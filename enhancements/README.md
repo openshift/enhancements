@@ -14,7 +14,7 @@ release-4.3.
 1. Socialize an idea with others.  Make sure others think the work is worth
    doing, and are willing to review design and code changes required.
 2. Follow the process outlined in the [enhancement
-   template](enhancement-template.md)   
+   template](template.md).
 
 ## FAQs
 
