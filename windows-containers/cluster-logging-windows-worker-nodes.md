@@ -14,7 +14,7 @@ approvers:
   - "@jcantrill"
   - "@richm"  
 creation-date: 2019-09-10
-last-updated: 2019-09-10
+last-updated: 2019-09-17
 status: implementable
 ---
 
@@ -43,7 +43,6 @@ Windows node logging infrastructure on par with linux nodes
 
 As part of this enhancement, we plan to do the following:
 * Deploy log collection infrastructure onto Windows nodes
-* Configure container runtime to use the logging infrastructure we have deployed
 * Collect node and pod logs
 * Upgrade log collection infrastructure
 * Forward logs and events from nodes and pods to log store
@@ -57,15 +56,15 @@ As part of this enhancement, we do not plan to support:
     ETW, Perf Counters etc
 * Customization of log collection infrastructure
   * We plan to support fluentd only
-  * Microsoft will provide us with a Windows fluentd binary
+  * Microsoft will provide us with a Windows fluentd binary or gem file
 
 
 ## Proposal
 
 The main idea here is to deploy fluentd as a log collection agent onto Windows 
 nodes after cluster logging operator is deployed onto the cluster. Fluentd has
-support for Windows logging. We plan to leverage it and run fluentd as a service
-running on Windows node.
+support for Windows logging. We plan to leverage it and run fluentd as a 
+Windows service.
 
 
 ### Implementation Details
@@ -75,16 +74,22 @@ We plan to create a Windows Node logging Ansible Playbook that can
 * Download fluentd binary for Windows from a known location and transfers it to
   the Windows node
 * Configure the container runtime to use fluentd as the logging driver
-* Configure fluentd to communicate with elastic search data store in a format
-  similar to logs emitted from linux worker nodes
+* Configure fluentd to communicate with elasticsearch data store in the same 
+  format as logs emitted from linux worker nodes
 
 The inputs to this playbook
 
-* The ip address, port, certificate to connect the elastic search service
+* The ip address, port, certificate to connect the elasticsearch service
 * URL from which fluentd Windows binary can be downloaded from
 
 We can get the ipaddress and other details from various pods and secrets present
 in the OpenShift cluster, once the cluster logging operator has been deployed.
+If the certificates change, cluster admin should run the ansible playbook
+again. 
+
+Kubelet on Windows nodes logs to a file. So, we also need to configure 
+fluentd's record transformer to ensure that logs collected from the kubelet log
+file are in format understandable to elasticsearch
 
 ### Justification
 
@@ -107,11 +112,14 @@ The main risk with this proposal are the following dependencies on Microsoft:
 
 * To provide us with fluentd binary
 * Container logging works on Windows nodes
+* Container runtime writes container logs in a format understandable by fluentd
+  plugin
 
 Mitigations:
 
-* If fluentd binary is not shipped by Microsoft, we plan to build from upstream
-  which will result in Red Hat being responsible for security and other fixes. 
+* If fluentd binary is not shipped by Microsoft, we plan to install fluentd 
+  from upstream which will result in Red Hat being responsible for security and 
+  other fixes. 
 * If Microsoft doesn't provide container logging framework on Windows nodes, we
   would just support node logging in 4.3 timeframe
 
@@ -122,7 +130,7 @@ Mitigations:
 We plan to add e2e tests to ensure 
 
 * Fluentd service is running on Windows node
-* Windows nodes are forwarding logs properly to elastic search
+* Windows nodes are forwarding logs properly to elasticsearch
 
 ### Graduation Criteria
 
