@@ -1,5 +1,5 @@
 ---
-title: Neat-Enhancement-Idea
+title: Kernel Arguments - Day 1 Support
 authors:
   - "@ericavonb"
 reviewers:
@@ -11,11 +11,11 @@ approvers:
   - "@runcom"
 
 creation-date: 2019-09-12
-last-updated: 2019-09-12
-status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced
+last-updated: 2019-09-16
+status: **provisional**|implementable|implemented|deferred|rejected|withdrawn|replaced
 ---
 
-# kernel-args-day1-support
+# Kernel Args - Day 1 Support
 
 ## Release Signoff Checklist
 
@@ -27,37 +27,239 @@ status: provisional|implementable|implemented|deferred|rejected|withdrawn|replac
 
 ## Summary
 
-Having flexibility to provide custom kernel arguments during initial RHCOS node cnfiguration is important. With this enhancement, both OS upgrade to latest machine-os-content and custom kernel args can be applied on a node during first boot of machine followed by a single reboot.
+This enhancement proposes adding the ability for admins to configure custom
+kernel arguments during initial RHCOS node configuration. With this enhancement,
+both OS upgrade to the latest [machine-os-content](https://github.com/openshift/machine-config-operator/blob/master/docs/OSUpgrades.md#os-updates)
+and custom kernel args can be applied to a node during the first boot of the
+machine, followed by a single reboot.
 
 ## Motivation
 
-Kernel arguments for RHCOS can be set today using a MachineConfig as a `day-2` operation, i.e. after cluster install, incurring an additional reboot to apply. Even if the kernel args are configured at installation time, the node will still incur a double reboot to apply the args. Furthermore, that reboot will not be coordinated by the MCC, resulting in possible cluster downtime.
+Kernel arguments for RHCOS can be set today using a MachineConfig as a
+[`day-2` operation](https://github.com/openshift/machine-config-operator/blob/master/docs/MachineConfiguration.md#kernelarguments),
+i.e. after cluster install, incurring an additional reboot to apply. Even if the
+kernel args are configured at [installation time](https://github.com/openshift/installer/blob/master/docs/user/customization.md#install-time-customization-for-machine-configuration),
+the node will still incur a double reboot to apply the args. Furthermore, that
+reboot will not be coordinated by the [MachineConfigController](https://github.com/openshift/machine-config-operator/blob/master/docs/MachineConfigController.md#updatecontroller),
+resulting in possible cluster downtime.
 
-A better experience would be to allow kernel arguments to be set as a “day-1” operation, when a node is being initialized with the current OS and cluster version.
+We can provide a better experience by allowing kernel arguments to be set as a
+`day-1` operation, when a node is being initialized with the current OS and
+cluster version.
 
 
 ### Goals
 
-Support defining custom kernel arguments at installation time for RHCOS without rebooting the machine twice.
+- [ ] Cluster admins can define custom kernel arguments for RHCOS nodes during
+  cluster installation, without rebooting the machine twice.
+- [ ] kernel args
+  can be configured via MachineConfigs and will be applied to new nodes joining
+  the cluster, without inclurring an extra reboot.
+- [ ] In clusters installed using the 4.3 installer or higher, nodes with kernel
+  arguments configured via MachineConfigs have these kernel args applied with
+  the update without incurring an extra reboot.
 
 ### Non-Goals
 
-Doesn't support defining custom kernel arguments at installation time on non-RHCOS machines
+- Does not support defining custom kernel arguments on non-RHCOS machines.
+- Does not support applying kernel args on first boot for nodes in clusters
+  installed using a 4.1 or earlier installer.
+- Does not protect against setting kernel arguments that may affect the
+  performance of the node or cluster.
+- Does not take into account kernel args set manually on the node when applying
+  kernel args from the MachineConfigs. Any kernel args manually set or unset
+  will be overwritten on the next update.
 
 ## Proposal
 
-This is where we get down to the nitty gritty of what the proposal actually is.
+#### Part 1
+Add kernel args to install-config and process them in the MCO bootstrap. This
+should be a straight-forward translation from the install-config into
+MachineConfig resources.
 
-### User Stories [optional]
+#### Part 2
+For the nuts and bolts, there are a couple ways we could achieve no-extra-reboot
+kernel args support.
 
-Detail the things that people will be able to do if this is implemented.
-Include as much detail as possible so that people can understand the "how" of
-the system. The goal here is to make this feel real for users without getting
-bogged down.
+##### Method 1 - append to `etc/pivot/kernel-args`
+
+- Update the MachineConfigServer to parse kernel args in the MachineConfigs and
+  append them in the `/etc/pivot/kernel-args` file within the ignition it
+  serves, similar to how hyperthreading can be disabled in 4.2.
+- Update the MachineConfigDaemon to compare k-args set on MachineConfigs with
+  those set via rpm-ostree to determine if there are changes requiring a reboot.
+
+Pros:
+- Requires no additional packaging in RHCOS or other tricky methods to update
+  what's available on the host.
+- Allows new nodes in clusters with 4.2 bootimages to have k-args set without
+  the additional reboot.
+- Brings the MCD closer to the kubernetes model of inspecting current state and
+  reconciling desired spec with that.
+
+Cons:
+- Further special-cases kernel args as state passed to pivot. Any other config
+  that should be set before os pivot would need to be specially handled as well.
+- Determining the current state from the host rather than the current config
+  could get tricky, and is different from how other config fields are handled.
+  See https://github.com/openshift/machine-config-operator/pull/245
+
+
+##### Method 2 - MCD-as-pivot packaged in RHCOS
+
+- Package the MCD binary in RHCOS so that it is available on the host during
+  early boot.
+- Change the ignition files generated in the installer and saved in the
+  master/worker MachineConfigs to run the MCD pivot command, rather than `pivot`
+- Update the MCD pivot to parse the machine-config-encapsulated.json placed on
+  the host via the MCS and set the k-args if specifiied before running the pivot.
+
+Pros:
+- Moves us to a more flexible model where the MCD can be the component managing
+  the host.
+- Removes any drift between how k-args are handled on day-1 or day-2 by using
+  the same code paths.
+
+Cons:
+- Requires packaging the MCD in RHCOS, a separate process from the MCD container
+- Running the MCD as a binary removes all the advantages we get from containers.
+- Will only work on clusters with bootimages at 4.3 or higher, i.e. clusters
+  installed at 4.1 or 4.2 and upgraded will not have k-args applied without a
+  double reboot on new nodes spun up.
+
+
+##### Method 3 - MCD-as-pivot fed in through ignition
+
+- Same as method 2 except rather than packaging the MCD in RHCOS, feed it to the
+  hosts via their ignition file.
+- The MCS would need to extract the MCD through the os-container place it in the
+  ignition files it serves.
+
+Pros:
+- Same as method 2
+- Works for all versions of bootimages, including 4.1 and 4.2
+
+Cons:
+- Significantly more complexity in the MCS
+- Additional work to fit into a tight release schedule
+
+
+
+4. Package the MachineConfigDaemon in RHCOSRun the MCD during boot where `pivot` runs today to process kernel args along
+   with the pivot to the latest machine-os-content.
+
+#### Recommendation
+
+We believe starting with method 2 would be the best idea for 4.3 given the
+limited timeline. And since method 3 builds on top of method 2, we move in the
+right direction and can continue onto method 3 in further releases.
+
+
+### User Stories
 
 #### Story 1
 
+Kernel arguments can be set in my install config and applied to nodes as part of
+the cluster installation.
+
+Acceptance Criteria
+- CI tests ensure kernel args can be configured at install without ill effects
+  on other components
+- CI tests ensure kernel args configured at install incur only one reboot
+- CI tests ensure when no k-args are set via the installer, the MCD should do
+  nothing.
+- The installer validates user provided configs and rejects improperly formatted
+  ones.
+- The MCD validates user configured k-args in MCs for correctness and safety in
+  a best-effort manner.
+  - openapi schema on machineconfig CRD
+  - custom admission validation if necessary
+  - input validation during processing in controllers
+- The installer reports failures related to setting the kernel args to the user.
+- MCC takes k-args status into account when determining the node health and
+  reboot status.
+- A user can understand the status of k-arg configs via cluster resource objects
+  (nodes, MCs, MCPs).
+- MCD reports the status of k-args on its host to the node, MC, and/or other
+  related objects.
+- A user can reasonably debug k-arg configuration via installer logs and
+  artifacts, MC* logs, metrics, and events
+- kernel arg configuration is limited to cluster administrators and properly
+  secured.
+- Documentation outlines kernel arg configuration during install and guides
+  users through how to properly use install config and MachineConfig objects to
+  configure them.
+- Kernel arg configuration by the MCD during install works the same on all
+  supported platforms.
+- Other teams within Red Hat affected by these changes are informed and
+  communicated with through the implementation and release. These may include
+  but are not limited to: the Installer team, node-tuning-operator teams, RHCOS
+  teams, docs, and ART.
+
+
 #### Story 2
+
+Nodes with kernel arguments configured via MachineConfigs can be updated during
+cluster upgrades and have those kernel args applied without incurring an extra
+reboot on clusters installed at 4.3 or higher.
+
+Acceptance Criteria
+
+- Cluster upgrades from 4.3.x to 4.3.x+1 transition nodes to the MCD-as-pivot without
+cluster distruption.
+- Node updates are coordinated correctly by the MCO, taking kernel argument
+  application or failures into account for node health.
+- Cluster upgrades with nodes running pre-4.3 RHCOS have kernel arguments
+  applied after they are upgraded to a more recent OS version with kernel args
+- Upgrades call be rolled back on failure (?)
+
+Similar to previous issue:
+- CI tests ensure configured kernel args are applied to upgraded nodes during a
+  cluster upgrade, without ill effects on other components
+- Configured kernel args are applied to upgraded nodes during a cluster upgrade
+  without incurring any extra reboots
+- MCD reports the status of k-args on the host to the node and/or MC objects
+- MCC takes k-args status into account when determining the node health and
+  reboot status
+- A user can understand the status of k-arg configs via cluster resource objects
+  (nodes, MCs, MCPs)
+- A user can reasonably debug k-arg configuration via MC* logs, metrics, and events
+- k-arg configuration is limited to cluster administrators and properly secured
+- No k-arg configuration is done by the MCD on non-RHCOS and non-managed RHCOS
+  nodes.
+- Documentation outlines the changes to how k-args are applied and guides users
+  through how to properly use MCs to configure them and check that k-args
+  previously configured are being applied correctly
+- k-arg configuration by the MCD works the same on all supported platforms
+
+#### Story 3
+
+New nodes added to clusters first installed at 4.3 or higher can be configured
+with kernel args via MachineConfigs without incurring an extra reboot.
+
+Acceptance Criteria
+- CI tests ensure kernel args can be configured on new nodes added to a cluster
+  without ill effects on other components.
+- CI tests ensure kernel args configured on new nodes incur no extra reboot.
+- CI tests ensure when no k-args are set, the MCD should do nothing on new nodes.
+- Validation on user provided configs reject improperly formatted configs
+- User configured k-args in MCs are validated for correctness and safety in a
+  best-effort manner.
+- MCD reports the status of k-args on the host to the node and/or MC objects
+- MCC takes k-args status into account when determining the node health and
+  reboot status.
+- A user can understand the status of kernel arg configs via cluster resource
+  objects (nodes, MCs, MCPs).
+- A user can reasonably debug k-arg configuration via MC* logs, metrics, and
+  events.
+- Kernel arg configuration is limited to cluster administrators and properly
+  secured.
+- No kernel arg configuration is done by the MCD on non-RHCOS and non-managed
+  RHCOS nodes.
+- Documentation outlines kernel arg configuration and guides users through how
+  to properly use MCs to configure them.
+- Kernel arg configuration by the MCD works the same on all supported platforms
+
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -67,13 +269,29 @@ be a good place to talk about core concepts and how they releate.
 
 ### Risks and Mitigations
 
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
-
-How will security be reviewed and by whom? How will UX be reviewed and by whom?
-
-Consider including folks that also work outside your immediate sub-project.
+1. Risk: non-recoverable clusters due to bad kernel arg configuration
+   Mitigation: best-effort validation, careful documentation with warnings. We
+   may want to consider restricting customization of kernel args with specific
+   values needed by the system (e.g. ostree=..)
+2. Risk: Drift between RHCOS and other node types
+   Mitigation: check in with other OS's (e.g. FCOS) on how they might support
+   a similar feature. TODO check on what this would mean for the
+   windows-machine-config-operator.
+3. Risk: users with write permissions on MachineConfigs can set sensitive kernel
+   args, compromising the security of the system. For example, a user could turn
+   off audit logging via a MachineConfig using another user or service account's
+   credentials thus evading detection for any further actions.
+   Mitigation: strict RBAC on MachineConfig resources. We may wish to consider
+   more fine-grained permission scoping by creating a new resource type, similar
+   to `kubeletconfigs` and `containerruntimeconfigs`. We can also look into
+   restricting users from setting certain security sensitive kernel args.
+4. Risk: failures related to k-args may be harder to debug
+   Mitigation: careful error reporting, logging, integration with debugging
+   tools such as must-gather. TODO think about roll-back capabilities.
+5. Risk: overlapping configuration fields may lead to unexpected behavior (e.g.
+   FIPS mode, hyperthreading/nosmt)
+   Mitigation: validation where both are set, clear and deterministic
+   compositions.
 
 ## Design Details
 
@@ -81,88 +299,46 @@ Consider including folks that also work outside your immediate sub-project.
 
 **Note:** *Section not required until targeted at a release.*
 
-Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
+Testing should be thoroughly done at all levels, including unit, end-to-end, and
+integration. The tests should be straightforward - setting kernel args in an
+install or machineconfig, checking that they were applied correctly.
 
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
+More specific testing requirements have been outlined above in the acceptance
+criteria for the user stories.
 
-All code is expected to have adequate tests (eventually with coverage
-expectations).
 
 ### Graduation Criteria
 
 **Note:** *Section not required until targeted at a release.*
 
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-- Maturity levels - `Dev Preview`, `Tech Preview`, `GA`
-- Deprecation
-
-Clearly define what graduation means.
-
-#### Examples
-
-These are generalized examples to consider, in addition to the aforementioned
-[maturity levels][maturity-levels].
-
-##### Dev Preview -> Tech Preview
-
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-
-##### Tech Preview -> GA 
-
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
-
-##### Removing a deprecated feature
+As the ability to set kernel arguments via MachineConfigs will be added in 4.2,
+the API does not change with this proposal. The install-config API would have
+the addition of kernel args which can be matured according to standard procedure.
 
 ### Upgrade / Downgrade Strategy
 
-If applicable, how will the component be upgraded and downgraded? Make sure this
-is in the test plan.
+Since upgrades happen as a "day-2" operation, they should not be affected by
+rolling out these changes. See discussion about bootimage versions affecting the
+ability to utilize this feature in the methods discussed above.
 
-Consider the following in developing an upgrade/downgrade strategy for this
-enhancement:
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to keep previous behavior?
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to make use of the enhancement?
 
 ### Version Skew Strategy
 
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
+Version skew should not have an impact on this feature. The change would only
+apply to new nodes. If a new node is added during an ugrade (not recommended),
+it could get either the old or new version, meaning it may or may not require
+an extra reboot to apply the kernel args.
 
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
+The version skew between the bootimages and the upgraded cluster is the largest
+concern since users may be suprised that their clusters still double reboot new
+nodes despite being upgraded. Good documentation will be required.
+
 
 ## Implementation History
 
-## Drawbacks
+This feature is a continuation of adding kernel-args configuration to the
+machine-config-operator. Work was done in 4.2 to allow kernel-arg configuration
+as a "day-2" operator.
 
-## Alternatives
-
-## Infrastructure Needed [optional]
-
+See discusion in this issue: https://github.com/openshift/machine-config-operator/issues/798
+Former epic: https://jira.coreos.com/browse/PROD-1084
