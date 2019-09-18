@@ -7,12 +7,16 @@ reviewers:
   - "@crawford"
   - "@sdodson"
   - "@brancz"
+  - "@s-urbaniak"
+  - "@lilic"
 approvers:
   - "@crawford"
   - "@sdodson"
   - "@brancz"
+  - "@s-urbaniak"
+  - "@lilic"
 creation-date: 2019-09-17
-last-updated: 2019-09-17
+last-updated: 2019-09-18
 status: implementable
 ---
 
@@ -44,7 +48,8 @@ As part of this enhacement, we plan to do the following:
 * Configure Prometheus provisioned as part of OpenShift install to 
   collect data from Windows Nodes
 * Upgrade WMI exporter on the Windows Nodes
-* Leverage cluster-monitoring operator as much as we can for this work
+* Leverage cluster-monitoring operator for setting up Prometheus, alert manager
+  and other components
 
 ### Non-Goals
 
@@ -69,16 +74,25 @@ We plan to create a Windows Node Monitoring Ansible playbook that can
 transfers it to the Windows Node
 * Run WMI msi on the Windows Node
 * Ensure that WMI is running as a Windows Service on the node
-* Create a namespace called `openshift-windows`
+* Create a namespace called `openshift-windows` with 
+  `openshift.io/cluster-monitoring=true` label so that cluster monitoring
+  stack will pick up the service monitor in the next steps.
 * Create service, endpoint in `openshift-windows` pointing to WMI exporter 
   endpoint
-* Create a service monitor in `openshift-monitoring` namespace for service
+* Create a service monitor in `openshift-windows` namespace for service
   created above
 
 The inputs to this playbook
 * The internal ip address of the Windows Node where we want the WMI exporter
   to run.
 * URL from which WMI msi can be downloaded from
+
+### Justification
+
+The reason for having ansible playbook instead of operator with a container
+image is that all Windows container images contains a Windows Kernel and 
+Red Hat has a policy not to ship 3rd party kernels for support reasons. Please
+look at [alternatives](#Alternatives) section
 
 ### Risks and Mitigations
 
