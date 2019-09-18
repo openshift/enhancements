@@ -3,7 +3,10 @@ title: CoreOS Encrypted Disks By Default
 authors:
   - "Ben Howard @behoward"
 reviewers:
-  - TBD
+  - "Colin Walters @cgwalters"
+  - "Steve Miler @ashrow"
+  - "Ian McLeod @imcleod"
+  - "Micah Abbot @miabott"
 approvers:
   - TBD
 creation-date: 2019-09-20
@@ -56,7 +59,7 @@ The following are considered out of scope:
 * Arbitrary LUKS configurations or disk-layouts.
 * Re-formatting disk devices or partitions.
 
-### Fedora (FCOS) and Red Hat CoreOS (RHCOS)
+### Fedora CoreOS (FCOS) and Red Hat CoreOS (RHCOS)
 
 It is worth stating that this proposal is not mutually exclusive for any plans that FCOS may have towards root disk layout. FCOS and RHCOS would like to reach alignment and feature parity.
 
