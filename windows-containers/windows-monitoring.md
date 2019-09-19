@@ -45,10 +45,8 @@ Windows nodes
 
 As part of this enhacement, we plan to do the following:
 * Deploy Windows Management Instrumentation(WMI exporter) onto Windows nodes
-* Configure Prometheus provisioned as part of OpenShift install to 
-  collect data from Windows Nodes
 * Upgrade WMI exporter on the Windows Nodes
-* Leverage cluster-monitoring operator for setting up Prometheus, alert manager
+* Leverage cluster-monitoring operator that sets up Prometheus, Alertmanager
   and other components
 
 ### Non-Goals
@@ -156,7 +154,7 @@ Considering the above downsides, timeframe and all the unknowns present in this
 project, we have decided not to go with operator based model
 
 In the ansible based approach, we'd run ansible playbook from the master nodes
-which already has privilege to access the `openshift-monitoring` namespace. 
+which already has privilege to access the `openshift-windows` namespace. 
 
 ## Infrastructure Needed
 
