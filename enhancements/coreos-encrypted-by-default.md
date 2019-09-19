@@ -4,9 +4,9 @@ authors:
   - "Ben Howard @behoward"
 reviewers:
   - "Colin Walters @cgwalters"
-  - "Steve Miler @ashrow"
+  - "Steve Milner @ashcrow"
   - "Ian McLeod @imcleod"
-  - "Micah Abbot @miabott"
+  - "Micah Abbott @miabbott"
 approvers:
   - TBD
 creation-date: 2019-09-20
@@ -27,7 +27,7 @@ status: provisional
 
 ## Summary
 
-Openshift clusters will be encrypted at the operating system level by default. CoreOS boot images starting with 4.3 will be encrypted using a null-cipher. At boot time, the instance will be re-encrypted using AES-256-CBC and will not require user-intervention for boot and reboot.
+Openshift clusters will be encrypted at the operating system level by default. CoreOS boot images starting with 4.3 will be encrypted, and at first boot will be re-encrypted. Openshift nodes will (re)boot without administrator intervention.
 
 ## Motivation
 
@@ -72,8 +72,8 @@ Ignition is the first boot agent for FCOS and RHCOS. FCOS discussed the topic of
 * Master Key: the _actual_ encryption key used. The master key encrypted using a passphrase and is embedded in the LUKS meta-data on disk encrypted. This encryption key is unknown to users.
 * LUKS. Passphrase: any string or file that can be used to unlock the master key. Each passphrase is bound to a "key-slot."
 * LUKS Token: arbitrary JSON stored in the LUKS meta-data.
-* NBE: [Network Bound-Disk Encryption](https://access.redhat.com/documentation/en-US/Red_Hat_Enterprise_Linux/7/html/Security_Guide/sec-Using_Network-Bound_Disk_Encryption.html). A method of providing context-based disk encryption.
-* [Clevis](https://github.com/latchset/clevis): Linux CLI tools for policy-based encryption and decryption. Clevis has a Dracut module for automatically opening LUKS containers in an NBE context.
+* NBDE: [Network Bound-Disk Encryption](https://access.redhat.com/documentation/en-US/Red_Hat_Enterprise_Linux/7/html/Security_Guide/sec-Using_Network-Bound_Disk_Encryption.html). A method of providing context-based disk encryption.
+* [Clevis](https://github.com/latchset/clevis): Linux CLI tools for policy-based encryption and decryption. Clevis has a Dracut module for automatically opening LUKS containers in an NBDE context.
 * Clevis pin: a program called by Clevis to encrypt and decryption of secrets.
 * Tang: A server implementation that provides cryptographic binding services without the need for an escrow. Secrets are derived from what the client and the Tang server both have, reducing the attack surface.
 * KMS: Key Management System, such as Amazon KMS.
@@ -86,12 +86,12 @@ If you are unfamiliar with some of these terms [please see an excellent Youtube 
 
 To provide install-time _and_ rolling re-encryption, CoreOS boot images will:
 * Have the root filesystem housed in a LUKS container.
-* Use the 'null-cipher' for the initial LUKS container "encrpytion". This allows _any_ passphrase to unlocked the LUKS container.
+* Use the 'null-cipher' for the initial LUKS container "encryption". This allows _any_ passphrase to unlocked the LUKS container.
 * The passphrase will be stored in a LUKS token via the Clevis plaintext pin.
 
 Note: the default boot image is _effectively *NOT* encrypted_.
 
-On first boot, a Dracut module will re-encrypt the LUKS container unless the kernel CLI parameter ('rd.coreos.no_encrpytion=1') is used.  The module will likely run after Ignition has completed. It will:
+On first boot, a Dracut module will re-encrypt the LUKS container unless the kernel CLI parameter ('rd.coreos.no_encryption=1') is used.  The module will likely run after Ignition has completed. It will:
   * Prepare a random passphrase,
   * Randomize the LUKS container's UUID,
   * Re-encrypt the LUKS container using AES-256-CBC (FIPS 140-2 compliant). This process generates a new random master key.
@@ -129,7 +129,7 @@ ACME Corp has a 4.1 cluster and is upgrading to 4.3 and wants to use the new enc
 
 #### Story 4: Edge Clusters
 
-ACME Corp deploys sensitive bare-metal clusters to the edge. They build their clusters with a Clevis profile using TPM2 and Tang. Evil Corp clandestinely steals a few of ACME Corp's nodes. Since ACME Corp's nodes are configured using NBE encryption, no-data is compromised. ACME Corp avoids being shamed on the evening news and withstands the ire of the Board of Directors.
+ACME Corp deploys sensitive bare-metal clusters to the edge. They build their clusters with a Clevis profile using TPM2 and Tang. Evil Corp clandestinely steals a few of ACME Corp's nodes. Since ACME Corp's nodes are configured using NBDE encryption, no-data is compromised. ACME Corp avoids being shamed on the evening news and withstands the ire of the Board of Directors.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -216,11 +216,11 @@ In the above step, a new LUKS master key created, and each block is re-encrypted
 
 This idea hinges around Clevis, which provides an interface around different secret backend and includes a Dracut module which provides for unattended boot. Clevis uses [JSON Object Signing and Encryption, (JOSE)](https://jose.readthedocs.io/en/latest/).
 
-When Clevis binds a LUKS volume, a new JOSE object is written in the LUKS meta-data as a token. Clevis reads the JOSE object and then calls the appropriate pin. Clevis was added to Fedora 24 and RHEL 7, and it supported and recommended for unattended-encrypted boot.
+When Clevis binds a LUKS volume, a new JOSE object is written in the LUKS meta-data as a token. Clevis reads the JOSE object and then calls the appropriate pin. Clevis was added to Fedora 24 and RHEL 7, and it supported and recommended for unattended-encrypted boot. By adding new pins, administrators will have the flexibility to apply policy-based unattended boots.
 
-The first pin deals with the null case, where there is no NBE boot. This pin would be used to store an encoded plaintext password. In the event of the plaintext pin is used, the actual passphrase is obfucated (here be dragons: the axiom that "security by obscurity is not security" applies).
+The first pin deals with the null case, where there is neither a TPM2 device or a Clevis binding for NBDE boot. This pin would be used to store an encoded plaintext password. In the event of the plaintext pin is used, the actual passphrase is obfuscated (here be dragons: the axiom that "security by obscurity is not security" applies). The encryption function of pin would encode the passphrase in a JOSE object using base64 encoding, while the decrypt functionality would do the inverse.
 
-The second pin would deal with the Cloud KMS. [Container Linux did a proof-of-concept with LUKS v1 for NBE unlocks bound to a Cloud KMS](https://github.com/coreos/coreos-cryptagent). Extending the CryptAgent to be a Clevis should be straight forward and will allow for incremental approaches to adding and supporting different Cloud KMS.
+The second pin would deal with the Cloud KMS. [Container Linux did a proof-of-concept with LUKS v1 for NBDE unlocks bound to a Cloud KMS](https://github.com/coreos/coreos-cryptagent). Extending the CryptAgent to be a Clevis should be straight forward and will allow for incremental approaches to adding and supporting different Cloud KMS.
 
 Adding Clevis is relatively straight forward. Each pin provides a `clevis-{encrypt,decrypt}-<NAME>`, when ``<NAME>`` is the name of the pin (e.g. `clevis-encrypt-plaintext`). Pins may be written in any language; most are written in bash. This gives the flexibility to include new pins as the circumstances require.
 
@@ -289,7 +289,7 @@ The clearest risk to the design is that while the data will be encrypted by defa
 
 This risk cannot be understated and should be clearly and explicitly called out in the user documentation. There is an axiom in encryption that no encryption is better than bad encryption as it can create a false sense of security.
 
-With LUKS, [a passphrase is *NOT* the master key used for encrpytion](https://gitlab.com/cryptsetup/cryptsetup/blob/master/FAQ#L56-63); the master key is encrypted in the LUKS header on disk. Passphrases are used to unlock the master key. Each passphrase is stored in a "key-slot," which can be removed (`cryptsetup luksKillSlot...`). [An attacker could use an old snapshot or block-level backup to defeat encryption](https://gitlab.com/cryptsetup/cryptsetup/blob/master/FAQ#L56-63). If a user cycles a Clevis configuration, then existing block-level backups and snapshots should be secured unless a re-encryption operation is performed.
+With LUKS, [a passphrase is *NOT* the master key used for encryption](https://gitlab.com/cryptsetup/cryptsetup/blob/master/FAQ#L56-63); the master key is encrypted in the LUKS header on disk. Passphrases are used to unlock the master key. Each passphrase is stored in a "key-slot," which can be removed (`cryptsetup luksKillSlot...`). [An attacker could use an old snapshot or block-level backup to defeat encryption](https://gitlab.com/cryptsetup/cryptsetup/blob/master/FAQ#L56-63). If a user cycles a Clevis configuration, then existing block-level backups and snapshots should be secured unless a re-encryption operation is performed.
 
 ##### LUKS overhead: null cipher
 
@@ -342,7 +342,7 @@ Speed: Encrypted data carries a CPU burden. If a user does not opt-out of encryp
 * Disk throughput will be affected, as writes are CPU bound.
 * Workloads that are both CPU and disk-bound will be impacted.
 
-The cost to force encrpytion is best shown using a non-scientific test on a laptop:
+The cost to force encryption is best shown using a non-scientific test on a laptop:
 ```
 root@:/tmp/test # cryptsetup benchmark --cipher=null
 # Tests are approximate using memory only (no storage IO).
@@ -355,7 +355,7 @@ root@:/tmp/test # cryptsetup benchmark --cipher=aes
     aes-cbc        256b       864.5 MiB/s      2789.2 MiB/s
 ```
 
-Note: Impact on will be workload dependent. See:  The [comparision of Linux encrpytion](https://www.phoronix.com/scan.php?page=article&item=ext4-crypto-418&num=1).
+Note: Impact on will be workload dependent. See:  The [comparision of Linux encryption](https://www.phoronix.com/scan.php?page=article&item=ext4-crypto-418&num=1).
 
 The default mode may create a false sense of security, see `Risks, and Migitations.`
 
