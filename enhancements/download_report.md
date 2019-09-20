@@ -9,11 +9,12 @@ reviewers:
   - "@derekwaynecarr"
   - "@soltysh"
   - "@mfojtik"
+  - "@sanchezl"
 approvers:
   - "@deads2k"
   - "@derekwaynecarr"
 creation-date: 2019-09-18
-last-updated: 2019-09-18
+last-updated: 2019-09-20
 status: implementable
 see-also:
 replaces:
@@ -36,7 +37,7 @@ Once cluster start to fail a customer needs to figure out how to collect diagnos
 
 ## Motivation
 
-As part of proposed changes we need to provide a mechanism to request generation of must-gather report on demand and expose generated files via http. Having this changes would allow console developers to implement download diagnostics dialog. With this work we are not going to provide ability to filter data by applicable component but we are aiming to reuse existing functionality based on must-gather collection images for specific layered products (i.e. [kubevirt/must-gather](https://github.com/kubevirt/must-gather), [OCS must-gather](https://github.com/openshift/ocs-operator/tree/master/must-gather) ).
+As part of proposed changes we need to provide a mechanism to request generation of must-gather report on demand and expose generated files via http. Having this changes would allow console developers to implement download diagnostics dialog. With this work we are not going to provide ability to filter data by applicable component but we are aiming to reuse existing functionality based on must-gather collection images for specific layered products (i.e. [kubevirt/must-gather](https://github.com/kubevirt/must-gather), [OCS must-gather](https://github.com/openshift/ocs-operator/tree/master/must-gather).
 
 ### Goals
 
@@ -60,39 +61,33 @@ spec:
   images:
   - quay.io/kubevirt/must-gather
   - quay.io/ocs-dev/ocs-must-gather
-  imagestreams:
-  - openshift/must-gather
+  - quay.io/openshift/origin-must-gather
   deleteAfter: 30m
 # once report available route is added
 status:
-  route: example-mustgatherreport-openshift-must-gather-tdv78.router.default.svc.cluster.local/must-gather.tar.gz
- conditions:
+  report_url: https://example-mustgatherreport-openshift-must-gather-tdv78.router.default.svc.cluster.local/must-gather.tar.gz
+conditions:
   - status: "True"
     type: Initialized
   - status: "True"
     lastTransitionTime: "2019-09-16T12:02:39Z"
     type: Ready
-  - status: "True"
-    type: ContainersReady
-  - status: "True"
-    type: PodScheduled
 ```
 images - describes which images to use for running must-gather
 
-imagestreams - describes which image-streams to use for running must-gather
-
 deleteAfter - the duration to keep the generated reports
-
 
 Conditions:
  * Initialized - indicates diagnostic information collection started
  * Ready - indicates diagnostic information collection completed, file compressed and ready to be downloaded
 
 
-New controller watches for events on MustGatherReport custom resource. Once a resource is created the controller creates new must-gather namespace and a pod/job which uses list of container images to gather diagnostic data. We have 3 options to persist the files:
+New controller watches for events on MustGatherReport custom resource. Once a resource is created the controller creates new must-gather namespace and a pod which uses list of container images to gather diagnostic data. We have 3 options to persist the files:
 * must-gather and http server are part of a single pod, the files are persisted to a single RW PV. With this approach we are unable to scale and provide HA
 * must-gather and http server are running in separate pods that use a hostpath on a pet node and can do many RW. This is similar to current must-gather flow triggered by oc command. As in bullet one we are unable to scale and HA
 * must-gather and http server are part of separate pods that use a RW many storage. In this case we have no issues with scaling scale, no need for a pet nodes and parallel collection possible. With this approach we are dependent on OCS.
+
+At this time we have decided to go with #1 and for now we won’t be able to scale nor to provide HA.
 
 We need to add post-generation step to compress the files. Report is generated and compressed we create a service and a route pointing to http server. The controller updates custom resource status with URL to access generated file.
 
@@ -122,7 +117,7 @@ This enhancement will start as GA
 
 ### Upgrade / Downgrade Strategy
 
-We will support upgrades of the operator by publishing a new release. An older release can be used to downgrade.
+We will support upgrades managed by CVO of the operator by publishing a new release. An older release can be used to downgrade.
 
 ## Implementation History
 
