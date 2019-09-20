@@ -3,7 +3,7 @@ title: OAuth-Proxy-Proxy-Support
 authors:
   - "@deads2k"
 reviewers:
-  - "@sur"
+  - "@s-urbaniak"
   - "@bparees"
   - "@enj"
   - "@sttts"
@@ -35,14 +35,21 @@ invoked will cause adoption difficulties.
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift/docs]
 
+## Open Questions
+
+1. Can we expose proxy.config.openshift.io to system:authenticated by default.  Some cluster-admins may place basic-auth
+ credentials here because we provide no alternative.  This may make the configuration values suddenly sensitive and there
+ will be desire to hide that from workloads and other users.
+
 ## Summary
 
 In order to function, the `oauth-proxy`
  1. Gets the oauth-server location using the kube-apiserver's internal IP: `https://172.30.0.1/.well-known/oauth-authorization-server`
  2. Uses the result to find the token endpoint.
- 3. Hits the *external* token endpoint `https://oauth-openshift.apps.<cluster-dns-prefix>.openshift.com/oauth/token`.
+ 3. Hits the *external* token endpoint `https://oauth-openshift.apps.<cluster-dns-prefix>.openshift.com/oauth/token`.  
 
-This flow requires hitting a potentially external router, which requires honoring proxy settings.
+This flow requires hitting a potentially external router, which requires honoring proxy settings.  `/.well-known/oauth-authorization-server`
+implements [RFC 8414](https://tools.ietf.org/html/rfc8414) which does not allow specifying multiple possible URLs.
 
 ## Motivation
 
@@ -60,8 +67,8 @@ See summary in first section.
 ## Proposal
 
 The `oauth-proxy` can be written to use targeted list/watch against the proxy.config.openshift.io and 
-`oc get -n openshift-config-managed configmaps/proxy-ca` to build a proxy transport.  Using standard informers with single item
-watches allows RBAC to only expose GET for individual items.  It also means that an efficient swap mechanism can be built
+`oc get -n openshift-config-managed configmaps/trusted-ca-bundle` to build a proxy transport.  Using standard informers with single item
+watches allows RBAC to only expose GET for individual items.  It also means that an efficient observed update and `sync.Atomic` mechanism can be built
 to ensure performant behavior.
 
 This is an intricate thing to write, so we avoided it for every other proxy component, but this one is a component that is
@@ -92,7 +99,7 @@ update to use the feature, the feature works.
 
 ### Test Plan
 
-We would get @sur to update the monitoring stack to avoid setting the HTTP env vars and ensure that the proxy e2e test
+We would get @s-urbaniak to update the monitoring stack to avoid setting the HTTP env vars and ensure that the proxy e2e test
 still works.
 
 ### Graduation Criteria
@@ -116,7 +123,7 @@ The idea is to find the best form of an argument why this enhancement should _no
 
 ## Alternatives
 
-1. Using the internal service DNS name. The .well-known endpoint is public and conformant to a standard RFC.
+1. Using the internal service DNS name. The .well-known endpoint is public and conformant to a [RFC 8414](https://tools.ietf.org/html/rfc8414).
  It can only include a single URL, which means it must
  be public so that external clients like `oc`, the webconsole, and anything else can successfully use it.  Using an internal
  service name would also preclude the kube-apiserver from ever using an external oauth provider like keycloak.
@@ -131,6 +138,17 @@ The idea is to find the best form of an argument why this enhancement should _no
  Based on the apiserver team's experience, wiring these ca-bundle requires changes to the `oauth-proxy` to react to changes
  to the configmaps (so you pick up changes) and bash glue to move the ca-bundle content to the correct location.
  Communicating these restrictions and capabilities is almost more work than making the `oauth-proxy` reactive with a custom transport.
+ 
+4. One suggestion from the PR.
+    isn't there another alternative (implementation alternative anyway) in which the oauth-proxy
+
+    1. launches itself in an init mode which reads the proxy config (and CA) on startup (in its own gocode/main)
+    2. writes the CA to /etc/pki/......
+    3. execs itself w/ some new arg(not init mode) (because it needs to reinit to load the updated CAs in the TLS libs)
+    4. watches the proxy config/CA for changes and on changes, kills itself so it goes to (1)?
+    
+    I don't think we'll pursue something like that. It sounds more fragile to do seamlessly inside of containers you do not own,
+    with valid healthchecks you didn't write. This binary is used as part of a user-owned container spec.
 
 ## Infrastructure Needed [optional]
 
