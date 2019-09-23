@@ -3,6 +3,7 @@ title: Kernel Arguments - Day 1 Support
 authors:
   - "@ericavonb"
 reviewers:
+  - "@cgwalters"
   - "@imcleod"
   - "@runcom"
 approvers:
@@ -11,7 +12,7 @@ approvers:
   - "@runcom"
 
 creation-date: 2019-09-12
-last-updated: 2019-09-16
+last-updated: 2019-09-23
 status: **provisional**|implementable|implemented|deferred|rejected|withdrawn|replaced
 ---
 
@@ -107,12 +108,12 @@ Cons:
 
 ##### Method 2 - MCD-as-pivot packaged in RHCOS
 
-- Package the MCD binary in RHCOS so that it is available on the host during
-  early boot.
-- Change the ignition files generated in the installer and saved in the
-  master/worker MachineConfigs to run the MCD pivot command, rather than `pivot`
-- Update the MCD pivot to parse the machine-config-encapsulated.json placed on
-  the host via the MCS and set the k-args if specifiied before running the pivot.
+- Installer in 4.2 ships machine-config-daemon package in RHCOS host which handles [early pivot](https://github.com/openshift/machine-config-operator/pull/859).
+- [MCS inverts MachineConfig](https://github.com/openshift/machine-config-operator/pull/868) containing non-ignition part (like osImageURL,kernelArguments) during first boot in /etc/ignition-machine-config-encapsulated.json on hosts
+- During the first boot, MCD is patched to parse the ignition-machine-config-encapsulated.json available on the host to read and set the k-args if specified.
+- machine-config-dameon package in RHCOS is updated so that it has required changes on the host during early boot.
+- MCS is updated so that MCD first boot service runs to process kargs
+- As a result, we get kargs applied on RHCOS nodes during first boot without incurring extra reboot.
 
 Pros:
 - Moves us to a more flexible model where the MCD can be the component managing
@@ -121,11 +122,11 @@ Pros:
   the same code paths.
 
 Cons:
-- Requires packaging the MCD in RHCOS, a separate process from the MCD container
-- Running the MCD as a binary removes all the advantages we get from containers.
+- Requires latest MCD package with necessary fixes in RHCOS shipped with installer, any further changes needs [updating bootimage](https://github.com/openshift/os/issues/381) which is currently not in place.
 - Will only work on clusters with bootimages at 4.3 or higher, i.e. clusters
   installed at 4.1 or 4.2 and upgraded will not have k-args applied without a
   double reboot on new nodes spun up.
+- Running the MCD as a binary removes all the advantages we get from containers.
 
 
 ##### Method 3 - MCD-as-pivot fed in through ignition
@@ -213,7 +214,7 @@ cluster distruption.
   applied after they are upgraded to a more recent OS version with kernel args
 - Upgrades call be rolled back on failure (?)
 
-Similar to previous issue:
+Similar to previous story:
 - CI tests ensure configured kernel args are applied to upgraded nodes during a
   cluster upgrade, without ill effects on other components
 - Configured kernel args are applied to upgraded nodes during a cluster upgrade
