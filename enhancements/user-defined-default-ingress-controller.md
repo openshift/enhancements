@@ -156,7 +156,7 @@ If this proposal is implemented, during installation the user can provide an
 IngressController manifest which has the desired Route selection criteria,
 eliminating both drawbacks.
 
-### Implementation Details/Notes/Constraints
+### Implementation Details
 
 The IngressController resource is a cluster-scoped Custom Resource Definition.
 For the cluster to support creation of the default IngressController resource,
@@ -215,11 +215,13 @@ TODO
 
 ### Upgrade / Downgrade Strategy
 
-TODO
+This proposal is for install-time capabilities which have no impact on upgrades
+or downgrades.
 
 ### Version Skew Strategy
 
-TODO
+This proposal doesn't introduce any operator API behavioral changes which could
+be affected by version skew.
 
 ## Implementation History
 
@@ -227,7 +229,16 @@ TODO
 
 ## Drawbacks
 
-TODO
+The [Implementation Details/Notes/Constraints](#implementation-details) section
+contains detailed coverage of constraints and risks which in this case can be
+reasonably framed as drawbacks.
+
+Some broad reasons this proposal might _not_ be acceptable are:
+
+* The end-user installation complexity introduced does not offset the utility.
+* The general mechanism for implementation (extracting CVO manifests and
+  preempting the CVO) seems underspecified and too risky to form a stable
+  foundation for additional such procedures.
 
 ## Alternatives
 
