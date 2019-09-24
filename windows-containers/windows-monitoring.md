@@ -153,8 +153,8 @@ to this approach are
 Considering the above downsides, timeframe and all the unknowns present in this
 project, we have decided not to go with operator based model
 
-In the ansible based approach, we'd run ansible playbook from the master nodes
-which already has privilege to access the `openshift-windows` namespace. 
+In the ansible based approach, we'd run ansible playbook from the nodes
+which already have privilege to access the `openshift-windows` namespace. 
 
 ## Infrastructure Needed
 
