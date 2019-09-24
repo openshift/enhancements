@@ -4,10 +4,12 @@ authors:
   - "@ericavonb"
 reviewers:
   - "@cgwalters"
+  - "@crawford"
   - "@imcleod"
   - "@runcom"
 approvers:
   - "@cgwalters"
+  - "@crawford"
   - "@imcleod"
   - "@runcom"
 
