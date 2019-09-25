@@ -65,13 +65,15 @@ As an operator author, I want to have a way of defining where my operator is rel
 
 Acceptance Criteria:
 
-A format is defined so that I can publish index container images that are well defined and understood.
+A format is defined so that I can publish index container images to a container registry that are well defined and understood.
 
 **Internal details**:
 
 All the metadata that drives the on-cluster UI and install flow needs to be pulled by the cluster in order to display everything. Therefore it may be better to just build the index as a startable and queriable container that serves the content rather than a list of pointers to other content that needs to be pulled at runtime. There are some reasons to build the index as a simple list, largely stemming from a need for CI and build tools to build these indexes very rapidly. However, if the tools to generate the index are sufficiently well designed then bottlenecks can be avoided.
 
 The format then looks something like the operator-registry database that exists today, but with only minimal information about every single container. The db schema will have a layer of "latest" for each operator name for all the metadata that drives the OpenShift console (descriptions, icon references, etc.). Then all operator image pointers will aggregate just the metadata that drives install and upgrade (version, channels, dependencies, owned crds). To add additional updates to the database, the database just needs to be inserted/batch updated with changes rather than rebuilt from scratch.
+
+This database will be built by tooling that also needs to be created, but is not in scope of this enhancement.
 
 ---------------------
 
@@ -130,7 +132,7 @@ Polling process should be reviewed by quay team to ensure we scale on quay (alth
 
 The goal of this enhancement is to replace the app-registry implementation in a way that is usable by operator developers and operator author developers. To do this we will build an index image that is defined from a set of operator bundle images that are released independently and optimized in a way that can be productized by operator authors and pipeline developers.
 
-This implementation makes the assumption that a separate process is built that generates container images that contain individual operator bundles for each version of an operator. The intent of the index image is to aggregate these images that are out of scope of this enhancement.
+This implementation makes the assumption that a separate process is built that generates container images that contain individual operator bundles for each version of an operator. The intent of the index image is to aggregate these images that are out of scope of this enhancement. Once that image is built, the image itself is immutable. In order to create a new image, the tooling described here will run off cluster. Once the image is loaded onto the cluster, the only way to load new content is to pull down a new version of that image (either manually or by an automated poll).
 
 The final implementation goal of this enhancement involves this set of steps:
 
@@ -176,7 +178,9 @@ Add a new set of operator registry commands to utilize those new APIs:
     - inputs: $operatorName, $dbFile
     - outputs: updated database file without latest version of $operatorName included
     ex: `operator-registry delete-latest foo example.db`
-    
+
+As a point of context, these operations all output new database files. The intent of creating these commands is to allow the creation of new container images based on historical context of previous versions. These commands will be wrapped in tooling (outside the scope of this enhancement) that will be run as part of build environments or for local development. We are not creating a way for these commands to be run from inside the context of a cluster.
+
 *Reference non latest versions of bundles by image digests*
 
 Currently the operator-registry database has a table to the effect of:
