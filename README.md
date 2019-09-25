@@ -14,15 +14,17 @@ upstream communities.  Given the breadth of the distribution, it is useful to
 have a centralized place to describe OKD enhancements via an actionable design
 proposal.
 
-Enhancements may take multiple releases to ultimately complete.  Enhancements
-may be filed from anyone in the community, but require consensus from domain
-specific project maintainers in order to implement and accept into the release.
+Enhancements may take multiple releases to ultimately complete and thus provide
+the basis of a community roadmap.  Enhancements may be filed from anyone in the
+community, but require consensus from domain specific project maintainers in
+order to implement and accept into the release.
 
 ## Is My Thing an Enhancement?
 
 A rough heuristic for an enhancement is anything that:
 
-- impacts how a cluster is operated
+- impacts how a cluster is operated including addition or removal of significant
+  capabilities
 - impacts upgrade/downgrade 
 - needs significant effort to complete
 - requires consensus/code across multiple domains/repositories
