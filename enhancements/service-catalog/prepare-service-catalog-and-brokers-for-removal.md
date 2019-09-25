@@ -89,6 +89,14 @@ Create 2 gauges called template_service_broker_installed and
 template_service_broker_operator_installed. Possibly create a new
 ServiceMonitor.
 
+#### Story 5
+
+Verify the prometheus alerting manager is enabled, otherwise, enable it. For
+each of the operators add alerting code.
+
+The operators will need a new dependency.
+[alerting client](https://github.com/prometheus/alertmanager/blob/master/client/client.go)
+
 ### Implementation Details/Notes/Constraints [optional]
 
 The 4 operators, Service Catalog Controller Manager operator (svcat-cm-op),
@@ -140,6 +148,16 @@ value.
   - need to create a new Gauge
     - name: "template_service_broker_operator_installed"
     - help: "Indicates whether the template service broker operator is installed"
+
+#### other resources
+  - [alerting client](https://github.com/prometheus/alertmanager/blob/master/client/client.go)
+  - [Alerting rules](https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/)
+  - [Alertmanager](https://prometheus.io/docs/alerting/alertmanager/)
+  - [Metric types](https://prometheus.io/docs/concepts/metric_types/)
+  - [cluster-svcat-controller-manager-operator](https://github.com/openshift/cluster-svcat-controller-manager-operator/)
+  - [cluster-svcat-apiserver-operator](https://github.com/openshift/cluster-svcat-apiserver-operator)
+  - [template-service-broker-operator](https://github.com/openshift/template-service-broker-operator/)
+  - [ansible-service-broker-operator](https://github.com/openshift/ansible-service-broker/tree/master/operator)
 
 ### Risks and Mitigations
 
