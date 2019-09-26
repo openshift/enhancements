@@ -1,19 +1,21 @@
 ---
 title: Must-Gather
 authors:
-  - "@deads2k"
-reviewers:
-  - "@derekwaynecarr"
-  - "@soltysh"
-  - "@mfojtik"
-approvers:
-  - "@derekwaynecarr"
-creation-date: 2019-09-09
-last-updated: 2019-09-09
-status: implemented
-see-also:
-replaces:
-superseded-by:
+
+- "@deads2k"
+  reviewers:
+- "@derekwaynecarr"
+- "@soltysh"
+- "@mfojtik"
+  approvers:
+- "@derekwaynecarr"
+  creation-date: 2019-09-09
+  last-updated: 2019-09-09
+  status: implemented
+  see-also:
+  replaces:
+  superseded-by:
+
 ---
 
 # Must-Gather
@@ -65,53 +67,28 @@ ship a second one.
 `must-gather` for openshift is a combination of three tools:
 
 1. A client-side `inspect` command that works like a super-get.  It has semantic understand of some resources and traverses
- links to get interesting information beyond the current.  Pods in namespaces and logs for those pods as a for instance.
- Currently this is `openshift-must-gather inspect`, but we are porting this to `oc adm` as experiemental in 4.3.  We may
- change and extend arguments over time, but the intent of the command will remain.
+   links to get interesting information beyond the current.  Pods in namespaces and logs for those pods as a for instance.
+   Currently this is `openshift-must-gather inspect`, but we are porting this to `oc adm` as experiemental in 4.3.  We may
+   change and extend arguments over time, but the intent of the command will remain.
 2. The openshift-must-gather image, produced from https://github.com/openshift/must-gather.  The entry point is a 
- [/gather bash script](https://github.com/openshift/must-gather/blob/master/collection-scripts/gather) owned by CEE 
- (not the developers) that describes what to gather.  It is tightly coupled to the openshift payload
- and only contains logic to gather information from that payload.  We have e2e tests that make sure this functions.
+   [/gather bash script](https://github.com/openshift/must-gather/blob/master/collection-scripts/gather) owned by CEE 
+   (not the developers) that describes what to gather.  It is tightly coupled to the openshift payload
+   and only contains logic to gather information from that payload.  We have e2e tests that make sure this functions.
 3. `oc adm must-gather --image` which is a client-side tool that runs any must-gather compatible image by creating a pod,
- running the `/usr/bin/gather` binary, and then rsyncing the `/must-gather` and includes the logs of the pod.
+   running the `/usr/bin/gather` binary, and then rsyncing the `/must-gather` and includes the logs of the pod.
 
 ### `inspect`
 
-`oc adm inspect` is a noteworthy command because of the way that it traverses and gathers information.  Intead of being 
-truly generic, it has a generic fallback, but it understands many resources so that you can express an intent like, 
-"look at this cluster operator".  
-
-`oc adm inspect clusteroperator/kube-apiserver` does...
-1. Queue the resource
-2. Get and dump the resource (clusteroperator)
-3. Check against a well-known list of resources to do custom logic for
-4. If custom logic is found, queue more resources to iterate through
-5. Perform the custom logic.
-
-There are several special cases today.
-1. clusteroperators 
-    1. get all config.openshift.io resources
-    2. queue all clusteroperator's related resources under `.status.relatedObjects` 
-2. namespaces
-    1. queue everything in the `all` API category
-    2. queue secrets, configmaps, events, and PVCs (these are standard, core kube resources)
-3. routes
-    1. elide secret content from routes
-4. secrets
-    1. elide secret content from secrets.  Some keys are known to be non-secret though (ca.crt or tls.crt, for instance)
-5. pods
-    1. gets all current and previous container logs
-    2. take a best guess to find a metrics endpoint
-    3. take a best guess to find a healthz endpoint and all sub-healthz endpoints 
-    
+See the [inspect enhancement](oc/inspect.md) for details on the `inspect` command. 
 
 ### must-gather Images
+
 To provide your own must-gather image, it must....
 
 1. Must have a zero-arg, executable file at `/usr/bin/gather` that does your default gathering
 2. Must produce data to be copied back at `/must-gather`.  The data must not contain any sensitive data.  We don't string PII information, only secret information.
 3. Must produce a text `/must-gather/version` that indicates the product (first line) and the version (second line, `major.minor.micro.qualifier`),
- so that programmatic analysis can be developed.
+   so that programmatic analysis can be developed.
 
 ### User Stories [optional]
 
@@ -151,107 +128,13 @@ currently organized.
 │   │   ├── zipped audit files from each master here
 │   ├── openshift-apiserver
 │   │   ├── zipped audit files from each master here
-├── cluster-scoped-resources
-│   ├── <API_GROUP_NAME>
-│   │   ├── <API_RESOURCE_PLURAL>.yaml
-│   │   └── <API_RESOURCE_PLURAL>
-│   │       └── individually referenced resources here
-│   ├── config.openshift.io
-│   │   ├── authentications.yaml
-│   │   ├── apiservers.yaml
-│   │   ├── builds.yaml
-│   │   ├── clusteroperators.yaml
-│   │   ├── clusterversions.yaml
-│   │   ├── consoles.yaml
-│   │   ├── dnses.yaml
-│   │   ├── featuregates.yaml
-│   │   ├── images.yaml
-│   │   ├── infrastructures.yaml
-│   │   ├── ingresses.yaml
-│   │   ├── networks.yaml
-│   │   ├── oauths.yaml
-│   │   ├── projects.yaml
-│   │   ├── schedulers.yaml
-│   │   └── support.yaml
-│   ├── core
-│   │   └── nodes
-│   ├── machineconfiguration.openshift.io
-│   │   ├── machineconfigpools
-│   │   └── machineconfigs
-│   ├── network.openshift.io
-│   │   ├── clusternetworks
-│   │   └── hostsubnets
-│   ├── oauth.openshift.io
-│   │   └── oauthclients
-│   ├── operator.openshift.io
-│   │   ├── authentications
-│   │   ├── consoles
-│   │   ├── kubeapiservers
-│   │   ├── kubecontrollermanagers
-│   │   ├── kubeschedulers
-│   │   ├── openshiftapiservers
-│   │   ├── openshiftcontrollermanagers
-│   │   ├── servicecas
-│   │   └── servicecatalogcontrollermanagers
-│   ├── rbac.authorization.k8s.io
-│   │   ├── clusterrolebindings
-│   │   └── clusterroles
-│   ├── samples.operator.openshift.io
-│   │   └── configs
-│   └── storage.k8s.io
-│       └── storageclasses
 ├── host_service_logs
 │   └── masters
 │       ├── crio_service.log
 │       └── kubelet_service.log
-└── namespaces
-    ├── <NAMESPACE>
-    │   ├── <API_GROUP_NAME>
-    │   |   ├── <API_RESOURCE_PLURAL>.yaml
-    │   |   └── <API_RESOURCE_PLURAL>
-    │   |       └── individually referenced resources here
-    │   └── pods
-    │       └── <POD_NAME>
-    │           ├── <POD_NAME>.yaml
-    │           └── <CONTAINER_NAME>
-    │               └── <CONTAINER_NAME>
-    │                   ├── healthz
-    │                   |   └── <SUB_HEALTH>
-    │                   ├── logs
-    │                   |   ├── current.log
-    │                   |   └── previous.log
-    │                   └── metrics.json
-    ├── default
-    │   ├── apps
-    │   │   ├── daemonsets.yaml
-    │   │   ├── deployments.yaml
-    │   │   ├── replicasets.yaml
-    │   │   └── statefulsets.yaml
-    │   ├── apps.openshift.io
-    │   │   └── deploymentconfigs.yaml
-    │   ├── autoscaling
-    │   │   └── horizontalpodautoscalers.yaml
-    │   ├── batch
-    │   │   ├── cronjobs.yaml
-    │   │   └── jobs.yaml
-    │   ├── build.openshift.io
-    │   │   ├── buildconfigs.yaml
-    │   │   └── builds.yaml
-    │   ├── core
-    │   │   ├── configmaps.yaml
-    │   │   ├── events.yaml
-    │   │   ├── pods.yaml
-    │   │   ├── replicationcontrollers.yaml
-    │   │   ├── secrets.yaml
-    │   │   └── services.yaml
-    │   ├── default.yaml
-    │   ├── image.openshift.io
-    │   │   └── imagestreams.yaml
-    │   └── route.openshift.io
-    │       └── routes.yaml
+└── <inspect cmd output>
 ...
 ```
- 
 
 ### Test Plan
 
@@ -275,4 +158,3 @@ The `oc` command must skew +/- one like normal commands.
 ## Alternatives
 
 ## Infrastructure Needed [optional]
-
