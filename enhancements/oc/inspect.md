@@ -75,6 +75,34 @@ There are several special cases today.
    2. take a best guess to find a metrics endpoint
    3. take a best guess to find a healthz endpoint and all sub-healthz endpoints 
 
+#### --size
+
+`oc adm inspect --size=[small,medium,large,<number>Mi` The precise size matches the resourcequotas parsing rules.
+The sizes are subject to change, but initially
+1. small=10Mi
+2. medium=100Mi
+3. large=1Gi
+The default is no size restriction.
+
+The size of inspected assets can get quite large on systems that have been running for a while.
+Because the content is varied (logs, resources, metrics, etc), trying to tune each type of collection individually doesn't make sense.
+Instead we will support an intent based size that inspect tries to stay under the size limit.
+
+Exactly how we restrict this size is based on an unconfigurable heuristic that is subject to change.
+This doc will try to stay up to date with how the heuristic works, with least important information listed first.
+
+1. Logs past the most recent 10000 lines.
+2. ServiceAccount secret CAs past the default SA (to ensure we always get one).
+3. healthz
+4. per-binary metrics
+5. Healthy logs past the most recent 1000 lines.
+6. events more than two hours old.
+7. All logs past the most recent 1000 lines.
+
+If we have extra space, keep more of the available logs.
+When trimming logs, prefer to trim logs for healthy pods more than unhealthy pods.  
+*Happy pods are all alike, but every unhappy pod is unhappy in its own way.*
+
 ### User Stories [optional]
 
 #### Story 1
