@@ -130,7 +130,7 @@ Polling process should be reviewed by quay team to ensure we scale on quay (alth
 
 ### Implementation Details
 
-The goal of this enhancement is to replace the app-registry implementation in a way that is usable by operator developers and operator author developers. To do this we will build an index image that is defined from a set of operator bundle images that are released independently and optimized in a way that can be productized by operator authors and pipeline developers.
+The goal of this enhancement is to replace the app-registry implementation in a way that is usable by operator developers and CI pipeline developers. To do this we will build an index image that is defined from a set of operator bundle images that are released independently and optimized in a way that can be productized by operator authors and pipeline developers.
 
 This implementation makes the assumption that a separate process is built that generates container images that contain individual operator bundles for each version of an operator. The intent of the index image is to aggregate these images that are out of scope of this enhancement. Once that image is built, the image itself is immutable. In order to create a new image, the tooling described here will run off cluster. Once the image is loaded onto the cluster, the only way to load new content is to pull down a new version of that image (either manually or by an automated poll).
 
@@ -252,11 +252,13 @@ spec:
     interval: 1m
 ```
 
-Some open questions about the actual poll implementation: In openshift, for many of the the same reasons that OLM cannot directly pull the operator bundle image, OLM cannot query for new shas on a given tag directly. In order to accomplish this, we will need to create a deployment process that has an implicit understanding of what images are available (for example, we may use a rollout to force the deployment to update on the timer -- with a pull policy of always this will result in a new pod that is on the latest image when there are updates).
+Some open questions about the actual poll implementation: In openshift, for many of the the same reasons that OLM cannot directly pull the operator bundle image, OLM cannot query for new shas on a given tag directly.
 
-This is also fairly related to ImageStreams in OpenShift. Our current plan is to not leverage that feature given that OLM is a component that is also targeted at plain vanilla kubernetes clusters.
+In order to accomplish this, we will need to create a deployment process that has an implicit understanding of when new images are available. The initial implementation of this poller will leverage the existing method of building CatalogSources. That is, CatalogSources currently directly generate a pod. We will generate a new pod with an ImagePullPolicy of Always on the scheduled timer and then examine the SHA of the pods image. If the SHA does not match the current pod attached to the CatalogSource, we know that the image is newer and will point the CatalogSource to the new pod.
 
-#### Outcomed
+This concept is also fairly related to ImageStreams in OpenShift. Our current plan is to not leverage that feature given that OLM is a component that is also targeted at plain vanilla kubernetes clusters.
+
+#### Outcomes
 
 The outcome of all of this implementation ends up defining two distinct user workflows.
 
