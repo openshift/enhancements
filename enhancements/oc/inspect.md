@@ -74,6 +74,7 @@ There are several special cases today.
    1. gets all current and previous container logs
    2. take a best guess to find a metrics endpoint
    3. take a best guess to find a healthz endpoint and all sub-healthz endpoints 
+   4. take a best guess to find a [pprof](https://golang.org/pkg/net/http/pprof/) `/debug` endpoint and fetch `heap`, `profile` and `trace`
 
 ### User Stories [optional]
 
@@ -164,6 +165,7 @@ Attempt to gather the `/healthz`, `/version`, and `/metrics` endpoints from pod 
     │                   |   ├── current.log
     │                   |   └── previous.log
     │                   └── metrics.json
+    |                   └── {heap,profile,trace}
     ├── default
     │   ├── apps
     │   │   ├── daemonsets.yaml
