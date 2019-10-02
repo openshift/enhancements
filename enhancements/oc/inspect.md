@@ -60,8 +60,34 @@ truly generic, it has a generic fallback, but it understands many resources so t
 
 There are several special cases today.
 
-1. clusteroperators 
-   1. get all config.openshift.io resources
+1. any resource containing a `.status.relatedObjects` that has a schema conformant to
+
+   ```go
+    type <Foo>Status struct {
+     ... other fields
+	     	// relatedObjects is a list of objects that are "interesting" or related to this operator.  Common uses are:
+    	// 1. the detailed resource driving the operator
+    	// 2. operator namespaces
+    	// 3. operand namespaces
+    	// +optional
+    	RelatedObjects []ObjectReference `json:"relatedObjects,omitempty"`
+    }
+    
+    // ObjectReference contains enough information to let you inspect or modify the referred object.
+    type ObjectReference struct {
+    	// group of the referent.
+    	Group string `json:"group"`
+    	// resource of the referent.
+    	Resource string `json:"resource"`
+    	// namespace of the referent.
+    	// +optional
+    	Namespace string `json:"namespace,omitempty"`
+    	// name of the referent.
+    	Name string `json:"name"`
+    }
+   ```
+   one example are the `clusteroperators.config.openshift.io`. 
+   1. get all config.openshift.io resources // this should be reconfigured.
    2. queue all clusteroperator's related resources under `.status.relatedObjects` 
 2. namespaces
    1. queue everything in the `all` API category
