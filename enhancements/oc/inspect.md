@@ -32,23 +32,23 @@ authors:
 
 ## Summary
 
-When examining a cluster resource for debugging purposes, there are usually many other resources that need to also be gathered to provide context. The `inspect` command has semantic understand of some resources and traverses links to get interesting information beyond the original resource. 
+When examining a cluster resource for debugging purposes, there are usually many other resources that need to also be gathered to provide context. The `inspect` command has semantic understand of some resources and traverses links to get interesting information beyond the original resource.
 
 ## Motivation
 
-When gathering information for debugging purposes, you issue `get` commands to retrieve resources, but then you must also know what other resources are needed for context. The `inspect` command encapsulats the knowlege of what other resources provide context for the interested resource and enable a "super" `get` ability to easily gather them all at once.
+When gathering information for debugging purposes, you issue `get` commands to retrieve resources, but then you must also know what other resources are needed for context. The `inspect` command encapsulates the knowledge of what other resources provide context for the interested resource and enable a "super" `get` ability to easily gather them all at once.
 
 ### Goals
 
-* A single command should gather a specified resource and all the other resources needed to inspect that resource.
+* A single command should gather a specified resource and all related resources needed to inspect that resource.
 
 ### Non-Goals
 
 ### Proposal
 
-`oc adm inspect` is a noteworthy command because of the way that it traverses and gathers information.  Intead of being 
-truly generic, it has a generic fallback, but it understands many resources so that you can express an intent like, 
-"look at this cluster operator".  
+`oc adm inspect` is a noteworthy command because of the way that it traverses and gathers information.  Instead of being
+truly generic, it has a generic fallback, but it understands many resources so that you can express an intent like,
+"look at this cluster operator".
 
 `oc adm inspect clusteroperator/kube-apiserver` does...
 
@@ -72,7 +72,7 @@ There are several special cases today.
     	// +optional
     	RelatedObjects []ObjectReference `json:"relatedObjects,omitempty"`
     }
-    
+
     // ObjectReference contains enough information to let you inspect or modify the referred object.
     type ObjectReference struct {
     	// group of the referent.
@@ -86,9 +86,9 @@ There are several special cases today.
     	Name string `json:"name"`
     }
    ```
-   one example are the `clusteroperators.config.openshift.io`. 
+   one example are the `clusteroperators.config.openshift.io`.
    1. get all config.openshift.io resources // this should be reconfigured.
-   2. queue all clusteroperator's related resources under `.status.relatedObjects` 
+   2. queue all clusteroperator's related resources under `.status.relatedObjects`
 2. namespaces
    1. queue everything in the `all` API category
    2. queue secrets, configmaps, events, and PVCs (these are standard, core kube resources)
@@ -99,7 +99,7 @@ There are several special cases today.
 5. pods
    1. gets all current and previous container logs
    2. take a best guess to find a metrics endpoint
-   3. take a best guess to find a healthz endpoint and all sub-healthz endpoints 
+   3. take a best guess to find a healthz endpoint and all sub-healthz endpoints
    4. take a best guess to find a [pprof](https://golang.org/pkg/net/http/pprof/) `/debug` endpoint and fetch `heap`, `profile` and `trace`
 
 ### User Stories [optional]
@@ -221,10 +221,11 @@ Attempt to gather the `/healthz`, `/version`, and `/metrics` endpoints from pod 
     │   └── route.openshift.io
     │       └── routes.yaml
 ...
-`
+```
+
 ### Test Plan
 
-There is an e2e test that makes sure the command always exits successfully and that certain apsects of the content
+There is an e2e test that makes sure the command always exits successfully and that certain aspects of the content
 are always present.
 
 ### Graduation Criteria
