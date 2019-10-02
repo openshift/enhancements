@@ -119,6 +119,13 @@ images will be utilized as part of building the non-x86 install payload.
 
 However as no Jenkins imagestream will be installed on non-x86 clusters, the x86 image will not actually be exposed/consumed on those platforms, it will effectively be inert content.
 
+In addition our e2e tests currently heavily rely on imagestreams+templates that are installed by the samples operator.  
+If those things are not installed on non-x86 architectures, those e2e tests will fail on those platforms.  At a
+minimum those e2e tests must be disabled, but preferrably they need to be refactored to not rely on content from
+the samples operator.  A "middle ground" option is to refactor a subset of the tests that gives us a minimal 
+level of confidence, though we will not have as much coverage as we have on x86.
+
+
 ### Risks and Mitigations
 
 Unexpected outcomes with respect to the overall multi-arch design.
