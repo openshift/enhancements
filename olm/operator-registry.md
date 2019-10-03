@@ -71,7 +71,7 @@ A format is defined so that I can publish index container images to a container 
 
 All the metadata that drives the on-cluster UI and install flow needs to be pulled by the cluster in order to display everything. Therefore it may be better to just build the index as a startable and queriable container that serves the content rather than a list of pointers to other content that needs to be pulled at runtime. There are some reasons to build the index as a simple list, largely stemming from a need for CI and build tools to build these indexes very rapidly. However, if the tools to generate the index are sufficiently well designed then bottlenecks can be avoided.
 
-The format then looks something like the operator-registry database that exists today, but with only minimal information about every single container. The db schema will have a layer of "latest" for each operator name for all the metadata that drives the OpenShift console (descriptions, icon references, etc.). Then all operator image pointers will aggregate just the metadata that drives install and upgrade (version, channels, dependencies, owned crds). To add additional updates to the database, the database just needs to be inserted/batch updated with changes rather than rebuilt from scratch.
+The format then looks something like the operator-registry database that exists today, but with only the metadata required to drive the UI, UX, and install resolution. The db schema will have a layer of "latest" for each operator name for all the metadata that drives the OpenShift console (descriptions, icon references, etc.). Then all operator image pointers will aggregate just the metadata that drives install and upgrade (version, channels, dependencies, owned crds). To add additional updates to the database, the database just needs to be inserted/batch updated with changes rather than rebuilt from scratch.
 
 This database will be built by tooling that also needs to be created, but is not in scope of this enhancement.
 
@@ -106,7 +106,7 @@ _**Drive Operator Installs and UX**_
 
 As an OpenShift administrator, I want a way to install operators made available to me from my Operator index.
 - So that I can view what operators are available to install
-- So that I can view metadata about that operator (description, author, etc) on the OpenShift console
+- So that I can view metadata about available operators (description, author, etc) on the OpenShift console
 - So that I can select a given operator name, version, and channel to subscribe to
 
 Acceptance Criteria:
@@ -179,6 +179,11 @@ Add a new set of operator registry commands to utilize those new APIs:
     - outputs: updated database file without latest version of $operatorName included
     ex: `operator-registry delete-latest foo example.db`
 
+`operator-registry manifest`
+    - inputs: $dbFile
+    - outputs: file with list of bundle images the index was built on
+    ex: `operator-registry manifest example.db`
+
 As a point of context, these operations all output new database files. The intent of creating these commands is to allow the creation of new container images based on historical context of previous versions. These commands will be wrapped in tooling (outside the scope of this enhancement) that will be run as part of build environments or for local development. We are not creating a way for these commands to be run from inside the context of a cluster.
 
 *Reference non latest versions of bundles by image digests*
@@ -224,6 +229,12 @@ spec:
 ```
 
 We will also need to update operator-registry to include a new `serve` command that knows how to parse the manifest/ folder in the operator bundle image. This command will write to a configmap that OLM will use to get the bundle data.
+
+*Reproducibility*
+
+In order to satisfy the ability to recreate the index as a source of truth the `operator-registry manifest` command can be used. This command, when run against a particular database, will return a list of image SHAs for all of the bundle images the database was built from. This allows the command that built the index to be source controlled so that the index is reproducible. If a user needs to reproduce the index, they can simply run this command to get the json object, then pipe that list to the `operator-registry add` command to regenerate the index from scratch with an empty database.
+
+Also of note, there is the possible concern that the index is not fully reproducible because building the index requires pulling the bundle images it is built upon. If those bundles are gone, then the index cannot be easily recreated. It is also *possible* to commit the sqlite database file to source control, which would allow the index to be rebuilt without the need to pull the bundle images. However, the value of such an image is extremely limited given that the bundles are still required at runtime, so the recommended approach for CI systems is to use `operator-registry manifest` if needed.
 
 *DB Versioning*
 
@@ -273,6 +284,37 @@ The on cluster workflow:
   - When the user clicks "Install" from the operator-hub page or creates a subscription from the terminal, normally OLM queries the operator-registry grpc API for the entire "bundle" field, which is just a serialized JSON string containing all the yaml that was defined for that operator. If the version is not the latest version, that query will return null.
   - If the API returns null, OLM will ask for the bundle image URI from the operator-registry database and create a deployment with that image in order to get the manifests from that bundle. In order to do this, we will use an init container to push a binary into the container that can understand where the manifests are (in a well known path) and push all of those files into a configmap as strings.
   - OLM will read that configmap and create a CSV cr to drive the installation of the operator.
+
+
+#### CI story
+
+Not scoped out inside this enhancement is the fact that a higher order CLI tool needs to be built that encapsulates the functionality of these new `operator-registry` in order to build the index images. Such a tool will encapsulate the image build process along the lines of:
+
+1. Generate index scratch
+
+2. Generate index from previous index
+
+3. Delete entire operator from index
+
+4. Delete latest operator bundle version from index
+
+In all cases, such a tool will need to generate container images as output based on a set of input commands. Essentially it will generate a dockerfile/image specification, and then run podman/docker build to generate that image. Example dockerfile for an add command:
+
+```
+FROM quay.io/redhat/community-operators:latest as builder
+
+COPY exampledb.db exampledb.db
+
+FROM quay.io/operator-registry-builder/builder:latest
+COPY /build/bin/operator-registry /operator-registry
+
+RUN operator-registry add "quay.io/community-operators/foo:sha256@abcd123,quay.io/community-operators/bar:sha256@defg456" exampledb.db
+
+ENTRYPOINT ["/registry-server"]
+CMD ["--database", "/exampledb.db"]
+```
+
+In this way, the primary way that a developer or CI pipeline will interact with these indexes will be to try to "add" a newly built bundle to an index, with the output being a net new index. That index can be stored, passed around, and applied to clusters as needed.
 
 ### Risks and Mitigations
 
