@@ -7,7 +7,7 @@ reviewers:
 approvers:
   - TBD
 creation-date: 2019-09-05
-last-updated: 2019-09-20
+last-updated: 2019-10-04
 status: provisional
 ---
 
@@ -317,6 +317,14 @@ CMD ["--database", "/exampledb.db"]
 In this way, the primary way that a developer or CI pipeline will interact with these indexes will be to try to "add" a newly built bundle to an index, with the output being a net new index. That index can be stored, passed around, and applied to clusters as needed.
 
 ### Risks and Mitigations
+
+Concern:
+
+The current CI story around building index images has the expectation that operator-registry will be able to pull images to get manifest content. It appears as though certain build systems (ex. brew) may not have access to external registries. In that case, the operator-registry command will most likely not be able to fetch images directly.
+
+Mitigation:
+
+We may need to be able to give that CI tooling an option to build the database file itself and commit it to source control. Then when updating the index we would need a way to add manifest files directly to that existing database (through some other version of the `add` command). This is not a recommended method of interacting with the database (given that it will solidify the sqlite db as an API which comes with an entire other set of challenges) but it is a possible workaround for ci system limitations that we may need to explore.
 
 Concern:
 
