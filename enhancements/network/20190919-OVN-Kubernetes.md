@@ -48,22 +48,22 @@ ovn-northd, which converts logical objects in to flows.
 The data store is a replicated database, with a traditional master-backup
 architecture.
 
-The node-level process (ovn-southd) is responsible for programming the
+The node-level process (ovn-controller) is responsible for programming the
 flows from ovn-northd in to the vswitch on the local node. It also handles
 some bookkeeping.
 
 #### Controller
 There will be a controller daemonset on every master node. They will
 perform leader election directly via the Kubernetes API. The ovn-kubernetes
-process will, when it achieves leadership, will be responsible for
-starting the ovn-north process.
+process will, when it achieves leadership, be responsible for
+starting the ovn-northd process.
 
 #### Data store
 We will write a small controller that, based on the result of the leader
 election process, configures the databases (ovn-ndbd and ovn-sbdb) as
 master or backup. The master will be distributed via an endpoint. If a
 node is backup, it will watch for endpoint changes and update replication
-configuration as fit.
+configuration accordingly.
 
 #### Node-level
 The node-level components are configured as a daemonset. They run on all
@@ -71,16 +71,28 @@ nodes, including the control-plane. They watch for endpoint changes,
 watch the sbdb for changes, and configure the nodes.
 
 ### Test Plan
-OVN-Kubernetes must pass all standard QE tests, as well as the full e2e
-suite. It does not need any special testing, as the GA release does not
-enable any new features.
+In addition to the existing CI and QE test suites, we will develop both manual and
+automated testing that exercises the data-store failover.
+
+CI: We should be able to execute a complete CI run while "chaos-monkey-ing" the
+OVN control plane. This means we should create a CI job that randomly deletes
+the OVN leader during a CI run.
+
+We will also write specific tests that check failover. These will need to test
+that, after the master is killed, a new leader is elected, and that all other nodes
+are successfully replicating from that leader.
 
 ### Graduation Criteria
 GA:
 - OVN-Kubernetes is stable
-- The control-plane is low-latency: changes are installed on the nodes in under 10 seconds
-- Reliable control plane: losing a master node does not cause more than a few seconds of extra latency, and no loss of network connectivity
-- Reliable node: Upgrading ovn-kubernetes components
+- The control-plane is low-latency. For small clusters (sub 1000 pods),
+    - service changes: 95%ile 5 seconds, 99%ile 15 seconds
+    - pod creation (time blocked on networking): 95%ile 15 seconds, 99%ile 30 seconds
+    - network policy changes: 95%ile 5 seconds, 99%ile 15 seconds
+- Reliable control plane: losing a master node does not cause more than 10 seconds of
+  extra network programming latency, and no loss of new or existing network connections.
+- Reliable node: Upgrading ovn-kubernetes components does not affect existing connections, and
+  does not block new connections for more than 5 seconds.
 
 Default: For OVN-Kubernetes to be the default in new installations, it
 should implement all openshift-sdn-only features (that we do not wish
@@ -107,8 +119,13 @@ version skew can occur between nodes.
 
 ## Drawbacks
 
+OVN currently has no way to implement:
+- Session affinity for Services
+- "except" blocks for NetworkPolicy
+
+We will work upstream to enable these features.
+
 ## Alternatives
 There are many. But we’ve been involved in the OVN and OVN-Kubernetes
 communities for a long time. We have the expertise, and we think it’s
 worth the investment.
-
