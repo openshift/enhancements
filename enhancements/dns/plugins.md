@@ -1,5 +1,5 @@
 ---
-title: configurable-dns-forwarding
+title: configurable-dns-plugins
 authors:
   - "@dhansen"
 reviewers:
@@ -10,16 +10,17 @@ approvers:
   - "@knobunc"
   - "@ironcladlou"
 creation-date: 2019-09-27
-last-updated: 2019-10-08
+last-updated: 2019-10-10
 status: implementable
 see-also: 
 replaces:
 superseded-by:
 ---
 
-# Configurable DNS Forwarding
+# Configurable DNS Plugins
 
-This proposal allows cluster operators the ability to configure DNS name query forwarding.
+This proposal provides cluster operators the ability to configure CoreDNS [plugins](https://coredns.io/plugins/) and
+includes [forward](https://coredns.io/plugins/forward/) as the first plugin implementation.
 
 ## Release Signoff Checklist
 
@@ -31,16 +32,17 @@ This proposal allows cluster operators the ability to configure DNS name query f
 
 ## Open Questions [optional]
 
-1. Is `operator.openshift.io` the best API group for the proposed `Forwarder` type?
+1. Is `operator.openshift.io` the best API group for the proposed `ForwardPlugin` type?
 2. How are API changes handled for cluster downgrades?
 3. Should IPv6 references for `Nameservers` be removed until OpenShift adds IPv6 support?
-4. Is the cluster domain (i.e. cluster.local) an invalid `Forwarder` domain?
-5. Should the number of `Forwarders` be restricted due to Gap 4?
+4. Is the cluster domain (i.e. cluster.local) an invalid `ForwardPlugin` domain?
+5. Should the number of `ForwardPlugins` be restricted due to Gap 4?
 
 ## Summary
 
-Currently, the [cluster-dns-operator](https://github.com/openshift/cluster-dns-operator) manages DNS forwarding with a
-static ConfigMap:
+DNS name resolution for services and pods is currently provided by an instance of [CoreDNS](https://coredns.io) that
+runs on each node in the cluster. The [cluster-dns-operator](https://github.com/openshift/cluster-dns-operator) manages
+the CoreDNS configuration with a statically-defined ConfigMap:
 
 ```bash
 $ oc get configmap/dns-default -n openshift-dns -o yaml
@@ -69,44 +71,59 @@ metadata:
   <SNIP>
 ```
 
-This proposal will generate this ConfigMap with a `forward` section based on user-provided values of type `Forwarder`.
+Once CoreDNS starts and has parsed the configuration, it runs servers. Each server is defined by the zones it serves and
+a listening port. In the above configuration, CoreDNS starts one server that manages all zones and listens on port 5353.
+Each server has its own plugin chain represented within the server block stanza (i.e. `forward`). This proposal will
+generate the ConfigMap with a `forward` plugin configuration based on user-provided values of type `ForwardPlugin`.
 
 ## Motivation
 
-DNS name resolution for pods is currently provided by an instance of [CoreDNS](https://coredns.io) that runs on each
-node in the cluster. If a DNS query is for a hostname within the cluster domain suffix (i.e. `cluster.local`), CoreDNS
-resolves the name. Otherwise, CoreDNS proxies the request to a resolver identified by `/etc/resolv.conf` on the
-corresponding node. Although this provides a consistent and reliable approach for name resolution, it restricts how
-cluster operators manage DNS name queries.
+CoreDNS is responsible for resolving pod and service names for the cluster domain (i.e. `cluster.local`). Otherwise,
+CoreDNS proxies the request to a resolver identified by `/etc/resolv.conf` on the corresponding node. Although this provides a consistent and reliable approach for name
+resolution, it restricts how cluster operators manage DNS name queries.
 
 ### Goals
 
-1. A well defined API for DNS forwarding configuration that is specific to CoreDNS
-2. A minimal API surface that can be expanded to support future DNS forwarding use cases.
+1. A well defined API for managing CoreDNS plugins.
+2. The ability to configure the CoreDNS forwarding plugin.
+2. A minimal API surface that can be expanded to support future DNS forwarding and plugin use cases.
 
 ### Non-Goals
 
 1. Support every possible DNS forwarding use case.
 2. Configure or manage external DNS providers.
+3. Provide name query forwarding for other cluster services (i.e. container runtime).
+4. Manage what plugins get loaded (i.e. plugin.cfg).
 
 ## Proposal
 
-The proposed `Forwarder` type defines a schema for associating one or more `Nameservers` to a DNS subdomain identified
-by `Domain`. `Nameservers` are responsible for resolving name queries for `Domain`. `Policy` provides a mechanism for
-distinguishing where to forward DNS messages when `Nameservers` consists of more than one nameserver:
+`PluginConfig` defines one or more CoreDNS plugins that can be configured. If a plugin is not defined, it will use a
+default configuration provided by the cluster-dns-operator. A plugin is represented as a slice when multiple instances
+of the plugin can be expressed within the DNS configuration.
+
 ```go
-type Forwarder struct {
+type PluginConfig struct {
+    ForwardPlugins []ForwardPlugin `json:"forwardPlugin"`
+    // additional future plugins
+}
+```
+
+The proposed `ForwardPlugin` type defines a schema for associating one or more `Nameservers` to a DNS subdomain
+identified by `Domain`. `Nameservers` are responsible for resolving name queries for `Domain`. `Policy` provides a
+mechanism for distinguishing where to forward DNS messages when `Nameservers` consists of more than one nameserver:
+```go
+type ForwardPlugin struct {
     Domain string `json:"domain"`
     Nameservers []string `json:"nameservers"`
-    Policy ForwarderPolicy `json:"policy,omitempty"`
+    Policy ForwardPolicy `json:"policy,omitempty"`
 }
 
-type ForwarderPolicy string
+type ForwardPolicy string
 
 const (
-    ForwarderPolicyRandom ForwarderPolicy = "Random"
-    ForwarderPolicyRoundRobin ForwarderPolicy = "RoundRobin"
-    ForwarderPolicySequential ForwarderPolicy = "Sequential"
+    ForwardPolicyRandom ForwardPolicy = "Random"
+    ForwardPolicyRoundRobin ForwardPolicy = "RoundRobin"
+    ForwardPolicySequential ForwardPolicy = "Sequential"
 )
 ```
 
@@ -114,17 +131,6 @@ Each instance of CoreDNS performs health checking of `Nameservers`. If `Nameserv
 nameserver, `Policy` specifies the order of forwarder nameserver selection. When a healthy nameserver returns an error
 during the exchange, another server is tried from `Nameservers` based on `Policy`. Each server is represented by an IP
 address or IP address and port if the server listens on a port other than 53.
-
-A `Forwarder` list is added to `dnses.opertor.openshift.io`, allowing users the ability to configure multiple
-nameserver/domain/policy forwarding combinations:
-
-```go
-// DNSSpec is the specification of the desired behavior of the DNS.
-type DNSSpec struct {
-	// +optional
-	Forwarders []Forwarder `json:"forwarders,omitempty"`
-}
-```
 
 ### User Stories
 
@@ -135,23 +141,23 @@ name queries for our other internal devices using the DNS servers in our data ce
 
 ### Implementation Details/Notes/Constraints
 
-If `Forwarders` consists of more than one `Forwarder`, longest suffix match will be used to determine the `Forwarder`.
-For example, if there are two `Forwarders`, one for foo.com and one for a.foo.com, and the query is for www.a.foo.com,
-it will be routed to the a.foo.com `Forwarder`.
+If `ForwardPlugin` consists of more than one `ForwardPlugin`, longest suffix match will be used to determine the
+`ForwardPlugin`. For example, if there are two `ForwardPlugins`, one for foo.com and one for a.foo.com, and the query is
+for www.a.foo.com, it will be routed to the a.foo.com `ForwardPlugin`.
 
-A maximum of 15 `Nameservers` is allowed per `Forwarder`.
+A maximum of 15 `Nameservers` is allowed per `ForwardPlugin`.
 
-The cluster-dns-operator will generate the `forward` portion of `configmap/dns-default` based on `Forwarders` of
-`dnses.operator.openshift.io` instead of `forward` being statically defined. To achieve this:
+The cluster-dns-operator will generate the `forward` plugin configuration of `configmap/dns-default` based on
+`ForwardPlugin` of `dnses.operator.openshift.io` instead of `forward` being statically defined. To achieve this:
 
 1. The [default](https://github.com/openshift/cluster-dns-operator/blob/master/assets/dns/configmap.yaml) ConfigMap
 asset and associated code from the [manifests pkg](https://github.com/openshift/cluster-dns-operator/blob/master//pkg/manifests/manifests.go#L70:6)
 should be removed.
 
 2. The [desiredDNSConfigMap](https://github.com/openshift/cluster-dns-operator/blob/master/pkg/operator/controller/controller_dns_configmap.go)
-function must be modified to create a ConfigMap type with a `forward` configuration based on `Forwarder`.
-If `Forwarder` is not present or an invalid `Forwarder` is provided, the ConfigMap will contain
-`forward . /etc/resolv.conf`. Otherwise, desiredDNSConfigMap will use the provided `Forwarder` to construct the
+function must be modified to create a ConfigMap type with a `forward` configuration based on `ForwardPlugin`.
+If `ForwardPlugin` is not present or an invalid `ForwardPlugin` is provided, the ConfigMap will contain
+`forward . /etc/resolv.conf`. Otherwise, desiredDNSConfigMap will use the provided `ForwardPlugin` to construct the
 forwarding configuration and use `/etc/resolv.conf` as a resolver of last resort. For example:
 
 ```yaml
@@ -160,17 +166,18 @@ kind: DNS
 metadata:
   name: default
 spec:
-  forwarders:
-  - domain: foo.com
-    nameServers:
-      - 1.2.3.4
-      - 5.6.7.8:5353
-    policy: RoundRobin
-  - domain: bar.com
-    nameServers:
-      - 4.3.2.1
-      - 8.7.6.5:5353
-    policy: Sequential
+  pluginConfig:
+    forwardPlugins:
+    - domain: foo.com
+      nameServers:
+        - 1.2.3.4
+        - 5.6.7.8:5353
+      policy: RoundRobin
+    - domain: bar.com
+      nameServers:
+        - 4.3.2.1
+        - 8.7.6.5:5353
+      policy: Sequential
 ```
 
 The above `DNS` will produce the following `ConfigMap`:
@@ -209,7 +216,7 @@ metadata:
   namespace: openshift-dns
 ```
 #### Updating
-Changes to `Forwarder` will trigger a [rolling update](https://kubernetes.io/docs/tasks/manage-daemon/update-daemon-set/#performing-a-rolling-update)
+Changes to `ForwardPlugin` will trigger a [rolling update](https://kubernetes.io/docs/tasks/manage-daemon/update-daemon-set/#performing-a-rolling-update)
 of the CoreDNS DaemonSet.
 
 #### Validation
@@ -219,8 +226,8 @@ a valid port number must be specified. A colon is used to separate the address a
 `[IP]:port` for IPv6.
 
 #### Transport
-UDP is used to transport DNS messages and `Forwarder` health checks. Any UDP transport will automatically retry with the
-equivalent TCP transport if the response is truncated (TC flag set in response).
+UDP is used to transport DNS messages and `ForwardPlugin` health checks. Any UDP transport will automatically retry with
+the equivalent TCP transport if the response is truncated (TC flag set in response).
 
 #### Health Checking Details
 
@@ -235,7 +242,7 @@ random nameserver (which may or may not work).
 
 #### Gap 1
 Forwarded name queries and nameserver health checks are insecure. This may allow a malicious actor to impersonate an
-`Forwarder` nameserver.
+`ForwardPlugin` nameserver.
 
 #### Mitigation 1
 Add TLS support to secure forwarded name queries. Clearly document this insecurity in product documentation in the
@@ -260,13 +267,13 @@ metrics are exported. Ensure these metrics are surfaced through the OpenShift mo
 
 #### Gap 4
 
-An increased utilization of compute resources on each node due to the potential of running many `Forwarders`, each with
-up to 15 nameservers that are actively checked for health.
+An increased utilization of compute resources on each node due to the potential of running many `ForwardPlugins`, each
+with up to 15 nameservers that are actively checked for health.
 
 #### Mitigation 4
 
-Test utilization using multiple `Forwarders` with multiple `Nameservers`. Add a warning in the documentation that adding
-a large number of forwarders may incur a performance penalty or hit memory limits.
+Test utilization using multiple `ForwardPlugins` with multiple `Nameservers`. Add a warning in the documentation that
+adding a large number of forwarders may incur a performance penalty or hit memory limits.
 
 ## Design Details
 
@@ -274,8 +281,8 @@ a large number of forwarders may incur a performance penalty or hit memory limit
 
 Implement the following end-to-end test in addition to unit tests:
 
-- Create a `DNS` with a `Forwarder` that uses a `Nameserver` to resolve a hostname from `Domain`. Start the dns-operator
-and check the logs for healthcheck failures for the `Nameserver`.
+- Create a `DNS` with a `ForwardPlugin` that uses a `Nameserver` to resolve a hostname from `Domain`.
+- Start the dns-operator and check the logs for healthcheck failures for the `Nameserver`.
 - Create a pod that performs an nslookup for a hostname in the cluster domain.
 - Have the pod perform an nslookup for a hostname in `Domain`.
 - If the nslookup succeeds, check if the nslookup server matches the `Nameserver`.
@@ -288,7 +295,7 @@ TODO
 ### Upgrade / Downgrade Strategy
 
 Upgrades will continue to use the existing `forward . /etc/resolv.conf` forwarding configuration. Edit
- `dnses.operator.openshift.io` to modify the default forwarding behavior by adding a `Forwarder`. For example:
+ `dnses.operator.openshift.io` to modify the default forwarding behavior by adding a `ForwardPlugin`. For example:
  
 ```yaml
 apiVersion: operator.openshift.io/v1
@@ -296,11 +303,12 @@ kind: DNS
 metadata:
   name: default
 spec:
-  forwarders:
-  - domain: foo.com
-    nameServers:
-      - 1.2.3.4
-      - 5.6.7.8
+  pluginConfig:
+    forwardPlugins:
+    - domain: foo.com
+      nameServers:
+        - 1.2.3.4
+        - 5.6.7.8
 ```
 
 ### Version Skew Strategy
