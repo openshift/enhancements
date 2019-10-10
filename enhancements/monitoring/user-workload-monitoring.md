@@ -3,6 +3,7 @@ title: user-workload-monitoring
 authors:
   - "@s-urbaniak"
   - "@brancz"
+  - "@lilic"
 reviewers:
   - "@sichvoge"
   - "@openshift/openshift-team-monitoring"
@@ -10,7 +11,7 @@ approvers:
   - "@sichvoge"
   - "@openshift/openshift-team-monitoring"
 creation-date: 2019-09-19
-last-updated: 2019-09-19
+last-updated: 2019-10-10
 status: implementable
 ---
 
@@ -46,7 +47,7 @@ Currently it is difficult to achieve metering/chargeback for Red Hat products wi
 Allow deployment and reconciliation of scrape targets, recording rules, and alerting rules in user namespaces.
 This effectively means the following custom resources:
 
--  [ServiceMonitor](https://github.com/openshift/prometheus-operator/blob/master/Documentation/api.md#servicemonitor)
+- [ServiceMonitor](https://github.com/openshift/prometheus-operator/blob/master/Documentation/api.md#servicemonitor)
 - [PodMonitor](https://github.com/openshift/prometheus-operator/blob/master/Documentation/api.md#podmonitor)
 - [PrometheusRule](https://github.com/openshift/prometheus-operator/blob/master/Documentation/api.md#prometheusrule)
 
@@ -73,7 +74,7 @@ We will continue to use a centralized Alertmanager (A) cluster.
 The existing Alertmanager cluster will aggregate both user workload alerts as well as cluster alerts. Tenancy will be achieved by forcing specific labels onto metrics and alerts by which the central Alertmanager config can route similarly to how tenancy is achieved at the query level (see below).
 
 Querying data from a single, multi-tenant interface is done using the Thanos Querier (TQ) component.
-Tenancy is enforced at the prometheus query layer. This is achived by leveraging the existing topology using kube-rbac-proxy [1] and prom-label-proxy [2].
+Tenancy is enforced at the prometheus query layer. This is achieved by leveraging the existing topology using kube-rbac-proxy [1] and prom-label-proxy [2].
 
 Differences between cluster- and user-level is mainly upgrade guarantees. The cluster-level Prometheus stack is an integral part of OpenShift and its reliability is important, keeping the stack immutable and fully testable by us allows us to rely on it to a higher degree. As we have no such possibility for user defined configurations and scrape targets, we can't provide the same guarantees.
 
@@ -181,15 +182,48 @@ The kube-rbac-proxy sidecar will be deployed along with prom-label-proxy in the 
 
 For details about the tenancy model see the README for prom-label-proxy [2].
 
+### Multitenancy
+
+To account for multi tenant clusters, we want to add a label of origin to each metric that comes from the user workloads
+discovery objects e.g. ServiceMonitor and PodMonitors. To do this we will introduce a new field in the Prometheus Custom
+Resource in prometheus-operator `enforcedNamespaceLabel` which will contain the key of the label, with the value being
+the namespace in which the object was created in. Besides the above mentioned new label, the prometheus-operator will
+also enforce applying that same label, to any relabelConfigs relabelings, this will always be added as a last label so
+it makes sure that only the last label is taken into account and no one can override the namespace label. For the
+metricRelabelings we will remove any relabeling rule that has namespace target. The above work is all in
+prometheus-operator, in cluster-monitoring-operator we will set the field to `enforcedNamespaceLabel: namespace`. This
+ensures we do not have to override the work that prom-label-proxy is already doing. Same must be done for alerts, there
+we will inject the same label key value to the promql expression and append it to the label array. This will ensure that
+the rules and alerts include the users namespace.
+
+honor_labels controls how prometheus handles conflicts between labels already present in scraped data and the labels
+that prometheus would attach server side. If honor_labels is set to true labels from the scraped data are kept and
+server-side labels are ignored. If set to false the conflicts are resolved renaming the scraped data to
+`exported_<label-name>`. This is exactly what we want for user workloads, because we want to avoid the users possibly
+remapping the values of labels as we base our tenancy model on this. We have two options here that can be done in
+prometheus-operator, either discard that object completely in the same way as we do with filesystem access right now or
+create the respective objects and change the honorLabel value to false.
+
 ### Risks and Mitigations
 
-Risks are for one in the area of security, namely in the realm of accessing metrics a user has no permissions for.
-This is achieved by reusing the existing tenancy stack as well as with the newly added features for allow-lists,
-deny-lists and reconcilation limiting settings for prometheus operator.
+Risks are for one in the area of security, namely in the realm of accessing metrics a user has no permissions for.  This
+is achieved by reusing the existing tenancy stack as well as with the newly added features for allow-lists, deny-lists
+and reconciliation limiting settings for prometheus operator.
 
-Another risks are related to saturation of Prometheus servers.
-Potential queries of death (QoD) or aggressive scrapte targets with high cardinality
-can impact the availability of the user workload monitoring prometheus instances.
+Another risks are related to saturation of Prometheus servers.  Potential queries of death (QoD) or aggressive scrape
+targets with high cardinality can impact the availability of the user workload monitoring prometheus instances.
+
+When the scraped data includes a timestamp those timestamps are by default respected by Prometheus. We want to ignore
+that timestamp and instead let Prometheus set the time it received the scraped data, as that can cause many possible
+problems, one of which would be out-of-order inserts. To solve this problem we will need to add a new field in the
+promethus-operator Prometheus Custom Resource called `honorTimestamps`. Then in cluster-monitoring-operator we will then
+set this field to false for user workload only.
+
+PodMonitors and ServiceMonitors objects have a field to select which namespaces the Endpoints are discovered from, these
+could be a potential DDOS risk as a user could specify any namespace even the ones they do not have access to. To avoid
+this risk we will introduce a `ignoreNamespaceSelectors` in the Prometheus Custom Resource, and set that to `true` in
+cluster-monitoring-operator. This will discard the `namespaceSelector` field users specify and avoid the above
+mentioned risks.
 
 ## Design Details
 
@@ -210,7 +244,7 @@ These are generalized examples to consider, in addition to the aforementioned
 
 There is no dev preview planned, just tech preview.
 
-##### Tech Preview -> GA 
+##### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
