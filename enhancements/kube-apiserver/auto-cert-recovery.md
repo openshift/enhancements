@@ -8,7 +8,7 @@ reviewers:
 approvers:
   - "@sttts"
 creation-date: 2019-08-22
-last-updated: 2019-08-22
+last-updated: 2019-10-11
 status: implementable
 see-also:
 replaces:
@@ -28,7 +28,7 @@ superseded-by:
 ## Summary
 
 Fully automate the recovery of kube-apiserver and kube-controller-manager certificates currently documented [here](https://docs.openshift.com/container-platform/4.1/disaster_recovery/scenario-3-expired-certs.html).
-Currently, there are are helper commands to make the effort more practical, but we think we can fully automate the process
+Currently, there are helper commands to make the effort more practical, but we think we can fully automate the process
 to avoid human error and intervention.
 
 
@@ -53,13 +53,15 @@ VMs for later restart.  It is theoretically possible to automate the recovery st
 
 We will take our existing `cluster-kube-apiserver-operator regenerated-certificates` command and create a simple, non-leader-elected
 controller which will watch for expired certificates and regenerate them.  It will connect to the kube-apiserver using
-localhost with an SNI name option wired to a 10 year cert.  When there is no work to do, this controller wil do nothing.
+localhost with an SNI name option wired to a 10 year cert.  When there is no work to do, this controller will do nothing.
+This controller will run as another container in our existing static pods.
 The recovery flow will look like this:
 
 1. kas-static-pod/kube-apiserver starts with expired certificates
 2. kas-static-pod/cert-syncer connects to localhost kube-apiserver with using a long-lived SNI cert (localhost-recovery).  It sees expired certs.
-3. kas-static-poc/cert-regenerator connects to localhost kube-apiserver with a long-lived SNI cert (localhost-recovery).  It sees expired certs and refreshes them as appropriate.  Being in the same
- repo, it uses the same logic.  We will probably add an overall option to the library-go cert rotation to say, "only refresh on expired"
+3. kas-static-poc/cert-regenerator connects to localhost kube-apiserver with a long-lived SNI cert (localhost-recovery).
+ It sees expired certs and refreshes them as appropriate.  Being in the same  repo, it uses the same logic.
+ We will add an overall option to the library-go cert rotation to say, "only refresh on expired"
  so that it never collides with the operator during normal operation.  The library-go cert rotation impl is resilient to 
  multiple actors already.  
 4. kas-static-pod/cert-syncer sees updated certs and places them for reload. (this already works)
@@ -72,6 +74,13 @@ The recovery flow will look like this:
  multiple actors already.  
 9. kcm-static-pod/cert-syncer sees updated certs and places them for reload. (this already works)
 10. kcm-static-pod/kube-controller-manager wires up a library-go/pkg/controller/fileobserver to the CSR signer and suicides on the update
+11. At this point, kas and kcm are both up and running with valid serving certs and valid CSR signers.
+12. Kubelets will start creating CSRs for signers, but the machine approver is down.
+ **A cluster-admin must manually approve client CSRs for the master kubelets**
+13. Master kubelets are able to communicate to the kas and get listings of pods, 
+    1. kcm creates pods for operators including sdn-o and sdn, 
+    2. kube-scheduler sees a valid kas serving cert and schedules those pods to masters, 
+    3. master kubelets run the sdn, sdn-o, kas-o, kcm-o, ks-o and the system re-bootstraps. 
 
 ### Implementation Details/Notes/Constraints 
 
@@ -83,6 +92,7 @@ This requires these significant pieces
 - [ ] kas-o to provide a cert regeneration controller
 - [ ] kas-o to create and wire a long-lived serving cert/key pair for localhost-recovery
 - [ ] library-go cert rotation library to support an override for only rotating when certs are expired
+- [ ] remove old manual recovery commands
 
 ### Risks and Mitigations
 
@@ -118,9 +128,8 @@ Because each deployment in the payload is atomic, it will not skew.  There are n
 Major milestones in the life cycle of a proposal should be tracked in `Implementation
 History`.
 
-## Drawbacks
+## Alternatives
 
 This process can be run by a laborious and error prone manual process that three existent teams have already had trouble with.
 
-## Alternatives
 
