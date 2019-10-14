@@ -34,14 +34,14 @@ see-also:
 ## Summary
 
 Various OpenShift infrastructure components have a need to make requests
-to services the reside off-cluster.  Customers may require traffic that
+to services that reside off-cluster.  Customers may require traffic that
 goes outside their network to go through a proxy.  Therefore OpenShift
 infrastructure components that need to make requests to external services
 may need to go through a proxy.
 
 The goal of this proposal is to define a mechanism for publishing and consuming
 configuration information related to the proxy to be used when making external
-requests.  This includes information about the proxy hostname as well as any
+requests.  This includes the proxy connection information as well as any
 additional certificate authorities that are required to validate the proxy's
 certificate.  Configuration information also includes domains for which requests
 should not go through the proxy.
@@ -174,14 +174,33 @@ a configmap to pick up the CAs if it needs them.
 Automatic no proxy behavior:
 
 The following domains/hosts are automatically added to the no proxy configuration:
-* TODO
+
+```
+.cluster.local,.svc,,10.0.0.0/16,10.128.0.0/14,127.0.0.1,169.254.169.254,172.30.0.0/16,api-int.${CLUSTER_NAME}.${BASE_DOMAIN},etcd-0.${CLUSTER_NAME}.${BASE_DOMAIN},etcd-1.${CLUSTER_NAME}.${BASE_DOMAIN},etcd-2.${CLUSTER_NAME}.${BASE_DOMAIN},localhost
+```
+
+The following `noProxy` values are derived from the install config:
+
+1. `172.30.0.0/16` is from `serviceNetwork`
+2. `10.0.0.0/16` is from `machineCIDR`
+3. `10.128.0.0/14` is from `clusterNetwork` cidr
+
+AWS specific `noProxy`:
+```
+.${REGION}.compute.internal,
+```
+
+__Note:__ `.ec2.internal` is used of `.${REGION}.compute.internal` for the us-east-1 region.
+
+GCP Specific `noProxy`:
+`metadata, metadata.google.internal, metadata.google.internal.`
 
 Known limitations/future enhancements:
 
-* The no proxy entries that are automatically added do not include the cluster domain generically, so
+* The no proxy entries that are automatically added do not include the ingress domain generically, so
 requests that go to external routes will likely go through the proxy.  This may be undesirable, though
 it should not break as long as the proxy is able to call back to the cluster.  The administrator can add 
-additional no proxy entries.  It was deemed unacceptable to automatically noproxy the entire cluster domain 
+additional no proxy entries.  It was deemed unacceptable to automatically noproxy the entire ingress domain 
 because the front end load balancing/routing for the cluster could reside outside the clusters network.
 * Not all cloud service apis are added to the no proxy list.  This means some cloud api requests may
 go through the proxy, which again is undesirable though it should not break things as long as the proxy
@@ -191,12 +210,15 @@ the proxy configuration during install.  If it is incorrect, the install will fa
 puts administrators at risk of never providing validation endpoints to their proxy configuration, which
 means they can update their proxy configuration to something that does not work, in the future, if they do
 not add validation endpoints on day 2.  We should consider enhancing the install config to allow specification
-of validation endpoints so this step is not forgotten by administrators.
+of validation endpoints so this step is not forgotten by administrators.  In addition install is a lengthy
+operation.  Validating the proxy configuration up front would allow us to "fail fast".
 * Currently the no proxy value in the proxy config is append-only.  There is no way for an administrator to
 remove one of the no proxy domains that we add automatically.  This means we must be extremely cautious to
 not add noproxy domains that might need to be proxied.
-* Long term the additional CA bundle should instead be the *only* source of CAs for components.  Today the additional
-CA bundle is a combination of user provided CAs plus the system CAs from the network operator image.  
+* Long term it should be possible for the additional CA bundle to be the *only* source of CAs for components.  
+Today the additional CA bundle is a combination of user provided CAs plus the system CAs from the network 
+operator image.  In the future adding the system trusts to the bundle should be a configurable optiona so customers 
+who want to explicitly control the trusted CAs can do so.
 * In addition, due to 4.1->4.2 upgrade limitations, components must fallback to using their own CAs from their image in the event
 that the configmap does not have a bundle injected into it because the network operator is not upgraded yet.  This
 latter limitation can be removed in 4.3, meaning components can make the configmap key a required mount and expect
