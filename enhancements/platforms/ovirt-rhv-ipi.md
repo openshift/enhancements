@@ -10,7 +10,7 @@ reviewers:
 approvers:
   - "@deads2k"
 creation-date: 22019-10-07
-last-updated: 2019-10-07
+last-updated: 2019-11-20
 status: implementable
 ---
 
@@ -41,8 +41,13 @@ Components involved:
 - github.com/openshift/api
 - github.com/openshift/installer
 - github.com/openshift/machine-config-operator
-- github.com/openshift/cluster-image-registry-operator (@adambkapln?)
+- github.com/openshift/cluster-image-registry-operator
+- github.com/openshift/cluster-storage-operator
+- github.com/openshift/machine-api-operator
+- github.com/openshift/cloud-credential-operator
+- github.com/openshift/machine-api-operator
 - github.com/ovirt/cluster-api-provider-ovirt
+- github.com/ovirt/ovirt-openshift-extensions (temporary home for ovirt-csi, should move to openshift)
 - github.com/ovirt/terraform-provider-ovirt
 
 ## Motivation
@@ -69,7 +74,7 @@ will also create the bootstrap machine, and the configuration needed to get \
 the initial cluster running by supplying DNS a service and load balancing, all \
 using static pods.
 
-This work is related to the Bare-Metal provider because oVirt does not supply \
+The networking part is based on what was done for Bare-Metal provider because oVirt does not supply \
 DNS and LB services but is a platform provider. See the [baremetal ipi networking doc][baremetal-ipi-networking]
 
 ### Implementation Details/Notes/Constraints [optional]
@@ -81,35 +86,25 @@ and then choose `ovirt` the installation will ask for all the relevant details\
 of the installation: **url**, **user** and **password** of ovirt api. The installer \
 will validate it can communicate with the api, otherwise it will fail to proceed.\
 Next the installer will ask to choose the ovirt **cluster**, where the VMs will be\
-created, and next would be a *template* from that cluster for those VMs.\
-*Note* that it is the user's responsibility to upload the relevant RHCOS template\
-to ovirt. This may change in the future.
-[What is a VM Template][template-what] and [how to upload a template from qcow image?][template-upload]\
-With that the survey continues to the general cluster name, domain name, and\
-the rest of the non-ovirt specific question.
+created.
 
 2. Resource creation - terraform
 
-All the information from the survey is serialized by the installer into the file\
-`terraform.ovirt.auto.tfvars.json` under the current directory and then it invokes\
-terraform, which automatically load `.auto.tfvars.json`. `terraform.tfstate` is\
-the actual declaration of the resources and with it terraform creates the VMs.\
+Terraform uses ovirt's provider to create:
+
+- A VM Template from RHCOS qcow image
+- 1 bootstrap machine
+- 3 masters
+- a tag with the name `{.Infra.ClusterID}` and tag all masters and the template \
+ with it.
 
 3. Bootstrap
 
 The bootstrap VM has a huge Ignition config set using terraform and is visible\
 in the `terraform.tfstate` file. oVirt boots that VM with that content and the\
 bootstraping begins when the `bootkube.service` systemd service starts.\
-The bootstrap job is to:
-    1. run a DNS service which will listen on the DNS VIP supplied by the survey\
-    to allow internal resolution of the api and resolution of each node's FQDN\
-    2. run `keepalived` to activate the DNS VIP and API VIP on the machine nic as\
-    secondary IP. 
-    3. run and expose machine configs, using a static pod of Machine Config Server\
-    listening on the API VIP
-    4. load and bootstrap `etcd` service and help sign `etcd` members on the masters\
-    and boot statically the rest of the cluster pods.
-    5. pivot to a real master after its done
+
+This process is described more thoroughly in the [installer overview document][https://github.com/openshift/installer/blob/37b99d8c9a3878bac7e8a94b6b0113fad6ffb77a/docs/user/overview.md#cluster-installation-process]
 
 4. Masters bootstrap
 
@@ -135,7 +130,12 @@ For the following subjects please refer to ['baremetal IPI networking infrastruc
 
 - Storage
 
-    Recommended storage setup?
+    The default Storage Class of the cluster will use ovirt-csi. \
+    All disks that are created using this storage class will be created \
+    under the same storage domain of the VM Template disks. \
+    The installconfig can figure this out from the template creation output \
+    and save it under oVirt 'Platform' 
+        
 
 - Small setups and VM affinity
 
@@ -181,7 +181,8 @@ Clearly define what graduation means.
 
 #### Examples
 
-These are generalized examples to consider, in addition to the aforementioned
+TODO
+
 [maturity levels][maturity-levels].
 
 ##### Dev Preview -> Tech Preview
@@ -221,9 +222,6 @@ TODO
     cluster required to make on upgrade in order to make use of the enhancement?
 
 ### Version Skew Strategy
-
-TODO - how does cluster-api-provider-ovirt needs to versioned and included?
-should it be tagged with the release tag, for example `cluster-api-provider-ovirt:4.3`?
 
 TODO
   What are the guarantees? Make sure this is in the test plan.
