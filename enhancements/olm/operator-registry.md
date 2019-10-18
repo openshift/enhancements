@@ -269,6 +269,18 @@ In order to accomplish this, we will need to create a deployment process that ha
 
 This concept is also fairly related to ImageStreams in OpenShift. Our current plan is to not leverage that feature given that OLM is a component that is also targeted at plain vanilla kubernetes clusters.
 
+*Operator Bundle Metadata*
+
+Currently, when operator manifests are stored in app registry, every version of the operator is included in each release. In addition to each set of versioned manifests, this blob also contains an aggregate file called `package.yaml` that defines a package name, a default channel to subscribe to, and the head of every channel which defines the set of channels that can be subscribed to. Because no such aggreate concept can exist now that each operator version will exist in a separate operator image, we need to define a set of convetions for the registry to continue to build that index. For now, we will attempt to mitigate this issue by providing a similar set of metadata in every operator bundle image as a set of annotations:
+
+`packageName`: Provides the same function as before. The package name is used to uniquely tie that set of bundles to the update graph.
+
+`channels`: A set of channels that the particular bundle explicitly subscribes to. Since each channel is now an explicit choice, the channel graph is no longer an implicit decision with just the head of the channel defined.
+
+`defaultChannel`: Still defines the default channel that a subscription attaches to. Since this concept still applies to the entire package in aggregate in the index, we will explicitly update this value in the database *only* when the operator being added is the latest version. Otherwise this field will be ignored.
+
+This disassociation is a fairly complex problem that, ideally, will require more significant changes to the way that OLM understands and handles update graphs (for example, the use of the `replaces` field). In a future enhancement, a more comprehensive solution to this set of problems will be discussed. For now, this is an intermediate attempt to retain existing functionality.
+
 #### Outcomes
 
 The outcome of all of this implementation ends up defining two distinct user workflows.
