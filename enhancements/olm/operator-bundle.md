@@ -75,19 +75,27 @@ The focus of this user story is to define a standard to store, transmit, inspect
 
 ##### Build, Push, Pull Operator Bundle Image
 We use the following labels to annotate the operator bundle image.
-* The label `operators.operatorframework.io.bundle.resources` represents the bundle type:
-    * The value `manifests` implies that this bundle contains operator manifests only.
-    * The value `metadata` implies that this bundle has operator metadata only.
-    * The value `manifests+metadata` implies that this bundle contains both operator metadata and manifests.
-* The label `operators.operatorframework.io.bundle.mediatype` reflects the media type or format of the operator bundle. It could be helm charts, plain kubernetes manifests etc.
+* The label `operators.operatorframework.io.bundle.manifests.v1` reflects the path in the image to the directory that contains the operator manifests.
+* The label `operators.operatorframework.io.bundle.metadata.v1` reflects the path in the image to the directory that contains metadata files about the bundle.
+* The `v1.manifests` and `v1.metadata` labels imply the bundle type:
+    * The value `v1.manifests` implies that this bundle contains operator manifests.
+    * The value `v1.metadata` implies that this bundle has operator metadata.
+* The label `operators.operatorframework.io.bundle.mediatype.v1` reflects the media type or format of the operator bundle. It could be helm charts, plain kubernetes manifests etc.
+* The label `operators.operatorframework.io.bundle.package.v1` reflects the package name of the bundle.
+* The label `operators.operatorframework.io.bundle.channels.v1` reflects the list of channels the bundle is subscribing to when added into an operator registry
+* The label `operators.operatorframework.io.bundle.channel.default.v1` reflects the default channel an operator should be subscribed to when installed from a registry
 
 The labels will also be put inside a YAML file, as shown below.
 
 *annotations.yaml*
 ```yaml
 annotations:
-  operators.operatorframework.io.bundle.resources: "manifests+metadata"
-  operators.operatorframework.io.bundle.mediatype: "registry+v1"
+  operators.operatorframework.io.bundle.mediatype.v1: "registry+v1"
+  operators.operatorframework.io.bundle.manifests.v1: "path/to/manifests/"
+  operators.operatorframework.io.bundle.metadata.v1: "path/to/metadata/"
+  operators.operatorframework.io.bundle.package.v1: "$packageName"
+  operators.operatorframework.io.bundle.channels.v1: "alpha,stable"
+  operators.operatorframework.io.bundle.channel.default.v1: "stable"
 ```
 
 *Notes:*
@@ -105,17 +113,53 @@ An operator author can also specify the version of the format used inside the bu
 operators.operatorframework.io.bundle.mediatype: "registry+v1"
 ```
 
+###### Graph Metadata
+An additional point of concern is the fact that the current [operator-registry manifest format](https://github.com/operator-framework/operator-registry#manifest-format) also has a multi-version aggregation file `package.yaml` that describes data about the entire set of releases. Given that we are splitting up these manifests into separate objects, we now need a way to denormalize this data so that it applies only to an individual release. In order to do this, we will create labels on the image and include them in the `annotations.yaml` file. Previously the `package.yaml` file was defined like this:
+
+*package.yaml*
+```yaml
+packageName: etcd
+channels:
+- name: alpha
+  currentCSV: etcdoperator.v0.9.4
+- name: stable
+  currentCSV: etcdoperator.v0.9.2
+defaultChannel: stable
+```
+
+The data here defined a package name to attach to all versions, a default channel that defines what channel a user should subscribe to if they are not opinionated about how they want to subscribe to updates, and information about the head of every channel. Now that this data needs to be defined *per release*, we will make the following changes:
+
+1. Retain the Package Name
+2. Instead of defining just the head of individual channels, each release version will explicitly define what channels it is subscribing to.
+3. Retain the definition of the default channel. Always trust the latest version of the operator defining the default channel. If a non latest release is added to the index, ignore the default channel.
+
+This results in set of labels that will applied to the image as well as added to the annotations.yaml file:
+
+*annotations.yaml* additions for etcdoperator.v0.9.4
+```yaml
+operators.operatorframework.io.bundle.package.v1: "etcd"
+operators.operatorframework.io.bundle.channels.v1: "alpha"
+operators.operatorframework.io.bundle.channel.default.v1: "stable"
+```
+
+*annotations.yaml* additions for etcdoperator.v0.9.2
+```yaml
+operators.operatorframework.io.bundle.package.v1: "etcd"
+operators.operatorframework.io.bundle.channels.v1: "alpha,stable"
+operators.operatorframework.io.bundle.channel.default.v1: "stable"
+```
+
 ###### Example of an Operator Bundle that uses Operator Registry Format
 This example uses [Operator Registry Manifests](https://github.com/operator-framework/operator-registry#manifest-format) format to build an operator bundle image. The source directory of an operator registry bundle has the following layout.
 ```
 $ tree test
 test
-├── 0.1.0
-│   ├── testbackup.crd.yaml
-│   ├── testcluster.crd.yaml
-│   ├── testoperator.v0.1.0.clusterserviceversion.yaml
-│   └── testrestore.crd.yaml
-└── annotations.yaml
+├── testbackup.crd.yaml
+├── testcluster.crd.yaml
+├── testoperator.v0.2.0.clusterserviceversion.yaml
+├── testrestore.crd.yaml
+└── metadata
+    └── annotations.yaml
 ```
 
 `Dockerfile` for operator bundle
@@ -124,10 +168,14 @@ FROM scratch
 
 # We are pushing an operator-registry bundle 
 # that has both metadata and manifests.
-LABEL operators.operatorframework.io.bundle.resources=manifests+metadata
-LABEL operators.operatorframework.io.bundle.mediatype=registry+v1
+LABEL operators.operatorframework.io.bundle.mediatype.v1=registry+v1
+LABEL operators.operatorframework.io.bundle.manifests.v1=manifests/
+LABEL operators.operatorframework.io.bundle.metadata.v1=metadata/
+LABEL operators.operatorframework.io.bundle.package.v1: "etcd"
+LABEL operators.operatorframework.io.bundle.channels.v1: "alpha,stable"
+LABEL operators.operatorframework.io.bundle.channel.default.v1: "stable"
 
-ADD test/0.1.0 /manifests
+ADD ./test/*.yaml /manifests/
 ADD test/annotations.yaml /metadata/annotations.yaml
 ```
 
