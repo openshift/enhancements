@@ -45,7 +45,7 @@ The specific goals of this proposal are:
 
 * Provide an API that identifies log sources and their desired forwarding outputs.
 * Send logs to an Elasticsearch cluster not managed by the cluster logging infrastructure
-* Send logs to a fluentd instance not managed by the cluster logging infrastructure via fluentd's secureforward protocol
+* Send logs to a fluentd instance not managed by the cluster logging infrastructure via fluentd's `forward` protocol
 * Allow deployment of log forwarding without deploying the entirety of the cluster logging infrastructure (e.g. Kibana, Elasticsearch)
 * Support TLS between the collector and destination if so configured
 * Use the same log forwarding logic to write logs to a specified output or to the default storage managed by cluster logging (e.g. Elasticsearch).
@@ -61,7 +61,7 @@ We will be successful when:
 * Log forwarding intends to be opinionated about the source of log messages; it will explicitly define what constitutes "application logs" or "infrastructure logs". 
 It will not allow configuration of additional sources without further design considerations and how those sources may impact the collecting agent. Log forwarding is not 
 intended to provide a complex routing solution as one might achieve by using a custom collector configuration or a messaging solution (e.g. kafka).
-* It is not a goal for the tech-preview to support log forwarding outputs other then the ones identified for the goals. Admins can forward to their own fluentd via secure-forward 
+* It is not a goal for the tech-preview to support log forwarding outputs other then the ones identified for the goals. Admins can forward to their own fluentd via `forward` 
 and then configure that fluentd to forward to any number of specific logstore outputs
 
 
@@ -80,7 +80,7 @@ There are no assumptions regarding whether or not an endpoint is deployed on or 
 Following is the list of supported endpoint types for this proposal:
 
 * Elasticsearch (v6.x)
-* Fluent secure-forward
+* Fluent `forward`
 
 ### User Stories
 
@@ -99,7 +99,7 @@ This is an example of an OKD cluster hosting solution where several organization
 * A pipeline shall support at least one output.
 * A pipeline may support multiple outputs.
 * Outputs that require secrets which are not created by the cluster-logging-operator shall be created and managed by the administrator of the endpoint
-* Secrets shall have keys of: `tls.crt`, `tls.key`, `ca-bundler.crt` which point to the respective certificates for which they represent. Secrets shall have the key `shared_key` for use when using secureforward
+* Secrets shall have keys of: `tls.crt`, `tls.key`, `ca-bundler.crt` which point to the respective certificates for which they represent. Secrets shall have the key `shared_key` for use when using `forward` in a secure manner
 
 #### Security
 * A pipeline may support TLS configuration by declaring a secret. Secrets must contain keys: `tls.crt`, `tls.key`, `ca-bundler.crt`
@@ -135,7 +135,7 @@ spec:
        endpoint: elasticsearch.svc.messaging.cluster.local
        secrets:
           name: elasticsearch
-     - type: “secureforward”
+     - type: “forward”
        name: secureforward-offcluster
        endpoint: https://secureforward.offcluster.com:9200
        secrets:
@@ -300,7 +300,7 @@ Following is a diagram which identifies the workflow of a message through fluent
 * Tests to verify there are no regressions in functionality between pre and post logforwarding feature
 * Tests to verify log forwarding is writing logs to an Elasticsearch instance not managed by cluster logging
 * Tests to verify log forwarding is writing logs to an Elasticsearch instance managed by cluster logging
-* Tests to verify log forwarding is writing logs to a Fluentd instance via secure forward that is not managed by cluster logging
+* Tests to verify log forwarding is writing logs to a Fluentd instance via `forward` that is not managed by cluster logging
 
 ### Graduation Criteria
 
@@ -348,7 +348,7 @@ Version skew is not relevant to cluster logging because it is deployed as an OLM
 
 | release|Description|
 |---|---|
-|4.3| **Tech Preview** - Initial release supporting `Elasticsearch` and Fluentd `secure forward` 
+|4.3| **Tech Preview** - Initial release supporting `Elasticsearch` and Fluentd `forward` 
 
 ## Drawbacks
 Drawbacks to providing this enhancement are:
