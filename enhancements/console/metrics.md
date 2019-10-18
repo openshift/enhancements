@@ -9,7 +9,7 @@ approvers:
   - "@spadgett"
   - "@bparees"
 creation-date: 2019-09-20
-last-updated: 2019-09-20
+last-updated: 2019-10-18
 status: implementable
 ---
 
@@ -25,85 +25,81 @@ status: implementable
 
 ## Summary
 
-The purpose of this enhancement is to enable a set of telemetry metrics 
-for the console in order to improve the support of our customer environments.  
+The purpose of this enhancement is to enable a set of telemetry metrics for the console in order to improve 
+the support of our customer environments.  
 
-## Motivation
+Initially we will track `console_url` to support UHC by providing a mechanism to link back to the console 
+running on a cluster. 
+
+In addition, we may track `console_login_total` as a count (no identifying information) in order to establish 
+baseline console usage.   
+
+We may be interested in additional metrics in the future. 
+
 
 ### Goals
 
-- Tracking metrics via telemetry would allow us to gather feature usage data for the 
-console so that we can focus development efforts on the features customers find most 
-valuable.
+- Tracking `console_url` allows us to support UHC by providing backlink functionality to a console
+running on a cluster.
+  
 
 ### Non-Goals
 
+- Unfortunately, granular metrics will not be handled in this proposal.  There is a wealth of opportunity
+in tracking metrics like `console_page_views` to help us understand what features of the console provide
+the most value.  This would then help us focus development efforts on those high value features. Unfortunately, 
+this would generate too many time-series and would exceed the given budget of `10`.  Therefore we will not 
+be tracking the following metrics:
+  - `console_page_views{page=<page>}`
+  - `console_api_requests_total` 
+  - `console_extension_total{extension=<extension>}`  
+- Tracking console login via `console_login_total` could help us understand general console usage on a cluster.
+The problem is that we will not know token lifetime.  The default is 1 day but it can be configured to weeks,
+months, or years.  This metric would not consistently signal usage.
+  - `console_login_total`
+- We have evaluated a set of metrics around login that could eventually prove valuable but are not being 
+pursued at this time.  Failed login situation, if attached to an alert, could be meaningful:
+  - `console_failed_login_total`
+  - `console_unique_login_total`
+  - `console_login_oauth_error_total`
+- We have also evaluated metrics around our extension points and may consider tracking in the future:
+  - `console_extension_link_total`
+  - `console_extension_cli_download_total`
+  - `console_extension_external_log_link_total`
+  - `console_extension_notification_total`
+- We have also discussed several fundamental metrics.
+  - `cpu`
+  - `memory`
 - Analytics will not be handled in this proposal.  Previously, the console supported an optional 
-Google Analytics identifier. No other analytics platform is or has been supported.
+Google Analytics identifier. No other analytics platform is or has been supported.  Analytics tools would 
+provide a more comprehensive structure for handling page views and usage.
 - Error tracking will not be handled in this proposal.  We have discussed the use of tools like 
 Sentry for collecting errors and stack traces to improve our ability to understand console 
 error frequency and severity within the browser.
 
 ## Proposal
 
-- Track the console URL as a metadata metric like `console_url` to support UHC to provide backlinking 
-to the console.
-- Track API requests from the console to the API server as a metric like `console_api_requests_total` 
-with labels such as `referer` and `path` to clearly understand how the console consumes the API and 
-make the correct design and optimizations for it.
-- Track console pageviews as a metric like `console_page_view_total` to understand what pages and features
-customers find most useful.
-- Track user agent as a metric like `console_user_agent_total` to understand which browsers are most used 
-by customers.  This metric may be collapsed into `console_page_view_total` with the `user agent` tracked 
-as an additional label. 
-- Track console login as a metric like `console_login_total` to understand average console use.
-- Track enabled console extensions as a metric like `console_extension_enabled_total` to understand
-what extensions customers find most valuable.  
+Tracking `console_url` and `console_login_total` will require the following:
 
+- Instrumentation of the console operator to report back `console_url` via a `/metrics` endpoint.
+- ServiceMonitor objects must be created for the console operator.
+- Proposed metrics must be whitelisted for Telemeter.
 
 ### User Stories [optional]
 
 #### Story 1
 
-Instrument the console to collect the other metrics such as `console_page_view_total` and expose a 
-`/metrics` endpoint. 
-
-Prototype work has begun here https://github.com/openshift/console/pull/2821
-    - expose a `/metrics` endpoint
-    - collect `console_api_requests_total` with labels `"code", "method", "path", "referer"`
-
-Additional work to do:
-
-- `console_page_view_total{page="<page>" user-agent="<agent>"} <count>`
-- `console_login_total <count>`
-- `console_extension_enabled_total{extension="<extension>" enabled="<true|false"} <count>`
-
-Note that we will not track personally identifiable information. The metric `console_login_total` 
-should not track `user_id`, for example.  The `console_page_view_total` may pose a problem in that 
-resource names (such as namespaces) are included in URLs. 
-
 #### Story 2
 
-Protect the `/metrics` endpoint of the `console` behind RBAC.
+## Risks and Mitigations
 
-Use [kube-rbac-proxy](https://github.com/openshift/kube-rbac-proxy) as a sidecar container for the 
-console to protect the `/metrics` endpoint specifically.  This seems to be precisely the reason that 
-this component was developed and may fit our use case nicely.  There will be very little code changes 
-to the console itself. 
+As with any data tracking, we need to be mindful of privacy and GDPR concerns. The proposal in 
+current form will track no user specific identification data.
 
-### Story 3
-
-Decide if the other metrics besides `console_url` should be reported back to Telemeter.  Open the 
-appropriate PRs to the various repositories to make this happen.
-
-
-### Implementation Details/Notes/Constraints [optional]
-
-None.
-
-### Risks and Mitigations
-
-As we gather more metrics we need to be mindful of privacy and GDPR concerns. 
+If we chose to track `console_login_total` via a `/metrics` endpoint in the console, we would need a 
+mechanism of authentication for this endpoint.  The console is not built on top of library-go. Therefore 
+we would choose to use [kube-rbac-proxy](https://github.com/openshift/kube-rbac-proxy) as a sidecar container 
+and a front to the endpoint.
 
 ## Design Details
 
@@ -172,3 +168,13 @@ The side-car container pattern seems a better solution for augmenting existing f
 ## Infrastructure Needed [optional]
 
 None.
+
+## Implementation History
+
+Instrumentation of the console operator to track `console_url` has been completed in the following PR:
+
+- `console_url` instrumentation in the [console operator](https://github.com/openshift/console-operator/pull/270)
+- `console_url` approved for [telemetry](https://github.com/openshift/telemeter/pull/239)
+- `console_url` in [cluster-monitoring-operator](https://github.com/openshift/cluster-monitoring-operator/pull/486)
+- `console_url` to [observatorium](https://github.com/observatorium/configuration/pull/71/files)
+- `console_url` to [sass-telemeter](https://gitlab.cee.redhat.com/service/saas-telemeter/merge_requests/54)
