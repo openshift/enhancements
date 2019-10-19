@@ -1,23 +1,21 @@
 ---
 title: inspect
 authors:
-
 - "@sanchezl"
 - "@deads2k"
-  reviewers:
+reviewers:
 - "@deads2k"
 - "@derekwaynecarr"
 - "@soltysh"
 - "@mfojtik"
-  approvers:
+approvers:
 - "@deads2k"
-  creation-date: 2019-09-21
-  last-updated: 2019-09-25
-  status: provisional
-  see-also:
-  replaces:
-  superseded-by:
-
+creation-date: 2019-09-21
+last-updated: 2019-09-25
+status: provisional
+see-also:
+replaces:
+superseded-by:
 ---
 
 # inspect
