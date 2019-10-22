@@ -76,9 +76,11 @@ cluster version.
 ## Proposal
 
 #### Part 1
-Add kernel args to install-config and process them in the MCO bootstrap. This
-should be a straight-forward translation from the install-config into
-MachineConfig resources.
+Users supply kernel args to custom `MachineConfig` supplied to the install as
+currently [supported by the installer](https://github.com/openshift/installer/blob/master/docs/user/customization.md#install-time-customization-for-machine-configuration).
+Based on user needs and feedback, we can add a specific field for kernel args to
+the install-config at a later time. This would be a straight-forward translation
+from the install-config into MachineConfig resources.
 
 #### Part 2
 For the nuts and bolts, there are a couple ways we could achieve no-extra-reboot
@@ -148,7 +150,8 @@ Cons:
 
 
 
-4. Package the MachineConfigDaemon in RHCOSRun the MCD during boot where `pivot` runs today to process kernel args along
+4. Package the MachineConfigDaemon in RHCOSRun the MCD during boot where `pivot`
+runs today to process kernel args along
    with the pivot to the latest machine-os-content.
 
 #### Recommendation
@@ -315,8 +318,7 @@ criteria for the user stories.
 **Note:** *Section not required until targeted at a release.*
 
 As the ability to set kernel arguments via MachineConfigs will be added in 4.2,
-the API does not change with this proposal. The install-config API would have
-the addition of kernel args which can be matured according to standard procedure.
+the API does not change with this proposal.
 
 ### Upgrade / Downgrade Strategy
 
