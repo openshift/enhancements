@@ -23,10 +23,9 @@ superseded-by:
 ## Release Signoff Checklist
 
 - [x] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
+- [ ] User-facing documentation is created in [openshift/docs]
 
 ## Summary
 
@@ -207,11 +206,7 @@ Constraints:
 
 ### Test Plan
 
-TODO
-
-### Graduation Criteria
-
-TODO
+Testing of this feature will be performed manually by following product documentation UPI procedures. There is no automated testing facility for UPI flows today.
 
 ### Upgrade / Downgrade Strategy
 
@@ -225,7 +220,10 @@ be affected by version skew.
 
 ## Implementation History
 
-TODO
+#### October 22, 2019
+
+* Installer support for ingresscontroller manifests has been implemented ([cluster-ingress-operator#309](https://github.com/openshift/cluster-ingress-operator/pull/309), [installer#2523](https://github.com/openshift/installer/pull/2523)).
+* Building on the manifest support, the installer can render an internal default ingresscontroller manifest when clusters are private ([installer#2538](https://github.com/openshift/installer/pull/2538)).
 
 ## Drawbacks
 
@@ -267,7 +265,3 @@ Some broad reasons this proposal might _not_ be acceptable are:
   Several specific variants of API additions have been considered and not
   documented here; this is an overview of the properties common to the general
   approach.
-
-## Infrastructure Needed [optional]
-
-TODO
