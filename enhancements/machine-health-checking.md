@@ -37,11 +37,11 @@ superseded-by:
 
 ## Summary
 
-Enable opt in for automated health checking and remediation of unhealthy nodes backed by machines.
+Enable opt in for automated health checking and remediation of unhealthy nodes backed by machines. a.k.a. node auto repair.
 
 ## Motivation
 
-Reduce administrative overhead to run a cluster and ability to respond to failures of machines.
+Reduce administrative overhead to run a cluster and ability to respond to failures of machines and keep the nodes healthy.
 
 ### Goals
 
@@ -49,14 +49,14 @@ Reduce administrative overhead to run a cluster and ability to respond to failur
 
 - Allowing to define different unhealthy criterias for different pools of machines.
 
-- Allowing new and custom remediation strategies developed outside the machine-healthcheck controller, e.g baremetal reboot.
+- Providing administrator-defined short-circuiting of automated remediation when multiple nodes are unhealthy at the same time.
 
-- Providing administrator-defined short-circuiting of automated remediation.
+- Allowing a new and custom remediation developed outside the machine-healthcheck controller and enable its use via annotation, e.g baremetal reboot.
 
 
 ### Non-Goals
 
-- Coordinating individual remediation systems. This must be driven by each system however they see fit, e.g. by annotating affected nodes with state and transition time.
+- Coordinating individual remediation systems. This must be driven and designed by each system as they see fit, e.g. by annotating affected nodes with state and transition time. This proposal focus on remediating by deleting.
 
 - Recording long-term stable history of all health-check failures or remediations.
 
@@ -68,55 +68,66 @@ Reduce administrative overhead to run a cluster and ability to respond to failur
 
 - As a cluster admin I want to define different unhealthy criteria for pools of machines targeted for different workloads.
 
-- As a cluster admin I want to define different remediation strategies for different cloud environments. E.g deletion or reboot.
+- The MHC does a best effort to short-circtuit and it limits remediation when `maxUnhealthy` threshold is reached for a targeted pool. This is similar to what the node life cycle controller does for reducing the eviction rate as nodes goes unhealthy in a given zone. E.g a large number of nodes in a single zone are down because it's most likely a networking issue.
 
-- As a cluster admin I want to skip remediation to optionally prevent automated remediation if some threshold of nodes are unhealthy, because this situation may require more careful intervention. E.g a large number of nodes in a single zone are down because it's most likely a networking issue.
+Machine health checking is an integration point between node problem detection tooling and remediation to achieve node auto repairing.
 
-Machine health checking is an integration point between node problem detection tooling and remediation strategies.
+### Unhealthy criteria:
+A machine/node target is unhealthy when:
 
-We will provide a default remediation strategy - delete. It will delete a machine when the backed node meets the unhealthy criteria defined by the user. The upper level machine controller, e.g machineSet will then reconcile towards satisfying the expected number of replicas and will create a new one.
+- The Node meets the unhealthy node conditions criteria.
+- Machine has no nodeRef.
+- Machine has nodeRef but node is not found.
+- Machine is in phase "Failed".
 
-### Implementation Details
+If any of those criterias are met for longer than a given timeout, remediation is triggered.
+
+### Remediation:
+- The Machine is requested for deletion.
+- MachineSet controller reconciles expected number of replicas brining up a new machine/node tuple.
+- Machine controller drains node.
+- Machine controller deletes machine.
 
 #### MachineHealthCheck CRD:
 - Enable watching a pool of machines (based on a label selector).
 - Enable defining an unhealthy criteria (based on a list of node conditions).
-- Enable choosing a remediation strategy.
-- Enable setting a threshold for the number of unhealthy nodes. If the current number is at or above this threshold no further remediation 
+- Enable setting a threshold for the number of unhealthy nodes. If the current number is at or above this threshold no further remediation will take place. This can be expressed as a percentage of the targeted pool.
 
 
-E.g I want my worker machines in us-east-1a to be remediated when the backed node has `ready=false` condition for more than 10m.
+E.g I want my worker machines belonging to example-machine-set to be remediated when the backed node has `ready=false` condition for more than 10m.
 
 ```yaml
-apiVersion: "healthchecking.openshift.io/v1beta1"
-kind: "MachineHealthCheck"
+apiVersion: healthchecking.openshift.io/v1alpha1
+kind: MachineHealthCheck
 metadata:
-  name: workers-us-east-1a
+  name: example
   namespace: openshift-machine-api
 spec:
   selector:
-    role: worker
-    zone: us-east-1a
-  remediationStrategy: delete
+    matchLabels:
+      machine.openshift.io/cluster-api-machineset: example-machine-set
   unhealthyConditions:
-    - name: Ready
-      status: false
-      timeout: 10m
-  maxUnavailable: 5
-status:
-  ExpectedHealthy: 10 // Total number of machines targeted by the label selector
-  CurrentHealthy: 10
+  - type:    "Ready"
+    status:  "Unknown"
+    timeout: "300s"
+  - type:    "Ready"
+    status:  "False"
+    timeout: "300s"
+  maxUnhealthy: "40%"
 ```
 
-TODO: how to define OR relation between unhealthyConditions, e.g `ready=false || ready=unknown`
-
 #### MachineHealthCheck controller:
-- Watch MachineHealthCheck resources and nodes.
-- Find machines backing nodes that meet the unhealthy criteria and signal remediaton systems with the chosen remediation strategy, e.g `healthchecking.openshift.io/remediation: reboot`.
-- If the remediation is "delete" then it runs the remediation logic and set the machine for deletion. 
+- Watch MachineHealthCheck resources and operate over machine/node targets.
+- Calculate the number of unhealthy targets.
+- Compares current number against `maxUnhealthy` threshold and temporary short circuits remediation if the threshold is met.
+- Triggers remediation for unhealthy targets i.e requests machines for deletion.
+- MachineSet controller reconciles to meet number of replicas and bring up a new machine/node.
+- Machine controller drains the unhealthy node.
+- Machine is deleted.
 
 #### Out of tree remediation controller, e.g baremetal reboot:
-- Watch machines signaled for remediation with `healthchecking.openshift.io/remediation: reboot` and react as they need.
+- An external remediation can plug in by setting the `healthchecking.openshift.io/strategy: reboot` on the MHC resource.
+- An external remediation controller remediation could then watch machines annotated with `healthchecking.openshift.io/remediation: reboot` and react as it sees fit.
 
 ### Risks and Mitigations
 
