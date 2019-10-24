@@ -88,6 +88,8 @@ If any of those criterias are met for longer than a given timeout, remediation i
 - Machine controller drains node.
 - Machine controller deletes machine.
 
+### Implementation Details
+
 #### MachineHealthCheck CRD:
 - Enable watching a pool of machines (based on a label selector).
 - Enable defining an unhealthy criteria (based on a list of node conditions).
