@@ -68,38 +68,46 @@ Reduce administrative overhead to run a cluster and ability to respond to failur
 
 - As a cluster admin I want to define different unhealthy criteria for pools of machines targeted for different workloads.
 
-- The MHC does a best effort to short-circtuit and it limits remediation when `maxUnhealthy` threshold is reached for a targeted pool. This is similar to what the node life cycle controller does for reducing the eviction rate as nodes goes unhealthy in a given zone. E.g a large number of nodes in a single zone are down because it's most likely a networking issue.
+The machine health checker (MHC) does a best effort to keep nodes healthy in the cluster.
 
-Machine health checking is an integration point between node problem detection tooling and remediation to achieve node auto repairing.
+It provides a short-circuit mechanism and limits remediation when `maxUnhealthy` threshold is reached for a targeted pool. This is similar to what the node life cycle controller does for reducing the eviction rate as nodes goes unhealthy in a given zone. E.g a large number of nodes in a single zone are down because it's most likely a networking issue.
+
+The machine health checker is an integration point between node problem detection tooling expresed as node conditions and remediation to achieve a node auto repairing feature.
 
 ### Unhealthy criteria:
 A machine/node target is unhealthy when:
 
-- The Node meets the unhealthy node conditions criteria.
-- Machine has no nodeRef.
-- Machine has nodeRef but node is not found.
-- Machine is in phase "Failed".
+- The node meets the unhealthy node conditions criteria defined.
+- The Machine has no nodeRef.
+- The Machine has nodeRef but node is not found.
+- The Machine is in phase "Failed".
 
-If any of those criterias are met for longer than a given timeout, remediation is triggered.
+If any of those criterias are met for longer than given timeouts, remediation is triggered.
+For the node conditions the time outs are defined by the admin. For the other cases opinionated values can be assumed.
+For a machine with no nodeRef an opinionated value could be assumed e.g 10 min.
+For a node notFound or a failed machine, the machine is considerable unrecoverable, remediation can be triggered right away.
 
 ### Remediation:
-- The Machine is requested for deletion.
-- MachineSet controller reconciles expected number of replicas brining up a new machine/node tuple.
-- Machine controller drains node.
-- Machine controller deletes machine.
+- The machine is requested for deletion.
+- The controller owning that machine, e.g machineSet reconciles towards the expected number of replicas and start the process to bring up a new machine/node tuple.
+- The machine controller drains the node.
+- The machine controller provider implementation deletes the cloud instance.
+- The machine controller deletes the machine resource.
 
 ### Implementation Details
 
 #### MachineHealthCheck CRD:
 - Enable watching a pool of machines (based on a label selector).
-- Enable defining an unhealthy criteria (based on a list of node conditions).
-- Enable setting a threshold for the number of unhealthy nodes. If the current number is at or above this threshold no further remediation will take place. This can be expressed as a percentage of the targeted pool.
+- Enable defining an unhealthy node criteria (based on a list of node conditions).
+- Enable setting a threshold of unhealthy nodes. If the current number is at or above this threshold no further remediation will take place. This can be expressed as an int or as a percentage of the total targets in the pool.
 
+E.g:
+- I want my worker machines to be remediated when the backed node has `ready=false` or `ready=Unknown` condition for more than 10m.
+- I want remediation to temporary short-circuit if the 40% or more of the targets of this pool are unhealthy at the same time.
 
-E.g I want my worker machines belonging to example-machine-set to be remediated when the backed node has `ready=false` condition for more than 10m.
 
 ```yaml
-apiVersion: healthchecking.openshift.io/v1alpha1
+apiVersion: machine.openshift.io/v1beta1
 kind: MachineHealthCheck
 metadata:
   name: example
@@ -107,7 +115,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      machine.openshift.io/cluster-api-machineset: example-machine-set
+      role: worker
   unhealthyConditions:
   - type:    "Ready"
     status:  "Unknown"
@@ -116,16 +124,35 @@ spec:
     status:  "False"
     timeout: "300s"
   maxUnhealthy: "40%"
+status:
+  currentHealthy: 5
+  expectedMachines: 5
 ```
 
 #### MachineHealthCheck controller:
-- Watch MachineHealthCheck resources and operate over machine/node targets.
+Watch:
+- Watch machineHealthCheck resources
+- Watch machines and nodes with an event handler e.g controller runtime `EnqueueRequestsFromMapFunc` which returns machineHealthCheck resources.
+
+Reconcile:
+- Fetch all the machines in the pool and operate over machine/node targets. E.g:
+```
+type target struct {
+  Machine capi.Machine
+  Node    *corev1.Node
+  MHC     capi.MachineHealthCheck
+}
+```
+
 - Calculate the number of unhealthy targets.
-- Compares current number against `maxUnhealthy` threshold and temporary short circuits remediation if the threshold is met.
-- Triggers remediation for unhealthy targets i.e requests machines for deletion.
-- MachineSet controller reconciles to meet number of replicas and bring up a new machine/node.
-- Machine controller drains the unhealthy node.
-- Machine is deleted.
+- Compare current number against `maxUnhealthy` threshold and temporary short circuits remediation if the threshold is met.
+- Trigger remediation for unhealthy targets i.e request machines for deletion.
+
+Out of band:
+- The owning controller e.g machineSet controller reconciles to meet number of replicas and start the process to bring up a new machine/node.
+- The machine controller drains the unhealthy node.
+- The machine controller provider deletes the instance.
+- The machine controller deletes the machine.
 
 #### Out of tree remediation controller, e.g baremetal reboot:
 - An external remediation can plug in by setting the `healthchecking.openshift.io/strategy: reboot` on the MHC resource.
@@ -174,8 +201,12 @@ https://gist.github.com/bison/403bb921e1d5ed72f7edec2ccb47471c#remediationstrate
 
 ## Alternatives
 
-Decoupling the administrator-defined short-circuiting logic.
-Separate MachineDisruptionBudget resource. Similar to a PodDisruptionBudget, this resource simply targets a set of machines with a label selector and continuously records status information on the readiness of the targets. It includes thresholds similar to the maxUnavailable option above, and provides an at-a-glance view of whether the targets are at that limit or not.
+Considered to bake this functionality into machineSets. This was discarded as different controllers than a machineSet could be owning the targeted machines. For those cases as a user you still want to benefit from automated node remediation.
+
+Considered allowing to target machineSets instead of using a label selector. This was discarded because of the reason above. Also there might be upper level controllers doing things that the MHC does not need to account for, e.g machineDeployment flipping machineSets for a rolling update. Therefore considering machines and label selectors as the fundamental operational entity results in a good and convenient level of flexibility and decoupling from other controllers.
+
+Considered a more strict short-circuiting mechanisim (currently feature gated) decoupled from the machine health checker i.e machine disruption budget analogous to pod disruption budget. This was discarded because it added an non justified level of complexity and additional API CRDs. Instead we opt for a simpler approach and will consider more concrete feature requests that requires additional complexity based on real use feedback.
+This would introduce a MachineDisruptionBudget resource. This resource simply targets a set of machines with a label selector and continuously records status information on the readiness of the targets. It includes thresholds similar to the maxUnavailable option above, and provides an at-a-glance view of whether the targets are at that limit or not.
 
 Example:
 
