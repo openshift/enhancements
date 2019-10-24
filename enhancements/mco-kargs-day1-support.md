@@ -66,7 +66,7 @@ cluster version.
 
 - Does not support defining custom kernel arguments on non-RHCOS machines.
 - Does not support applying kernel args on first boot for nodes in clusters
-  installed using a 4.1 or earlier installer.
+  installed using a 4.2 or earlier installer.
 - Does not protect against setting kernel arguments that may affect the
   performance of the node or cluster.
 - Does not take into account kernel args set manually on the node when applying
