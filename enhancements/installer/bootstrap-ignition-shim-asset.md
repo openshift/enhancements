@@ -31,29 +31,24 @@ status: provisional
 
 There are a few platforms that use an Ignition shim for their bootstrap machine. The shim
 is essentially a pointer to the main config that is stored on a remote server, which helps
-us avoid problems with instance metadata size limits on our platform. Previously, we were doing
+to avoid problems with instance metadata size limits. Previously, we were doing
 this in Terraform using the terraform Ignition Provider, however the repo has fallen extremely out
 of date, making us unable to add additional CA Bundles to our nodes. This means that clients that
 use self signed certificates are unable to use our IPI installer, and can not upgrade to openshift 4 on Openstack.
-We considered both updating the
-terraform provider and creating a new installer asset as possible solutions, and ultimately decided
-that the best solution for our team is to create the installer asset. We plan to create an ignition
-asset similar to the [node asset](https://github.com/openshift/installer/blob/master/pkg/asset/ignition/machine/node.go)
-for bootstrap ignition shims that other platforms can **opt in** to.
+We considered both updating the terraform provider and creating a new installer asset as possible solutions, and ultimately decided
+that the best solution for our team is to create the installer asset. This asset would be generated just like the bootstrap
+and master ignition assets are currently generated, and other platforms would have the option to pass the asset to their
+terraform configs if they choose to use it. Please see
+[this working proof of concept](https://github.com/openshift/installer/pull/2544) to see a technical
+example of how this would be implemented.
 
 ## Motivation
 
-We spent a lot of time looking at the Terraform Ignition Provider to determine if we could
-get involved in the community there to solve our problem. However we had a number of hangups
-with this. First and foremost, that repo has not seen code merged since May 2019. We also noticed
-a number of valid and mergable pull requests waiting for approval for months.
-It seems as if there aren't any maintainers, and we were also unable to reach the contributers.
-The CA Bundle bug is preventing a considerable portion of our IPI users
-from being able to upgrade to OpenShift 4 on OpenStack, and we need this fix in 4.3, so this was rather
-dissuading. Lastly, we discovered that for our UPI solution, we wont have a way to generate the bootstrap
-ignition shim if we continue generating it in terraform. We would like to generate the ignition configs for
-UPI with the command `openshift-install create ignition-configs` so that Ignition configs for both UPI and IPI
-are created the same way.
+Our motivations for choosing an installer asset over updating the terraform provider are as follows:
+
+- Risk: The terraform ignition provider is extremely stale, and does not seem to be accepting or reviewing any new code
+- Time: It is critical for the OpenStack team that we get this fix in 4.3, it prevents a large number of our users from upgrading to OpenShift 4. Terraform provider code is 100% green field for our team, so taking it on with the expectation of finishing by the feature freeze deadline is risky.
+- Convenience: It would be convenient for all of our ignition assets to be generated the same way for UPI and IPI, ideally with the command: `openshift-install create ignition-configs`. This garuntees consistency, and lets us reuse the same code and tests.
 
 ### Goals
 
@@ -67,10 +62,11 @@ asset so that other platforms can opt into using it, and add their own customiza
 ## Proposal
 
 We are proposing to create a new installer asset in `installer/pkg/asset/ignition/bootstrap/shim.go`.
-This assest would have similar design to the [node asset] (https://github.com/openshift/installer/blob/master/pkg/asset/ignition/machine/node.go),
-and will serve as a pointer to the main bootstrap ignition config. Platforms can further customize this
-config with the IP address of the node or service provisioned to host the Bootstrap Config by
-editing the `ignitionHost` field in Terraform, which is already the standard for most platforms.
+This assest would have similar design to [this proof of concept code](https://github.com/openshift/installer/pull/2544),
+and will serve as a pointer to the main bootstrap ignition config. In most platforms, that config is stored
+in a remote storage solution like s3 or swift in Terraform. They can simply append an ignition config source to the
+generated ignition config assset that points to the remote storage location in Terraform for now. We would like to
+consider moving that functionality to the installer in later iterations of this design.
 
 ### Risks and Mitigations
 
@@ -82,6 +78,7 @@ make sure that their needs are met.
 - Some values, such as the Swift temp url in OpenStack, are generated in Terraform,
 and are therefore unable to be moved to the new installer asset.
   - These values can be edited in Terraform, as they are on aws and azure
+  - Possible future plans to move this operation to installer code?
 - The new Asset would need to know the platform like the node asset does
   - We can make the InstallConfig asset one of the dependancies, and pass it in as an argument
 
