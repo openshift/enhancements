@@ -1,24 +1,24 @@
 ---
 title: ovn-kubernetes-ga
 authors:
-- @pecameron
-- @squeed
-- @knobunc
-- @dcbw
+  - "@pecameron"
+  - "@squeed"
+  - "@knobunc"
+  - "@dcbw"
 reviewers:
-- TBD
+  - TBD
 approvers:
-- TBD
-￼
+  - TBD
 creation-date: 2019-09-19
 last-updated: 2019-09-19
 status: implementable
-see-also:
-replaces:
-Superseded-by:
-
+see-also: []
+replaces: []
+Superseded-by: []
 ---
+
 # OVN-Kubernetes
+
 ## Release Signoff Checklist
 - [X] Enhancement is `implementable`
 - [X] Design details are appropriately documented from clear requirements
