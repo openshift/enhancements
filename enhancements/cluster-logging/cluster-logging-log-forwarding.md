@@ -12,7 +12,7 @@ approvers:
   - "@ewolinetz"
   - "@richm"
 creation-date: 2019-09-17
-last-updated: 2019-09-17
+last-updated: 2019-10-25
 status: implementable
 see-also:[]
 replaces:[]
@@ -105,13 +105,16 @@ This is often required for industries such as the US public sector, healthcare o
 * A pipeline may support multiple outputs.
 * Outputs that require secrets which are not created by the cluster-logging-operator shall be created and managed by the administrator of the endpoint
 * Secrets shall have keys of: `tls.crt`, `tls.key`, `ca-bundler.crt` which point to the respective certificates for which they represent. Secrets shall have the key `shared_key` for use when using `forward` in a secure manner
+* The operator will only support a single instance of log forwarding named `instance` for at least the tech preview release
+* Log forwarding is enabled for tech preview when the instance of `clusterloggging` is annotated with: `clusterlogging.openshift.io/logforwardingtechpreview: enabled`
 
 #### Security
 * A pipeline may support TLS configuration by declaring a secret. Secrets must contain keys: `tls.crt`, `tls.key`, `ca-bundler.crt`
+* The secret must exist in the `openshift-logging` namespace
 * Endpoints defined without a secret will use unsecure communication and must explicitly declare `insecure: true` in the output specifification
 
 #### Log Message Routing
-* Undeclared source types (e.g. `logs.infra`) will be dropped if they are not defined in `spec.forwarding.pipelines` entry
+* Undeclared source types (e.g. `logs.infra`) will be dropped if they are not defined in `spec.pipelines` entry
 * Declared source types are routed to the specified output
 
 For example, If you have specified a pipeline for `logs.app` sources, but did not specify one for `logs.infra`, then `logs.infra` will be dropped
@@ -124,43 +127,40 @@ For example, If you have specified a pipeline for `logs.app` sources, but did no
 The `cluster-logging-operator` will use the forwarding API to generate a collector configuration and mount any secrets into the collector pod.
 
 ### API Specification
-The proposed forwarding API:
+The log forwarding API:
 
 ```
 apiVersion: "logging.openshift.io/v1alpha1"
-kind: "ClusterLogging"
+kind: "LogForwarding"
 spec:
-  collection:
-    type: fluentd
-  forwarding:
-    disableDefaultForwarding: true
-    outputs:
-     - type: “elasticsearch”
-       name: elasticsearch
-       endpoint: elasticsearch.svc.messaging.cluster.local
-       secrets:
-          name: elasticsearch
-     - type: “forward”
-       name: secureforward-offcluster
-       endpoint: https://secureforward.offcluster.com:9200
-       secrets:
-          name: secureforward
-     - type: “elasticsearch”
-       name: elasticsearch-insecure
-       endpoint: elasticsearch-insecure.svc.messaging.cluster.local
-       insecure: true
-   pipelines:
+  disableDefaultForwarding: true
+  outputs:
+   - type: “elasticsearch”
+     name: elasticsearch
+     endpoint: elasticsearch.svc.messaging.cluster.local
+     secrets:
+        name: elasticsearch
+   - type: “forward”
+     name: secureforward-offcluster
+     endpoint: https://secureforward.offcluster.com:9200
+     secrets:
+        name: secureforward
+   - type: “elasticsearch”
+     name: elasticsearch-insecure
+     endpoint: elasticsearch-insecure.svc.messaging.cluster.local
+     insecure: true
+  pipelines:
    - name: container-logs
-     source: logs.app
+     inputSource: logs.app
      outputRefs:
      - elasticsearch
      - secureforward-offcluster
    - name: infra-logs
-     source: logs.infra:
+     inputSource: logs.infra:
      outputRefs:
      - elasticsearch-insecure
    - name: audit-logs
-     source: logs.audit
+     inputSource: logs.audit
      outputRefs:
      - secureforward-offcluster
 ```
@@ -296,9 +296,11 @@ Following is a diagram which identifies the workflow of a message through fluent
     * `secretName` is the name of a secret in the `openshift-logging` namespace.
     * `tls.crt`, `tls.key`, `ca-bundle.crt` are files in the secret
 
+
 #### Collector
 * The collectors will be modified to be remove endpoint config specific logic from the start script ; configuration is assumed to be correct and used as provided by the `cluster-logging-operator`
-* Extract all configuration from after the source config point to final destination into the collector configuration.
+* Extract all configuration into the collector configuration.
+* Extract the `run.sh` script from the collector image and mount into the deployed pod
 
 ### Test Plan
 #### Unit testing
@@ -315,6 +317,7 @@ Following is a diagram which identifies the workflow of a message through fluent
 
 ##### Tech Preview
 
+* Log forwarding is only enabled when annotated with: `clusterlogging.openshift.io/logforwardingtechpreview: enabled`
 * Ability to store logs to the cluster managed log aggregator without defining log forwarding (e.g. status quo)
 * Explicitly define and document log sources and their meanings (e.g. `logs.apps`, `logs.infra`)
 * Explicitly define supported outputs (e.g. `elasticsearch`, `fluentd`)
@@ -326,7 +329,7 @@ Following is a diagram which identifies the workflow of a message through fluent
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
-- Available by default
+- Available by default without tech preview annotation
 - Concrete API
 - Additional supported outputs (e.g. `Splunk`, `Graylog`, `kafka`)
 - Support for SRE usecase: As an administrator of a dedicated cluster, I need to allow dedicated-admins to configure the destination of container logs (logs.apps) separately from infra logs so they are prevented from modifying where infra logs (logs.infra) are forwarded
@@ -340,9 +343,9 @@ Upgrades should be seamless to users of cluster logging deployments managed by t
 Upon upgrade, the `cluster-logging-operator` will continue to route `logs.infra` and `logs.app` logs to the internal logstore if:
 
 * `spec.logstore` is defined
-* `spec.forwarding` is undefined or `spec.forwarding.disableDefaultForwarding` is `false`
 
-The `cluster-logging-operator` will honor `spec.forwarding` if so defined regardless off the value of `spec.forwarding.disableDefaultForwarding`
+
+The `cluster-logging-operator` will honor the `LogForwarding` resource named `instance` if it exists and the `ClusterLogging` resource named `instance` is properly annotated.
 
 
 #### Downgrade
