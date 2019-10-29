@@ -82,11 +82,15 @@ The machine controller will set the right phase when its communication flow with
 
 - Exists() is True.
 
+- Machine has been given providerID/address.
+
 - Machine has **no** status.nodeRef.
 
 ##### Running
 
 - Exists() is True.
+
+- Machine has been given providerID/address.
 
 - Machine has status.nodeRef.
 
@@ -96,7 +100,7 @@ The machine controller will set the right phase when its communication flow with
 
 ##### Failed
 
-- Create() returns a permanentError type or Exists() is False and machine has a providerID/address.
+- Create() returns a invalidConfigurationMachineError type or Exists() is False and machine has a providerID/address.
 
 #### Actuator invariants
 
@@ -108,22 +112,22 @@ The machine controller will set the right phase when its communication flow with
 
 - It must set providerID and IP addresses.
 
-- It must return a permanentError type for known unrecoverable errors, e.g invalid cloud input or insufficient quota.
+- It must return an invalidConfigurationMachineError type for known unrecoverable errors, e.g invalid cloud input like an instance type that doesn't exist or insufficient quota.
 
 ##### Update()
 
 - It must not modify cloud infrastructure.
 
-- It should reconcile machine.Status with cloud values.
+- It should reconcile machine.Status with IP addresses values.
 
 #### Errors
 
 - A machine entering a "Failed" phase should set the machine.Status.ErrorMessage.
 
+- A machine which entered "Failed" phase won't farther reconcile. It must be deleted.
+
 - The machine.Status.ErrorMessage might be bubbled up to the machineSet.Status.ErrorMessage for easier visibility.
 
-
-#### [Implementation example](https://github.com/enxebre/cluster-api-provider-azure/commit/ef9a0dd68918eb6ca4af50765b07bcae4d309aaf)
 
 ### Risks and Mitigations
 
