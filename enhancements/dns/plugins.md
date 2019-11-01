@@ -19,24 +19,21 @@ superseded-by:
 
 # Configurable DNS Plugins
 
-This proposal provides cluster operators the ability to configure CoreDNS [plugins](https://coredns.io/plugins/) and
+This proposal provides cluster admins the ability to configure CoreDNS [plugins](https://coredns.io/plugins/) and
 includes [forward](https://coredns.io/plugins/forward/) as the first plugin implementation.
 
 ## Release Signoff Checklist
 
 - [x] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift/docs]
 
 ## Open Questions [optional]
 
-1. Is `operator.openshift.io` the best API group for the proposed `Servers` type?
-2. How are API changes handled for cluster downgrades?
-3. Should IPv6 references for `Upstreams` be removed until OpenShift adds IPv6 support?
-4. Is the cluster domain (i.e. cluster.local) an invalid subdomain for `Zones`?
-5. Should the number of `Servers` be restricted due to Gap 4?
+1. How are API changes handled for cluster downgrades?
+2. Should the number of `Servers` be restricted due to Gap 4?
 
 ## Summary
 
@@ -74,7 +71,8 @@ metadata:
 Once CoreDNS starts and has parsed the configuration, it runs one or more servers. Each server is defined by the zones
 it serves and a listening port. In the above configuration, CoreDNS starts one server that manages all zones and listens
 on port 5353. Each server has its own plugin chain represented within the server block stanza (i.e. forward). This
-proposal will generate the ConfigMap with a forward plugin configuration based on `ForwardPlugin`.
+proposal describes an API for (a) configuring additional zones for specific subdomains and (b) specifying custom
+upstream nameservers that will be used to resolve names beneath these subdomains.
 
 ## Motivation
 
@@ -95,14 +93,17 @@ queries.
 2. Configure or manage external DNS providers.
 3. Provide name query forwarding for other cluster services (i.e. container runtime).
 4. Manage what plugins get loaded (i.e. plugin.cfg).
+5. Specifications for any CoreDNS plugins other than forward.
 
 ## Proposal
 
-`Server` defines the schema for a server that runs per instance of CoreDNS. A `Server` must have a `Name` that is unique
-among `Servers`. `Zones` defines one or more subdomains to match for name queries to be forwarded to `Upstreams`.
-`ForwardPlugin` provides options for configuring the forward plugin configuration. A `Server` listens on port `5353`,
-which can not be configured at this time. If a `Server` is not specified, the cluster-dns-operator will generate the
-previously depicted ConfigMap.
+`Server` defines the schema for a server that runs per instance of CoreDNS. The `Name` field is required and specifies a
+unique name for the `Server`. `Zones` is required and specifies the subdomains the server is authoritative for.
+
+`Server` may contain several CoreDNS plugins in the future. This proposal includes `ForwardPlugin` as the first plugin
+implementation. `ForwardPlugin` provides options for configuring the forward plugin configuration. A `Server` listens on
+port `5353`, which can not be configured at this time. If no `Server` is specified, the cluster-dns-operator will
+generate the ConfigMap referenced in the [Summary](#summary) section.
 
 ```go
 type Server struct {
@@ -114,28 +115,15 @@ type Server struct {
 ```
 
 `ForwardPlugin` defines a schema for configuring the CoreDNS forward plugin. `Upstreams` is a list of resolvers to
-forward name queries for subdomains specified by `Zones`. `Policy` provides a mechanism for selecting an upstream
-resolver when `Upstreams` consists of more than one resolver. If a policy is not specified, the "Random" policy will be
-used which implements random upstream selection.
+forward name queries for subdomains specified by `Zones`. `Upstreams` are randomized when more than 1 upstream is
+specified. Each instance of CoreDNS performs health checking of `Upstreams`. When a healthy upstream returns an error
+during the exchange, another resolver is tried from `Upstreams`. Each upstream is represented by an IP address or IP
+address and port if the upstream listens on a port other than 53.
 ```go
 type ForwardPlugin struct {
     Upstreams []string `json:"upstreams"`
-    Policy ForwardPolicy `json:"policy,omitempty"`
 }
-
-type ForwardPolicy string
-
-const (
-    ForwardPolicyRandom ForwardPolicy = "Random"
-    ForwardPolicyRoundRobin ForwardPolicy = "RoundRobin"
-    ForwardPolicySequential ForwardPolicy = "Sequential"
-)
 ```
-
-Each instance of CoreDNS performs health checking of `Upstreams`. If `Upstreams` consists of more than one upstream,
-`Policy` specifies the order of upstream resolver selection. When a healthy upstream returns an error during the
-exchange, another resolver is tried from `Upstreams` based on `Policy`. Each upstream is represented by an IP address or
-IP address and port if the upstream listens on a port other than 53.
 
 `Servers` is added to `DNSSpec` since multiple servers can run per CoreDNS instance.
 ```go
@@ -161,21 +149,21 @@ A maximum of 15 `Upstreams` is allowed per `ForwardPlugin`.
 
 `Name` must comply with the [rfc6335](https://tools.ietf.org/rfc/rfc6335.txt) Service Name Syntax.
 
-`Zones` must conform to the definition of a subdomain in [rf1123](https://tools.ietf.org/html/rfc1123).
+`Zones` must conform to the definition of a subdomain in [rfc1123](https://tools.ietf.org/html/rfc1123). The cluster
+domain (i.e. cluster.local) is an invalid subdomain for `Zones`.
 
-The cluster-dns-operator will generate the forward plugin configuration of `configmap/dns-default` based on
-`Servers` of `dnses.operator.openshift.io` instead of the configuration being statically defined. To achieve this:
+The cluster-dns-operator will prepend the configuration of `Servers` to `configmap/dns-default`, instead of the entire
+ConfigMap being statically defined. To achieve this:
 
 1. The [default](https://github.com/openshift/cluster-dns-operator/blob/master/assets/dns/configmap.yaml) ConfigMap
 asset and associated code from the [manifests pkg](https://github.com/openshift/cluster-dns-operator/blob/master//pkg/manifests/manifests.go#L70:6)
 should be removed.
 
 2. The [desiredDNSConfigMap](https://github.com/openshift/cluster-dns-operator/blob/master/pkg/operator/controller/controller_dns_configmap.go)
-function must be modified to create a ConfigMap with a server configuration based on `Server`. If `Server` is not
-present or an invalid `Server` is provided, the ConfigMap will not contain the server. If no `Servers` are specified,
-only the default server configuration is used with `forward . /etc/resolv.conf`. Otherwise, desiredDNSConfigMap will use
-the provided `Servers` to construct additional server configuration blocks, each with a forwarding configuration and use
-`/etc/resolv.conf` as a resolver of last resort. For example:
+function must be modified to create a ConfigMap with additional server configuration blocks based on `Server`. If
+`Server` is undefined or an invalid, the ConfigMap will only contain the default server. Otherwise,
+`desiredDNSConfigMap` will use the provided `Servers` to construct additional server configuration blocks, each with a
+forwarding configuration and use `/etc/resolv.conf` as a resolver of last resort. For example:
 
 ```yaml
 apiVersion: operator.openshift.io/v1
@@ -188,19 +176,17 @@ spec:
     zones:
       - foo.com
     forwardPlugin:
-      - upstreams:
-          - 1.1.1.1
-          - 2.2.2.2:5353
-      policy: RoundRobin
+      upstreams:
+        - 1.1.1.1
+        - 2.2.2.2:5353
   - name: bar-server
     zones:
       - bar.com
       - example.com
     forwardPlugin:
-      - upstreams:
-          - 3.3.3.3
-          - 4.4.4.4:5454
-      policy: Sequential
+      upstreams:
+        - 3.3.3.3
+        - 4.4.4.4:5454
 ```
 
 The above `DNS` will produce the following `ConfigMap`:
@@ -210,11 +196,9 @@ data:
   Corefile: |
     foo.com:5353 {
         forward . 1.1.1.1 2.2.2.2:5353
-        policy round_robin
     }
     bar.com:5353 example.com:5353 {
         forward . 3.3.3.3 4.4.4.4:5454
-        policy sequential
     }
     .:5353 {
         errors
@@ -244,9 +228,8 @@ of the CoreDNS DaemonSet.
 
 #### Validation
 `Domain` must conform to the [RFC 1123](https://tools.ietf.org/html/rfc1123#page-13) definition of a subdomain. Each
-upstream in `Upstreams` must be a valid IPv4 or IPv6 address. If the upstream listens on a port other than 53,
-a valid port number must be specified. A colon is used to separate the address and port, `IP:port` for IPv4 or
-`[IP]:port` for IPv6.
+upstream in `Upstreams` must be a valid IPv4 address. If the upstream listens on a port other than 53,
+a valid port number must be specified. A colon is used to separate the address and port, `IP:port` for IPv4.
 
 #### Transport
 UDP is used to transport DNS messages and `ForwardPlugin` health checks. Any UDP transport will automatically retry with
@@ -295,8 +278,9 @@ to 15 upstreams being actively checked for health.
 
 #### Mitigation 4
 
-Test utilization using multiple `Servers` with multiple `Upstreams`. Add a warning in the documentation that adding a
-large number of forwarders may incur a performance penalty or hit memory limits.
+Test utilization using multiple `Servers` with multiple `Upstreams`. Include a warning in the documentation that states
+"adding a large number of forwarders may incur a performance penalty or hit memory limits". It's also possible for the
+operator to increase the amount of resources (i.e. memory) requested based on the number of `Servers`.
 
 ## Design Details
 
@@ -331,10 +315,9 @@ spec:
     zones:
       - foo.com
     forwardPlugin:
-      - upstreams:
-          - 1.1.1.1
-          - 2.2.2.2:5353
-      policy: RoundRobin
+      upstreams:
+        - 1.1.1.1
+        - 2.2.2.2:5353
 ```
 
 ### Version Skew Strategy
