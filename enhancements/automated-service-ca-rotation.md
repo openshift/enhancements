@@ -92,12 +92,14 @@ and the functionality could be separately extracted for operator reuse.
 
 ## Proposal
 
-- Detect when the current CA certificate has passed 1/2 of its validity bounds
-  (i.e. 6 months has passed of a 1 year validity) and generate a new CA.
+- Detect when the current CA certificate has less than 6 months of validity and
+  generate a new CA.
   - The new CA should have the same `Subject.CommonName` as the current CA to
     ensure that trust chaining is possible.
-  - This provides a 6 month grace period for consumers of serving certs and ca
-    bundles to be refreshed.
+  - Servers using a serving cert provided by the operator will have until 6
+    months after rotation to refresh without breaking trust.
+  - Clients using a ca bundle provided by the operator will have until the
+    original expiry of the pre-rotation CA to refresh without breaking trust.
 
 - Generate an intermediate CA certificate with the same public key as the new CA
   but signed with the private key of the current CA.
@@ -113,6 +115,10 @@ and the functionality could be separately extracted for operator reuse.
     bridge trust between an unrefreshed server (serving with a cert
     generated from the previous CA) and a refreshed client (validating
     trust with the new CA bundle).
+  - If the expiry of the current CA is less than 6 months, the new intermediate
+    certificate should be set to expire 6 months from the time of rotation to
+    ensure that refreshed clients will be able to trust unrefreshed servers for
+    that minimum duration.
 
 - Compare the `AuthorityKeyId` of a serving cert with the `SubjectKeyId` of the
   current CA to determine whether the serving cert was issued by the current CA.
@@ -176,6 +182,22 @@ restarted in advance of the expiry of the service CA created at deployment
 manual rotation (by deleting the signing secret) could be performed. Manual
 rotation would not be seamless, however, due to the lack of a grace period for
 services and clients to converge on the new trust chain.
+
+- Testing in advance of service CA rotation whether consumers of CA artifacts are
+refreshing in a timely manner is complicated:
+ - Unrefreshed clients and servers would be able to communicate without error
+   with both refreshed and unrefreshed clients and servers until the expiry of
+   the pre-rotation CA.
+ - Detecting clients that do not refresh would require starting a cluster with
+   automatic rotation disabled and provisioned with a near-expiry service
+   CA. This would allow a subsequent forced rotation to flush out the failure of
+   unrefreshed clients when the pre-rotation CA had expired.
+ - Without knowing that a given deployment or replicaset was automatically
+   responding to a serving cert being regenerated or a new ca bundle being
+   injected, a pod that references a serving cert secret or ca bundle configmap
+   could simply be deleted if it was started before the most recent rotation. This
+   would ensure that the pod was restarted with the current state of the service
+   ca artifacts it was consuming.
 
 - Every team should confirm whether any components that interact with service
 serving CAs (either by consuming a service that is signed with one, or by
