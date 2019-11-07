@@ -154,6 +154,8 @@ Out of band:
 - The machine controller provider deletes the instance.
 - The machine controller deletes the machine.
 
+![Machine health check](./mhc.svg)
+
 #### Out of tree remediation controller, e.g baremetal reboot:
 - An external remediation can plug in by setting the `healthchecking.openshift.io/strategy: reboot` on the MHC resource.
 - An external remediation controller remediation could then watch machines annotated with `healthchecking.openshift.io/remediation: reboot` and react as it sees fit.
