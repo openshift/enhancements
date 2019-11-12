@@ -207,7 +207,7 @@ Known limitations/future enhancements:
   not add no-proxy domains that might need to be proxied.
 * Long term it should be possible for the additional CA bundle to be the *only* source of CAs for components.
   Today the additional CA bundle is a combination of user provided CAs plus the system CAs from the network
-  operator image.  In the future adding the system trusts to the bundle should be a configurable optiona so customers
+  operator image.  In the future adding the system trusts to the bundle should be a configurable optional so customers
   who want to explicitly control the trusted CAs can do so.
 * In addition, due to 4.1->4.2 upgrade limitations, components must fallback to using their own CAs from their image in the event
   that the configmap does not have a bundle injected into it because the network operator is not upgraded yet.  This
