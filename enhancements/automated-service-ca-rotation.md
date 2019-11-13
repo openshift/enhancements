@@ -142,6 +142,20 @@ and the functionality could be separately extracted for operator reuse.
   - If a forced rotation and expiry-triggered rotation coincide, only
     the forced rotation should be performed.
 
+- Stop including the service CA in serving certs generated in response to the
+  beta annotation (`service.beta.openshift.io/serving-cert-secret-name`).
+  - The service CA is expected to be supplied via the ca bundle injected into
+    configmaps and apiservices by the service ca operator.
+  - The service CA will continue to be included in serving certs generated in
+    response to the alpha annotation
+    (`service.alpha.openshift.io/serving-cert-secret-name`) to ensure
+    compatibility with services that depend on this behavior.
+    - Some services may reuse a serving cert intended to secure server endpoints
+      as the ca bundle used by clients to verify the security of those
+      endpoints. Such reuse is not compatible with the trust-maintaining
+      cross-signing scheme proposed by this enhancement, and is likely to result
+      in service disruption for those services when a service CA is rotated.
+
 ### Risks and Mitigations
 
 Automatic rotation is only effective if consumers of certs and CA bundles will
