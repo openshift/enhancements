@@ -13,7 +13,7 @@ approvers:
   - "@eparis"
   - "@knobunc"
 creation-date: 2019-10-04
-last-updated: 2019-10-29
+last-updated: 2019-11-24
 status: implemented
 see-also:
   - "https://github.com/openshift/enhancements/pull/22"
@@ -150,7 +150,7 @@ configmap after confirming the validation endpoints can be accessed using the ne
 
 Additional behaviors:
 
-* configmaps labeled with `config.openshift.io/inject-trusted-cabundle: "true"` will have the current
+* configmaps labeled with `config.openshift.io/inject-proxy-cabundle: "true"` will have the current
   set of additional CAs injected into them by logic in the cluster network operator.
 * deployments with the `config.openshift.io/inject-proxy: <container-name>` will get the current proxy
   environment variables injected (HTTP_PROXY, HTTPS_PROXY, NO_PROXY) by the cluster version operator.
