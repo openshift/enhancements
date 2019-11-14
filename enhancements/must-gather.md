@@ -1,21 +1,19 @@
 ---
 title: must-gather
 authors:
-
 - "@deads2k"
-  reviewers:
+reviewers:
 - "@derekwaynecarr"
 - "@soltysh"
 - "@mfojtik"
-  approvers:
+approvers:
 - "@derekwaynecarr"
-  creation-date: 2019-09-09
-  last-updated: 2019-09-09
-  status: implemented
-  see-also:
-  replaces:
-  superseded-by:
-
+creation-date: 2019-09-09
+last-updated: 2019-09-09
+status: implemented
+see-also:
+replaces:
+superseded-by:
 ---
 
 # Must-Gather
