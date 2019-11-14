@@ -28,27 +28,27 @@ TBD
 
 ## Summary
 
-User provided price sheets is a way for users to define custom price rates for calculating cost reports on resource reservations or usage.
-It is an opt-in feature that would require the user to provide configuration that defines the prices and rates they desire.
+User-provided price sheets is a way for users to define custom price rates for calculating cost reports on resource reservations or usage.
+It is an opt-in feature that would require the user to provide a configuration that defines the prices and rates they desire.
 
 ## Motivation
 
 Currently metering only supports calculating costs using AWS billing data, but does not support calculating costs for other clouds nor on-premise solutions.
-User provided price sheets would allow users to define their own prices for uses in clouds or environments which don't yet have native support from Metering.
+User-provided price sheets would enable metering to expand it's functionality to those who wish to define their own prices for clouds and environments which are not yet supported.
 
-Additionally, by creating the concept of price sheets, we must define our cost report queries to work against a well defined API.
-Instead of writing a cost report query per cloud provider, we can write queries that will work against any price sheet.
+Additionally, by creating the concept of price sheets, we must define our cost report queries to work against a well-defined API.
+Instead of writing a cost ReportQuery per cloud provider, we can write queries that will work against any price sheet.
 This would allow us, and users to programmatically generate price sheets, more easily unlocking support cost reports on different clouds and on-premise environments.
 
 ### Goals
 
-- Allow users to define their own prices for resources, eg: $.015 per core hour.
-- Enable better use of cost [ReportQueries][reportqueries] by standardizing cost calculations to use price sheet Presto tables
+- Allow users to define their own prices for resources, eg: $0.015 per core hour.
+- Enable better use of cost [ReportQueries][reportqueries] by standardizing cost calculations to use price sheet Presto tables.
 
 ### Non-Goals
 
 - Perfect ease-of use. Price sheets builds upon multiple core concepts already available in Metering. We can accomplish everything we need with existing functionality, but it may not be as easy as it could be. We will add higher level abstractions to hide the lower level details once the concept is proven.
-- Adding support for new clouds. Supporting user provided price sheets is the primary goal, and the secondary goal is ensuring cloud bills could be used to generate a price sheet.
+- Adding support for new clouds. Supporting user-provided price sheets is the primary goal, and the secondary goal is ensuring cloud bills could be used to generate a price sheet.
 
 ## Proposal
 
@@ -58,10 +58,12 @@ This percentage was then multiplied by the cost for the reporting period to get 
 
 The price sheet model changes how we calculate cost, but actually provides more granularity and actually translates to the same concepts as above but with a bit more complexity as a result of the flexibility.
 
-Calculating cost with a price sheet is about having a price for a rate of usage and multiplying the usage by that price, much like the way we do cost reporting with AWS today.
+Today, with AWS, to calculate cost, we do cost reporting by multiplign usage by a price for rate of usage.
+In a similar fashion, we propose to do this for other environments by means of a price sheet.
 The primary difference is that instead of doing this over the entire reporting period, we do it per pricing period in the billing report, and the calculation is done by calculating the price per pricing period and summing the results of that over the entire reporting period.
 
-We start by enabling users to define price sheets by documenting how to do so with existing functionality that's available, and by defining a few more default ReportQueries that utilize price sheets when calculating costs.
+Users can define price sheets using currently available functionality.
+Price sheets are enabled by adding new default ReportQueries that reference price sheet tables in calculating costs.
 
 At a high level this means we need to do the following:
 
@@ -93,20 +95,20 @@ The price sheet will define 7 columns.
 
 There are a few properties that each row must obey to ensure correct results:
 - Each row is expected to be a non-overlapping period of time specified by `price_start_dateand` and `price_end_date`, also known as the "price period".
-- For each price period, there is only 1 row for a particular value of `resource`. This means one currency, one price, one `resource_unit`, one time_unit` per price period per resource.
-- For a given `resource`, the correct `unit` is specified. Eg: for `resource=cpu`, `resource_unit` must be either `cores` or `millicores`, and must not be specified in different units within the same price period.
+- For each price period, there is only 1 row for a particular value of `resource`. This means one currency, one price, one `resource_unit`, one `time_unit` per price period per resource.
+- For a given `resource`, the correct `unit` is specified. E.g.: for `resource=cpu`, `resource_unit` must be either `cores` or `millicores`, and must not be specified in different units within the same price period.
 
 
 #### Initial design
 
 To start, we will provide an example of a ReportDataSource and ReportQuery users can use to create a price sheet (details in ReportDataSources) and a set of ReportQueries for calculating cost using a price sheet ReportDataSource.
-Once we are satisfied with the results we can enable creating these resource as part of the Metering install by configuring any necessary options in the MeteringConfig.
-Before proceeding with full support for the feature, we will likely leverage an "unsupported features" flag in the MeteringConfig that must be set to use install the price sheet resources, otherwise the user can manually create the resources if they wish to test the functionality before it's GA.
+Once we are satisfied with the results, we can enable creating these resource as part of the Metering install by configuring any necessary options in the MeteringConfig.
+Before proceeding with full support for the feature, we will likely leverage an "unsupported features" flag in the MeteringConfig that must be set to in order install to the price sheet resources, otherwise the user can manually create the resources if they wish to test the functionality before it's GA.
 
 #### Price sheet ReportDataSource and ReportQuery
 
-A ReportDataSource's in the context of price sheets serves the purpose of create and/or exposing a PrestoTable to Reports, ReportQueries and other ReportDataSources to enable accessing the price sheet from the reporting sub-system.
-To support for user provided price sheets, we will start by having users use a ReportDataSource to either create a view or table for price sheets.
+A ReportDataSource in the context of price sheets serves the purpose of creating and/or exposing a PrestoTable to Reports, ReportQueries and other ReportDataSources to enable accessing the price sheet from the reporting sub-system.
+To support for user-provided price sheets, we will start by having users use a ReportDataSource to either create a view or table for price sheets.
 This will be done by specifying a ReportQuery to use that defines the SQL for creating the table with whatever contents so long as it meets the criteria listed above.
 
 In addition to writing a ReportQuery for creating a user-defined price sheet, we also need to write a ReportQuery that can be used to create a price sheet from the AWS ReportDataSource tables we already have.
