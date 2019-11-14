@@ -268,6 +268,6 @@ Some broad reasons this proposal might _not_ be acceptable are:
   documented here; this is an overview of the properties common to the general
   approach.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 TODO

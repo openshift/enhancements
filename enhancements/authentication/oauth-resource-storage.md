@@ -30,7 +30,7 @@ superseded-by:
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions [optional]
+## Open Questions
 
 1. Do we really need token read access for users. This enhancement allows us to add that with reasonable effort,
    but we should consider also either some imperative logout subresource, or an endpoint for the oauth server. This
@@ -100,7 +100,7 @@ Note: the tilde is a valid character in oauth tokens used as bearer tokens (acco
 [RFC6750](https://tools.ietf.org/html/rfc6750#section-2.1)), and it works as character in URL paths. Colon,
 which we used in an earlier iteration of this enhancement is not valid for the former. 
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
@@ -208,7 +208,7 @@ Similar to the `Drawbacks` section the `Alternatives` section is used to
 highlight and record other possible approaches to delivering the value proposed
 by an enhancement.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 Use this section if you need things from the project. Examples include a new
 subproject, repos requested, github details, and/or testing infrastructure.

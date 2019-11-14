@@ -100,7 +100,7 @@ to allow the latter 2 capabilities to be configured for
 user-provisioned infrastructure, without requiring configuration that
 is only relevant to the first capability.
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
@@ -118,7 +118,7 @@ the cluster is being built using the installer-provisioned
 infrastructure workflow or the user-provisioned workflow so I can
 apply only the rules necessary for each case.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 All of the validation is currently performed during early phases of
 the installer for the `InstallConfig` target. The user-provisioned

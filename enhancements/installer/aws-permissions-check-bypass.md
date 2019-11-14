@@ -29,7 +29,7 @@ superseded-by:
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions [optional]
+## Open Questions
 
 ## Summary
 
@@ -203,7 +203,7 @@ will use the contents of the install-config ConfigMap to build the runtime
 configuration to ensure CCO runs in the desired mode.
 ```
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
@@ -231,7 +231,7 @@ spec:
   forceCredentialsMode: "mint"
 ```
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 Bypassing these checks means that errors will be encountered at the moment the
 API calls are attempted. For example a user with enough permissions to create
@@ -361,7 +361,7 @@ to put the `forceCredentialsMode` field into a platform-specific section, and
 the CloudCredentialOperatorConfig CRD could be modified to have
 platform-specific overides as well.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 (For testing and for any ongoing e2e) A pair of AWS accounts where the root
 account has the ability to set/modify SCP polcies, and a second child account to

@@ -140,6 +140,6 @@ user has [sufficient privileges](#admin-user).
 
 ## Alternatives
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 OpenShift 4.x cluster

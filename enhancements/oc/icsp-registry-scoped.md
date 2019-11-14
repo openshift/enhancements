@@ -27,7 +27,7 @@ status: implementable
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions [optional]
+## Open Questions
 
 
 ## Summary
@@ -101,7 +101,7 @@ As a user with a cluster in a disconnected network, I can mirror updates to
 optional operators that I already have installed without causing my cluster to
 reboot.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 This is an example of a registry-scoped ICSP:
 
@@ -240,6 +240,6 @@ could likely be delivered to users sooner. This enhancement also has the
 advantage of simplifying the contents of `registries.conf` and the sum of all
 ICSPs, which itself is a good thing for manageability.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 None.

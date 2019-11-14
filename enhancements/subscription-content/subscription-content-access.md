@@ -96,7 +96,7 @@ As a multi-cluster administrator, I want to enable my cluster for entitlements v
 that works well with GitOps (or similar patterns) so that granting access to subscription content is
 not a burden as I scale the number of clusters under management.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 To consume RHEL content in OpenShift, the running container must have access to the following:
 
@@ -303,13 +303,13 @@ This proposal has been rejected out of the desire to make OpenShift nodes as eph
 Kubernetes Pods. For OpenShift, the subscription belongs to the cluster, and concerns regaring use
 and billing are addressed via monitoring and telemetry.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 - New Github repos will be needed for each component above.
 - New CI templates needed to install the respective components for e2e testing.
 - Ultimately this will be introduced as an OLM operator, with attendant images produced by CPaaS
 
 
-## Open Questions [optional]
+## Open Questions
 
 - How can the cluster subscription manager be informed of key rotation/revocation events?

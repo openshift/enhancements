@@ -418,7 +418,7 @@ None
 
 Already covered inline.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 1. Access to US Gov Cloud region to test the changes.
 

@@ -67,7 +67,7 @@ resource that allows administrators to manage route admission based on the route
 
 As a cluster administrator, I need the ability to admit routes based on the route's wildcard policy configuration.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 The [Ingress Operator](https://github.com/openshift/cluster-ingress-operator) will use `WildcardPolicy` to configure
 the environment variable `ROUTER_ALLOW_WILDCARD_ROUTES` in the [OpenShift Router](https://github.com/openshift/router).

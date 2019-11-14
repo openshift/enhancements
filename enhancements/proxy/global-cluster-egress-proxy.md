@@ -29,7 +29,7 @@ see-also:
 - [ x ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions [optional]
+## Open Questions
 
 ## Summary
 
@@ -123,7 +123,7 @@ is performing traffic decryption/re-encryption, I want to provide a
 valid CA that can trust my proxy's certificate to openshift components
 so they will trust my proxy.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 This enhancement introduces a cluster scoped proxy configuration resource.
 The resource includes fields to:
@@ -287,6 +287,6 @@ as the design/implementation evolves.
 Make every component define its own configuration mechanism for proxy support and require
 admins to modify all of them and keep them in sync.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 * CI environments with configured proxies that we can direct the clusters under test to use.

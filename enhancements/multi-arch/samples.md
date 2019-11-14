@@ -101,13 +101,13 @@ architecture.
 There are some interesting details and caveats that will be discussed in the 
 implementation details section.
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
 #### Story 2
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 In a somewhat related note, there have been a lot of side conversations regarding the Jenkins imagestream
 in particular, as the openshift/jenkins images are included in the 4.1/4.2 payloads.
@@ -173,7 +173,7 @@ Another alternative is to bootstrap the samples operator as "Removed" on non-x86
 over installing it as Managed w/ no imagestreams/templates to install.  And if the cluster admin were to subsequently
 change to "Managed", the issue of invalid content arises.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 New PR e2e jobs running on non-x86, or hybrid topologies, where clear means for the tests to determine the 
 architectures employed such that common tests can be run across multiple architectures.

@@ -102,11 +102,11 @@ type EBSCSIDriverList struct {
 The CRD and its `cluster` instance is created by OLM from the operator manifest.
 
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 ### Risks and Mitigations
 
@@ -144,7 +144,7 @@ There is no dev-preview phase.
 
 ## Alternatives
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 * aws-ebs-csi-driver GitHub repository (forked from upstream).
 * aws-ebs-csi-driver-operator GitHub repository.

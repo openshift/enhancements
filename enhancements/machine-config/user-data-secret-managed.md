@@ -71,7 +71,7 @@ The proposal is pretty simple today:
 - The MCO has a way to manage the lifecycle of the Secret containing the stub ignition
 
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 The implementation has already started and there are two PRs that provide a working POC:
 

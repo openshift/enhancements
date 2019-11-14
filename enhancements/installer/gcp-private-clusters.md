@@ -184,7 +184,7 @@ A limitation of this design is that no health check for the machine config serve
 
 Other alternatives were considered but this is the only known feasible design. As mentioned above, using external network load balancers and limiting public access with firewalls is not possible, because tagged VM instances can not be granted access through source tags. 
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 * Network deployment in GCP CI account which includes VPC, subnets, NAT gateways, Internet gateway that provide egress to the Internet for instance in private subnet.
 * VPN accessibility to the network deployment created above.

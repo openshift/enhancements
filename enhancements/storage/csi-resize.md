@@ -93,4 +93,4 @@ strategy of their drivers along with the sidecars those drivers use.
 
 Users could use the upstream sidecar instead of the one proposed here.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed

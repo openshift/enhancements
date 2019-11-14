@@ -27,7 +27,7 @@ superseded-by:
 - [x] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions [optional]
+## Open Questions
 
 N/A
 
@@ -186,7 +186,7 @@ upgradeable condition to allow z-level upgrades" [PR #291](https://github.com/op
 Create a bugzilla for docs include detailed directions on how to remove the
 Service Catalog and it's associated objects to allow upgrading to OpenShift 4.4.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 N/A
 
@@ -256,6 +256,6 @@ These Custom Brokers will be orphaned and remain running.
 
 N/A
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 N/A

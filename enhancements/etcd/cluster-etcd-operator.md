@@ -32,7 +32,7 @@ cluster-etcd-operator (CEO) is an operator that handles the scaling of etcd duri
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift/docs]
 
-## Open Questions [optional]
+## Open Questions
 
 TODO
 
@@ -341,6 +341,6 @@ TODO
 
 TODO
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 TODO

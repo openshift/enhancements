@@ -183,6 +183,6 @@ they should as well for s390x or ppc64le.
 
 See the `Non-Goals` section for items that could also be classified as `Alternatives`.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 IPV6 and Disconnected environments for launching e2e's either from PRs out periodic tests.
