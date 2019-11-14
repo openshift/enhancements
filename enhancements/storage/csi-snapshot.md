@@ -1,5 +1,5 @@
 ---
-title: CSI Snapshots
+title: csi-snapshots
 authors:
   - "@chuffman"
 reviewers:
@@ -15,7 +15,7 @@ replaces:
 superseded-by:
 ---
 
-# csi-snapshots
+# CSI Snapshots
 
 ## Release Signoff Checklist
 

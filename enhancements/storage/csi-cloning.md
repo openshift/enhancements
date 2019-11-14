@@ -1,5 +1,5 @@
 ---
-title: CSI Cloning
+title: csi-cloning
 authors:
   - "@chuffman"
 reviewers:
@@ -16,7 +16,7 @@ replaces:
 superseded-by:
 ---
 
-# csi-cloning
+# CSI Cloning
 
 ## Release Signoff Checklist
 

@@ -1,5 +1,5 @@
 ---
-title: (AWS) Allow Customer-Provisioned Subnets
+title: allow-customer-provisioned-aws-subnets
 authors:
   - "@wking"
 reviewers:
@@ -15,7 +15,7 @@ superseded-by:
   - "https://docs.google.com/document/d/12Nu_OvcNnItD4vaH6G0ky0IeAxnvDSpzp5sVrZv7-8M/"
 ---
 
-# aws-allow-customer-provisioned-subnets
+# Allow Customer-Provisioned AWS Subnets
 
 ## Release Signoff Checklist
 

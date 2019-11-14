@@ -1,5 +1,5 @@
 ---
-title: Precision Time Protocol
+title: precision-time-protocol
 authors:
   - "@zshi-redhat"
 reviewers:
@@ -13,7 +13,7 @@ last-updated: 2019-09-03
 status: implementable
 ---
 
-# Add-Precision-Time-Protocol-Support
+# Precision Time Protocol
 
 ## Release Signoff Checklist
 

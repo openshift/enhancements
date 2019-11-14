@@ -1,5 +1,5 @@
 ---
-title: Encrypting Data at Datastore Layer
+title: encrypting-data-at-datastore-layer
 authors:
   - "@enj"
 reviewers:

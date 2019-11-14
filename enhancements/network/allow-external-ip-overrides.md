@@ -1,5 +1,5 @@
 ---
-title: Allow over-ride of allowable External IP addresses for a service
+title: allow-external-ip-overrides-for-services
 authors:
   - "@abhat"
 reviewers:
@@ -17,7 +17,7 @@ replaces:
 superseded-by:
 ---
 
-# Allow external IP overrides
+# Allow External IP Overrides for Services
 
 ## Release Signoff Checklist
 

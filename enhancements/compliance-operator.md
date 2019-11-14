@@ -1,5 +1,5 @@
 ---
-title: OpenShift Compliance operator
+title: openshift-complianc-operator
 authors:
   - "@jhrozek"
 reviewers:
@@ -13,7 +13,7 @@ last-updated: 2019-10-22
 status: provisional
 ---
 
-# OpenShift Compliance operator
+# OpenShift Compliance Operator
 
 ## Release Signoff Checklist
 

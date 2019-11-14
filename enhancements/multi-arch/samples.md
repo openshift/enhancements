@@ -1,5 +1,5 @@
 ---
-title: Samples-Non-X86
+title: sample-imagestream-and-templates-on-non-x86-platforms
 authors:
   - "@gabemontero"
 reviewers:

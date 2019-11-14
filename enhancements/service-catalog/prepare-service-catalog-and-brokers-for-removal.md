@@ -15,7 +15,7 @@ replaces:
 superseded-by:
 ---
 
-# prepare-service-catalog-and-brokers-for-removal
+# Prepare Service Catalog and Brokers for Removal
 
 ## Release Signoff Checklist
 

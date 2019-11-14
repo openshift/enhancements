@@ -1,5 +1,5 @@
 ---
-title: Machine/Instance lifecycle
+title: machine/instance-lifecycle
 authors:
   - @enxebre
 reviewers:

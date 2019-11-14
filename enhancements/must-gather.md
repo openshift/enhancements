@@ -1,5 +1,5 @@
 ---
-title: Must-Gather
+title: must-gather
 authors:
 
 - "@deads2k"
