@@ -1,5 +1,5 @@
 ---
-title: CSI Volume Expansion
+title: csi-volume-expansion
 authors:
   - "@bertinatto"
   - "@gnufied"
@@ -17,7 +17,7 @@ superseded-by:
 
 ---
 
-# csi-volume-expansion
+# CSI Volume Expansion
 
 ## Release Signoff Checklist
 

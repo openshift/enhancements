@@ -1,5 +1,5 @@
 ---
-title: (AWS) Internal OpenShift clusters
+title: internal-aws-clusters
 authors:
   - "@abhinavdahiya"
 reviewers:
@@ -14,7 +14,7 @@ superseded-by:
   - "https://docs.google.com/document/d/1IUCqz6AhxNwYDyx9jPcqbsa1-EloWD13OIONK7YP3JE"
 ---
 
-# aws-internal-openshift-clusters
+# Internal AWS Clusters
 
 ## Release Signoff Checklist
 

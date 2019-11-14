@@ -1,5 +1,5 @@
 ---
-title: kube-apiserver-Certificates
+title: kube-apiserver-certificates
 authors:
   - "@deads2k"
 reviewers:

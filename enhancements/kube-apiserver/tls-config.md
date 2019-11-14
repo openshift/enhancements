@@ -1,5 +1,5 @@
 ---
-title: TLS-Config
+title: tls-config-for-externally-facing-services
 authors:
   - "@deads2k"
   - "@danehans"

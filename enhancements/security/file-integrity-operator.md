@@ -1,5 +1,5 @@
 ---
-title: OpenShift node file integrity monitoring
+title: cluster-node-file-integrity-operator
 authors:
   - "@mrogers950"
 reviewers:

@@ -1,5 +1,5 @@
 ---
-title: Upgrading oc to latest version of Kubernetes with gomod
+title: upgrading-oc-to-latest-version-of-kubernetes-with-gomod
 authors:
   - "@soltysh"
 reviewers:

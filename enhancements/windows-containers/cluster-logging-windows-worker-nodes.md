@@ -1,5 +1,5 @@
 ---
-title: OpenShift Windows Worker Node and Container Logging
+title: openshift-windows-worker-node-and-container-logging
 authors:
   - "@ravisantoshgudimetla"
   - "@aravindhp"
@@ -18,7 +18,7 @@ last-updated: 2019-09-17
 status: implementable
 ---
 
-# logging-for-windows-worker-nodes
+# OpenShift Windows Worker Node and Container Logging
 
 ## Release Signoff Checklist
 

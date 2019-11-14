@@ -1,5 +1,5 @@
 ---
-title: Compact Clusters
+title: compact-clusters
 authors:
   - "@smarterclayton"
 reviewers:

@@ -1,6 +1,5 @@
-# Automated Policy-based DiskEncryption on Boot Images
 ---
-title: CoreOS Encrypted Disks By Default
+title: automated-policy-based-disk-encryption-on-boot-images
 
 authors:
   - "Ben Howard @behoward"
@@ -23,6 +22,7 @@ status: provisional
 
 ---
 
+# Automated Policy-based Disk Encryption on Boot Images
 
 ## Release Signoff Checklist
 

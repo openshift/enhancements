@@ -1,5 +1,5 @@
 ---
-title: Neat-Enhancement-Idea
+title: neat-enhancement-idea
 authors:
   - "@janedoe"
 reviewers:
@@ -19,14 +19,14 @@ superseded-by:
   - "/enhancements/our-past-effort.md"
 ---
 
-# Title
+# Neat Enhancement Idea
 
 This is the title of the enhancement. Keep it simple and descriptive. A good
 title can help communicate what the enhancement is and should be considered as
 part of any review.
 
-The title should be lowercased and spaces/punctuation should be replaced with
-`-`.
+The YAML `title` should be lowercased and spaces/punctuation should be
+replaced with `-`.
 
 To get started with this template:
 1. **Pick a domain.** Find the appropriate domain to discuss your enhancement.

@@ -1,5 +1,5 @@
 ---
-title: Kernel Arguments - Day 1 Support
+title: kernel-arguments-day-1-support
 authors:
   - "@ericavonb"
 reviewers:

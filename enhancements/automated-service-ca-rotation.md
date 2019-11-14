@@ -1,5 +1,5 @@
 ---
-title: Automated Service CA Rotation
+title: automated-service-ca-rotation
 authors:
   - "@marun"
 reviewers:
@@ -19,7 +19,7 @@ replaces:
 superseded-by:
 ---
 
-# automated-service-ca-rotation
+# Automated Service CA Rotation
 
 ## Release Signoff Checklist
 

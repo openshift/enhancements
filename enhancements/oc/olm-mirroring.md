@@ -1,5 +1,5 @@
 ---
-title: Compact Clusters
+title: oc-tooling-for-disconnected-olm
 authors:
   - "@ecordell"
 reviewers:
