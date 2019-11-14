@@ -419,18 +419,11 @@ TBD
 
 ### Graduation Criteria
 
-N/A
-
-#### Examples
-
-These are generalized examples to consider, in addition to the aforementioned
-[maturity levels][maturity-levels].
-
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 There is no dev preview planned, just tech preview.
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -442,11 +435,6 @@ The OperatorGroup is marked as deprecated,
 the removal is blocked by OLM's prometheus operator.
 - Analyze saturation of new prometheus servers
 and evaluate fitness for GA by analyzing telemetry.
-
-##### Removing a deprecated feature
-
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
 
 ### Upgrade / Downgrade Strategy
 
