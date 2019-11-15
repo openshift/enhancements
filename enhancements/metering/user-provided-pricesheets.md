@@ -85,7 +85,7 @@ The Presto table schema is defining a set of column names and their data types t
 
 The price sheet will define 7 columns.
 
-- `resource varchar` is the type of resource, such as CPU or Memory
+- `resource varchar` is the type of resource, such as CPU or memory.
 - `resource_unit varchar` is the unit of the resource. For CPU it might be cores or millicores and for memory it could be bytes, gigabytes, etc.
 - `time_unit varchar` is the unit of time that the resource is billed at. For example 'hour' or 'minute'.
 - `price double` is the price the resource is billed at, in terms of resources used in terms of `resource_unit` per `time_unit`.
