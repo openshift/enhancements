@@ -63,7 +63,7 @@ In a similar fashion, we propose to do this for other environments by means of a
 The primary difference is that instead of doing this over the entire reporting period, we do it per pricing period in the billing report, and the calculation is done by calculating the price per pricing period and summing the results of that over the entire reporting period.
 
 Users can define price sheets using currently available functionality.
-Price sheets are enabled by adding new default ReportQueries that reference price sheet tables in calculating costs.
+Price sheets are enabled by adding new default ReportQueries that reference price sheet tables in calculating costs and having uses define price sheets using the ReportDataSource and PrestoTable resources.
 
 At a high level this means we need to do the following:
 
