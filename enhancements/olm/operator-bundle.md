@@ -6,7 +6,7 @@
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift/docs]
+- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 This enhancement proposes standards and conventions for storing kubernetes manifests and `metadata` associated with an operator as container images in OCI-compliant container registries, and to associate metadata-only images with standard, runnable images.

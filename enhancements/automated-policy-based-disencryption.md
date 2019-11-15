@@ -33,7 +33,7 @@ status: provisional
 - [ ] Test plan is defined
 - [ ] Test plan implemented 
 - [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift/docs]
+- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 - [ ] Transition Plan to Ignition controlled policy application
 
 ## Summary

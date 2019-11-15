@@ -24,7 +24,7 @@ Superseded-by: []
 - [X] Design details are appropriately documented from clear requirements
 - [X] Test plan is defined
 - [X] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift/docs]
+- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 Makes OVN-Kubernetes production-ready for OpenShift’s use-cases.

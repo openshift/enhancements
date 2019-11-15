@@ -28,7 +28,7 @@ includes [forward](https://coredns.io/plugins/forward/) as the first plugin impl
 - [x] Design details are appropriately documented from clear requirements
 - [x] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift/docs]
+- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Open Questions [optional]
 
