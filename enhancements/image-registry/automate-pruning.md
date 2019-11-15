@@ -1,5 +1,5 @@
 ---
-title: Automate-Pruning
+title: automate-image-pruning
 authors:
   - "@dmage"
   - "@adambkaplan"
