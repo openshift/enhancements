@@ -24,7 +24,7 @@ superseded-by:
 
 This enhancement proposes the addition of a new NodePort publishing strategy to the  [ingresscontrollers.operator.openshift.io API](https://github.com/openshift/api/blob/master/operator/v1/types_ingress.go).
 
-The NodePort strategy is positioned as a preferred alternative to most uses of the existing HostNetwork strategy.
+The NodePort strategy is positioned as a preferred alternative to most uses of the existing HostNetwork strategy, and is proposed as a new default in all contexts where HostNetwork is currently chosen by OpenShift.
 
 ## Release Signoff Checklist
 
@@ -73,8 +73,10 @@ type EndpointPublishingStrategy struct {
   // <existing fields omitted>
 
   // nodePortStrategy exposes ingress controller pods using a NodePort
-  // service. The node ports are dynamically allocated by OpenShift. Changes
-  // to the node port field of the managed Service will honored.
+  // service. The node ports are dynamically allocated by OpenShift.
+  //
+  // To support static port allocations, user changes to the node port
+  // field of the managed Service will preserved.
   NodePort *NodePortStrategy `json:"nodePort,omitempty"`
 }
 
@@ -110,7 +112,7 @@ spec:
     ingresscontroller.operator.openshift.io/deployment-ingresscontroller: default
 ```
 
-**Important**: The Ingress Operator will ignore any updates to `.spec.ports[].nodePort` fields of the Service.
+**Note:** It is also proposed that `NodePort` become the default publishing strategy for all platforms which currently default to `HostNetwork`.
 
 ### User Stories
 
@@ -124,7 +126,7 @@ One critical architectural detail of this proposal which demands scrutiny is the
 
 * The Ingress Operator will ignore any updates to `.spec.ports[].nodePort` fields of the Service.
 
-By making explicit that users own the  `.spec.ports[].nodePort` field, no additional port configuration API should be required. By default, ports are allocated automatically, and if those automatically allocated ports are insufficient, users can update the managed `Service` resource directly.
+By making explicit that users own the  `.spec.ports[].nodePort` field, no additional port configuration API should be required. By default, ports are allocated automatically and users can discover the actual port allocations for integrations. However, sometimes static port allocations are necessary to integrate with existing infrastructure which may not be easily reconfigured in response to dynamic ports. To achieve integrations with static node ports, users can update the managed `Service` resource directly.
 
 Because OpenShift isn't managing anything connected to the NodePort service, the ports used to expose the IngressController are irrelevant and can be left to the discretion of the administrator (constrained only by the cluster node port CIDR configuration).
 
