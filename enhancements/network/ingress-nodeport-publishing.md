@@ -5,13 +5,13 @@ authors:
 reviewers:
   - "@ironcladlou"
   - "@smarterclayton"
-  - "@knobc"
+  - "@knobunc"
   - "@Miciah"
   - "@danehans"
   - "@frobware"
 approvers:
   - "@smarterclayton"
-  - "@knobc"
+  - "@knobunc"
 creation-date: 2019-11-05
 last-updated: 2019-11-05
 status: provisional
@@ -47,7 +47,7 @@ Administrators today have two alternatives to the `LoadBalancerService` publishi
 
 The `Private` strategy is not ideal because the administrator becomes responsible for managing Kubernetes Service and possibly other resources to expose the IngressController, and OpenShift is unable to provide any management value (e.g. upgrades, monitoring).
 
-The `HostNetwork` typically does the job, but has significant operational drawbacks:
+The `HostNetwork` strategy typically does the job, but has significant operational drawbacks:
 
 1. HA rollouts require node headroom to host new versions. Because the IngressController pods use statically defined ports on the host network interface, new revisions of the pods can't be colocated on the same node, requiring either additional nodes for scale-up or a toleration for reducing availability for a scale-down prior to scale-up.
 2. IngressController shards require dedicated sets of nodes. Because of the static host port allocation prohibiting colocation, pods of discrete shards of IngressControllers can't live on the same node even when resources might allow it. This results in poor utilization.
@@ -78,6 +78,7 @@ type EndpointPublishingStrategy struct {
   NodePort *NodePortStrategy `json:"nodePort,omitempty"`
 }
 
+// NodePortStrategy has no additional configuration.
 type NodePortStrategy struct {
 }
 ```
@@ -109,24 +110,25 @@ spec:
     ingresscontroller.operator.openshift.io/deployment-ingresscontroller: default
 ```
 
-The Ingress Operator will ignore any updates to `.spec.ports[].nodePort` fields of the Service.
+**Important**: The Ingress Operator will ignore any updates to `.spec.ports[].nodePort` fields of the Service.
 
-### User Stories [optional]
-
-Detail the things that people will be able to do if this is implemented.
-Include as much detail as possible so that people can understand the "how" of
-the system. The goal here is to make this feel real for users without getting
-bogged down.
+### User Stories
 
 #### Story 1
 
-#### Story 2
+As an OpenShift administrator, I want to integrate the default ingresscontroller with a self-managed load balancer directly through node ports in a way that maximizes ingress utilization and ingresscontroller scheduling flexibility.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
-What are the caveats to the implementation? What are some important details that
-didn't come across above. Go in to as much detail as necessary here. This might
-be a good place to talk about core concepts and how they releate.
+One critical architectural detail of this proposal which demands scrutiny is the following constraint:
+
+* The Ingress Operator will ignore any updates to `.spec.ports[].nodePort` fields of the Service.
+
+By making explicit that users own the  `.spec.ports[].nodePort` field, no additional port configuration API should be required. By default, ports are allocated automatically, and if those automatically allocated ports are insufficient, users can update the managed `Service` resource directly.
+
+Because OpenShift isn't managing anything connected to the NodePort service, the ports used to expose the IngressController are irrelevant and can be left to the discretion of the administrator (constrained only by the cluster node port CIDR configuration).
+
+If in the future the `NodePort` strategy API gains a port configuration field, it should be possible in a future enhancement for the ingress operator to selectively assume ownership of `.spec.ports[].nodePort`.
 
 ### Risks and Mitigations
 
@@ -142,87 +144,7 @@ Consider including folks that also work outside your immediate sub-project.
 
 ### Test Plan
 
-**Note:** *Section not required until targeted at a release.*
-
-Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
-
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
-
-All code is expected to have adequate tests (eventually with coverage
-expectations).
-
-### Graduation Criteria
-
-**Note:** *Section not required until targeted at a release.*
-
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-- Maturity levels - `Dev Preview`, `Tech Preview`, `GA`
-- Deprecation
-
-Clearly define what graduation means.
-
-#### Examples
-
-These are generalized examples to consider, in addition to the aforementioned
-[maturity levels][maturity-levels].
-
-##### Dev Preview -> Tech Preview
-
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-
-##### Tech Preview -> GA 
-
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
-
-##### Removing a deprecated feature
-
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
-
-### Upgrade / Downgrade Strategy
-
-If applicable, how will the component be upgraded and downgraded? Make sure this
-is in the test plan.
-
-Consider the following in developing an upgrade/downgrade strategy for this
-enhancement:
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to keep previous behavior?
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to make use of the enhancement?
-
-### Version Skew Strategy
-
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
-
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
+This new API should be covered by e2e tests similar to those which exist already for the other publishing strategies.
 
 ## Implementation History
 
@@ -235,14 +157,8 @@ The idea is to find the best form of an argument why this enhancement should _no
 
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement.
+#### Add port configuration to HostNetwork API
 
-## Infrastructure Needed [optional]
+One alternative to a NodePort strategy is to add user-defined port configuration to the `HostNetwork` publishing strategy. Configurable ports would enable co-location of `HostNetwork` shards, but would not resolve co-location during rollout. Additionally, end-users would be responsible for port conflict resolution barring the specification of some  port allocation strategy (which is already solved by `NodePort`).
 
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
 
-Listing these here allows the community to get the process for these resources
-started right away.
