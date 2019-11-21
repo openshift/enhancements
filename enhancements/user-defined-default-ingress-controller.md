@@ -245,6 +245,7 @@ Some broad reasons this proposal might _not_ be acceptable are:
   unnecessary. For example, a [generic "internal" cluster status](https://github.com/openshift/enhancements/pull/25)
   could inform the Ingress Operator to use an internal load balancer by default
   for new IngressControllers, solving at least one use case.
+
   * Drawback: Requires new configuration API and the attendant enhancement
     proposal process.
   * Drawback: Solves use cases somewhat piecemeal; may require a new proposal
