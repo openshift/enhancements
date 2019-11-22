@@ -129,7 +129,7 @@ status:
   components:
    matchLabels:
       operators.coreos.com/operator:v2alpha1/plumbus: ""
-   refs:
+   resources:
     - kind: ClusterServiceVersion
       namespace: operators
       name: plumbus.v2.0.0-alpha
@@ -191,37 +191,37 @@ spec:
   - type: ManifestImage
     manifestImage: quay.io/howtheydoit/bus@sha256:def456...
 
- status:
-  serviceAccountRef:
-    name: plumbus-plan
-    namespace: olm
+status:
+ serviceAccountRef:
+   name: plumbus-plan
+   namespace: olm
 
-  conditions:
-  - kind: PendingApproval
-    status: True
-    reason: UnsatisfiedPermissions
-    message: pending approval of unsatisfied permissions
-    lastTransitionTime: "2019-09-16T22:26:29Z"
+ conditions:
+ - kind: PendingApproval
+   status: True
+   reason: UnsatisfiedPermissions
+   message: pending approval of unsatisfied permissions
+   lastTransitionTime: "2019-09-16T22:26:29Z"
 
-  resolved:
-  - type: ManifestImage
-    manifestImage: quay.io/howtheydoit/plum@sha256:abc123...
-  - type: ManifestImage
-    manifestImage: quay.io/howtheydoit/bus@sha256:def456...
+ resolved:
+ - type: ManifestImage
+   manifestImage: quay.io/howtheydoit/plum@sha256:abc123...
+ - type: ManifestImage
+   manifestImage: quay.io/howtheydoit/bus@sha256:def456...
 
-  pending:
-    permissions:
-    - apiGroups:
-      - ""
-      resources:
-      - secrets
-      verbs:
-      - get
-      - list
-      - create
-      - update
-      namespaces:
-      - operators
+ pending:
+   permissions:
+   - apiGroups:
+     - ""
+     resources:
+     - secrets
+     verbs:
+     - get
+     - list
+     - create
+     - update
+     namespaces:
+     - operators
 ```
 
 To simplify operator permission management, OLM will adopt a permission approval model similar to that used by Android and iOS, wherein:
@@ -282,7 +282,7 @@ status:
 
 **Note:** *Both namespace and cluster scoped resources are gathered using this label selector. Namespace scoped components are selected across all namespaces.*
 
-Once associated with an `Operator`, a component's reference will be listed in the `status.components.resource` field of that `Operator`. Component references will also be enriched with abnormal status conditions relevant to the operator. These conditions should follow [k8s status condition conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties) and in some cases may be copied directly from the component status.
+Once associated with an `Operator`, a component's reference will be listed in the `status.components.resources` field of that `Operator`. Component references will also be enriched with abnormal status conditions relevant to the operator. These conditions should follow [k8s status condition conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties) and in some cases may be copied directly from the component status.
 
 ```yaml
 status:
