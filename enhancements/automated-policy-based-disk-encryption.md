@@ -104,11 +104,7 @@ ACME Corp is only able to consider technologies that have encrypted disks, but t
 
 #### Story 2: Upgrades
 
-ACME Corp has a 4.1 cluster and is upgrading to 4.3 and wants to use the new encryption. The IT department simply:
-* Adds their Clevis machine config set
-* [updates the machine set](https://docs.openshift.com/container-platform/4.1/machine_management/creating-machineset.html)
-* Scales up new nodes
-* Scales down the old nodes
+Clusters upgraded from earlier versions will have older boot images and hence not support encryption.  Addressing this is deferred until we have a plan for [updating bootimages](https://github.com/openshift/os/issues/381).
 
 #### Story 3: Edge Clusters
 
