@@ -148,8 +148,8 @@ The encryption key rotation logic will be implemented using a distributed state 
 
 The distributed state machine is using the following data:
 
-1. keys named `key-<unisgned integer #>`, stored in `openshift-config-managed/<component>-encryption-<unsigned integer #>` secrets, and found via the label `encryption.apiserver.operator.openshift.io/component` for the respective component.
-2. the target encryption configuration stored in the `openshift-config-managed/encryption-config` secret as upstream [`apiserver.config.k8s.io/v1.EncryptionConfig`](https://github.com/kubernetes/kubernetes/blob/49891cc270019245a3d4796e84b33bf36d0bae08/staging/src/k8s.io/apiserver/pkg/apis/config/v1/types.go#L24) type (and synched to `<operand-target-namespace>/encryption-config`).
+1. keys named `key-<unisgned integer #>`, stored in `openshift-config-managed/encryption-key-<component>-<unsigned integer #>` secrets, and found via the label `encryption.apiserver.operator.openshift.io/component` for the respective component.
+2. the target encryption configuration stored in the `openshift-config-managed/encryption-config-<component>` secret as upstream [`apiserver.config.k8s.io/v1.EncryptionConfig`](https://github.com/kubernetes/kubernetes/blob/49891cc270019245a3d4796e84b33bf36d0bae08/staging/src/k8s.io/apiserver/pkg/apis/config/v1/types.go#L24) type (and synched to `<operand-target-namespace>/encryption-config`).
 3. `revision` label of running API server pods.
 4. the observed encryption configuration stored in the `<operand-target-namespace>/encryption-config-<revision>` secret.
 5. the encryption `APIServer` configuration defined above.
@@ -158,11 +158,11 @@ Pod revisions and key numbers are unrelated.
 
 We say that a key `key-<n>` is
 
-1. **created** - if its secret `openshift-config-managed/<component>-encryption-<n>` is created.
+1. **created** - if its secret `openshift-config-managed/encryption-key-<component>-<n>` is created.
 2. **configured read-key for resource GR** if it is defined as read-key for GR in the target encryption config secret. We call it **observed read-key for resource GR** if all API server instances are running with a corresponding config.
 3. **configured write-key for resource GR** if it is defined as write-key for GR in the target encryption config secret. We call it **observed write-key for resource GR** if all API server instances are running with a corresponding config.
-4. **migrated for resource GR** if the key secret `openshift-config-managed/<component>-encryption-<n>`'s annotation `encryption.operator.openshift.io/migrated-resources` lists the GR.
-5. **deleted** - if its secret `openshift-config-managed/<component>-encryption-<n>` is deleted.
+4. **migrated for resource GR** if the key secret `openshift-config-managed/encryption-key-<component>-<n>`'s annotation `encryption.operator.openshift.io/migrated-resources` lists the GR.
+5. **deleted** - if its secret `openshift-config-managed/encryption-key-<component>-<n>` is deleted.
 
 Each version of the operator has a fixed list of GRs that are supposed to be encrypted. All other GRs are **non-encrypted** for that operator. We say that such a resource of the former is **encrypted** if it is configured with at least a read-key in the target encryption config, and **to-be-encrypted** if it is not.
 
