@@ -18,6 +18,8 @@ the basis of a community roadmap.  Enhancements may be filed from anyone in the
 community, but require consensus from domain specific project maintainers in
 order to implement and accept into the release.
 
+For an overview of the whole project, see [ROADMAP.md](./ROADMAP.md)
+
 ## Is My Thing an Enhancement?
 
 A rough heuristic for an enhancement is anything that:
