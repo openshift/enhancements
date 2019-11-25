@@ -38,7 +38,7 @@ status: provisional
 
 ## Summary
 
-Starting with OpenShift 4.3, CoreOS boot images will be encryption-ready. On first boot either administator provided or automated policy will be used for the root disk encryption. Bootstrapping and node provisioning **MUST** fail when the policy cannot be applied unless the administrator has opted out. 
+Starting with OpenShift 4.3, Red Hat Enterprise Linux RHCOS (RHCOS) boot images will be encryption-ready. On first boot either administator provided or automated policy will be used for the root disk encryption. Bootstrapping and node provisioning **MUST** fail when the policy cannot be applied unless the administrator has opted out.
 
 ## Motivation
 
@@ -49,7 +49,7 @@ The security of data-at-rest is of chief concern for end-users, organizations an
 This enhancement is to provide policy based application of enterprise-grade encryption to the root filesystem.
 
 When an applicable policy is found:
-* CoreOS will be encrypted using standard AES-256 encryption at the OS-Level on first boot. Only FIPS 140-2 compliant ciphers, hashes and checksum algorithms will be used.
+* RHCOS will be encrypted using standard AES-256 encryption at the OS-Level on first boot. Only FIPS 140-2 compliant ciphers, hashes and checksum algorithms will be used.
 * OS-Level hooks will be included to support this feature
 * Automated boot/reboot handled by Clevis
 * User intervention MUST not be required to initialize or (re)boot a cluster.
@@ -84,7 +84,7 @@ If you are unfamiliar with some of these terms [please see an excellent Youtube 
 
 ## Proposal
 
-To provide policy-based encryption, CoreOS boot images will:
+To provide policy-based encryption, RHCOS boot images will:
 * Be encryption ready by having root filesystem housed within a bare LUKS container.
 * On first-boot, the root file system will be encrypted.
 * Automated unlocking of the root file sysystem will be policy based.
@@ -116,9 +116,9 @@ ACME Corp deploys sensitive bare-metal clusters to the edge. They build their cl
 
 ### Implementation Details/Notes/Constraints
 
-This proposal introduces dependencies on CoreOS and the the Installer only. The vast majority of the work will be done through operating system level hooks. OpenShift itself will entirely unaware that CoreOS is encrypted.
+This proposal introduces dependencies on RHCOS and the the Installer only. The vast majority of the work will be done through operating system level hooks. OpenShift itself will entirely unaware that RHCOS is encrypted.
 * A new Dracut module will be added. Upstream `cryptsetup` has a in-tree [Dracut Module for disk-reencryption](https://gitlab.com/cryptsetup/cryptsetup/tree/master/misc/dracut_90reencrypt).  The module will need to be extended to support Cleivs configurations.
-* CoreOS will need to add Clevis and it's dependencies. Clevis provides TPM2 and Tang support upon installation and provides the backbone for extending to additional key-stores.
+* RHCOS will need to add Clevis and it's dependencies. Clevis provides TPM2 and Tang support upon installation and provides the backbone for extending to additional key-stores.
 * Extend the Cloud CryptAgent to act as a Clevis Pin. This not a requirement for release. 
 * A new Linux systemd unit for handling application of new policies. 
 
@@ -126,7 +126,7 @@ This proposal introduces dependencies on CoreOS and the the Installer only. The 
 
 ### On Disk Changes
 
-The current partitioning for a CoreOS images is:
+The current partitioning for a RHCOS images is:
 ```
 Model: Unknown (unknown)
 Disk /dev/nbd0: 17.2GB
@@ -159,7 +159,7 @@ Number  Start   End     Size    File system  Name        Flags
 /dev/nbd0p4: UUID="1a7086bd-6514-457c-bc06-1215944f026d" TYPE="crypto_LUKS" PARTLABEL="root" PARTUUID="01317d04-4b83-463e-8762-5a07ec2499e6"
 ```
 
-CoreOS today uses `/dev/disk/by-label` for mounting the root-filesystem. Once the LUKS container `crypt-root` is opened, `/dev/disk/by-label/rootfs` will appear.
+RHCOS today uses `/dev/disk/by-label` for mounting the root-filesystem. Once the LUKS container `crypt-root` is opened, `/dev/disk/by-label/rootfs` will appear.
 
 
 As an example, partition 4 could be prepared by creating a well-known plain-text password (e.g. 'coreos') using the `cipher_null`. When `cipher_null` is used, any passphrase is acceptable.
@@ -409,7 +409,7 @@ TBD
 
 ### Graduation Criteria
 
-In order to be considered stable, CoreOS must:
+In order to be considered stable, RHCOS must:
 * boot completely
 * Support TPM2, Tang, and plaintext Clevis configurations
 * Optionally, support KMS Clevis configuration
