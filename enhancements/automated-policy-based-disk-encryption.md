@@ -49,7 +49,7 @@ The security of data-at-rest is of chief concern for end-users, organizations an
 This enhancement is to provide policy based application of enterprise-grade encryption to the root filesystem.
 
 When an applicable policy is found:
-* RHCOS will be encrypted using standard AES-256 encryption at the OS-Level on first boot. Only FIPS 140-2 compliant ciphers, hashes and checksum algorithms will be used.
+* The root filesystem will be encrypted using standard AES-256 encryption at the OS-Level on first boot. Only FIPS 140-2 compliant ciphers, hashes and checksum algorithms will be used.
 * OS-Level hooks will be included to support this feature
 * Automated boot/reboot handled by Clevis
 * User intervention MUST not be required to initialize or (re)boot a cluster.
@@ -62,7 +62,7 @@ The following are considered out of scope:
 * Encryption of installations using an incompatible boot image.
 * Changing Ignition.
 * Storing of keys in-Cluster.
-* Arbitrary LUKS configurations or disk-layouts.
+* Arbitrary LUKS configurations or disk-layouts (this means providing a separate `/var` partition via Ignition will not be encrypted)
 * Re-formatting disk devices or partitions.
 * Re-encryption of previously encrypted volumes.
 * Encryption of previously provisioned nodes that were not encrypted.
