@@ -270,6 +270,35 @@ openshift-apiserver:
 
 Note: configmaps don't seem to be security-sensitive, but we know that large users of etcd encryption do encrypt them because separation of sensitive and non-sensitive data is not always easy in practice.
 
+#### Backup/Restore
+
+A backup consists of the steps 
+
+1. backup the etcd snapshot
+2. backup the master file `/etc/kubernetes/static-pod-resources/kube-apiserver-pod-<REVISION>/secrets/encryption-config/encryption-config
+` and mounted via host mount as `/etc/kubernetes/static-pod-resources/secrets/encryption-config/encryption-config` in the kube-apiserver pod.
+
+A restore must put both parts of the backup in place in master file-system before starting up kube-apiserver. 
+
+Note: the restore of the openshift-apiserver encryption config will be automatic if both (1) and (2) match.
+
+The backup of (2) must happen shortly after (1) (before another write-key is set, which happens once per week): assume (1) happens
+
+a. outside of migration: then (2) can happen
+   
+   - before migration too (`-1-2-(migration)-`)
+   - during a just started migration (`-1-(-2-migration)-`)
+   - after a started migration (`-1-(migration)-2-`).
+   
+   In the first case, config and etcd snapshot perfectly match. In the second and third case, a new write-key is part of the config and the last read-key is preserved in the config as well allowing to read newly written data and untouched data.
+   
+b. during a migration: then (2) can happen
+   
+   - during the same migration (`-(-1-2-migration)-`)
+   - after the migration (`-(-1-migration)-2-`).
+   
+   In the first case, config and etcd snapshot perfectly match. In the second case, the current write-key and the previous read-key is preserved in the config, allowing to read migrated data and untouched data.
+
 ### Risks and Mitigations
 
 1. Deletion of an in-use encryption key will permanently break a cluster
