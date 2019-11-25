@@ -114,9 +114,9 @@ ACME Corp deploys sensitive bare-metal clusters to the edge. They build their cl
 
 This proposal introduces dependencies on RHCOS and the the Installer only. The vast majority of the work will be done through operating system level hooks. OpenShift itself will entirely unaware that RHCOS is encrypted.
 * A new Dracut module will be added. Upstream `cryptsetup` has a in-tree [Dracut Module for disk-reencryption](https://gitlab.com/cryptsetup/cryptsetup/tree/master/misc/dracut_90reencrypt).  The module will need to be extended to support Cleivs configurations.
-* RHCOS will need to add Clevis and it's dependencies. Clevis provides TPM2 and Tang support upon installation and provides the backbone for extending to additional key-stores.
+* RHCOS will need to add Clevis and its dependencies. Clevis provides TPM2 and Tang support upon installation and provides the backbone for extending to additional key-stores.
 * Extend the Cloud CryptAgent to act as a Clevis Pin. This not a requirement for release. 
-* A new Linux systemd unit for handling application of new policies. 
+* The initramfs will have a `coreos-encrypt.service` systemd unit implementing this.
 
 ## Design Details
 
