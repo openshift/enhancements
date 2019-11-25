@@ -2,8 +2,7 @@
 
 Enhancement tracking repository for OKD.
 
-Inspired by [Kubernetes
-enhancements](https://github.com/kubernetes/enhancements) process.
+Inspired by the [Kubernetes enhancement](https://github.com/kubernetes/enhancements) process.
 
 This repository provides a rally point to discuss, debate, and reach consensus
 for how OKD [enhancements](./enhancements) are introduced.  OKD combines
