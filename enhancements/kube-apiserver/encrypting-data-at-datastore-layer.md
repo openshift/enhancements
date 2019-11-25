@@ -190,7 +190,7 @@ A transition only takes place when all API servers have converged to the same re
 - 1->2: when a new **created** key is found.
 - 2->3: when all API servers have **observed the read-key for resource GR**.
 - 3->4: when all GR instances have been rewritten in etcd and the key is marked as **migrated** for that GR by the migration mechanism.
-- 4->5: when another write-key has reached (4).
+- 4->5: when the key is not the latest read key (one read key is always preserved in the config for easier backup/restore) and another write-key has reached (4).
 
 #### Controllers
 
