@@ -148,8 +148,8 @@ The encryption key rotation logic will be implemented using a distributed state 
 
 The distributed state machine is using the following data:
 
-1. keys named `key-<unisgned integer #>`, stored in `openshift-config-managed/<component>-encryption-<unsigned integer #>` secrets, and found via the label `encryption.apiserver.operator.openshift.io/component` for the respective component.
-2. the target encryption configuration stored in the `openshift-config-managed/encryption-config` secret as upstream [`apiserver.config.k8s.io/v1.EncryptionConfig`](https://github.com/kubernetes/kubernetes/blob/49891cc270019245a3d4796e84b33bf36d0bae08/staging/src/k8s.io/apiserver/pkg/apis/config/v1/types.go#L24) type (and synched to `<operand-target-namespace>/encryption-config`).
+1. keys named `key-<unisgned integer #>`, stored in `openshift-config-managed/encryption-key-<component>-<unsigned integer #>` secrets, and found via the label `encryption.apiserver.operator.openshift.io/component` for the respective component.
+2. the target encryption configuration stored in the `openshift-config-managed/encryption-config-<component>` secret as upstream [`apiserver.config.k8s.io/v1.EncryptionConfig`](https://github.com/kubernetes/kubernetes/blob/49891cc270019245a3d4796e84b33bf36d0bae08/staging/src/k8s.io/apiserver/pkg/apis/config/v1/types.go#L24) type (and synched to `<operand-target-namespace>/encryption-config`).
 3. `revision` label of running API server pods.
 4. the observed encryption configuration stored in the `<operand-target-namespace>/encryption-config-<revision>` secret.
 5. the encryption `APIServer` configuration defined above.
@@ -158,11 +158,11 @@ Pod revisions and key numbers are unrelated.
 
 We say that a key `key-<n>` is
 
-1. **created** - if its secret `openshift-config-managed/<component>-encryption-<n>` is created.
+1. **created** - if its secret `openshift-config-managed/encryption-key-<component>-<n>` is created.
 2. **configured read-key for resource GR** if it is defined as read-key for GR in the target encryption config secret. We call it **observed read-key for resource GR** if all API server instances are running with a corresponding config.
 3. **configured write-key for resource GR** if it is defined as write-key for GR in the target encryption config secret. We call it **observed write-key for resource GR** if all API server instances are running with a corresponding config.
-4. **migrated for resource GR** if the key secret `openshift-config-managed/<component>-encryption-<n>`'s annotation `encryption.operator.openshift.io/migrated-resources` lists the GR.
-5. **deleted** - if its secret `openshift-config-managed/<component>-encryption-<n>` is deleted.
+4. **migrated for resource GR** if the key secret `openshift-config-managed/encryption-key-<component>-<n>`'s annotation `encryption.operator.openshift.io/migrated-resources` lists the GR.
+5. **deleted** - if its secret `openshift-config-managed/encryption-key-<component>-<n>` is deleted.
 
 Each version of the operator has a fixed list of GRs that are supposed to be encrypted. All other GRs are **non-encrypted** for that operator. We say that such a resource of the former is **encrypted** if it is configured with at least a read-key in the target encryption config, and **to-be-encrypted** if it is not.
 
@@ -190,7 +190,7 @@ A transition only takes place when all API servers have converged to the same re
 - 1->2: when a new **created** key is found.
 - 2->3: when all API servers have **observed the read-key for resource GR**.
 - 3->4: when all GR instances have been rewritten in etcd and the key is marked as **migrated** for that GR by the migration mechanism.
-- 4->5: when another write-key has reached (4).
+- 4->5: when the key is not the latest read key (one read key is always preserved in the config for easier backup/restore) and another write-key has reached (4).
 
 #### Controllers
 
@@ -269,6 +269,35 @@ openshift-apiserver:
 1. `oauthauthorizetokens.oauth.openshift.io`
 
 Note: configmaps don't seem to be security-sensitive, but we know that large users of etcd encryption do encrypt them because separation of sensitive and non-sensitive data is not always easy in practice.
+
+#### Backup/Restore
+
+A backup consists of the steps 
+
+1. backup the etcd snapshot
+2. backup the master file `/etc/kubernetes/static-pod-resources/kube-apiserver-pod-<REVISION>/secrets/encryption-config/encryption-config
+` and mounted via host mount as `/etc/kubernetes/static-pod-resources/secrets/encryption-config/encryption-config` in the kube-apiserver pod.
+
+A restore must put both parts of the backup in place in master file-system before starting up kube-apiserver. 
+
+Note: the restore of the openshift-apiserver encryption config will be automatic if both (1) and (2) match.
+
+The backup of (2) must happen shortly after (1) (before another write-key is set, which happens once per week): assume (1) happens
+
+a. outside of migration: then (2) can happen
+   
+   - before migration too (`-1-2-(migration)-`)
+   - during a just started migration (`-1-(-2-migration)-`)
+   - after a started migration (`-1-(migration)-2-`).
+   
+   In the first case, config and etcd snapshot perfectly match. In the second and third case, a new write-key is part of the config and the last read-key is preserved in the config as well allowing to read newly written data and untouched data.
+   
+b. during a migration: then (2) can happen
+   
+   - during the same migration (`-(-1-2-migration)-`)
+   - after the migration (`-(-1-migration)-2-`).
+   
+   In the first case, config and etcd snapshot perfectly match. In the second case, the current write-key and the previous read-key is preserved in the config, allowing to read migrated data and untouched data.
 
 ### Risks and Mitigations
 
