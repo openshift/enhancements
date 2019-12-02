@@ -68,6 +68,8 @@ Reduce administrative overhead to run a cluster and ability to respond to failur
 
 - As a cluster admin I want to define different unhealthy criteria for pools of machines targeted for different workloads.
 
+- As a cluster admin I need to temporarily disable health-checking for a machine because of maintenace (e.g. required reboot of bare-metal host after OS update).
+
 The machine health checker (MHC) does a best effort to keep nodes healthy in the cluster.
 
 It provides a short-circuit mechanism and limits remediation when `maxUnhealthy` threshold is reached for a targeted pool. This is similar to what the node life cycle controller does for reducing the eviction rate as nodes goes unhealthy in a given zone. E.g a large number of nodes in a single zone are down because it's most likely a networking issue.
@@ -144,6 +146,7 @@ type target struct {
 }
 ```
 
+- Filter out targets with set `healthchecking.openshift.io/disabled: true` on the Machine object.
 - Calculate the number of unhealthy targets.
 - Compare current number against `maxUnhealthy` threshold and temporary short circuits remediation if the threshold is met.
 - Trigger remediation for unhealthy targets i.e request machines for deletion.

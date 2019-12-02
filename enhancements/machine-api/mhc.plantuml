@@ -4,6 +4,7 @@ start;
 repeat
   repeat
     :Watch MHCs;
+    :Filter out targets with disabled health-checking;
     :Find unhealthy targets: Need remediation or going towards timeout;
   repeat while (unhealthyTargets > maxUnhealthy) is (yes)
   -> no;
