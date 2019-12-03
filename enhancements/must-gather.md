@@ -88,6 +88,10 @@ To provide your own must-gather image, it must....
 3. Must produce a text `/must-gather/version` that indicates the product (first line) and the version (second line, `major.minor.micro.qualifier`),
    so that programmatic analysis can be developed.
 
+### local fall-back
+
+If the `oc adm must-gather` tool's pod cannot be scheduled or run on the cluster, the `oc adm must-gather` tool will, after a timeout, fall-back to running `oc adm inspect clusteroperators` locally. 
+
 ### User Stories [optional]
 
 #### Story 1
