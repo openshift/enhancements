@@ -30,7 +30,7 @@ superseded-by:
 
 We want certain CSI drivers such as AWS, GCE, Cinder, Azure and vSphere to be installable on Openshift, so as
 they can be used along-side in-tree drivers and when upstream enables migration flag for these volume types, their
-replacement CSI drivers can take over and none of storage features get affected.
+replacement CSI drivers can take over and none of the storage features get affected.
 
 ## Motivation
 
@@ -82,6 +82,19 @@ The configuration of CSI driver can be done via OLM UI if required and CSI drive
 
 Installation via OLM however means that, when we want to enable these CSI drivers as default drivers, they must be installed by default in Openshift installs.
 We further propose that - Cluster Storage Operator(https://github.com/openshift/cluster-storage-operator) could create subscriptions for these driver operators when drivers have to be installed by default.
+
+Expected workflow as optional driver (using EBS as an example):
+1. User finds EBS CSI driver in OLM and installs it.
+2. EBS CSI driver is installed and it creates relevant storageclass that user can use to provision CSI EBS volumes.
+
+Expected workflow as default driver:
+1. CVO installs cluster-storage-operator.
+2. cluster-storage-operator detects cloudprovider on which cluster is running(lets say EBS).
+3. cluster-storage-operator creates a subscription for EBS CSI driver using redhat operator source.
+3. cluster-storage-operator monitors progress of subscription and sets its own status as available when subscription is installed.
+
+cluster-storage-operator ensures that there is always an subscription for CSI driver in given cloudprovider environment.
+
 
 There are pros and cons to this approach and since this KEP is in its first iteration, we would like to seek feedback from other stakeholders.
 
