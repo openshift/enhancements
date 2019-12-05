@@ -107,4 +107,17 @@ Pros:
 Cons:
 1. If the CSI driver fails to deploy by the cluster-storage-operator, it will make the cluster-storage-operator degraded and as a result cluster will be degraded. This may not be optimal because initially we want CSI driver to be optional component.
 2. Supporting future configuration of drivers is tricky. Currently cluster-storage-operator is not a configurable operator. But enabling and disabling
-migration and making driver configurable will require desiging CRDs which could support these functions.
+migration and making driver configurable will require designing CRDs which could support these functions.
+
+### Installation with cloud providers
+
+Since all cloud providers are moving from in-tree to external cloud controllers (and external repositories), it may have sense to have one overarching "cloud-operator".
+The operator would check on which cloud it is and manage everything related to the cloud, i.e. install corresponding cloud controller and CSI driver.
+
+It can be installed either by OLM or CVO, with the same pros/cons as noted above.
+
+Extra pros:
+1. Single operator managing everything related to clouds, single status showing health of the cloud part of a cluster.
+
+Extra cons:
+1. Coordination between cluster infrastructure (or whoever manages cloud controllers) and storage teams.
