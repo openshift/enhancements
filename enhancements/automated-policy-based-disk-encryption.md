@@ -38,7 +38,7 @@ status: provisional
 
 ## Summary
 
-Starting with OpenShift 4.3, CoreOS boot images will be encryption-ready. On first boot either administator provided or automated policy will be used for the root disk encryption. Bootstrapping and node provisioning **MUST** fail when the policy cannot be applied unless the administrator has opted out. 
+Starting with OpenShift 4.3, Red Hat Enterprise Linux RHCOS (RHCOS) boot images will be encryption-ready. On first boot either administator provided or automated policy will be used for the root disk encryption. Bootstrapping and node provisioning **MUST** fail when the policy cannot be applied unless the administrator has opted out.
 
 ## Motivation
 
@@ -49,7 +49,7 @@ The security of data-at-rest is of chief concern for end-users, organizations an
 This enhancement is to provide policy based application of enterprise-grade encryption to the root filesystem.
 
 When an applicable policy is found:
-* CoreOS will be encrypted using standard AES-256 encryption at the OS-Level on first boot. Only FIPS 140-2 compliant ciphers, hashes and checksum algorithms will be used.
+* The root filesystem will be encrypted using standard AES-256 encryption at the OS-Level on first boot. Only FIPS 140-2 compliant ciphers, hashes and checksum algorithms will be used.
 * OS-Level hooks will be included to support this feature
 * Automated boot/reboot handled by Clevis
 * User intervention MUST not be required to initialize or (re)boot a cluster.
@@ -62,7 +62,7 @@ The following are considered out of scope:
 * Encryption of installations using an incompatible boot image.
 * Changing Ignition.
 * Storing of keys in-Cluster.
-* Arbitrary LUKS configurations or disk-layouts.
+* Arbitrary LUKS configurations or disk-layouts (this means providing a separate `/var` partition via Ignition will not be encrypted)
 * Re-formatting disk devices or partitions.
 * Re-encryption of previously encrypted volumes.
 * Encryption of previously provisioned nodes that were not encrypted.
@@ -84,7 +84,7 @@ If you are unfamiliar with some of these terms [please see an excellent Youtube 
 
 ## Proposal
 
-To provide policy-based encryption, CoreOS boot images will:
+To provide policy-based encryption, RHCOS boot images will:
 * Be encryption ready by having root filesystem housed within a bare LUKS container.
 * On first-boot, the root file system will be encrypted.
 * Automated unlocking of the root file sysystem will be policy based.
@@ -104,11 +104,7 @@ ACME Corp is only able to consider technologies that have encrypted disks, but t
 
 #### Story 2: Upgrades
 
-ACME Corp has a 4.1 cluster and is upgrading to 4.3 and wants to use the new encryption. The IT department simply:
-* Adds their Clevis machine config set
-* [updates the machine set](https://docs.openshift.com/container-platform/4.1/machine_management/creating-machineset.html)
-* Scales up new nodes
-* Scales down the old nodes
+Clusters upgraded from earlier versions will have older boot images and hence not support encryption.  Addressing this is deferred until we have a plan for [updating bootimages](https://github.com/openshift/os/issues/381).
 
 #### Story 3: Edge Clusters
 
@@ -116,83 +112,23 @@ ACME Corp deploys sensitive bare-metal clusters to the edge. They build their cl
 
 ### Implementation Details/Notes/Constraints
 
-This proposal introduces dependencies on CoreOS and the the Installer only. The vast majority of the work will be done through operating system level hooks. OpenShift itself will entirely unaware that CoreOS is encrypted.
+This proposal introduces dependencies on RHCOS and the the Installer only. The vast majority of the work will be done through operating system level hooks. OpenShift itself will entirely unaware that RHCOS is encrypted.
 * A new Dracut module will be added. Upstream `cryptsetup` has a in-tree [Dracut Module for disk-reencryption](https://gitlab.com/cryptsetup/cryptsetup/tree/master/misc/dracut_90reencrypt).  The module will need to be extended to support Cleivs configurations.
-* CoreOS will need to add Clevis and it's dependencies. Clevis provides TPM2 and Tang support upon installation and provides the backbone for extending to additional key-stores.
+* RHCOS will need to add Clevis and its dependencies. Clevis provides TPM2 and Tang support upon installation and provides the backbone for extending to additional key-stores.
 * Extend the Cloud CryptAgent to act as a Clevis Pin. This not a requirement for release. 
-* A new Linux systemd unit for handling application of new policies. 
+* The initramfs will have a `coreos-encrypt.service` systemd unit implementing this.
 
 ## Design Details
 
 ### On Disk Changes
 
-The current partitioning for a CoreOS images is:
-```
-Model: Unknown (unknown)
-Disk /dev/nbd0: 17.2GB
-Sector size (logical/physical): 512B/512B
-Partition Table: gpt
-Disk Flags:
+RHCOS bootimages shipped with OpenShift 4.1 and 4.2 mostly follow the specification for [Fedora CoreOS filesystem layout](https://github.com/coreos/fedora-coreos-tracker/issues/18).  As of the latest 4.3 development, this is even closer because the `metal` image has unified BIOS/UEFI.
 
-Number  Start   End     Size    File system  Name        Flags
- 1      1049kB  404MB   403MB   ext4         boot
- 2      404MB   537MB   133MB   fat16        EFI-SYSTEM  boot, esp
- 3      537MB   538MB   1049kB               BIOS-BOOT   bios_grub
- 4      538MB   17.2GB  16.6GB  xfs          rootfs
- ```
+This proposal calls for moving the root filesystem into a LUKS container by default, with a `null` cipher.  This will allow us to easily re-encrypt with a strong key, without implementing full support for [reconfiguring the root filesystem storage](https://github.com/coreos/fedora-coreos-tracker/issues/94).
 
-In this idea, partition 4, will move the root XFS filesystem into a LUKS container:
-```
-Model: Unknown (unknown)
-Disk /dev/nbd0: 17.2GB
-Sector size (logical/physical): 512B/512B
-Partition Table: gpt
-Disk Flags:
+As of the time of this writing, OpenShift 4.3 development has implemented this.
 
-Number  Start   End     Size    File system  Name        Flags
- 1      1049kB  404MB   403MB   ext4         boot
- 2      404MB   537MB   133MB   fat16        EFI-SYSTEM  boot, esp
- 3      537MB   538MB   1049kB               BIOS-BOOT   bios_grub
- 4      538MB   17.2GB  16.6GB               crypt-root
-
-# blkid /dev/nbd0p4
-/dev/nbd0p4: UUID="1a7086bd-6514-457c-bc06-1215944f026d" TYPE="crypto_LUKS" PARTLABEL="root" PARTUUID="01317d04-4b83-463e-8762-5a07ec2499e6"
-```
-
-CoreOS today uses `/dev/disk/by-label` for mounting the root-filesystem. Once the LUKS container `crypt-root` is opened, `/dev/disk/by-label/rootfs` will appear.
-
-
-As an example, partition 4 could be prepared by creating a well-known plain-text password (e.g. 'coreos') using the `cipher_null`. When `cipher_null` is used, any passphrase is acceptable.
-```
-# echo "coreos" > /tmp/disk.key
-# cryptsetup luksFormat \
-    -q \
-    --label="coreos_rootfs-default" \
-    --cipher=cipher_null \
-    --key-file=/tmp/disk.key \
-    /dev/nbd0p4
-```
-
-Perform the LUKS binding (example of future command)
-```
-# clevis-luks-bind \
-       -d /dev/nbd0p4 \
-      plaintext  '{"passphrase": "doesNotMatter"}'
-```
-
-During the first boot, a Dracut module will create a new random-key and then re-encrypt the device. For example:
-```
-# head -c 256 > new_pass
-# echo coreos |
-  cryptsetup-reencrypt \
-     --cipher="aes-cbc-essiv:sha256" \
-     --key-size=256 \
-     --progress-frequency=5 \
-     --key-file=new_pass
-     /dev/nbd0p4
-```
-
-In the above step, a new LUKS master key created, and each block is encrypted. After the encryption, an appropriate Clevis configuration will be applied and the `new_key` will be removed; future encryption operations will use existing Clevis configruation. The use of an ephemeral passphrase is needed for initial encryption and LUKS binding of the Clevis policy.
+On first boot, when a Clevis pin is provided, `cryptsetup-reencrypt` will be invoked.
 
 ### Policies
 
@@ -409,7 +345,7 @@ TBD
 
 ### Graduation Criteria
 
-In order to be considered stable, CoreOS must:
+In order to be considered stable, RHCOS must:
 * boot completely
 * Support TPM2, Tang, and plaintext Clevis configurations
 * Optionally, support KMS Clevis configuration
