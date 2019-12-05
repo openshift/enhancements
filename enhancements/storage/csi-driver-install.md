@@ -52,6 +52,7 @@ We would like to approach various goals of this KEP in different phases, because
 * Provide a way for AWS CSI driver installation starting from Openshift-4.4. Users could either optionally install it or CSI driver could be installed
 along with in-tree driver and users could use both.
 * Install CSI provided storageclass along with in-tree StorageClass.
+* *Install RHV CSI driver during installation of OCP 4.4 on RHV.* The driver is not optional. RHV is just another cloud provider for OCP.
 
 ### Phase-2 Goals
 
@@ -100,6 +101,16 @@ cloudprovider on which cluster is running and install necessary CSI driver by de
 
 It makes it simpler to enable these drivers by default when in-tree to CSI migration goes GA.
 
+Expected workflow:
+1. CVO installs cluster-storage-operator.
+2. cluster-storage-operator checks on which cloud it is, let's say it's AWS.
+3. cluster-storage-operator starts AWS EBS CSI driver operator and sets its cluster-storage-operator status to Available + Progressing. In future it could run also AWS EFS CSI driver operator.
+4. AWS EBS CSI driver operator installs EBS CSI driver and creates some status CR (clusteroperators.config.openshift.io again?) that it's Available + Progressing.
+5. AWS EBS CSI driver operator checks that the driver is fully installed, i.e. driver DaemonSet and Deployment have full set of replicas and sets its own status to Available.
+6. cluster-storage-operator monitors status of AWS EBS CSI driver operator and sets its own status to Available.
+
+User cannot uninstall the driver, therefore the AWS EBS CSI driver operator does not consume any CR (whose deletion would tell the operator to uninstall the driver).
+
 Pros:
 1. Simpler handling of in-tree to CSI migration.
 2. Drivers are automatically installed and admin can monitor progress.
@@ -108,6 +119,7 @@ Cons:
 1. If the CSI driver fails to deploy by the cluster-storage-operator, it will make the cluster-storage-operator degraded and as a result cluster will be degraded. This may not be optimal because initially we want CSI driver to be optional component.
 2. Supporting future configuration of drivers is tricky. Currently cluster-storage-operator is not a configurable operator. But enabling and disabling
 migration and making driver configurable will require designing CRDs which could support these functions.
+3. cluster-storage-operator needs to give RBAC permissions to the CSI operators. I.e. it must have all the permissions already. They may be quite powerful (privileged pods, edit PVs/PVCs) and may be slightly different for each CSI driver. Collection of these RBAC rules may be complicated, as they may be in multiple repos.
 
 ### Installation with cloud providers
 
