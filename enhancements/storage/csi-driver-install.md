@@ -106,6 +106,7 @@ Pros:
 Cons:
 1. When these CSI drivers have to be installed by default, this approach causes a coupling between CVO managed cluster-storage-operator and driver's operator.
 2. In general there are some concerns about OLM's lack of documentation and everyone's understanding of it.
+3. Not sure about disconected cluster installation / update.
 
 ### Installation via CVO
 
