@@ -38,7 +38,7 @@ status: provisional
 
 ## Summary
 
-Starting with OpenShift 4.3, Red Hat Enterprise Linux RHCOS (RHCOS) boot images will be encryption-ready. On first boot either administator provided or automated policy will be used for the root disk encryption. Bootstrapping and node provisioning **MUST** fail when the policy cannot be applied unless the administrator has opted out.
+Starting with OpenShift 4.3, Red Hat Enterprise Linux RHCOS (RHCOS) boot images will be "encryption ready".  Not encrypted by default, but operating system level encryption will be supported and configurable via Ignition.
 
 ## Motivation
 
@@ -46,15 +46,7 @@ The security of data-at-rest is of chief concern for end-users, organizations an
 
 ### Goals
 
-This enhancement is to provide policy based application of enterprise-grade encryption to the root filesystem.
-
-When an applicable policy is found:
-* The root filesystem will be encrypted using standard AES-256 encryption at the OS-Level on first boot. Only FIPS 140-2 compliant ciphers, hashes and checksum algorithms will be used.
-* OS-Level hooks will be included to support this feature
-* Automated boot/reboot handled by Clevis
-* User intervention MUST not be required to initialize or (re)boot a cluster.
-* Users will have the ability to opt-out default policy-based encryption or apply their own.
-* Failure to apply policies will prevent node bootstrap.
+This enhancement describes encryption of the root filesystem for Red Hat Enterprise Linux CoreOS.  Encryption is implemented with LUKS and Clevis.
 
 ### Non-Goals
 
@@ -84,15 +76,15 @@ If you are unfamiliar with some of these terms [please see an excellent Youtube 
 
 ## Proposal
 
-To provide policy-based encryption, RHCOS boot images will:
-* Be encryption ready by having root filesystem housed within a bare LUKS container.
-* On first-boot, the root file system will be encrypted.
-* Automated unlocking of the root file sysystem will be policy based.
+To provide encryption, RHCOS boot images will:
+* Be encryption ready by having root filesystem housed within a bare LUKS container configured with a `null` cipher and an empty passphrase.
+* On first-boot, if an encryption configuration is provided, the root filesystem will be encrypted.
+* Automated unlocking of the root file system.
 * Unless the user opts-out, best-practice policies will be enforced for the encryption of the root filesystem.
 
-On first boot, a Dracut module will encrypt the root-filesystem using a Clevis policy. Should the policy binding operation fail, the node bootstrap will fail also. 
+On first boot, a Dracut module will encrypt the root-filesystem using a Clevis policy.  Like all Ignition stages, if this operation fails, the system will not complete booting.
 
-The encryption step will take between 1-3 minutes, depending on the CPU and disk I/O. Afer first-boot, a Linux `systemd` service will provide for updating the policy. If an administrator wishes to disable encryption, they will have to reprovision the node.
+The encryption step can take several minutes, depending on the CPU and disk I/O.
 
 Clevis handles the automated unlocking of the root filesystem.
 
@@ -100,19 +92,15 @@ Clevis handles the automated unlocking of the root filesystem.
 
 #### Story 1: Requirements
 
-ACME Corp is only able to consider technologies that have encrypted disks, but they want to use Google Cloud. With OpenShift's 4.3 boot images, they can evaluate OpenShift.
+ACME Corp policy requires operating system level encryption to be used for their bare metal servers to preserve data confidentiality after hard drives are de-commissioned.  Their servers have TPM2 devices, and by configuring a binding of the root device to the TPM, the data on the hard drives in inaccessible after they are removed from the servers.  However, this is transparent to the system administrators and does not require them to manually enter a passphrase or key during boot.
 
 #### Story 2: Upgrades
 
 Clusters upgraded from earlier versions will have older boot images and hence not support encryption.  Addressing this is deferred until we have a plan for [updating bootimages](https://github.com/openshift/os/issues/381).
 
-#### Story 3: Edge Clusters
-
-ACME Corp deploys sensitive bare-metal clusters to the edge. They build their clusters with a Clevis profile using TPM2 and Tang. Evil Corp clandestinely steals a few of ACME Corp's nodes. Since ACME Corp's nodes are configured using NBDE encryption, no-data is compromised. ACME Corp avoids being shamed on the evening news and withstands the ire of the Board of Directors.
-
 ### Implementation Details/Notes/Constraints
 
-This proposal introduces dependencies on RHCOS and the the Installer only. The vast majority of the work will be done through operating system level hooks. OpenShift itself will entirely unaware that RHCOS is encrypted.
+This proposal introduces dependencies on RHCOS and the the Installer only. The vast majority of the work will be done through operating system level hooks.
 * A new Dracut module will be added. Upstream `cryptsetup` has a in-tree [Dracut Module for disk-reencryption](https://gitlab.com/cryptsetup/cryptsetup/tree/master/misc/dracut_90reencrypt).  The module will need to be extended to support Cleivs configurations.
 * RHCOS will need to add Clevis and its dependencies. Clevis provides TPM2 and Tang support upon installation and provides the backbone for extending to additional key-stores.
 * Extend the Cloud CryptAgent to act as a Clevis Pin. This not a requirement for release. 
@@ -132,70 +120,13 @@ On first boot, when a Clevis pin is provided, `cryptsetup-reencrypt` will be inv
 
 ### Policies
 
-The default policy will be selected based on the installation target.
-* AWS: AMIs are encrypted.  OS-level encryption not used.
-* Alibaba: TBD
-* Azure: TBD
-* Bare Metal: TPM2 required.
-* GCP: vTPM
-* IBM Cloud: TBD
+In order to aid backward compatibility, for OpenShift 4.3, operating-system level encryption will not be enabled by default.  Note that many IaaS (cloud) providers encrypt disks at the infrastructure level; for example, on AWS the OpenShift installer creates encrypted per-cluster AMIs.  On Google Compute Engine, disk images are automatically encrypted.
 
-Users will be able to define their own policy, or to opt out entirely. 
+However, this proposal aims to support operating system level encryption for bare metal, as well as cloud deployments that require encryption at the operating system level.
 
 ### Installer Support
 
-Basic Installer support is required. The Installer will select the default policy, or use a custom policy if defined in `install-config.yaml`. Policies will added as an Ignition file-payload using Clevis' JSON format. 
-
-Encryption policy will be defined in `install-config.yaml` under a new `os_encryption` section. For example:
-```
-fips: <true|false>
-os_encryption:
-   disable: <true|default=false>
-   enforce: <default=true|false> 
-   tpm2: <true|false>
-   tang:
-     - <URL>:<THUMBPRINT>
-     - <URL>:<THUMBPRINT>
-   user: <base64 Encoded clevis.json>
-```
-
-The Installer is not required to support all the possible configruations. The default configruation would be rendered as:
-```
-os_encryption:
-   disable: false
-   enforce: true
-```
-In this state, the Installer will user deliver a default policy based on the installation target. Setting `enforce: false` will allow for policy binding to fail and the nodes may be encrypted. If `disable: true` encryption will not be attempted at all.
-
-**NOTE**: there is no `disks` section today. The new top-level directive will be used in the future for the definition of disk-partitioning. 
-
-The following are examples of policies:
-* Tang: `{"url": "http://...", "thp": "<THUMBPRINT>"`}`
-* TPM2: `{}` Note: this is correct
-
-If both `tpm2: true` and a Tang stanza is found, rendered:
-```
-{"t": 2,
-   "pins": {
-    "tpm2": {},
-    "tang": [
-        {"url": "<URL>",
-         "thp": "<THUMBPRINT>"} ]
-   }
-}
-```
-
-The Installer is neither required to, nor expected to, validate a user-provided configuration.
-
-KMS pins will be provider specific. At this time, more research is required. It is anticipated that KMS pins be delivered using the `user` payload option.
-
-Example user provided payload:
-```
-disk:
-   encryption:
-      policy: user
-      user: U2VyaW91c2x5IHRoaXMgaXMgYSBkdW1iIGV4YW1wbGUK
-```
+At the time of this writing, encryption is configured by providing custom `MachineConfig` objects [to the installer](https://github.com/openshift/installer/blob/master/docs/user/customization.md#install-time-customization-for-machine-configuration).
 
 ### Dracut Module
 
@@ -265,7 +196,7 @@ The current [CoreOS Installer](https://github.com/coreos/coreos-installer/blob/m
 * saves parameters into /boot
 * reboots
 
-This design does not require any changes to the Installer. Once the CoreOS installer is done, the on-disk CoreOS will be booted and re-encrypted normally.
+This design does not require any changes to the CoreOS installer. Once the CoreOS installer is done, the on-disk CoreOS will be booted and re-encrypted normally.
 
 ### Risks and Mitigations
 
