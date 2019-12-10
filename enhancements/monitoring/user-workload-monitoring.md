@@ -187,7 +187,7 @@ See [5] and [6] for more details.
 #### Alerts/Recording Rules Aggregation
 
 Thanos Querier only solves aggregating the query path. For aggregating recording rules as well as alerting rules
-another component Thanos Ruler is deployed. This component is responsible for hosting user defined recording rules
+another component [Thanos Ruler](https://thanos.io/components/rule.md/) is deployed. This component is responsible for hosting user defined recording rules
 as well as alerting rules.
 
 Thanos Ruler is deployed via the user workload monitoring prometheus operator via a new CRD called ThanosRule.
