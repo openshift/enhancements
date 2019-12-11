@@ -43,6 +43,10 @@ their interfacing with Openshift. We need a way for users to use the CSI drivers
 to CSI driver. To support upstream design - we will also need a way for users to disable the migration and keep using in-tree driver, until
 in-tree code is finally removed.
 
+## Terminology
+
+CSI migration - seamless migration of in-tree volume plugins (AWS EBS, GCE PD, OpenStack Cinder, vSphere, Azure Disk, Azure File) to their CSI counterparts. In a cluster with CSI migration enabled for a particular plugin, Kubernetes translates all in-tree volume plugin calls into CSI under the hood, without users changing their PVs / StorageClasses. This enables removal of the cloud specific code and whole cloud providers out of kubernetes/kubernetes.
+
 ## Goals
 
 We would like to approach various goals of this KEP in different phases, because we do not expect to get everything right or done in phase-1.
@@ -57,7 +61,7 @@ along with in-tree driver and users could use both.
 ### Phase-2 Goals
 
 * Support installation of GCE, Cinder, vSphere, AzureDisk CSI drivers.
-* Provide a way for users to enable in-tree to CSI migration.
+* Provide a way for users to enable in-tree to CSI migration. It basically replaces whole in-tree volume plugin with a less tested CSI implementation. While it's not a strict requirement, we'd like to have the migration optional for at least one release.
 * Provide a way for users to disable in-tree to CSI migration.
 
 ### Phase-3 Goals
@@ -68,6 +72,9 @@ along with in-tree driver and users could use both.
 ## Non-Goals
 
 * This KEP does not attempt to design installation of third-party or partner CSI drivers.
+* Design of CSI migration enablement.
+  * A new operator will be needed to enable alpha features on API server, controller-manager and kubelets in the right order and with proper node draining before switching the gates.
+  * Right now it's implementation detail, this enhancement focuses on CSI driver installation. Proper enhancement will be created for CSI migration.
 
 ## Proposal
 
@@ -155,32 +162,40 @@ Extra pros:
 Extra cons:
 1. Coordination between cluster infrastructure (or whoever manages cloud controllers** and storage teams.
 
-## Goals and required testing
+## Timeline
+Bases on current upstream plans & assumptions.
 
-### OCP-4.5
-* We support installation of AWS & GCE CSI drivers alongside with in-tree drivers. User can use both drivers at the same time.
-* We do not support enabling or disabling the feature gate at this point.
+### OCP-4.5 (Kubernetes 1.18)
+* We support installation of AWS & GCE CSI drivers alongside with in-tree drivers. User can use both drivers at the same time. The default storage class is for in-treee volume plugin (unless cluster admin changes it).
+* We do not support enabling or disabling CSI migration feature gate at this point.
 
 #### Testing
-* CSI certification with driver and integration with openshift-tests.
-* All sidecars and Openshift should run tests with forked sidecars and forker driver.
+* E2e test(s) with our CSI certification suite with driver and integration with openshift-tests.
+* All sidecars and openshift/origin should run tests with forked OCP sidecars and forked OCP driver.
 
-### OCP-4.6
+### OCP-4.6 (Kubernetes 1.19)
 * Add support for Azure and Cinder CSI drivers.
-* We will allow users to enable or disable migration. Disabling the migration should not remove the driver.
+* We will allow users to enable or disable CSI migration. Disabling the migration should not remove the driver.
 
 #### Testing
-* Requires testing harness to edit/create a CR to enable migration and wait for migration to complete - kinda open question.
-* Will require a new prow job.
-* Disable the migration and check if everything works. How is upstream going to test this?
+* Run e2e tests with CSI migration on.
+  * Requires testing harness to edit/create a CR to enable migration and wait for migration to complete - kinda open question.
+  * Will require a new prow job.
+  * New test not available upstream: Run a StatefulSet with migration disabled (assuming it's the default). Enable the migration and check if the StatefulSet works. Disable the migration and check if it still works.
+    * How is upstream going to test this?
 * We should have scale tests that runs the tests at large scale (co-ordinate with perf team may be).
-   - Looking for signal about CSI driver deployment working at scale.
-   - Ensure that with somewhat increased number of watchers etc, things still keep working.
+   * Looking for signal about CSI driver deployment working at scale.
+   * Ensure that with somewhat increased number of watchers etc, things still keep working.
+* Long-running e2e tests.
+  * To make sure the CSI driver can sustain more than 1 hour of regular e2e tests.
 
-### OCP-4.7
+### OCP-4.7 (Kubernetes 1.20)
 
-* vSphere CSI driver installaion.
+* vSphere CSI driver installation.
+  * Current vSphere driver is not backward compatible. We expect some changes and stabilization upstream. Our gut feeling is +/- Kubernetes 1.20 timeframe.
 
-### OCP-4.8
+### OCP-4.8 (Kubernetes 1.21)
+Kubernetes 1.21 is current upstream target for removal of in-tree cloud providers and their volume plugins!
 
 * CSI drivers for their in-tree counterpart will become GA and CSI volumes will become default.
+* CSI migration is enabled and cannot be disabled (code for corresponding in-tree volume plugins and in-tree cloud providers doesn't event exist).
