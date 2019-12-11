@@ -49,7 +49,7 @@ We would like to approach various goals of this KEP in different phases, because
 
 ### Phase-1 Goals
 
-* Provide a way for AWS CSI driver installation starting from Openshift-4.4. Users could either optionally install it or CSI driver could be installed
+* Provide a way for AWS and GCE CSI driver installation . Users could either optionally install it or CSI driver could be installed
 along with in-tree driver and users could use both.
 * Install CSI provided storageclass along with in-tree StorageClass.
 * *Install RHV CSI driver during installation of OCP 4.4 on RHV.* The driver is not optional. RHV is just another cloud provider for OCP.
@@ -108,6 +108,13 @@ Cons:
 2. In general there are some concerns about OLM's lack of documentation and everyone's understanding of it.
 3. Not sure about disconected cluster installation / update.
 
+Open questions for OLM team:
+1. How will disconnected installs work?
+2. We need a way for a CSI driver operator to say version range of Openshift against which it is supported.
+3. Are channel to which user is subscribed to automatically upgraded when Openshift version is bumped? For example: If we install an operator from 4.2 channel on OCP-4.2 and then upgrade to OCP-4.3, is subscription updated to use channel 4.3? Or this should be handled via `skipRange`?
+4. Currently CVO operators can directly access cloudprovider configuration via configmap placed in `openshift-config` namespace, are we going to allow OLM operators to do the same? Do we need to do something to support CSI driver configuration?
+5. There are some concerns about unknown unknowns which we may discover later on and requires faster turn around time from OLM team. These issues can become blocker issues for storage team but storage team may not have necessary technical know-how to fix them and hence will require help from OLM team.
+
 ### Installation via CVO
 
 We are also considering if these 5 CSI drivers should be installed by default and managed via CVO. We are considering using cluster-storage-operator to detect
@@ -146,4 +153,34 @@ Extra pros:
 1. Single operator managing everything related to clouds, single status showing health of the cloud part of a cluster.
 
 Extra cons:
-1. Coordination between cluster infrastructure (or whoever manages cloud controllers) and storage teams.
+1. Coordination between cluster infrastructure (or whoever manages cloud controllers** and storage teams.
+
+## Goals and required testing
+
+### OCP-4.5
+* We support installation of AWS & GCE CSI drivers alongside with in-tree drivers. User can use both drivers at the same time.
+* We do not support enabling or disabling the feature gate at this point.
+
+#### Testing
+* CSI certification with driver and integration with openshift-tests.
+* All sidecars and Openshift should run tests with forked sidecars and forker driver.
+
+### OCP-4.6
+* Add support for Azure and Cinder CSI drivers.
+* We will allow users to enable or disable migration. Disabling the migration should not remove the driver.
+
+#### Testing
+* Requires testing harness to edit/create a CR to enable migration and wait for migration to complete - kinda open question.
+* Will require a new prow job.
+* Disable the migration and check if everything works. How is upstream going to test this?
+* We should have scale tests that runs the tests at large scale (co-ordinate with perf team may be).
+   - Looking for signal about CSI driver deployment working at scale.
+   - Ensure that with somewhat increased number of watchers etc, things still keep working.
+
+### OCP-4.7
+
+* vSphere CSI driver installaion.
+
+### OCP-4.8
+
+* CSI drivers for their in-tree counterpart will become GA and CSI volumes will become default.
