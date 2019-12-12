@@ -59,20 +59,20 @@ Upstream has chosen [addon](https://github.com/kubernetes/kubernetes/tree/master
 1. OCP ships a new operator for csi-snapshot-controller, say csi-snapshot-controller-operator.
   * This operator will be installed by CVO in all clusters.
     * We do not know in advance what CSI drivers will a cluster admin install and we want the cluster ready for snapshots.
-  * This operator will create Deployment with csi-snapshot-controller and report its status via standard `ClusterOperator` object.
-    * Using Deployment with leader election instead of upstream StatefulSet - leader election is significantly faster to run a new leader when a node with the current leader gets unavailable.
-    * TBD: Use DaemonSet on masters? The controller can read / write any VolumeSnapshot, VolumeSnapshotContent and PV objects in the cluster and read any PVC. Running it on masters may be more secure.
-  * Everything runs in namespace `openshift-csi-snapshot-controller`.
+  * This operator will create / update VolumeSnapshot, VolumeSnapshotContent and VolumeSnapshotClass CRDs.
+    * Vanilla copy of [upstream CRDs](https://github.com/kubernetes/kubernetes/tree/master/cluster/addons/volumesnapshots/crd) is used.
+  * This operator will create Deployment with csi-snapshot-controller
+    * Using Deployment with 3 replicas + leader election instead of upstream StatefulSet - leader election is significantly faster to run a new leader when a node with the current leader gets unavailable.
+    * Optionally, run the Deployment on masters using proper node selector + tolerations.
+  * This operator will report its status and status of the operand (Deployment) via standard `ClusterOperator` object.
+    * With RelatedObjects = the Deployment with the controller + `openshift-csi-snapshot-controller` namespace.
+  * Everything (the operator + the operand) runs in namespace `openshift-csi-snapshot-controller`.
   * Requires new github repo, openshift/csi-snapshot-controller-operator.
   * Requires new image.
   * No new CRD / CR is needed for the operator itself, the operator does the same on all clusters / clouds and does not need any configuration.
 
 2. OCP ships new image csi-snapshot-controller. Its source code is already available in github.com/openshift/csi-external-snapshotter, we only need an image.
-  * The component / image is called kubernetes-csi/snapshot-controller upstream, we add csi- prefix to repository and image names, who knows what other kinds of snapshotters there will be.
-
-3. OCP creates upstream snapshot CRDs via CVO.
-  * Created during (or before) csi-snapshot-controller-operator installation.
-  * We just copy [upstream CRDs](https://github.com/kubernetes/kubernetes/tree/master/cluster/addons/volumesnapshots/crd).
+  * The component / image is called kubernetes-csi/snapshot-controller upstream, we add csi- prefix to repository and image names, as we do with other repos / images from github.com/kubernetes-csi
 
 ### User Stories [optional]
 
