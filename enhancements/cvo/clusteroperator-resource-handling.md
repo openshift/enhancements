@@ -47,6 +47,8 @@ of the data required to resolve the issue via must-gather.
 ### Non-Goals
 
 1. create a new tool to gather data for failed installs after bootstrapping.
+2. taking responsibility for creating clusteroperator resources.  Individual operators are responsible for creating and maintaining
+   clusteroperator resources.
 
 ## Proposal
 
@@ -57,6 +59,21 @@ of the data required to resolve the issue via must-gather.
 3.  `clusteroperator` resources in the payload should all be created immediately regardless of where in the payload ordering
     they are located.  This ensures that they are always present during collection.
 4.  The CVO waiting logic on `clusteroperator` remains the same.
+
+### Specific Implementation Option
+
+This isn't a required mechanism for implementation, but it demonstrates how narrowly scoped the change is.
+ 1. create a new control loop with a clusteroperator lister, clusteroperator client, and a function to get the current payload.
+ 2. register event handlers on clusteroperator informer and time based every minute.
+ 3. sync loop reads the current payload.  for each clusteroperator in the payload
+    1. check lister to see if clusteroperator exists.  If so, continue to next clusteroperator.
+    2. create clusteroperator with empty spec and metadata.  If create fails, continue to next clusteroperator.
+    3. update clusteroperator/status with `.status.relatedResources` and the three required conditions in `Unknown` state.
+
+There is no need to modify the existing CVO logic because it's all valid.
+The individual operators are controllers so the presence of an unknown state doesn't matter.
+The new control loop doesn't fight with any individual operators because it's a create-only call with a one time status priming.
+If anything goes wrong with this control loop, the rest of the system continues to function as it does today. 
 
 ### Risks and Mitigations
 
