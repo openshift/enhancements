@@ -240,7 +240,7 @@ The list of rules and alerts is being filtered by prom-label-proxy based on the 
 To account for multi tenant clusters, a label of origin to each metric, recording, and alerting rule
 is added that comes from the user workloads discovery objects e.g. ServiceMonitor, PodMonitors, and PrometheusRules.
 To do this the Prometheus custom resource that declares the user workload Prometheus has the field `enforcedNamespaceLabel` set.
-It contains the key of the label, with the value being the namespace in which the object was created in.
+It contains the key of the label, with the value being the namespace in which the object was created.
 Besides the above mentioned new label, the prometheus-operator will
 also enforce applying that same label, to any relabelConfigs relabelings, this will always be added as a last label so
 it makes sure that only the last label is taken into account and no one can override the namespace label. For the
