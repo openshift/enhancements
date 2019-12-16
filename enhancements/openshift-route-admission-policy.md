@@ -21,13 +21,13 @@ superseded-by:
 
 # Route Admission Policy
 
-Administrators and application developers would like to be able to run applications in multiple namespaces with the same domain name. This is for organizations where multiple teams develop microservices that are exposed on the same hostname.
+Administrators and application developers would like to be able to run applications in multiple namespaces with the same domain name. This is for organizations where multiple teams develop microservices that are exposed on the same host name.
 
 With the OpenShift ingress operator, it is not possible to configure the router to accept routes from different namespaces, while the openshift-router supports this feature. 
 
 Customers on OpenShift 3 using `ROUTER_DISABLE_NAMESPACE_OWNERSHIP_CHECK` are blocked from upgrading to OpenShift 4 without this RFE or disabling the default router.
 
-This flag should only be enabled for clusters with trust between namespaces, otherwise a malicious user could take over a hostname. This should therefore be a opt-in feature.
+This flag should only be enabled for clusters with trust between namespaces, otherwise a malicious user could take over a host name. This should therefore be a opt-in feature.
 
 ## Release Signoff Checklist
 
@@ -47,13 +47,13 @@ See the [section][#route-admission-policies]
 
 ### Goals
 
-1. Define an API that allows the cluster administrator to enable sharing of hostnames across namespaces.
+1. Define an API that allows the cluster administrator to enable sharing of host names across namespaces.
 
 ### Non-Goals
 
 ## Proposal
 
-Add a new _RouteAdmissionPolicy_ field to the [IngressController API resource][https://github.com/openshift/api/blob/master/operator/v1/types_ingress.go] which allows administrators to configure how cross-namespace hostname claims should be handled by the IngressConroller.
+Add a new _RouteAdmissionPolicy_ field to the [IngressController API resource][https://github.com/openshift/api/blob/master/operator/v1/types_ingress.go] which allows administrators to configure how cross-namespace host name claims should be handled by the IngressConroller.
 
 ### User Stories
 
@@ -76,20 +76,20 @@ Addition of the new field requires no migration, as the default is not changing.
 ```go
 // RouteAdmissionPolicy is an admission policy for allowing new route claims.
 type RouteAdmissionPolicy struct {
-  // NamespaceOwnership describes how hostname claims across namespaces should
+  // NamespaceOwnership describes how host name claims across namespaces should
   // be handled. The default is Strict.
   NamespaceOwnership NamespaceOwnershipCheck
 }
 
 // NamespaceOwnershipCheck is a route admission policy component that describes
-// how hostname claims across namespaces should be handled.
+// how host name claims across namespaces should be handled.
 type NamespaceOwnershipCheck string
 
 const (
-    // InterNamespaceAllowedOwnershipCheck allows routes to claim subdomains of the same hostname across namespaces.
+    // InterNamespaceAllowedOwnershipCheck allows routes to claim subdomains of the same host name across namespaces.
     InterNamespaceAllowedOwnershipCheck NamespaceOwnershipCheck = "InterNamespaceAllowed"
 
-    // StrictNamespaceOwnershipCheck does not allow routes to claim the same hostname across namespaces.
+    // StrictNamespaceOwnershipCheck does not allow routes to claim the same host name across namespaces.
     StrictNamespaceOwnershipCheck NamespaceOwnershipCheck = "Strict"
 )
 
@@ -116,9 +116,9 @@ In case of rollbacks where AllowInterNamespaceClaims has been used, administrato
 
 ### Test Plan
 
-- Create two routes in two different namespaces with the same hostname, and ensure that they are not admitted by default (`empty` or `unset`).
+- Create two routes in two different namespaces with the same host name, and ensure that they are not admitted by default (`empty` or `unset`).
 
-- Create two routes in two different namespaces with the same hostname, and ensure that they are admitted when RouteAdmissionPolicy is configured to allow it.
+- Create two routes in two different namespaces with the same host name, and ensure that they are admitted when RouteAdmissionPolicy is configured to allow it.
 
 #### Migration
 
