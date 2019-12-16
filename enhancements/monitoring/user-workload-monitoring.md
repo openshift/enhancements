@@ -214,26 +214,53 @@ In order for alerts to work in this case the following systems need to be up:
 
 1. User workload Prometheus
 
+### Console integration
+
+##### Developer perspective
+
+Alerts/Recording Rules Aggregation implies that the user potentially choses whether recording or alerting rules are being deployed on the user workload Prometheus or Thanos Ruler.
+In order to retrieve the total list user workload recording rules or alerting rules a fan-out request has to be executed against user workload Prometheus and Thanos Ruler
+and the response has to be merged for final display. The fan-out/merge proxy logic is suggested to be implemented in the console backend (being a Go based proxy server).
+
+##### Administrator perspective
+
+The administrator perspective shows all recording and alerting rules originating both from the shipped cluster-monitoring stack as well as user defined rules in user workload Prometheus and Thanos Ruler.
+This is accomplished by a similar fan-out/merge logic as described for the developer perspective,
+this time covering three backends: 1. cluster-monitoring Prometheus 2. user-workload-monitoring Prometheus, and 3. Thanos Ruler.
+The fan-out/merge proxy logic is suggested to be implemented in the console backend (being a Go based proxy server).
+
 ### Tenancy
 
-#### Queries
-
-![](user-monitoring-request.png)
-
 Tenancy is achieved by leveraging the existing topology that is protecting cluster monitoring Prometheus already today.
-The kube-rbac-proxy sidecar will be deployed along with prom-label-proxy in the Thanos Querier Deployment.
+
+Here, kube-rbac-proxy sidecar is deployed along with prom-label-proxy in front of monitoring components that expose endpoints for querying metrics, recording rules, and alerts.
 
 For details about the tenancy model see the README for prom-label-proxy [2].
 
-#### Rules and Alerting tenancy
+#### Query endpoint
+
+![](user-monitoring-request.png)
+
+OpenShift console executes queries against `/query` endpoint of Thanos Querier to execute live queries. Queries are being enforced by injecting the requested namespace in flight.
+
+Access to this endpoint is gated by the permission to `get pods.metrics.k8s.io` in the requested namespace.
+
+#### Available Rules and declared alerts
 
 ![](user-monitoring-rules-request.png)
 
-OpenShift consoles executes queries against the `/rules` and `/alerts` endpoint of Prometheus and Alertmanager
-to retrieve a list alerts and rules. This endpoint is made tenant-aware by prom-label-proxy.
+OpenShift console executes queries against the `/rules` and `/alerts` endpoint of Prometheus and Thanos Ruler
+to retrieve a list of declared alerts and recording rules. Recording rules as well as alerting rules deployed via user workload monitoring are having enforced namespace labels set. The list of rules and alerts is being filtered by prom-label-proxy based on the tenant namespace label.
 
-Recording rules as well as alerting rules deployed via user workload monitoring are having enforced namespace labels set.
-The list of rules and alerts is being filtered by prom-label-proxy based on the tenant namespace label.
+Access to this endpoint is gated by the permission to `get prometheusrules.monitoring.coreos.com` in the requested namespace.
+
+#### AlertManager alerts and silences
+
+OpenShift console executes requests against the `/alerts` endpoint of Alertmanager to retrieve the list of currently firing alerts and to silence alerts. Firing alerts originating from user workload monitoring are having enforced namespace labels set. A user can only create and update silences as well as get alerts and silences filtered by the namespace label in flight.
+
+Access to read the list of currently firing alerts is gated by the permission to `get prometheusrules.monitoring.coreos.com` in the requested namespace.
+
+Access to post a new silence or update an existing silence is gated by the permission to `create prometheusrules.monitoring.coreos.com`.
 
 ### Multitenancy
 
