@@ -196,7 +196,7 @@ deploy its own Thanos Ruler instances in user namespaces.
 
 Thanos Ruler queries Thanos Querier to resolve recording and alerting rules.
 This does have implications on the availability of user defined alerts.
-In order for alerts to work the following systems need to be up:
+The following list enumerates critical components for alerts to work for this use case:
 
 1. Thanos Ruler
 2. Thanos Querier
@@ -208,9 +208,8 @@ higher availability can be achieved by hosting user defined alerting rules on th
 user workload Prometheus instances.
 
 This is enabled by setting a label on the PrometheusRule custom resource which is deployed by the user.
-Prometheus Operator then dispatches the deployment of this rule on the user workload monitoring Prometheus instance
-rather than on the Thanos Ruler instance.
-In order for alerts to work in this case the following systems need to be up:
+Prometheus Operator then dispatches the deployment of this rule on the user workload monitoring Prometheus instance rather than on the Thanos Ruler instance.
+For this use case just one system is critical for alerts to work:
 
 1. User workload Prometheus
 
