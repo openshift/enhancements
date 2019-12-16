@@ -23,9 +23,9 @@ superseded-by:
 
 Administrators and application developers would like to be able to run applications in multiple namespaces with the same domain name. This is for organizations where multiple teams develop microservices that are exposed on the same host name.
 
-With the OpenShift ingress operator, it is not possible to configure the router to accept routes from different namespaces, while the openshift-router supports this feature. 
+In OpenShift version 4, it's not possible using the IngressController or other API to enable cross namespace Route host name claims.
 
-Customers on OpenShift 3 using `ROUTER_DISABLE_NAMESPACE_OWNERSHIP_CHECK` are blocked from upgrading to OpenShift 4 without this RFE or disabling the default router.
+OpenShift version 3 supports this configuration through the `ROUTER_DISABLE_NAMESPACE_OWNERSHIP_CHECK` environment variable. Users of this feature are blocked from upgrading to OpenShift 4 unless they discontinue use of the feature.
 
 This flag should only be enabled for clusters with trust between namespaces, otherwise a malicious user could take over a host name. This should therefore be a opt-in feature.
 
@@ -138,11 +138,11 @@ The API defines `empty` equivalent to `Strict`, therefore all the clients will h
 
 ## Drawbacks
 
-This only implements one existing feature in the OpenShift router that existed in OpenShift 3.x, whereas there are many more configurations.
+This only implements one existing feature in the OpenShift Router that existed in OpenShift 3.x, whereas there are many more configurations.
 
 ## Alternatives
 
-- There are many environment variables exposed by the openshift-router which are not included in this proposal. An alternative proposal would be to allow setting environment variables directly through the ingress-controller CRD, but this would expose more feature in an uncontrolled manner. 
+- There are many environment variables exposed by the OpenShift Router which are not included in this proposal. An alternative proposal would be to allow setting environment variables directly through the ingress-controller CRD, but this would expose more feature in an uncontrolled manner.
 - This proposal implements an enum based [comment](https://github.com/openshift/api/pull/416#issuecomment-523658482), but there are only two values. This could be implemented as a boolean. There is an [existing PR](https://github.com/openshift/api/pull/416) with this implementation.
 
 ## Infrastructure Needed [optional]
