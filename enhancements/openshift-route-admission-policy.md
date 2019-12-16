@@ -23,11 +23,11 @@ superseded-by:
 
 Administrators and application developers would like to be able to run applications in multiple namespaces with the same domain name. This is for organizations where multiple teams develop microservices that are exposed on the same host name.
 
-In OpenShift version 4, it's not possible using the IngressController or other API to enable cross namespace Route host name claims.
+In OpenShift version 4, it is not possible to configure IngressControllers to accept routes from different namespaces and the same host name.
 
-OpenShift version 3 supports this configuration through the `ROUTER_DISABLE_NAMESPACE_OWNERSHIP_CHECK` environment variable. Users of this feature are blocked from upgrading to OpenShift 4 unless they discontinue use of the feature.
+OpenShift version 3 supports this through the `ROUTER_DISABLE_NAMESPACE_OWNERSHIP_CHECK` environment variable when configuring the OpenShift Router directly. Users of this feature are blocked from upgrading to OpenShift 4 unless they discontinue use of the feature.
 
-This flag should only be enabled for clusters with trust between namespaces, otherwise a malicious user could take over a host name. This should therefore be a opt-in feature.
+Allowing claims across namespaces should only be enabled for clusters with trust between namespaces, otherwise a malicious user could take over a host name. This should therefore be a opt-in feature.
 
 ## Release Signoff Checklist
 
