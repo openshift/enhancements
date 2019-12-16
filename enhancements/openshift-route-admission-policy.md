@@ -1,16 +1,18 @@
 ---
-title: Route Admission Policy
+title: route-admission-policy
 authors:
   - "@larhauga"
   - "@chlunde"
+  - "@ironcladlou"
 reviewers:
   - "@openshift/api-reviewers"
   - "@openshift/sig-network-edge"
   - "@ironcladlou"
+
 approvers:
   - "@openshift/api-approvers"
 creation-date: 2019-09-25
-last-updated: 2019-09-25
+last-updated: 2019-12-16
 status: implementable
 see-also:
 replaces:
@@ -51,23 +53,19 @@ See the [section][#route-admission-policies]
 
 ## Proposal
 
-Modify the existing `operator.openshift.io`'s custom resource [`IngressController`][ingress-controller-api] to include an enum field `RouteAdmissionPolicy` that can be set to `AllowInterNamespaceClaims` or `Strict`, where `Strict` is default.
-
+Add a new _RouteAdmissionPolicy_ field to the [IngressController API resource][https://github.com/openshift/api/blob/master/operator/v1/types_ingress.go] which allows administrators to configure how cross-namespace hostname claims should be handled by the IngressConroller.
 
 ### User Stories
 
-#### Default Route Admission Policy
-
-The default behavior is `Strict` which match the current behavior and is a secure default.
-
-
 ### Implementation Details/Notes/Constraints [optional]
 
-The openshift-ingress-operator will be able to use the enum `RouteAdmissionPolicy` to enable the environment variable `ROUTER_DISABLE_NAMESPACE_OWNERSHIP_CHECK` in the openshift-ingress router. This is enabled when `RouteAdmissionPolicy` is set to `AllowInterNamespaceClaims`.
+The [Ingress Operator](https://github.com/openshift/cluster-ingress-operator) will use `RouteAdmissionPolicy` to configure the environment variable `ROUTER_DISABLE_NAMESPACE_OWNERSHIP_CHECK` in the [OpenShift Router](https://github.com/openshift/router).
+
+The default behavior should be to disallow inter-namespace claims, which is secure and backwards compatible with existing IngressController resources.
 
 ### Risks and Mitigations
 
-Addition of the new field requires no migration, as the default matches the current configuration.
+Addition of the new field requires no migration, as the default is not changing.
 
 ## Design Details
 
@@ -77,16 +75,35 @@ Addition of the new field requires no migration, as the default matches the curr
 
 ```go
 // RouteAdmissionPolicy is an admission policy for allowing new route claims.
-type RouteAdmissionPolicy string
+type RouteAdmissionPolicy struct {
+  // NamespaceOwnership describes how hostname claims across namespaces should
+  // be handled. The default is Strict.
+  NamespaceOwnership NamespaceOwnershipCheck
+}
+
+// NamespaceOwnershipCheck is a route admission policy component that describes
+// how hostname claims across namespaces should be handled.
+type NamespaceOwnershipCheck string
 
 const (
-    // AllowInterNamespaceClaimsRouteAdmissionPolicy allows routes to claim the same hostname across namespaces.
-    AllowInterNamespaceClaimsRouteAdmissionPolicy RouteAdmissionPolicy = "AllowInterNamespaceClaims"
+    // InterNamespaceAllowedOwnershipCheck allows routes to claim subdomains of the same hostname across namespaces.
+    InterNamespaceAllowedOwnershipCheck NamespaceOwnershipCheck = "InterNamespaceAllowed"
 
-    // StrictRouteAdmissionPolicy does not allow routes to claim the same hostname across namespaces.
-    // This is the default behavior 
-    StrictRouteAdmissionPolicy RouteAdmissionPolicy = "Strict"
+    // StrictNamespaceOwnershipCheck does not allow routes to claim the same hostname across namespaces.
+    StrictNamespaceOwnershipCheck NamespaceOwnershipCheck = "Strict"
 )
+
+// (Existing fields omitted, only newly proposed fields are visible)
+type IngressController struct {
+  // RouteAdmission defines a policy for handling new route claims (for example,
+  // to allow or deny claims across namespaces).
+  //
+  // The default policy is (in YAML):
+  //
+  //     namespaceOwnership: Strict
+  //
+  RouteAdmission *RouteAdmissionPolicy
+}
 ```
 
 ### Migration of existing clusters
@@ -99,9 +116,9 @@ In case of rollbacks where AllowInterNamespaceClaims has been used, administrato
 
 ### Test Plan
 
-- Create two routes in two different namespaces with the same hostname, and ensure that they are not admitted by default (`empty` or `unset`) and `Strict`.
+- Create two routes in two different namespaces with the same hostname, and ensure that they are not admitted by default (`empty` or `unset`).
 
-- Create two routes in two different namespaces with the same hostname, and ensure that they are admitted when RouteAdmissionPolicy is set to `AllowInterNamespaceClaims`.
+- Create two routes in two different namespaces with the same hostname, and ensure that they are admitted when RouteAdmissionPolicy is configured to allow it.
 
 #### Migration
 
