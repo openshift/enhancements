@@ -53,7 +53,7 @@ See the [section][#route-admission-policies]
 
 ## Proposal
 
-Add a new _RouteAdmissionPolicy_ field to the [IngressController API resource][https://github.com/openshift/api/blob/master/operator/v1/types_ingress.go] which allows administrators to configure how cross-namespace host name claims should be handled by the IngressConroller.
+Add a new _RouteAdmissionPolicy_ field to the [IngressController API resource][https://github.com/openshift/api/blob/master/operator/v1/types_ingress.go] which allows administrators to configure how cross-namespace host name claims should be handled by the IngressController.
 
 ### User Stories
 
@@ -76,7 +76,7 @@ Addition of the new field requires no migration, as the default is not changing.
 ```go
 // RouteAdmissionPolicy is an admission policy for allowing new route claims.
 type RouteAdmissionPolicy struct {
-  // NamespaceOwnership describes how host name claims across namespaces should
+  // namespaceOwnership describes how host name claims across namespaces should
   // be handled. The default is Strict.
   NamespaceOwnership NamespaceOwnershipCheck
 }
@@ -86,7 +86,7 @@ type RouteAdmissionPolicy struct {
 type NamespaceOwnershipCheck string
 
 const (
-    // InterNamespaceAllowedOwnershipCheck allows routes to claim subdomains of the same host name across namespaces.
+    // InterNamespaceAllowedOwnershipCheck allows routes to claim different paths of the same host name across namespaces.
     InterNamespaceAllowedOwnershipCheck NamespaceOwnershipCheck = "InterNamespaceAllowed"
 
     // StrictNamespaceOwnershipCheck does not allow routes to claim the same host name across namespaces.
@@ -94,8 +94,8 @@ const (
 )
 
 // (Existing fields omitted, only newly proposed fields are visible)
-type IngressController struct {
-  // RouteAdmission defines a policy for handling new route claims (for example,
+type IngressControllerSpec struct {
+  // routeAdmission defines a policy for handling new route claims (for example,
   // to allow or deny claims across namespaces).
   //
   // The default policy is (in YAML):
