@@ -78,6 +78,13 @@ Addition of the new field requires no migration, as the default is not changing.
 type RouteAdmissionPolicy struct {
   // namespaceOwnership describes how host name claims across namespaces should
   // be handled. The default is Strict.
+  //
+  // Value must be one of:
+  //
+  // - Strict: do not allow routes to claim the same host name across namespaces.
+  // - InterNamespaceAllowed: allow routes to claim different paths of the same host name across namespaces.
+  //
+  // The default is Strict.
   NamespaceOwnership NamespaceOwnershipCheck
 }
 
@@ -116,7 +123,7 @@ In case of rollbacks where AllowInterNamespaceClaims has been used, administrato
 
 ### Test Plan
 
-- Create two routes in two different namespaces with the same host name, and ensure that they are not admitted by default (`empty` or `unset`).
+- Create two routes in two different namespaces with the same host name, and ensure that they are not admitted by default (`null` or unset).
 
 - Create two routes in two different namespaces with the same host name, and ensure that they are admitted when RouteAdmissionPolicy is configured to allow it.
 
