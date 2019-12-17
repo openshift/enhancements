@@ -72,7 +72,7 @@ Outgoing TLS probably needs similar configuration, but that configuration is dec
 
 ### Cluster-scoped Default Trust
 
-There will be a ConfigMap (FIXME: or should this be a new CRD under openshift/api?) named `default-ca-bundle` in the `openshift-config` namespace.
+There will be a ConfigMap named `default-ca-bundle` in the `openshift-config` namespace.
 The ConfigMap will have the following keys:
 
 * `ca-bundle.crt`, containing a PEM-encoded X.509 certificate bundle.

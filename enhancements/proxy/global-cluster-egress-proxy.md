@@ -13,7 +13,7 @@ approvers:
   - "@eparis"
   - "@knobunc"
 creation-date: 2019-10-04
-last-updated: 2019-11-24
+last-updated: 2019-12-17
 status: implemented
 see-also:
   - "https://github.com/openshift/enhancements/pull/22"
