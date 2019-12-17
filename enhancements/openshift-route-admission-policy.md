@@ -111,6 +111,12 @@ type IngressControllerSpec struct {
   //
   RouteAdmission *RouteAdmissionPolicy
 }
+
+// (Existing fields omitted, only newly proposed fields are visible)
+type IngressControllerStatus struct {
+  // routeAdmission is the route admission policy that is in effect.
+  RouteAdmission *RouteAdmissionPolicy
+}
 ```
 
 ### Migration of existing clusters
