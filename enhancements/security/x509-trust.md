@@ -94,7 +94,7 @@ For example, the registry operator uses [`trusted-ca`][registry-configmap-name] 
 Components that have distinct trust domains may define multiple ConfigMaps for each domain.
 For example, there may be one ConfigMap for proxy/egress TLS, and another ConfigMap for [S/MIME][smime] verification.
 To populate that trust bundle, the cluster administrator can set labels on the ConfigMap(s).
-For example, [the `config.openshift.io/inject-proxy-cabundle` label](../proxy/global-cluster-egress-proxy.md#implementation-detailsnotesconstraints-optional) asks for the current proxy trust bundle.
+For example, [the `config.openshift.io/inject-trusted-cabundle` label](../proxy/global-cluster-egress-proxy.md#implementation-detailsnotesconstraints-optional) asks for the current proxy trust bundle.
 
 The cluster-version operator (CVO) [merges ConfigMaps][cluster-version-operator-EnsureConfigMap] by [clobbering any manifest-defined data][cluster-version-operator-mergeMap], [labels, and annotations][cluster-version-operator-EnsureObjectMeta].
 Data keys, labels, and annotations not defined in the manifest are ignored.
@@ -139,7 +139,7 @@ FIXME
 The network operator supports copying trust bundles between ConfigMaps based on labels on the target ConfigMaps.
 
 * [The `config.openshift.io/inject-default-cabundle` label](../proxy/global-cluster-egress-proxy.md#implementation-detailsnotesconstraints-optional) asks for the current [cluster-scoped default trust bundle](#cluster-scoped-default-trust).
-* [The `config.openshift.io/inject-proxy-cabundle` label](../proxy/global-cluster-egress-proxy.md#implementation-detailsnotesconstraints-optional) asks for the current proxy trust bundle.
+* [The `config.openshift.io/inject-trusted-cabundle` label](../proxy/global-cluster-egress-proxy.md#implementation-detailsnotesconstraints-optional) asks for the current proxy trust bundle.
     The network operator will fall back to [the cluster-scoped default trust bundle](#cluster-scoped-default-trust) if no proxy-specific trust bundle has been configured.
 
 If multiple labels are set `true`, the network operator will provide the union of the requested trust bundles.
@@ -169,21 +169,6 @@ FIXME
 ### Graduation Criteria
 
 FIXME
-
-#### Removing a deprecated feature
-
-Currently cluster components set `config.openshift.io/inject-trusted-cabundle` to receive the _proxy_ bundle, not [the cluster-scoped default trust bundle](#cluster-scoped-default-trust).
-And currently nothing populates `default-ca-bundle` (the installer uses [`user-ca-bundle`][installer-configmap-name]).
-So a hard cut to the approach described in this enhancement would remove configured additional trust from proxy-consuming components.
-This enhancement deprecates the `config.openshift.io/inject-trusted-cabundle` label in favor of the [new labels](#implementation-detailsnotesconstraints).
-The expected migration path is:
-
-1. The network operator learns about the new labels.
-    `config.openshift.io/inject-trusted-cabundle` is treated as a synonym for `config.openshift.io/inject-proxy-cabundle`.
-2. Existing proxy consumers migrate to `config.openshift.io/inject-proxy-cabundle`.
-3. The network operator adds an alert on any ConfigMaps with the `config.openshift.io/inject-trusted-cabundle` label, to notify cluster administrators about the deprecation.
-    This doesn't have to be an alert, it could happen through [the insights operator][insights-operator] instead.
-4. After a suitable deprecation period, the `config.openshift.io/inject-trusted-cabundle` handling is removed from the network operator.
 
 ### Version Skew Strategy
 
