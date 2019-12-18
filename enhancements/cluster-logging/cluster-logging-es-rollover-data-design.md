@@ -60,7 +60,7 @@ This change will not:
 
 ## Proposal
 
-This proposal introduces two specific changes to to achieve its goals:
+This proposal introduces two specific changes to achieve its goals:
 
 * Co-located data in a few opinionated indices
 * Index management using [rollover index API](https://www.elastic.co/guide/en/elasticsearch/reference/6.3/indices-rollover-index.html)
@@ -76,7 +76,7 @@ This policy is passed to the Elasticsearch CR for the `elasticsearch-operator` t
 #### Assumptions
 
 * ClusterLogging will expose the minimal needed set of the Elasticsearch CR rollover policy management API in order to achieve the previously described goals
-* ClusterLogging will manage rollover as Elasticsearch index management is either restricted by Elastic licensing or not available in the opensource version of OpenDistro
+* ClusterLogging will manage rollover as Elasticsearch index management is either restricted by Elastic licensing or not available in the opensource version of OpenDistro (OpenDistro [Index Management](https://github.com/opendistro-for-elasticsearch/index-management/releases/tag/alpha-rc1) requires Elasticsearch 7.x and higher)
 * Security will be addressed by using the OpenDistro security plugin and document level security (DLS). Details TBD.
 
 #### Data Model
