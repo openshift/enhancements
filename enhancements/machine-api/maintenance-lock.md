@@ -3,17 +3,29 @@ title: maintenance-lock
 authors:
   - "@beekhof"
 reviewers:
-  - @bison
-  - @enxebre
-  - @michaelgugino
-  - @derekwaynecarr
+  - "@bison"
+  - "@enxebre"
+  - "@michaelgugino"
+  - "@derekwaynecarr"
+  - "@crawford"
+  - "@eparis"
+  - "@rphillips"
+  - "@runcom"
 approvers:
-  - TBD
+  - "@bison"
+  - "@enxebre"
+  - "@michaelgugino"
+  - "@derekwaynecarr"
+  - "@crawford"
+  - "@eparis"
+  - "@rphillips"
+  - "@runcom"
 creation-date: 2019-12-06
 last-updated: 2019-12-09
 status: provisional
 see-also:
   - https://github.com/kubernetes/enhancements/pull/1080
+  - https://github.com/kubernetes/enhancements/pull/1411
 replaces:
   - https://github.com/kubevirt/node-maintenance-operator
 superseded-by:
@@ -24,15 +36,15 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
+- [x] Enhancement is `implementable`
+- [x] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Open Questions [optional]
 
-1. Should UIs/consoles set the annotation directly, or signal for an operator to do so by creating a CR?
+None
 
 ## Summary
 
@@ -94,32 +106,42 @@ impossible but certainly error prone.
 
 ## Proposal
 
-UIs and consoles wishing to put a node into maintenance create a
-`lifecycle.openshift.io/maintenance` annotation for a node.
+Utilize the existing `Lease` built-in API in the API group
+`coordination.k8s.io` to define a new per-node `Lease` object with Name equal
+to Node name in a newly created dedicated namespace. [Further
+details](https://github.com/kubernetes/enhancements/pull/1411)
 
-Operator initiated (via UIs, consoles, or from the node) software reboots or
-hardware power events for the annotated node will be respected but the system
-will avoid taking automated actions that would require them.
+Components performing a invasive and/or destructive actions much aquire the
+per-node lease in advance to avoid software updates, reboots, or hardware power
+events while another component is performing a similar action.
 
-This means the MCO will refuse to update the software or configuration on the
-annotated node, and machine healthcheck will refuse to take any remediation
-actions for the annotated node.
+Invasive actions include anything that modifes the node's operating system or
+it's configuration (eg. MCO/MCD).  Destructive actions include anything that
+result in the node being deleted (autoscaling, machine healthcheck) or change
+power state.
 
-Additionally, on metal3 based deployments, there is a new Metal3 Maintenance
-Operator that:
+On metal3 based deployments, a `lifecycle.openshift.io/maintenance` node
+annotation will be created for UIs and consoles to use to put a node into
+maintenance.
 
-- watches for the annotation to be added
+Additionally, we define a new Metal3 Maintenance Operator that:
+
+- watches for the `lifecycle.openshift.io/maintenance` annotation to be added
+- acquires the per-node lease
 - cordons the node
 - uses the drain library to move workloads elsewhere
+- reboots the machine at the end of the maintenance window
 
 In the future, cloud platforms may create a different controller to peform
 additional tasks based on the annotation if the need arises.
 
 To exit maintenance mode, the admin can programatically remove the annotation
-or use a UI/console.  This signals to the Metal3 Maintenance Operator that any
-in-flight drain operations should be cancelled and the the node should be
-uncordoned.
+or use a UI/console.  This signals to the Metal3 Maintenance Operator that:
 
+- any in-flight drain operations should be cancelled,
+- the the node should be uncordoned,
+- the node rebooted,
+- the lease released
 
 ### User Stories [optional]
 
