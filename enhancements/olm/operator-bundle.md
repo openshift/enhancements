@@ -77,9 +77,6 @@ The focus of this user story is to define a standard to store, transmit, inspect
 We use the following labels to annotate the operator bundle image.
 * The label `operators.operatorframework.io.bundle.manifests.v1` reflects the path in the image to the directory that contains the operator manifests.
 * The label `operators.operatorframework.io.bundle.metadata.v1` reflects the path in the image to the directory that contains metadata files about the bundle.
-* The `v1.manifests` and `v1.metadata` labels imply the bundle type:
-    * The value `v1.manifests` implies that this bundle contains operator manifests.
-    * The value `v1.metadata` implies that this bundle has operator metadata.
 * The label `operators.operatorframework.io.bundle.mediatype.v1` reflects the media type or format of the operator bundle. It could be helm charts, plain kubernetes manifests etc.
 * The label `operators.operatorframework.io.bundle.package.v1` reflects the package name of the bundle.
 * The label `operators.operatorframework.io.bundle.channels.v1` reflects the list of channels the bundle is subscribing to when added into an operator registry
@@ -171,12 +168,12 @@ FROM scratch
 LABEL operators.operatorframework.io.bundle.mediatype.v1=registry+v1
 LABEL operators.operatorframework.io.bundle.manifests.v1=manifests/
 LABEL operators.operatorframework.io.bundle.metadata.v1=metadata/
-LABEL operators.operatorframework.io.bundle.package.v1: "etcd"
-LABEL operators.operatorframework.io.bundle.channels.v1: "alpha,stable"
-LABEL operators.operatorframework.io.bundle.channel.default.v1: "stable"
+LABEL operators.operatorframework.io.bundle.package.v1="etcd"
+LABEL operators.operatorframework.io.bundle.channels.v1="alpha,stable"
+LABEL operators.operatorframework.io.bundle.channel.default.v1="stable"
 
 ADD ./test/*.yaml /manifests/
-ADD test/annotations.yaml /metadata/annotations.yaml
+ADD ./test/metadata/annotations.yaml /metadata/annotations.yaml
 ```
 
 Below is the directory layout of the operator bundle inside the image.
@@ -210,13 +207,18 @@ A tool can inspect an operator bundle image to determine the bundle type and its
 ```bash
 # inspect the type of the operator bundle.
 docker image inspect quay.io/test/test-operator:v1 | \
-jq '.[0].Config.Labels["operators.operatorframework.io.bundle.resources"]'
+jq '.[0].Config.Labels["operators.operatorframework.io.bundle.manifests.v1"]'
 
-"manifests+metadata"
+"manifests/"
+
+docker image inspect quay.io/test/test-operator:v1 | \
+jq '.[0].Config.Labels["operators.operatorframework.io.bundle.metadata.v1"]'
+
+"metadata/"
 
 # inspect the format of the operator bundle.
 docker image inspect quay.io/test/test-operator:v1 | \
-jq '.[0].Config.Labels["operators.operatorframework.io.bundle.mediatype"]'
+jq '.[0].Config.Labels["operators.operatorframework.io.bundle.mediatype.v1"]'
 
 "registry+v1"
 ```
