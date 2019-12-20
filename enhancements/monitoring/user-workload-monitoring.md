@@ -207,7 +207,7 @@ If there is no need to aggregate user defined metrics and cluster level metrics 
 higher availability can be achieved by hosting user defined alerting rules on the
 user workload Prometheus instances.
 
-This is enabled by setting a label on the PrometheusRule custom resource which is deployed by the user.
+This is enabled by setting the label `openshift.io/cluster-monitoring-target: "prometheus"` on the PrometheusRule custom resource which is deployed by the user.
 Prometheus Operator then dispatches the deployment of this rule on the user workload monitoring Prometheus instance rather than on the Thanos Ruler instance.
 For this use case just one system is critical for alerts to work:
 
@@ -217,8 +217,8 @@ For this use case just one system is critical for alerts to work:
 
 ##### Developer perspective
 
-Alerts/Recording Rules Aggregation implies that the user potentially choses whether recording or alerting rules are being deployed on the user workload Prometheus or Thanos Ruler.
-In order to retrieve the total list user workload recording rules or alerting rules a fan-out request has to be executed against user workload Prometheus and Thanos Ruler
+Alerts/Recording Rules Aggregation implies that the user potentially chooses whether recording or alerting rules are being deployed on the user workload Prometheus or Thanos Ruler.
+In order to retrieve the full list of user workload recording alerting and recording rules a fan-out request has to be executed against user workload Prometheus and Thanos Ruler
 and the response has to be merged for final display. The fan-out/merge proxy logic is suggested to be implemented in the console backend (being a Go based proxy server).
 
 ##### Administrator perspective
@@ -232,13 +232,20 @@ The fan-out/merge proxy logic is suggested to be implemented in the console back
 
 Tenancy is achieved by leveraging the existing topology that is protecting cluster monitoring Prometheus already today.
 
-Here, kube-rbac-proxy sidecar is deployed along with prom-label-proxy in front of monitoring components that expose endpoints for querying metrics, recording rules, and alerts.
+![](user-monitoring-request.png)
+
+Here, kube-rbac-proxy sidecar is deployed along with prom-label-proxy in front of monitoring components that expose endpoints for querying metrics, recording rules, alerts, and silences.
+
+![](user-monitoring-rbac.png)
+
+kube-rbac-proxy enforces RBAC constraints by verifying the request in flight.
+It uses a tenancy request parameter (namespace) and verifies the token in flight if the bearer token in flight has the appropriate permissions to access a configured resource given the HTTP verb in flight.
+Details on which resources and verbs are being checked are given below and are summarized in the picture above.
 
 For details about the tenancy model see the README for prom-label-proxy [2].
 
-#### Query endpoint
 
-![](user-monitoring-request.png)
+#### Query endpoint
 
 OpenShift console executes queries against `/query` endpoint of Thanos Querier to execute live queries. Queries are being enforced by injecting the requested namespace in flight.
 
@@ -246,14 +253,12 @@ Access to this endpoint is gated by the permission to `get pods.metrics.k8s.io` 
 
 #### Available Rules and declared alerts
 
-![](user-monitoring-rules-request.png)
-
 OpenShift console executes queries against the `/rules` and `/alerts` endpoint of Prometheus and Thanos Ruler
 to retrieve a list of declared alerts and recording rules. Recording rules as well as alerting rules deployed via user workload monitoring are having enforced namespace labels set. The list of rules and alerts is being filtered by prom-label-proxy based on the tenant namespace label.
 
 Access to this endpoint is gated by the permission to `get prometheusrules.monitoring.coreos.com` in the requested namespace.
 
-#### AlertManager alerts and silences
+#### Alertmanager alerts and silences
 
 OpenShift console executes requests against the `/alerts` endpoint of Alertmanager to retrieve the list of currently firing alerts and to silence alerts. Firing alerts originating from user workload monitoring are having enforced namespace labels set. A user can only create and update silences as well as get alerts and silences filtered by the namespace label in flight.
 
