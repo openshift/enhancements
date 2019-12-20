@@ -88,7 +88,7 @@ This might be accomplished with just one of the operators, that would need
 a little more investigation.
 
 Replace the operator's code with a new Job executable that will perform the
-deletion of the objects associated with the Service Catalog. The following items
+deletion of the apiserver associated with the Service Catalog. The following items
 would be removed:
 
 - ClusterServiceClasses
@@ -126,12 +126,8 @@ There is also an alternative to this approach in the Alternatives section below.
 
 #### Story 3
 
-Remove Service Catalog and the brokers from the release payload
-
 1. Keep the Service Catalog _Operators_ in the OpenShift 4.4 release payload
 1. Remove the Service Catalog from the OpenShift 4.4 release payload (ART)
-1. Remove the Ansible Service Broker from the OpenShift 4.4 release payload (ART)
-1. Remove the Template Service Broker from the OpenShift 4.4 release payload (ART)
 
 #### Story 4
 
@@ -215,7 +211,9 @@ N/A
 
 The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
 
-* what about Custom Broker installed, how will those be handled?
+- what about Custom Broker installed, how will those be handled?
+
+These Custom Brokers will be orphaned and remain running.
 
 ## Alternatives
 
