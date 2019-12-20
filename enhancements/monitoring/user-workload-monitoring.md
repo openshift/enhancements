@@ -51,7 +51,8 @@ This effectively means the following custom resources:
 - [PodMonitor](https://github.com/openshift/prometheus-operator/blob/master/Documentation/api.md#podmonitor)
 - [PrometheusRule](https://github.com/openshift/prometheus-operator/blob/master/Documentation/api.md#prometheusrule)
 
-Allow the correlation between app and cluster centric metrics.
+Allow the correlation between app and cluster centric metrics not only when querying metrics
+but also inside user defined alerts and recording rules.
 
 ### Non-Goals
 
@@ -71,7 +72,9 @@ as well as the newly added Prometheus servers.
 
 The cluster Prometheus Operator (PO) continues to operate the cluster-level Prometheus.
 We will continue to use a centralized Alertmanager (A) cluster.
-The existing Alertmanager cluster will aggregate both user workload alerts as well as cluster alerts. Tenancy will be achieved by forcing specific labels onto metrics and alerts by which the central Alertmanager config can route similarly to how tenancy is achieved at the query level (see below).
+The existing Alertmanager cluster will aggregate both user workload alerts as well as cluster alerts.
+Tenancy will be achieved by forcing specific labels onto metrics and alerts
+by which the central Alertmanager config can route similarly to how tenancy is achieved at the query level (see below).
 
 Querying data from a single, multi-tenant interface is done using the Thanos Querier (TQ) component.
 Tenancy is enforced at the prometheus query layer. This is achieved by leveraging the existing topology using kube-rbac-proxy [1] and prom-label-proxy [2].
@@ -125,6 +128,14 @@ As a member of the operations tenant, I’d like to make sure that one tenant do
 
 As a member of the operations team, I'd like the ability for application developers to access container cpu and memory usage metrics.
 
+### US9
+
+As a service owner, I'd like to configure alerting rules or recording rules for my service that correlate both cluster as well as user defined metrics.
+
+### US10
+
+As a service owner, I'd like to view configured and fired alerts in the dev perspective of OpenShift console.
+
 ### Implementation Details/Notes/Constraints
 
 #### Isolation
@@ -134,7 +145,7 @@ reconciled by two separate prometheus operators.
 Both prometheus operators are under supervision of cluster monitoring operator.
 This allows a separation of concerns in terms of upgradability, security settings, and scalability.
 The cluster monitoring Prometheus Operator continues to be deployed in the `openshift-monitoring` namespace.
-The user workload monitoring Prometheus Operator will be deployed in the `openshift-user-monitoring` namespace.
+The user workload monitoring Prometheus Operator is deployed in the `openshift-user-workload-monitoring` namespace.
 
 Currently, cluster monitoring operator scans all namespaces filtering `openshift` namespaces labeled with
 `openshift.io/cluster-monitoring: "true"` and takes this set of namespaces as the _allowed list_ of reconcilable
@@ -142,21 +153,21 @@ namespaces for the existing cluster monitoring prometheus operator.
 
 The same set of openshift namespaces that exist today will be configured as a _deny list_ of reconcilable namespaces
 at the user workload monitoring prometheus operator.
-Deny listing of namespaces was added recently in prometheus operator, see [3].
+Deny listing of namespaces was added in prometheus operator, see [3].
 
-To make sure that users cannot add Prometheus instances in user namespaces,
-a new WIP feature [4] will ensure that reconciliation of Prometheus custom resources
-will be limited to the `openshift-user-monitoring` namespace for the user workload monitoring prometheus operator
+To make sure that users cannot add Prometheus/Alertmanager/ThanosRuler instances in user namespaces,
+a feature in prometheus-operator [4] ensures that reconciliation of the corresponding custom resources
+will be limited to the `openshift-user-workload-monitoring` namespace for the user workload monitoring prometheus operator
 and `openshift-monitoring` namespace for the cluster monitoring prometheus operator.
 
 ![](user-namespaces-custom-resources.png)
 
-User workload monitoring Prometheus Operator (green) then will reconcile Prometheus custom resources
-in the `openshift-user-monitoring` namespace only.
+User workload monitoring Prometheus Operator (green) then will reconcile Prometheus/Alertmanager/ThanosRuler custom resources
+in the `openshift-user-workload-monitoring` namespace only.
 It ignores Prometheus custom resources in any other namespace.
 The same holds true for the cluster monitoring prometheus operator (red).
 
-#### Aggregation
+#### Query Aggregation
 
 The front facing Kubernetes service has to make it as simple as possible
 for integrators to leverage both user workload monitoring as well as cluster monitoring.
@@ -173,27 +184,101 @@ Usage of the Thanos querier component inside cluster monitoring has many advanta
 
 See [5] and [6] for more details.
 
+#### Alerts/Recording Rules Aggregation
+
+Thanos Querier only solves aggregating the query path. For aggregating recording rules as well as alerting rules
+another component [Thanos Ruler](https://thanos.io/components/rule.md/) is deployed. This component is responsible for hosting user defined recording rules
+as well as alerting rules.
+
+Thanos Ruler is deployed via the user workload monitoring prometheus operator via a new CRD called ThanosRule.
+The same _deny list_ setting is applied to user workload monitoring prometheus operator such that the user cannot
+deploy its own Thanos Ruler instances in user namespaces.
+
+Thanos Ruler queries Thanos Querier to resolve recording and alerting rules.
+This does have implications on the availability of user defined alerts.
+The following list enumerates critical components for alerts to work for this use case:
+
+1. Thanos Ruler
+2. Thanos Querier
+3. User workload Prometheus
+4. Cluster monitoring Prometheus
+
+If there is no need to aggregate user defined metrics and cluster level metrics in user alerts,
+higher availability can be achieved by hosting user defined alerting rules on the
+user workload Prometheus instances.
+
+This is enabled by setting the label `openshift.io/prometheus-rule-evaluation-scope: "leaf-prometheus"` on the PrometheusRule custom resource which is deployed by the user.
+Prometheus Operator then dispatches the deployment of this rule on the user workload monitoring Prometheus instance rather than on the Thanos Ruler instance.
+For this use case just one system is critical for alerts to work:
+
+1. User workload Prometheus
+
+### Console integration
+
+##### Developer perspective
+
+Alerts/Recording Rules Aggregation implies that the user potentially chooses whether recording or alerting rules are being deployed on the user workload Prometheus or Thanos Ruler.
+In order to retrieve the full list of user workload recording alerting and recording rules a fan-out request has to be executed against user workload Prometheus and Thanos Ruler
+and the response has to be merged for final display. The fan-out/merge proxy logic is suggested to be implemented in the console backend (being a Go based proxy server).
+
+##### Administrator perspective
+
+The administrator perspective shows all recording and alerting rules originating both from the shipped cluster-monitoring stack as well as user defined rules in user workload Prometheus and Thanos Ruler.
+This is accomplished by a similar fan-out/merge logic as described for the developer perspective,
+this time covering three backends: 1. cluster-monitoring Prometheus 2. user-workload-monitoring Prometheus, and 3. Thanos Ruler.
+The fan-out/merge proxy logic is suggested to be implemented in the console backend (being a Go based proxy server).
+
 ### Tenancy
+
+Tenancy is achieved by leveraging the existing topology that is protecting cluster monitoring Prometheus already today.
 
 ![](user-monitoring-request.png)
 
-Tenancy is achieved by leveraging the existing topology that is protecting cluster monitoring Prometheus already today.
-The kube-rbac-proxy sidecar will be deployed along with prom-label-proxy in the Thanos Querier Deployment.
+Here, kube-rbac-proxy sidecar is deployed along with prom-label-proxy in front of monitoring components that expose endpoints for querying metrics, recording rules, alerts, and silences.
+
+![](user-monitoring-rbac.png)
+
+kube-rbac-proxy enforces RBAC constraints by verifying the request in flight.
+It uses a tenancy request parameter (namespace) and verifies the token in flight if the bearer token in flight has the appropriate permissions to access a configured resource given the HTTP verb in flight.
+Details on which resources and verbs are being checked are given below and are summarized in the picture above.
 
 For details about the tenancy model see the README for prom-label-proxy [2].
 
+
+#### Query endpoint
+
+OpenShift console executes queries against `/query` endpoint of Thanos Querier to execute live queries. Queries are being enforced by injecting the requested namespace in flight.
+
+Access to this endpoint is gated by the permission to `get pods.metrics.k8s.io` in the requested namespace.
+
+#### Available Rules and declared alerts
+
+OpenShift console executes queries against the `/rules` and `/alerts` endpoint of Prometheus and Thanos Ruler
+to retrieve a list of declared alerts and recording rules. Recording rules as well as alerting rules deployed via user workload monitoring are having enforced namespace labels set. The list of rules and alerts is being filtered by prom-label-proxy based on the tenant namespace label.
+
+Access to this endpoint is gated by the permission to `get prometheusrules.monitoring.coreos.com` in the requested namespace.
+
+#### Alertmanager alerts and silences
+
+OpenShift console executes requests against the `/alerts` endpoint of Alertmanager to retrieve the list of currently firing alerts and to silence alerts. Firing alerts originating from user workload monitoring are having enforced namespace labels set. A user can only create and update silences as well as get alerts and silences filtered by the namespace label in flight.
+
+Access to read the list of currently firing alerts is gated by the permission to `get prometheusrules.monitoring.coreos.com` in the requested namespace.
+
+Access to post a new silence or update an existing silence is gated by the permission to `create prometheusrules.monitoring.coreos.com`.
+
 ### Multitenancy
 
-To account for multi tenant clusters, we want to add a label of origin to each metric that comes from the user workloads
-discovery objects e.g. ServiceMonitor and PodMonitors. To do this we will introduce a new field in the Prometheus Custom
-Resource in prometheus-operator `enforcedNamespaceLabel` which will contain the key of the label, with the value being
-the namespace in which the object was created in. Besides the above mentioned new label, the prometheus-operator will
+To account for multi tenant clusters, a label of origin is added to each metric, recording, and alerting rule
+that comes from the user workloads discovery objects e.g. ServiceMonitor, PodMonitors, and PrometheusRules.
+To do this the Prometheus custom resource that declares the user workload Prometheus has the field `enforcedNamespaceLabel` set.
+It contains the key of the label, with the value being the namespace in which the object was created.
+Besides the above mentioned new label, the prometheus-operator will
 also enforce applying that same label, to any relabelConfigs relabelings, this will always be added as a last label so
 it makes sure that only the last label is taken into account and no one can override the namespace label. For the
-metricRelabelings we will remove any relabeling rule that has namespace target. The above work is all in
-prometheus-operator, in cluster-monitoring-operator we will set the field to `enforcedNamespaceLabel: namespace`. This
+metricRelabelings we remove any relabeling rule that has namespace target. The above work is all in
+prometheus-operator, in cluster-monitoring-operator we set the field to `enforcedNamespaceLabel: namespace`. This
 ensures we do not have to override the work that prom-label-proxy is already doing. Same must be done for alerts, there
-we will inject the same label key value to the promql expression and append it to the label array. This will ensure that
+we inject the same label key value to the promql expression and append it to the label array. This ensures that
 the rules and alerts include the users namespace.
 
 honor_labels controls how prometheus handles conflicts between labels already present in scraped data and the labels
