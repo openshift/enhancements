@@ -153,7 +153,6 @@ Remove the broker operators from productization
 
 1. Remove the Service Catalog from productization (ART)
 1. Remove the installation instructions from the documentation (Docs)
-1. Ensure the how to disable service catalog instructions are correct (Docs/Eng)
 
 ### Implementation Details/Notes/Constraints [optional]
 
