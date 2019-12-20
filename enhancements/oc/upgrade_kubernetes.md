@@ -63,7 +63,7 @@ superseded-by:
    1. Edit the replace dependencies to point to the commits from the merged PRs from previous steps.
    2. Edit the replace dependencies for all other k8s.io/repos to point to latest release (`release-1.17` here).
       It's useful to add a commit for steps 1,2.
-   3. Run `go mod vendor`, `go mod tidy` and verify the changes before committing.
+   3. Run `go mod tidy` _then_ `go mod vendor` and verify the changes before committing.
    3. Update kubectl version fields injected in Makefile (using `git describe --long --tags --abbrev=7` in kubernetes fork).
    4. Run `make` and `make test-unit` and fix whatever is broken.
 9. Update this document with latest versions, spreadsheet, anything else to help the next bump go smoothly.
@@ -74,7 +74,7 @@ superseded-by:
 * `go build`, `go test`, and other package-building commands add new dependencies to go.mod as needed.
 * `go list -m all` prints the current module’s dependencies.
 * `go get` changes the required version of a dependency (or adds a new dependency).
-* `go mod tidy` removes unused dependencies.
+* `go mod tidy` removes unused dependencies.  You should always run this _before_ `go mod vendor`.
 * `go mod why -m` and/or `go mod graph` to learn about why a certain version was picked and how/where from
 
 ## FAQ
