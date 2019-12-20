@@ -207,7 +207,7 @@ If there is no need to aggregate user defined metrics and cluster level metrics 
 higher availability can be achieved by hosting user defined alerting rules on the
 user workload Prometheus instances.
 
-This is enabled by setting the label `openshift.io/cluster-monitoring-target: "prometheus"` on the PrometheusRule custom resource which is deployed by the user.
+This is enabled by setting the label `openshift.io/prometheus-rule-evaluation-scope: "leaf-prometheus"` on the PrometheusRule custom resource which is deployed by the user.
 Prometheus Operator then dispatches the deployment of this rule on the user workload monitoring Prometheus instance rather than on the Thanos Ruler instance.
 For this use case just one system is critical for alerts to work:
 
