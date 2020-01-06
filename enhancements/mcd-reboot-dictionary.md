@@ -67,6 +67,8 @@ systemd service.
 
 ### Goals
 
+- Creation of a minimally invasive solution that can be delivered in the 
+  short-term, allowing time for a more comprehensive approach to be developed
 - A system defined whitelist of file paths that do not trigger a reboot
 - Changes to systemd service configurations are applied by restarting the service
 - Specific files can be updated with no action (eg. ssh keys)
@@ -197,14 +199,17 @@ The idea is to find the best form of an argument why this enhancement should _no
 
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement.
+- Improve the MCD's logic for handling changes to CRDs.  This may require a
+  lot of things that need to be plumbed through in the MCO and may not be 
+  possible in the short term.
+
+- Define a higher level syntax that would contain additional information about
+  the action a field needs in order for any changes to be applied; and was be
+  able to be transformed into the appropriate Ignition format.  This would be a
+  much larger body of work that would not be possible to complete in the short 
+  term.
+
 
 ## Infrastructure Needed [optional]
 
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
-
-Listing these here allows the community to get the process for these resources
-started right away.
+None
