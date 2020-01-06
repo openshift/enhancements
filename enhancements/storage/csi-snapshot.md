@@ -69,10 +69,50 @@ Upstream has chosen [addon](https://github.com/kubernetes/kubernetes/tree/master
   * Everything (the operator + the operand) runs in namespace `openshift-csi-snapshot-controller`.
   * Requires new github repo, openshift/csi-snapshot-controller-operator.
   * Requires new image.
-  * No new CRD / CR is needed for the operator itself, the operator does the same on all clusters / clouds and does not need any configuration.
 
 2. OCP ships new image csi-snapshot-controller. Its source code is already available in github.com/openshift/csi-external-snapshotter, we only need an image.
   * The component / image is called kubernetes-csi/snapshot-controller upstream, we add csi- prefix to repository and image names, as we do with other repos / images from github.com/kubernetes-csi
+
+### API
+While the operator does not need any special cluster-specific configuration, following API is provided in `github.com/openshift/api/operator/v1` to be a good OpenShift operator. Explicitly, the operator uses `status.observedGeneration` and `status.generations` to track changes in dependent objects.
+
+Package name: `github.com/openshift/api/operator/v1`
+API version: `operator.openshift.io/v1`
+Kind: `CSISnapshot`
+
+```go
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// CSISnapshot provides a means to configure an operator to manage the CSI snapshots. `cluster` is the canonical name.
+type CSISnapshot struct {
+    metav1.TypeMeta   `json:",inline"`
+    metav1.ObjectMeta `json:"metadata,omitempty"`
+
+    // spec holds user settable values for configuration
+    // +kubebuilder:validation:Required
+    // +required
+    Spec CSISnapshotSpec `json:"spec"`
+
+    // status holds observed values from the cluster. They may not be overridden.
+    // +optional
+    Status CSISnapshotStatus `json:"status"`
+}
+
+// CSISnapshotSpec is the specification of the desired behavior of the CSISnapshot operator.
+type CSISnapshotSpec struct {
+    OperatorSpec `json:",inline"`
+}
+
+// CSISnapshotStatus defines the observed status of the CSISnapshot operator.
+type CSISnapshotStatus struct {
+    OperatorStatus `json:",inline"`
+}
+```
+
+The CRD and its `cluster` instance is created by CVO from the csi-snapshot-controller-operator manifest.
+
 
 ### User Stories [optional]
 
@@ -102,7 +142,7 @@ This feature has already been implemented upstream. Therefore, this feature requ
 This feature has already been implemented upstream. The upstream design was discussed under https://github.com/kubernetes/enhancements/blob/master/keps/sig-storage/20190709-csi-snapshot.md.
 
 ### csi-snapshot-controller-operator
-The operator is fairly straightforward, it manages just one Deployment that runs csi-snapshot-controller and requires no API changes / new CRDs.
+The operator is fairly straightforward, it manages just one Deployment that runs csi-snapshot-controller (and related service account and RBAC role bindings).
 
 * Upstream RBAC from [upstream](https://github.com/kubernetes/kubernetes/blob/master/cluster/addons/volumesnapshots/volume-snapshot-controller/rbac-volume-snapshot-controller.yaml)
 * Upstream [StatefulSet](https://github.com/kubernetes/kubernetes/blob/master/cluster/addons/volumesnapshots/volume-snapshot-controller/volume-snapshot-controller-deployment.yaml)
