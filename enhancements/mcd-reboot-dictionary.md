@@ -6,10 +6,12 @@ reviewers:
   - "@crawford"
   - "@eparis"
   - "@rphillips"
+  - "@runcom"
 approvers:
   - "@crawford"
   - "@eparis"
   - "@rphillips"
+  - "@runcom"
 creation-date: 2019-12-15
 last-updated: 2019-12-15
 status: provisional
