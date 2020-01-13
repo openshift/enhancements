@@ -65,7 +65,7 @@ This proposal introduces two specific changes to to achieve its goals:
 * Co-located data in a few opinionated indices
 * Index management using [rollover index API](https://www.elastic.co/guide/en/elasticsearch/reference/6.3/indices-rollover-index.html)
 
-Logs of a given type (e.g. app container, infra container, node) are separated by index.  The Cluster Logging collector writes logs to a well-known alias established by the `cluster-logging-operator`.  The ClusterLogging CR instance specifies the management policy for each log type index.  This controls: 
+Logs of a given type (e.g. app container, infra) are separated by index.  The Cluster Logging collector writes logs to a well-known alias established by the `cluster-logging-operator`.  The ClusterLogging CR instance specifies the management policy for each log type index.  This controls: 
 * the maximum age (e.g. 7 days).  
 
 This policy is passed to the Elasticsearch CR for the `elasticsearch-operator` to manage the rollover policy.  The details of the policy are specified by the `cluster-logging-operator` and are based on the guidelines suggested by Elasticsearch.
@@ -84,10 +84,9 @@ Logs of a given type are co-located to the following indices:
 
 | Log Type | Read Alias | Write Alias | Initial Index |
 |---------|-----------|---------------|---------------|
-| Node (`logs.infra`)|infra, infra.node|infra.node-write|node.infra-00001|
-| Container Infra (`logs.infra`)|infra, infra.container|infra.container-write|container.infra-000001|
-| Container Application (`logs.app`)|app.logs|app.container-write|container.app-000001|
-| Audit (`logs.audit`)|infra.audit|infra.audit-write|audit.infra-000001|
+| Infra (`logs.infra`)|infra,logs.infra|infra-write|infra-00001|
+| Application Container (`logs.app`)|app,logs.app|app-write|app-000001|
+| Audit (`logs.audit`)|infra.audit,logs.audit|infra.audit-write|audit.infra-000001|
 
 **Note:** Log types are further defined in [LogForwarding](./cluster-logging-log-forwarding.md).
 
@@ -128,8 +127,8 @@ spec:
         delete:
           minAge: 7d
     mappings:
-    - name:  node.infra               #creates node.infra-00001 aliased node.infra-write
-      policyRef: infra-policy         #policy applies to index patterns node.infra*
+    - name:  infra               #creates infra-00001 aliased infra-write
+      policyRef: infra-policy         #policy applies to index patterns infra*
       aliases:
       - infra  
 ```
@@ -154,7 +153,7 @@ Example configuration:
    </elasticsearch_index_name>
 ```
 #### Deprecations
-* The Curator Cronjob deployed by the `cluster-logging-operator` will be removed. The responsibilities for curation will be subsumed by
+* The Curator Cronjob deployed by the `cluster-logging-operator` will be deprecated and eventually removed. The responsibilities for curation will be subsumed by
  implementation of Elasticsearch rollover management.
 * Curation configuration by namespace is no longer configurable and is restricted to cluster
 wide settings associated with log type 
@@ -173,7 +172,7 @@ wide settings associated with log type
 #### Upgrade
 The `elasticsearch-operator` will migrate existing log indices to work with the new data design by:
 * Indices beginning with `project.*` are aliased to: `app.logs`
-* Indices beginning with `.operations.*` are indexed to `infra`
+* Indices beginning with `.operations.*` are aliased to `infra`
 * Migrated indices are deleted after migration
 
 **Note:** The `cluster-logging-operator` will leave the deployed curation CronJob to manage indices from the older data schema.  These indices will be curated as previously and, eventually, removed from the cluster.  The curation CronJob will be removed in fugure releases.
@@ -208,7 +207,7 @@ curl http://localhost:9200/_template/app_logs?pretty -HContent-Type:application/
   "index_patterns": ["app.container*"], 
   "settings": {
     "number_of_shards": 1,
-    "number_of_replicas": 1,
+    "number_of_replicas": 1
   },
   "aliases": {
     "app.logs": {}
