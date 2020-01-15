@@ -90,8 +90,8 @@ cluster. The Job that will delete the Service Catalog operators and their
 associated items.
 
 - cluster-svcat-apiserver-operator
-  - Role named `prometheus-k8s in `openshift-service-catalog-apiserver-operator`
-  - RoleBinding named `prometheus-k8s in `openshift-service-catalog-apiserver-operator`
+  - Role named `prometheus-k8s` in `openshift-service-catalog-apiserver-operator`
+  - RoleBinding named `prometheus-k8s` in `openshift-service-catalog-apiserver-operator`
   - ServiceMonitor in `openshift-service-catalog-apiserver-operator`
   - Namespace `openshift-service-catalog-apiserver-operator` (not sure
     if we can do this from the Job)
@@ -103,8 +103,8 @@ associated items.
   - Deployment named `openshift-service-catalog-apiserver-operator`
   - ClusterOperator named `service-catalog-apiserver`
 - cluster-svcat-controller-manager-operator
-  - Role named `prometheus-k8s in `openshift-service-catalog-controller-manager-operator`
-  - RoleBinding named `prometheus-k8s in `openshift-service-catalog-controller-manager-operator`
+  - Role named `prometheus-k8s` in `openshift-service-catalog-controller-manager-operator`
+  - RoleBinding named `prometheus-k8s` in `openshift-service-catalog-controller-manager-operator`
   - ServiceMonitor in `openshift-service-catalog-controller-manager-operator`
   - Namespace `openshift-service-catalog-controller-manager-operator` (not sure
     if we can do this from the Job)
