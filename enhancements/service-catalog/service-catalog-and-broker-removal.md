@@ -120,12 +120,17 @@ The Job will NOT touch the Service Catalog resources. These resources will
 remain if the admin marked the Service Catalog CRs as `Unmanaged` meaning they
 will self manage the Service Catalog relieving the operators of their duty.
 
-The Service Catalog operators would remain in the release payload but the
-Service Catalog itself would be removed.
+The Service Catalog operator entry will remain in the release payload. The
+images containing the operator code will be replaced with an image containing
+the new Job mentioned above. The `manifests` directory will contain only the
+items required to deploy the Job. The Service Catalog, i.e. operand, will be
+removed.
 
 #### Story 2
 
-Keep the Service Catalog _Operators_ in the OpenShift 4.4 release payload.
+Keep the Service Catalog Operator entries in the OpenShift 4.4 release payload.
+See the end of Story 1 for what will be contained in the operators going
+forward.
 
 #### Story 3
 
