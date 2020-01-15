@@ -60,9 +60,6 @@ This is the next step in the removal of the Service Catalog and Brokers.
 
 1. Implement a mechanism that ensures the Service Catalog and Service Brokers
    are not present after an upgrade to OpenShift 4.4. (ENG)
-1. Add a new operator to remove brokers to the OpenShift 4.4 release payload (ENG/ART)
-1. Remove the Service Catalog from the OpenShift 4.4 release payload (ART)
-   * Will have to keep the Service Catalog operators
 1. Remove the Template Service Broker from productization (ART)
 1. Remove the Ansible Service Broker from productization (ART)
 1. Remove the Template Service Broker Operator from productization (ART)
@@ -87,49 +84,55 @@ cluster-svcat-controller-manager-operator, with a [Job](https://kubernetes.io/do
 This might be accomplished with just one of the operators, that would need
 a little more investigation.
 
-Replace the operator's code with a new Job executable that will perform the
-deletion of the apiserver associated with the Service Catalog. The following items
-would be removed:
-
-- ClusterServiceClasses
-- ClusterServicePlans
-- ClusterServiceBrokers
-- ServiceClasses
-- ServicePlans
-- ServiceBrokers
-- ServiceInstances
-- ServiceBindings
-
 The idea is that the Job will run during the upgrade until completion. Once
-finished, the Service Catalog will have been removed from the cluster.
+finished, the Service Catalog Operators will have been removed from the
+cluster. The Job that will delete the Service Catalog operators and their
+associated items.
 
-The Service Catalog operators would *remain* in the release payload but the
-Service Catalog itself would be removed.
+- cluster-svcat-apiserver-operator
+  - Role named `prometheus-k8s` in `openshift-service-catalog-apiserver-operator`
+  - RoleBinding named `prometheus-k8s` in `openshift-service-catalog-apiserver-operator`
+  - ServiceMonitor in `openshift-service-catalog-apiserver-operator`
+  - Namespace `openshift-service-catalog-apiserver-operator` (not sure
+    if we can do this from the Job)
+  - ServiceCatalogAPIServer (cr)
+  - ConfigMap named `openshift-service-catalog-apiserver-operator-config`
+  - Service named `metrics`
+  - ClusterRoleBinding for `openshift-service-catalog-apiserver-operator` ServiceAccount
+  - ServiceAccount `openshift-service-catalog-apiserver-operator`
+  - Deployment named `openshift-service-catalog-apiserver-operator`
+  - ClusterOperator named `service-catalog-apiserver`
+- cluster-svcat-controller-manager-operator
+  - Role named `prometheus-k8s` in `openshift-service-catalog-controller-manager-operator`
+  - RoleBinding named `prometheus-k8s` in `openshift-service-catalog-controller-manager-operator`
+  - ServiceMonitor in `openshift-service-catalog-controller-manager-operator`
+  - Namespace `openshift-service-catalog-controller-manager-operator` (not sure
+    if we can do this from the Job)
+  - ServiceCatalogControllerManager (cr)
+  - ConfigMap named `openshift-service-catalog-controller-manager-operator-config`
+  - Service named `metrics`
+  - ClusterRoleBinding for `openshift-service-catalog-controller-manager-operator` ServiceAccount
+  - ServiceAccount `openshift-service-catalog-controller-manager-operator`
+  - Deployment named `openshift-service-catalog-controller-manager-operator`
+  - ClusterOperator named `service-catalog-controller-manager`
 
-There are a few alternatives that are discussed in the Alternatives section of
-this proposal, please see below.
+The Job will NOT touch the Service Catalog resources. These resources will
+remain if the admin marked the Service Catalog CRs as `Unmanaged` meaning they
+will self manage the Service Catalog relieving the operators of their duty.
+
+The Service Catalog operator entry will remain in the release payload. The
+images containing the operator code will be replaced with an image containing
+the new Job mentioned above. The `manifests` directory will contain only the
+items required to deploy the Job. The Service Catalog, i.e. operand, will be
+removed.
 
 #### Story 2
 
-Implement a mechanism that ensures Service Brokers are not present after
-an upgrade to OpenShift 4.4.
-
-Create a new CVO managed operator with a Job definition as in Story 1 to remove
-the Ansible Service Broker and Template Service Broker. The new CVO operator is
-needed because the Ansible Service Broker operator and the Template Service
-Broker operator are both OLM managed operators which may or may not be present
-during cluster upgrades.
-
-NOTE: this would add a new item to the OpenShift 4.4 release payload.
-
-There is also an alternative to this approach in the Alternatives section below.
+Keep the Service Catalog Operator entries in the OpenShift 4.4 release payload.
+See the end of Story 1 for what will be contained in the operators going
+forward.
 
 #### Story 3
-
-1. Keep the Service Catalog _Operators_ in the OpenShift 4.4 release payload
-1. Remove the Service Catalog from the OpenShift 4.4 release payload (ART)
-
-#### Story 4
 
 Remove the Brokers from productization
 
@@ -137,7 +140,7 @@ Remove the Brokers from productization
 1. Remove the Ansible Service Broker from productization (ART)
 1. Remove the broker sections from the documentation (Docs)
 
-#### Story 5
+#### Story 4
 
 Remove the broker operators from productization
 
@@ -145,10 +148,43 @@ Remove the broker operators from productization
 1. Remove the Ansible Service Broker Operator from productization (ART)
 1. Remove the operator instructions from the documentation (Docs)
 
-#### Story 6
+#### Story 5
 
 1. Remove the Service Catalog from productization (ART)
 1. Remove the installation instructions from the documentation (Docs)
+
+#### Story 6
+
+The plan is to block upgrades from happening until the admin either removes the
+Service Catalog or chooses to self-manage their Service Catalog install. These
+can be satisified by changing the `managementState` of both Service Catalog CRs
+to either `Removed` to remove the Service Catalog bits or `Unmanaged` to relieve
+the operators of their management duties.
+
+In a 4.3.z release, update the Service Catalog Operators to set `Upgradeable: False`
+whenever the `managementState` is `Managed`. The CVO supports blocking upgrades when
+operators set this field since [PR #243](https://github.com/openshift/cluster-version-operator/pull/243)
+
+The `Upgradeable` field is dependent on the value of the `managementState`
+field. The following table shows the corresponding values:
+
+| managementState | Upgradeable |
+| --------------- | ----------- |
+| Managed         | False       |
+| Unmanaged       | True        |
+| Removed         | True        |
+
+Include detailed directions on how to remove the Service Catalog and it's
+associated objects to allow upgrading to OpenShift 4.4.
+
+NOTE: this would mean clusters would not be upgradeable to 4.3.z either without
+a change to the CVO. Allowing minor upgrades is being explored in the "loosen
+upgradeable condition to allow z-level upgrades" [PR #291](https://github.com/openshift/cluster-version-operator/pull/291)
+
+#### Story 7
+
+Create a bugzilla for docs include detailed directions on how to remove the
+Service Catalog and it's associated objects to allow upgrading to OpenShift 4.4.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -206,6 +242,7 @@ N/A
 - 20190916 - Proposal for removal preparation was written
 - 20191217 - Proposal to remove Service Catalog and Brokers
 - 20191220 - Revised this proposal
+- 20200115 - Revised to show new plan for removing Service Catalog
 
 ## Drawbacks
 
@@ -217,46 +254,7 @@ These Custom Brokers will be orphaned and remain running.
 
 ## Alternatives
 
-#### Block upgrades
-
-One alternative to Story 1 is to block upgrades from happening until the
-admin removes the Service Catalog and the brokers. In a 4.3.z release,
-update the Service Catalog Operators to set `Upgradeable: False` whenever the
-`managementState` is `Managed`. The CVO supports blocking upgrades when
-operators set this field since [PR #243](https://github.com/openshift/cluster-version-operator/pull/243)
-
-Include detailed directions on how to remove the Service Catalog and it's
-associated objects to allow upgrading to OpenShift 4.4.
-
-The OpenShift 4.4 would then not need any Service Catalog bits. But it would put
-the onus on the cluster admin to clean things up properly.
-
-NOTE: this would mean clusters would not be upgradeable to 4.3.z either without
-a change to the CVO. Allowing minor upgrades is being explored in the "[poc]
-honor UpgradeableMinor condition" [PR #285](https://github.com/openshift/cluster-version-operator/pull/285)
-
-#### Use a new Service Catalog / Broker Removal Operator
-
-Another alternative, is to create a *new* CVO managed operator that would handle
-the removal of the Service Catalog *and* the Service Brokers in a single
-operator.
-
-This would mean replacing the Service Catalog operators with a a new operator in
-the OpenShift 4.4 release payload.
-
-The pro to this approach is that it is explicit in what it is doing. Also, we
-are already proposing adding a new operator in Story 2 to handle the Service
-Broker removal.
-
-#### Repurpose the Service Catalog operator to handle Service Brokers as well
-
-Yet another alternative, is to add support to the Service Catalog operator Job
-from Story 1 to also handle removal of Service Brokers. Ideally, it would be a
-separate Job defined in the same manifest.
-
-This approach would have *no* additions to the release payload in OpenShift
-4.4. The downside is the Service Catalog operator gets confusing since it is
-also handling Service Brokers which might not be obvious.
+N/A
 
 ## Infrastructure Needed [optional]
 
