@@ -1,5 +1,5 @@
 ---
-title: extended-platform-tests
+title: openshift-tests
 authors:
   - "@deads2k"
 reviewers:
@@ -17,7 +17,7 @@ replaces:
 superseded-by:
 ---
 
-# Extended Platform Tests
+# OpenShift Tests
 
 ## Release Signoff Checklist
 
@@ -63,11 +63,24 @@ Doing this...
 
 ### The realistic, land in 4.4 approach
 
-1. Create openshift/extended-platform-tests
+1. Create openshift/openshift-tests
 2. Prime the repo with a `git filter-branch` from origin to keep the history of the tests we have.
 3. Create a simple `go.mod` based vendoring and library-go based `Makefile`.
-4. Produce images.
-5. Create CI template for new `extended-platform-tests run openshift/conformance/parallel` and  `extended-platform-tests run openshift/conformance/serial`.
+4. Produce images. 
+   1. openshift/origin will start producing an openshift-kubernetes-tests image that has `openshift-tests` binary.
+   2. openshift/origin will rename the existing `openshift-tests` binary to `openshift-kubernetes-tests` and create
+      a new `openshift-tests` binary which looks in a path and runs all the `openshift-*-tests` binaries and aggregates
+      the junit results.  These new binaries will go into both the existing openshift-tests image and the new openshift-kubernetes-tests image.
+   3. a new job for openshift/origin will be created to run *just* openshift-kubernetes-tests image and binary.
+   4. the openshift/openshift-tests repo will create a new binary called `openshift-openshift-tests`.  It will temporarily
+      create an extended-platform-tests image based on openshift-kubernetes-tests that layers in the `openshift-openshift-tests`
+      binary.
+   5. confirm that that the extended-platform-tests image runs all tests from openshift-kubernetes-tests and openshift-openshift-tests.
+      we can do this with a CI job ont he openshift/openshift-tests repo
+   6. coordinate a swap of ownership of the openshift-tests image.  the extended-platform-tests image will be renamed to openshift-tests
+      and openshift/origin will stop creating an openshift-tests image.
+      
+5. Create CI template for new `openshift-tests run openshift/conformance/parallel` and  `openshift-tests run openshift/conformance/serial`.
 6. Wire the new jobs into the repos.
 
 ### The ideal "handle the testing gaps we actually need to fix" approach
@@ -96,7 +109,7 @@ from the repository of their choosing.
 ### Risks and Mitigations
 
 1. The creation of a test ghetto that no one cares about.
-By moving existing non-kubernetes tests to extended-platform-tests, we can ensure
+By moving existing non-kubernetes tests to openshift-tests, we can ensure
 that teams that are familiar with how the test framework works have a vested interest in the new repo being successful.
 
 ### Version Skew Strategy
