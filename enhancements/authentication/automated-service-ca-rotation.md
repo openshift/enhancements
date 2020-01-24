@@ -101,6 +101,31 @@ and the functionality could be separately extracted for operator reuse.
   - Clients using a ca bundle provided by the operator will have until the
     original expiry of the pre-rotation CA to refresh without breaking trust.
 
+- The duration of the service CA should be extended from its current value of
+  12 months to a value that exceeds the maximum expected upgrade interval
+  (currently 12 months). A value of 14 months should be sufficient.
+  - Timelines:
+    - With 12 month CA duration:
+      - T+0m  - Cluster installed with new CA or existing CA is rotated (CA-1)
+      - T+6m  - Automated rotation replaces CA-1 with CA-2 when CA-1 duration < 6m
+      - T+12m - Cluster is upgraded and all pods are restarted
+      - T+12m - CA-1 expires. If cluster was not upgraded before this
+                happens, services using the old key material may
+                break.
+    - With 14 month CA duration:
+      - T+0m  - Cluster installed with new CA or existing CA is rotated (CA-1)
+      - T+8m  - Automated rotation replaces CA-1 with CA-2 when CA-1 duration < 6m
+      - T+12m - Cluster is upgraded and all pods are restarted
+      - T+14m - CA-1 expires. No impact because of the restart at time of upgrade
+  - Services that do not refresh key material automatically must be restarted
+    after ca rotation.
+  - Upgrades restart all pods, and ensuring that an upgrade takes place after
+    rotation and prior to expiry of the pre-rotation ca guarantees that
+    services will always be using valid key material.
+  - If the ca duration does not exceed the expected upgrade interval, there is
+    the possibility, however slight, that an upgrade will not occur after
+    automated rotation and before expiry of the pre-rotation ca.
+
 - Generate an intermediate CA certificate with the same public key as the new CA
   but signed with the private key of the current CA.
   - This intermediate certificate should be included with newly-generated serving
