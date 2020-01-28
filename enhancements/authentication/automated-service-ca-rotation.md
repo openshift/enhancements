@@ -102,29 +102,83 @@ and the functionality could be separately extracted for operator reuse.
     original expiry of the pre-rotation CA to refresh without breaking trust.
 
 - The duration of the service CA should be extended from its current value of
-  12 months to a value that exceeds the maximum expected upgrade interval
-  (currently 12 months). A value of 14 months should be sufficient.
-  - Timelines:
-    - With 12 month CA duration:
+  12 months to 26 months and the minimum CA duration should be extended to 13
+  months. These values ensure that pods will be guaranteed to be restarted in
+  a cluster supported by Red Hat before the expiry of the pre-rotation CA.
+  - Pods in the OCP control plane automatically refresh key material
+    (certificates and CA bundles) without pod restart.
+  - For all other pods, the timing of upgrades is key to determining CA
+    duration:
+    - Services that do not refresh key material automatically must be
+      restarted after CA rotation.
+    - Upgrades restart all pods, so ensuring that an upgrade takes place
+      after rotation and prior to expiry of the pre-rotation CA guarantees
+      that services will always be using valid key material.
+  - Computing CA duration:
+    - The maximum interval, *I*, between upgrades of a cluster supported by
+      Red Hat is 12 months.
+      - At most 3 OCP releases are supported at one time, and 3 releases are
+        expected in a given year.
+      - In the event that an LTS release strategy is chosen, a supported
+        cluster would still be expected to be upgraded at least once per year
+        if only with a patch release.
+    - When the minimum remaining CA duration, *M*, is reached, automatic
+      rotation will be triggered. *M* must be greater than *I* to ensure that
+      an upgrade occurs before the expiry of the pre-rotation CA.
+    - Let the interval between creation of a CA and its rotation be *R*.
+      - *R* must be greater than *I* to ensure that an upgrade occurs before
+        the expiry of the pre-rotation CA.
+      - *R* must be greater than or equal to the minimum remaining CA
+        duration, *M*, to ensure that an upgrade occurs before a subsequent
+        rotation.
+        - Since cross-signing is only supported between the current and
+          previous CAs, rotating before all pods have been restarted to use key
+          material from the current CA risks breaking trust with key material
+          issued by the previous CA.
+    - The interval between creation and rotation, *R*, can be computed as the
+      total duration *D* less the minimum remaining duration *M*:
+      - *R* = *D* - *M*
+    - Reordering to solve for *D*:
+      - *D* = *R* + *M*
+    - Since each of *R* and *M* must be greater than *I*:
+      - *D* = *R* + *M* > 2 * *I*
+    - Since *R* >= *M* should be true, simplify to *R* = *M*:
+      - *D* = 2 * *R* > 2 * *I*
+    - Substitute *I* = 12:
+      - *D* = 2 * *R* > 24
+    - Picking *R* = *M* = 13 will satisfy the relation, resulting in *D* = 26
+  - Worst-case timelines with old and new values for CA duration:
+    - Let minimum duration *M* = 6 months, total duration *D* = 12 months:
       - T+0m  - Cluster installed with new CA or existing CA is rotated (CA-1)
       - T+6m  - Automated rotation replaces CA-1 with CA-2 when CA-1 duration < 6m
       - T+12m - Cluster is upgraded and all pods are restarted
       - T+12m - CA-1 expires. If cluster was not upgraded before this
                 happens, services using the old key material may
                 break.
-    - With 14 month CA duration:
+    - Let minimum duration *M* = 13 months, total duration *D* = 26 months:
       - T+0m  - Cluster installed with new CA or existing CA is rotated (CA-1)
-      - T+8m  - Automated rotation replaces CA-1 with CA-2 when CA-1 duration < 6m
       - T+12m - Cluster is upgraded and all pods are restarted
-      - T+14m - CA-1 expires. No impact because of the restart at time of upgrade
-  - Services that do not refresh key material automatically must be restarted
-    after ca rotation.
-  - Upgrades restart all pods, and ensuring that an upgrade takes place after
-    rotation and prior to expiry of the pre-rotation ca guarantees that
-    services will always be using valid key material.
-  - If the ca duration does not exceed the expected upgrade interval, there is
-    the possibility, however slight, that an upgrade will not occur after
-    automated rotation and before expiry of the pre-rotation ca.
+      - T+13m - Automated rotation replaces CA-1 with CA-2 when CA-1 duration < 13m
+      - T+24m - Cluster is upgraded and all pods are restarted
+      - T+26m - CA-1 expires. No impact because of the restart at time of upgrade
+  - Since all clusters that do not support automated rotation will have CAs with
+    a 12 month total duration, the remaining CA duration for those clusters will
+    always be less than the minimum upgrade interval of 12 months. Rotation will
+    be triggered when upgrading to a release that supports automated CA rotation
+    and the cluster administrator should manually restart all pods.
+    - Without this intervention, pod restart before expiry of the pre-rotation
+      CA cannot be guaranteed.
+    - The requirement to manually restart pods after a cluster is upgraded to
+      a release that supports automated CA rotation is a one-time thing. All
+      subsequent upgrades and rotations will ensure restart before expiry
+      without manual intervention.
+    - The requirement to manually restart pods after upgrading to a release
+      that supports automated rotation will need to be communicated via
+      documentation.
+      - A Prometheus alert doesn't seem like a viable option except for the
+        current pending release (4.4) due to the requirement to key it off of
+        an existing metric, and the general policy of not backporting metrics
+        and alert additions to previous releases of OCP.
 
 - Generate an intermediate CA certificate with the same public key as the new CA
   but signed with the private key of the current CA.
@@ -250,11 +304,15 @@ or CA bundle (i.e. recognize when it changes, load the new value).
 
 - Since trust verification does not depend on interaction with a cluster, the
   code to do so could be shared between unit and e2e testing.
+  - https://github.com/openshift/service-ca-operator/blob/master/test/util/rotate.go#L22
 
 - Unit testing should be used to validate the logic of the rotation method.
+  - https://github.com/openshift/service-ca-operator/blob/master/pkg/operator/rotate_test.go#L176
 
 - E2E testing should be used to validate the rotation method in combination with
   the required API interaction.
+  - https://github.com/openshift/service-ca-operator/blob/master/test/e2e/e2e_test.go#L1174
+  - https://github.com/openshift/service-ca-operator/blob/master/test/e2e/e2e_test.go#L1182
 
 - Exploratory testing should be performed to determine if rotation induces
   unexpected behavior in other components.
