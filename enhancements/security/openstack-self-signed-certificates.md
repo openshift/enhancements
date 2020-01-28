@@ -71,7 +71,7 @@ The `cluster-image-registry-operator` (CIRO) and the `image-registry` also need 
 
 The `machine-controllers` and more specifically, `cluster-api-provider-openstack` (CAPO), will need to authenticate with openstack any time it needs to manage the current machine pool. In order to keep `openshift-config/cloud-provider-config` as the central point that services draw the CA certificate from, CAPO is given RBAC access to `GET` configmaps named `cloud-provider-config` from the `openshift-config` namespace. This allows the kubernetes client in CAPO to fetch the latest CA certificate, and craft a custom http transport that trusts it when authenticating with OpenStack.
 
-Lastly, Kuryr needs to communicate with OpenStack networking services as part of its core functionality. Following the common design pattern, kuryr GETs the latest version of `openshift-config/cloud-provider-config` and builds a custom http transport with the CA cert when authenticating with OpenStack.
+Lastly, when Kuryr is configured cluster-network-operator and Kuryr itself need to communicate with OpenStack networking services as part of their core functionality. Following the common design pattern, CNO GETs the latest version of `openshift-config/cloud-provider-config` and builds a custom HTTP transport with the CA cert when authenticating with OpenStack. Then a ConfigMap with certificate is created in `openshift-kuryr` in order to mount it for kuryr-controller pods. Please note that in case of Kuryr due to usage of Python OpenStack APIs, the passed CA certificate overwrites default CAs instead of being appended to them.
 
 In total, these changes enable the distribution, and trust of OpenStack CA certificates in an OpenShift cluster both during and after install.
 
