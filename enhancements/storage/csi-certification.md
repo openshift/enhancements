@@ -3,7 +3,7 @@ title: csi-certification
 authors:
   - "@fbertina"
 reviewers:
-  - "jsafrane"
+  - "@jsafrane"
   - "@gnufied”
   - "@chuffman"
 approvers:
@@ -77,9 +77,9 @@ In order to run all tests of the `openshift/csi` test suite, CSI driver vendors 
   * This file should describe the supported features, so that the `openshift-tests` utility knows which tests should run.
 	* Here is the [upstream documentation](https://github.com/kubernetes/kubernetes/blob/master/test/e2e/storage/external/README.md) that describe its format.
 * Find out the location of the `tests` image in he cluster.
-  * The command `oc adm release info` can be used to get the `tests` image address:
+  * The command `oc adm release info` can be used to get the `tests` image address. In the following example, `myPullSecret.txt` contains the pull secret used to install the cluster:
 	```
-	$ oc adm release info --pullspecs | grep tests
+	$ oc adm release info --pullspecs -a myPullSecret.txt | grep tests
 	tests                                         quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:c89de58c5a2ea4ce9bffabf54f2c74d0805c39d6baa12754990fa3a2f1203856
 	```
 * Run the tests.
@@ -89,7 +89,8 @@ In order to run all tests of the `openshift/csi` test suite, CSI driver vendors 
   * Assuming that both `kubeconfig.yaml` and `manifest.yaml` files are in the current working directory, this is how the tests can be executed:
 	```
 	$ podman run \
-	     -v `pwd`:/data \
+         --authfile=myPullSecret.txt \
+	     -v `pwd`:/data:z \
 		 --rm -it \
 		 quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:c89de58c5a2ea4ce9bffabf54f2c74d0805c39d6baa12754990fa3a2f1203856 \
 		 sh -c "KUBECONFIG=/data/kubeconfig TEST_CSI_DRIVER_FILES=/data/manifest.yaml /usr/bin/openshift-tests run openshift/csi"
