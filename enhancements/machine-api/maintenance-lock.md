@@ -153,7 +153,7 @@ inhibit machine healthchecks while writing a new CoreOS image to disk.
 #### Story 2
 
 As cloud admin, I want to put a node into maintenance, so that it drains and I
-can see workloads start elsewhere before deleting it.
+can see workloads start elsewhere before working on it.
 
 #### Story 3
 
