@@ -191,7 +191,7 @@ required to make it possible.
 
 ## Implementation History
 
-- Initial version: 15-12-2019
+- Initial version: 2019-12-15
 
 ## Drawbacks 
 
