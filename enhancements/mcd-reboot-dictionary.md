@@ -110,7 +110,7 @@ Example (and not necessarily 100% accurate) entries:
 | kubelet.conf | /etc/kubernetes/ | binary | /bin/custom-drain-and-restart-tool -v3 | 30min |
 | crio.conf    | /etc/crio/ | systemctl | _restart_ crio.service ||
 | seccomp.json | /etc/crio/ | systemctl | _reload_ crio.service ||
-| imaginary.conf | /somewhere/ | binary | /bin/my-custom-tool -q || 20s |
+| imaginary.conf | /somewhere/ | binary | /bin/my-custom-tool -q | 20s |
 
 After the MCD writes out a configuation change, it will consult the whitelist
 before deciding if a reboot is required. If the filename is present, has a
