@@ -99,18 +99,18 @@ as data, the file will be a list of entries containing:
 - filename
 - path
 - action to perform
+- drain required
 - action specific data (eg. the service name)
 - timeout
 
 Example (and not necessarily 100% accurate) entries:
 
-| File | Path | Action | Args | Timeout |
-| ---- | ---- | ------ | ---- | ------- |
-| * | /var/home/core/.ssh/ | none ||
-| kubelet.conf | /etc/kubernetes/ | binary | /bin/custom-drain-and-restart-tool -v3 | 30min |
-| crio.conf    | /etc/crio/ | systemctl | _restart_ crio.service ||
-| seccomp.json | /etc/crio/ | systemctl | _reload_ crio.service ||
-| imaginary.conf | /somewhere/ | binary | /bin/my-custom-tool -q | 20s |
+| File | Path | Action | Drain | Args | Timeout |
+| ---- | ---- | ------ | ----- | ---- | ------- |
+| * | /var/home/core/.ssh/ | none | false |||
+| kubelet.conf | /etc/kubernetes/ | systemctl | false | _reload_ kubelet.service | 30min |
+| crio.conf    | /etc/crio/ | systemctl | true | _restart_ crio.service ||
+| imaginary.conf | /somewhere/ | binary | false | /bin/my-custom-tool -q | 20s |
 
 After the MCD writes out a configuation change, it will consult the whitelist
 before deciding if a reboot is required. If the filename is present, has a
