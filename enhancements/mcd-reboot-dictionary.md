@@ -96,24 +96,24 @@ static file in yaml format.
 The information could be baked into the the MCD itself, but assuming we treat it
 as data, the file will be a list of entries containing:
 
-- filename
+- filename or glob
 - path
 - action to perform
 - drain required
-- action specific data (eg. the service name)
-- timeout
+- action specific data
 
 Example (and not necessarily 100% accurate) entries:
 
-| File | Path | Action | Drain | Args | Timeout |
-| ---- | ---- | ------ | ----- | ---- | ------- |
-| * | /var/home/core/.ssh/ | none | false |||
-| kubelet.conf | /etc/kubernetes/ | systemctl | false | _reload_ kubelet.service | 30min |
+| File | Path | Action | Drain | Args |
+| ---- | ---- | ------ | ----- | ---- |
+| * | /var/home/core/.ssh/ | none | false ||
+| kubelet.conf | /etc/kubernetes/ | systemctl | false | _reload_ kubelet.service |
 | crio.conf    | /etc/crio/ | systemctl | true | _restart_ crio.service ||
-| imaginary.conf | /somewhere/ | binary | false | /bin/my-custom-tool -q | 20s |
+| imaginary.conf | /somewhere/ | binary | false | /bin/my-custom-tool -q |
+| grub2.conf | /etc/ | reboot | true ||
 
 After the MCD writes out a configuation change, it will consult the whitelist
-before deciding if a reboot is required. If the filename is present, has a
+before deciding what action is required. If the filename is present, has a
 valid action and any associated data, the action will be performed.  Otherwise,
 a reboot will be performed as in prior 4.x versions.
 
@@ -123,13 +123,17 @@ to it is treated as requiring a reboot.
 The system's highest priority is to apply the changes, if the specified action
 results in an error, then a reboot will be performed as in prior 4.x versions.
 
-Errors include the failure of any API calls (eg. https://github.com/coreos/go-systemd ) 
-necessary to apply the change, or external binaries/scripts (eg. `systemctl`)
-returning a value other than ``0``. 
+Errors include 
+* the failure of any API calls (eg. https://github.com/coreos/go-systemd ) necessary 
+  to apply the change
+* external binaries/scripts (eg. `systemctl`) returning a value other than ``0``
+* actions taking "too" long (eg. we might want to put a limit on drain operations)
 
 In the case of multiple files being changed by a single update, if any file requires
 a reboot (either by configuration or an error), then the whitelist is ignored for all
 (remaining) files.  Otherwise, all files are handled independantly.
+
+
 
 ### User Stories [optional]
 
