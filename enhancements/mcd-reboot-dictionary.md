@@ -65,6 +65,10 @@ the order of minutes) and the machine configuration includes files that need
 either no action to take effect, or can be more quickly applied by restarting a
 systemd service.
 
+Telco admins therefor want the system to use the least invasive method for 
+applying configuration file updates, to reduce periods of degraded system and 
+application availability.
+
 ### Goals
 
 - Creation of a minimally invasive solution that can be delivered in the 
@@ -79,6 +83,8 @@ systemd service.
 - Allowing the admin to specify additional paths or strategies
 - Allowing different behaviour based on which option or part of the file has
   been updated
+- Allowing reboots to be delayed so that several changes can be applied with 
+  a single reboot
 
 ## Proposal
 
@@ -95,31 +101,60 @@ as data, the file will be a list of entries containing:
 - action to perform
 - action specific data (eg. the service name, timeout)
 
+Example entries:
+
+| File | Path | Action | Args |
+| ---- | ---- | ------ | ---- |
+| * | /var/home/core/.ssh/ | none ||
+| kubelet.conf | /etc/kubernetes/ | none ||
+| crio.conf    | /etc/crio/ | systemctl | _restart_ crio.service |
+| seccomp.json | /etc/crio/ | systemctl | _reload_ crio.service |
+| imaginary.conf | /somewhere/ | binary | /bin/my-custom-tool -q --timeout 20s |
+
 After the MCD writes out a configuation change, it will consult the whitelist
 before deciding if a reboot is required. If the filename is present, has a
 valid action and any associated data, the action will be performed.  Otherwise,
 a reboot will be performed as in prior 4.x versions.
 
-If the action results in an error, or takes too long, a reboot will be
-performed as in prior 4.x versions.
+If a file contains any options that require a reboot to be applied, then any change 
+to it is treated as requiring a reboot.
 
+The system's highest priority is to apply the changes, if the specified action
+results in an error, then a reboot will be performed as in prior 4.x versions.
+
+Errors include the failure of any API calls (eg. https://github.com/coreos/go-systemd ) 
+necessary to apply the change, or external binaries/scripts (eg. `systemctl`)
+returning a value other than ``0``. 
+
+In the case of multiple files being changed by a single update, if any file requires
+a reboot (either by configuration or an error), then the whitelist is ignored for all
+(remaining) files.  Otherwise, all files are handled independantly.
 
 ### User Stories [optional]
 
-Detail the things that people will be able to do if this is implemented.
-Include as much detail as possible so that people can understand the "how" of
-the system. The goal here is to make this feel real for users without getting
-bogged down.
-
 #### Story 1
 
-As a telco admin, I want the system to use the least invasive method for
-applying configuration file updates, to reduce periods of degraded system and
-application availability.
+As an admin, I want to update the SSH keys without any followup action, to 
+reduce the number of unnecessary periods of degraded system and application 
+availability.
 
 #### Story 2
 
-None
+As an admin, I want to update the CRI-O configuration by restarting it's systemd
+unit, to reduce the number of unnecessary periods of degraded system and 
+application availability.
+
+#### Story 3
+
+As an admin, I want to update the kubelet config file without reboot, to 
+reduce the number of unnecessary periods of degraded system and 
+application availability.
+
+#### Story 4
+
+As an admin, I want to continue to force reboots for network configuration 
+updates and changes to kernel flags, so that they are applied in a timely 
+manner.
 
 ### Implementation Details/Notes/Constraints [optional]
 
