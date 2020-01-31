@@ -107,6 +107,7 @@ Example (and not necessarily 100% accurate) entries:
 | File | Path | Action | Drain | Args |
 | ---- | ---- | ------ | ----- | ---- |
 | * | /var/home/core/.ssh/ | none | false ||
+| *.service | /etc/systemd/system/ | systemctl | false | _restart_ |
 | kubelet.conf | /etc/kubernetes/ | systemctl | false | _reload_ kubelet.service |
 | crio.conf    | /etc/crio/ | systemctl | true | _restart_ crio.service ||
 | imaginary.conf | /somewhere/ | binary | false | /bin/my-custom-tool -q |
@@ -119,6 +120,12 @@ a reboot will be performed as in prior 4.x versions.
 
 If a file contains any options that require a reboot to be applied, then any change 
 to it is treated as requiring a reboot.
+
+If a file matches more than one entry, the first one listed will be applied.
+
+If no service is supplied for a ``systemctl`` action, the matching filename (with
+directory components stripped) will be treated as the name of the unit file to be
+operated on.
 
 The system's highest priority is to apply the changes, if the specified action
 results in an error, then a reboot will be performed as in prior 4.x versions.
