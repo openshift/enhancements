@@ -77,7 +77,7 @@ ship a second one.
 
 ### `inspect`
 
-See the [inspect enhancement](oc/inspect.md) for details on the `inspect` command. 
+See the [inspect enhancement](inspect.md) for details on the `inspect` command. 
 
 ### must-gather Images
 
