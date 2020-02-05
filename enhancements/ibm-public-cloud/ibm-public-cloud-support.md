@@ -4,6 +4,14 @@ authors:
   - "@csrwng"
 reviewers:
   - "@derekwaynecarr"
+  - "@sttts"
+  - "@deads2k"
+  - "@mfojtik"
+  - "@ironcladlou"
+  - "@crawford"
+  - "@abhinavdahiya"
+  - "@spadgett"
+  - "@miabbott"
 approvers:
   - "@derekwaynecarr"
 creation-date: 2020-02-04
