@@ -104,7 +104,7 @@ spec:
       id: eclipse/cloudshell/latest
 ``` 
 
-As a consequence the Cloud Shell will be depenent on the Eclipse Che DevWorkspace operator that deploys the CRD and controller to manage workspaces. But unlike Eclipse Che, in a Cloud Shell instance:
+As a consequence, the Cloud Shell will be dependent on the Eclipse Che DevWorkspace operator that deploys the CRD and controller to manage workspaces. But unlike Eclipse Che, in a Cloud Shell instance:
 - Eclipse Che server components are not deployed: `wsmaster`, `registries`, `keycloak` and `postgres`. Instanciation of `DevWorkspaces` is a responsibility of the OpenShift Console.
 - Eclipse Che and the Cloud Shell are both deployed and controlled using operators but those are distinct ones.
 - Theia (or other editors) based workspaces are not supported. Only Eclipse Che workspaces with editor of type CloudShell are supported.
