@@ -100,7 +100,7 @@ metadata:
   name: cloudshell
 spec:
   components:
-    - type: containerImage
+    - type: dockerimage
       id: eclipse/cloudshell/latest
 ``` 
 
