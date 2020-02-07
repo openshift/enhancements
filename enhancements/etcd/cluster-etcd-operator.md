@@ -178,6 +178,40 @@ items:
           status: Remove
 ```
 
+### Migration of certificates, keys, and CA bundles
+
+In 4.3 (and currently in 4.4), the certificates, keys and CA bundles use to launch etcd are located on disk on the masters.
+To transition to an operator, we need to maintain the source of truth for these files in secrets and configmaps.
+To support migration, we will create a daemonset (`ds/etcd-credential-pusher`) that will create configmaps for the CA bundles and secrets for the configmaps if they are not present.
+The known set of files is currently
+ 1. `etcd --cert-file=/etc/ssl/etcd/system:etcd-server:${ETCD_DNS_NAME}.crt --key-file=/etc/ssl/etcd/system:etcd-server:${ETCD_DNS_NAME}.key`
+    This will be pushed to `oc -n openshift-etcd get secret/etcd-serving-cert`.
+    It doesn't matter which particular pair wins.
+ 2. `etcd --trusted-ca-file=/etc/ssl/etcd/ca.crt`
+    This will be pushed to `oc -n openshift-etcd get configmap/etcd-serving-ca`.
+    It doesn't matter which particular bundle wins.
+ 3. `etcd --peer-cert-file=/etc/ssl/etcd/system:etcd-peer:${ETCD_DNS_NAME}.crt --peer-key-file=/etc/ssl/etcd/system:etcd-peer:${ETCD_DNS_NAME}.key`
+    This will be pushed to `oc -n openshift-etcd get secret/etcd-peer-client-cert`.
+    It doesn't matter which particular pair wins.
+ 4. `etcd --peer-trusted-ca-file=/etc/ssl/etcd/ca.crt`
+    This will be pushed to `oc -n openshift-etcd get configmap/etcd-peer-client-ca`.
+    It doesn't matter which particular bundle wins.
+ 5. `grpc-proxy --key-file /etc/ssl/etcd/system:etcd-metric:${ETCD_DNS_NAME}.key --cert-file /etc/ssl/etcd/system:etcd-metric:${ETCD_DNS_NAME}.crt`
+    This will be pushed to `oc -n openshift-etcd get secret/etcd-metrics-proxy-serving-cert`.
+    It doesn't matter which particular pair wins.
+ 6. `grpc-proxy --key /etc/ssl/etcd/system:etcd-peer:${ETCD_DNS_NAME}.key --cert /etc/ssl/etcd/system:etcd-peer:${ETCD_DNS_NAME}.crt`
+    This will be pushed to `oc -n openshift-etcd get secret/etcd-metrics-proxy-peer-client-cert`.
+    It doesn't matter which particular pair wins.
+ 7. `grpc-proxy --cacert /etc/ssl/etcd/ca.crt`
+    This will be pushed to `oc -n openshift-etcd get configmap/etcd-metrics-proxy-serving-ca`.
+    It doesn't matter which particular bundle wins.
+ 8. `grpc-proxy --trusted-ca-file /etc/ssl/etcd/metric-ca.crt`
+    This will be pushed to `oc -n openshift-etcd get configmap/etcd-metrics-proxy-client-ca`.
+    It doesn't matter which particular bundle wins.
+In later releases and perhaps later in 4.4, we will have the installer produce the initial values for these certificates, keys, and CA bundles
+so that we can immediately render them into the cluster instead of waiting to pull them off disk.
+
+
 #### InitContainers
 
 This section will walk through the init containers for the etcd-member static pod and outline how
