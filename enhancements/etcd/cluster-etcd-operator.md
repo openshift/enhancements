@@ -191,8 +191,8 @@ The known set of files is currently
     This will be pushed to `oc -n openshift-etcd get configmap/etcd-serving-ca`.
     It doesn't matter which particular bundle wins.
  3. `etcd --peer-cert-file=/etc/ssl/etcd/system:etcd-peer:${ETCD_DNS_NAME}.crt --peer-key-file=/etc/ssl/etcd/system:etcd-peer:${ETCD_DNS_NAME}.key`
-    This will be pushed to `oc -n openshift-etcd get secret/etcd-peer-client-cert`.
-    It doesn't matter which particular pair wins.
+    This will be pushed to `oc -n openshift-etcd get secret/etcd-peer-client-cert-<node-name>`.
+    The certificates are different between nodes and must remain distinct.
  4. `etcd --peer-trusted-ca-file=/etc/ssl/etcd/ca.crt`
     This will be pushed to `oc -n openshift-etcd get configmap/etcd-peer-client-ca`.
     It doesn't matter which particular bundle wins.
