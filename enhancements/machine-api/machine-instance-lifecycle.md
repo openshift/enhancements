@@ -128,6 +128,9 @@ The machine controller will set the right phase when its communication flow with
 
 - The machine.Status.ErrorMessage might be bubbled up to the machineSet.Status.ErrorMessage for easier visibility.
 
+#### Machine lifecycle diagram
+
+![image](machine-lifecycle.png)
 
 ### Risks and Mitigations
 
