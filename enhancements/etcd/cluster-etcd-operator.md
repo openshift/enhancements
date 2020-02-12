@@ -490,7 +490,34 @@ items:
 
 ### Upgrade / Downgrade Strategy
 
-TODO
+Assume that I update the above to indicate that we're using a static pod operator like the kube-apiserver.
+It rolls out one node at a time, not coordinated with the MCO in any way, without regard for PDBs.
+It does prefer updating it's own crashlooping or unready pods to bringing down working members (we already did this).
+
+#### Upgrade from 4.3 to 4.4
+
+ 1. The 4.4-etcd-staticpod moves the /etcd/kubernetes/manifests/etcd-member.yaml to a backup location before trying to start etcd.
+ 2. This causes the 4.3-machineconfigpool to go degraded because the file that it tries to maintain is gone.
+ 3. If the master node restarts using a 4.3-machineconfigpool, the old /etcd/kubernetes/manifests/etcd-member.yaml will come back.
+    This is ok because the 4.4-etcd-staticpod will remove it again and try to claim the same port.
+ 4. The 4.4-mco will not have an etcd-member.yaml file.  When the 4.4-mco restarts master nodes, they will start back up
+    and not have a /etcd/kubernetes/manifests/etcd-member.yaml.  This means the 4.4-machineconfigpool will be healthy again.
+
+#### Downgrade from 4.4 to 4.3
+
+The cluster can function without intervention, but to fully restore 4.3, manual intervention is required.
+
+ 1. The 4.4-etcd-pod exists on every master.  Recall that it moves /etcd/kubernetes/manifests/etcd-member.yaml to a backup location before trying to start etcd.
+ 2. The 4.4-etcd-pod are still maintained by the 4.4 etcd operator because the CVO doesn't know how to remove any resources.
+ 3. If left, this will leave a 4.3 cluster with a 4.4 style etcd and degraded machineconfigpools.
+    The cluster can run in this state for a very long time.
+ 4. To clean up, upgrade again.  Or....
+ 5. Delete the openshift-etcd-operator namespace and wait for it to be removed.
+ 6. **One master at at time**... 
+    1. move the 4.4-etcd-pod to a backup location
+    2. restore the etcd-member.yaml from its backup location
+    3. wait for the etcd-member to rejoin
+    4. move to the next master.
 
 ### Version Skew Strategy
 
