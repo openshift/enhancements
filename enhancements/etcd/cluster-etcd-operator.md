@@ -490,7 +490,23 @@ items:
 
 ### Upgrade / Downgrade Strategy
 
-TODO
+#### Upgrade from 4.3 to 4.4
+
+quorum-guard: currently quorum-guard is a deployment in the `machine-config-operations` namespace the bash logic used
+to validate quorum expects certs to exist in /etc/kubernetes/static-pod-resources/etcd-member/. The target controller
+in CEO now installs these certs by revision on disk in a path such as /etc/kubernetes/static-pod-resources/etcd-pod-N/.
+
+quorum-guard was added to MCO's CVO manifests because CEO did not yet exist. Because we gracefully handle the certs in
+secrets in the `openshift-etcd` namespace it makes sense to move quorum-guard with the addition of the operator.
+
+1.) add quorum-guard deployment to CEO manifests and deploy into `openshift-etcd` namespace mounting the proper secrets.
+2.) remove quorum-guard from CVO controlled manifests in MCO repo.
+3.) create a CVO controlled Jobs that removes the Deployment and PDB from MCO namespace.
+
+#### Downgrade from 4.4 to 4.3
+
+quorum-guard: if another PDB and quorum-guard are running this should not cause an issue. We could document the steps to
+manually handle removal of quorum-gaurd in the `openshift-etcd` namespace.
 
 ### Version Skew Strategy
 
