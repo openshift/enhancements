@@ -42,6 +42,7 @@ OpenShift on AWS China.
 
 * It's not a goal to detail how to request and setup a AWS account in AWS China.
 * It's not a goal to detail how to do UPI install.
+* It's not a goal to support all AWS service endpoints that are not part of the SDK for AWS China Regions.
 
 ## Proposal
 
@@ -52,7 +53,7 @@ In order to support install OpenShift on AWS China, we need:
 * OpenShift installer support AWS China Regions.
 * All OCP components using AWS apis should use AWS China api endpoints.
 
-### User Stories
+### Implementation Details/Notes/Constraints
 
 #### Setup AWS China Account
 
@@ -67,17 +68,18 @@ Currently, we have CI jobs push the AMIs to public regions, after the AWS China 
 The OpenShift installer should be able to use the AMIs that pushed to AWS China regions to provision clusters, and use the correct api endpoints and ARNs, Notable difference for AWS China:
 
 * AWS resources ARNs in China regions are prefixed with "arn:arn-cn"
-* Ec2 service endpoint is "ec2.amazonaws.com.cn"
-* Route53 currently is not GA, we can use api endpoint "route53.amazonaws.com.cn" or "api.route53.cn" in AWS China.
+* Ec2 service endpoint is "ec2.amazonaws.com.cn", it's already in SDK, we should configure correctly to use this.
+* Route53 currently is not GA, and AWS SDK is missing the api endpoint, we should hard code the api endpoint "route53.amazonaws.com.cn" or "api.route53.cn" in AWS China, the two both works at the moment, but first one is preferred.
 
 #### Cloud credential operator support AWS China regions
 
-Cloud credential operator will create AWS client and use IAM service to validate the permission for provided AWS credential, to support AWS China, it should use IAM api endpoint "iam.amazonaws.com.cn" for AWS China regions.
+Cloud credential operator will create AWS client and use IAM service to validate the permission for provided AWS credential, to support AWS China, we should setup the SDK correctly so it can use IAM api endpoint "iam.amazonaws.com.cn" for AWS China regions.
 
 #### Ingress operator support AWS China regions
 
-Ingress operator will create ELBs and using route53 service to update related DNS records, to support AWS China, it should use
-"route53.amazonaws.com.cn" or "api.route53.cn" api endpoint. And for the resource groups tagging api, it should use "tagging.cn-northwest-1.amazonaws.com.cn"
+Ingress operator use route53 service to update related DNS records, Route53 currently is not GA in AWS China, and AWS SDK is missing the api endpoint, we should hard code the api endpoint "route53.amazonaws.com.cn" or "api.route53.cn" in AWS China, the two both works at the moment, but first one is preferred.
+
+When we using `resourcetaggingapi` to query the DNS zones, we need setup the region correctly or it will return no results.
 
 ### Risks and Mitigations
 
@@ -87,7 +89,7 @@ TODO
 
 ### Test Plan
 
-Our testing CI should include one AWS China Region, and run the installer and e2e tests in AWS China account.
+We should have our AWS Account setup and shared out for dev teams, so we can start testing, and our testing CI should include one AWS China Region, and run the installer and e2e tests in AWS China account.
 
 ### Graduation Criteria
 
