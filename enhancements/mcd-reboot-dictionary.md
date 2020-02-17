@@ -144,23 +144,27 @@ a reboot (either by configuration or an error), then the whitelist is ignored fo
 
 ### User Stories [optional]
 
+The user stories below are intended to be illustrative of the different types of 
+services we need to build capabilities for.
+
 #### Story 1
 
 As an admin, I want to update the SSH keys without any followup action, to 
-reduce the number of unnecessary periods of degraded system and application 
+limit the number of unnecessary periods of degraded system and application 
 availability.
 
 #### Story 2
 
 As an admin, I want to update the CRI-O configuration by restarting it's systemd
-unit, to reduce the number of unnecessary periods of degraded system and 
-application availability.
+unit and causing Pods to be restarted by draining them from the node, to ensure 
+that the new settings take effect quickly and consistently, but also limit the
+number of unnecessary periods of degraded system and application availability.
 
 #### Story 3
 
-As an admin, I want to update the kubelet config file without reboot, to 
-reduce the number of unnecessary periods of degraded system and 
-application availability.
+As an admin, I want to update the ``chrony`` config file without reboot, to
+ensure  that the new settings take effect quickly, but also limit the number
+of unnecessary periods of degraded system and application availability.
 
 #### Story 4
 
