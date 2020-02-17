@@ -11,8 +11,8 @@ reviewers:
 approvers:
   - TBD
 creation-date: 2019-10-23
-last-updated: 2019-10-23
-status: implementable
+last-updated: 2020-02-17
+status: implemented
 see-also:
   - "https://docs.google.com/document/d/1VqrIERs30M9EyPaqcO43wcSXHXvfe_Ao2W0ThDIohlM/edit"
 replaces:
@@ -23,11 +23,11 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [x] Enhancement is `implementable`
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
+- [x] Graduation criteria for dev preview, tech preview, GA
+- [x] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
@@ -91,15 +91,6 @@ refresh. This is already supported by
 and the functionality could be separately extracted for operator reuse.
 
 ## Proposal
-
-- Detect when the current CA certificate has less than 6 months of validity and
-  generate a new CA.
-  - The new CA should have the same `Subject.CommonName` as the current CA to
-    ensure that trust chaining is possible.
-  - Servers using a serving cert provided by the operator will have until 6
-    months after rotation to refresh without breaking trust.
-  - Clients using a ca bundle provided by the operator will have until the
-    original expiry of the pre-rotation CA to refresh without breaking trust.
 
 - The duration of the service CA should be extended from its current value of
   12 months to 26 months and the minimum CA duration should be extended to 13
@@ -180,6 +171,17 @@ and the functionality could be separately extracted for operator reuse.
         an existing metric, and the general policy of not backporting metrics
         and alert additions to previous releases of OCP.
 
+- Detect when the current CA certificate has less than the minimum validity
+  duration and generate a new CA.
+  - The new CA should have the same `Subject.CommonName` as the current CA to
+    ensure that trust chaining is possible.
+  - Servers using a serving cert provided by the operator and clients using a ca
+    bundle provided by the operator will have until the original expiry of the
+    pre-rotation CA to refresh without breaking trust.
+    - It's not possible to extend the trust past the original expiry of the
+      pre-rotation CA because an unrefreshed participant - a client or server
+      using key material with the original expiry - is the limiting factor.
+
 - Generate an intermediate CA certificate with the same public key as the new CA
   but signed with the private key of the current CA.
   - This intermediate certificate should be included with newly-generated serving
@@ -194,10 +196,10 @@ and the functionality could be separately extracted for operator reuse.
     bridge trust between an unrefreshed server (serving with a cert
     generated from the previous CA) and a refreshed client (validating
     trust with the new CA bundle).
-  - If the expiry of the current CA is less than 6 months, the new intermediate
-    certificate should be set to expire 6 months from the time of rotation to
-    ensure that refreshed clients will be able to trust unrefreshed servers for
-    that minimum duration.
+  - If the expiry of the current CA is less than the minimum validity duration,
+    the new intermediate certificate should be set to expire at the minimum
+    validity duration from the time of rotation to ensure that refreshed clients
+    will be able to trust unrefreshed servers for that interval.
 
 - Compare the `AuthorityKeyId` of a serving cert with the `SubjectKeyId` of the
   current CA to determine whether the serving cert was issued by the current CA.
@@ -234,12 +236,12 @@ also refresh automatically before expiry of the pre-rotation CA.
 
 The proposed rotation scheme does not extend the useful lifespan of serving certs
 and CA bundles from the pre-rotation CA. Their lifespan will still be 1
-year. Instead, the rotation schema provides a 6 month window when both the old
-and new CAs will be trusted. Within that 6 month window, it is critical that
+year. Instead, the rotation schema provides a 13 month window when both the old
+and new CAs will be trusted. Within that 13 month window, it is critical that
 services that consume serving certs and clients that consume CA bundles start
 using the serving certs and CA bundle provided by the new CA. For some consumers
 this may happen automatically (e.g. via restart on change or hitless
-rotation. Others may need to be manually restarted.
+rotation). Others may need to be manually restarted.
 
 OpenShift 4.1 Beta 5 - the first 4.1 beta candidate provided to external
 audiences - was made available on May 14, 2019. Without automatic or manual
@@ -247,20 +249,23 @@ rotation, the control plane of a cluster installed on that date would start
 failing a year later - May 14, 2020 - due to the expiry of the service CA
 generated at the time of cluster deployment.
 
-- A 4.1 or 4.2 cluster should ideally be upgraded to 4.3 in advance of the 1 year
-anniversary of deployment to enable the seamless automated rotation proposed by
-this enhancement.
+- A 4.1, 4.2 or 4.3 cluster should ideally be upgraded to 4.4 (or a z-stream
+patch release that supports rotation) in advance of the 1 year anniversary of
+deployment to enable the seamless automated rotation proposed by this
+enhancement.
 
-- A 4.3 release note should indicate the need to restart services after automated
-CA rotation that are not capable of automatically picking up changes to service
-cert secrets or ca bundle configmaps. To avoid downtime, such services need to be
-restarted in advance of the expiry of the service CA created at deployment
-(i.e. before the 1 year anniversary of 4.1 cluster deployment).
+- A release note for any release that supports automated rotation should indicate
+the need to restart services after automated CA rotation that are not capable of
+automatically picking up changes to service cert secrets or ca bundle
+configmaps. To avoid downtime, such services need to be restarted in advance of
+the expiry of the service CA created at deployment (i.e. before the 1 year
+anniversary of cluster deployment).
 
-- If an upgrade to 4.3 were not possible before the expiry of the service CA,
-manual rotation (by deleting the signing secret) could be performed. Manual
-rotation would not be seamless, however, due to the lack of a grace period for
-services and clients to converge on the new trust chain.
+- If an upgrade to a release supporting automated rotation were not possible
+before the expiry of the service CA, manual rotation (by deleting the signing
+secret) could be performed. Manual rotation would not be seamless, however, due
+to the lack of a grace period for services and clients to converge on the new
+trust chain.
 
 - Testing in advance of service CA rotation whether consumers of CA artifacts are
 refreshing in a timely manner is complicated:
@@ -322,7 +327,7 @@ or CA bundle (i.e. recognize when it changes, load the new value).
 
 ### Graduation Criteria
 
-Being delivered as GA in 4.3.
+Being delivered as GA in 4.4.
 
 ### Upgrade / Downgrade Strategy
 
