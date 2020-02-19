@@ -498,6 +498,9 @@ It does prefer updating it's own crashlooping or unready pods to bringing down w
 
  1. The 4.4-etcd-staticpod moves the /etcd/kubernetes/manifests/etcd-member.yaml to a backup location before trying to start etcd.
  2. This causes the 4.3-machineconfigpool to go degraded because the file that it tries to maintain is gone.
+    1. We discovered that the MCO does not upgrade past a degraded condition.
+    2. This appears to be flaw in the MCO that prevents upgrading past bugs, but for the short term, we will simply
+    skip evaluating the file in question.
  3. If the master node restarts using a 4.3-machineconfigpool, the old /etcd/kubernetes/manifests/etcd-member.yaml will come back.
     This is ok because the 4.4-etcd-staticpod will remove it again and try to claim the same port.
  4. The 4.4-mco will not have an etcd-member.yaml file.  When the 4.4-mco restarts master nodes, they will start back up
