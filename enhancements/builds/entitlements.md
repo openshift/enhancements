@@ -8,11 +8,15 @@ authors:
 reviewers:
   - "@bparees"
   - "@adambkaplan"
+  - "@derekwaynecarr"
+  - "@nvonkok"
   - "@who else?"
   
 approvers:
   - "@bparees"
   - "@adambkaplan"
+  - "@derekwaynecarr"
+  - "@mrunalp"
   - "@who else?"
   
 creation-date: 2020-02-18
@@ -43,12 +47,35 @@ see-also:
  > 1. CRI-O either already has or will have an option to specify host directories that should always be mounted 
 >into containers, akin to what the Red Hat Docker Daemon used to provide with OpenShift V3.  If / when that feature
 >is available could have bearing on the implementation options discussed below, or even when to stage in this 
->enhancement.  Presumably the MCO would need updating to leverage this CRI-O feature.
+>enhancement.  With current capabilities, the cluster admin would use the MCO post install to effectively update the
+>filesystem of each node with the necessary subscription related files in a well known location that CRI-O would look
+>for.  There is concern though using this through MCO from a couple of perspectives.  One perspective of concern is 
+>multi-cluster management, and scaling out to many clusters.  As such, enabling entitlement, either for builds only or 
+>for pods in general, could be policy bits around the multi-cluster set up experience.  Related to that, but also 
+>relevant in a single cluster scenario, is around customers having a specific config resource around entitlements, 
+>and engaging through that instead of the more generic MCO.  Ultimately, with respect to this proposal, which is currently
+>for builds only, there is first a scope question around devising a broader architecture around entitlements, across 
+>a broader range of components.  That is either a separate proposal, or a broadening of the scope of this proposal
+>from its original intent.  Second, if we manage this with separate proposals, do we gate this one or make it 
+>dependent on the broader proposal, or move forward with this one, and simply get agreement on what the order of 
+>precedence would be when both a point solution around builds and broader solution around accessing entitlements 
+>from any pod. 
 > 2. There has been discussion elsewhere around having a more generic notion of "global resources" that any pod can
 >mount.  Would we want this enhancement to tackle that (probably "no")?  Would we gate this enhancement on the 
->availability of such a feature (probably "no")?  Upstream feature work is implied with such an item.
-> 3. Do we need to allow for multiple sets of entitlement credentials to be used by Builds in 4.x?  It does not appear 
->that was the case in 3.x.
+>availability of such a feature (probably "no")?  Upstream feature work is implied with such an item.  If however such
+>an upstream features becomes more likely by the time implementation of this proposal arrives, it might dictate our 
+>choosing the CRI-O related path vs. building a path around post-install Secrets, as that later path would
+>most likely be obviated by the upstream feature.
+> 3. We did provide for multiple sets of entitlement credentials in 3.x.  There have been no official, RFE style  
+>registered requirements entitlements at a namespace level.  However, we've started to get (slightly) less official
+>feedback that customers want this in a more automated sense (vs. the current manual steps).  At a minimum, and is
+>noted below when alternatives are discussed, if namespaced entitlements are added with subsequent implementation
+>after global entitlements usability is improved, it needs to be seamless, and we minimally need to agree now
+>on what the order of precedence will be (with the take on that listed below).
+> 4. There has also been a question in the past needing to shard entitlements due to API rate limiting.  To date, it
+>has been stated that is not a concern for builds.  Periodic checkpoints here could be prudent.
+> 5. There is also the general question of how entitlements are propagated for our managed service offerings?  Reaching 
+>out to the appropriate teams there to understand current capabilities/processes and building from there is needed.
 
 ## Summary
 
@@ -63,8 +90,8 @@ and without further intervention after install "for free" because:
 
 In V4.x, with 
 
-- the removal of the docker daemon
-- and the total replacement of the openshift ansible based installer
+- the removal of the docker daemon, meaning no docker socket and no access to the host's content
+- and the total replacement of the openshift ansible based installer, so no gathering of entitlements during install
 
 all those 3.x mechanisms are gone, and a series of steps from either the cluster admin and/or developer attempting
 to run OpenShift Builds leveraging entitled content must be performed after install to enable access to the entitled
@@ -81,12 +108,12 @@ The highlights of those steps from [the current 4.x doc](https://docs.openshift.
 
 - With direct access to the entitlement pem files, create a generic secret from the files and reference the secret in
 your BuildConfig's input/source secret list
-- With Subscription Manager, and S2I build strategy, create config maps for the Subscription Manager configuration and 
-certs and reference the config maps in your BuildConfig's input/source config map list
+- With Subscription Manager, and S2I build strategy, create secret(s) for the Subscription Manager configuration and 
+certs and reference the secret(s) in your BuildConfig's input/source secret list
 - With Subscription Manager, and Docker build strategy, you have to modify your Dockerfile and manually copy and 
 initialize as needed the information from the base image
-- With Satellite, and S2I build strategy, create a config map to reference the repository config file you created for your
-satellite instance and reference the config map in you BuildConfig's input/source config map list
+- With Satellite, and S2I build strategy, create a secret to reference the repository config file you created for your
+satellite instance and reference the secret in you BuildConfig's input/source secret list
 - With Satellite, and Docker build strategy, you have to modify your Dockerfile and manually copy and initialize as 
 needed the information from the base image as well as your repository config file for your satellite instance
 - And remember to set the skip layers optimization option (i.e. squash layers) with Docker Strategy builds
@@ -99,6 +126,8 @@ using OpenShift Builds with RHEL subscriptions/entitlements.
 Simplify overall usability for using RHEL Subscriptions/Entitlements with OpenShift Builds, as we took a hit in 
 4.x vs. 3.x.
 
+And large, multi cluster administration needs to be simplified by results from our work here.
+
 ### Goals
 
 No longer require (though still allow) manual manipulation of the BuildConfig to consume entitlements.
@@ -107,16 +136,41 @@ No longer require (though still allow) manual injection of subscription credenti
 
 ### Non-Goals
 
-Reach a V3.x level, where no post install activity is needed to consume entitlements.
+1. Reach a V3.x level, where no post install activity is needed to consume entitlements.  In other words, no changes 
+to the V4.x installer to allow the user to inject the subscription particulars will be encompassed in this enhancement.
 
-In other words, no changes to the V4.x installer to allow the user to inject the subscription
-particulars.
+2. Protecting this content from being viewed/copied by users. If it's available for the build to use, the user who can 
+create a build can also read / view / exfiltrate the credentials. It is technically impossible to avoid that, since 
+anyone can write a build that does a "RUN cp /path/to/creds /otherpath" and then their resulting image will contain 
+the creds.
 
 ## Proposal
 
 ### User Stories [optional]
 
-No new user stories are introduced here.  We are improving the user's 4.x experience for existing stories.
+#### Existing User Stories (that will be improved upon)
+
+1. As a cluster admin with users who need to build an image that needs to include Red Hat content that can only be 
+accessed via a subscription, I want an easy way to distribute subscription credentials that can be consumed by my 
+user's builds.
+
+2. As a user who needs to build an image that includes subscription content, I want a simple way for my image build to 
+have access to the subscription configuration/credentials.
+
+#### New User Stories
+
+1. As a multi-cluster administrator, I can enable my cluster for entitlements via a declarative API that works well 
+with GitOps (or similar patterns) so that enabling entitled builds is not a burden as I scale the number of clusters 
+under management.
+
+TODO:  Still need some form of implementation details for this one if it remains in this proposal.
+
+#### Out Of Scope Stories
+
+1. As a user I have a (non OpenShift Build) pod whose entry point is a script that installs software from entitled 
+sources, and I want a simpler way for the necessary entitlemenet information injected in the pod.
+
+(See the Open Questions for other work that could make this happen). 
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -131,10 +185,17 @@ So the concerns for the implementation center around 4 questions:
 
 ##### Current Preferred Option
 
-The most likely choice here will be to have a well known config map in the openshift-config
+The most likely choice here will be to have a well known secret in the openshift-config
 namespace where administrators can store the credentials.
  
 The build controller can access that content and mount into build pods as it deems fit.
+
+To mimic 3.x behavior, if the global credential(s) exist, the build controller will always 
+mount (and the builder image will always tell buildah to use them).  In other words, they 
+are always present.  To add to the old 3.x behavior, we'll define a annotation to set on 
+the build config to opt out.  We could also add an option on the global build config object 
+to opt out for everyone, but unless we end up supporting non-build entitlement scenarios, this seems 
+unnecessary (just don't create the global secret).
 
 The current assumption is that only one set of entitlement credentials is needed at the global level.
 
@@ -142,16 +203,17 @@ The current assumption is that only one set of entitlement credentials is needed
 
 ###### User Namespace Option
 
-Users could provide secrets/config maps with a well known annotation in their namespace that the build controller 
-can look for and mount accordingly.
+Users could provide secret(s) with a well known annotation in their namespace that the build controller 
+can look for and mount in the pod, so the openshift/builder image can instruct buidah to mount.
 
-A slight step up from having to manually cite those secrets/config maps in the BuildConfig Spec after creating them,
+This would be a slight step up from having to manually cite those secrets in the BuildConfig Spec after creating them,
 as documented today. 
 
 Whether we do this one in part may be determined by whether we expect multiple sets of entitlements to be 
 used on a given cluster, where a single global copy is not sufficient.
 
-Multiple global copies could also be an alternative here.
+Multiple global secrets, one for ech credential set, where the annotation specifies which global secret to use
+for the given build, could also be an alternative here.
 
 The per namespace version would act as an override and take precedence over the global copy.
 
@@ -163,9 +225,12 @@ The per namespace version would act as an override and take precedence over the 
 The current mindset for this enhancement proposal is to also cite that concern, and only depend on such a 
 mechanism if the CRI-O/MCO based solution noted in open questions is available.
 
+A per build config annotation to opt out would be included in such a solution,  If the CRI-O/MCO solugin was an install 
+based, day 1 operation, we could have a new field added to the global build config.  
+
 #### In what form are the credentials provided
 
-There will also be well defined keys within the global config map that account for the various forms:
+There will also be well defined keys within the global secret that account for the various forms:
 
 - set of pem files
 - SubscriptionManager config and certs
@@ -175,27 +240,31 @@ There will also be well defined keys within the global config map that account f
 
 ##### Current Preferred Option
 
-The build controller copies the global credential config map into the user's namespace, mounts it
+The build controller copies the global credential secret into the user's namespace, mounts it
 into the build pod, and then the builder image running in the build pod tells buildah to mount it.
 
 This is analogous to how build handle registry CAs today.
 
-The config map can either be another of the predetermined ones the build controller creates for every build or 
-the build controller can look for an existing config map with a predetermined annotation.
-And certainly both approaches can be supported, where the annotated existing config map takes 
-precedence over the predetermined build controller config map. 
+The secret can either be another of the predetermined ones the build controller creates for every build or 
+the build controller can look for an existing secret with a predetermined annotation.
+And certainly both approaches can be supported, where the annotated existing secret takes 
+precedence over the predetermined build controller secret. 
 
 ##### Alternatives (can provide multiple options if deemed necessary)
 
-###### User Namespace Option
+###### User Namespace Option 1
 
-The build controller would look for config maps with a predefined annotation in the build's namespace,
-where the user has injected the credentials in that config map, and mount them into the build pod.
+The build controller would look for secrets with a predefined annotation in the build's namespace,
+where the user has injected the credentials in that secret, and mount the secret into the build pod.
 
 The builder image in the pod then seeds buildah with the correct argument to access the mounted content.
 
-There would be different annotations for copying from a global location into the config map vs. simply
-using a config map that the user has set up.
+###### User Namespace Option 2
+
+The build controller would look for secrets with a predefined annotation in the build's namespace, 
+and it would copy the contents from the global location into the secret, and mount the secret into the build pod.
+
+The builder image in the pod then seeds buildah with the correct argument to access the mounted content.
 
 ###### Host Injected Option
 
@@ -208,20 +277,22 @@ to access the credentials.
 
 ##### Current Preferred Option
 
-When the build is initiated, we provide:
+To summarize what was noted above, with the global secret option, the credentials would always be available to the build
+if the secret exists.  A per build config annotation to opt out would be provided.  A global opt out (in the global
+build config) would only be employed if sufficient non-build scenarios leveraging the global secret arose.
 
-- Always if the global config map exists, copying to a predetermined build controller map with an opt-out annotation 
-on the Build
-- Always if `HostPath` volume exists, with an opt-out annotation on the Build
-- Conditionally if the user has annotated a config map with the creds if that option is available
-- Conditionally if the user has annotated a config map for copy from the global creds if that options is available
+##### Host Injection Option
 
-The conditional options would be a feature over and above what was provided in 3.x.
+Same rationale as the global config option.
+
+##### User Namespace Options
+
+For these an annotation is needed to opt in.
 
 ###### Pre-Build Auto Injection Option
 
 There seems no need at this time to employ more sophisticated mechanism's like the global proxy controller
-auto-injecting the credentials defined at the global level into per namespace secrets/config maps with 
+auto-injecting the credentials defined at the global level into per namespace secrets/secrets with 
 a well known label.
 
 Copying when a build is initiated seems sufficient.
@@ -249,11 +320,14 @@ With both 3.x and 4.x, there have been no automated e2e tests / extended tests o
 for validating consumption of entitled content in OpenShift Builds.  The reason presumably being 
 that there is not set of credentials that our CI system can use.
 
-Revisiting that assumption / understanding should be done during the implementation of this enhancement.
+We've revisited this as part of composing this enhancement, and have devised the following recipe, assuming
+one of the forms where a secret of some sort is created:
+- using the existing build global cluster configuration tests in the serial suite
+- do a run where some fake creds are set up in a predetermined secret
+- run a docker strategy build that cats the expected mounted secret content 
+- search for the cat output in the build logs 
 
-If it is now possible / containable, new e2e tests should be added.
-
-Otherwise, manual testing from QE that takes in the three forms of credentials
+Manual testing with actual yum install of entitled content by QE should consider the three forms of credentials
 - the actual pem files
 - SubscriptionManager configuration, including certs
 - Satellite instance and configuration, including certs
