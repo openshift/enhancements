@@ -341,14 +341,18 @@ one of the forms where a secret of some sort is created:
 - run a docker strategy build that cats the expected mounted secret content 
 - search for the cat output in the build logs 
 
-Manual testing with actual yum install of entitled content by QE should consider the three forms of credentials
+Then there is the quesiont of whether manual testing with actual yum install of entitled content by QE should consider 
+with the three forms of credentials
 - the actual pem files
 - SubscriptionManager configuration, including certs
 - Satellite instance and configuration, including certs
 
 It may not be a given that OpenShift QE has access and/or ability to utilize SubscriptionManager and/or
-Satellite.  The status around that should be visited during the test case review when implementing this 
-enhancement.
+Satellite with OpenShift Builds.
+TODO:  Have sent email to QE asking for history here.
+
+Otherwise, at planning and QE/test case review time, if we cannot convince ourselves the right content is in the right 
+places solely via our new e2e tests, the status around QE's expertise/capabilities with manual testing should be visited.
 
 ### Graduation Criteria
 
