@@ -210,14 +210,22 @@ standalone etcd cert signer[3] used in 4.1 - 4.3.
 
 ## Design Details
 
-
 ### Test Plan
 
-1. Unit tests for all controllers
-1. New e2e suite to exercise scaling operations and failure modes.
-1. QE will be asked to have cluster-etcd-operator enabled in all test clusters, especially long-lived clusters
-1. The OpenShift Online environments will always run with cluster-etcd-operator enabled
-
+#### Scenarios that require testing
+1. If one master is lost, instructions for how to.
+   1. create a new master that joins the cluster
+   2. removal of the old master from the cluster
+2. Changes to the etcd-quorum recovery steps
+3. All nodes being shut off at the same time and restarted.
+4. IP address change of a single member
+5. IP address change of all members
+6. debugging and detection when DNS information for all members is lost
+7. debugging and detection when DNS information for one member is lost
+8. Removal of a member from the etcd cluster
+9. Recovery of a member with a bad data-dir.
+10. Addition of a new member when there is significant etcd data.
+11. Upgrade, downgrade, re-upgrade
 
 ### Graduation Criteria
 
