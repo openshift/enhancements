@@ -134,6 +134,13 @@ No longer require (though still allow) manual manipulation of the BuildConfig to
 
 No longer require (though still allow) manual injection of subscription credentials into a user's namespace.
 
+Wherever possible during the implementation, structure the openshift/builder code hits such that they can be leveraged 
+by tekton based image building, including OpenShift Build V2, to take the equivalent mounting of subscription 
+credential content into the build pod (where something other than the build controller for Build V1 does this), and 
+supply the necessary arguments to the `buildah` binary (vs. the `buildah` golang API the openshift/builder image
+uses).  The "code hit structuring" implies adding common code that could be referenced by both solutions into a 
+separate, simpler, utility github/openshift repository.  
+
 ### Non-Goals
 
 1. Reach a V3.x level, where no post install activity is needed to consume entitlements.  In other words, no changes 
@@ -217,6 +224,11 @@ for the given build, could also be an alternative here.
 
 The per namespace version would act as an override and take precedence over the global copy.
 
+NOTE: a user namespace option quite possibly will be more attractive to a general tekton implementation, as 
+access to the openshift-config namespace is not a lower permission level sort of thing.  In theory, the Build V2
+controller may have similar privileges as the current build V1 controller, but we will have to monitor that 
+situation with respect to features like this.
+
 ###### Host Injected Option
 
 `HostPath` volumes are already called out as a security concern in [volume mounted injections for builds](volume-secrets.md)
@@ -226,7 +238,9 @@ The current mindset for this enhancement proposal is to also cite that concern, 
 mechanism if the CRI-O/MCO based solution noted in open questions is available.
 
 A per build config annotation to opt out would be included in such a solution,  If the CRI-O/MCO solugin was an install 
-based, day 1 operation, we could have a new field added to the global build config.  
+based, day 1 operation, we could have a new field added to the global build config.
+
+NOTE: presumably a host injected option would provide the credentials "for free" for general tekton or Build V2 usage.  
 
 #### In what form are the credentials provided
 
