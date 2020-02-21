@@ -3,6 +3,7 @@ title: cluster-logging-log-forwarding
 authors:
   - "@jcantrill"
   - "@jaosorior"
+  - "@alanconway"
 reviewers:
   - "@bparees"
   - "@ewolinetz"
@@ -10,9 +11,8 @@ reviewers:
 approvers:
   - "@bparees"
   - "@ewolinetz"
-  - "@richm"
 creation-date: 2019-09-17
-last-updated: 2019-10-25
+last-updated: 2020-02-28
 status: implementable
 see-also:[]
 replaces:[]
@@ -33,55 +33,69 @@ superseded-by:[]
 
 The purpose of log forwarding is to provide a declarative way by which adopters of cluster logging can ship
 container and node logs to destinations that are not necessarily managed by the OKD cluster logging infrastructure.
-Destinations are either on or off cluster endpoints such as the cluster logging provided Elasticsearch, an organization's Kafka message bus, or other log aggregation solutions (e.g. Splunk, Graylog).
+Destinations are either on or off cluster endpoints such as the cluster logging provided Elasticsearch, an organization's Kafka message bus, a syslog server, etc.
+
+This document describes the initial release goals for log forwarding. "Future plans" at the end outlines stories that were pushed out during discussions.
 
 ## Motivation
 
 Organizations desire to reuse their existing enterprise log solutions to store container logs.  Providing a declarative mechanism by which administrators define a log destination simplifies their operational burden.  They are able to take advantage of log collection infrastructure with minimal configuration changes. The cluster logging stack is able to deploy a collector to each OKD node that is configured with the necessary permissions to collect the logs, add container metadata (e.g. labels) and ship them to the specified endpoint.
 
-
-
 ### Goals
 The specific goals of this proposal are:
 
-* Provide an API that identifies log sources and their desired forwarding outputs.
-* Send logs to an Elasticsearch cluster not managed by the cluster logging infrastructure
-* Send logs to a fluentd instance not managed by the cluster logging infrastructure via fluentd's `forward` protocol
-* Allow deployment of log forwarding without deploying the entirety of the cluster logging infrastructure (e.g. Kibana, Elasticsearch)
-* Support TLS between the collector and destination if so configured
-* Use the same log forwarding logic to write logs to a specified output or to the default storage managed by cluster logging (e.g. Elasticsearch).
+* Selectively forward Application, Infrastructure and Audit inputs.
+* Forward any combination of inputs to any combination of outputs.
+* Send logs to endpoints not managed by the cluster logging infrastructure such as:
+  * An Elasticsearch cluster (version 5 or 6)
+  * An endpoint that accepts the fluent forward protocol (fluentd, fluentbit, others...).
+  * An endpoint that accepts the syslog protocol via UDP, TCP or TLS.
+  * A kafka broker
+  * Others based on demand...
+* Support TLS connections to outputs if so configured
+* Provide a common, simplified, generic configuration for all output types.
+  - connection URL, TLS, reconnect are always configured the same way.
+  - limited access to essential output-specific features, e.g. setting a syslog facility.
+* Configure inputs for the managed store (Elasticsearch) in the same way as external stores.
+* Deploy a singleton cluster-scoped forwarder to manage forwarding for the cluster.
+* Re-connect automatically if an output connection fails.
 
 We will be successful when:
 
 * an administrator is able to deploy their own log aggregation service
-* specifies this service in log forwarding configuration
-* the service receives logs from a OKD cluster logging deployed collection agent  
+ - specifies this service as an output in the `ClusterLogForwarder` spec.
+ - specifies the inputs (categories) to forward
+ - the service receives the expected logs
 
 ### Non-Goals
 
-* Log forwarding intends to be opinionated about the source of log messages; it will explicitly define what constitutes "application logs" or "infrastructure logs". 
-It will not allow configuration of additional sources without further design considerations and how those sources may impact the collecting agent. Log forwarding is not 
-intended to provide a complex routing solution as one might achieve by using a custom collector configuration or a messaging solution (e.g. kafka).
-* It is not a goal for the tech-preview to support log forwarding outputs other then the ones identified for the goals. Admins can forward to their own fluentd via `forward` 
-and then configure that fluentd to forward to any number of specific logstore outputs
-* It is not a goal to provide secure storage for audit logs. If the deployer chooses to enable audit log forwarding, they need to make sure that the endpoint is compliant with governmental regulations and secure. The OpenShift logging Elasticsearch does not comply with those regulations.
+* No secure storage for audit logs, only secure (TLS) delivery to a target system.
+  - The user must ensure that the target system is secure and compliant with regulations.
+  - The OpenShift Elasticsearch store is not guaranteed to comply with any such regulations.
+* No direct access to the configuration schemes of target systems or the local collector
+  - limited access to essential output-specific features, e.g. setting a syslog facility.
+* Not intended to provide a complex routing solution as one might achieve by using a custom collector configuration or a messaging solution (e.g. kafka) - but is intended to allow forwarding to an such a system that is deployed externally.
 
 ## Proposal
 
-Log forwarding will provide a declarative way to specify the outputs for specific types of logs using a 'pipeline'.  A 'pipeline' defines simple routing for one source to one or more outputs. The source of logs are opinionated and well defined by cluster logging. The initial source types are as follows:
+Provide a declarative `pipeline` that associates a set of named `inputs` with a set of named `outputs`.
 
-* `logs.app` - Container logs generated by user applications running on the platform, excluding infrastructure container applications
-* `logs.infra` - Logs generated by both infrastructure components running on the platform and OKD nodes (e.g. journal logs).  "Infra" applications are defined as any pods which run in namespaces: `openshift*`, `kube*`, `default`.
-* `logs.audit` - Logs generated by the nodes' auditd (/var/log/audit/audit.log), audit logs from the kubeapi-server and the openshift-apiserver. This will not be forwarded by default.
+The following reserved input names are defined for the initial release:
+* `Application` - Container logs generated by user applications running on the platform, excluding `Infrastructure` containers.
+* `Infrastrucure` - Logs generated by infrastructure components running on the platform and OKD nodes (e.g. journal logs).  "Infrastructure" applications are defined as any pods which run in namespaces: `openshift*`, `kube*`, `default`.
+* `Audit` - Logs generated by the nodes' auditd (/var/log/audit/audit.log), audit logs from the kubeapi-server and the openshift-apiserver. This will not be forwarded by default.
 
-Future types may be:
-* `events.kubernetes` - Kubernetes events
+The following reserved output names are defined:
+* `Default` - the current Elasticsearch based store.
 
-There are no assumptions regarding whether or not an endpoint is deployed on or off cluster.  Endpoints off-cluster may require adminstrators to perform additional actions in order for logs to be forwarded (e.g. secret creation, opening port, enable global proxy configuration) 
-Following is the list of supported endpoint types for this proposal:
+Users can define their own named outputs pointing to their target endpoints. An endpoint can be deployed on or off cluster.  Endpoints off-cluster may require adminstrators to perform additional actions in order for logs to be forwarded (e.g. secret creation, opening port, enable global proxy configuration)
 
-* Elasticsearch (v6.x)
-* Fluent `forward`
+The following output types are planned for initial support:
+
+* Elasticsearch (v6.x) with/without TLS.
+* Fluent `forward` with/without TLS.
+* Syslog UDP, TCP, TLS.
+* Kafka
 
 ### User Stories
 
@@ -99,262 +113,219 @@ This is often required for industries such as the US public sector, healthcare o
 
 ### Implementation Details
 
-#### Assumptions
-
-* A pipeline shall support at least one output.
-* A pipeline may support multiple outputs.
-* Outputs that require secrets which are not created by the cluster-logging-operator shall be created and managed by the administrator of the endpoint
-* Secrets shall have keys of: `tls.crt`, `tls.key`, `ca-bundler.crt` which point to the respective certificates for which they represent. Secrets shall have the key `shared_key` for use when using `forward` in a secure manner
-* The operator will only support a single instance of log forwarding named `instance` for at least the tech preview release
-* Log forwarding is enabled for tech preview when the instance of `clusterloggging` is annotated with: `clusterlogging.openshift.io/logforwardingtechpreview: enabled`
+* A pipeline associates multiple input names with multiple output names.
+* Users cannot define new inputs (for initial release)
+* Users can define new outputs, output configuration includes:
+  - `type` (e.g. `Syslog`,`Fluent`)
+  - `url` used to connect to the endpoint.
+  - `secretRef` referring to a secret object used for secure connections.
+    - For a standard logging installation, secrets are in the `openshift-logging` namespace
+    - You can omit the `namespace` field in the secretRef, the `openshift-logging` namespace is assumed. If you do include the `namespace` field it must be `openshift-logging`
+    - Secrets not created by the cluster-logging-operator shall be created and managed by the administrator of the endpoint
+    - NOTE: We use SecretReference rather than a simple name string for future flexibility.
+* If no `ClusterLogForwarder` object exists, the default Elasticsearch instance is enabled (status quo)
+* If a `ClusterLogForwarder` exists  the default Elasticsearch instance is disabled unless there is a `pipeline` with the `Default` output.
 
 #### Security
-* A pipeline may support TLS configuration by declaring a secret. Secrets must contain keys: `tls.crt`, `tls.key`, `ca-bundler.crt`
-* The secret must exist in the `openshift-logging` namespace
-* Endpoints defined without a secret will use unsecure communication and must explicitly declare `insecure: true` in the output specifification
 
-#### Log Message Routing
-* Undeclared source types (e.g. `logs.infra`) will be dropped if they are not defined in `spec.pipelines` entry
-* Declared source types are routed to the specified output
+* Server-authenticated TLS is enabled if `url` is a secure URL (e.g. 'https:')
+* Client-authenticated TLS is enabled if `url` is secure *and* `secretRef` has keys `tls.crt`, `tls.key`, `ca-bundle.crt`
+  - it is an error if `secretRef` is present but `url` is *not* secure, or the required 'tls.' keys are missing or invalid.
+* An intentionally *insecure* output (no TLS) must have `insecure: true`
+  - This is to avoid accidental insecure mis-configuration of an output that was intended to be secure.
+* The user is responsible for creating and maintaining the secret objects
+* The cluster logging operator is responsible for watching secrets and applying changes
+  - e.g. if the user replaces a certificate or changes a password in a secret, the operator must re-connect affected outputs with the new credentials.
 
-For example, If you have specified a pipeline for `logs.app` sources, but did not specify one for `logs.infra`, then `logs.infra` will be dropped
+#### Reliability
+* Output connections will automatically re-connect on disconnect.
+* Changes to secrets will trigger automatic re-connect with new credentials.
 
+#### Scale
+* The cluster logging operator generates configuration for the collector
+  - with a singleton ClusterLogForwarder this is unlikely to be a scaling problem.
+* The actual connection and forwarding to remote endpoints is done by the collector
+  - we rely on the collector to scale and perform.
 
-### Risks and Mitigations
+#### Metrics
+Note: the actual forwarding is done by the collector, so we can only provide metrics that are available from the collector.
 
-## Design Details
+Desirable metrics include:
 
-The `cluster-logging-operator` will use the forwarding API to generate a collector configuration and mount any secrets into the collector pod.
+* Counter:
+  - Volume (bytes) per input, per pipeline, per output and total.
+* Histogram/Summary:
+  - Throughput (bytes/sec) per input, per pipeline, per output and total.
+  - Read size: per input
+  - Write size: per output
+  - Latency (sec)
+    - per pipeline: from read to written on all outputs.
+    - per output: from read to written on this output.
 
-### API Specification
-The log forwarding API:
+#### Cluster Logging Operator
+The `cluster-logging-operator` will use the `ClusterLogForwarder` configuration to:
 
-```
-apiVersion: "logging.openshift.io/v1alpha1"
-kind: "LogForwarding"
-spec:
-  disableDefaultForwarding: true
-  outputs:
-   - type: “elasticsearch”
-     name: elasticsearch
-     endpoint: elasticsearch.svc.messaging.cluster.local
-     secrets:
-        name: elasticsearch
-   - type: “forward”
-     name: secureforward-offcluster
-     endpoint: https://secureforward.offcluster.com:9200
-     secrets:
-        name: secureforward
-   - type: “elasticsearch”
-     name: elasticsearch-insecure
-     endpoint: elasticsearch-insecure.svc.messaging.cluster.local
-     insecure: true
-  pipelines:
-   - name: container-logs
-     inputSource: logs.app
-     outputRefs:
-     - elasticsearch
-     - secureforward-offcluster
-   - name: infra-logs
-     inputSource: logs.infra:
-     outputRefs:
-     - elasticsearch-insecure
-   - name: audit-logs
-     inputSource: logs.audit
-     outputRefs:
-     - secureforward-offcluster
-```
-
-The generated collector configuration is something like the following. **Note:** the source definitions from prior releases remain unchanged:
-
-```
-# source definitions
-<source>
-  @type tail
-  @label @CONCAT
-  <label @CONCAT>
-    <filter kubernetes.**>
-      @type concat
-      key log
-      partial_key logtag
-      partial_value P
-      separator \'\'
-    </filter>
-    <match kubernetes.**>
-      @type relabel
-      @label @INGRESS
-    </match>
-  </label>
-</source>
- 
-# INGRESS
-<label @INGRESS>
-  ... #current @INGRESS config
-
-    <match output_ops_tag journal.** system.var.log** mux.ops audit.log**   %OCP_FLUENTD_TAGS%>
-      @type relabel
-      @label @_LOGS_INFRA
-    </match>
-    <match kubernetes.**>
-      @type relabel
-      @label @_LOGS_APP
-    </match>
-</label>
-
-<label @_LOGS_APP>
-  <match **>
-     @type copy
-     <store>
-        @type relabel
-        @label @CONTAINER_LOGS
-     </store>
-  </match>
-</label>
-
-<label @_LOGS_INFRA>
-  <match **>
-     @type copy
-     <store>
-        @type relabel
-        @label @INFRA_LOGS
-     </store>
-  </match>
-</label>
-
-# match outputs are generated based on defined pipeline endpoints
-<label @CONTAINER_LOGS>
-  <match **>
-     @type copy
-     #store section for each endpoint type
-     <store>
-       @type relabel
-       @label @SECUREFORWARD_OFFCLUSTER
-     </store>
-     <store>
-       @type relabel
-       @label @ELASTICSEARCH
-     </store>
- </match>
-</label>
-
-<label @CONTAINER_LOGS>
-  <match **>
-     @type copy
-     #store section for each endpoint type
-     <store>
-       @type relabel
-       @label @ELASTICSEARCH_INSECURE
-     </store>
- </match>
-</label>
- 
-#specific pipeline endpoint
-<label @ELASTICSEARCH>
-  <match retry_elasticsearch>
-     @type copy
-     <store>
-       @type elasticsearch
-       @id elasticsearch
-       client_key /var/run/ocp-collector/secrets/elasticsearch/key
-       client_cert /var/run/ocp-collector/secrets/elasticsearch/cert
-       ca_file /var/run/ocp-collector/secrets/elasticsearch/cacert
-       <buffer>
-		@type file
-		path '/var/lib/fluentd/elasticsearch'
-       </buffer>
-     </store>
-  </match>
-  <match **>
-     @type copy
-     <store>
-       @type elasticsearch
-       @id elasticsearch
-       client_key /var/run/ocp-collector/secrets/elasticsearch/key
-       client_cert /var/run/ocp-collector/secrets/elasticsearch/cert
-       ca_file /var/run/ocp-collector/secrets/elasticsearch/cacert
-       retry_tag "retry_elasticsearch"
-     </store>
- </match>
-</label>
-<label @SECUREFORWARD_OFFCLUSTER>
-   ...
-</label>
-```
-
-Following is a diagram which identifies the workflow of a message through fluentd as captured by the above configuration.
-
-![https://docs.google.com/drawings/d/18FD4c1pBz4e8eJIH37yUwM40ew69g8h1cqPEfOLsuyY/edit?usp=sharing](images/log-forwarding-message-flow.png)
-
-### Cluster Logging Operator
-* The operator generates output configuration for the collector
-* The operator specifies in the collector daemonset the secrets needed to communicate to each endpoint:
-
-   `/var/run/ocp-collector/secrets/<secretName>/{tls.crt,tls.key,ca-bundle.crt}`
-
-    where:
-
-    * `secretName` is the name of a secret in the `openshift-logging` namespace.
-    * `tls.crt`, `tls.key`, `ca-bundle.crt` are files in the secret
-
+* generate output configuration for the collector that respects all the pipelines.
+* mount secrets in the collector daemonset as needed for each endpoint.
+  - the controller ensures that collector configuration refers to the correct mounted secrets.
+  - the exact location of secrets in the file-system is a controller implementation detail.
 
 #### Collector
 * The collectors will be modified to be remove endpoint config specific logic from the start script ; configuration is assumed to be correct and used as provided by the `cluster-logging-operator`
 * Extract all configuration into the collector configuration.
 * Extract the `run.sh` script from the collector image and mount into the deployed pod
 
+### Risks and Mitigations
+- The API and GA feature set are a close match to the Tech Preview API, which reduces the risk.
+- We have starting-point implementations for fluent and syslog outputs.
+- We have done experimental work on kafka outputs.
+
+### Examples CRs for some use cases
+
+#### As a cluster administrator, I want to forward to a remote service and also store logs locally.
+
+I want a remote copy of logs, but also I want to continue using the default elasticsearch log store:
+- I don't lose logs while the remote service is down.
+- My local users can continue to view and query the logs locally.
+
+```
+apiVersion: "logging.openshift.io/v1"
+kind: "ClusterLogForwarder"
+spec:
+  outputs:
+   - name: SecureRemote
+     type: Syslog
+     url: tls://secureforward.offcluster.com:9200
+     secret:
+        name: my_secrets # Must contain keys tls.key, tls.cert and ca.cert
+
+  pipelines:
+   - inputs: [ Infrastructure, Application, Audit ]
+     outputs: [ SecureRemote, Default ]
+```
+
+#### As a cluster administrator, I want to use a local syslog instance only, with no elasticsearch.
+
+```
+apiVersion: "logging.openshift.io/v1"
+kind: "ClusterLogForwarder"
+spec:
+  outputs:
+   - name: MyLogs
+     type: Syslog
+     syslog:
+       Facility: Local0
+     url: localstore.example.com:9200
+  pipelines:
+   - inputs: [Infrastructure, Application, Audit]
+     outputs: [MyLogs]
+```
+
+#### As a cluster administrator, I want to clearly separate where the logging stack forwards infrastructure and/or audit related logs.
+
+```
+apiVersion: "logging.openshift.io/v1"
+kind: "ClusterLogForwarder"
+metadata:
+  outputs:
+   - name: MyInfra ...
+   - name: MyApp ...
+   - name: MyAudit ...
+  pipelines:
+   - inputs: [Infrastructure]
+     outputs: [MyInfra]
+   - inputs: [Application]
+     outputs: [MyApp]
+   - inputs: [Audit]
+     outputs: [MyAudit]
+```
+### As a Red Hat SRE who operates OSD clusters, I want a mechanism to protect my configuration (e.g. audit log forwarding, infra logs) from non SRE administrators  of OSD but at the same time give them the opportunity to configure their own log forwarding for applications. ###
+
+In a cluster with a single administrator role, the ClusterLogForwarder instance is deployed with the name "instance"
+In a cluster with two administrator roles, a second ClusterLogForwarder instance can be deployed with the name "application"
+The "application" forwarder is restricted to only forwarding Application logs, the "instance" forwarder is unrestricted.
+In an OSD cluster the SRE role has access to "instance", the dedicated admin role only has access to "application".
+
 ### Test Plan
-#### Unit testing
+
+#### Regression testing
+Translate all existing TP tests to new API, translation should be simple, tests should pass.
+
+n#### Unit testing
 * Log forwarding will add unit tests to provide adequate coverage for all changes
-* BDD unit testing will be added to unit testing to make tests goals more explicit,  readable, and obvious
+* BDD unit testing will be added to unit testing to make tests goals more expliit,  readable, and obvious
+* Use `go test -cover` and related tools to measure coverage https://blog.golang.org/cover
+
+#### Functional testing
+Go tests that run (in sub-processes or goroutines):
+- a collector instance
+- a dummy log receiver
+- a simulated container generating logs
+
+Verify configurations:
+* Pipelines with multiple, overlapping outputs.
+* TLS server and client authentication.
+* Tests for all output types
+* Verify reconnect
+* Error scenarios.
+
+Note: by driving functional tests from `go test` we can get coverage stats integrated with the unit tests.
+
 #### Integration and E2E tests
-* Test no regressions after upgrade when log forwarding exists
-* Tests to verify there are no regressions in functionality between pre and post logforwarding feature
+* Tests to verify no change in behavior with
+  - No ClusterLogForwarder object deployed.
+  - A ClusterLogForwarder object with this configuration:
+    ```pipelines: {inputs: [Infrastructure, Application, Audit], outputs: [Default]}```
 * Tests to verify log forwarding is writing logs to an Elasticsearch instance not managed by cluster logging
-* Tests to verify log forwarding is writing logs to an Elasticsearch instance managed by cluster logging
-* Tests to verify log forwarding is writing logs to a Fluentd instance via `forward` that is not managed by cluster logging
+* Tests to verify log forwarding is writing logs to a fluentd instance that is not managed by cluster logging
+* Tests to verify log forwarding is writing logs to a syslog instance that is not managed by cluster logging
+
+#### Scale and stress testing
+* Run selected E2E tests under stress conditions:
+  - many nodes
+  - many containers
+  - high-volume log streams
+  - many outputs
+* Find breaking points.
+* Fix bugs that show up under stress.
+* Optimize performance bottlenecks.
 
 ### Graduation Criteria
 
-##### Tech Preview
+##### Tech Preview -> GA
 
-* Log forwarding is only enabled when annotated with: `clusterlogging.openshift.io/logforwardingtechpreview: enabled`
-* Ability to store logs to the cluster managed log aggregator without defining log forwarding (e.g. status quo)
-* Explicitly define and document log sources and their meanings (e.g. `logs.apps`, `logs.infra`)
-* Explicitly define supported outputs (e.g. `elasticsearch`, `fluentd`)
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-
-##### Tech Preview -> GA 
-
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
+Essential:
+- Rework TP implementation to implement new API - structurally close, much renaming.
+- Implement new GA output types.
+- Sufficient test coverage (upgrade, tech. preview migration, downgrade, scale)
 - Available by default without tech preview annotation
-- Concrete API
-- Additional supported outputs (e.g. `Splunk`, `Graylog`, `kafka`)
-- Support for SRE usecase: As an administrator of a dedicated cluster, I need to allow dedicated-admins to configure the destination of container logs (logs.apps) separately from infra logs so they are prevented from modifying where infra logs (logs.infra) are forwarded
-- Modify API to support: include and exclude of logs
+- End user documentation.
 
 ### Upgrade / Downgrade Strategy
 
 #### Upgrade
+
 Upgrades should be seamless to users of cluster logging deployments managed by the `cluster-logging-operator`.  Admins who make no changes will see no difference after upgrade when this feature is deployed.
 
-Upon upgrade, the `cluster-logging-operator` will continue to route `logs.infra` and `logs.app` logs to the internal logstore if:
+For users who deployed the tech preview (TP), we adopt the following strategy:
 
-* `spec.logstore` is defined
+1. The GA operator will fail to deploy the TP API, with an informative status.
+2. If an instance of the TP API is present at upgrade, the new operator will:
+   - convert the TP API configuration to an instance of the GA API (also considering the TP enable/disable annotations to include/exclude a Default pipeline)
+   - deploy the equivalent GA API instance
+   - mark the old instance as inactive with an informative status.
 
-
-The `cluster-logging-operator` will honor the `LogForwarding` resource named `instance` if it exists and the `ClusterLogging` resource named `instance` is properly annotated.
-
+A TP deployment will continue to function after upgrade, but the user must use the new API to make any changes. The status of the TP object, will point them clearly to the GA API.
 
 #### Downgrade
 Downgrades should be discouraged unless we know for certain the Elasticsearch version managed by cluster logging is the same version.  There is risk that Elasticsearch may have migrated data that is unreadable by an older version.
 
-
 ### Version Skew Strategy
 
-Version skew is not relevant to cluster logging because it is deployed as an OLM managed operator.  Component versions are set in a versioned operator deployment.
+Version skew is not relevant to the GA proposal because the operands will not change, only the way the operator configures them. Logging is deployed as an OLM managed operator and component versions are set in a versioned operator deployment.
+
+In future upgrades where operator+operand versions may be temporarily mismatched, we will need to handle the version skew issues.
+
 
 ## Implementation History
 
@@ -365,7 +336,7 @@ Version skew is not relevant to cluster logging because it is deployed as an OLM
 ## Drawbacks
 Drawbacks to providing this enhancement are:
 * Increased exposure to issues being raised by customers for things outside the control of the cluster logging team
-  * What happens when the customer managed endpoint is down?  How well does the collector handle the back pressure? When do logs get dropped because they can not be shipped
+  * What happens when the customer managed endpoint is down?  How well does the collector handle the back pressure? When do logs get dropped because they can not be shipped?
 * Setting customer expectations of the capabilities of log forwarding and guarantees (e.g. rates, delivery, reliability, message loss)
 
 ## Alternatives
@@ -373,4 +344,37 @@ Drawbacks to providing this enhancement are:
 Provide a recipe for customer's to deploy their own log collector to move the responsibility to the customer.
 
 ## Infrastructure Needed
-* Future target endpoints may require special infrastructure or licencing to properly test.  For example, Splunk is destination requested by many users but is a licensed product.  The free dev tier may not provide sufficient capacity to fully test
+* Future target endpoints may require special infrastructure or licensing to properly test.
+* Scale and stress tests require intensive use of a large cluster for an extended period of time.
+
+## Future plans
+As well as serving the current GA requirements, the log forwarding API has been designed with the following future requirements in mind.
+
+### Stand-alone log forwarding. ###
+
+Deploy log forwarding without deploying the entirety of the cluster logging infrastructure (e.g. Kibana, Elasticsearch) Forwarding will be a stand-alone system independent of any log store. This decoupling will let us test forwarding separately, and let customers to switch off our managed store entirely while still using a managed and supported forwarder.
+
+### As a team lead (tenant), I’d like to configure secure log forwarding to the tool of my team's choice, separate from global config. ###
+
+Introduce a namespace-scoped LogForwarder. The API is a restricted version of the ClusterLogForwarder API:
+- can't use Infrastructure or Audit inputs
+- can only forward logs from own namespace.
+
+Although there could be many `LogForwarder` objects, there is still only one collector. The operator would join all the configurations and compile them to a single collector configuration. It would also enforce the limitations of namespace-scoped forwarders.
+
+### I want to configure log forwarding to include/exclude logs on k8s labels. ###
+
+Allow user-defined named inputs in addition to the built in Application, Infrastructure, Audit.
+User inputs can select logs based on:
+* K8s label selector maps and/or expressions.
+* Namespaces
+
+User defined inputs could also be extended to allow per-record filtering and transformations (e.g. using regular expressions), but we haven't though much about that yet.
+
+### I want many namespace-scoped forwarders to share the same remote logging connection ###
+Having every namespace define it's own log forwarding outputs may create a large number of connections from the underlying collector. In many cases you would like to define a single Output destination (e.g. for "ImportantApplications"), but allow each namespace to define for itself which applications are "Important" by creating pipelines to a shared ImportantApplications output.
+
+The solution is to define a "shared output" API. This has the same configuration as an `output` entry in the ClusterLogForwarder API, but can be deployed as a separate object. Any forwarder configuration can refer to the output as "<namespace>/<name>", the cluster logging controller will collect all pipelines referring to that name, and generate collector configuration
+to do all the requested forwarding over a single connection.
+
+Security consideration: we need to restrict use of an Output either by role or namespace, needs investigation.
