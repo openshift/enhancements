@@ -180,6 +180,16 @@ This controller shapes the static pod manifest itself.  It has some unique featu
     It waits until it is able to know that it is in the member list before trying to start.
     When it does this, it is able to determine the member list to use to launch.
 
+### Replacing single lost master
+This is one of the scenarios that needs user intervention and the step needs to be in user-facing docs.
+
+1. User will determine if one of the etcd is unhealthy by verifying against etcd API from etcd pod: `etcdctl endpoint health --cluster`
+2. User will  manually remove the etcd member from etcd membership using the DR [script](https://github.com/openshift/machine-config-operator/blob/47c32dc6f3268fb4942c66431cdca3f85b60e488/templates/master/00-master/_base/files/usr-local-bin-etcd-member-remove-sh.yaml) `etcd-member-remove.sh`
+   In future versions, the first two tasks would be automated by the operator and will not require manual intervention.
+3. User will determine if they need to stop the existing machine and provision a new machine.
+4. If needed users will provision a new machine using the same method as they used during install time.
+4. If needed, users will update two DNS records for the new master: A record and SRV record to include the A record pointing to the new etcd-member machine
+5. As soon kubelet starts on new master, cluster-etcd-operator will scale up the etcd membership with the new member. 
 
 ### Implementation Details/Notes/Constraints
 
