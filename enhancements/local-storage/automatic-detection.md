@@ -44,16 +44,18 @@ To automatically detect local devices and provision local volumes out of them.
 ### Goals
 
 - Automatic detection of available disks from nodes which can be used as PVs for OpenShift-cluster.
-- Should respond to the attach/detach events of the disks/devices.
-- Should have options for filtering particular kind of disks based on properties such as name, size, manufacturer, etc.
+- Respond to the attach/detach events of the disks/devices.
+- Have options for filtering particular kind of disks based on properties such as name, size, manufacturer, etc.
 
 ### Non-Goals
+
+- Inherently protect against confilict with provisioners that own local devices on the same nodes automatic detection is configured to run.
 
 ## Proposal
 
 The `local-storage-operator` is already capable of consuming local disks from the nodes and provisioning PVs out of them,
 but the disk/device paths needs to explicitly specified in the `LocalVolume` CR.
-The idea is to introduce a new Custom Resource, `AutoDetectVolumes`, that enables automated discovery andn provisioning of local volume based PVs.
+The idea is to introduce a new Custom Resource, `AutoDetectVolumes`, that enables automated discovery and provisioning of local volume based PVs on a set of nodes addressed by one or more labelSelectors.
 
 ### Risks and Mitigations
 
@@ -101,7 +103,7 @@ type AutoDetectVolumeSpec struct {
     // VolumeMode determines whether the PV created is Block or Filesystem
     // + optional
     VolumeMode PersistentVolumeMode `json:"volumeMode,omitempty"`
-    // FSType type to be used when volumeMode is Filesystem
+    // FSType type to create when volumeMode is Filesystem
     // +optional
     FSType string `json:"fsType,omitempty"`
     // DeviceInclusionSpec is the filtration rule for including a device in the device discovery
@@ -129,7 +131,7 @@ const (
 
 type DeviceDiscoveryPolicyType string
 
-const (   
+const (
     // The DeviceDiscoveryPolicies that will be supported by the LSO.
     // These Discovery policies will based on lsblk's type output
     // Disk represents a device-type of disk
@@ -161,7 +163,7 @@ type DeviceInclusionSpec struct {
     // to contain at least one of these strings.
     // +optional
     Models []string `json:"models"`
-    
+
     // Vendors is a list of device vendors. If not empty, the device's model as outputted by lsblk needs
     // to contain at least one of these strings.
     // +optional
@@ -169,7 +171,20 @@ type DeviceInclusionSpec struct {
 }
 ```
 
-some examples of autoDetectVolume CR instance:
+The existing LSO daemon will create PVs that match the `AutoDetectVolume` criteria.
+
+### Test Plan
+
+- The integration tests for the LSO already exist. These tests will need to be updated to test this feature.
+- The tests must ensure that detection of devices are working/updating correctly.
+- The tests must ensure that data corruption are not happening during auto detection of devices.
+
+### Graduation Criteria
+
+- Documentation exists for the behaviour of each configuration item.
+- Unit and End to End tests coverage is sufficient.
+
+#### Examples
 
 ```yaml
 apiVersion: local.storage.openshift.io/v1alpha1
@@ -230,23 +245,6 @@ spec:
       - ATA
       - ST2000LM
 ```
-
-The existing LSO daemon will create PVs that match the `AutoDetectVolume` criteria.
-
-### Test Plan
-
-- The integration tests for the LSO already exist. These tests will need to be updated to test this feature.
-- The tests must ensure that detection of devices are working/updating correctly.
-- The tests must ensure that data corruption are not happening during auto detection of devices.
-
-### Graduation Criteria
-
-N/A
-
-#### Examples
-
-These are generalized examples to consider, in addition to the aforementioned
-[maturity levels][maturity-levels].
 
 ##### Removing a deprecated feature
 
