@@ -185,7 +185,10 @@ Populates the static pod manifest used on the bootstrap node and other resource 
 
 #### File Reads
 1.) cluster-network-file - to determine the `ClusterCIDR` and `ServiceCIDR`. These values are used to conclude if the cluster is
-    single stack.
+    one of the following.
+    1. single-stack IPv4
+    2. single-stack IPv6
+    3. dual-stack
 2.) cluster-config-file - checks the declared `MachineCIDR` of the cluster from the install-config. Render uses the `MachineCIDR`
     of the cluster to validate which IP address on the bootstrap interfaces is the BootstrapIP by making sure it is on the same
     network as the `MachineCIDR`.
@@ -193,7 +196,8 @@ Populates the static pod manifest used on the bootstrap node and other resource 
 #### File Writes
 1.) etcd-member-pod.yaml - The static pod manifest for the bootstrap etcd instance.
 2.) manifests/00_etcd-host-service.yaml - host-etcd-2 service
-3.) manifests/00_openshift-etcd-ns.yaml - openshift-etcd namespace
+3.) manifests/00_etcd-host-service-endpoints.yaml - host-etcd endpoints resource
+4.) manifests/00_openshift-etcd-ns.yaml - openshift-etcd namespace
 
 ### Implementation Details/Notes/Constraints
 
@@ -220,6 +224,19 @@ starting before the operator exists we utilize the standalone etcd cert signer[3
 [2] https://github.com/openshift/installer/blob/release-4.4/data/data/bootstrap/files/usr/local/bin/bootkube.sh.template#L140
 
 [3] https://github.com/openshift/installer/blob/552f107a2d6b062f009c94c65be0f195f2c9168c/data/data/bootstrap/files/usr/local/bin/bootkube.sh.template#L83
+
+## Debt
+Before cluster-etcd-operator etcd stored many of its assets in MCO and the installer. These assets
+should eventually move back into the openshift-etcd namespace and or be owned/created by
+cluster-etcd-operator.
+
+1.) Quorum Guard
+2.) Disaster Recovery Scripts
+3.) Installer Rendered Resources
+    1.) openshift-etcd namespace
+    2.) etcd-host-service
+    3.) etcd-host-service endpoints
+    4.) etcd-service
 
 ## Design Details
 
