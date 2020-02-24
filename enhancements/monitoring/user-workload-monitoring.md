@@ -251,20 +251,22 @@ OpenShift console executes queries against `/query` endpoint of Thanos Querier t
 
 Access to this endpoint is gated by the permission to `get pods.metrics.k8s.io` in the requested namespace.
 
-#### Available Rules and declared alerts
+#### Available Rules and alerts
 
 OpenShift console executes queries against the `/rules` and `/alerts` endpoint of Prometheus and Thanos Ruler
-to retrieve a list of declared alerts and recording rules. Recording rules as well as alerting rules deployed via user workload monitoring are having enforced namespace labels set. The list of rules and alerts is being filtered by prom-label-proxy based on the tenant namespace label.
+to retrieve a list of declared alerting/recording rules and a list of active alerts. Recording rules as well as alerting rules deployed via user workload monitoring are having enforced namespace labels set. The list of rules and alerts is being filtered by prom-label-proxy based on the tenant namespace label.
 
-Access to this endpoint is gated by the permission to `get prometheusrules.monitoring.coreos.com` in the requested namespace.
+Access to these endpoints is gated by the permission to `get prometheusrules.monitoring.coreos.com` in the requested namespace.
 
-#### Alertmanager alerts and silences
+#### Alertmanager silences
 
-OpenShift console executes requests against the `/alerts` endpoint of Alertmanager to retrieve the list of currently firing alerts and to silence alerts. Firing alerts originating from user workload monitoring are having enforced namespace labels set. A user can only create and update silences as well as get alerts and silences filtered by the namespace label in flight.
+OpenShift console executes requests against the `/silences` endpoint of Alertmanager to retrieve the list of silences and to silence alerts. A user can only create, delete and update silences as well as get silences filtered by the namespace label in flight.
 
-Access to read the list of currently firing alerts is gated by the permission to `get prometheusrules.monitoring.coreos.com` in the requested namespace.
+Access to list the silences is gated by the permission to `get prometheusrules.monitoring.coreos.com` in the requested namespace.
 
-Access to post a new silence or update an existing silence is gated by the permission to `create prometheusrules.monitoring.coreos.com`.
+Access to create a new silence or update an existing silence is gated by the permission to `create prometheusrules.monitoring.coreos.com` in the requested namespace.
+
+Access to delete an existing silence is gated by the permission to `delete prometheusrules.monitoring.coreos.com` in the requested namespace.
 
 ### Multitenancy
 
