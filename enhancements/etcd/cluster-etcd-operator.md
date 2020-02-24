@@ -180,6 +180,20 @@ This controller shapes the static pod manifest itself.  It has some unique featu
     It waits until it is able to know that it is in the member list before trying to start.
     When it does this, it is able to determine the member list to use to launch.
 
+### Render Command
+Populates the static pod manifest used on the bootstrap node and other resource dependencies during the cluster bootstrap.
+
+#### File Reads
+1.) cluster-network-file - to determine the `ClusterCIDR` and `ServiceCIDR`. These values are used to conclude if the cluster is
+    single stack.
+2.) cluster-config-file - checks the declared `MachineCIDR` of the cluster from the install-config. Render uses the `MachineCIDR`
+    of the cluster to validate which IP address on the bootstrap interfaces is the BootstrapIP by making sure it is on the same
+    network as the `MachineCIDR`.
+
+#### File Writes
+1.) etcd-member-pod.yaml - The static pod manifest for the bootstrap etcd instance.
+2.) manifests/00_etcd-host-service.yaml - host-etcd-2 service
+3.) manifests/00_openshift-etcd-ns.yaml - openshift-etcd namespace
 
 ### Implementation Details/Notes/Constraints
 
@@ -198,9 +212,8 @@ bootkube.sh:
 
 cluster-etcd-operator render[1] command generates the static pod manifest for the etcd deployed
 on the master node. After this manifest is persisted to disk on the bootstrap node we copy[2] it
-to the manifests directory. This static pod has a shortened list of init containers with include
-`discovery` and `certs`. Because we are starting before the operator exists we utilize the
-standalone etcd cert signer[3] used in 4.1 - 4.3.
+to the manifests directory. This static pod has a single init container `certs`. Because we are
+starting before the operator exists we utilize the standalone etcd cert signer[3] used in 4.1 - 4.3.
 
 [1] https://github.com/openshift/installer/blob/552f107a2d6b062f009c94c65be0f195f2c9168c/data/data/bootstrap/files/usr/local/bin/bootkube.sh.template#L124
 
