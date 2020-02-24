@@ -9,7 +9,7 @@ reviewers:
   - "@bparees"
   - "@adambkaplan"
   - "@derekwaynecarr"
-  - "@nvonkok"
+  - "@zvonkok"
   - "@who else?"
   
 approvers:
@@ -76,6 +76,10 @@ see-also:
 >has been stated that is not a concern for builds.  Periodic checkpoints here could be prudent.
 > 5. There is also the general question of how entitlements are propagated for our managed service offerings?  Reaching 
 >out to the appropriate teams there to understand current capabilities/processes and building from there is needed.
+> 6. And after 4.5 epic planning it was made clear that a more general solution around entitlements, beyond just builds,
+>is desired.  PM has the to-do to investigate, prioritize, and create/assign epics accordingly.  Investigating in the 
+>interim around build specific needs via this proposal has been deemed acceptable, but certainly a subsequent, broader
+>proposal may necessitate adjustments to this one. 
 
 ## Summary
 
@@ -117,6 +121,10 @@ satellite instance and reference the secret in you BuildConfig's input/source se
 - With Satellite, and Docker build strategy, you have to modify your Dockerfile and manually copy and initialize as 
 needed the information from the base image as well as your repository config file for your satellite instance
 - And remember to set the skip layers optimization option (i.e. squash layers) with Docker Strategy builds
+
+*Another note on Satellite*: you can also subscribe nodes with Satellite (reference the "jump-host"), which results in 
+the pem files being placed in a well known location on the file system.  A user with sufficient privilege to the node 
+could obtain the pem files. 
 
 This enhancement proposal aims to introduce more centralized and automated infrastructure to ease the burden of 
 using OpenShift Builds with RHEL subscriptions/entitlements.
@@ -341,18 +349,15 @@ one of the forms where a secret of some sort is created:
 - run a docker strategy build that cats the expected mounted secret content 
 - search for the cat output in the build logs 
 
-Then there is the quesiont of whether manual testing with actual yum install of entitled content by QE should consider 
-with the three forms of credentials
+Then there is the question of whether manual testing with actual yum install of entitled content by QE should consider 
+with any of the three forms of credentials
 - the actual pem files
 - SubscriptionManager configuration, including certs
 - Satellite instance and configuration, including certs
 
-It may not be a given that OpenShift QE has access and/or ability to utilize SubscriptionManager and/or
-Satellite with OpenShift Builds.
-TODO:  Have sent email to QE asking for history here.
-
-Otherwise, at planning and QE/test case review time, if we cannot convince ourselves the right content is in the right 
-places solely via our new e2e tests, the status around QE's expertise/capabilities with manual testing should be visited.
+QE already has existing test cases around using subscription manager with the manual process in play today for 4.x.
+They will be adjusted and serve as the minimum for implementations of this proposal.  Most likely this is sufficient,
+but due diligence around additional testing for the other scenarios will be assessed during test case review.
 
 ### Graduation Criteria
 
