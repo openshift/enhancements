@@ -139,16 +139,8 @@ The controller inventories (and watches):
 * Role
 
 The data is collected using the Mig SA token associated with the
-MigCluster.  No change there.
-
-Requests to the Discovery Service REST API are authorized/filtered based on
-RBAC rules as follows (initial thinking and subject to review and adjustment):
-* /namespaces/ns1/plans/ - must have verb=list on MigPlan in the ns1 namespace.
-* /namespaces/ns1/clusters/ - must have verb=list on MigCluster in the ns1 namespace.
-* /../clusters/c1/namespaces/ - reply only includes those namespaces for which the user has edit for the namespace. Similar to the openshift Project API described here.
-* /../clusters/c1/persistentvolumes/ - must have verb=list for persistentvolumes.
-* /../clusters/c1/namespaces/ns2/pods/ - must have verb=list for Pod in the ns2 namespace.
-* /../clusters/c1/namespaces/ns2/pods/p1/log - must have verb=get for pods/log in the ns2 namespace.
+MigCluster.  The data is then indexed and used in conjunction with the user's
+identity token to determine the list of resources the user is able to migrate.
 
 REST request authorization steps:
 1. Authenticate the Bearer token to a User or ServiceAccount by performing a
