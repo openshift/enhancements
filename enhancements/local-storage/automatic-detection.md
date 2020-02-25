@@ -100,12 +100,16 @@ type AutoDetectVolumeSpec struct {
     // +optional
     // Maximum number of Devices that needs to be detected per node.
     MaxDeviceCount int `json:"maxDeviceCount"`
-    // VolumeMode determines whether the PV created is Block or Filesystem
+    // VolumeMode determines whether the PV created is Block or Filesystem. By default it will
+    // be block
     // + optional
     VolumeMode PersistentVolumeMode `json:"volumeMode,omitempty"`
     // FSType type to create when volumeMode is Filesystem
     // +optional
     FSType string `json:"fsType,omitempty"`
+    // If specified, a list of tolerations to pass to the discovery daemons.
+	  // +optional
+	  Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
     // DeviceInclusionSpec is the filtration rule for including a device in the device discovery
     // +optional
     DeviceInclusionSpec *DeviceInclusionSpec `json:"deviceInclusionSpec"`
