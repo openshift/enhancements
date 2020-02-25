@@ -195,12 +195,45 @@ sources, and I want a simpler way for the necessary entitlemenet information inj
 
 So the concerns for the implementation center around 4 questions:
 
-- Where do we get the credentials from
+- Delivery mechanism for our "encapsulation" of the credentials
+- Where do we get the credentials (i.e. our "encapsulation") from once delivered 
 - In what form are the credentials provided (pem files, SubscriptionManager, Satellite)
 - How does the build consume the credentials
 - When does the build consume the credentials (where consuming means telling buildah to mount it)
 
-#### Where do we get the credentials from
+#### Delivery Mechanism for the "encapsulation" of credentials
+
+##### IBM Mulitcloud Manager (though a rename is coming with transfer to Red Hat)
+
+So "MCM" for future reference introduces a "klusterlet" which is [installed](https://www.ibm.com/support/knowledgecenter/SSBS6K_3.1.2/mcm/installing/klusterlet.html#install_ktl)
+in the clusters it manages.
+
+And MCM also introduces a "compliance" with a list of "policies" (all backed by CRDs) with the klusterlet will
+poll.  See [this document](https://www.ibm.com/support/knowledgecenter/SSBS6K_3.1.2/mcm/compliance/policy_overview.html) for details.
+
+Each policy then has a list or k8s RBAC to define on the cluster, followed by a list of general k8s API object yaml
+which can be applied on the cluster.  As the "klusterlet" polls, if it finds new or updated compliances or policies
+within compliances, it performs the API object creates/updates/patches specified to change the system.
+
+Whatever API objects we use to encapsulate the entitlement credentials/configuration in a single
+cluster, and the associated RBAC needed to create those objects, will need to be spelled out so that they can be 
+injected into MCM compliances and policies.
+
+##### OpenShift Hive
+
+Hive has an analogous feature, "sync sets", to allow for API objects to be created on the clusters it manages.  At this
+time, while the "red washed" MCM will leverage Hive for some things, it will not replace its compliance/policy/klusterlet
+infrastructure with sync sets.
+
+However, for existing dedicated/managed cluster using Hive without MCM, the same RBAC/Object spelled out for MCM should
+suffice for Hive without MCM.
+  
+##### Manual cluster admin creation
+
+As the title implies, a user with sufficient privilege would create the API objects we decide are the "encapsulation"
+for the entitlement/subscription credentials at the namespace / cluster level we end up supporting.
+
+#### Where do we get the credentials from (i.e. the precise form of the "encapsulation")
 
 ##### Current Preferred Option
 
