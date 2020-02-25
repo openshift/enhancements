@@ -235,7 +235,7 @@ for the entitlement/subscription credentials at the namespace / cluster level we
 
 #### Where do we get the credentials from (i.e. the precise form of the "encapsulation")
 
-##### Current Preferred Option
+##### Global secret option
 
 The most likely choice here will be to have a well known secret in the openshift-config
 namespace where administrators can store the credentials.
@@ -251,9 +251,7 @@ unnecessary (just don't create the global secret).
 
 The current assumption is that only one set of entitlement credentials is needed at the global level.
 
-##### Alternatives (can provide multiple options if deemed necessary)
-
-###### User Namespace Option
+##### User Namespace Option
 
 Users could provide secret(s) with a well known annotation in their namespace that the build controller 
 can look for and mount in the pod, so the openshift/builder image can instruct buidah to mount.
@@ -274,7 +272,7 @@ access to the openshift-config namespace is not a lower permission level sort of
 controller may have similar privileges as the current build V1 controller, but we will have to monitor that 
 situation with respect to features like this.
 
-###### Host Injected Option
+##### Host Injected Option
 
 `HostPath` volumes are already called out as a security concern in [volume mounted injections for builds](volume-secrets.md)
  proposal.
@@ -285,7 +283,26 @@ mechanism if the CRI-O/MCO based solution noted in open questions is available.
 A per build config annotation to opt out would be included in such a solution,  If the CRI-O/MCO solugin was an install 
 based, day 1 operation, we could have a new field added to the global build config.
 
-NOTE: presumably a host injected option would provide the credentials "for free" for general tekton or Build V2 usage.  
+NOTE: presumably a host injected option would provide the credentials "for free" for general tekton or Build V2 usage.
+
+NOTE: Host injection via the MCO requires a node reboot for the updates to take effect.  That is generally deemed 
+undesirable for this feature.  Also, the MCO API has not been an obvious entryway for users to date when employment
+of the existing manual options for entitlements has come up.
+
+###### Current state
+
+1) Currently, auto mount of secrets from the host into the Pods enabled per default. Some people raised concerns about 
+this default setting.  Also, RHCOS does not, nor will ever have, the RPM installed by default such that the rhsm.conf
+file is present.
+
+2) Disabling auto mount of secrets from the host is under consideration by RHCOS
+
+3) Secrets on the host to provide the creds and rhsm.conf would then be needed.
+
+4) Where again, nobody wants to use the MCO for that.
+
+5) TODO: still searching for clarification on how the "secrets from the host" would be injected, and what they 
+would look like exactly.
 
 #### In what form are the credentials provided
 
@@ -297,7 +314,7 @@ There will also be well defined keys within the global secret that account for t
 
 #### How does the build consume the credentials
 
-##### Current Preferred Option
+##### Global Secret Option
 
 The build controller copies the global credential secret into the user's namespace, mounts it
 into the build pod, and then the builder image running in the build pod tells buildah to mount it.
@@ -309,23 +326,21 @@ the build controller can look for an existing secret with a predetermined annota
 And certainly both approaches can be supported, where the annotated existing secret takes 
 precedence over the predetermined build controller secret. 
 
-##### Alternatives (can provide multiple options if deemed necessary)
-
-###### User Namespace Option 1
+##### User Namespace Option 1
 
 The build controller would look for secrets with a predefined annotation in the build's namespace,
 where the user has injected the credentials in that secret, and mount the secret into the build pod.
 
 The builder image in the pod then seeds buildah with the correct argument to access the mounted content.
 
-###### User Namespace Option 2
+##### User Namespace Option 2
 
 The build controller would look for secrets with a predefined annotation in the build's namespace, 
 and it would copy the contents from the global location into the secret, and mount the secret into the build pod.
 
 The builder image in the pod then seeds buildah with the correct argument to access the mounted content.
 
-###### Host Injected Option
+##### Host Injected Option
 
 Assuming again the build controller does not attempt `HostPath` volumes per the [volume mounted injections for builds](volume-secrets.md)
 proposal, and assuming the CRI-O feature is available and injects the credential in a well known location, 
@@ -334,7 +349,7 @@ to access the credentials.
 
 #### When does the build consume the credentials
 
-##### Current Preferred Option
+##### Global Secret Option
 
 To summarize what was noted above, with the global secret option, the credentials would always be available to the build
 if the secret exists.  A per build config annotation to opt out would be provided.  A global opt out (in the global
@@ -348,16 +363,14 @@ Same rationale as the global config option.
 
 For these an annotation is needed to opt in.
 
-###### Pre-Build Auto Injection Option
+###### Pre-Build Auto Injection
 
-There seems no need at this time to employ more sophisticated mechanism's like the global proxy controller
-auto-injecting the credentials defined at the global level into per namespace secrets/secrets with 
-a well known label.
-
-Copying when a build is initiated seems sufficient.
-
-If there is a performance concern with copying on each build, then CA injection controller approach employed
+If there is a performance concern with copying on each build, then the CA injection controller approach employed
 by Global Proxy could be a solution, where that controller handles updating when the source resource is changed.
+
+Today the global proxy support includes auto-injecting the credentials defined at the global level into per namespace 
+config maps with a well known label.
+
 
 ### Risks and Mitigations
 
