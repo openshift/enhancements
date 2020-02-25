@@ -108,6 +108,10 @@ The highlights of those steps from [the current 4.x doc](https://docs.openshift.
 - create an ImageStreamTag to the UBI image from `registry.redhat.io` in the `openshift` namespace, or 
 - reference the UBI image directly and include a pull secret to `registry.redhat.io` in your BuildConfig
 
+*NOTE*: in 4.5, image registry and build updates are occurring so that image streams and builds will have
+access to the `registry.redhat.io` credentials supplied in the install pull secret.  As such, the above steps
+in the manual process will no longer be required.
+
 2) Next, based on your access to the credentials:
 
 - With direct access to the entitlement pem files, create a generic secret from the files and reference the secret in
