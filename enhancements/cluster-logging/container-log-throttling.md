@@ -34,7 +34,7 @@ superseded-by: []
 
 ## Summary
 
-  Container log throttling is a set of capabilities in OpenShift aimed at providing cluster administrators with means of controlling logging policies and logging throughput of individual containers or their groupings. Containers are considered sources of two log streams, stdout and stderr, that are together routed by the container runtime to a log file on the cluster node. Stdout and stderr log streams are controlled separately.
+  Container log throttling is a set of capabilities in OpenShift aimed at providing cluster administrators with means of controlling logging policies and logging throughput of individual containers or their groupings. Containers generate two log streams, stdout and stderr, that the container runtime routes to a log file on the cluster node. Stdout and stderr log streams are controlled separately.
   The following logging policies are proposed:
   1. Passthrough
      Unrestricted logging. For backward compatibility, this is the default if no policy is specified. It is an error to specify a rate limit with this policy.
