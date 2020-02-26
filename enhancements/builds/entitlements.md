@@ -44,29 +44,31 @@ see-also:
 
 ## Open Questions [optional]
 
- > 1. CRI-O either already has or will have an option to specify host directories that should always be mounted 
->into containers, akin to what the Red Hat Docker Daemon used to provide with OpenShift V3.  If / when that feature
->is available could have bearing on the implementation options discussed below, or even when to stage in this 
->enhancement.  With current capabilities, the cluster admin would use the MCO post install to effectively update the
+ > 1. CRI-O already has config options (see the [config file doc](https://github.com/cri-o/cri-o/blob/master/docs/crio.conf.5.md)) 
+>to specify host directories that should always be mounted into containers
+>(i.e. `/etc/share/containers/mounts.conf`), akin to what the Red Hat Docker Daemon used to provide with OpenShift V3.  
+>Guidance in the early 4.x time frame has been around the cluster admin using the MCO post install to effectively update the
 >filesystem of each node with the necessary subscription related files in a well known location that CRI-O would look
->for.  There is concern though using this through MCO from a couple of perspectives.  One perspective of concern is 
->multi-cluster management, and scaling out to many clusters.  As such, enabling entitlement, either for builds only or 
->for pods in general, could be policy bits around the multi-cluster set up experience.  Related to that, but also 
->relevant in a single cluster scenario, is around customers having a specific config resource around entitlements, 
->and engaging through that instead of the more generic MCO.  Ultimately, with respect to this proposal, which is currently
->for builds only, there is first a scope question around devising a broader architecture around entitlements, across 
->a broader range of components.  That is either a separate proposal, or a broadening of the scope of this proposal
->from its original intent.  Second, if we manage this with separate proposals, do we gate this one or make it 
->dependent on the broader proposal, or move forward with this one, and simply get agreement on what the order of 
->precedence would be when both a point solution around builds and broader solution around accessing entitlements 
->from any pod. 
+>for.  There is concern though using this through MCO from a couple of perspectives.  One, the MCO api is not a 
+>natural for someone who wants to do something higher level like "enable entitlements for builds".  Second, using the
+>MCO for any node update requires a restart of the node, which is onerous for this scenario.  Also note, the RHCOS
+>team want stop disable their current default setting of auto-mounting secrets from the host (i.e. stuff from 
+>`/etc/share/containers/mounts.conf`), since RHCOS does not fully install subscription manager and they have 
+>problems when only partial subscription manager metadata is available.  [RHCOS has the subscription-manager-certs 
+>installed but missing the subscription-manger package which carries the rhsm.conf.](https://bugzilla.redhat.com/show_bug.cgi?id=1783393)
+>They are entertaining an MCO solution to work around this problem, but disabling auto-mount, and then having a 
+>solution which adds all the subscription manager in one fell swoop, would be their preference. 
 > 2. There has been discussion elsewhere around having a more generic notion of "global resources" that any pod can
->mount.  Would we want this enhancement to tackle that (probably "no")?  Would we gate this enhancement on the 
->availability of such a feature (probably "no")?  Upstream feature work is implied with such an item.  If however such
->an upstream features becomes more likely by the time implementation of this proposal arrives, it might dictate our 
->choosing the CRI-O related path vs. building a path around post-install Secrets, as that later path would
->most likely be obviated by the upstream feature.
-> 3. We did provide for multiple sets of entitlement credentials in 3.x.  There have been no official, RFE style  
+>mount.  There is an open question of whether this proposal should tackle that.  Would we gate this enhancement on the 
+>availability of such a feature (probably "not sure")?  Upstream feature work could be implied with such an item.  Or 
+>exploration of CSI based solutions to read secrets is an option, though perhaps this scenario would be an abuse of the CSI pattern,
+>and some form of performance assessment would be prudent.  A slight variant of that would be providing a special
+>`SecretProviderClass` for defining where secrets are read from (i.e. the default subscription locations vs. the default
+>k8s secret mount points).  And after 4.5 epic planning it was made clear that a more general solution around entitlements, beyond just builds,
+>is desired.  PM has the to-do to investigate, prioritize, and create/assign epics accordingly.  Investigating in the 
+>interim around build specific needs via this proposal has been deemed acceptable, but certainly a subsequent, broader
+>proposal may necessitate adjustments to this one.
+> 3. We did *NOT* provide for multiple sets of entitlement credentials in 3.x.  There have been no official, RFE style  
 >registered requirements entitlements at a namespace level.  However, we've started to get (slightly) less official
 >feedback that customers want this in a more automated sense (vs. the current manual steps).  At a minimum, and is
 >noted below when alternatives are discussed, if namespaced entitlements are added with subsequent implementation
@@ -74,12 +76,8 @@ see-also:
 >on what the order of precedence will be (with the take on that listed below).
 > 4. There has also been a question in the past needing to shard entitlements due to API rate limiting.  To date, it
 >has been stated that is not a concern for builds.  Periodic checkpoints here could be prudent.
-> 5. There is also the general question of how entitlements are propagated for our managed service offerings?  Reaching 
->out to the appropriate teams there to understand current capabilities/processes and building from there is needed.
-> 6. And after 4.5 epic planning it was made clear that a more general solution around entitlements, beyond just builds,
->is desired.  PM has the to-do to investigate, prioritize, and create/assign epics accordingly.  Investigating in the 
->interim around build specific needs via this proposal has been deemed acceptable, but certainly a subsequent, broader
->proposal may necessitate adjustments to this one. 
+> 5. There is also the general question of how entitlements are propagated for our managed service offerings.  There are
+some attempts at capturing the particulars for this below, but it needs some vetting.
 
 ## Summary
 
@@ -96,6 +94,11 @@ In V4.x, with
 
 - the removal of the docker daemon, meaning no docker socket and no access to the host's content
 - and the total replacement of the openshift ansible based installer, so no gathering of entitlements during install
+- and the total change in the OCP subscription model between 3.x and 4.x:  you don't subscribe RHCOS nodes (in fact they
+do not have or ever will the entire set of subscription manager RPMs, and any as discussed in some of the alternatives
+below, at most we will only seed enough subscription manager artifacts in RHCOS so that things like turning auto mount
+on won't SEGFAULT).  In 3.x, the underlying linux was classic RHEL, and so hence the subscription manager was fully 
+good to go out of the box (and hence could be shared with pods running on that node).
 
 all those 3.x mechanisms are gone, and a series of steps from either the cluster admin and/or developer attempting
 to run OpenShift Builds leveraging entitled content must be performed after install to enable access to the entitled
@@ -193,10 +196,10 @@ sources, and I want a simpler way for the necessary entitlemenet information inj
 
 ### Implementation Details/Notes/Constraints [optional]
 
-So the concerns for the implementation center around 4 questions:
+So the concerns for the implementation center around 5 questions:
 
-- Delivery mechanism for our "encapsulation" of the credentials
-- Where do we get the credentials (i.e. our "encapsulation") from once delivered 
+- Mechanism for delivering for subscription config/credentials to the cluster
+- Where/How subscription config/credentials are stored on the cluster (e.g. what resources types+namespaces)
 - In what form are the credentials provided (pem files, SubscriptionManager, Satellite)
 - How does the build consume the credentials
 - When does the build consume the credentials (where consuming means telling buildah to mount it)
