@@ -175,7 +175,11 @@ type DeviceInclusionSpec struct {
 }
 ```
 
-The existing LSO daemon will create PVs that match the `AutoDetectVolume` criteria.
+- Once the `AutoDetectVolume` is created, the controller will:
+  - configure the local-static-provisioner to make a new StorageClass based on certain directories on the selected nodes.
+  - assign diskmaker daemons to the selected nodes.
+- The diskmaker daemon will find devices that match the disovery policy and symlink them into the directory that the local-static-provisioner is watching.
+
 
 ### Test Plan
 
