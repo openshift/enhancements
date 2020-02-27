@@ -164,7 +164,7 @@ It can only add one member at time.
 ### StaticPodController
 The standard controller for managing static pods, like the KAS-o, KCM-o, KS-o.
 
-### TaregetConfigController
+### TargetConfigController
 This controller shapes the static pod manifest itself.  It has some unique features of its output.
 
 #### Static Pod Shape
@@ -180,6 +180,62 @@ This controller shapes the static pod manifest itself.  It has some unique featu
     It waits until it is able to know that it is in the member list before trying to start.
     When it does this, it is able to determine the member list to use to launch.
 
+
+### Exceptional Scenarios
+These are things like DR or "off and on" again or "member is misbehaving" scenarios that need to work in a way that is 
+coherent with the operator controllers.
+This requires coordination between human operators (cluster-admins) and machine operators.
+
+#### one out of three etcd members "goes bad"
+The recommendation is to remove the offending member using `etcdctl member remove` (perhaps via a script).
+After removing the member, the pod will restart and self-clean its existing data-dir
+
+#### `etcdlctl member remove` is called on a healthy, running member
+1. the removed-member sees itself removed
+2. the removed-member's etcd process exits non-zero
+3. the etcd-pod is restarted by the kubelet
+4. the `discovery-initial-etcd-cluster` command starts running
+   1. the cluster does not list the removed-member as part of the cluster
+   2. the container is unready
+   3. the ClusterMemberController adds the member
+   4. the command tries again and sees removed-member present
+   5. the removed-member does not have a `Name`, only the peer address
+   6. the existing data-dir is moved to a save location
+5. etcd joins the cluster with an empty data-dir and does a standard scale up.
+
+#### `etcdlctl member remove` is called on an off or unhealthy member
+This is the same as the health case above, except that it starts at step 3, "the etcd-pod is restarted by the kubelet".
+
+#### Add a master
+This "just works".
+1. The new member is added
+2. The list of projected peers changes
+3. The new certificates are signed
+4. A new revision is created
+5. The new revision scales up on the new master
+
+#### Turn all nodes off and back on again
+This should just work.
+The static pods start and etcd members find each other.
+Reasons for this to fail
+ 1. More than one DNS name changed
+ 2. More than one IP address changed
+
+#### Remove an undesired master from etcd
+This is currently impossible.
+Removing a member will simply result in the `etcdctl member remove` flow above happening and the member being re-added.
+
+#### Restore from backup
+1. On all masters, remove the etcd-static pod from /etc/kubernetes/manifests
+2. On masterA, copy the backup and then move to /var/lib/etcd-backup/snapshot-something
+3. On masterA, run `etcd restore` with a new cluster UUID
+4. On masterA, copy the etcd-restore static pod yaml (in etcd-certs) into /etc/kubernetes/manifests
+5. At this point, etcd should be started, kube-apiserver should be able to connect and the cluster should start
+   standing back up.  You don't need to wait.
+6. Wait for kube-apiserver to start back up.  This may take a while because of kubelet pod crashloop restart delays.
+7. On kube-apiserver, forceRedeployment of the etcds.operator.openshift.io|.spec.forceRedeploymentReason.
+   This causes the etcd operator to get the members to join.
+8. No other action is required.
 
 ### Implementation Details/Notes/Constraints
 
