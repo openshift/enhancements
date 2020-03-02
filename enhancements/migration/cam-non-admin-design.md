@@ -95,13 +95,17 @@ For the current design, there will exist one operator running in
 `openshift-migration`. For an alternative approach, please see OLM
 OperatorGroup Integration below.
 
-There will be at least one new CRD introduced which will define a namespaced
-installation of CAM. The operator will be watching ALL namespaces for the
-creation of this CR. For now, this will be called a `MigrationSandbox`. In the
-current design, when a MigrationSandbox is created in namespace `Foo`, the
-operator will install a namespaced Migration UI in namespace `Foo`. A new
-Migration Controller will be deployed in `openshift-migration` which will be
-watching namespace `Foo` for the creation of Migration Resources.
+There will be at least one new configuration parameter introduced to the
+`MigrationController` Custom Resource which will define a namespaced
+installation of CAM. The operator will be change to watch ALL namespaces for
+the creation of this CR. `MigrationController` will more than likely be renamed
+as this doesn't accurately represent what this CR is doing. For now, this let's
+assume this new name is called a `MigrationSandbox`. In the current design,
+when a MigrationSandbox is created in namespace `Foo` with a specified
+configuration parameter `namespaced: true`, the operator will install a
+namespaced Migration UI in namespace `Foo`. A new Migration Controller will be
+deployed in `openshift-migration` which will be watching namespace `Foo` for
+the creation of Migration Resources.
 
 #### Migration Controller
 
@@ -151,6 +155,19 @@ REST request authorization steps:
 1. Inspect the associated ClusterRole/Role rules.
 1. Match resources in the role's Rules.
 1. Match verb(s) in roles Rules.
+
+###### A note about Subject Rules Review
+
+It was originally discussed that we could use Subject Rules Review to determine
+the list of resources a user could have access to on a given cluster. This
+seemed promising, but the way CAM currently operates this SRR check would run
+inside of the plan controller. The plan controller reconciles ~1-3 times a
+second which would lead to ~60 SRR requests a minute as a lowball estimate. It
+will also need to run an SRR check for every namespace included in a migration.
+In the case of 10 namespaces, this would be ~600 SRR requests a minute.
+
+In our benchmark tests, it took ~18 seconds to perform 100 SAR requests. This
+means using SRR is simply not a scalable solution for our controller.
 
 ### User Stories [optional]
 
@@ -244,6 +261,14 @@ the host cluster.
       prevents another user Alice from simply being able to guess Bob’s
       secretRef.
    1. https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/
+   1. **Note:** This check is not sufficient to determine user escalation
+      because this only tells the controller that a cluster administrator has
+      granted Bob the ability to perform migrations. This grants Bob the
+      ability to create Velero resources on the cluster. If Bob had full access
+      to the Velero API, Bob could backup/restore resources he does not have
+      access to. This is why the additional identity token needs to be used to
+      prevent Bob from creating a migration plan with namespaces he does not
+      have access to.
 1. The cluster-administrator then creates a MigCluster resource in
    `openshift-migration` which includes the usual spec fields:
    1. Mig SA Secret Ref
@@ -303,15 +328,18 @@ end to end tests.**
 
 ### Upgrade / Downgrade Strategy
 
-If applicable, how will the component be upgraded and downgraded? Make sure this
-is in the test plan.
+To handle the upgrade use case, CAM must not break the existing cluster-scoped
+installation use case of CAM. To do this, a new configuration field will be
+added to the CAM installation CR (currently `MigrationController` but will more
+than likely be renamed) to allow a user to specify that they would like a
+tenant-scoped installation of CAM.
 
-Consider the following in developing an upgrade/downgrade strategy for this
-enhancement:
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to keep previous behavior?
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to make use of the enhancement?
+If a user has CAM 1.1 installed and upgrades to CAM 1.2 then they will be
+unaffected as their `MigrationController` CR will not have the added
+configuration value to have a tenant-scoped install.
+
+The operator should be capable of updating/reverting the two types of
+installations when the configuration parameter is changed.
 
 ### Version Skew Strategy
 
