@@ -72,8 +72,8 @@ as well as the newly added Prometheus servers.
 
 The cluster Prometheus Operator (PO) continues to operate the cluster-level Prometheus.
 We will continue to use a centralized Alertmanager (A) cluster.
-The existing Alertmanager cluster will aggregate both user workload alerts as well as cluster alerts.
-Tenancy will be achieved by forcing specific labels onto metrics and alerts
+The existing Alertmanager cluster aggregates both user workload alerts as well as cluster alerts.
+Tenancy is achieved by forcing specific labels onto metrics and alerts
 by which the central Alertmanager config can route similarly to how tenancy is achieved at the query level (see below).
 
 Querying data from a single, multi-tenant interface is done using the Thanos Querier (TQ) component.
@@ -136,6 +136,26 @@ As a service owner, I'd like to configure alerting rules or recording rules for 
 
 As a service owner, I'd like to view configured and fired alerts in the dev perspective of OpenShift console.
 
+### US11
+
+As a member of the operations team, I’d like to get notified if the Prometheus servers are acting strange.
+
+### US12
+
+As a member of the operations team, I'd like to have an overview about all the Prometheus servers inside a cluster.
+
+### US13
+
+As a member of the operations team, I'd like to configure more replicas for the new Prometheus servers.
+
+### US14
+
+As a member of the operations team, I'd like to give dedicated users the permission to enable/disable and configure the user workload monitoring stack.
+
+### US15
+
+As a member of the operations team I want to see all alerts (cluster and user workload alerts) in the admin perspective and can silence any of them.
+
 ### Implementation Details/Notes/Constraints
 
 #### Isolation
@@ -162,7 +182,7 @@ and `openshift-monitoring` namespace for the cluster monitoring prometheus opera
 
 ![](user-namespaces-custom-resources.png)
 
-User workload monitoring Prometheus Operator (green) then will reconcile Prometheus/Alertmanager/ThanosRuler custom resources
+User workload monitoring Prometheus Operator (green) reconciles Prometheus/Alertmanager/ThanosRuler custom resources
 in the `openshift-user-workload-monitoring` namespace only.
 It ignores Prometheus custom resources in any other namespace.
 The same holds true for the cluster monitoring prometheus operator (red).
@@ -187,8 +207,8 @@ See [5] and [6] for more details.
 #### Alerts/Recording Rules Aggregation
 
 Thanos Querier only solves aggregating the query path. For aggregating recording rules as well as alerting rules
-another component [Thanos Ruler](https://thanos.io/components/rule.md/) is deployed. This component is responsible for hosting user defined recording rules
-as well as alerting rules.
+another component [Thanos Ruler](https://thanos.io/components/rule.md/) is deployed.
+This component is responsible for hosting user defined recording rules as well as alerting rules.
 
 Thanos Ruler is deployed via the user workload monitoring prometheus operator via a new CRD called ThanosRule.
 The same _deny list_ setting is applied to user workload monitoring prometheus operator such that the user cannot
@@ -218,15 +238,13 @@ For this use case just one system is critical for alerts to work:
 ##### Developer perspective
 
 Alerts/Recording Rules Aggregation implies that the user potentially chooses whether recording or alerting rules are being deployed on the user workload Prometheus or Thanos Ruler.
-In order to retrieve the full list of user workload recording alerting and recording rules a fan-out request has to be executed against user workload Prometheus and Thanos Ruler
-and the response has to be merged for final display. The fan-out/merge proxy logic is suggested to be implemented in the console backend (being a Go based proxy server).
+In order to retrieve the full list of user workload recording alerting and recording rules the existing Thanos Querier gets support for the Prometheus `/api/v1/rules` and `/api/v1/alerts` API. Internally it fans out to the existing in-cluster Prometheus, the user workload monitoring Prometheus, and ThanosRuler. See [7] and [8] for further implementation details.
+
+Tenancy is achieved using prom-label-proxy and kube-rbac-proxy. Here, returned alerts and rules are constrained and filtered with the tenancy namespace label.
 
 ##### Administrator perspective
 
-The administrator perspective shows all recording and alerting rules originating both from the shipped cluster-monitoring stack as well as user defined rules in user workload Prometheus and Thanos Ruler.
-This is accomplished by a similar fan-out/merge logic as described for the developer perspective,
-this time covering three backends: 1. cluster-monitoring Prometheus 2. user-workload-monitoring Prometheus, and 3. Thanos Ruler.
-The fan-out/merge proxy logic is suggested to be implemented in the console backend (being a Go based proxy server).
+The administrator perspective shows all recording and alerting rules originating both from the shipped cluster-monitoring stack as well as user defined rules in user workload Prometheus and Thanos Ruler using the same mechanism explained above but without tenancy enforcement.
 
 ### Tenancy
 
@@ -253,20 +271,24 @@ Access to this endpoint is gated by the permission to `get pods.metrics.k8s.io` 
 
 #### Available Rules and alerts
 
-OpenShift console executes queries against the `/rules` and `/alerts` endpoint of Prometheus and Thanos Ruler
+OpenShift console executes queries against the `/rules` and `/alerts` endpoint of Thanos Querier
 to retrieve a list of declared alerting/recording rules and a list of active alerts. Recording rules as well as alerting rules deployed via user workload monitoring are having enforced namespace labels set. The list of rules and alerts is being filtered by prom-label-proxy based on the tenant namespace label.
 
 Access to these endpoints is gated by the permission to `get prometheusrules.monitoring.coreos.com` in the requested namespace.
+This permission is contained in the `monitoring-rules-view` role.
 
 #### Alertmanager silences
 
 OpenShift console executes requests against the `/silences` endpoint of Alertmanager to retrieve the list of silences and to silence alerts. A user can only create, delete and update silences as well as get silences filtered by the namespace label in flight.
 
 Access to list the silences is gated by the permission to `get prometheusrules.monitoring.coreos.com` in the requested namespace.
+This permission is contained in the `monitoring-rules-view` role.
 
 Access to create a new silence or update an existing silence is gated by the permission to `create prometheusrules.monitoring.coreos.com` in the requested namespace.
 
 Access to delete an existing silence is gated by the permission to `delete prometheusrules.monitoring.coreos.com` in the requested namespace.
+
+The above permissions are contained in the `monitoring-rules-edit` role
 
 ### Multitenancy
 
@@ -290,6 +312,90 @@ server-side labels are ignored. If set to false the conflicts are resolved renam
 remapping the values of labels as we base our tenancy model on this. We have two options here that can be done in
 prometheus-operator, either discard that object completely in the same way as we do with filesystem access right now or
 create the respective objects and change the honorLabel value to false.
+
+### Roles
+
+The following new named roles are deployed via cluster-monitoring-operator.
+
+#### `monitoring-rules-view`
+This is a cluster role which can be bound against a concrete namespace by the cluster admin.
+Embeds the `get prometheusrules.monitoring.coreos.com` permission. It allows to:
+
+1. Read PrometheusRule custom resources matching the permitted namespace.
+
+```
+$ oc -n <namespace> get prometheusrule <foo>.
+```
+
+2. Get declared and pending alerts and recording rules from `/api/v1/alerts?namespace=<foo>` and `/api/v1/rules?namespace=<foo>` endpoints matching the permitted namespace.
+
+#### `monitoring-rules-edit`
+This is a cluster role which can be bound against a concrete namespace by the cluster admin.
+Embeds the `create/edit/delete prometheusrules.monitoring.coreos.com` permission. It allows to:
+
+1. create/modify/delete PrometheusRule custom resources matching the permitted namespace.
+
+```
+$ oc -n <namespace> create/patch/delete prometheusrule <foo>.
+```
+
+2. Silence firing alerts from the Alertmanager `/alerts?namespace=<foo>` endpoint matching the permitted namespace.
+
+#### `monitoring-targets-edit`
+This is a cluster role which can be bound against a concrete namespace by the cluster admin.
+Embeds the `get/create/edit/delete` permissions for the following custom resources:
+
+1. ServiceMonitor
+2. PodMonitor
+3. PrometheusRule
+
+It allows to create new scraping targets for services/pods and allows to create new recording or alerting rules.
+
+#### `monitoring-workload-config-edit`
+This is a named role against the `workload-monitoring-config` configmap resource in the `openshift-monitoring` namespace
+embedding `get/create/edit/delete` permissions.
+
+### Configuration/Enablement
+
+User workload monitoring is not enabled by default. It must be explicitly enabled by the user.
+User workload monitoring is enabled just by creating an empty `workload-monitoring-config` configmap in the `openshift-monitoring` namespace.
+
+The user workload monitoring configuration allows to set all existing configuration options as for the in-cluster stack with the addition to set the replica count of the user workload monitoring Prometheus instances.
+
+Note: Long term the existing `cluster-monitoring-config` and `workload-monitoring-config` will be moved to dedicated custom resources and CRDs but are out of scope for this enhancement.
+
+### Resource impact
+
+Once user workload monitoring is enabled, by default 2 replicas of Prometheus and one Prometheus Operator instance are being deployed in the `openshift-user-workload-monitoring` namespace.
+
+As of OpenShift 4.4 the following idle resource usage have been measured after 24h of staying idle:
+
+1. Prometheus: ~65MB memory usage per replica instance, ~6 milli-cores CPU usage
+2. Prometheus Operator: ~15MB memory usage, ~1 milli-core of CPU usage
+
+This results in an additional overhead of ~145MB memory and ~7 milli-cores of CPU usage for the user workload monitoring stack.
+The above resource measurements will be set as the default resource requests for the user workload monitoring Prometheus and Prometheus operator.
+
+### High cardinality detection
+
+As a first step a similar high cardinality alert will be used as in [9] and potentially [10]. More formally we will alert on:
+
+- A sum over time of scrape samples scraped reaching a threshold.
+- A sum over time of scrape series being added reaching a threshold.
+- A sum of the rate of tsdb head series created reaching a threshold.
+
+The above will be encapsulated in one single alert.
+This alert will be declared as `info` level only and transmitted via Telemetry.
+Additional telemetry metrics are going to be gathered to have more insights about the usage of user workload monitoring in clusters:
+
+- Active series
+- Rate of sample ingested
+- Memory usage
+- CPU usage of prometheus
+- Replica count of Prometheus instances
+
+Over time we will learn about better thresholds and potentially also about better alerts.
+Additional protection mechanism may be introduced at a later point using front proxy tools like bomb squad [11].
 
 ### Risks and Mitigations
 
@@ -394,3 +500,13 @@ with the this approach and this alternative does not allow to deprecate Operator
 [5] https://deploy-preview-1541--thanos-io.netlify.com/components/query.md/
 
 [6] https://github.com/cortexproject/cortex/issues/1672
+
+[7] https://docs.google.com/document/d/12ou_YE54NPzBvzfAH-xkqmvyTu_L14_TYx5DhRxBOfU/edit
+
+[8] https://github.com/thanos-io/thanos/pull/2200
+
+[9] https://github.com/openshift/origin/pull/24074
+
+[10] https://github.com/openshift/origin/pull/24442
+
+[11] https://github.com/open-fresh/bomb-squad
