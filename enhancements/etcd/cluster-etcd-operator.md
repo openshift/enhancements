@@ -92,7 +92,28 @@ It never creates the instance.  In the future, it should honor the `oc -n kube-s
 
 #### Consumers
 `oc -n openshift-etcd get endpoints/host-etcd` can be used to build etcd clients.
-It is used in this operator and in the KAS-o and OAS-o.  
+It is used in this operator and in the KAS-o and OAS-o.
+
+### HostEndpointsController2
+
+This controller maintains the list of endpoints in `oc -n openshift-etcd get endpoints/host-etcd-2`.
+It always places the internal IP addresses and node names for every master node, even those without pods.
+On a fresh install the initial endpoints resource is created by the installer with the IP address of the etcd bootstrap
+member injected into the `alpha.installer.openshift.io/etcd-bootstrap` annotation. On an upgrade the endpoints resource
+is created by this controller.
+
+#### Reads
+ 1. `oc get nodes -l node-role.kubernetes.io/master:`
+ 2. `oc -n openshift-etcd get endpoints/host-etcd-2` - to preserve the `alpha.installer.openshift.io/etcd-bootstrap` annotation.
+
+#### Writes
+`oc -n openshift-etcd get endpoints/host-etcd-2`
+ 1. **.spec.subsets[0].addresses[*n*].nodename** is set to the node name.
+ 2. **.spec.subsets[0].addresses[*n*].ip** is set to the first internal IP of the node.
+
+#### Consumers
+`oc -n openshift-etcd get endpoints/host-etcd-2` can be used to build etcd clients.
+It is used in this operator and in the KAS-o and OAS-o.
 
 ### EtcdMembersController
 This controller directly contacts etcd to determine the status of individual members.
@@ -179,7 +200,6 @@ This controller shapes the static pod manifest itself.  It has some unique featu
  3. The static pod contacts the existing etcd to determine membership.
     It waits until it is able to know that it is in the member list before trying to start.
     When it does this, it is able to determine the member list to use to launch.
-
 
 ### Exceptional Scenarios
 These are things like DR or "off and on" again or "member is misbehaving" scenarios that need to work in a way that is 
@@ -324,6 +344,57 @@ The cluster can function without intervention, but to fully restore 4.3, manual 
     2. restore the etcd-member.yaml from its backup location
     3. wait for the etcd-member to rejoin
     4. move to the next master.
+
+#### Migrating to IPs
+
+KAS-o must access etcd over the cluster network. An external DNS is needed to resolve dns names that resolve to cluster
+IPs. This adds a dependency on the configuration of an external DNS and greatly complicates the scaling of the etcd
+cluster automatically via an operator due to the need to configure the external DNS manually.
+
+Migrating to using only IPs will remove the need to have external processes for configuring the external DNS. In order
+to overcome some of the issues with using an external DNS, mDNS was used to broadcast dns name records dynamically. 
+Unfortunately, there are sometimes conflicts between DNS and mDNS, and the availability of mDNS resource records are
+disrupted when etcd endpoints are restarted. Migrating to using only IPs will provide resilience during upgrades.
+
+##### Etcd Clients
+
+Etcd clients such as KAS-o & OAS-o will compile a list of etcd grpc endpoint urls:
+
+1. From IPs found in `oc -n openshift-etcd get endpoints/host-etcd-2`:
+   * bootstrap member IP from `alpha.installer.openshift.io/etcd-bootstrap` annotation if available.
+   * cluster member IPs from **.spec.subsets[0].addresses[*n*].ip**.
+2. Local host urls: `https://127.0.0.1:2379` and `https://[::1]:2379`
+
+##### Etcd Serving Certificates
+
+Etcd client serving certificates will need to additionally be valid for `127.0.0.1` and `::1`.
+
+##### Etcd Peer URLs
+
+In release 4.4 etcd **peerUrls** will be constructed using IPs. Any existing **peerUrls** constructed with dns names
+will be preserved in case of a downgrade to a pre-4.4 level. 
+
+##### Handling Node IP Changes
+
+Changes to the IP address used by an etcd member node will need to be detected so that the etcd member can be redeployed.
+
+###### Subset of IPs Change
+
+If a subset of the etcd member IP addresses change, "scale down" the stale members and scale back up to the desired
+number of members.
+ 
+###### All IPs Change
+
+If all the etcd member IP addresses change, the etcd cluster will become non-functional. We recover by recovering a
+single etcd member and scaling back up to the desired number of members.
+
+1. Select a node to begin the restore.
+   * TODO how to select a node
+2. Run a restore-data-dir flow with an existing data-dir that takes us back to a single member with new cluster ID.
+   * TODO how to select data-dir
+   * TODO tool needed for automation
+3. Once initial member is up, local KAS-o, (using `127.0.0.1` or `::1` urls) should connect and become available. 
+4. Etcd operator runs as usual, scaling and redeploying automatically as different IPs are detected resulting in new certs
 
 ### Version Skew Strategy
 
