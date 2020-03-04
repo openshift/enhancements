@@ -49,35 +49,41 @@ see-also:
 >(i.e. `/etc/share/containers/mounts.conf`), akin to what the Red Hat Docker Daemon used to provide with OpenShift V3.  
 >Guidance in the early 4.x time frame has been around the cluster admin using the MCO post install to effectively update the
 >filesystem of each node with the necessary subscription related files in a well known location that CRI-O would look
->for.  There is concern though using this through MCO from a couple of perspectives.  One, the MCO api is not a 
+>for.  There is concern though using this through MCO from a couple of perspectives.  One, the MCO api is not
 >natural for someone who wants to do something higher level like "enable entitlements for builds".  Second, using the
 >MCO for any node update requires a restart of the node, which is onerous for this scenario.  Also note, the RHCOS
->team want stop disable their current default setting of auto-mounting secrets from the host (i.e. stuff from 
->`/etc/share/containers/mounts.conf`), since RHCOS does not fully install subscription manager and they have 
+>team want to disable their current default setting of auto-mounting secrets from the host (i.e. stuff from 
+>`/etc/share/containers/mounts.conf`), since RHCOS does not fully install subscription manager (and never will), and they have 
 >problems when only partial subscription manager metadata is available.  [RHCOS has the subscription-manager-certs 
->installed but missing the subscription-manger package which carries the rhsm.conf.](https://bugzilla.redhat.com/show_bug.cgi?id=1783393)
+>installed but are missing the subscription-manger package which carries the rhsm.conf.](https://bugzilla.redhat.com/show_bug.cgi?id=1783393)
 >They are entertaining an MCO solution to work around this problem, but disabling auto-mount, and then having a 
->solution which adds all the subscription manager in one fell swoop, would be their preference. 
+>solution which adds all the subscription manager in one fell swoop, would be their preference.  In the end, providing
+>an alternative to an MCO based solution **would seem** to facilitate RHCOS's future intentions and it would seem we should
+>minimally coordinate with them to facilitate how they stage future changes  
 > 2. There has been discussion elsewhere around having a more generic notion of "global resources" that any pod can
 >mount.  There is an open question of whether this proposal should tackle that.  Would we gate this enhancement on the 
->availability of such a feature (probably "not sure")?  Upstream feature work could be implied with such an item.  Or 
->exploration of CSI based solutions to read secrets is an option, though perhaps this scenario would be an abuse of the CSI pattern,
->and some form of performance assessment would be prudent.  A slight variant of that would be providing a special
->`SecretProviderClass` for defining where secrets are read from (i.e. the default subscription locations vs. the default
->k8s secret mount points).  And after 4.5 epic planning it was made clear that a more general solution around entitlements, beyond just builds,
+>availability of such a feature (probably "not sure")?  Upstream feature work could be implied with such an item.  But
+>what influence such a notion could have on this proposal is TBD. 
+> 3. After 4.5 epic planning it was made clear that a more general solution around entitlements, beyond just builds,
 >is desired.  PM has the to-do to investigate, prioritize, and create/assign epics accordingly.  Investigating in the 
 >interim around build specific needs via this proposal has been deemed acceptable, but certainly a subsequent, broader
->proposal may necessitate adjustments to this one.
-> 3. We did *NOT* provide for multiple sets of entitlement credentials in 3.x.  There have been no official, RFE style  
+>proposal may necessitate adjustments to this one.  This proposal at the moment is straddling the fence between speaking
+>to a generic solution vs. a build specific one (though things are trending toward the former).  But a rebranding of 
+>this proposal may occur during the review process.
+> 4. We did *NOT* provide for multiple sets of entitlement credentials in 3.x.  There have been no official, RFE style  
 >registered requirements entitlements at a namespace level.  However, we've started to get (slightly) less official
 >feedback that customers want this in a more automated sense (vs. the current manual steps).  At a minimum, and is
 >noted below when alternatives are discussed, if namespaced entitlements are added with subsequent implementation
 >after global entitlements usability is improved, it needs to be seamless, and we minimally need to agree now
 >on what the order of precedence will be (with the take on that listed below).
-> 4. There has also been a question in the past needing to shard entitlements due to API rate limiting.  To date, it
+> 5. There has also been a question in the past needing to shard entitlements due to API rate limiting.  To date, it
 >has been stated that is not a concern for builds.  Periodic checkpoints here could be prudent.
-> 5. There is also the general question of how entitlements are propagated for our managed service offerings.  There are
+> 6. There is also the general question of how entitlements are propagated for our managed service offerings.  There are
 some attempts at capturing the particulars for this below, but it needs some vetting.
+> 7. With the CSI plugin based solution articulated below, there is some question as to how that is packaged, such as a)
+>a change to the existing openshift apiserver, b) a separate admission server (possibly aggregated apiserver) utilizing
+>libraries like https://github.com/openshift/generic-admission-server, or c) perhaps even a patch we carry on the k8s
+>apiserver (yikes!!)
 
 ## Summary
 
