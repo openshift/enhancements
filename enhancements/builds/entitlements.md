@@ -81,8 +81,8 @@ see-also:
 > 6. There is also the general question of how entitlements are propagated for our managed service offerings.  There are
 some attempts at capturing the particulars for this below, but it needs some vetting.
 > 7. With the CSI plugin based solution articulated below, there is some question as to how that is packaged, such as a)
->a change to the existing openshift apiserver, b) a separate admission server (possibly aggregated apiserver) utilizing
->libraries like https://github.com/openshift/generic-admission-server, or c) perhaps even a patch we carry on the k8s
+> a separate admission server (possibly aggregated apiserver) utilizing
+>libraries like https://github.com/openshift/generic-admission-server, or b) perhaps even a patch we carry on the k8s
 >apiserver (yikes!!)
 
 ## Summary
@@ -252,8 +252,8 @@ The is our most likely choice, and it will be to have a well known secret in the
 namespace where administrators can store the credentials, and then update pod definitions prior to pod creation to include
 volume mounts to that content.
 
-To mimic 3.x behavior, if the global credential(s) exist, then always mount.  As a result, they 
-are always present.  
+**IF** we were to mimic 3.x behavior, if the global credential(s) exist, then always mount.  As a result, they 
+are always present.....**HOWEVER** .....   
 
 At this time, the current sentiment for 4.x is to opt in to receiving entitlements instead of the default being
 the credentials are "just there", where either an annotation (or perhaps new API field(s) in the case of builds).  
@@ -290,7 +290,7 @@ in a pod:
 ###### Build Specific consumption path
 
 Once the "entitlement" volume is mounted in the build pod, the openshift builder image will need to map the pod mounted volumes to the 
-requisite buildah parameters (much like it does today for existing secrets/configmaps mounted into the build pod).
+requisite buildah parameters.
 
 ###### Build Specific Secret Injection Option
 
@@ -313,10 +313,6 @@ as documented today.
 
 The per namespace version would act as an override and take precedence over the global copy.
 
-NOTE: a user namespace option quite possibly will be more attractive to a general tekton implementation, as 
-access to the openshift-config namespace is not a lower permission level sort of thing.  In theory, the Build V2
-controller may have similar privileges as the current build V1 controller, but we will have to monitor that 
-situation with respect to features like this.
 
 ##### Host Injected Option (Not doing, but listing for completeness)
 
