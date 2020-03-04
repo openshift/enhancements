@@ -245,12 +245,16 @@ namespace where administrators can store the credentials.
  
 The build controller can access that content and mount into build pods as it deems fit.
 
-To mimic 3.x behavior, if the global credential(s) exist, the build controller will always 
+To mimic 3.x behavior, if the global credential(s) exist, the build controller would always 
 mount (and the builder image will always tell buildah to use them).  In other words, they 
-are always present.  To add to the old 3.x behavior, we'll define a annotation to set on 
-the build config to opt out.  We could also add an option on the global build config object 
-to opt out for everyone, but unless we end up supporting non-build entitlement scenarios, this seems 
-unnecessary (just don't create the global secret).
+are always present.  
+
+At this time, the current sentiment for 4.x is to opt in to receiving entitlements instead of the default being
+the credentials are "just there".  
+
+An opt-in at both the `BuildConfig` level and global build controller config level (`BuildDefaults`) would be provided,
+where in the `BuildConfig` case it would be an API field addition under the `BuildSource`.  Something like
+`includeSubscription`.  And an analogous field name and type would be added to `BuildDefaults`. 
 
 The current assumption is that only one set of entitlement credentials is needed at the global level.
 
