@@ -155,8 +155,8 @@ No longer require (though still allow) manual manipulation of the BuildConfig to
 
 No longer require (though still allow) manual injection of subscription credentials into a user's namespace.
 
-Wherever possible during the implementation, structure the openshift/builder code hits such that they can be leveraged 
-by tekton based image building, including OpenShift Build V2, to take the equivalent mounting of subscription 
+Wherever possible during the implementation, identify any openshift/builder image or build controller code hits that 
+could be leveraged by tekton based image building, including OpenShift Build V2, to take the equivalent mounting of subscription 
 credential content into the build pod (where something other than the build controller for Build V1 does this), and 
 supply the necessary arguments to the `buildah` binary (vs. the `buildah` golang API the openshift/builder image
 uses).  The "code hit structuring" implies adding common code that could be referenced by both solutions into a 
@@ -196,18 +196,17 @@ TODO:  Still need some form of implementation details for this one if it remains
 #### Out Of Scope Stories
 
 1. As a user I have a (non OpenShift Build) pod whose entry point is a script that installs software from entitled 
-sources, and I want a simpler way for the necessary entitlemenet information injected in the pod.
+sources, and I want a simpler way for the necessary entitlement information injected in the pod.
 
-(See the Open Questions for other work that could make this happen). 
+(See the Open Questions and the question around if this will become in scope). 
 
 ### Implementation Details/Notes/Constraints [optional]
 
-So the concerns for the implementation center around 5 questions:
+So the concerns for the implementation center around these questions:
 
-- Mechanism for delivering for subscription config/credentials to the cluster
+- Delivery mechanism for subscription config/credentials to the cluster
 - Where/How subscription config/credentials are stored on the cluster (e.g. what resources types+namespaces)
 - In what form are the credentials provided (pem files, SubscriptionManager, Satellite)
-- How does the build consume the credentials
 - When does the build consume the credentials (where consuming means telling buildah to mount it)
 
 #### Delivery Mechanism for the "encapsulation" of credentials
@@ -228,6 +227,9 @@ Whatever API objects we use to encapsulate the entitlement credentials/configura
 cluster, and the associated RBAC needed to create those objects, will need to be spelled out so that they can be 
 injected into MCM compliances and policies.
 
+The assumption is that since the preferred solutions below do not entail creating/editing API objects specific to
+OpenShift only, the existing API client employed by MCM should be able to consume what we provide.
+
 ##### OpenShift Hive
 
 Hive has an analogous feature, "sync sets", to allow for API objects to be created on the clusters it manages.  At this
@@ -242,41 +244,72 @@ suffice for Hive without MCM.
 As the title implies, a user with sufficient privilege would create the API objects we decide are the "encapsulation"
 for the entitlement/subscription credentials at the namespace / cluster level we end up supporting.
 
-#### Where do we get the credentials from (i.e. the precise form of the "encapsulation")
+#### Where/How do we get the credentials from (i.e. the precise form of the "encapsulation")
 
 ##### Global secret option
 
-The most likely choice here will be to have a well known secret in the openshift-config
-namespace where administrators can store the credentials.
- 
-The build controller can access that content and mount into build pods as it deems fit.
+The is our most likely choice, and it will be to have a well known secret in the openshift-config
+namespace where administrators can store the credentials, and then update pod definitions prior to pod creation to include
+volume mounts to that content.
 
-To mimic 3.x behavior, if the global credential(s) exist, the build controller would always 
-mount (and the builder image will always tell buildah to use them).  In other words, they 
+To mimic 3.x behavior, if the global credential(s) exist, then always mount.  As a result, they 
 are always present.  
 
 At this time, the current sentiment for 4.x is to opt in to receiving entitlements instead of the default being
-the credentials are "just there".  
+the credentials are "just there", where either an annotation (or perhaps new API field(s) in the case of builds).  
 
-An opt-in at both the `BuildConfig` level and global build controller config level (`BuildDefaults`) would be provided,
-where in the `BuildConfig` case it would be an API field addition under the `BuildSource`.  Something like
-`includeSubscription`.  And an analogous field name and type would be added to `BuildDefaults`. 
+As noted in the open question, simply getting credentials at the global level may not be sufficient, so additional
+alternatives / complementary pieces to a global solution are articulated below.
 
-The current assumption is that only one set of entitlement credentials is needed at the global level.
+The preferred implementation path at this time is to build the following set of components inject the global secret contents 
+in a pod:
+ - a [CSI plugin](https://github.com/container-storage-interface/spec) would fetch the secret(s) and write it on the underlying 
+ node/host filesystem on a path we control so that CRIO can mount the content
+ - this CSI plugin essentially provides a new "entitlement" Volume type 
+ - it is a special case type that is not intended to be the more generic CSI Volume type that is already present
+ upstream
+ - and while it is similar to a HostPath volume, it won't appear in the pod as a HostPath, with the requisite 
+ permissions that implies
+ - the CSI plugin would be hosted as a `DaemonSet` on the k8s cluster, to get per node/host granularity
+ - and that `DaemonSet` would be privileged so as to have access to the pod's associated node/host file system.
+ - the [CSI spec](https://github.com/container-storage-interface/spec/blob/master/spec.md) details the entire architecture,
+ concepts, and protocol
+ - but to try and summarize a key element for us: CSI has two step mounting process. staging and publishing. Staging is 
+ node local and publish is pod local. So we will probably want to stage the content once and publish it for each pod 
+ (which is nothing but creating a bind mount for original volume)
+ - That means we do not have to necessarily read and copy the secret(s) contents on every pod creation
+ - We can build an associated controller that watches the global secret, or per namespace secrets that have been 
+ annotated/labelled, and if possible that somehow engages the CSI plugin to redo the staging step.  This is *somewhat*
+ akin to the injection controller employed by the Global Proxy support.
+ - Moving on from the CSI plugin, an admission controller/webhook path (see open questions regarding "packaging" options there) 
+ that based on the presence of the annotation on the pod (or one of several for per namespace perhaps), and the presence 
+ of a global whitelist that stipulates which namespaces can annotate their pod.  See risks and mitigations for 
+ speculation around the need for more granular control.
+ - can mutate the pod, adding volume mounts of the "entitlement" volume 
+
+###### Build Specific consumption path
+
+Once the "entitlement" volume is mounted in the build pod, the openshift builder image will need to map the pod mounted volumes to the 
+requisite buildah parameters (much like it does today for existing secrets/configmaps mounted into the build pod).
+
+###### Build Specific Secret Injection Option
+
+In lieu of the CSI plugin and k8s admission flow, a build only solution would center around  
+The build controller accessing the global secret and mounting into build pods as it deems fit.
+
 
 ##### User Namespace Option
 
-Users could provide secret(s) with a well known annotation in their namespace that the build controller 
-can look for and mount in the pod, so the openshift/builder image can instruct buidah to mount.
+Users could provide secret(s) with a well known annotation in their namespace that the global solution
+noted above can look for and mount in the pod in the same way as the global secret.
+
+The global solution minimally would only look for secrets with such an annotation or label in the namespace of the 
+pod who has the annotation for mounting entitlements.
+
+Labels might be preferable in the per namespace case to facilitate queries. 
 
 This would be a slight step up from having to manually cite those secrets in the BuildConfig Spec after creating them,
 as documented today. 
-
-Whether we do this one in part may be determined by whether we expect multiple sets of entitlements to be 
-used on a given cluster, where a single global copy is not sufficient.
-
-Multiple global secrets, one for ech credential set, where the annotation specifies which global secret to use
-for the given build, could also be an alternative here.
 
 The per namespace version would act as an override and take precedence over the global copy.
 
@@ -285,7 +318,7 @@ access to the openshift-config namespace is not a lower permission level sort of
 controller may have similar privileges as the current build V1 controller, but we will have to monitor that 
 situation with respect to features like this.
 
-##### Host Injected Option
+##### Host Injected Option (Not doing, but listing for completeness)
 
 `HostPath` volumes are already called out as a security concern in [volume mounted injections for builds](volume-secrets.md)
  proposal.
@@ -314,8 +347,6 @@ file is present.
 
 4) Where again, nobody wants to use the MCO for that.
 
-5) TODO: still searching for clarification on how the "secrets from the host" would be injected, and what they 
-would look like exactly.
 
 #### In what form are the credentials provided
 
@@ -325,77 +356,36 @@ There will also be well defined keys within the global secret that account for t
 - SubscriptionManager config and certs
 - Satellite config and instance information, yum repo file if needed, and certs  
 
-#### How does the build consume the credentials
+All of these could be contained in a single secret created with multiple `--from-file` options, correlating to 
+multiple key/value pairs in the secret.
 
-##### Global Secret Option
+We would need to proscribe well known key names to be used for each.  And perhaps for each type of thing, the CSI
+plugin would need to copy them to the best place possible on the node/host for CRIO consumption.
 
-The build controller copies the global credential secret into the user's namespace, mounts it
-into the build pod, and then the builder image running in the build pod tells buildah to mount it.
+If this proves untenable, multiple secrets per entitlement, with different annotations for each, would be needed.
 
-This is analogous to how build handle registry CAs today.
-
-The secret can either be another of the predetermined ones the build controller creates for every build or 
-the build controller can look for an existing secret with a predetermined annotation.
-And certainly both approaches can be supported, where the annotated existing secret takes 
-precedence over the predetermined build controller secret. 
-
-##### User Namespace Option 1
-
-The build controller would look for secrets with a predefined annotation in the build's namespace,
-where the user has injected the credentials in that secret, and mount the secret into the build pod.
-
-The builder image in the pod then seeds buildah with the correct argument to access the mounted content.
-
-##### User Namespace Option 2
-
-The build controller would look for secrets with a predefined annotation in the build's namespace, 
-and it would copy the contents from the global location into the secret, and mount the secret into the build pod.
-
-The builder image in the pod then seeds buildah with the correct argument to access the mounted content.
-
-##### Host Injected Option
-
-Assuming again the build controller does not attempt `HostPath` volumes per the [volume mounted injections for builds](volume-secrets.md)
-proposal, and assuming the CRI-O feature is available and injects the credential in a well known location, 
-the only build related change would be in the builder image, where it supplies buildah the necessary volume arg
-to access the credentials.
+The current though is to go with one secret vs. multiple, but this can be adjusted during implementation if need be.
 
 #### When does the build consume the credentials
 
-##### Global Secret Option
+An opt-in at both the `BuildConfig` level and global build controller config level (`BuildDefaults`) would be provided,
+where in the `BuildConfig` case it would be an API field addition under the `BuildSource`.  Something like
+`includeSubscription`.  And an analogous field name and type would be added to `BuildDefaults`. 
 
-To summarize what was noted above, with the global secret option, the credentials would always be available to the build
-if the secret exists.  A per build config annotation to opt out would be provided.  A global opt out (in the global
-build config) would only be employed if sufficient non-build scenarios leveraging the global secret arose.
-
-##### Host Injection Option
-
-Same rationale as the global config option.
-
-##### User Namespace Options
-
-For these an annotation is needed to opt in.
-
-###### Pre-Build Auto Injection
-
-If there is a performance concern with copying on each build, then the CA injection controller approach employed
-by Global Proxy could be a solution, where that controller handles updating when the source resource is changed.
-
-Today the global proxy support includes auto-injecting the credentials defined at the global level into per namespace 
-config maps with a well known label.
+The build controller in turn would supply the annotation(s) the CSI plugin and associated admission apparatus respects
+onto the build pod.
 
 
 ### Risks and Mitigations
 
-No additional structural API changes are envisioned for this enhancement.  It may leverage API changes from other sources like 
-[volume mounted injections for builds](volume-secrets.md).
+Predefined annotations/labels should largely suffice, but we are proposing new fields in the existing Build V1 API 
+objects to facilitate opt-in at both the global level and per BuildConfig level.
 
-Predefined annotations will suffice.
+How the CSI plugin is packaged (see the open questions) could entail some longer term risk based on which choice is made.
 
-So no new exploit windows from that perspective.
-
-Otherwise, it will be the job of the build controller to ensure that any volume mounts into the build pod are safe from
-privileged escalation based wrongdoing if a `HostPath` based solution is employed.
+The intent of the associated whitelist for which namespaces can access entitlements is to give administrators sufficient
+control around who can access entitlements.  If not, it would seem we would need to create a new API type that RBAC
+could be defined off of to get more granular authorization. 
 
 ## Design Details
 
@@ -447,7 +437,8 @@ N/A
 
 ## Alternatives
 
-Alternative to various elements in the implementation proposal are cited in-line in the above section.
+A build only solution could entail the build controller replacing the CSI plugin and admission framework and mounting
+secrets into the build pod.
 
 ## Infrastructure Needed [optional]
 
