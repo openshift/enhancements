@@ -85,6 +85,20 @@ This procedure enables to recover from a situation where the control plane certi
 
 ## Proposal
 
+### Backup
+
+1. On all masters create a new backup revision `/etc/kubernetes/static-pod-manifests/backup-N`.
+2. On all masters write `/etc/kubernetes/static-pod-manifests/backup-N/backup.env` file containing 3 environmental
+   variables `CREATED`, `ETCD_REVISION` and `APISERVER_REVISION`.
+2. On all masters copy directory `/etc/kubernetes/static-pod-manifests/etcd-pod-${ETCD_REVISION}` to
+  `/etc/kubernetes/static-pod-manifests/backup-N/etcd-pod`.
+3. On all masters take an etcd snapshot `etcdctl snapshot save
+  /etc/kubernetes/static-pod-manifests/backup-N/etcd-data/backup.db`.
+4. On all masters copy directory `/etc/kubernetes/static-pod-manifests/kube-apiserver-pod-${APISERVER_REVISION}`
+  to `/etc/kubernetes/static-pod-manifests/backup-N/kube-apiserver-pod`.
+5. On all masters replace directory `/etc/kubernetes/static-pod-manifests/backups` with a copy of
+  `/etc/kubernetes/static-pod-manifests/backup-N` directory.
+
 ## User Stories [optional]
 
 ## Implementation Plan
