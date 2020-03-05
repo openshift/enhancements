@@ -101,6 +101,22 @@ This procedure enables to recover from a situation where the control plane certi
 
 ## User Stories [optional]
 
+### Security
+
+Your clusters backup data is as secure as your cluster. If someone were to root the system they would have direct
+access to all data.
+
+### Availability
+
+Your data is as resilient as your cluster. We make N copies of your data so in the case of failure you dont have to
+worry about your last backup location.
+
+### Recovery Automation
+
+If the cluster were to lose quorum and every master is seeded with data required to restore. Automation of recovery
+tasks becomes easier.
+
+
 ## Implementation Plan
 
 1. Make changes to the scripts as needed
