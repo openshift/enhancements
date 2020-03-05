@@ -45,17 +45,17 @@ see-also:
 ## Open Questions [optional]
 
  > 1. CRI-O already has config options (see the [config file doc](https://github.com/cri-o/cri-o/blob/master/docs/crio.conf.5.md)) 
->to specify host directories that should always be mounted into containers
->(i.e. `/etc/share/containers/mounts.conf`), akin to what the Red Hat Docker Daemon used to provide with OpenShift V3.  
+>to specify host directories that should always be mounted into containers (i.e. `/etc/containers/mounts.conf` to override
+>the default `/usr/share/containers/mounts.conf`), akin to what the Red Hat Docker Daemon used to provide with OpenShift V3.  
 >Guidance in the early 4.x time frame has been around the cluster admin using the MCO post install to effectively update the
 >filesystem of each node with the necessary subscription related files in a well known location that CRI-O would look
 >for.  There is concern though using this through MCO from a couple of perspectives.  One, the MCO api is not
 >natural for someone who wants to do something higher level like "enable entitlements for builds".  Second, using the
 >MCO for any node update requires a restart of the node, which is onerous for this scenario.  Also note, the RHCOS
->team want to disable their current default setting of auto-mounting secrets from the host (i.e. stuff from 
->`/etc/share/containers/mounts.conf`), since RHCOS does not fully install subscription manager (and never will), and they have 
+>team want to disable their current default setting of auto-mounting secrets from the host (i.e. creating an empty 
+>`/etc/containers/mounts.conf`), since RHCOS does not fully install subscription manager (and never will), and they have 
 >problems when only partial subscription manager metadata is available.  [RHCOS has the subscription-manager-certs 
->installed but are missing the subscription-manger package which carries the rhsm.conf.](https://bugzilla.redhat.com/show_bug.cgi?id=1783393)
+>installed but are missing the subscription-manager package which carries the rhsm.conf.](https://bugzilla.redhat.com/show_bug.cgi?id=1783393)
 >They are entertaining an MCO solution to work around this problem, but disabling auto-mount, and then having a 
 >solution which adds all the subscription manager in one fell swoop, would be their preference.  In the end, providing
 >an alternative to an MCO based solution **would seem** to facilitate RHCOS's future intentions and it would seem we should
@@ -154,6 +154,10 @@ And large, multi cluster administration needs to be simplified by results from o
 No longer require (though still allow) manual manipulation of the BuildConfig to consume entitlements.
 
 No longer require (though still allow) manual injection of subscription credentials into a user's namespace.
+
+Help customers who just started with OpenShift. They can work with `oc` and some sample yaml files but are completely 
+overwhelmed with the entitlement story. Especially if they are used only to satellite and expect things just to work 
+when they subscribe.  The RHCOS team has had to a lot of customer coaching in 4.x wrt entitlements.
 
 Wherever possible during the implementation, identify any openshift/builder image or build controller code hits that 
 could be leveraged by tekton based image building, including OpenShift Build V2, to take the equivalent mounting of subscription 
@@ -407,6 +411,10 @@ with any of the three forms of credentials
 QE already has existing test cases around using subscription manager with the manual process in play today for 4.x.
 They will be adjusted and serve as the minimum for implementations of this proposal.  Most likely this is sufficient,
 but due diligence around additional testing for the other scenarios will be assessed during test case review.
+
+And a note to QE:  the RHCOS team wanted us to know they tested the "jump-host" scenario with respect to Satellite
+in the 4.3 timeframe.  See https://docs.google.com/document/d/1-Il7O86vQBTKq2QNe47kQF-66n1NHgM9drEmtKWeELU/edit#heading=h.igkdrwoly0rc
+for details.
 
 ### Graduation Criteria
 
