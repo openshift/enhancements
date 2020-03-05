@@ -128,33 +128,33 @@ As a member of the operations tenant, I’d like to make sure that one tenant do
 
 As a member of the operations team, I'd like the ability for application developers to access container cpu and memory usage metrics.
 
-### US9
+#### US9
 
 As a service owner, I'd like to configure alerting rules or recording rules for my service that correlate both cluster as well as user defined metrics.
 
-### US10
+#### US10
 
 As a service owner, I'd like to view configured and fired alerts in the dev perspective of OpenShift console.
 
-### US11
+#### US11
 
-As a member of the operations team, I’d like to get notified if the Prometheus servers are acting strange.
+As a member of the operations team, I’d like to get notified if the Prometheus servers are acting unexpectedly.
 
-### US12
+#### US12
 
-As a member of the operations team, I'd like to have an overview about all the Prometheus servers inside a cluster.
+As a member of the operations team, I'd like to have an overview about all the Prometheus, Thanos Querier, and Thanos Ruler instances hosting user workload metrics inside a cluster.
 
-### US13
+#### US13
 
 As a member of the operations team, I'd like to configure more replicas for the new Prometheus servers.
 
-### US14
+#### US14
 
 As a member of the operations team, I'd like to give dedicated users the permission to enable/disable and configure the user workload monitoring stack.
 
-### US15
+#### US15
 
-As a member of the operations team I want to see all alerts (cluster and user workload alerts) in the admin perspective and can silence any of them.
+As a member of the operations team I want to see all alerts (cluster and user workload alerts) in the admin panel and can silence any of them.
 
 ### Implementation Details/Notes/Constraints
 
@@ -238,7 +238,7 @@ For this use case just one system is critical for alerts to work:
 ##### Developer perspective
 
 Alerts/Recording Rules Aggregation implies that the user potentially chooses whether recording or alerting rules are being deployed on the user workload Prometheus or Thanos Ruler.
-In order to retrieve the full list of user workload recording alerting and recording rules the existing Thanos Querier gets support for the Prometheus `/api/v1/rules` and `/api/v1/alerts` API. Internally it fans out to the existing in-cluster Prometheus, the user workload monitoring Prometheus, and ThanosRuler. See [7] and [8] for further implementation details.
+In order to retrieve the full list of user workload recording alerting and recording rules the existing Thanos Querier gets support for the Prometheus `/api/v1/rules` API. Internally it fans out to the existing in-cluster Prometheus, the user workload monitoring Prometheus, and ThanosRuler. See [7] and [8] for further implementation details.
 
 Tenancy is achieved using prom-label-proxy and kube-rbac-proxy. Here, returned alerts and rules are constrained and filtered with the tenancy namespace label.
 
@@ -319,6 +319,7 @@ The following new named roles are deployed via cluster-monitoring-operator.
 
 #### `monitoring-rules-view`
 This is a cluster role which can be bound against a concrete namespace by the cluster admin.
+
 Embeds the `get prometheusrules.monitoring.coreos.com` permission. It allows to:
 
 1. Read PrometheusRule custom resources matching the permitted namespace.
@@ -331,6 +332,7 @@ $ oc -n <namespace> get prometheusrule <foo>.
 
 #### `monitoring-rules-edit`
 This is a cluster role which can be bound against a concrete namespace by the cluster admin.
+
 Embeds the `create/edit/delete prometheusrules.monitoring.coreos.com` permission. It allows to:
 
 1. create/modify/delete PrometheusRule custom resources matching the permitted namespace.
@@ -343,6 +345,7 @@ $ oc -n <namespace> create/patch/delete prometheusrule <foo>.
 
 #### `monitoring-targets-edit`
 This is a cluster role which can be bound against a concrete namespace by the cluster admin.
+
 Embeds the `get/create/edit/delete` permissions for the following custom resources:
 
 1. ServiceMonitor
