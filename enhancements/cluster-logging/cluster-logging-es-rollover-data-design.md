@@ -84,9 +84,9 @@ Logs of a given type are co-located to the following indices:
 
 | Log Type | Read Alias | Write Alias | Initial Index |
 |---------|-----------|---------------|---------------|
-| Infra (`logs.infra`)|infra,logs.infra|infra-write|infra-00001|
-| Application Container (`logs.app`)|app,logs.app|app-write|app-000001|
-| Audit (`logs.audit`)|infra.audit,logs.audit|infra.audit-write|audit.infra-000001|
+| Infra (`logs-infra`)|infra,logs-infra|infra-write|infra-00001|
+| Application Container (`logs-app`)|app,logs-app|app-write|app-000001|
+| Audit (`logs-audit`)|infra.audit,logs-audit|infra.audit-write|audit.infra-000001|
 
 **Note:** Log types are further defined in [LogForwarding](./cluster-logging-log-forwarding.md).
 
@@ -99,9 +99,9 @@ metadata:
 spec:
   logStore:
     retentionPolicy: 
-      logs.app:
+      logs-app:
         maxAge: 7d
-      logs.infra
+      logs-infra
         maxAge: 7d
 
 ```
