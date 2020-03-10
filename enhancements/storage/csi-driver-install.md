@@ -56,7 +56,6 @@ We would like to approach various goals of this KEP in different phases, because
 * Provide a way for AWS and GCE CSI driver installation . Users could either optionally install it or CSI driver could be installed
 along with in-tree driver and users could use both.
 * Install CSI provided storageclass along with in-tree StorageClass.
-* *Install RHV CSI driver during installation of OCP 4.4 on RHV.* The driver is not optional. RHV is just another cloud provider for OCP.
 
 ### Phase-2 Goals
 
@@ -85,7 +84,7 @@ We are currently considering two options for installation of CSI driver.
 We propose that - we provide each driver mentioned above as a separate operator which could be subscribed and installed via OLM UI. Each driver's operator
 is responsible for its installation and release. The operator is responsible for creating storageclass that the driver provides.
 
-The configuration of CSI driver can be done via OLM UI if required and CSI driver can access cloudprovider credentials from Openshift provided sources.
+The configuration of CSI driver can be done via OLM UI if required and CSI driver can access cloudprovider credentials from Openshift provided sources.The CR that is responsible for driver configuration can be installed by default by the operator itself.
 
 Installation via OLM however means that, when we want to enable these CSI drivers as default drivers, they must be installed by default in Openshift installs.
 We further propose that - Cluster Storage Operator(https://github.com/openshift/cluster-storage-operator) could create subscriptions for these driver operators when drivers have to be installed by default.
@@ -115,52 +114,26 @@ Cons:
 2. In general there are some concerns about OLM's lack of documentation and everyone's understanding of it.
 3. Not sure about disconected cluster installation / update.
 
-Open questions for OLM team:
+When a CSI driver operator is in technical preview, we expect that the operator will be available from a `beta` channel. Moving to a `stable` channel once a driver reaches GA will require Openshift admin to manually change subscribed channel from beta to stable. At this point we expect that, operator in GA state will simply adopt the resources(CRs) created by beta version of the operator.
+
+
+### Open questions for OLM team:
 1. How will disconnected installs work?
+A: This was partly answered by shawn. It is possible to use disconnected installs today via https://docs.openshift.com/container-platform/4.3/operators/olm-restricted-networks.html but index images should make it easier.
+
+
 2. We need a way for a CSI driver operator to say version range of Openshift against which it is supported.
+A: This is less of a problem with index images because all versions of operator is not available from same source.
+
 3. Are channel to which user is subscribed to automatically upgraded when Openshift version is bumped? For example: If we install an operator from 4.2 channel on OCP-4.2 and then upgrade to OCP-4.3, is subscription updated to use channel 4.3? Or this should be handled via `skipRange`?
+A: Channels aren't automatically upgraded on OCP upgrade but we will be using stable and beta channel names rather than version specific channels.As proposed above we expect that an operator installed from stable channel will adopt resources created by beta channel.
+
 4. Currently CVO operators can directly access cloudprovider configuration via configmap placed in `openshift-config` namespace, are we going to allow OLM operators to do the same? Do we need to do something to support CSI driver configuration?
-5. There are some concerns about unknown unknowns which we may discover later on and requires faster turn around time from OLM team. These issues can become blocker issues for storage team but storage team may not have necessary technical know-how to fix them and hence will require help from OLM team.
+A: This is still an open question. Currently in 4.6 we will have cluster-storage-operator create the subscription but this is being tracked via RFE - https://issues.redhat.com/browse/RFE-664.
 
-### Installation via CVO
+5. Since most CSI operators has to be singletons,we need to stop users from installing the operator multiple times in different namespaces. Currently this is not possible.
+A. This is still an open question and work to address this is being tracked via https://issues.redhat.com/browse/RFE-660.
 
-We are also considering if these 5 CSI drivers should be installed by default and managed via CVO. We are considering using cluster-storage-operator to detect
-cloudprovider on which cluster is running and install necessary CSI driver by default. This does mean that, CSI driver is always installed along-side in-tree drivers.
-
-It makes it simpler to enable these drivers by default when in-tree to CSI migration goes GA.
-
-Expected workflow:
-1. CVO installs cluster-storage-operator.
-2. cluster-storage-operator checks on which cloud it is, let's say it's AWS.
-3. cluster-storage-operator starts AWS EBS CSI driver operator and sets its cluster-storage-operator status to Available + Progressing. In future it could run also AWS EFS CSI driver operator.
-4. AWS EBS CSI driver operator installs EBS CSI driver and creates some status CR (clusteroperators.config.openshift.io again?) that it's Available + Progressing.
-5. AWS EBS CSI driver operator checks that the driver is fully installed, i.e. driver DaemonSet and Deployment have full set of replicas and sets its own status to Available.
-6. cluster-storage-operator monitors status of AWS EBS CSI driver operator and sets its own status to Available.
-
-User cannot uninstall the driver, therefore the AWS EBS CSI driver operator does not consume any CR (whose deletion would tell the operator to uninstall the driver).
-
-Pros:
-1. Simpler handling of in-tree to CSI migration.
-2. Drivers are automatically installed and admin can monitor progress.
-
-Cons:
-1. If the CSI driver fails to deploy by the cluster-storage-operator, it will make the cluster-storage-operator degraded and as a result cluster will be degraded. This may not be optimal because initially we want CSI driver to be optional component.
-2. Supporting future configuration of drivers is tricky. Currently cluster-storage-operator is not a configurable operator. But enabling and disabling
-migration and making driver configurable will require designing CRDs which could support these functions.
-3. cluster-storage-operator needs to give RBAC permissions to the CSI operators. I.e. it must have all the permissions already. They may be quite powerful (privileged pods, edit PVs/PVCs) and may be slightly different for each CSI driver. Collection of these RBAC rules may be complicated, as they may be in multiple repos.
-
-### Installation with cloud providers
-
-Since all cloud providers are moving from in-tree to external cloud controllers (and external repositories), it may have sense to have one overarching "cloud-operator".
-The operator would check on which cloud it is and manage everything related to the cloud, i.e. install corresponding cloud controller and CSI driver.
-
-It can be installed either by OLM or CVO, with the same pros/cons as noted above.
-
-Extra pros:
-1. Single operator managing everything related to clouds, single status showing health of the cloud part of a cluster.
-
-Extra cons:
-1. Coordination between cluster infrastructure (or whoever manages cloud controllers** and storage teams.
 
 ## Timeline
 Bases on current upstream plans & assumptions.
