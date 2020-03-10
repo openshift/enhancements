@@ -95,17 +95,13 @@ For the current design, there will exist one operator running in
 `openshift-migration`. For an alternative approach, please see OLM
 OperatorGroup Integration below.
 
-There will be at least one new configuration parameter introduced to the
-`MigrationController` Custom Resource which will define a namespaced
-installation of CAM. The operator will be change to watch ALL namespaces for
-the creation of this CR. `MigrationController` will more than likely be renamed
-as this doesn't accurately represent what this CR is doing. For now, this let's
-assume this new name is called a `MigrationSandbox`. In the current design,
-when a MigrationSandbox is created in namespace `Foo` with a specified
-configuration parameter `namespaced: true`, the operator will install a
-namespaced Migration UI in namespace `Foo`. A new Migration Controller will be
-deployed in `openshift-migration` which will be watching namespace `Foo` for
-the creation of Migration Resources.
+There will be a new Custom Resource Definition introduced to CAM called
+`MigrationSandbox` which will define a namespaced installation of CAM.  The
+operator will be changed to watch ALL namespaces for the creation of this CR.
+In the current design, when a MigrationSandbox is created in namespace `Foo`,
+the operator will install a namespaced Migration UI in namespace `Foo`. A new
+Migration Controller will be deployed in `openshift-migration` which will be
+watching namespace `Foo` for the creation of Migration Resources.
 
 #### Migration Controller
 
@@ -155,6 +151,10 @@ REST request authorization steps:
 1. Inspect the associated ClusterRole/Role rules.
 1. Match resources in the role's Rules.
 1. Match verb(s) in roles Rules.
+
+There will be one discovery controller running in the `openshift-migration`
+namespace. It will be responsible for indexing all of the added `migcluster`
+resources.
 
 ###### A note about Subject Rules Review
 
@@ -329,14 +329,23 @@ end to end tests.**
 ### Upgrade / Downgrade Strategy
 
 To handle the upgrade use case, CAM must not break the existing cluster-scoped
-installation use case of CAM. To do this, a new configuration field will be
-added to the CAM installation CR (currently `MigrationController` but will more
-than likely be renamed) to allow a user to specify that they would like a
-tenant-scoped installation of CAM.
+installation use case of CAM. To do this, a new Custom Resource will be
+introduced that will be used only for namespace-scoped installations of CAM.
+The operator will be updated with a new playbook that will perform the
+namespaced installation on creation of the `MigrationSandbox` resource.
+
+The `MigrationController` CR which indicates a cluster-scoped install of CAM
+will be locked down via a set of RBAC resources which will only allow the
+privileged admin to create it. This will allow an admin to create the
+`MigrationController` resoruce in `openshift-migration`, but prevent Bob from
+being able to create a `MigrationController` in namespace `Foo`.
 
 If a user has CAM 1.1 installed and upgrades to CAM 1.2 then they will be
-unaffected as their `MigrationController` CR will not have the added
-configuration value to have a tenant-scoped install.
+unaffected as their `MigrationController` CR will still imply a cluster-scoped
+install of CAM. If the user creates a `MigrationSandbox` resource while also
+having a cluster-scoped install of CAM, the operator will leave the
+cluster-scoped install of CAM alone while provisioning the needed resources for
+the namespaced-install.
 
 The operator should be capable of updating/reverting the two types of
 installations when the configuration parameter is changed.
