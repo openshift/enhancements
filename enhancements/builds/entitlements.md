@@ -269,22 +269,49 @@ The preferred implementation path at this time is to build the following set of 
 in a pod:
  - a [CSI plugin](https://github.com/container-storage-interface/spec) would fetch the secret(s) and write it on the underlying 
  node/host filesystem on a path we control so that CRIO can mount the content
- - this CSI plugin essentially provides a new "entitlement" Volume type 
- - it is a special case type that is not intended to be the more generic CSI Volume type that is already present
- upstream
- - and while it is similar to a HostPath volume, it won't appear in the pod as a HostPath, with the requisite 
- permissions that implies
+ - though for our purposes, `plugin`, `driver`, and `endpoint` seem to be the same thing based on which document you are
+ reading.
+ - k8s provides Kubernetes CSI Sidecar Containers: a set of standard containers that aim to simplify the development and 
+ deployment of CSI Drivers on Kubernetes.
+ - There are CSI volume and persistent volume types in k8s.
+ - per [k8s volume docs](https://kubernetes.io/docs/concepts/storage/volumes/#csi) the CSI types do not support direct
+ reference from a Pod and may only be referenced in a Pod via a `PersistentVolumeClaim`
+ - To that end, one of the sidecar containers, the [external provisioner](https://kubernetes-csi.github.io/docs/external-provisioner.html),
+ helps with this
+ - It watches Kubernetes `PersistentVolumeClaim` objects, and if the PVC 
+ references a Kubernetes StorageClass, and the name in the provisioner field of the storage class matches the name 
+ returned by the specified CSI endpoint `GetPluginInfo` call, it calls the CSI endpoint `CreateVolume` method to provision
+ the new volume.
+ - there are also lifecycle methods for destroy, resize, etc.  
  - the CSI plugin would be hosted as a `DaemonSet` on the k8s cluster, to get per node/host granularity
  - and that `DaemonSet` would be privileged so as to have access to the pod's associated node/host file system.
  - the [CSI spec](https://github.com/container-storage-interface/spec/blob/master/spec.md) details the entire architecture,
  concepts, and protocol
- - but to try and summarize a key element for us: CSI has two step mounting process. staging and publishing. Staging is 
- node local and publish is pod local. So we will probably want to stage the content once and publish it for each pod 
+ - so Volume provisioning could access the node/host filesystem, in particular the directory (and only the directory)
+ where the secret contents will be copied to
+ - As part of Volume creation/provisioning a key element is this: CSI has two step mounting process. staging and publishing.
+ - They correspond to the endpoint's `NodeStageVolume` and `NodePublishVolume` implementations 
+ - Staging is node local and publish is pod local. So we will probably want to stage the content once and publish it for each pod 
  (which is nothing but creating a bind mount for original volume)
  - That means we do not have to necessarily read and copy the secret(s) contents on every pod creation
- - We can build an associated controller that watches the global secret, or per namespace secrets that have been 
- annotated/labelled, and if possible that somehow engages the CSI plugin to redo the staging step.  This is *somewhat*
- akin to the injection controller employed by the Global Proxy support.
+ - the [CSI spec volume lifecycle section](https://github.com/container-storage-interface/spec/blob/master/spec.md#volume-lifecycle) 
+ talks about a pre-provisioned volume.
+ - If we can implement this, then we can build an associated controller that watches the global secret, or per namespace secrets that have been 
+ annotated/labelled, and if possible that engages the CSI plugin and its `ControllerPublishVolume` implementation to redo 
+ the staging step and update the secret contents.  This is *somewhat* akin to the injection controller employed by the 
+ Global Proxy support.
+ - **TODO**: in looking at the [kubernetes-csi hostpath example](https://github.com/kubernetes-csi/csi-driver-host-path)
+ it seems very very similar to what we want to do, but with this exception:  it employs a `StatefulSet` for deploying
+ the CSI driver, and in the comments there, it says the following, which does not work for us:
+ 
+ ```bash
+    # One replica only:
+    # Host path driver only works when everything runs
+    # on a single node. We achieve that by starting it once and then
+    # co-locate all other pods via inter-pod affinity
+```
+
+ - that single node notion obviously won't work for us.  Need to understand why that is the case.
  - Moving on from the CSI plugin, an admission controller/webhook path (see open questions regarding "packaging" options there) 
  that based on the presence of the annotation on the pod (or one of several for per namespace perhaps), and the presence 
  of a global whitelist that stipulates which namespaces can annotate their pod.  See risks and mitigations for 
