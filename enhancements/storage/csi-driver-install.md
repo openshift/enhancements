@@ -5,12 +5,14 @@ authors:
   - “@jsafrane”
 reviewers:
   - "@eparis”
+  - "@shawn-hurley"
 approvers:
-  - TBD
-  - "@..."
+  - "@eparis"
+  - "@knobunc"
+  - "@shawn-hurley"
 creation-date: 2019-11-04
-last-updated: 2019-11-04
-status: provisional
+last-updated: 2020-03-10
+status: implementable
 see-also:
 replaces:
 superseded-by:
@@ -77,7 +79,7 @@ along with in-tree driver and users could use both.
 
 ## Proposal
 
-We are currently considering two options for installation of CSI driver.
+We are currently considering using OLM for installation of CSI driver.
 
 ### Installation via OLM
 
@@ -97,7 +99,7 @@ Expected workflow as default driver:
 1. CVO installs cluster-storage-operator.
 2. cluster-storage-operator detects cloudprovider on which cluster is running(lets say EBS).
 3. cluster-storage-operator creates a subscription for EBS CSI driver using redhat operator source.
-3. cluster-storage-operator monitors progress of subscription and sets its own status as available when subscription is installed.
+4. cluster-storage-operator monitors progress of subscription and sets its own status as available when subscription is installed.
 
 cluster-storage-operator ensures that there is always an subscription for CSI driver in given cloudprovider environment.
 
@@ -119,20 +121,27 @@ When a CSI driver operator is in technical preview, we expect that the operator 
 
 ### Open questions for OLM team:
 1. How will disconnected installs work?
-A: This was partly answered by shawn. It is possible to use disconnected installs today via https://docs.openshift.com/container-platform/4.3/operators/olm-restricted-networks.html but index images should make it easier.
+
+  A: This was partly answered by shawn. It is possible to use disconnected installs today via
+     https://docs.openshift.com/container-platform/4.3/operators/olm-restricted-networks.html but index images should make it easier.
 
 
 2. We need a way for a CSI driver operator to say version range of Openshift against which it is supported.
-A: This is less of a problem with index images because all versions of operator is not available from same source.
+
+  A: This is less of a problem with index images because all versions of operator is not available from same source.
 
 3. Are channel to which user is subscribed to automatically upgraded when Openshift version is bumped? For example: If we install an operator from 4.2 channel on OCP-4.2 and then upgrade to OCP-4.3, is subscription updated to use channel 4.3? Or this should be handled via `skipRange`?
-A: Channels aren't automatically upgraded on OCP upgrade but we will be using stable and beta channel names rather than version specific channels.As proposed above we expect that an operator installed from stable channel will adopt resources created by beta channel.
+
+  A: Channels aren't automatically upgraded on OCP upgrade but we will be using stable and beta channel names rather than version specific channels.As
+     proposed above we expect that an operator installed from stable channel will adopt resources created by beta channel.
 
 4. Currently CVO operators can directly access cloudprovider configuration via configmap placed in `openshift-config` namespace, are we going to allow OLM operators to do the same? Do we need to do something to support CSI driver configuration?
-A: This is still an open question. Currently in 4.6 we will have cluster-storage-operator create the subscription but this is being tracked via RFE - https://issues.redhat.com/browse/RFE-664.
+
+  A: This is still an open question. Currently in 4.6 we will have cluster-storage-operator create the subscription but this is being tracked via RFE - https://issues.redhat.com/browse/RFE-664.
 
 5. Since most CSI operators has to be singletons,we need to stop users from installing the operator multiple times in different namespaces. Currently this is not possible.
-A. This is still an open question and work to address this is being tracked via https://issues.redhat.com/browse/RFE-660.
+
+  A. This is still an open question and work to address this is being tracked via https://issues.redhat.com/browse/RFE-660.
 
 
 ## Timeline
