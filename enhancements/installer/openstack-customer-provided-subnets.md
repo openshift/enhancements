@@ -26,7 +26,9 @@ status: planning
 
 ## Summary
 In many large organizations, IT groups are separated into teams. A common separation of duties lies between networking/WAN and application or enabling technology deployments. One group will provision or assign OpenStack accounts with core management technology. A second group will be responsible for provisioning networks complete with subnet & zone selection, routing, VPN connections, and ingress/egress rules from the company. Lastly, an applications team (or individual business units) are given a quota for other OpenStack resources to provision application-specific items (instances, containers, databases, pipelines, load balancers, etc.).
+
 Another example of this split is found in companies that provide public access to their OpenStack resources, giving their tenants/customers quota on compute and storage resources but providing pre-defined networks for them.
+
 In these scenarios, only OpenStack administrators will manage these networks, which will be generally provider networks, (as opposed to tenant networks), since they require physical network infrastructure configuration (typically VLANs). So when OpenStack tenants log in they will find them pre-created, shared with them and ready to use.
 
 To accomplish this, our infrastructure needs an OpenStack account access that can be separated into "networking infrastructure" versus "application". Networking infrastructure includes elements related to the networks (networks, subnets, routing tables, internet gateways, NAT, VPN). Application items include OpenStack resources directly touching nodes within the cluster (LBs, security groups, Swift containers, nodes). This is a typical separation of responsibilities among IT groups and deployment/provisioning pipelines within large companies.
@@ -48,8 +50,8 @@ There are no changes in expectations regarding publicly addressable parts of the
 
 
 ## User Stories
-1. As an administrator of a private openstack cloud, I use provider networks for my openstack cluster, and would like to be able to install Openshift in this environment.
-2. As an OpenStack tenant, I want to be able to use pre-configured network resources so that I dont have to worry about the infrastructure behind those resources.
+1. As an administrator of a private openstack cloud, I use provider networks for my openstack cluster, and would like to be able to install OpenShift in this environment.
+2. As an OpenStack tenant, I want to be able to use pre-configured network resources so that I dont have to create new resources to install an OpenShift cluster.
 
 ## Implementation Details Notes/Constraints
 
@@ -68,6 +70,22 @@ platform:
     - subnet-1
     - subnet-2
     - subnet-3
+pullSecret: '{"auths": ...}'
+sshKey: ssh-ed25519 AAAA...
+```
+
+To make this work optimally, we should also enable customers to pass custom IP addresses to be used for our loadbalancing VIPs. This allows users who want to provision their own networks to set the CIDRs of the allowed address pairs that the VIPs can be drawn from.
+
+```yaml
+apiVersion: v1
+baseDomain: example.com
+metadata:
+  name: test-cluster
+platform:
+  openstack:
+    region: us-west-2
+    VIPAddresses:
+      - "192.168.30.1/19"
 pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
