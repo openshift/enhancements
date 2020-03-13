@@ -28,6 +28,7 @@ status: planning
 In many large organizations, IT groups are separated into teams. A common separation of duties lies between networking/WAN and application or enabling technology deployments. One group will provision or assign OpenStack accounts with core management technology. A second group will be responsible for provisioning networks complete with subnet & zone selection, routing, VPN connections, and ingress/egress rules from the company. Lastly, an applications team (or individual business units) are given a quota for other OpenStack resources to provision application-specific items (instances, containers, databases, pipelines, load balancers, etc.).
 Another example of this split is found in companies that provide public access to their OpenStack resources, giving their tenants/customers quota on compute and storage resources but providing pre-defined networks for them.
 In these scenarios, only OpenStack administrators will manage these networks, which will be generally provider networks, (as opposed to tenant networks), since they require physical network infrastructure configuration (typically VLANs). So when OpenStack tenants log in they will find them pre-created, shared with them and ready to use.
+
 To accomplish this, our infrastructure needs an OpenStack account access that can be separated into "networking infrastructure" versus "application". Networking infrastructure includes elements related to the networks (networks, subnets, routing tables, internet gateways, NAT, VPN). Application items include OpenStack resources directly touching nodes within the cluster (LBs, security groups, Swift containers, nodes). This is a typical separation of responsibilities among IT groups and deployment/provisioning pipelines within large companies.
 
 ## Motivation
@@ -40,14 +41,15 @@ There are no changes in expectations regarding publicly addressable parts of the
 
 ## Proposal
 - Installer allow users to provide a list of subnets that should be used for the cluster. Since there is an expectation that networking is being shared, the installer cannot modify the networking setup, but changes required to the shared resources like Tags that do not affect the behavior for other tenants of the network will be made.
-- The installer validates the assumptions about the networking setup
+- The installer validates a set of bare minimum assumptions about the networking setup
 - Non-networking infrastructure resources that are specific to the cluster and resources owned by the cluster will be created by the installer. So resources like security groups, roles, RHCOS boot images, and ignition storage objects.
 - The infrastructure resources owned by the cluster continue to be clearly identifiable and distinct from other resources.
 - Destroying a cluster must make sure that no resources are deleted that didn't belong to the cluster. Leaking resources is preferred over any possibility of deleting non-cluster resources.
 
 
 ## User Stories
-As an administrator of a cluster using provider networking, I have a pre-configured provider network, that cannot be manipulated by openstack tenants, and I want to install openshift on it.
+1. As an administrator of a private openstack cloud, I use provider networks for my openstack cluster, and would like to be able to install Openshift in this environment.
+2. As an OpenStack tenant, I want to be able to use pre-configured network resources so that I dont have to worry about the infrastructure behind those resources.
 
 ## Implementation Details Notes/Constraints
 
@@ -73,10 +75,10 @@ sshKey: ssh-ed25519 AAAA...
 ### Subnets
 - Subnets must all be a part of the same OpenStack cloud
 - Each subnet must be able to be tagged, and have the capacity for at least one tag. This allows us to add the `kubernetes.io/cluster/.*:` shared tag to identify the subnet as part of the cluster. The k8s cloud provider code in kube-controller-manager uses this tag to find the subnets for the cluster to create LoadBalancer Services.
-- The CIDR block for each one must be contained by Networking.MachineCIDR.
-- Subnets must be able to reach the node that is deploying the installer, otherwise it will fail to complete the bootstrapping and installation.
+- The CIDR block for each one must be in MachineNetworks.
+- The host running the installer needs to be able to reach the IP addresses assigned to the master nodes.
 - No two public subnets or two private subnets can share a single availability zone, because that might be an error for future cloud provider load-balancer allocation.
-- Provider networks lack the concept of floating IPs, used by the installer for the VIPs for ingress and LBs. Floating IPs are reserved usually for the external network, which will have internet access and will connect a router interface to the internet, while provider networks will be L2 networks, part of the physical network infrastructure. Both provider networks and external networks are pre-created by the administrator and shared with the tenants.
+- The installer should be able to support customer provided provider networks, as  well as tenant networks. 
 - The subnet will have to allow for traffic to be routed to the VIPs that the installer uses for its dns solution. In IPI we currently manage this with an allowed address pair.
 
 ### Resources Created by the Installer
