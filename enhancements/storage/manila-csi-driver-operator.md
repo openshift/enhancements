@@ -49,7 +49,7 @@ To maintain the lifecycle of the driver we want to implement an operator, that w
 
 ### Action plan
 
-#### Find a testing/development platform that supports Manila
+#### Find a testing/development platform that supports Manila (Done)
 
 For testing and development we need a public OpenStack cloud with Manila support. So far MOC and PSI do not have this capability.
 The cloud should be OSP 13+ based, and comply with the reference architecture.
@@ -73,7 +73,7 @@ Actions:
 
 - Prepare and merge a bump commit (Done: https://github.com/openshift/cloud-provider-openstack/pull/16)
 
-#### Build Manila CSI driver image by OCP automation
+#### Build Manila CSI driver image by OCP automation (Done)
 
 To start using Manila CSI in OpenShift we need to build its image and make sure it is a part of the OpenShift release image. The driver image should be automatically tested before it becomes available.
 The driver provides the Dockerfile, so we can reuse it to complete the task. Upstream image is already available in Quay in quay.io/k8scsi account.
@@ -83,7 +83,7 @@ Actions:
 
 The operator will run containerized and End-to-End tests and also push the resulting image in the OCP Quay account.
 
-#### Test the driver manually
+#### Test the driver manually (Done)
 
 When all required components are built, we can manually deploy the driver with NFS backend and test how it works.
 Actions:
@@ -94,28 +94,28 @@ Actions:
 
 - Go through the lifecycle of volume (create, update, mount, write data, delete, etc.)
 
-#### Write Manila CSI driver operator
+#### Write Manila CSI driver operator (Done)
 
 The operator should be able to create, configure and manage Manila CSI driver for Kubernetes and OpenShift. In other words, automate what has been done on the previous step.
 Actions:
 
-- Create a new repo in OpenShift’s github: github.com/openshift/manila-csi-driver-operator
+- Create a new repo in OpenShift’s github: github.com/openshift/csi-driver-manila-operator
 
-- Implement the driver, using [OpenShift Operator SDK](https://docs.openshift.com/container-platform/4.1/applications/operator_sdk/osdk-getting-started.html)
+- Implement the operator, using [OpenShift Operator SDK](https://docs.openshift.com/container-platform/4.1/applications/operator_sdk/osdk-getting-started.html)
 
 ##### CSI driver operator installation
 
-The installation will include next steps:
+Starting from OpenShift 4.5 the installation will include next steps:
 
 - `cluster-version-operator` starts `openshift-cluster-storage-operator`.
 
-- `openshift-cluster-storage-operator` checks it runs on OpenStack and Manila service is available
+- `openshift-cluster-storage-operator` checks if it runs on OpenStack, installs Manila CSI driver operator via OLM, starts it and monitors its status (i.e. monitors existence of Manila CSI driver operator ClusterOperator CR and reports its own `openshift-cluster-storage-operator` status based on it).
 
-- `openshift-cluster-storage-operator` starts Manila CSI driver operator and monitors its status (i.e. monitors existence of Manila CSI driver operator ClusterOperator CR and reports its own `openshift-cluster-storage-operator` status based on it).
-
-- Manila CSI driver operator starts, populates [configuration](https://github.com/kubernetes/cloud-provider-openstack/tree/master/manifests/manila-csi-plugin) and secrets for Manila CSI driver and runs the CSI driver (i.e. starts Deployment with the controller parts and DaemonSet with the node parts). Additionally it creates at least one non-default StorageClass that users can use in their RWX PVCs
+- Manila CSI driver operator checks if Manila service is available. If it's true then it starts, populates [configuration](https://github.com/kubernetes/cloud-provider-openstack/tree/master/manifests/manila-csi-plugin) and secrets for Manila CSI driver and runs the CSI driver (i.e. starts Deployment with the controller parts and DaemonSet with the node parts). Additionally it creates at least one non-default StorageClass that users can use in their RWX PVCs. If Manila service is not available, the operator does nothing.
 
 - Manila CSI driver operator reports status of the driver in ClusterOperator CR.
+
+In OpenShift <= 4.4 users will have to install the operator manually via OLM.
 
 #### Add automatic testing
 
@@ -124,7 +124,7 @@ Actions:
 
 - Run tests from https://github.com/openshift/origin/tree/master/vendor/k8s.io/kubernetes/test/e2e/storage/drivers against Manila CSI driver.
 
-#### Document how to use the driver
+#### Document how to use the operator (Done)
 
 Make sure users understand how to use the feature.
 
@@ -227,5 +227,7 @@ For development and testing we need an OpenStack cloud that supports Manila.
 ## Links
 
 1. [OpenStack Manila documentation](https://docs.openstack.org/manila/latest/)
-2. [Manila CSI plugin code](https://github.com/kubernetes/cloud-provider-openstack/tree/master/pkg/csi/manila)
-3. [Manila CSI plugin documentation](https://github.com/kubernetes/cloud-provider-openstack/blob/master/docs/using-manila-csi-plugin.md)
+2. [Manila CSI Driver code](https://github.com/kubernetes/cloud-provider-openstack/tree/master/pkg/csi/manila)
+3. [Manila CSI Driver documentation](https://github.com/kubernetes/cloud-provider-openstack/blob/master/docs/using-manila-csi-plugin.md)
+4. [CSI Driver Manila Operator](https://github.com/openshift/csi-driver-manila-operator)
+5. [CSI drivers installation enhancement proposal](https://github.com/openshift/enhancements/pull/139)
