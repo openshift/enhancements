@@ -230,6 +230,10 @@ type LocalVolumeGroupStatus struct {
   - `Failed`
   - `Discovered`
   - `Provisioned`
+
+#### Note: There is a chance of race condition: 
+- If two `LocalVolumeGroup` CR targets same nodes with overlapping inclusion filter.
+- If `LocalVolumeGroup` CR and `LocalVolume` CR targets the same node with overlapping devices.
   
 Example of `LocalVolumeGroup` CR:
 
