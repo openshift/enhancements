@@ -207,9 +207,6 @@ type LocalVolumeGroupStatus struct {
 	// +optional
 	Reason string `json:"reason,omitempty"`
 
-	// TotalDiscoveredDeviceCount is the count of the total devices which matched the inclusion filter
-	TotalDiscoveredDeviceCount *int32 `json:"totalDiscoveredDeviceCount,omitempty"`
-
 	// TotalProvisionedDeviceCount is the count of the total devices over which the PVs has been provisioned
 	TotalProvisionedDeviceCount *int32 `json:"totalProvisionedDeviceCount,omitempty"`
 
@@ -265,7 +262,6 @@ spec:
     maxSize: 100G
 status:
   phase: Provisioned
-  totalDiscoveredDeviceCount: 4
   totalProvisionedDeviceCount: 4
   timeStamp: '2020-03-09T08:37:19Z'
 ```
@@ -304,7 +300,6 @@ spec:
       - ST2000LM
 status:
   phase: Provisioned
-  totalDiscoveredDeviceCount: 4
   totalProvisionedDeviceCount: 4
   timeStamp: '2020-03-09T08:37:19Z'
 ```
