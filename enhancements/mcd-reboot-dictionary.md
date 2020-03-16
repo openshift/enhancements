@@ -147,6 +147,11 @@ a reboot (either by configuration or an error), then the whitelist is ignored fo
 The user stories below are intended to be illustrative of the different types of 
 services we need to build capabilities for.
 
+#### Story 0
+
+As an admin, I need to be able to add and update vlans on a pool of machines every 3-4 
+weeks without rebooting, to limit the number of unnecessary periods of degraded system 
+and application availability. 
 #### Story 1
 
 As an admin, I want to update the SSH keys without any followup action, to 
