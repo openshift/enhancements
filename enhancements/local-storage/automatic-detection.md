@@ -125,10 +125,6 @@ type LocalVolumeGroupSpec struct {
 	DeviceInclusionSpec *DeviceInclusionSpec `json:"deviceInclusionSpec"`
 }
 
-type LocalVolumeGroupStatus struct {
-	Status string `json:"status"`
-}
-
 // DeviceMechanicalProperty holds the device's mechanical spec. It can be rotational or nonRotational
 type DeviceMechanicalProperty string
 
@@ -140,22 +136,28 @@ const (
 	NonRotational DeviceMechanicalProperty = "NonRotational"
 )
 
-type DeviceDiscoveryPolicyType string
+type DeviceType string
 
 const (
-	// The DeviceDiscoveryPolicies that will be supported by the LSO.
+	// The DeviceTypes that will be supported by the LSO.
 	// These Discovery policies will based on lsblk's type output
 	// Disk represents a device-type of disk
-	Disk DeviceDiscoveryPolicyType = "disk"
+	Disk DeviceType = "Disk"
 	// Part represents a device-type of partion
-	Part DeviceDiscoveryPolicyType = "part"
+	Partition DeviceType = "Part"
 )
 
+type DeviceTypeList struct {
+	// Devices is the list of devices that should be used for automatic detection.
+	// This would be one of the types supported by the local-storage operator. Currently,
+	// the supported types are: disk, part. If the list is empty the default value will be `[disk]`.
+	Devices []DeviceType `json:"devices"`
+}
+
 type DeviceInclusionSpec struct {
-	// DeviceTypes that should be used for automatic detection. This would be one of the types supported
-	// by the local-storage operator. Currently, the supported types are: disk, part
-	// If the list is empty the default value will be `[disk]`.
-	DeviceTypes []DeviceDiscoveryPolicyType `json:"deviceType"`
+	// DeviceTypeList holds the list of devices that should be used for automatic detection.
+	// If Nil the default detection will be of disks.
+	DeviceTypeList *DeviceTypeList `json:"deviceTypeList"`
 
 	// DeviceMechanicalProperty denotes whether Rotational or NonRotational disks should be used.
 	// by default, it selects both
@@ -164,11 +166,11 @@ type DeviceInclusionSpec struct {
 
 	// MinSize is the minimum size of the device which needs to be included
 	// +optional
-	MinSize resource.Quantity `json:"minSize"`
+	MinSize *resource.Quantity `json:"minSize"`
 
 	// MaxSize is the maximum size of the device which needs to be included
 	// +optional
-	MaxSize resource.Quantity `json:"maxSize"`
+	MaxSize *resource.Quantity `json:"maxSize"`
 
 	// Models is a list of device models. If not empty, the device's model as outputted by lsblk needs
 	// to contain at least one of these strings.
@@ -186,15 +188,36 @@ type LocalVolumeGroupPhase string
 const (
 	DiscoveringPhase LocalVolumeGroupPhase = "Discovering"
 	FailedPhase      LocalVolumeGroupPhase = "Failed"
-	DiscoveredPhase  Phase = "Discovered"
-	ProvisionedPhase LocalVolumeGroupPhase = "Discovered"
+	DiscoveredPhase  Phase                 = "Discovered"
+	ProvisionedPhase LocalVolumeGroupPhase = "Provisioned"
 )
 
 type LocalVolumeGroupStatus struct {
-	Phase                       LocalVolumeGroupPhase `json:"phase,omitempty"`
-	TotalDiscoveredDeviceCount  *int32                `json:"totaldiscovereddevicecount,omitempty"`
-	TotalProvisionedDeviceCount *int32                `json:"totalprovisioneddevicecount,omitempty"`
-	TimeStramp                  `json:"phase,omitempty"`
+	// Phase describes the state of the LocalVolumeGroup
+	Phase LocalVolumeGroupPhase `json:"phase,omitempty"`
+
+	// A human-readable message indicating details about why the LocalVolumeGroup is in this state.
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// Reason is a brief CamelCase string that describes any failure and is meant
+	// for machine parsing and tidy display in the CLI.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+
+	// TotalDiscoveredDeviceCount is the count of the total devices which matched the inclusion filter
+	TotalDiscoveredDeviceCount *int32 `json:"totalDiscoveredDeviceCount,omitempty"`
+
+	// TotalProvisionedDeviceCount is the count of the total devices over which the PVs has been provisioned
+	TotalProvisionedDeviceCount *int32 `json:"totalProvisionedDeviceCount,omitempty"`
+
+  // LastProvisionedTimeStamp is the timeStamp value for lastProvisionedTimeStamp
+  // +optional
+	LastProvisionedTimeStamp `json:"lastProvisionedTimeStamp,omitempty"`
+
+	// observedGeneration is the last generation change the operator has dealt with
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 ```
 ### Workflow of LocalPV creation via LocalVolumeGroup CR
