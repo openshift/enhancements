@@ -57,19 +57,21 @@ and we can use that information to sort devices into storage classes based on th
 - Inherently protect against confilict with provisioners that own local devices on the same nodes automatic detection is configured to run.
 
 ### Risks and Mitigations
-
-- LSO will detect disks that contain data and/or are in-use via ensuring that the device:
+- There is a risk that LSO detects a volume that contains data and we mitigate this risk by ensuring that the device:
   - can be openened exclusively.
   - is not read-only.
   - is not removable.
   - has no child partitions.
   - has no FS signature.
   - state (as outputted by `lsblk`) is not `suspended`
-- Ensuring disks aren't re-detected as new or otherwise destroyed if their device path changes.
-  - This is already ensured by the current LSO approach of consuming disks by their `UUID`
-- This will match all newly attached AWS EBS PVs, just before kubelet formats them.
-- This will match all local disks that already have PVs, but these PVs are not bound / used yet.`
-
+- There is a risk that LSO will detect just attached device as empty, before kubelet formats it, we mitigate this risk 
+    - by re-checking the device after ~1 minute.
+- There is a risk that the path of the disk changes after reboot and disk can be re-detected as new, we mitigate this risk by
+    - Using disk id for symlink.
+- There is a risk that LSO will match all local disks that already have PVs, but these PVs are not bound / used yet.`
+    - We leave it up to the cluster admin for selecting the inclusion spec.
+- There is a risk that multiple `LocalVolumeGroup` and `LocalVolume` CRs will use the same device.
+    - We leave it up to the cluster admin to adjust the CR.
 
 ## Proposal
 
