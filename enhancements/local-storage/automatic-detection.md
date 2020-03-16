@@ -164,7 +164,7 @@ type DeviceInclusionSpec struct {
 	// DeviceMechanicalProperty denotes whether Rotational or NonRotational disks should be used.
 	// by default, it selects both
 	// +optional
-	DeviceMechanicalProperty DeviceMechanicalProperty `json:"deviceMechanicalProperty"`
+	DeviceMechanicalProperty []DeviceMechanicalProperty `json:"deviceMechanicalProperty"`
 
 	// MinSize is the minimum size of the device which needs to be included
 	// +optional
@@ -188,13 +188,16 @@ type DeviceInclusionSpec struct {
 type LocalVolumeGroupPhase string
 
 const (
-	RunningPhase LocalVolumeGroupPhase = "Running"
-	FailedPhase  LocalVolumeGroupPhase = "Failed"
+	ActivePhase LocalVolumeGroupPhase = "Active"
+	FailedPhase LocalVolumeGroupPhase = "Failed"
 )
 
 type LocalVolumeGroupStatus struct {
 	// Phase describes the state of the LocalVolumeGroup
 	Phase LocalVolumeGroupPhase `json:"phase,omitempty"`
+
+	// Conditions is a list of conditions and their status.
+	Conditions []operatorv1.OperatorCondition `json:"conditions,omitempty"`
 
 	// A human-readable message indicating details about why the LocalVolumeGroup is in this state.
 	// +optional
@@ -219,7 +222,7 @@ type LocalVolumeGroupStatus struct {
   - assign diskmaker daemons to the selected nodes.
 - The diskmaker daemon will find devices that match the disovery policy and symlink them into the directory that the local-static-provisioner is watching.
 - Possible `status.phase` values for `LocalVolumeGroup`
-  - `Running`
+  - `Active`
   - `Failed`
 
 #### Note: There is a chance of race condition: 
@@ -248,12 +251,14 @@ spec:
   maxDeviceCount: 10
   deviceInclusionSpec:
     deviceTypes:
-      - disk
-    deviceMechanicalProperty: Rotational
+      - Disk
+    deviceMechanicalProperty: 
+      - Rotational
+      - NonRotational
     minSize: 10G
     maxSize: 100G
 status:
-  phase: Running
+  phase: Active
   totalProvisionedDeviceCount: 4
 ```
 
@@ -278,9 +283,10 @@ spec:
   maxDeviceCount: 10
   deviceInclusionSpec:
     deviceTypes:
-      - disk
-      - nvme
-    deviceMechanicalProperty: NonRotational
+      - Disk
+      - Partition
+    deviceMechanicalProperty: 
+      - NonRotational
     minSize: 10G
     maxSize: 100G
     models:
@@ -290,7 +296,7 @@ spec:
       - ATA
       - ST2000LM
 status:
-  phase: Running
+  phase: Active
   totalProvisionedDeviceCount: 4
 ```
 
