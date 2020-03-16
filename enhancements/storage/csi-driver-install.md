@@ -109,6 +109,19 @@ Expected workflow as optional driver (using EBS as an example):
 
 When a CSI driver operator is in technical preview, we expect that the operator will be available from a `beta` channel. Moving to a `stable` channel once a driver reaches GA will require Openshift admin to manually change subscribed channel from beta to stable. At this point we expect that, operator in GA state will simply **adopt** the resources(CRs) created by beta version of the operator.
 
+
+#### Uninstallation of optional CSI driver operator.
+
+Removing a CSI driver should be a safe operation and only possible if no workload is using the driver and hence we propose that - driver configuration CR
+should have a finalizer which will be removed by the operator when csi-driver operator detects that no volume provisioned by this driver is in-use. Typically we expect following steps to happen in order for removal of the driver:
+
+1. User should remove any pods that are using the CSI volumes.
+2. User should delete all PV/PVCs provisioned by the CSI driver.
+3. User should remove all snapshots provisioned by the CSI driver.
+4. User deletes the CSI driver CR which in turn will cause operator to delete all resources created by the driver (daemonsets, storageclasses, deployments)
+5. Finalizer is removed from CR and CSI driver CR is removed from api-server.
+6. User can now safely uninstall the CSI driver operator by deleting the subscription from UI or from command line.
+
 ### Expected workflow as default driver:
 
 When these drivers become mandatory part of Openshift cluster, we need to install them by default. This section in general only applies to drivers which want to be enabled by default in Openshift installation.
