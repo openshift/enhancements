@@ -188,10 +188,8 @@ type DeviceInclusionSpec struct {
 type LocalVolumeGroupPhase string
 
 const (
-	DiscoveringPhase LocalVolumeGroupPhase = "Discovering"
-	FailedPhase      LocalVolumeGroupPhase = "Failed"
-	DiscoveredPhase  Phase                 = "Discovered"
-	ProvisionedPhase LocalVolumeGroupPhase = "Provisioned"
+	RunningPhase LocalVolumeGroupPhase = "Running"
+	FailedPhase  LocalVolumeGroupPhase = "Failed"
 )
 
 type LocalVolumeGroupStatus struct {
@@ -210,10 +208,6 @@ type LocalVolumeGroupStatus struct {
 	// TotalProvisionedDeviceCount is the count of the total devices over which the PVs has been provisioned
 	TotalProvisionedDeviceCount *int32 `json:"totalProvisionedDeviceCount,omitempty"`
 
-  // LastProvisionedTimeStamp is the timeStamp value for lastProvisionedTimeStamp
-  // +optional
-	LastProvisionedTimeStamp `json:"lastProvisionedTimeStamp,omitempty"`
-
 	// observedGeneration is the last generation change the operator has dealt with
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -225,10 +219,8 @@ type LocalVolumeGroupStatus struct {
   - assign diskmaker daemons to the selected nodes.
 - The diskmaker daemon will find devices that match the disovery policy and symlink them into the directory that the local-static-provisioner is watching.
 - Possible `status.phase` values for `LocalVolumeGroup`
-  - `Discovering`
+  - `Running`
   - `Failed`
-  - `Discovered`
-  - `Provisioned`
 
 #### Note: There is a chance of race condition: 
 - If two `LocalVolumeGroup` CR targets same nodes with overlapping inclusion filter.
@@ -261,9 +253,8 @@ spec:
     minSize: 10G
     maxSize: 100G
 status:
-  phase: Provisioned
+  phase: Running
   totalProvisionedDeviceCount: 4
-  timeStamp: '2020-03-09T08:37:19Z'
 ```
 
 ```yaml
@@ -299,9 +290,8 @@ spec:
       - ATA
       - ST2000LM
 status:
-  phase: Provisioned
+  phase: Running
   totalProvisionedDeviceCount: 4
-  timeStamp: '2020-03-09T08:37:19Z'
 ```
 
 ### Test Plan
