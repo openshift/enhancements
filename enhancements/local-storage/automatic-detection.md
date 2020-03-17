@@ -18,7 +18,7 @@ approvers:
   - "@hekumar"
   - "@chuffman"
 creation-date: 2020-01-21
-last-updated: 2020-03-16
+last-updated: 2020-03-17
 status: implementable
 ---
 
@@ -157,7 +157,7 @@ const (
 	// Disk represents a device-type of disk
 	Disk DeviceType = "Disk"
 	// Part represents a device-type of partion
-	Partition DeviceType = "Part"
+	Partition DeviceType = "Partition"
 )
 
 type DeviceInclusionSpec struct {
