@@ -108,6 +108,7 @@ type LocalVolumeGroupSpec struct {
 	StorageClassName string `json:"storageClassName"`
 	// MinDeviceCount is the minumum number of devices that needs to be detected per node.
 	// If the match devices are less than the minCount specified then no PVs will be created.
+	// +optional
 	MinDeviceCount int `json:"minDeviceCount"`
 	// +optional
 	// Maximum number of Devices that needs to be detected per node.
@@ -149,17 +150,11 @@ const (
 	Partition DeviceType = "Part"
 )
 
-type DeviceTypeList struct {
+type DeviceInclusionSpec struct {
 	// Devices is the list of devices that should be used for automatic detection.
 	// This would be one of the types supported by the local-storage operator. Currently,
-	// the supported types are: disk, part. If the list is empty the default value will be `[disk]`.
+	// the supported types are: disk, part. If the list is empty no devices will be selected.
 	Devices []DeviceType `json:"devices"`
-}
-
-type DeviceInclusionSpec struct {
-	// DeviceTypeList holds the list of devices that should be used for automatic detection.
-	// If Nil the default detection will be of disks.
-	DeviceTypeList *DeviceTypeList `json:"deviceTypeList"`
 
 	// DeviceMechanicalProperty denotes whether Rotational or NonRotational disks should be used.
 	// by default, it selects both
@@ -225,7 +220,7 @@ type LocalVolumeGroupStatus struct {
   - `Active`
   - `Failed`
 
-#### Note: There is a chance of race condition: 
+#### Note: There is a chance of race condition and duplicate creation of PVs 
 - If two `LocalVolumeGroup` CR targets same nodes with overlapping inclusion filter.
 - If `LocalVolumeGroup` CR and `LocalVolume` CR targets the same node with overlapping devices.
   
