@@ -190,26 +190,9 @@ type DeviceInclusionSpec struct {
 	Vendors []string `json:"vendors"`
 }
 
-type LocalVolumeGroupCondition string
-
-const (
-	ActivePhase LocalVolumeGroupCondition = "Active"
-	FailedPhase LocalVolumeGroupCondition = "Failed"
-)
-
 type LocalVolumeGroupStatus struct {
-
-	// Conditions is the state of the LocalVolumeGroup
-	Condition LocalVolumeGroupCondition `json:"conditions,omitempty"`
-
-	// A human-readable message indicating details about why the LocalVolumeGroup is in this state.
-	// +optional
-	Message string `json:"message,omitempty"`
-
-	// Reason is a brief CamelCase string that describes any failure and is meant
-	// for machine parsing and tidy display in the CLI.
-	// +optional
-	Reason string `json:"reason,omitempty"`
+	// Conditions is a list of conditions and their status.
+	Conditions []operatorv1.OperatorCondition `json:"conditions,omitempty"`
 
 	// TotalProvisionedDeviceCount is the count of the total devices over which the PVs has been provisioned
 	TotalProvisionedDeviceCount *int32 `json:"totalProvisionedDeviceCount,omitempty"`
@@ -224,9 +207,6 @@ type LocalVolumeGroupStatus struct {
   - configure the local-static-provisioner to make a new StorageClass based on certain directories on the selected nodes.
   - assign diskmaker daemons to the selected nodes.
 - The diskmaker daemon will find devices that match the disovery policy and symlink them into the directory that the local-static-provisioner is watching.
-- Possible `status.phase` values for `LocalVolumeGroup`
-  - `Active`
-  - `Failed`
 
 #### Note: There is a chance of race condition and duplicate creation of PVs 
 - If two `LocalVolumeGroup` CR targets same nodes with overlapping inclusion filter.
@@ -261,7 +241,10 @@ spec:
     minSize: 10G
     maxSize: 100G
 status:
-  condition: Active
+  conditions:
+  - lastTransitionTime: "2020-03-17T09:33:43Z"
+    status: "True"
+    type: Available
   totalProvisionedDeviceCount: 5
 ```
 
@@ -299,7 +282,10 @@ spec:
       - ATA
       - ST2000LM
 status:
-  condition: Active
+  conditions:
+  - lastTransitionTime: "2020-03-17T09:33:43Z"
+    status: "True"
+    type: Available
   totalProvisionedDeviceCount: 5
 ```
 
