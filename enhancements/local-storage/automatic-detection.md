@@ -100,6 +100,16 @@ type LocalVolumeGroup struct {
 	Status            LocalVolumeGroupStatus `json:"status,omitempty"`
 }
 
+// PersistentVolumeMode describes how a volume is intended to be consumed, either Block or Filesystem.
+type PersistentVolumeMode string
+
+const (
+	// PersistentVolumeBlock means the volume will not be formatted with a filesystem and will remain a raw block device.
+	PersistentVolumeBlock PersistentVolumeMode = "Block"
+	// PersistentVolumeFilesystem means the volume will be or is formatted with a filesystem.
+	PersistentVolumeFilesystem PersistentVolumeMode = "Filesystem"
+)
+
 type LocalVolumeGroupSpec struct {
 	// Nodes on which the automatic detection policies must run.
 	// +optional
@@ -109,10 +119,10 @@ type LocalVolumeGroupSpec struct {
 	// MinDeviceCount is the minumum number of devices that needs to be detected per node.
 	// If the match devices are less than the minCount specified then no PVs will be created.
 	// +optional
-	MinDeviceCount int `json:"minDeviceCount"`
-	// +optional
+	MinDeviceCount *int32 `json:"minDeviceCount"`
 	// Maximum number of Devices that needs to be detected per node.
-	MaxDeviceCount int `json:"maxDeviceCount"`
+	// +optional
+	MaxDeviceCount *int32 `json:"maxDeviceCount"`
 	// VolumeMode determines whether the PV created is Block or Filesystem. By default it will
 	// be block
 	// + optional
@@ -159,7 +169,7 @@ type DeviceInclusionSpec struct {
 	// DeviceMechanicalProperty denotes whether Rotational or NonRotational disks should be used.
 	// by default, it selects both
 	// +optional
-	DeviceMechanicalProperty []DeviceMechanicalProperty `json:"deviceMechanicalProperty"`
+	DeviceMechanicalProperties []DeviceMechanicalProperty `json:"deviceMechanicalProperties"`
 
 	// MinSize is the minimum size of the device which needs to be included
 	// +optional
@@ -180,19 +190,17 @@ type DeviceInclusionSpec struct {
 	Vendors []string `json:"vendors"`
 }
 
-type LocalVolumeGroupPhase string
+type LocalVolumeGroupCondition string
 
 const (
-	ActivePhase LocalVolumeGroupPhase = "Active"
-	FailedPhase LocalVolumeGroupPhase = "Failed"
+	ActivePhase LocalVolumeGroupCondition = "Active"
+	FailedPhase LocalVolumeGroupCondition = "Failed"
 )
 
 type LocalVolumeGroupStatus struct {
-	// Phase describes the state of the LocalVolumeGroup
-	Phase LocalVolumeGroupPhase `json:"phase,omitempty"`
 
-	// Conditions is a list of conditions and their status.
-	Conditions []operatorv1.OperatorCondition `json:"conditions,omitempty"`
+	// Conditions is the state of the LocalVolumeGroup
+	Condition LocalVolumeGroupCondition `json:"conditions,omitempty"`
 
 	// A human-readable message indicating details about why the LocalVolumeGroup is in this state.
 	// +optional
@@ -253,8 +261,8 @@ spec:
     minSize: 10G
     maxSize: 100G
 status:
-  phase: Active
-  totalProvisionedDeviceCount: 4
+  condition: Active
+  totalProvisionedDeviceCount: 5
 ```
 
 ```yaml
@@ -291,8 +299,8 @@ spec:
       - ATA
       - ST2000LM
 status:
-  phase: Active
-  totalProvisionedDeviceCount: 4
+  condition: Active
+  totalProvisionedDeviceCount: 5
 ```
 
 ### Test Plan
