@@ -1,5 +1,5 @@
 ---
-title: allow-customer-provisioned-aws-subnets
+title: support-provider-networks-and-custom-networks
 authors:
   - "@wking"
 reviewers:
@@ -14,7 +14,7 @@ last-updated: 2020-03-12
 status: planning
 ---
 
-# 4.5: OpenStack: Allow Customer Provisioned Subnets
+# 4.5: OpenStack: Support Provider Networks and Custom Subnets
 
 ## Release Signoff Checklist
 
@@ -42,9 +42,13 @@ As an administrator, I would like to create or reuse my own networks, subnets an
 There are no changes in expectations regarding publicly addressable parts of the cluster.
 
 ## Proposal
-- Installer allow users to provide a list of subnets that should be used for the cluster. Since there is an expectation that networking is being shared, the installer cannot modify the networking setup, but changes required to the shared resources like Tags that do not affect the behavior for other tenants of the network will be made.
-- The installer validates a set of bare minimum assumptions about the networking setup
-- Non-networking infrastructure resources that are specific to the cluster and resources owned by the cluster will be created by the installer. So resources like security groups, roles, RHCOS boot images, and ignition storage objects.
+- Installer allow users to provide a list of subnets that should be used for the cluster. 
+- In order to support provider networks in IPI, the subnets passed to the installer must meet these requirements:
+  - have the capacity and ability for the installer to provision ports on the nodes subnet
+  - have dhcp enabled
+  - the installer must be able to send and recieve https traffic to nodes connected to ports on the nodes subnet
+- In order to support provider networks in UPI, additional documentation will be provided to support this use case
+- For those who do not want the installer to provision their networking resources, we will provide additional UPI documentation.
 - The infrastructure resources owned by the cluster continue to be clearly identifiable and distinct from other resources.
 - Destroying a cluster must make sure that no resources are deleted that didn't belong to the cluster. Leaking resources is preferred over any possibility of deleting non-cluster resources.
 
@@ -56,7 +60,7 @@ There are no changes in expectations regarding publicly addressable parts of the
 ## Implementation Details Notes/Constraints
 
 ### Installer Resources
-The user provides a list of subnets to the installer in the openstack platform section of the install-config.yaml.
+If a user wants to use a pre-existing subnet, they can provide the installer with the ID of that subnet. The installer needs to have the authorization and quota to provision the necessary ports and resources on that subnet.
 
 ```yaml
 apiVersion: v1
@@ -66,15 +70,12 @@ metadata:
 platform:
   openstack:
     region: us-west-2
-    subnets:
-    - subnet-1
-    - subnet-2
-    - subnet-3
+    nodesSubnet: abcd-4321
 pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
 
-To make this work optimally, we should also enable customers to pass custom IP addresses to be used for our loadbalancing VIPs. This allows users who want to provision their own networks to set the CIDRs of the allowed address pairs that the VIPs can be drawn from.
+Users with provider networks often do not use floating IPs, and so the first changge we will make to address this is to make the parameter `platform.openstack.lbFloatingIP` optional. When unset, the installer will not attempt to provision and attach a floating ip to the api port. To allow the customer to set up their own custom external access infrastructure, we will have to let them set the `apiVIP` and `ingressVIP` port IPs ahead of the install, so that they can be added to their routing/loadbalancing scheme before the installer is run. 
 
 ```yaml
 apiVersion: v1
@@ -84,8 +85,23 @@ metadata:
 platform:
   openstack:
     region: us-west-2
-    VIPAddresses:
-      - "192.168.30.1/19"
+    apiVIP: "192.168.30.15"
+    ingressVIP: "192.168.30.17"
+pullSecret: '{"auths": ...}'
+sshKey: ssh-ed25519 AAAA...
+```
+
+Lastly, the installer will need to know how to access the api, so an optional argument, `apiEntrypoint`, that takes an IP or URL as an argument will be addedr. When this argument is set, the installer will direct all api calls to the address the user provides.
+
+```yaml
+apiVersion: v1
+baseDomain: example.com
+metadata:
+  name: test-cluster
+platform:
+  openstack:
+    region: us-west-2
+    apiEntrypoint: "http://anyURLorIP.com"
 pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
@@ -94,10 +110,8 @@ sshKey: ssh-ed25519 AAAA...
 - Subnets must all be a part of the same OpenStack cloud
 - Each subnet must be able to be tagged, and have the capacity for at least one tag. This allows us to add the `kubernetes.io/cluster/.*:` shared tag to identify the subnet as part of the cluster. The k8s cloud provider code in kube-controller-manager uses this tag to find the subnets for the cluster to create LoadBalancer Services.
 - The CIDR block for each one must be in MachineNetworks.
-- The host running the installer needs to be able to reach the IP addresses assigned to the master nodes.
-- No two public subnets or two private subnets can share a single availability zone, because that might be an error for future cloud provider load-balancer allocation.
-- The installer should be able to support customer provided provider networks, as  well as tenant networks. 
-- The subnet will have to allow for traffic to be routed to the VIPs that the installer uses for its dns solution. In IPI we currently manage this with an allowed address pair.
+- The host running the installer needs to be able to send http requests to the api.
+- The installer should be able to support provider networks, as well as tenant networks.
 
 ### Resources Created by the Installer
 When the installer is passed a set of subnets, it will no longer create a network, a subnet on that network, the ports on that subnet, the routing, or the floating ips on those networks.  
@@ -106,10 +120,13 @@ The installer will continue to create:
 - Images
 - Security Groups
 - Security Group Rules
-- Images
+- Ports
 - Volumes
 - Nodes
 - Boot Metadata
+
+### Installs that need more control
+For the use case where cluster operators do not want the installer creating any resources on their networks, we want them to use the UPI installer, since this usage pattern does not fit in to the IPI vision of the installer. To suppor this use case, we will provide additional UPI documentation.
 
 ### Destroying the Cluster
 We are operating under the assumption that the users that provisioned their custom subnets will also want to manually deprovision them. Therefore, no resources will be deleted in the custom network’s or subnets that are provided to the installer. We will remove any tags we added though.
@@ -117,7 +134,7 @@ We are operating under the assumption that the users that provisioned their cust
 All other resources will be destroyed normally.
 
 ### Limitations
-Subnets must provide networking (ports and routers). At least for the initial implementation, we will not validate this assumption, will attempt to install the cluster regardless, and will fail after having created cluster-owned resources if the assumption is violated. Future work can iterate on pre-create validation for the networking assumptions, if they turn out to be a common tripping point.
+This does add a bit of complexity to the install process, so it is important that we have good validation and clear documentation to help users navigate this feature.
 
 ## Risks and Mitigations
 Deploying OpenShift clusters to pre-existing network has the side-effect of reduced the isolation of cluster services.
@@ -129,8 +146,7 @@ Deploying OpenShift clusters to pre-existing network has the side-effect of redu
 ## Design Details
 
 ### Test Plan
-1. Proof of valid case: Update CI to use a UPI script to create a correct set of networks and subnets and pass them to the installer for an e2e installation. 
-2. IF Validation: Proof of Invalid case: Create a test to create incorrect subnets and ensure that installer fails before trying to deploy infrastructure.
+1. Proof of valid case: Update CI to use a UPI script to create a correct set of networks and subnets and pass them to the installer for an e2e installation
 
 ### Garduation Criteria
 This enhancement will follow standard graduation criteria.
@@ -148,4 +164,4 @@ This enhancement will follow standard graduation criteria.
 - Downgrade and scale testing are not relevant to this enhancement
 
 ## Draw Backs
-Customer owned networking components means the cluster cannot automatically change things about the networking during upgrade. This should be documented clearly so the customer is aware.
+This adds a bit of complexity to the user experience. It also does not support customers having full control over their networks in IPI, we are aware of other platforms going this route, but are not aware of an openstack IPI version of this use case at the time of writing.
