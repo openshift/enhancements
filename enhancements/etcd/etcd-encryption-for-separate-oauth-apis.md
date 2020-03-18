@@ -6,6 +6,7 @@ reviewers:
   - "@sttts"
 approvers:
   - "@derekwaynecarr"
+  - "@mfojtik"
 creation-date: 2020-03-17
 last-updated: 2020-03-17
 status: implementable
@@ -28,13 +29,13 @@ superseded-by:
 
 ## Summary
 
-The `encryption-config` used by OpenShift API server to encrypt/decrypt resources will be also used by the new `oauth-apiserver`.
+The `encryption-config` used by OpenShift API server to encrypt/decrypt resources will also be used by the new `oauth-apiserver` for one release `(4.5)` and will be split in the next `(4.6)`, in order to allow seamless upgrade and downgrade of encrypted servers.
 Initially `OAS-O` will be responsible to manage both servers. In the future releases `CAO` will take over the config and will manage its operand.
 
 ## Motivation
 
 Starting from version `4.3` customers that want to have additional layer of data security can enable etcd encryption. Once enabled OpenShift API server encrypts among others `OAuth tokens`.
-In version `4.n` we decided to split `openshift-apiserver` and create a new server called `oauth-apiserver`.
+In version `4.5` we decided to split `openshift-apiserver` and create a new server called `oauth-apiserver`.
 That means the resources previously managed by a different component now will be served by a brand new API server.
 That also means that `oauth-apiserver` needs to be given the encryption keys in order to decrypt previously encrypted resources, like the aforementioned tokens.
 
@@ -44,25 +45,28 @@ Without any manual interaction and with fully tested and working upgrade and dow
 This document describes how we are going to achieve that.
 
 ### Goals
-1. Make it possible to run the OpenShift OAuth API Server on an encrypted cluster.
+1. Make it possible to run the OpenShift OAuth API Server on an encrypted cluster. That includes:
+ - a cluster upgraded from an encrypted `4.4`
+ - a cluster downgraded from an encrypted `4.6`
+ - a new `4.5` cluster on which encryption was enabled
 
 ### Non-Goals
 
 
 ## Proposal
 
-In OpenShift encryption at rest leverages Kubernetes built-in mechanism. It is based on `EncryptionConfiguration` that controls how API data is encrypted in etcd.
-It holds an array of keys that are used to encrypt resources. 
+In OpenShift encryption at rest leverages Kubernetes built-in mechanism: It is based on `EncryptionConfiguration` that controls how API data is encrypted in etcd.
+It holds one array of keys for each resource.
 
-OpenShift maintains a single `EncryptionConfiguration` resource that is created and maintained by a set of controllers called the encryption controllers in `openshift-config-managed` namespace for each API server that needs encryption.
+OpenShift maintains `EncryptionConfiguration` resource that is created and maintained by a set of controllers called the encryption controllers in `openshift-config-managed` namespace for each API server that needs encryption.
 For example `OAS-O` creates `encryption-config-openshift-apiserver` secret in that namespace. At a later stage it is copied to `openshift-apiserver` namespace, revisioned and finally makes its way to the API server.
 
-In order to make two API servers (`openshift-apiserver` and `oauth-apiserver`) use the same `encryption-config` we are going to create a copy for the new API and let it be managed by `OAS-O` for one release `n` to support downgrades.
+In order to make two API servers (`openshift-apiserver` and `oauth-apiserver`) use the same `encryption-config` we are going to create a copy for the new API server and let it be managed by `OAS-O` for one release `n` to support downgrades to release `n-1` (which will be `4.5` to `4.4`).
 On the next release `n+1` we will copy over the keys to avoid creating new ones. From that point on `authentication-operator` will maintain its own config.
 
 1. Create a new controller in `OAS-O` that will create and annotate `encryption-config-openshift-oauth` secret in `openshift-config-managed` namespace. It also must keep it in sync with `encryption-config-openshift-apiserver`.
  The annotation will prevent `CAO` from managing the newly created `encryption-config`.
-2. Prepare `authentication-operator` to manage `encryption-config-openshift-oauth` but only if it doesn't have an annotation.
+2. Prepare `authentication-operator` to manage `encryption-config-openshift-oauth` but only if it doesn't have the annotation from `1`.
    - make use of `encryption.NewControllers` but don't start it if the annotation is present
 3. Update `CAO` to revision and plug `encryption-config` for its operand.
 4. Create a new deployer (`statemachine.Deployer`) called `UnionRevisionLabelPodDeployer` that will manage multiple `RevisionLabelPodDeployer`.
@@ -73,7 +77,7 @@ On the next release `n+1` we will copy over the keys to avoid creating new ones.
      - use `encryptionconfig.FromSecret` function that returns `EncryptionConfiguration`
      - use `reflect.DeepEqual` function to compare `EncryptionConfigurration.Resources` for example `reflect.DeepEqual(openshiftAPIServerEncryptionCfg.Resources, oauthAPIServerEncryptionCfg.Resources)`
    - returns "success" otherwise
-6. Change `NewRevisionLabelPodDeployer` to conditionally keep the secrets in synchornization. 
+6. Change `NewRevisionLabelPodDeployer` to conditionally keep the secrets in synchronization. 
 7. Update `OAS-O` to use `UnionRevisionLabelPodDeployer` passing two `RevisionLabelPodDeployer`. The first one for `openshift-apiserver` (already existing) and the second one for `oauth-apiserver`.
    - it will report whether all instances of `oauth-apiserver` converged to the same revision
    - make sure that `oauth-apiserver` deployer won't synchronize the secrets
