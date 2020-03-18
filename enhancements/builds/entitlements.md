@@ -1,5 +1,5 @@
 ---
-title: openshift-builds-improve-use-of-rhel-entitlements
+title: openshift-entitlement-injection
 
 authors:
   - "@gabemontero"
@@ -31,7 +31,7 @@ see-also:
   
 ---
 
-# A More Automatic Experience For Use of Entitled RHEL Content In OpenShift V4 Builds
+# A More Automatic Experience For Use of Entitled RHEL Content In OpenShift V4 Pods and Builds
 
 
 ## Release Signoff Checklist
@@ -44,141 +44,79 @@ see-also:
 
 ## Open Questions [optional]
 
- > 1. CRI-O already has config options (see the [config file doc](https://github.com/cri-o/cri-o/blob/master/docs/crio.conf.5.md)) 
->to specify host directories that should always be mounted into containers (i.e. `/etc/containers/mounts.conf` to override
->the default `/usr/share/containers/mounts.conf`), akin to what the Red Hat Docker Daemon used to provide with OpenShift V3.  
->Guidance in the early 4.x time frame has been around the cluster admin using the MCO post install to effectively update the
->filesystem of each node with the necessary subscription related files in a well known location that CRI-O would look
->for.  There is concern though using this through MCO from a couple of perspectives.  One, the MCO api is not
->natural for someone who wants to do something higher level like "enable entitlements for builds".  Second, using the
->MCO for any node update requires a restart of the node, which is onerous for this scenario.  Also note, the RHCOS
->team want to disable their current default setting of auto-mounting secrets from the host (i.e. creating an empty 
->`/etc/containers/mounts.conf`), since RHCOS does not fully install subscription manager (and never will), and they have 
->problems when only partial subscription manager metadata is available.  [RHCOS has the subscription-manager-certs 
->installed but are missing the subscription-manager package which carries the rhsm.conf.](https://bugzilla.redhat.com/show_bug.cgi?id=1783393)
->They are entertaining an MCO solution to work around this problem, but disabling auto-mount, and then having a 
->solution which adds all the subscription manager in one fell swoop, would be their preference.  In the end, providing
->an alternative to an MCO based solution **would seem** to facilitate RHCOS's future intentions and it would seem we should
->minimally coordinate with them to facilitate how they stage future changes  
-> 2. There has been discussion elsewhere around having a more generic notion of "global resources" that any pod can
->mount.  There is an open question of whether this proposal should tackle that.  Would we gate this enhancement on the 
->availability of such a feature (probably "not sure")?  Upstream feature work could be implied with such an item.  But
->what influence such a notion could have on this proposal is TBD. 
-> 3. After 4.5 epic planning it was made clear that a more general solution around entitlements, beyond just builds,
->is desired.  PM has the to-do to investigate, prioritize, and create/assign epics accordingly.  Investigating in the 
->interim around build specific needs via this proposal has been deemed acceptable, but certainly a subsequent, broader
->proposal may necessitate adjustments to this one.  This proposal at the moment is straddling the fence between speaking
->to a generic solution vs. a build specific one (though things are trending toward the former).  But a rebranding of 
->this proposal may occur during the review process.
-> 4. We did *NOT* provide for multiple sets of entitlement credentials in 3.x.  There have been no official, RFE style  
->registered requirements entitlements at a namespace level.  However, we've started to get (slightly) less official
->feedback that customers want this in a more automated sense (vs. the current manual steps).  At a minimum, and is
->noted below when alternatives are discussed, if namespaced entitlements are added with subsequent implementation
->after global entitlements usability is improved, it needs to be seamless, and we minimally need to agree now
->on what the order of precedence will be (with the take on that listed below).
-> 5. There has also been a question in the past needing to shard entitlements due to API rate limiting.  To date, it
->has been stated that is not a concern for builds.  Periodic checkpoints here could be prudent.
-> 6. There is also the general question of how entitlements are propagated for our managed service offerings.  There are
-some attempts at capturing the particulars for this below, but it needs some vetting.
-> 7. With the CSI plugin based solution articulated below, there is some question as to how that is packaged, such as a)
-> a separate admission server (possibly aggregated apiserver) utilizing
->libraries like https://github.com/openshift/generic-admission-server, or b) perhaps even a patch we carry on the k8s
->apiserver (yikes!!)
+1. We did *NOT* provide for multiple sets of entitlement credentials in 3.x.  There have been no official, RFE style registered requirements entitlements at a namespace level.  However, we've started to get (slightly) less official feedback that customers want this in a more automated sense (vs. the current manual steps).  At a minimum, and is noted below when alternatives are discussed, if namespaced entitlements are added with a subsequent implementation after global entitlements usability is improved, it needs to be seamless, and we minimally need to agree now on what the order of precedence will be (with the take on that listed below).
+
+2. There has also been a question in the past needing to shard entitlements due to API rate limiting.  To date, it has been stated that is not a concern for builds.  Periodic checkpoints here could be prudent.
+
+3. There is a general question of how entitlements are propagated for our managed service offerings.  There are
+some attempts at capturing the particulars for this below, but it needs some vetting.  
+
+4. This solution requires a mutating admission controller that intercepts all pod resources.  There is an open question as to how that is packaged, either as a) a separate admission webhook utilizing libraries like https://github.com/openshift/generic-admission-server, or b) as a patch we carry on the upstream k8s apiserver
 
 ## Summary
 
-So in V3.x, all OpenShift Builds essentially had the customer RHEL entitlements mounted into the build pod automatically
+In V3.x, all OpenShift pods (and therefore builds) had the customer RHEL entitlements mounted into the build pod automatically
 and without further intervention after install "for free" because:
 
  - the ansible based installer required/forced providing your subscription information in order to install OCP
- - for reference, see [these docs](https://docs.openshift.com/container-platform/3.11/install/host_preparation.html#host-registration) 
- and [these roles](https://github.com/openshift/openshift-ansible/blob/release-3.11/roles/rhel_subscribe/tasks/main.yml)
+ - for reference, see [these docs](https://docs.openshift.com/container-platform/3.11/install/host_preparation.html#host-registration) and [these roles](https://github.com/openshift/openshift-ansible/blob/release-3.11/roles/rhel_subscribe/tasks/main.yml)
  - next, Red Hats's docker daemon installed in 3.x had specific logic that auto-mounted the host's subscriptions 
  into the container
 
 In V4.x, with 
 
-- the removal of the docker daemon, meaning no docker socket and no access to the host's content
-- and the total replacement of the openshift ansible based installer, so no gathering of entitlements during install
-- and the total change in the OCP subscription model between 3.x and 4.x:  you don't subscribe RHCOS nodes (in fact they
-do not have or ever will the entire set of subscription manager RPMs, and any as discussed in some of the alternatives
+- the change in the OCP subscription model between 3.x and 4.x:  you don't subscribe RHCOS nodes (in fact they
+do not have or ever will the entire set of subscription manager RPMs, and as discussed in some of the alternatives
 below, at most we will only seed enough subscription manager artifacts in RHCOS so that things like turning auto mount
 on won't SEGFAULT).  In 3.x, the underlying linux was classic RHEL, and so hence the subscription manager was fully 
 good to go out of the box (and hence could be shared with pods running on that node).
+- the replacement of the openshift ansible based installer, so no gathering of entitlements during install
+- builds running inside containers instead of on the host so builds cannot benefit from automounting of host content into the container
 
-all those 3.x mechanisms are gone, and a series of steps from either the cluster admin and/or developer attempting
-to run OpenShift Builds leveraging entitled content must be performed after install to enable access to the entitled
-content during the build.
+all those 3.x mechanisms are gone, and a series of steps from either the cluster admin and/or developer are required if entitlements are needed within a pod.  Additional steps are required if entitlements are required within an OpenShift build.
 
-The highlights of those steps from [the current 4.x doc](https://docs.openshift.com/container-platform/4.3/builds/running-entitled-builds.html):
-
-1) First, either
- 
-- create an ImageStreamTag to the UBI image from `registry.redhat.io` in the `openshift` namespace, or 
-- reference the UBI image directly and include a pull secret to `registry.redhat.io` in your BuildConfig
-
-*NOTE*: in 4.5, image registry and build updates are occurring so that image streams and builds will have
-access to the `registry.redhat.io` credentials supplied in the install pull secret.  As such, the above steps
-in the manual process will no longer be required.
-
-2) Next, based on your access to the credentials:
-
-- With direct access to the entitlement pem files, create a generic secret from the files and reference the secret in
-your BuildConfig's input/source secret list
-- With Subscription Manager, and S2I build strategy, create secret(s) for the Subscription Manager configuration and 
-certs and reference the secret(s) in your BuildConfig's input/source secret list
-- With Subscription Manager, and Docker build strategy, you have to modify your Dockerfile and manually copy and 
-initialize as needed the information from the base image
-- With Satellite, and S2I build strategy, create a secret to reference the repository config file you created for your
-satellite instance and reference the secret in you BuildConfig's input/source secret list
-- With Satellite, and Docker build strategy, you have to modify your Dockerfile and manually copy and initialize as 
-needed the information from the base image as well as your repository config file for your satellite instance
-- And remember to set the skip layers optimization option (i.e. squash layers) with Docker Strategy builds
-
-*Another note on Satellite*: you can also subscribe nodes with Satellite (reference the "jump-host"), which results in 
-the pem files being placed in a well known location on the file system.  A user with sufficient privilege to the node 
-could obtain the pem files. 
+For the steps required in OpenShift Builds, see [the current 4.x doc](https://docs.openshift.com/container-platform/4.3/builds/running-entitled-builds.html)
 
 This enhancement proposal aims to introduce more centralized and automated infrastructure to ease the burden of 
-using OpenShift Builds with RHEL subscriptions/entitlements.
+making RHEL subscriptions/entitlements available to both general workloads (pods) and builds.
 
 ## Motivation
 
-Simplify overall usability for using RHEL Subscriptions/Entitlements with OpenShift Builds, as we took a hit in 
+Simplify overall usability for using RHEL Subscriptions/Entitlements with OpenShift, as we took a hit in 
 4.x vs. 3.x.
 
-And large, multi cluster administration needs to be simplified by results from our work here.
+Large, multi cluster administration needs to be simplified by results from our work here.
 
 ### Goals
 
-No longer require (though still allow) manual manipulation of the BuildConfig to consume entitlements.
+No longer require developer steps (beyond an annotation) to get entitlements in a pod, assuming the cluster has entitlements configured.
 
-No longer require (though still allow) manual injection of subscription credentials into a user's namespace.
+No longer require (though still allow) manual manipulation (beyond a true/false config field) of the BuildConfig to consume entitlements.
 
-Help customers who just started with OpenShift. They can work with `oc` and some sample yaml files but are completely 
-overwhelmed with the entitlement story. Especially if they are used only to satellite and expect things just to work 
-when they subscribe.  The RHCOS team has had to a lot of customer coaching in 4.x wrt entitlements.
+No longer require (though still allow) manual injection of subscription credentials into a user's namespace (entitlements will come from a cluster scoped resource accessible to all users based on admin configuration).
 
-Wherever possible during the implementation, identify any openshift/builder image or build controller code hits that 
-could be leveraged by tekton based image building, including OpenShift Build V2, to take the equivalent mounting of subscription 
-credential content into the build pod (where something other than the build controller for Build V1 does this), and 
-supply the necessary arguments to the `buildah` binary (vs. the `buildah` golang API the openshift/builder image
-uses).  The "code hit structuring" implies adding common code that could be referenced by both solutions into a 
-separate, simpler, utility github/openshift repository.  
+Help customers who just started with OpenShift. They can work with `oc` and some sample yaml files but are completely overwhelmed with the entitlement story. Especially if they are used only to satellite and expect things just to work when they subscribe.  The RHCOS team has had to a lot of customer coaching in 4.x wrt entitlements.
+
+Wherever possible during the implementation, identify any openshift/builder image or build controller code hits that could be leveraged by tekton based image building, including OpenShift Build V2, to take the equivalent mounting of subscription credential content into the build pod (where something other than the build controller for Build V1 does this), and supply the necessary arguments to the `buildah` binary (vs. the `buildah` golang API the openshift/builder image uses).  The "code hit structuring" implies adding common code that could be referenced by both solutions into a separate, simpler, utility github/openshift repository.  
 
 ### Non-Goals
 
-1. Reach a V3.x level, where no post install activity is needed to consume entitlements.  In other words, no changes 
-to the V4.x installer to allow the user to inject the subscription particulars will be encompassed in this enhancement.
+1. Reach a V3.x level, where no post install activity is needed to consume entitlements.  In other words, no changes to the V4.x installer to allow the user to inject the subscription particulars will be encompassed in this enhancement.
 
-2. Protecting this content from being viewed/copied by users. If it's available for the build to use, the user who can 
-create a build can also read / view / exfiltrate the credentials. It is technically impossible to avoid that, since 
-anyone can write a build that does a "RUN cp /path/to/creds /otherpath" and then their resulting image will contain 
-the creds.
+2. Protecting this content from being viewed/copied by users who are otherwise intended to leverage it. If it's available for the pod or build to use, the user who can create a pod or build can also read / view / exfiltrate the credentials. It is technically impossible to avoid that, since anyone can write a build that does a "RUN cp /path/to/creds /otherpath" and then their resulting image will contain the creds.
 
 ## Proposal
 
-### User Stories [optional]
+The high level proposal is as follows:
+
+1. Introduce a concept of generic global secrets that can be created by administrators and mounted into any pod
+2. Introduce a configuration mechanism that allows the adminstrator to control which users/namespaces are allowed to mount a given global secret
+3. Define an annotation api that users can apply to their pods to request injection of one more more global secrets, and what path to inject into
+4. Define a CSI driver capable of copying global secrets into a volume that is made available for pods to mount
+5. Define an admission controller that, taking into account the security configuration from (2), will add a PVC+volume mount(to be fullfilled by the CSI driver in (4)) to pods requesting injection, and reject PVCs/pods that include volume mounts but do not meet the security requirements from (2).
+ 
+
+### User Stories
 
 #### Existing User Stories (that will be improved upon)
 
@@ -186,8 +124,14 @@ the creds.
 accessed via a subscription, I want an easy way to distribute subscription credentials that can be consumed by my 
 user's builds.
 
+2. As a cluster admin with users who need to perform actions within their pods that require entitlements, I want an easy way to provide subscription credentials that those users can consume.
+
+3. As a cluster admin who runs a multitenant cluster, I want to be able to control which users/namespaces can have the entitlements injected and provide different entitlements to different namespaces.
+
 2. As a user who needs to build an image that includes subscription content, I want a simple way for my image build to 
 have access to the subscription configuration/credentials.
+
+3. As a user who needs to perform activities within a pod that require entitlements, I want my pod to automatically include entitlements if the cluster has them available.
 
 #### New User Stories
 
@@ -197,30 +141,25 @@ under management.
 
 TODO:  Still need some form of implementation details for this one if it remains in this proposal.
 
-#### Out Of Scope Stories
-
-1. As a user I have a (non OpenShift Build) pod whose entry point is a script that installs software from entitled 
-sources, and I want a simpler way for the necessary entitlement information injected in the pod.
-
-(See the Open Questions and the question around if this will become in scope). 
-
 ### Implementation Details/Notes/Constraints [optional]
 
-So the concerns for the implementation center around these questions:
+The concerns for the implementation center around these questions:
 
 - Delivery mechanism for subscription config/credentials to the cluster
 - Where/How subscription config/credentials are stored on the cluster (e.g. what resources types+namespaces)
 - In what form are the credentials provided (pem files, SubscriptionManager, Satellite)
-- When does the build consume the credentials (where consuming means telling buildah to mount it)
+- When/how does the pod or build consume the credentials (where consuming means the pod or build mounting it and, for builds, wiring the mount through to buildah)
 
 #### Delivery Mechanism for the "encapsulation" of credentials
 
-##### IBM Mulitcloud Manager (though a rename is coming with transfer to Red Hat)
+Discussion of how global secrets get defined on a cluster.
 
-So "MCM" for future reference introduces a "klusterlet" which is [installed](https://www.ibm.com/support/knowledgecenter/SSBS6K_3.1.2/mcm/installing/klusterlet.html#install_ktl)
+##### MultiCloud Manager/Advanced Cluster Management
+
+"MCM" for future reference introduces a "klusterlet" which is [installed](https://www.ibm.com/support/knowledgecenter/SSBS6K_3.1.2/mcm/installing/klusterlet.html#install_ktl)
 in the clusters it manages.
 
-And MCM also introduces a "compliance" with a list of "policies" (all backed by CRDs) with the klusterlet will
+MCM also introduces a "compliance" with a list of "policies" (all backed by CRDs) which the klusterlet will
 poll.  See [this document](https://www.ibm.com/support/knowledgecenter/SSBS6K_3.1.2/mcm/compliance/policy_overview.html) for details.
 
 Each policy then has a list or k8s RBAC to define on the cluster, followed by a list of general k8s API object yaml
@@ -237,7 +176,7 @@ OpenShift only, the existing API client employed by MCM should be able to consum
 ##### OpenShift Hive
 
 Hive has an analogous feature, "sync sets", to allow for API objects to be created on the clusters it manages.  At this
-time, while the "red washed" MCM will leverage Hive for some things, it will not replace its compliance/policy/klusterlet
+time, while MCM will leverage Hive for some things, it will not replace its compliance/policy/klusterlet
 infrastructure with sync sets.
 
 However, for existing dedicated/managed cluster using Hive without MCM, the same RBAC/Object spelled out for MCM should
@@ -248,19 +187,13 @@ suffice for Hive without MCM.
 As the title implies, a user with sufficient privilege would create the API objects we decide are the "encapsulation"
 for the entitlement/subscription credentials at the namespace / cluster level we end up supporting.
 
-#### Where/How do we get the credentials from (i.e. the precise form of the "encapsulation")
+#### Where/How do pods/builds get the credentials from (i.e. the precise form of the "encapsulation")
 
 ##### Global secret option
 
-The is our most likely choice, and it will be to have a well known secret in the openshift-config
-namespace where administrators can store the credentials, and then update pod definitions prior to pod creation to include
-volume mounts to that content.
+This enhancement proposes a new concept of a "global secret".  Administrators will be able to define secrets in a unique namespace (likely openshift-config) and then configure a CSI driver + Admission controller which will be able to inject those secrets into pods that request the content, based on a configuration the administrator provides.
 
-**IF** we were to mimic 3.x behavior, if the global credential(s) exist, then always mount.  As a result, they 
-are always present.....**HOWEVER** .....   
-
-At this time, the current sentiment for 4.x is to opt in to receiving entitlements instead of the default being
-the credentials are "just there", where either an annotation (or perhaps new API field(s) in the case of builds).  
+**IF** we were to mimic 3.x the behavior would be: if the global credential(s) exist, then always mount.  As a result, they are always present, however at this time, the current sentiment for 4.x is to opt in to receiving entitlements instead of the default being the credentials are always there, where either an annotation (or perhaps new API field(s) in the case of builds). determines whether they are injected.  
 
 As noted in the open question, simply getting credentials at the global level may not be sufficient, so additional
 alternatives / complementary pieces to a global solution are articulated below.
@@ -276,8 +209,7 @@ in a pod:
  - There are CSI volume and persistent volume types in k8s.
  - per [k8s volume docs](https://kubernetes.io/docs/concepts/storage/volumes/#csi) the CSI types do not support direct
  reference from a Pod and may only be referenced in a Pod via a `PersistentVolumeClaim`
- - To that end, one of the sidecar containers, the [external provisioner](https://kubernetes-csi.github.io/docs/external-provisioner.html),
- helps with this
+ - To that end, one of the sidecar containers, the [external provisioner](https://kubernetes-csi.github.io/docs/external-provisioner.html), helps with this
  - It watches Kubernetes `PersistentVolumeClaim` objects, and if the PVC 
  references a Kubernetes StorageClass, and the name in the provisioner field of the storage class matches the name 
  returned by the specified CSI endpoint `GetPluginInfo` call, it calls the CSI endpoint `CreateVolume` method to provision
@@ -318,18 +250,13 @@ in a pod:
  speculation around the need for more granular control.
  - can mutate the pod, adding volume mounts of the "entitlement" volume 
 
-###### Build Specific consumption path
+###### Build Specific consumption
 
-Once the "entitlement" volume is mounted in the build pod, the openshift builder image will need to map the pod mounted volumes to the 
-requisite buildah parameters.
+Once the "entitlement" volume is mounted in the build pod, the openshift builder image will need to map the pod mounted volumes to the requisite buildah parameters.
 
-###### Build Specific Secret Injection Option
+##### User Namespace Option (future goal)
 
-In lieu of the CSI plugin and k8s admission flow, a build only solution would center around  
-The build controller accessing the global secret and mounting into build pods as it deems fit.
-
-
-##### User Namespace Option
+***This section is not in scope for the first pass implementation.***
 
 Users could provide secret(s) with a well known annotation in their namespace that the global solution
 noted above can look for and mount in the pod in the same way as the global secret.
@@ -345,24 +272,7 @@ as documented today.
 The per namespace version would act as an override and take precedence over the global copy.
 
 
-##### Host Injected Option (Not doing, but listing for completeness)
-
-`HostPath` volumes are already called out as a security concern in [volume mounted injections for builds](volume-secrets.md)
- proposal.
-
-The current mindset for this enhancement proposal is to also cite that concern, and only depend on such a 
-mechanism if the CRI-O/MCO based solution noted in open questions is available.
-
-A per build config annotation to opt out would be included in such a solution,  If the CRI-O/MCO solugin was an install 
-based, day 1 operation, we could have a new field added to the global build config.
-
-NOTE: presumably a host injected option would provide the credentials "for free" for general tekton or Build V2 usage.
-
-NOTE: Host injection via the MCO requires a node reboot for the updates to take effect.  That is generally deemed 
-undesirable for this feature.  Also, the MCO API has not been an obvious entryway for users to date when employment
-of the existing manual options for entitlements has come up.
-
-###### Current state
+##### Current state
 
 1) Currently, auto mount of secrets from the host into the Pods enabled per default. Some people raised concerns about 
 this default setting.  Also, RHCOS does not, nor will ever have, the RPM installed by default such that the rhsm.conf
@@ -375,7 +285,7 @@ file is present.
 4) Where again, nobody wants to use the MCO for that.
 
 
-#### In what form are the credentials provided
+#### In what form are the credentials provided to the cluster
 
 There will also be well defined keys within the global secret that account for the various forms:
 
@@ -393,13 +303,16 @@ If this proves untenable, multiple secrets per entitlement, with different annot
 
 The current though is to go with one secret vs. multiple, but this can be adjusted during implementation if need be.
 
-#### When does the build consume the credentials
+#### When does the pod or build consume the credentials
 
-An opt-in at both the `BuildConfig` level and global build controller config level (`BuildDefaults`) would be provided,
-where in the `BuildConfig` case it would be an API field addition under the `BuildSource`.  Something like
-`includeSubscription`.  And an analogous field name and type would be added to `BuildDefaults`. 
+For pods, an annotation should be used to flag the pod as desiring credentials.  This can also allow the user to pick from multiple available secrets for injection.  The annotation needs to be sufficient to determine:
 
-The build controller in turn would supply the annotation(s) the CSI plugin and associated admission apparatus respects
+1. Which global secret to inject
+2. Where to inject it (path)
+
+For builds, an opt-in at both the `BuildConfig` level and global build controller config level (`BuildDefaults`) would be provided, where in the `BuildConfig` case it would be an API field addition under the `BuildSource`.  Something like `includeSubscription`.  And an analogous field name and type would be added to `BuildDefaults`. 
+
+The build controller in turn would supply the annotation(s) the admission apparatus respects
 onto the build pod.
 
 
@@ -411,7 +324,7 @@ objects to facilitate opt-in at both the global level and per BuildConfig level.
 How the CSI plugin is packaged (see the open questions) could entail some longer term risk based on which choice is made.
 
 The intent of the associated whitelist for which namespaces can access entitlements is to give administrators sufficient
-control around who can access entitlements.  If not, it would seem we would need to create a new API type that RBAC
+control around who can access which entitlements.  If not, it would seem we would need to create a new API type that RBAC
 could be defined off of to get more granular authorization. 
 
 ## Design Details
@@ -419,7 +332,7 @@ could be defined off of to get more granular authorization.
 ### Test Plan
 
 With both 3.x and 4.x, there have been no automated e2e tests / extended tests out of openshift/origin
-for validating consumption of entitled content in OpenShift Builds.  The reason presumably being 
+for validating consumption of entitled content.  The reason presumably being 
 that there is not set of credentials that our CI system can use.
 
 We've revisited this as part of composing this enhancement, and have devised the following recipe, assuming
@@ -428,6 +341,8 @@ one of the forms where a secret of some sort is created:
 - do a run where some fake creds are set up in a predetermined secret
 - run a docker strategy build that cats the expected mounted secret content 
 - search for the cat output in the build logs 
+
+Since the build pod is dependent on the general pod injection behavior, this should cover both pod injection and build consumption.
 
 Then there is the question of whether manual testing with actual yum install of entitled content by QE should consider 
 with any of the three forms of credentials
@@ -468,8 +383,22 @@ N/A
 
 ## Alternatives
 
-A build only solution could entail the build controller replacing the CSI plugin and admission framework and mounting
+1. A build only solution could entail the build controller replacing the CSI plugin and admission framework and mounting
 secrets into the build pod.
+
+2. CRI-O already has config options (see the [config file doc](https://github.com/cri-o/cri-o/blob/master/docs/crio.conf.5.md))  to specify host directories that should always be mounted into containers (i.e. `/etc/containers/mounts.conf` to override the default `/usr/share/containers/mounts.conf`), akin to what the Red Hat Docker Daemon used to provide with OpenShift V3.  Guidance in the early 4.x time frame has been around the cluster admin using the MCO post install to effectively update the filesystem of each node with the necessary subscription related files in a well known location that CRI-O would look for.  There are some concerns though about using MCO for this purpose.  One, the MCO api is not natural for someone who wants to do something higher level like "enable entitlements for builds".  Second, using the MCO for any node update requires a restart of the node, which is onerous for this scenario.  Also note, the RHCOS team wants to disable their current default setting of auto-mounting secrets from the host (i.e. creating an empty `/etc/containers/mounts.conf`), since RHCOS does not fully install subscription manager (and never will), and they have problems when only partial subscription manager metadata is available.  [RHCOS has the subscription-manager-certs installed but are missing the subscription-manager package which carries the rhsm.conf.](https://bugzilla.redhat.com/show_bug.cgi?id=1783393)
+
+They are entertaining an MCO solution to work around this problem, but disabling auto-mount, and then having a solution which adds all the subscription manager in one fell swoop, would be their preference.  In the end, providing an alternative to an MCO based solution **would seem** to facilitate RHCOS's future intentions and it would seem we should minimally coordinate with them to facilitate how they stage future changes  
+
+3. Hostpath injection.  Hostpath injection is not an option for pods (it would require users have permission to create pods with hostpath mounts which is unacceptable).  
+
+Hostpath injections for builds could be done since we control the build pod and can protect it from user tampering, however there is a general desire to move build pods to be less privileged, not more.  
+
+In addition, storing entitlements on nodes(such that they can be hostmounted) has significant drawbacks as noted above(Namely, MCO being a poor distribution mechanism for this information).
+
+Furthermore we are now trying to solve the entitlement problem for all pods, not just builds.  
+
+As such, this approach doesn't warrant further consideration.
 
 ## Infrastructure Needed [optional]
 
