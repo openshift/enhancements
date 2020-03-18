@@ -3,7 +3,7 @@ title: openshift-entitlement-injection
 
 authors:
   - "@gabemontero"
-  - "@bparees" (provided a lot of input in tracking Jira)
+  - "@bparees"
 
 reviewers:
   - "@bparees"
@@ -21,7 +21,7 @@ approvers:
   
 creation-date: 2020-02-18
 
-last-updated: yyyy-mm-dd
+last-updated: 2020-03-18
 
 <!-- status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced -->
 status: provisional
@@ -112,7 +112,8 @@ The high level proposal is as follows:
 1. Introduce a concept of generic global secrets that can be created by administrators and mounted into any pod
 2. Introduce a configuration mechanism that allows the adminstrator to control which users/namespaces are allowed to mount a given global secret
 3. Define an annotation api that users can apply to their pods to request injection of one more more global secrets, and what path to inject into
-4. Define a CSI driver capable of copying global secrets into a volume that is made available for pods to mount
+4. Define a CSI driver capable of copying global secrets into a volume that is made available for pods to mount.   This
+has been broken out into a [separate enhancement proposal](https://github.com/openshift/enhancements/pull/250)
 5. Define an admission controller that, taking into account the security configuration from (2), will add a PVC+volume mount(to be fullfilled by the CSI driver in (4)) to pods requesting injection, and reject PVCs/pods that include volume mounts but do not meet the security requirements from (2).
  
 
@@ -200,55 +201,21 @@ alternatives / complementary pieces to a global solution are articulated below.
 
 The preferred implementation path at this time is to build the following set of components inject the global secret contents 
 in a pod:
- - a [CSI plugin](https://github.com/container-storage-interface/spec) would fetch the secret(s) and write it on the underlying 
- node/host filesystem on a path we control so that CRIO can mount the content
- - though for our purposes, `plugin`, `driver`, and `endpoint` seem to be the same thing based on which document you are
- reading.
- - k8s provides Kubernetes CSI Sidecar Containers: a set of standard containers that aim to simplify the development and 
- deployment of CSI Drivers on Kubernetes.
- - There are CSI volume and persistent volume types in k8s.
- - per [k8s volume docs](https://kubernetes.io/docs/concepts/storage/volumes/#csi) the CSI types do not support direct
- reference from a Pod and may only be referenced in a Pod via a `PersistentVolumeClaim`
- - To that end, one of the sidecar containers, the [external provisioner](https://kubernetes-csi.github.io/docs/external-provisioner.html), helps with this
- - It watches Kubernetes `PersistentVolumeClaim` objects, and if the PVC 
- references a Kubernetes StorageClass, and the name in the provisioner field of the storage class matches the name 
- returned by the specified CSI endpoint `GetPluginInfo` call, it calls the CSI endpoint `CreateVolume` method to provision
- the new volume.
- - there are also lifecycle methods for destroy, resize, etc.  
- - the CSI plugin would be hosted as a `DaemonSet` on the k8s cluster, to get per node/host granularity
- - and that `DaemonSet` would be privileged so as to have access to the pod's associated node/host file system.
- - the [CSI spec](https://github.com/container-storage-interface/spec/blob/master/spec.md) details the entire architecture,
- concepts, and protocol
- - so Volume provisioning could access the node/host filesystem, in particular the directory (and only the directory)
- where the secret contents will be copied to
- - As part of Volume creation/provisioning a key element is this: CSI has two step mounting process. staging and publishing.
- - They correspond to the endpoint's `NodeStageVolume` and `NodePublishVolume` implementations 
- - Staging is node local and publish is pod local. So we will probably want to stage the content once and publish it for each pod 
- (which is nothing but creating a bind mount for original volume)
- - That means we do not have to necessarily read and copy the secret(s) contents on every pod creation
- - the [CSI spec volume lifecycle section](https://github.com/container-storage-interface/spec/blob/master/spec.md#volume-lifecycle) 
- talks about a pre-provisioned volume.
- - If we can implement this, then we can build an associated controller that watches the global secret, or per namespace secrets that have been 
- annotated/labelled, and if possible that engages the CSI plugin and its `ControllerPublishVolume` implementation to redo 
- the staging step and update the secret contents.  This is *somewhat* akin to the injection controller employed by the 
- Global Proxy support.
- - **TODO**: in looking at the [kubernetes-csi hostpath example](https://github.com/kubernetes-csi/csi-driver-host-path)
- it seems very very similar to what we want to do, but with this exception:  it employs a `StatefulSet` for deploying
- the CSI driver, and in the comments there, it says the following, which does not work for us:
- 
- ```bash
-    # One replica only:
-    # Host path driver only works when everything runs
-    # on a single node. We achieve that by starting it once and then
-    # co-locate all other pods via inter-pod affinity
-```
-
- - that single node notion obviously won't work for us.  Need to understand why that is the case.
+ - See the [CSI Driver proposal](https://github.com/openshift/enhancements/pull/250) for specifics on that piece.
  - Moving on from the CSI plugin, an admission controller/webhook path (see open questions regarding "packaging" options there) 
  that based on the presence of the annotation on the pod (or one of several for per namespace perhaps), and the presence 
- of a global whitelist that stipulates which namespaces can annotate their pod.  See risks and mitigations for 
- speculation around the need for more granular control.
- - can mutate the pod, adding volume mounts of the "entitlement" volume 
+ of a global whitelist that stipulates which namespaces can annotate their pod (See risks and mitigations for 
+ speculation around the need for more granular control) can validate and mutate user Pods
+ - Specifically, it can add a `PersistentVolumeClaim` and associated `VolumeMount` that is serviced by the CSI Driver
+ proposal.  See that proposal for the specific settings on the `PersistentVolumenClaim` that are required.
+ - the annotation could also drive the exact mount directory desired by the user for the Pod, and that would translate
+ to how the `VolumeMount` injected into the Pod is constructed.
+ - the whitelist could be text based list that is captured in a CRD that is read by the admission apparatus and serves
+ as the configuration for the admission apparatus
+ - Or new CRD API object could be defined just for capturing who can inject the Secrets onto the host, and then RBAC `Roles`
+ could be defined on those objects, with `RoleBindings` defined to capture who can inject.
+ - Then the admission apparatus, in the form of SAR checks against those objects using the requesting user's credentials,
+  would enforce who can inject. 
 
 ###### Build Specific consumption
 
