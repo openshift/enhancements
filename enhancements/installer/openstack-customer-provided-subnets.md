@@ -69,7 +69,6 @@ metadata:
   name: test-cluster
 platform:
   openstack:
-    region: us-west-2
     nodesSubnet: abcd-4321
 pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
@@ -84,14 +83,13 @@ metadata:
   name: test-cluster
 platform:
   openstack:
-    region: us-west-2
     apiVIP: "192.168.30.15"
     ingressVIP: "192.168.30.17"
 pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
 
-Lastly, the installer will need to know how to access the api, so an optional argument, `apiEntrypoint`, that takes an IP or URL as an argument will be addedr. When this argument is set, the installer will direct all api calls to the address the user provides.
+Lastly, the installer will need to know how to access the api, so an optional argument, `apiEndpoint`, that takes an IP or URL as an argument will be added. When this argument is set, the installer will direct all api calls to the address the user provides.
 
 ```yaml
 apiVersion: v1
@@ -100,8 +98,7 @@ metadata:
   name: test-cluster
 platform:
   openstack:
-    region: us-west-2
-    apiEntrypoint: "http://anyURLorIP.com"
+    apiEndpoint: "http://anyURLorIP.com"
 pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
@@ -146,8 +143,11 @@ Deploying OpenShift clusters to pre-existing network has the side-effect of redu
 ## Design Details
 
 ### Test Plan
-1. Proof of valid case: Update CI to use a UPI script to create a correct set of networks and subnets and pass them to the installer for an e2e installation
-
+1. e2e test: Update CI to use a UPI script to create a correct set of networks and subnets and pass them to the installer for an e2e installation
+2. Unit tests for new parameters:
+   1. `apiVIP` and `ingressVIP` must be valid ip addresses in the nodesSubnet CIDR
+   2. `apiEndpoint` must be a valid IP address or URL
+   3. `nodesSubnet` must be the uuid of a subnet that exists in the openstack cloud that the installer has access to
 ### Garduation Criteria
 This enhancement will follow standard graduation criteria.
 
