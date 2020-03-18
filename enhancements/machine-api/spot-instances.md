@@ -75,6 +75,10 @@ the following requirements for integration will work for each of AWS, Azure and 
 - If the Spot request cannot be satisfied when a Machine is created, the Machine will be marked as failed.
   This Machine would be remediated by an MHC if present.
 
+- The actuator should label Machines as interruptible if they are spot/preemptible
+  - This will allow termination handlers to be deployed to only spot/preemptible instances
+  - The `machine.openshift.io/interruptible-instance` label will be set on `the Machine.Spec.Lables` if the instance is spot/preemptible
+
 - Graceful termination of nodes should be provided by observing termination notices
 
 ### Implementation Details
@@ -149,6 +153,9 @@ type AWSMachineProviderConfig struct {
 }
 ```
 
+Once the instance is launched, the Machine will be labelled as an `interruptible-instance`
+if the instance `InstanceLifecycle` field is set to `spot`.
+
 ###### Termination Notices
 Termination notices on AWS are provided via the EC2 metadata service up to 2 minutes before an instance is due to be preempted.
 
@@ -182,6 +189,9 @@ type GCPMachineProviderSpec struct {
 }
 ```
 
+Once the instance is launched, the Machine will be labelled as an `interruptible-instance`
+if the instance `Scheduling.Preepmtible` field is set to `true`.
+
 ##### Azure
 
 ###### Launching Instances
@@ -212,6 +222,9 @@ type AzureMachineProviderSpec struct {
   SpotVMOptions *SpotVMOptions `json:”spotVMOptions,omitempty”`
 }
 ```
+
+Once the instance is launched, the Machine will be labelled as an `interruptible-instance`
+if the instance `Priority` field is set to `spot`.
 
 ###### Deallocation
 Since Spot VMs are not deleted when they are preempted and instead are deallocated,
