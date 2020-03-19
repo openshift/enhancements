@@ -1,16 +1,15 @@
 ---
 title: support-provider-networks-and-custom-networks
 authors:
-  - "@wking"
+  - "@egarcia"
 reviewers:
   - "@mandre"
   - "@pierreprinetti"
   - "@adduarte"
 approvers:
   - "@abhinavdahiya"
-  - "@sdodson"
 creation-date: 2020-03-12
-last-updated: 2020-03-12
+last-updated: 2020-03-19
 status: planning
 ---
 
@@ -74,7 +73,7 @@ pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
 
-Users with provider networks often do not use floating IPs, and so the first changge we will make to address this is to make the parameter `platform.openstack.lbFloatingIP` optional. When unset, the installer will not attempt to provision and attach a floating ip to the api port. To allow the customer to set up their own custom external access infrastructure, we will have to let them set the `apiVIP` and `ingressVIP` port IPs ahead of the install, so that they can be added to their routing/loadbalancing scheme before the installer is run. 
+Clusters with provider networks often do not use floating IPs, and so the first change we will make to address this is to make the parameter `platform.openstack.lbFloatingIP` optional. When unset, the installer will not attempt to attach a floating IP to the API port. To allow the customer to set up their own custom external access infrastructure, we will have to let them set the `apiVIP` and `ingressVIP` port IPs ahead of the install, so that they can be added to their routing/loadbalancing scheme before the installer is run.
 
 ```yaml
 apiVersion: v1
@@ -89,7 +88,7 @@ pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
 
-Lastly, the installer will need to know how to access the api, so an optional argument, `apiEndpoint`, that takes an IP or URL as an argument will be added. When this argument is set, the installer will direct all api calls to the address the user provides.
+Lastly, the installer will need to know how to access the API, so an optional argument, `apiEndpoint`, will take the FQDN the API can be reached at. This argument can be an IP address or a URL. When this argument is set, the installer will direct all API calls to the address the user provides.
 
 ```yaml
 apiVersion: v1
@@ -98,7 +97,7 @@ metadata:
   name: test-cluster
 platform:
   openstack:
-    apiEndpoint: "http://anyURLorIP.com"
+    apiEndpoint: "http://fullyQualifiedDomain.com"
 pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
@@ -107,7 +106,7 @@ sshKey: ssh-ed25519 AAAA...
 - Subnets must all be a part of the same OpenStack cloud
 - Each subnet must be able to be tagged, and have the capacity for at least one tag. This allows us to add the `kubernetes.io/cluster/.*:` shared tag to identify the subnet as part of the cluster. The k8s cloud provider code in kube-controller-manager uses this tag to find the subnets for the cluster to create LoadBalancer Services.
 - The CIDR block for each one must be in MachineNetworks.
-- The host running the installer needs to be able to send http requests to the api.
+- The host running the installer needs to be able to send HTTP requests to the API.
 - The installer should be able to support provider networks, as well as tenant networks.
 
 ### Resources Created by the Installer
@@ -123,7 +122,7 @@ The installer will continue to create:
 - Boot Metadata
 
 ### Installs that need more control
-For the use case where cluster operators do not want the installer creating any resources on their networks, we want them to use the UPI installer, since this usage pattern does not fit in to the IPI vision of the installer. To suppor this use case, we will provide additional UPI documentation.
+For the use case where cluster operators do not want the installer creating any resources on their networks, we want them to use the UPI installer, since this usage pattern does not fit in to the IPI vision of the installer. To support this use case, we will provide additional UPI documentation.
 
 ### Destroying the Cluster
 We are operating under the assumption that the users that provisioned their custom subnets will also want to manually deprovision them. Therefore, no resources will be deleted in the custom network’s or subnets that are provided to the installer. We will remove any tags we added though.
@@ -145,7 +144,7 @@ Deploying OpenShift clusters to pre-existing network has the side-effect of redu
 ### Test Plan
 1. e2e test: Update CI to use a UPI script to create a correct set of networks and subnets and pass them to the installer for an e2e installation
 2. Unit tests for new parameters:
-   1. `apiVIP` and `ingressVIP` must be valid ip addresses in the nodesSubnet CIDR
+   1. `apiVIP` and `ingressVIP` must be valid IP addresses in the nodesSubnet CIDR
    2. `apiEndpoint` must be a valid IP address or URL
    3. `nodesSubnet` must be the uuid of a subnet that exists in the openstack cloud that the installer has access to
 ### Garduation Criteria
