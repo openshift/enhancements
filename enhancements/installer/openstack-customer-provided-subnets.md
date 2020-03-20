@@ -73,7 +73,10 @@ pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
 
-Clusters with provider networks often do not use floating IPs, and so the first change we will make to address this is to make the parameter `platform.openstack.lbFloatingIP` optional. When unset, the installer will not attempt to attach a floating IP to the API port. To allow the customer to set up their own custom external access infrastructure, we will have to let them set the `apiVIP` and `ingressVIP` port IPs ahead of the install, so that they can be added to their routing/loadbalancing scheme before the installer is run.
+Clusters with provider networks often do not use floating IPs, and may have flat networking schemes. In order to accound for this, we will have to make floating IPs in the cluster optional, as well as the external network. so the first change we will make to address this is to make the parameter `platform.openstack.lbFloatingIP` optional. When unset, the installer will not attempt to attach a floating IP to the API port. Likewise, we will have to make the variable `platform.openstack.externalNetwork` optional. When this is unset, the installer will no longer create and attach a floting IP to the bootstrap node.
+
+
+To allow the customer to set up their own custom external access infrastructure, we will have to let them set the `apiVIP` and `ingressVIP` port IPs ahead of the install, so that they can be added to their routing/loadbalancing scheme before the installer is run.
 
 ```yaml
 apiVersion: v1
@@ -88,26 +91,12 @@ pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
 
-Lastly, the installer will need to know how to access the API, so an optional argument, `apiEndpoint`, will take the FQDN the Kubernetes API can be reached at. This argument can be an IP address or a URL. When this argument is set, the installer will direct all Kubernetes API calls to the address the user provides.
-
-```yaml
-apiVersion: v1
-baseDomain: example.com
-metadata:
-  name: test-cluster
-platform:
-  openstack:
-    apiEndpoint: "http://fullyQualifiedDomain.com"
-pullSecret: '{"auths": ...}'
-sshKey: ssh-ed25519 AAAA...
-```
-
-### Subnet
-- Subnets must all be a part of the same OpenStack cloud
-- Each subnet must be able to be tagged, and have the capacity for at least one tag. This allows us to add the `kubernetes.io/cluster/.*:` shared tag to identify the subnet as part of the cluster. The k8s cloud provider code in kube-controller-manager uses this tag to find the subnets for the cluster to create LoadBalancer Services.
-- The CIDR block for each one must be in MachineNetworks.
+### Nodes Subnet
+- Nodes Subnet must all be a part of the same OpenStack cloud
+- The subnet must be able to be tagged, and have the capacity for at least one tag. This allows us to add the `kubernetes.io/cluster/.*:` shared tag to identify the subnet as part of the cluster. The k8s cloud provider code in kube-controller-manager uses this tag to find the subnets for the cluster to create LoadBalancer Services.
+- The CIDR block must be in MachineNetworks.
 - The host running the installer needs to be able to send HTTP requests to the API.
-- The installer should be able to support provider networks, as well as tenant networks.
+- The installer should be able to support subnets on provider networks, as well as tenant networks.
 
 ### Resources Created by the Installer
 When the installer is passed a set of subnets, it will no longer create a network, a subnet on that network, the ports on that subnet, the routing, or the floating ips on those networks.  
