@@ -9,7 +9,7 @@ reviewers:
 approvers:
   - "@abhinavdahiya"
 creation-date: 2020-03-12
-last-updated: 2020-03-19
+last-updated: 2020-03-20
 status: planning
 ---
 
@@ -41,8 +41,8 @@ As an OpenStack user, I would like to deploy OpenShift onto pre-existing OpenSta
 There are no changes in expectations regarding publicly addressable parts of the cluster.
 
 ## Proposal
-- Installer allow users to provide a list of subnets that should be used for the cluster. 
-- In order to support provider networks in IPI, the subnets passed to the installer must meet these requirements:
+- Installer allow users to provide a subnet that should be used for the cluster. 
+- In order to support provider networks in IPI, the subnet passed to the installer must meet these requirements:
   - have the capacity and ability for the installer to provision ports on the nodes subnet
   - have dhcp enabled
   - the installer must be able to send and recieve https traffic to nodes connected to ports on the nodes subnet
@@ -136,6 +136,7 @@ Deploying OpenShift clusters to pre-existing network has the side-effect of redu
    1. `apiVIP` and `ingressVIP` must be valid IP addresses in the nodesSubnet CIDR
    2. `apiEndpoint` must be a valid IP address or URL
    3. `nodesSubnet` must be the uuid of a subnet that exists in the openstack cloud that the installer has access to
+   4. When `externalNetwork` is set, then `lbFloatingIP` also needs to be set. This goes both ways.
 ### Garduation Criteria
 This enhancement will follow standard graduation criteria.
 
