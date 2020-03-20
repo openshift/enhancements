@@ -215,7 +215,7 @@ in a pod:
  - Or new CRD API object could be defined just for capturing who can inject the Secrets onto the host, and then RBAC `Roles`
  could be defined on those objects, with `RoleBindings` defined to capture who can inject.
  - Then the admission apparatus, in the form of SAR checks against those objects using the requesting user's credentials,
-  would enforce who can inject. 
+  would enforce who can request injection on their pods, as well as who can directly create PVCs and pods with VolumeMounts that are serviced by the CSI driver, to ensure that arbitrary users can't create PVCs+Pods that will expose the global secrets. 
 
 ###### Build Specific consumption
 
