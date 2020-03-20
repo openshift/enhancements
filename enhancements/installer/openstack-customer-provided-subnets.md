@@ -35,7 +35,7 @@ To accomplish this, our infrastructure needs an OpenStack account access that ca
 ## Motivation
 
 ### Goals
-As an administrator, I would like to create or reuse my own networks, subnets and routing schemes that I can deploy OpenShift to.
+As an OpenStack user, I would like to deploy OpenShift onto pre-existing OpenStack networks, subnets and routing schemes.
 
 ### Non-Goals
 There are no changes in expectations regarding publicly addressable parts of the cluster.
@@ -88,7 +88,7 @@ pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
 
-Lastly, the installer will need to know how to access the API, so an optional argument, `apiEndpoint`, will take the FQDN the API can be reached at. This argument can be an IP address or a URL. When this argument is set, the installer will direct all API calls to the address the user provides.
+Lastly, the installer will need to know how to access the API, so an optional argument, `apiEndpoint`, will take the FQDN the Kubernetes API can be reached at. This argument can be an IP address or a URL. When this argument is set, the installer will direct all Kubernetes API calls to the address the user provides.
 
 ```yaml
 apiVersion: v1
@@ -102,7 +102,7 @@ pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
 
-### Subnets
+### Subnet
 - Subnets must all be a part of the same OpenStack cloud
 - Each subnet must be able to be tagged, and have the capacity for at least one tag. This allows us to add the `kubernetes.io/cluster/.*:` shared tag to identify the subnet as part of the cluster. The k8s cloud provider code in kube-controller-manager uses this tag to find the subnets for the cluster to create LoadBalancer Services.
 - The CIDR block for each one must be in MachineNetworks.
