@@ -1,5 +1,5 @@
 ---
-title: openshift-entitlement-injection
+title: openshift-sensitive-data-injection
 
 authors:
   - "@gabemontero"
@@ -31,7 +31,7 @@ see-also:
   
 ---
 
-# A More Automatic Experience For Use of Entitled RHEL Content In OpenShift V4 Pods and Builds
+# A More Automatic Experience For Injecting Sensitive Data In OpenShift V4 Pods and Builds
 
 
 ## Release Signoff Checklist
@@ -79,6 +79,9 @@ For the steps required in OpenShift Builds, see [the current 4.x doc](https://do
 
 This enhancement proposal aims to introduce more centralized and automated infrastructure to ease the burden of 
 making RHEL subscriptions/entitlements available to both general workloads (pods) and builds.
+
+Similar asks for injecting trusted certificate authorities have also arisen, and the implementation described below
+can facilitate that as well.
 
 ## Motivation
 
@@ -140,7 +143,8 @@ have access to the subscription configuration/credentials.
 with GitOps (or similar patterns) so that enabling entitled builds is not a burden as I scale the number of clusters 
 under management.
 
-TODO:  Still need some form of implementation details for this one if it remains in this proposal.
+2. As a cluster administrator, I can inject trusted certificate authorities into any approved pods in my cluster via
+a designated secret.
 
 ### Implementation Details/Notes/Constraints [optional]
 
