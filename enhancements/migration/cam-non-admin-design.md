@@ -103,6 +103,12 @@ the operator will install a namespaced Migration UI in namespace `Foo`. A new
 Migration Controller will be deployed in `openshift-migration` which will be
 watching namespace `Foo` for the creation of Migration Resources.
 
+The Controller needs to run in `openshift-migration` due to the fact that it
+will be using the elevated permissioned service account for both the source and
+destination clusters. If this controller ran in the user's namespace, we have
+broken the security model since the user could exec into the pod and gain
+access to this service account.
+
 #### Migration Controller
 
 The migration controller needs to run in `openshift-migration` since it will
@@ -111,63 +117,38 @@ exec into the controller pod and escalate their privileges.
 
 The controller’s migplan controller will need to be updated to validate that
 the list of namespaces selected on the migplan do not include namespaces which
-a user does not have access to migrate. To do this, it will leverage the
-discovery service’s RBAC-based authorization support to determine what
-namespaces the user can migrate.
+a user does not have access to migrate. 
 
-##### Discovery Controller
+##### Authorization
 
-The discovery controller will be updated to support RBAC-based authorization.
-Since CAM will be updated to allow a user to specify an identity token on the
-migration plan, the discovery controller can take this identity token in and
-use it as a bearer token.
+SAR checks will be used to determine whether or not a user has access to
+migrate a specific namespace. In order to present a list of namespaces to the
+user, a SAR check can be done to determine if the user has `get` access on a
+given namespace. The equivalent CLI command for this would be:
+```
+$ oc auth can-i get project -n <namespace>
+```
 
-The discovery controller would inventory the kubernetes RBAC resources and
-effectively implement Subject Access Review using the bearer token.  The
-authentication would be delegated to the cluster using a TokenReview. The RBAC
-model in kubernetes seems to be straight-forward and consistent with commonly
-found models. Based on the quality of the model and documentation, the
-implementation of the Access Review seems to be equally straight-forward.  This
-isn’t re-inventing RBAC, it’s simply applying the kubernetes RBAC rule set to
-the discovered data to provide authorization. Mainly leveraging an existing
-authentication mechanism and set of RBAC rules already being managed by users.
+Prior to running the actual migration, the plan controller should run
+additional SAR checks to ensure that the user has the required permissions for
+every action the migration controller will take on the given namespace. This
+includes:
+* scaling down deployments/replicasets/etc (quiescing applications)
+* creating/updating pods (for stage pods/labels/annotations)
+* listing PVCs (for storage selection)
+* etc.
 
-The controller inventories (and watches):
-* ClusterRoleBinding
-* RoleBinding
-* ClusterRole
-* Role
 
-The data is collected using the Mig SA token associated with the
-MigCluster.  The data is then indexed and used in conjunction with the user's
-identity token to determine the list of resources the user is able to migrate.
+##### Authorization - Cluster-Scoped resources
 
-REST request authorization steps:
-1. Authenticate the Bearer token to a User or ServiceAccount by performing a
-   TokenReview.  This step will provide information about the token (user or
-   SA).
-1. Find ClusterRoleBindings/RoleBindings for the User (and groups) or
-   ServiceAccount.
-1. Inspect the associated ClusterRole/Role rules.
-1. Match resources in the role's Rules.
-1. Match verb(s) in roles Rules.
-
-There will be one discovery controller running in the `openshift-migration`
-namespace. It will be responsible for indexing all of the added `migcluster`
-resources.
-
-###### A note about Subject Rules Review
-
-It was originally discussed that we could use Subject Rules Review to determine
-the list of resources a user could have access to on a given cluster. This
-seemed promising, but the way CAM currently operates this SRR check would run
-inside of the plan controller. The plan controller reconciles ~1-3 times a
-second which would lead to ~60 SRR requests a minute as a lowball estimate. It
-will also need to run an SRR check for every namespace included in a migration.
-In the case of 10 namespaces, this would be ~600 SRR requests a minute.
-
-In our benchmark tests, it took ~18 seconds to perform 100 SAR requests. This
-means using SRR is simply not a scalable solution for our controller.
+It's worth noting that cluster scoped resources are an exception to the rule
+here. A great example in this case are Persistent Volumes. In general, a user
+doesn't have the ability to list Persistent Volumes in a cluster and for that
+matter they cannot mutate them. The migration controller + Velero will mutate
+Persistent Volumes and needs the ability to list and introspect them to perform
+a good user experience. We need to determine whether this will be acceptable
+for CAM to interact with PVs that are consumed by a user's owned PVC, or
+whether additional permissions will need to be granted to the user.
 
 ### User Stories [optional]
 
