@@ -100,7 +100,9 @@ No longer require (though still allow) manual injection of subscription credenti
 
 Help customers who just started with OpenShift. They can work with `oc` and some sample yaml files but are completely overwhelmed with the entitlement story. Especially if they are used only to satellite and expect things just to work when they subscribe.  The RHCOS team has had to a lot of customer coaching in 4.x wrt entitlements.
 
-Wherever possible during the implementation, identify any openshift/builder image or build controller code hits that could be leveraged by tekton based image building, including OpenShift Build V2, to take the equivalent mounting of subscription credential content into the build pod (where something other than the build controller for Build V1 does this), and supply the necessary arguments to the `buildah` binary (vs. the `buildah` golang API the openshift/builder image uses).  The "code hit structuring" implies adding common code that could be referenced by both solutions into a separate, simpler, utility github/openshift repository.  
+Ensure that solutions for entitlements include any requirements on entitlements serve as a sufficient building block
+for the broader scenario of maintaining kmods on the host/nodes of an OpenShift cluster (@zvonkok is the contact for 
+this as well).
 
 ### Non-Goals
 
