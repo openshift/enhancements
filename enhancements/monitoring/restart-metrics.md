@@ -76,7 +76,8 @@ is not performant enough.
   text_collector.
 
 - A whitelist will be enabled in systemd_exporter to enable metrics from the
-  following core services:
+  following core services, using the built in command-line argument
+  ([collector.unit-whitelist](https://github.com/povilasv/systemd_exporter/blob/master/systemd/systemd.go#L25)):
   - kubelet
   - crio
   - sshd
