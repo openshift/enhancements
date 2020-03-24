@@ -56,7 +56,7 @@ To support custom endpoints for AWS APIs, the install-config would allow the use
 
 When custom endpoints are provided for AWS APIs, the cluster operators also need the discover the information, therefore, the installer will make these available using the `config.openshift.io/v1` `Infrastructure` object. The cluster operators can then use the custom endpoints from the object to configure the AWS SDK to use the corresponding endpoints for communications.
 
-Since various kubernetes components like the kube-apiserver, kubelet (machine-config-operator), kube-controller-manager, cloud-controller-managers use the `.spec.cloudConfig` Config Map reference for cloud provider specific configurations, a new controller `cluster-kube-cloud-config-operator` will be introduced to perform the task of stitching the custom endpoints with the rest of the cloud config, such that all the kubernetes components can continue to directly consume a Config Map for configuration. This controller will perform the specialized stitching on the bootstrap host for control-plane kubelet and also actively reconcile the state in the cluster.
+Since various kubernetes components like the kube-apiserver, kubelet (machine-config-operator), kube-controller-manager, cloud-controller-managers use the `.spec.cloudConfig` Config Map reference for cloud provider specific configurations, a new controller `cluster-kube-cloud-config-operator` will be introduced. The controller will perform the task of stitching the custom endpoints with the rest of the cloud config, such that all the kubernetes components can continue to directly consume a Config Map for configuration. This controller will also perform the specialized stitching on the bootstrap host for control-plane kubelet and also actively reconcile the state in the cluster.
 
 Currently the installer only allows users to specify the regions that has RHCOS published AMIs, and therefore to support custom regions, the installer will allow users to specify any region string as long as the users also provide the custom endpoints for some predetermined list of services that are necessary for successful installs.
 
@@ -139,7 +139,7 @@ The Terraform AWS provider doesn't accept random AWS API endpoint [overrides][te
 
 The `metadata.json` needs to store the custom endpoints from the `install-config.yaml` so that the users can delete the clusters without any previous state.
 
-### Infrastructure global configuration
+### Infrastructure global configuration for service endpoints
 
 Since almost of the cluster operators that communicate to the the AWS API need the use the API endpoints provided by the user, the `Infrastructure` global configuration seems like the best place to store and discover this information.
 
@@ -157,6 +157,8 @@ type InfrastructureSpec struct {
 // PlatformSpec holds some configuration to the underlying infrastructure provider
 // of the current cluster. It is supposed that only one of the spec structs is set.
 type PlatformSpec struct {
+  Type PlatformType `json:"type"`
+
   // AWS contains settings specific to the Amazon Web Services infrastructure provider.
   // +optional
   AWS *AWSPlatformSpec `json:"aws,omitempty"`
@@ -210,6 +212,10 @@ Infrastructure global configuration already performs the function of tracking in
 2. Configure each individual cluster operator
 There are five cluster operators that would need to be configured namely, cluster-kube-controller-manager, cluster-ingress-operator, cluster-machine-api-operator, cluster-image-registry-operator, cluster-credential-operator. There might be more operators like cluster-network-operator that might require access to the AWS APIs in the future to control the security group rules. Also various OLM operators that interact with AWS APIs will need their own configuration. Configuring all these separately is not a great UX for installer and a user who wants to modify the cluster to use API endpoints as day-2 operation.
 
+3. AWS has a `cloud.conf` file as mentioned in [upstream docs][k8s-cloud-conf] which is logically already an API supported and the file format already represents the canonical representation of this information.
+The cloud configuration doesn't translate well to what most of the OpenShift operators need to configure the clients for cloud APIs. The cloud config includes a lot more information than just configuring the clients like instance prefixes for LBs, information about the vpc, subnets etc. which the operators operators don't need. These values in the configuration makes it very difficult to abstract away information which most of the operators do not need.
+Secondly, if there ends up an special configuration required to configure the OpenShift operators for a cloud, we will end up conflicting with kube-cloud-controller code to make the ask valid as since it's purpose upstream is to configure k8s-cloud-controllers only.
+
 ### Cluster Kube Cloud Config Operator
 
 Since various kubernetes components like the kube-apiserver, kubelet (machine-config-operator), kube-controller-manager, cloud-controller-managers use the `.spec.cloudConfig` Config Map reference from the global `Infrastructure` configuration for cloud provider specific configurations. Introduction of new controller `cluster-kube-cloud-config-operator` allows performing the task of stitching the custom endpoints with the rest of the cloud config, such that all the kubernetes components can continue to directly consume a Config Map for configuration.
@@ -223,6 +229,32 @@ The controller reads the on disk `Infrastructure` object, and the cloud config C
 2. Writing that Config Map to disk for use by other operators and also push to the cluster
 
 The bootstrap control flow should not modify the existing `Infrastructure` object on the disk.
+
+#### Infrastructure global configuration updates for cloud configurations
+
+```go
+// InfrastructureSpec contains settings that apply to the cluster infrastructure.
+type InfrastructureSpec struct {
+  // cloudConfig is a reference to a ConfigMap containing the cloud provider configuration file.
+  // This configuration file is used to configure the Kubernetes cloud provider integration
+  // when using the built-in cloud provider integration or the external cloud controller manager.
+  // The namespace for this config map is openshift-config.
+  // +optional
+  CloudConfig ConfigMapFileReference `json:"cloudConfig"`
+}
+```
+
+```go
+// InfrastructureStatus describes the infrastructure the cluster is leveraging.
+type InfrastructureStatus struct {
+  // cloudConfig is a reference to a ConfigMap containing the cloud provider configuration file.
+  // This configuration file is used to configure the Kubernetes cloud provider integration
+  // when using the built-in cloud provider integration or the external cloud controller manager.
+  // The namespace for this config map is openshift-config-managed.
+  // +optional
+  CloudConfig ConfigMapFileReference `json:"cloudConfig"`
+}
+```
 
 #### Validations
 
@@ -396,6 +428,7 @@ Already covered inline.
 [aws-describe-instance-type-offerings]: https://aws.amazon.com/blogs/compute/it-just-got-easier-to-discover-and-compare-ec2-instance-types/
 [install-config-aws-ami]: https://github.com/openshift/installer/blob/e8289c5ddef58e17bbf22e225e179cbe70ac4108/pkg/types/aws/platform.go#L6-L8
 [k8s-aws-cloud-provider-get-resolver]: https://github.com/kubernetes/kubernetes/blob/5cb1ec5fea6c4cafee6b8de3d09ca65361063451/staging/src/k8s.io/legacy-cloud-providers/aws/aws.go#L656-L680
+[k8s-cloud-conf]: https://kubernetes.io/docs/concepts/cluster-administration/cloud-providers/#cloud-conf
 [k8s-aws-cloud-provider-service-overrides]: https://github.com/kubernetes/kubernetes/blob/5cb1ec5fea6c4cafee6b8de3d09ca65361063451/staging/src/k8s.io/legacy-cloud-providers/aws/aws.go#L595-L616
 [terraform-provider-aws-config-endpoints]: https://github.com/terraform-providers/terraform-provider-aws/blob/63b09d73d017b47d16790db92ba81c4f3fd7606e/aws/config.go#L390-L549
 [terraform-aws-provider-api-endpoints]: https://www.terraform.io/docs/providers/aws/guides/custom-service-endpoints.html
