@@ -97,6 +97,9 @@ is not performant enough.
 
 ### Risks and Mitigations
 
+- Node team will own the systemd_exporter image. The daemonset that configures
+  and deploys the image will be owned by the cluster-monitoring-operator.
+
 ## Design Details
 
 - Explained above
