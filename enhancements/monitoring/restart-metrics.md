@@ -61,9 +61,9 @@ system services.
 
 ### Current Behavior
 
-node_exporter is running in a non-privileged container - as user `nobody` - and
-cannot connect to the DBUS socket to communicate with systemd. Monitoring has
-concerns the underlying [systemd
+node_exporter is running in a non-privileged container and cannot connect to the
+DBUS socket to communicate with systemd because of an selinux denial. Monitoring
+has concerns the underlying [systemd
 collector](https://github.com/prometheus/node_exporter/blob/master/collector/systemd_linux.go)
 is not performant enough.
 
