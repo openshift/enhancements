@@ -11,7 +11,7 @@ approvers:
   - "@bparees"
   - "@adambkaplan"
 creation-date: 2019-12-02
-last-updated: 2020-01-20
+last-updated: 2020-03-23
 status: implementable
 ---
 
@@ -173,7 +173,7 @@ on the node where the pod is running the pod won't come up.
 
 Mitigations
 
-Mounted path always exist on worker nodes.
+Mounted path always exist on worker and master nodes.
 
 #### Image stream secrets endpoint
 
@@ -246,6 +246,7 @@ Does not apply.
 2019-12-12: Added pull-through support.
 2019-12-13: Added note on `readOnly` and image registry pull-through.
 2020-01-20: Added note on `ephemeral` containers under Risks and Mitigations.
+2020-03-23: Documenting credentials path as present on master nodes as well.
 
 ## Infrastructure Needed
 
