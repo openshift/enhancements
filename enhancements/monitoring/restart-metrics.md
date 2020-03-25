@@ -70,7 +70,7 @@ is not performant enough.
 ## Proposal
 
 - This proposal is to add a privileged sidecar running systemd_exporter
-  [systemd_exporter](https://github.com/povilasv/systemd_exporter]) to the
+  [systemd_exporter](https://github.com/povilasv/systemd_exporter) to the
   node_exporter [daemonset](https://github.com/openshift/cluster-monitoring-operator/blob/master/assets/node-exporter/daemonset.yaml#L17).
 
 - systemd_exporter will be configured to write metrics to node_exporters
