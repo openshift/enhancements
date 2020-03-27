@@ -86,7 +86,7 @@ Logs of a given type are co-located to the following indices:
 |---------|-----------|---------------|---------------|
 | Infra (`logs-infra`)|infra,logs-infra|infra-write|infra-00001|
 | Application Container (`logs-app`)|app,logs-app|app-write|app-000001|
-| Audit (`logs-audit`)|infra.audit,logs-audit|infra.audit-write|audit.infra-000001|
+| Audit (`logs-audit`)|audit,logs-audit|audit-write|audit-000001|
 
 **Note:** Log types are further defined in [LogForwarding](./cluster-logging-log-forwarding.md).
 
@@ -99,9 +99,9 @@ metadata:
 spec:
   logStore:
     retentionPolicy: 
-      logs-app:
+      application:
         maxAge: 7d
-      logs-infra
+      infra
         maxAge: 7d
 
 ```
@@ -149,7 +149,7 @@ Example configuration:
    <elasticsearch_index_name>
      tag "**"
      name_type static 
-     static_index_name 'container.app-write'
+     static_index_name 'app-write'
    </elasticsearch_index_name>
 ```
 #### Deprecations
@@ -171,7 +171,7 @@ wide settings associated with log type
 
 #### Upgrade
 The `elasticsearch-operator` will migrate existing log indices to work with the new data design by:
-* Indices beginning with `project.*` are aliased to: `app.logs`
+* Indices beginning with `project.*` are aliased to: `app`
 * Indices beginning with `.operations.*` are aliased to `infra`
 * Migrated indices are deleted after migration
 
@@ -204,13 +204,13 @@ There are no current alternatives
 #### Create Template
 ```
 curl http://localhost:9200/_template/app_logs?pretty -HContent-Type:application/json -XPUT -d '{
-  "index_patterns": ["app.container*"], 
+  "index_patterns": ["app*"], 
   "settings": {
     "number_of_shards": 1,
     "number_of_replicas": 1
   },
   "aliases": {
-    "app.logs": {}
+    "app": {}
    }
 }'
 ```
@@ -218,24 +218,24 @@ curl http://localhost:9200/_template/app_logs?pretty -HContent-Type:application/
 ```
 curl http://localhost:9200/app.container-000001?pretty -HContent-Type:application/json -XPUT -d '{
   "aliases": {
-    "app.container-write": {"is_write_index": true},
-    "app.logs": {}
+    "app-write": {"is_write_index": true},
+    "logs-app": {}
    }
 }'
 ```
 #### Insert Data
 ```
-curl http://localhost:9200/app.container-write/_doc/0?pretty \
+curl http://localhost:9200/app-write/_doc/0?pretty \
   -HContent-Type:application/json -XPOST -d '{"value":"1"}'
 
 ```
 #### Retrieve Data
 ```
-curl http://localhost:9200/app.logs/_search?pretty \
+curl http://localhost:9200/logs-app/_search?pretty \
   -HContent-Type:application/json
 ```
 #### Rollover Index
 ```
-curl http://localhost:9200/app.container-write/_rollover?pretty \
+curl http://localhost:9200/app-write/_rollover?pretty \
   -HContent-Type:application/json -XPOST -d '{"conditions": {"max_docs": 1}}'
 ```
