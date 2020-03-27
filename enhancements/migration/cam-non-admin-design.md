@@ -138,6 +138,13 @@ includes:
 * listing PVCs (for storage selection)
 * etc.
 
+For the full list of needed RBAC permisssions, please see
+[here](https://github.com/konveyor/mig-operator/blob/master/roles/migrationcontroller/templates/mig_rbac.yml.j2).
+However, it is worth noting that we don't require this full set of permissions
+to migrate a namespace. Truly we only need to isolate the list of actions CAM
+is taking in a given namespace as listed above. This list is being compiled
+[here](https://docs.google.com/document/d/1Wu7Bb6C3DRLKrH7ii1wG2us62JBUvE4VXmLxg6LHrR4/edit?usp=sharing)
+
 
 ##### Authorization - Cluster-Scoped resources
 
