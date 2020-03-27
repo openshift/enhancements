@@ -10,7 +10,7 @@ reviewers:
 approvers:
   - "@openshift/api-approvers"
 creation-date: 2020-03-19
-last-updated: 2020-03-19
+last-updated: 2020-03-27
 status: implementable
 see-also: [route-admission-policy](https://github.com/openshift/enhancements/blob/master/enhancements/ingress/openshift-route-admission-policy.md)
 replaces:
@@ -130,12 +130,6 @@ type IngressControllerSpec struct {
   //
   // +optional
   RouteAdmission *RouteAdmissionPolicy `json:"routeAdmission,omitempty"`
-}
-
-// (Existing type and field, included for completeness)
-type IngressControllerStatus struct {
-  // routeAdmission is the route admission policy that is in effect.
-  RouteAdmission *RouteAdmissionPolicy
 }
 ```
 
