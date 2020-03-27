@@ -150,6 +150,22 @@ a good user experience. We need to determine whether this will be acceptable
 for CAM to interact with PVs that are consumed by a user's owned PVC, or
 whether additional permissions will need to be granted to the user.
 
+For CAM in the PV case, I think it makes sense to see if a user can *update*
+PVCs in the given namespace, and if they have the proper permissions to do
+this, we can assume that it is safe to copy the data off a PV or in the move
+case, to change the `ReclaimPolicy`.
+
+There is 2 potential approaches that we can take for the non-admin design in
+terms of handling of cluster-scoped resources *other* than Persistent Volumes.
+A good example of a cluster-scoped resource we handle today that a regular user
+doesn't have access to is SCCs. I believe that we could follow a similar
+pattern to what we used in the past with the Ansible Service Broker to expose a
+configuration option `autoEscalate` which would enable our plugins to pick up
+cluster-scoped resources given that a namespace scoped resource the user has
+access to depends on it. Otherwise, every other cluster-scoped resource that
+the user cannot *get* (which will be checked via SAR check) will not be
+included in the backup. This can be controlled easily via the plugin.
+
 ### User Stories [optional]
 
 With this feature, a normal OpenShift user who only has elevated permissions
