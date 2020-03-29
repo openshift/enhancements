@@ -32,7 +32,7 @@ status: provisional
 ## Open Questions [optional]
 
 - [x] Initial "exec" denial mechanism PoC (with 1 validating webhook only)
-- [ ] Complete "exec" denial mechanism PoC using [che-workspace-crd-operator](https://github.com/che-incubator/che-workspace-crd-operator) (with 1 mutating + 3 validating webhooks). See section "Pod Exec Denial Policy" below.
+- [x] Complete "exec" denial mechanism PoC using [che-workspace-crd-operator](https://github.com/che-incubator/che-workspace-crd-operator) (with 1 mutating + 3 validating webhooks). See section "Pod Exec Denial Policy" below.
 - [ ] Define the mechanism to inject user tokens in the tooling container. See section "Users Token Injection in Tooling Containers" below.
 - [ ] Analyse if [Kubernetes RBAC](https://github.com/brancz/kube-rbac-proxy) works better for us then [OpenShift OAuth Proxy](https://github.com/openshift/oauth-proxy) as the auth proxy sidecar.
 
