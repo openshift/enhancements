@@ -7,6 +7,10 @@ reviewers:
   - "@eparis"
   - "@rphillips"
   - "@runcom"
+  - "@yuqi-zhang"
+  - "@kikisdeliveryservice"
+  - "@sinnykumari"
+  - "@ericavonb"
 approvers:
   - "@crawford"
   - "@eparis"
