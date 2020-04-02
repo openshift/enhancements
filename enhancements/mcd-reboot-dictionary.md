@@ -255,7 +255,12 @@ required to make it possible.
 
 ## Drawbacks 
 
-The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
+The risks primarily fall into 4 categories:
+- configuration: that files could be be added to the whitelist even though they require a reboot in unidentified scenarios,
+- behavioural: that some config changes will result in a reboot, others not, and that admins cannot determine which in advance
+- support: that the implementation could introduce bugs that prevent necessary reboots from being triggered
+- tech debt: that the implementation will be hard to replace once a holistic approach is identified
+
 
 ## Alternatives
 
