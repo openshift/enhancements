@@ -3,11 +3,13 @@ title: signal-cluster-deletion
 authors:
   - "@abutcher"
 reviewers:
-  - TBD
+  - dgoodwin
+  - abhinavdahiya
 approvers:
-  - TBD
+  - dgoodwin
+  - abhinavdahiya
 creation-date: 2020-03-30
-last-updated: 2020-03-30
+last-updated: 2020-04-06
 status: provisional
 ---
 
@@ -33,7 +35,8 @@ Signal that cluster deletion has begun through deletion of a new CRD `ClusterAli
 
 ### Non-Goals
 
-Attaching finalizers to operator resources based on the `ClusterAlive` object which would facilitate removal of operator resources.
+* Attaching finalizers to operator resources based on the `ClusterAlive` object which would facilitate removal of operator resources.
+* Removing resources other than the `ClusterAlive` object during cluster uninstall.
 
 ## Proposal
 
@@ -54,7 +57,8 @@ apiVersion: v1
 kind: ClusterAlive
 metadata:
   name: cluster
-  namespace: openshift-config
+spec:
+  blockTeardown: true  # block teardown of operator resources
 ```
 
 #### Install
@@ -67,7 +71,7 @@ Create `ClusterAlive` object for existing clusters. (Is this the right place to 
 
 #### Uninstall
 
-Delete a cluster's `ClusterAlive` resource during uninstallation and wait X minutes before continuing cluster tear down.
+Delete a cluster's `ClusterAlive` resource during uninstall when requested via flag such as `openshift-install destroy cluster --cluster-alive-delete`. Cluster destroy will wait for a default amount of time and fail if `ClusterAlive` deletion was not successful. The default timeout will not be configurable and users will be expected to attempt shutdown multiple times upon failure.
 
 ### Risks and Mitigations
 
@@ -75,7 +79,12 @@ Delete a cluster's `ClusterAlive` resource during uninstallation and wait X minu
 
 ### Test Plan
 
-Deletion of the `ClusterAlive` resource will occur in uninstall by default and will be tested by e2e as part of regular cluster teardown.
+In OpenShift CI, clusters will try to delete their `ClusterAlive` object and if that fails, all infra resources will be destroyed.
+
+```
+destroy cluster --cluster-alive-delete || true
+destroy cluster
+```
 
 ### Graduation Criteria
 
