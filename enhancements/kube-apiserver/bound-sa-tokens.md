@@ -80,7 +80,7 @@ therefore risk of compromise) for a given service account token.
     - service-account-signing-key-file
       - Operator should set this to the path of the private key it manages
     - service-account-issuer
-      - Operator should default this to `auth.openshift.io` and it should be possible to
+      - Operator should default this to `https://kubernetes.default.svc` and it should be possible to
         override it. When it is overridden, tokens from the previous issuer will no longer
         validate and it may be necessary to restart affected pods.
     - api-audiences
