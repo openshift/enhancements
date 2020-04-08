@@ -1,4 +1,3 @@
-
 ---
 title: Managing Control Plane machines
 authors:
