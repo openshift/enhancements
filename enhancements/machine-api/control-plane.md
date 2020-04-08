@@ -108,40 +108,40 @@ To satisfy the goals, motivation and stories above this propose a new CRD and co
 
 #### Declarative horizontal scaling
 ##### Scale out
-1 - The controller always reconciles towards expected number of replicas. This must be an odd number.
-2 - Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label.
-3 - Compare with expected replicas number. If expected is higher than current then:
-4 - Check all owned machines have a backed ready node.
-5 - Check all etcd members for all owned machines are healthy via Cluster etcd Operator status signalling.
-6 - If (NOT all etcd members are healthy OR NOT all owned machines have a backed ready node) then controller short circuits here, log, update status and requeue. Else:
-7 - Choose a failure domain.
-8 - Create new Machine object with a templated spec. Go to 1.
-9 - Cluster etcd Operator watches the new node. It runs a new etcd pod on it.
+1. The controller always reconciles towards expected number of replicas. This must be an odd number.
+2. Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label.
+3. Compare with expected replicas number. If expected is higher than current then:
+4. Check all owned machines have a backed ready node.
+5. Check all etcd members for all owned machines are healthy via Cluster etcd Operator status signalling.
+6. If (NOT all etcd members are healthy OR NOT all owned machines have a backed ready node) then controller short circuits here, log, update status and requeue. Else:
+7. Choose a failure domain.
+8. Create new Machine object with a templated spec. Go to 1.
+9. Cluster etcd Operator watches the new node. It runs a new etcd pod on it.
 
 ##### Scale in
-1 - The controller always reconciles towards expected number of replicas. This must be an odd number.
-2 - Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label.
-3 - Compare with expected replicas number. If expected is lower than current then:
-4 - Check all owned machines have a backed ready node.
-5 - Check all etcd members for all owned machines are healthy via Cluster etcd Operator status signalling.
-6 - If (NOT all etcd members are healthy OR NOT all owned machines have a backed ready node) then controller short circuits here, log, update status and requeue. Else:
-7 - Remove etcd member.
-8 - Delete machine. Go to 1. (Race between the node going away and Cluster etcd Operator re-adding the member?)
+1. The controller always reconciles towards expected number of replicas. This must be an odd number.
+2. Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label.
+3. Compare with expected replicas number. If expected is lower than current then:
+4. Check all owned machines have a backed ready node.
+5. Check all etcd members for all owned machines are healthy via Cluster etcd Operator status signalling.
+6. If (NOT all etcd members are healthy OR NOT all owned machines have a backed ready node) then controller short circuits here, log, update status and requeue. Else:
+7. Remove etcd member.
+8. Delete machine. Go to 1. (Race between the node going away and Cluster etcd Operator re-adding the member?)
 
 #### Declarative Vertical scaling (scale out + scale in)
-1 - Watch changes to the Control Plane provideSpec
-2 - Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label.
-3 - Fetch all machines with old providerSpec.
-4 - If any machine has old providerSpec then signal controller as "needs upgrade".
-5 - If any machine has "replaced" annotation then trigger scale in workflow (starting in 4) and requeue. Else:
-6 - Pick oldest machine in more populated domain failure.
-7 - Trigger scale out workflow (starting in 4). Set "replaced" annotation. Requeue.
+1. Watch changes to the Control Plane provideSpec
+2. Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label.
+3. Fetch all machines with old providerSpec.
+4. If any machine has old providerSpec then signal controller as "needs upgrade".
+5. If any machine has "replaced" annotation then trigger scale in workflow (starting in 4) and requeue. Else:
+6. Pick oldest machine in more populated domain failure.
+7. Trigger scale out workflow (starting in 4). Set "replaced" annotation. Requeue.
 This is effectively a rolling upgrade with maxUnavailable 0 and maxSurge 1.
 
 #### Self healing (MHC + reconciling)
-1 - The Controller should always reconcile by removing etcd members for voluntary Machine disruptions, i.e machine deletion.
-2 - At creation time, unless indicated otherwise `EnableAutorepair=true` will be default. The controller will create a Machine Health Checking resource with an ownerRef which will monitor the Control Plane Machines. This will request unhealthy machines to be deleted. Related https://github.com/openshift/machine-api-operator/pull/543.
-3 - The controller will ensure the `maxUnhealthy` value in the MHC resource is set a to known integer to prevent farther remediation from happening during scenarios where quorum could be violated. E.g 1 for cluster with 3 members or 2 for a cluster with 5 members.
+1. The Controller should always reconcile by removing etcd members for voluntary Machine disruptions, i.e machine deletion.
+2. At creation time, unless indicated otherwise `EnableAutorepair=true` will be default. The controller will create a Machine Health Checking resource with an ownerRef which will monitor the Control Plane Machines. This will request unhealthy machines to be deleted. Related https://github.com/openshift/machine-api-operator/pull/543.
+3. The controller will ensure the `maxUnhealthy` value in the MHC resource is set a to known integer to prevent farther remediation from happening during scenarios where quorum could be violated. E.g 1 for cluster with 3 members or 2 for a cluster with 5 members.
 
 #### Bootstrapping (scale out)
 Currently during a regular IPI bootstrapping process the installer uses Terraform to create a bootstrapping instance and 3 master instances. Then it creates Machine resources to "adopt" the existing master instances. In the past etcd quorum needed to be reached between the three of them before having storage available for the control plane to run self hosted and so for the CVO to run its payload.
