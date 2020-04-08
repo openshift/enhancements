@@ -46,7 +46,7 @@ This proposal outlines a solution for declaratively managing as a single entity 
 ## Motivation
 
 The Control Plane is the most critical and sensitive entity of a running cluster. Today OCP Control Plane instances are "pets" and therefore fragile. There are multiple scenarios where adjusting the compute capacity which is backing the Control Plane components might be desirable either for resizing or repairing. 
-Currently there is nothing that automates or eases this task. The steps for the Control Plane to be resized in any manner or to recover from a tolerable failure are completely manual. Different teams are following different SOP documents scattered around with manual steps resulting in loss of information, confusion and extra efforts for engineers and users.
+Currently there is nothing that automates or eases this task. The steps for the Control Plane to be resized in any manner or to recover from a tolerable failure are completely manual. Different teams are following different "Standard Operating Procedure" documents scattered around with manual steps resulting in loss of information, confusion and extra efforts for engineers and users.
 
 ### Goals
 
