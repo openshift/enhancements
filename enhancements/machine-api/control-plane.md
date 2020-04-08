@@ -125,8 +125,9 @@ To satisfy the goals, motivation and stories above this propose a new CRD and co
 4. Check all owned machines have a backed ready node.
 5. Check all etcd members for all owned machines are healthy via Cluster etcd Operator status signalling.
 6. If (NOT all etcd members are healthy OR NOT all owned machines have a backed ready node) then controller short circuits here, log, update status and requeue. Else:
-7. Remove etcd member.
-8. Delete machine. Go to 1. (Race between the node going away and Cluster etcd Operator re-adding the member?)
+7. Pick oldest machine in more populated domain failure.
+8. Remove etcd member.
+9. Delete machine. Go to 1. (Race between the node going away and Cluster etcd Operator re-adding the member?)
 
 #### Declarative Vertical scaling (scale out + scale in)
 1. Watch changes to the Control Plane provideSpec
