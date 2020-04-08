@@ -1,6 +1,6 @@
 
 ---
-title: Single entity Control Plane
+title: Managing Control Plane machines
 authors:
   - enxebre
 reviewers:
@@ -27,7 +27,7 @@ see-also:
   - "https://github.com/openshift/cluster-openshift-apiserver-operator"
 ---
 
-# Single entity Control Plane
+# Managing Control Plane machines
 
 ## Release Signoff Checklist
 
