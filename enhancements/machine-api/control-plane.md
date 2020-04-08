@@ -109,7 +109,7 @@ To satisfy the goals, motivation and stories above this propose a new CRD and co
 #### Declarative horizontal scaling
 ##### Scale out
 1. The controller always reconciles towards expected number of replicas. This must be an odd number.
-2. Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label.
+2. Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label e.g `node-role.kubernetes.io/master`.
 3. Compare with expected replicas number. If expected is higher than current then:
 4. Check all owned machines have a backed ready node.
 5. Check all etcd members for all owned machines are healthy via Cluster etcd Operator status signalling.
@@ -120,7 +120,7 @@ To satisfy the goals, motivation and stories above this propose a new CRD and co
 
 ##### Scale in
 1. The controller always reconciles towards expected number of replicas. This must be an odd number.
-2. Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label.
+2. Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label e.g `node-role.kubernetes.io/master`.
 3. Compare with expected replicas number. If expected is lower than current then:
 4. Check all owned machines have a backed ready node.
 5. Check all etcd members for all owned machines are healthy via Cluster etcd Operator status signalling.
