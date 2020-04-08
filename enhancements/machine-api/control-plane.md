@@ -1,3 +1,4 @@
+
 ---
 title: Managing Control Plane machines
 authors:
@@ -61,25 +62,32 @@ Currently there is nothing that automates or eases this task. The steps for the 
 ### Non-Goals
 
 - To integrate with any existing etcd topology e.g external clusters. Stacked etcd with dynamic member identities, local storage and the Cluster etcd Operator are an assumed invariant.
-- To managed individual Control Plane components. Self hosted Control Plane components that are self managed by their operators is an assumed invariant.
+- To managed individual Control Plane components. Self hosted Control Plane components that are self managed by their operators is an assumed invariant:
+	- Rolling OS upgrades and config changes at the software layer are managed by the Machine Config Operator.
+	- etcd Guard that ensures a PDB to honour quorum is managed by the Machine Config Operator.
+	- Each individual Control Plane component i.e Kube API Server, Scheduler and controller manager are self hosted and managed by their operators.
+	- The Cluster etcd Operator manages certificates, report healthiness and add etcd members as "Master" nodes join the cluster.
+	- The Kubelet is tied to the OS and therefore is managed by the Machine Config Operator.
 - To integrate with any Control Plane components topology e.g Remote hosted pod based Control Plane.
 - Automated disaster recovery of a cluster that has lost quorum.
 - To manage OS upgrades. This is managed by the Machine Config Operator.
 - To manage configuration changes at the software layer. This is managed by the Machine Config Operator.
+- To manage the life cycle of Control Plane components
 - To automate the provisioning and decommission of the bootstrapping instance managed by the installer.
 
 ## Proposal
 
 This proposes an ad-hoc CRD and controller for declaratively managing as a single entity the compute resources that host the OCP Control Plane components.
 
-This entity is decoupled and orthogonal to the lifecycle and management of the Control Plane components that it hosts:
-- Rolling OS upgrades and config changes at the software layer are managed by the Machine Config Operator.
-- etcd Guard that ensures a PDB to honour quorum is managed by the Machine Config Operator.
-- Each individual Control Plane component i.e Kube API Server, Scheduler and controller manager are self hosted and managed by their operators.
-- The Cluster etcd Operator manages certificates, report healthiness and add etcd members as "Master" nodes join the cluster.
-- The Kubelet is tied to the OS and therefore is managed by the Machine Config Operator.
+This controller differs from a regular machineSet in that: 
+- It ensures that scaling operations are non disruptive for etcd:
+	- It scales one resource at a time.
+	- It let scaling operations proceed only when all etcd members are healthy and all the owned machines have a backed ready node.
+- It ensure even spread of compute resources across failure domains.
+- It removes etcd membership for voluntary machine disruptions (Question: can rather etcd operator somehow handle this?).
+- It owns and ensure safe values for a MHC that monitor its machines.
 
-All of these components are expected to keep self managing themselves as the cluster shrink and expand the Control Plane compute resources.
+This entity is decoupled and orthogonal to the lifecycle and management of the Control Plane components that it hosts. All of these components are expected to keep self managing themselves as the cluster shrink and expand the Control Plane compute resources.
 
 ### User Stories [optional]
 
@@ -127,7 +135,7 @@ To satisfy the goals, motivation and stories above this propose a new CRD and co
 4. Check all owned machines have a backed ready node.
 5. Check all etcd members for all owned machines are healthy via Cluster etcd Operator status signalling.
 6. If (NOT all etcd members are healthy OR NOT all owned machines have a backed ready node) then controller short circuits here, log, update status and requeue. Else:
-7. Pick oldest machine in more populated domain failure.
+7. Pick oldest machine in more populated failure domain.
 8. Remove etcd member.
 9. Delete machine. Go to 1. (Race between the node going away and Cluster etcd Operator re-adding the member?)
 
@@ -137,7 +145,7 @@ To satisfy the goals, motivation and stories above this propose a new CRD and co
 3. Fetch all machines with old providerSpec.
 4. If any machine has old providerSpec then signal controller as "needs upgrade".
 5. If any machine has "replaced" annotation then trigger scale in workflow (starting in 4) and requeue. Else:
-6. Pick oldest machine in more populated domain failure.
+6. Pick oldest machine in more populated failure domain.
 7. Trigger scale out workflow (starting in 4). Set "replaced" annotation. Requeue.
 This is effectively a rolling upgrade with maxUnavailable 0 and maxSurge 1.
 
@@ -259,7 +267,7 @@ Otherwise this would go "Tech Preview" under a feature gate first until enough r
 
 ### Upgrade / Downgrade Strategy
 
-During the cluster upgrade for the targeted release the Machine API Operator (MAO) will let the CVO to instantiate the new CRD `controlPlane` and it will run the backing controller making this functionallity opt-in for existing clusters. The user can create an instance of the new CRD if they choose to do so.
+During the cluster upgrade for the targeted release the Machine API Operator (MAO) will let the CVO to instantiate the new CRD `controlPlane` and it will run the backing controller making this functionality opt-in for existing clusters. The user can create an instance of the new CRD if they choose to do so.
 
 New IPI clusters deployed after the targeted release will run the `controlPlane` instance deployed by the installer out of the box.
 
@@ -274,11 +282,55 @@ New IPI clusters deployed after the targeted release will run the `controlPlane`
 
 ## Alternatives
 
-- Same approach but different details:
-The Control Plane controller scaling logic could be built atop machineSets just like a deployment uses replica sets. The scenarios to be supported in this proposal are very specific. The flexibility that managing machineSets would provide is not needed. The Control Plane is critical and we want to favour control over flexibility here, therefore this proposes an ad-hoc controller logic to avoid unnecessary layers of complexity.
+1. Use only existing resources for managing the Control Plane:
 
-- Cluster etcd Operator could develop the capabilities to manage and scale machines. However this would break multiple design boundaries:
+This wouldn't be enough to satisfy the user stories in this proposal.
+
+Scenario 1: Scale out compute from 3 to 5. 2 etcd member healthy and 1 unhealthy out of 3.
+
+- With only machineSet + MHC:
+	- New machines start to come up.
+	- As soon as the etcd API is notified of a new member( total 4, healthy 2) the cluster
+	loses quorum until that new member starts and joins the cluster.
+	- There's no automation mechanism for Machines to spread evenly across failure domains.
+
+- With upper level controller:
+	- If (NOT all etcd members are healthy OR NOT all owned machines have a backed ready node) then controller short circuits here, log, update status and requeue. Else:
+	- Scale up one machine at a time. Go to 1.
+
+Scenario 2: 4 etcd member healthy and 1 unhealthy out of 5. Scale in compute from 5 to 3.
+
+- With only machineSet + MHC:
+	- Machines start to get deleted.
+	- etcd peer membership is not removed. 
+	- etcd guard blocks on drain before losing quorum. etcd remains degraded.
+	- There's no automation mechanism for Machines to spread evenly across failure domains.
+
+- With upper level controller:
+	- If (NOT all etcd members are healthy OR NOT all owned machines have a backed ready node) then controller short circuits here, log, update status and requeue. Else:
+	- Machines start to get deleted.
+	- remove etcd member. Quorum membership remains consistent.
+
+Scenario 3: self-healing
+
+- With only machineSet + MHC:
+	- All burden is on a consumer of the APIs to set safe inputs.
+
+- With upper level controller:
+	- Self healing is signalled with a bool via API.
+	- The Controller own all the details
+
+2. Same approach but different details: The Control Plane controller scaling logic could be built atop machineSets just like a deployment uses replica sets.
+
+The scenarios to be supported in this proposal are very specific. The flexibility that managing machineSets would provide is not needed. 
+
+The Control Plane is critical and we want to favour control over flexibility here, therefore this proposes an ad-hoc controller logic to avoid unnecessary layers of complexity.
+
+3. Cluster etcd Operator could develop the capabilities to manage and scale machines. However this would break multiple design boundaries:
 The Cluster etcd Operator has the ability to manage etcd members at Pod level without being necessarily tied to the lifecycle of Nodes or Machines.
+
 There are UPI environments where the Machine API is not running the Master instances. Nevertheless we want the Cluster etcd Operator to manage the etcd membership consistently there.
 
-- Hive could develop the capabilities to manage and scale the Control Plane Machines. However this would leave multiple scenarios uncovered where the Control Plane Machines would remain "pets" and it won't satisfy multiple of the stories mentioned above. Instead this proposal provides a reasonable abstraction to guarantee a certain level of consistent behaviour that Hive can still leverage as it sees fit.
+4. Hive could develop the capabilities to manage and scale the Control Plane Machines.
+
+However this would leave multiple scenarios uncovered where the Control Plane Machines would remain "pets" and it won't satisfy multiple of the stories mentioned above. Instead this proposal provides a reasonable abstraction to guarantee a certain level of consistent behaviour that Hive can still leverage as it sees fit.
