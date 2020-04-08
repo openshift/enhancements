@@ -43,11 +43,12 @@ superseded-by:
 
 For clarity in this doc we set the definition for "Control Plane" as "The collection of stateless and stateful processes which enable a Kubernetes cluster to meet minimum operational requirements". This includes: kube-apiserver, kube-controller-manager, kube-scheduler, kubelet and etcd.
 
-This proposal outlines a solution for declaratively managing as a single entity the compute resources that host the OCP Control Plane components. It introduces scaling and self-healing capabilities for Control Plane compute resources while honouring inviolable Etcd expectations and without disrupting the lifecycle of Control plane components.
+This proposal outlines a solution for declaratively managing as a single entity the compute resources that host the OCP Control Plane components. It introduces scaling and self-healing capabilities for Control Plane compute resources while honouring inviolable etcd expectations and without disrupting the lifecycle of Control plane components.
 
 ## Motivation
 
 The Control Plane is the most critical and sensitive entity of a running cluster. Today OCP Control Plane instances are "pets" and therefore fragile. There are multiple scenarios where adjusting the compute capacity which is backing the Control Plane components might be desirable either for resizing or repairing. 
+
 Currently there is nothing that automates or eases this task. The steps for the Control Plane to be resized in any manner or to recover from a tolerable failure are completely manual. Different teams are following different "Standard Operating Procedure" documents scattered around with manual steps resulting in loss of information, confusion and extra efforts for engineers and users.
 
 ### Goals
@@ -84,7 +85,7 @@ This controller differs from a regular machineSet in that:
 	- It let scaling operations proceed only when all etcd members are healthy and all the owned machines have a backed ready node.
 - It ensure even spread of compute resources across failure domains.
 - It removes etcd membership for voluntary machine disruptions (Question: can rather etcd operator somehow handle this?).
-- It owns and ensure safe values for a MHC that monitor its machines.
+- It owns and ensure safe values for a MHC that monitor the Control Plane machines.
 
 This entity is decoupled and orthogonal to the lifecycle and management of the Control Plane components that it hosts. All of these components are expected to keep self managing themselves as the cluster shrink and expand the Control Plane compute resources.
 
@@ -113,11 +114,11 @@ This entity is decoupled and orthogonal to the lifecycle and management of the C
 
 ### Implementation Details/Notes/Constraints [optional]
 
-To satisfy the goals, motivation and stories above this propose a new CRD and controller that manages the Control Plane as a single entity which supports the following features:
+To satisfy the goals, motivation and stories above this proposes a new CRD and a controller that manages the Control Plane as a single entity. It supports the following features:
 
 #### Declarative horizontal scaling
 ##### Scale out
-1. The controller always reconciles towards expected number of replicas. This must be an odd number.
+1. The controller always reconciles towards expected number of replicas. Validation enforce this to be an odd number.
 2. Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label e.g `node-role.kubernetes.io/master`.
 3. Compare with expected replicas number. If expected is higher than current then:
 4. Check all owned machines have a backed ready node.
@@ -128,13 +129,13 @@ To satisfy the goals, motivation and stories above this propose a new CRD and co
 9. Cluster etcd Operator watches the new node. It runs a new etcd pod on it.
 
 ##### Scale in
-1. The controller always reconciles towards expected number of replicas. This must be an odd number.
+1. The controller always reconciles towards expected number of replicas. Validation enforce this to be an odd number.
 2. Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label e.g `node-role.kubernetes.io/master`.
 3. Compare with expected replicas number. If expected is lower than current then:
 4. Check all owned machines have a backed ready node.
 5. Check all etcd members for all owned machines are healthy via Cluster etcd Operator status signalling.
 6. If (NOT all etcd members are healthy OR NOT all owned machines have a backed ready node) then controller short circuits here, log, update status and requeue. Else:
-7. Pick oldest machine in more populated failure domain.
+7. Pick oldest machine in more populated failure domain out of a candidates to be deleted list (by default all owned Machines).
 8. Remove etcd member.
 9. Delete machine. Go to 1. (Race between the node going away and Cluster etcd Operator re-adding the member?)
 
@@ -143,7 +144,7 @@ To satisfy the goals, motivation and stories above this propose a new CRD and co
 2. Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label.
 3. Fetch all machines with old providerSpec.
 4. If any machine has old providerSpec then signal controller as "needs upgrade".
-5. If any machine has "replaced" annotation then trigger scale in workflow (starting in 4) and requeue. Else:
+5. If any machine has "replaced" annotation then trigger scale in workflow (starting in 4) passing the machines with "replace" annotation as the candidates to be deleted and requeue. Else:
 6. Pick oldest machine in more populated failure domain.
 7. Trigger scale out workflow (starting in 4). Set "replaced" annotation. Requeue.
 This is effectively a rolling upgrade with maxUnavailable 0 and maxSurge 1.
