@@ -94,7 +94,7 @@ All of these components are expected to keep self managing themselves as the clu
 - As a SRE, I want to have consumable API primitives in place to resize Control Plane compute resources so I can develop upper level automation tooling atop. E.g Control Plane autoresizing to support a severe growth peak of the number of worker nodes.
 
 #### Story 5
-- As an operator, I want my cluster infrastructure to be self healing so I want faulty nodes to be remediated automatically for safety scenarios.
+- As an operator, I want my machine API cluster infrastructure to be self healing so I want faulty nodes to be remediated automatically for safety scenarios.
 
 #### Story 6
 - As a multi cluster operator, I want to have a universal user experience for managing the Control Plane in a declarative manner across any cloud provider, bare metal and any flavour of the product that have in common the topology assumed in this doc.
