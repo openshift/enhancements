@@ -55,7 +55,7 @@ Currently there is nothing that automates or eases this task. The steps for the 
 - To have a declarative mechanism to manage the Control Plane as a single entity.
 - To support declarative safe horizontal scaling towards an odd number of replicas for the control plane compute resources.
 - To support declarative safe vertical scaling for the control plane compute resources.
-- To support declarative safe self-healing and replacement of Control Plane compute resources when the unhealthy resources are below n/2.
+- To support declarative safe self-healing and replacement of Control Plane compute resources when the healthy resources are above n/2.
 - To support even spread of compute resources across multiple failure domains.
 
 ### Non-Goals
