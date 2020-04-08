@@ -147,7 +147,7 @@ This is effectively a rolling upgrade with maxUnavailable 0 and maxSurge 1.
 #### Bootstrapping (scale out)
 Currently during a regular IPI bootstrapping process the installer uses Terraform to create a bootstrapping instance and 3 master instances. Then it creates Machine resources to "adopt" the existing master instances. In the past etcd quorum needed to be reached between the three of them before having storage available for the control plane to run self hosted and so for the CVO to run its payload.
 
-The Cluster etcd Operator introduced support for a single member etcd cluster to be available quickly on the bootstrapping machine. This lets the CVO to be deployed much faster while new etcd members are added organically as masters come up.
+The Cluster [etcd Operator](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/cluster-etcd-operator.md) introduced support for a single member etcd cluster to be available quickly on the bootstrapping machine. This lets the CVO to be deployed much faster while new etcd members are added organically as masters come up.
 
 This proposes dropping terraform for creating masters instances in favour of letting the installer to define a Control Plane resource that scales from zero to 3 replicas as soon as the CVO runs the Machine API Operator. Alternatively if this happen to not be doable because of chicken-egg issues, we could keep the current workflow and include an additional step to create the Control Plane resource which would just adopt existing Master machines.
 
