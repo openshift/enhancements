@@ -1,4 +1,3 @@
-
 ---
 title: Managing Control Plane machines
 authors:
@@ -12,19 +11,22 @@ reviewers:
   - derekwaynecarr
 approvers:
   - TBD
+
 creation-date: 2020-04-02
 last-updated: yyyy-mm-dd
-status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced
+status: implementable
 see-also:
-  - "https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20191017-kubeadm-based-control-plane.md"
-  - "https://github.com/openshift/enhancements/blob/master/enhancements/etcd/cluster-etcd-operator.md"
-  - "https://github.com/openshift/enhancements/blob/master/enhancements/etcd/disaster-recovery-with-ceo.md"
-  - "https://github.com/openshift/machine-config-operator/blob/master/docs/etcd-quorum-guard.md"
-  - "https://github.com/openshift/cluster-kube-scheduler-operator"
-  - "https://github.com/openshift/cluster-kube-controller-manager-operator"
-  - "https://github.com/openshift/cluster-openshift-controller-manager-operator"
-  - "https://github.com/openshift/cluster-kube-apiserver-operator"
-  - "https://github.com/openshift/cluster-openshift-apiserver-operator"
+  - https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20191017-kubeadm-based-control-plane.md
+  - https://github.com/openshift/enhancements/blob/master/enhancements/etcd/cluster-etcd-operator.md
+  - https://github.com/openshift/enhancements/blob/master/enhancements/etcd/disaster-recovery-with-ceo.md
+  - https://github.com/openshift/machine-config-operator/blob/master/docs/etcd-quorum-guard.md
+  - https://github.com/openshift/cluster-kube-scheduler-operator
+  - https://github.com/openshift/cluster-kube-controller-manager-operator
+  - https://github.com/openshift/cluster-openshift-controller-manager-operator
+  - https://github.com/openshift/cluster-kube-apiserver-operator
+  - https://github.com/openshift/cluster-openshift-apiserver-operator
+replaces:
+superseded-by:
 ---
 
 # Managing Control Plane machines
