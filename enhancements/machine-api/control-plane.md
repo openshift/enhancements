@@ -162,6 +162,9 @@ The Cluster [etcd Operator](https://github.com/openshift/enhancements/blob/maste
 This proposes dropping terraform for creating masters instances in favour of letting the installer to define a Control Plane resource that scales from zero to 3 replicas as soon as the CVO runs the Machine API Operator. Alternatively if this happen to not be doable because of chicken-egg issues, we could keep the current workflow and include an additional step to create the Control Plane resource which would just adopt existing Master machines.
 
 #### API
+
+`controlplane.machine.openshift.io`
+
 ```
 type ControlPlane struct {
 	metav1.TypeMeta   `json:",inline"`
