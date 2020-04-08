@@ -41,7 +41,7 @@ see-also:
 
 For clarity in this doc we set the definition for "Control Plane" as "The collection of stateless and stateful processes which enable a Kubernetes cluster to meet minimum operational requirements". This includes: kube-apiserver, kube-controller-manager, kube-scheduler, kubelet and etcd.
 
-This proposal outlines a solution for declaratively managing as a single entity the compute resources that host the OCP Control Plane components. It introduces scaling and self-healing capabilities for this compute resources while honouring inviolable etcd expectations and with out disrupting the lifecycle of Control plane components.
+This proposal outlines a solution for declaratively managing as a single entity the compute resources that host the OCP Control Plane components. It introduces scaling and self-healing capabilities for Control Plane compute resources while honouring inviolable Etcd expectations and without disrupting the lifecycle of Control plane components.
 
 ## Motivation
 
