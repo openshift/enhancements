@@ -59,7 +59,7 @@ Currently there is nothing that automates or eases this task. The steps for the 
 - To support declarative safe self-healing and replacement of Control Plane compute resources when the healthy resources are above n/2.
 - To support even spread of compute resources across multiple failure domains.
 
-### Non-Goals
+### Non-Goals / Future work
 
 - To integrate with any existing etcd topology e.g external clusters. Stacked etcd with dynamic member identities, local storage and the Cluster etcd Operator are an assumed invariant.
 - To managed individual Control Plane components. Self hosted Control Plane components that are self managed by their operators is an assumed invariant:
@@ -74,6 +74,7 @@ Currently there is nothing that automates or eases this task. The steps for the 
 - To manage configuration changes at the software layer. This is managed by the Machine Config Operator.
 - To manage the life cycle of Control Plane components
 - To automate the provisioning and decommission of the bootstrapping instance managed by the installer.
+- To provide autoscaling support. This proposal is a necessary first step for autoscaling. It focuses on settling on the primitives that abstracts away the Control Plane as single scalable resource. In a follow up RFE we can discuss how/when to auto scale this resource based on relevant cluster metrics e.g number of workers, number of etcd objects, etc.
 
 ## Proposal
 
@@ -163,7 +164,7 @@ This proposes dropping terraform for creating masters instances in favour of let
 
 #### API
 
-`controlplane.machine.openshift.io`
+`controlplane.machine.openshift.io`	
 
 ```
 type ControlPlane struct {
