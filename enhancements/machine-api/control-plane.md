@@ -99,7 +99,7 @@ This entity is decoupled and orthogonal to the lifecycle and management of the C
 - As an operator running User Provider Infrastructure (UPI), I want to expose my non-machine API machines and offer them to the Control Plane controller so I can have the ability to resize the control plane in a declarative, automated and seamless manner.
 
 #### Story 3
-- As an operator of an OCP Dedicated Managed Platform, I want to give users flexibility to add as many workers nodes as they want or to enable autoscaling on woker nodes so I need to have ability to resize the control plane instances in a declarative, automated and seamless manner to react quickly to cluster growth.
+- As an operator of an OCP Dedicated Managed Platform, I want to give users flexibility to add as many workers nodes as they want or to enable autoscaling on worker nodes so I need to have ability to resize the control plane instances in a declarative, automated and seamless manner to react quickly to cluster growth.
 
 #### Story 4
 - As a SRE, I want to have consumable API primitives in place to resize Control Plane compute resources so I can develop upper level automation tooling atop. E.g Control Plane autoresizing to support a severe growth peak of the number of worker nodes.
@@ -141,7 +141,7 @@ To satisfy the goals, motivation and stories above this proposes a new CRD and a
 9. Delete machine. Go to 1. (Race between the node going away and Cluster etcd Operator re-adding the member?)
 
 #### Declarative Vertical scaling (scale out + scale in)
-1. Watch changes to the Control Plane provideSpec
+1. Watch changes to the Control Plane providerSpec
 2. Fetch all existing control plane Machine resources by ownerRef. Adopt any other machine having a targeted label.
 3. Fetch all machines with old providerSpec.
 4. If any machine has old providerSpec then signal controller as "needs upgrade".
@@ -153,7 +153,7 @@ This is effectively a rolling upgrade with maxUnavailable 0 and maxSurge 1.
 #### Self healing (MHC + reconciling)
 1. The Controller should always reconcile by removing etcd members for voluntary Machine disruptions, i.e machine deletion.
 2. At creation time, unless indicated otherwise `EnableAutorepair=true` will be default. The controller will create a Machine Health Checking resource with an ownerRef which will monitor the Control Plane Machines. This will request unhealthy machines to be deleted. Related https://github.com/openshift/machine-api-operator/pull/543.
-3. The controller will ensure the `maxUnhealthy` value in the MHC resource is set a to known integer to prevent farther remediation from happening during scenarios where quorum could be violated. E.g 1 for cluster with 3 members or 2 for a cluster with 5 members.
+3. The controller will ensure the `maxUnhealthy` value in the MHC resource is set to a known integer to prevent farther remediation from happening during scenarios where quorum could be violated. E.g 1 for cluster with 3 members or 2 for a cluster with 5 members.
 
 #### Bootstrapping (scale out)
 Currently during a regular IPI bootstrapping process the installer uses Terraform to create a bootstrapping instance and 3 master instances. Then it creates Machine resources to "adopt" the existing master instances. In the past etcd quorum needed to be reached between the three of them before having storage available for the control plane to run self hosted and so for the CVO to run its payload.
