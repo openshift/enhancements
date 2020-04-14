@@ -45,6 +45,7 @@ For clarity in this doc we set the definition for "Control Plane" as "The collec
 
 This proposal outlines a solution for declaratively managing as a single entity the compute resources that host the OCP Control Plane components. It introduces scaling and self-healing capabilities for Control Plane compute resources while honouring inviolable etcd expectations and without disrupting the lifecycle of Control plane components.
 
+
 ## Motivation
 
 The Control Plane is the most critical and sensitive entity of a running cluster. Today OCP Control Plane instances are "pets" and therefore fragile. There are multiple scenarios where adjusting the compute capacity which is backing the Control Plane components might be desirable either for resizing or repairing. 
@@ -154,6 +155,8 @@ This is effectively a rolling upgrade with maxUnavailable 0 and maxSurge 1.
 1. The Controller should always reconcile by removing etcd members for voluntary Machine disruptions, i.e machine deletion.
 2. At creation time, unless indicated otherwise `EnableAutorepair=true` will be default. The controller will create a Machine Health Checking resource with an ownerRef which will monitor the Control Plane Machines. This will request unhealthy machines to be deleted. Related https://github.com/openshift/machine-api-operator/pull/543.
 3. The controller will ensure the `maxUnhealthy` value in the MHC resource is set to a known integer to prevent farther remediation from happening during scenarios where quorum could be violated. E.g 1 for cluster with 3 members or 2 for a cluster with 5 members.
+
+Machine Health Checking currently only supports remediation by deleting. Any alternative remediation should be discussed in a different proposal extending the original Machine Health Checking orthogonally to this one.
 
 #### Bootstrapping (scale out)
 Currently during a regular IPI bootstrapping process the installer uses Terraform to create a bootstrapping instance and 3 master instances. Then it creates Machine resources to "adopt" the existing master instances. In the past etcd quorum needed to be reached between the three of them before having storage available for the control plane to run self hosted and so for the CVO to run its payload.
