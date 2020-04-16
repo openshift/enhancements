@@ -341,7 +341,7 @@ $ oc -n <namespace> create/patch/delete prometheusrule <foo>.
 
 2. Silence firing alerts from the Alertmanager `/alerts?namespace=<foo>` endpoint matching the permitted namespace.
 
-#### `monitoring-targets-edit`
+#### `monitoring-edit`
 This is a cluster role which can be bound against a concrete namespace by the cluster admin.
 Embeds the `get/create/edit/delete` permissions for the following custom resources:
 
