@@ -55,13 +55,13 @@ the N routes are deleted.
 **Wildcard certificates problems**
 
 By default workspaces routes have URLs with random subdomains like
-https://<random-part>.example.com. We create a lots of these routes and
+`https://<random-part>`.example.com. We create a lots of these routes and
 that's not an issue if the customer is allowed to use a wildcard TLS
-certificate (https://*.example.com).
+certificate (`https://*.example.com`).
 
 But not all customers can use wildcard certs. For that reason we now support
 fixed domain scenario using URLs with a fixed hostname and a variable path:
-https://example.com/<random-part>/. We have been able to implement this
+`https://example.com/<random-part>/`. We have been able to implement this
 single-host option because upstream Ingress controllers support path rewriting.
 For instance with the nginx controller adding the following annotation does
 the trick:
@@ -73,7 +73,7 @@ We would like to support these annotations for Routes as well.
 ## Alternatives
 
 We can fix this on the CRW side: we can deploy a reverse proxy per every CRW
-installation (https://crw.example.com) and use it to route requests coming from
+installation (`https://crw.example.com`) and use it to route requests coming from
 users browsers.
 
 However that means shifting a responsibility that is an OpenShift responsibility
