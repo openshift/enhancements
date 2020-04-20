@@ -10,8 +10,8 @@ reviewers:
 approvers:
   - "@mfojtik"
 creation-date: 2019-10-08
-last-updated: 2019-12-11
-status: implementable 
+last-updated: 2020-04-02
+status: implementable
 see-also:
 replaces:
 superseded-by:
@@ -25,21 +25,35 @@ superseded-by:
    ```
    export GO111MODULE=on
    ```
-2. Get desired version of apimachinery, client-go, cli-runtime, kubectl and kubernetes (eg. 1.17.0).
+
+2. Get desired version of apimachinery, client-go, cli-runtime, kubectl and kubernetes (eg. 1.18.0).
+
 3. Create branch `oc-A.B-kubernetes-X.Y.Z` (where A.B is the oc version, and X.Y.Z is the kubernetes version)
    in apimachinery, client-go, cli-runtime, kubectl and kubernetes and prime the repos with the basic
    state from k8s (see previous step).
-4. Open a PR in openshift/release to add this new branch of openshift/kubernetes, [similar to this](https://github.com/openshift/release/pull/6349)
-   Usually, you can copy the last version's `release/ci-operator/config/openshift/kubernetes/*` file to a new file that reflects the new branch name, 
-   verify the go version used, then `make jobs` to generate the new job. 
-5. Pick carry patches. From each openshift/kubernetes-repository, `git log --no-merges --oneline openshift/oc-4.4-kubernetes-1.17.0`
-   is a handful query where `openshift` is the name of the remote pointing to `openshift/kubernetes-repo` 
+
+   **Info**: `oc-A.B-kubernetes-X.Y.Z` branches are usually pre-created, so it's sufficient to just check the branches already exist. Also, all the branches contain the latest changes from corresponding k8s repositories (without our carry patches if there are any). I.e. just a clean sync with upstream repositories. We need those as a base for applying our patches and syncing those to oc repository at the end.
+   Also, in case you are working with pre-release candidates, all the branches will have corresponding suffix in addition. E.g. `oc-4.5-kubernetes-1.18.0-beta.2`.
+
+4. Open a PR in openshift/release to add this new branch of openshift/kubernetes, [similar to this](https://github.com/openshift/release/pull/7582).
+   Usually, you can copy the last version's `release/ci-operator/config/openshift/kubernetes/*` file to a new file that reflects the new branch name,
+   verify the go version used, then `make jobs` to generate the new job.
+
+5. Pick carry patches. From each openshift/kubernetes-repository, `git log --no-merges --oneline openshift/oc-4.5-kubernetes-1.18.0`
+   is a handful query where `openshift` is the name of the remote pointing to `openshift/kubernetes-repo`
    (replace versions from previous query accordingly). For the `UPSTREAM` commits, you need
-   to verify what kind of patches were applied to the last kubernetes bump (1.16.2 here) and create a 
-   [spreadsheet similar to this](https://docs.google.com/spreadsheets/d/1VQw_B2Nfqg9ILKvoNLK0YQdiM2LUidOX7Q-wRKBlrSE/edit?usp=sharing)
-   to decide whether we still need a patch or not.  
+   to verify what kind of patches were applied to the last kubernetes bump (1.17.0 here) and create a
+   [spreadsheet similar to this](https://docs.google.com/spreadsheets/d/1caKr7-FGn14H2P8UZ6K7wrjcqwQIRuEA_nQR8X4iKJ0/edit#gid=1354624919)
+   to decide whether we still need a patch or not.
+
+   **Info**: At the bottom of the spreadsheet, there's a tab for each repository.
+   Each tab contains a list of commits that were available in the previous rebase.
+   In order to get a new list, run `git log --no-merges --oneline openshift/oc-4.5-kubernetes-1.18.0 | grep UPSTREAM`
+   over each repository, copy paste the list to each tab and mark individual commits with proper colors.
+
 6. For each repository (apimachinery, client-go, cli-runtime, kubectl), open A PR with the picked commits from the
    spreadsheet against the oc-A.B-kubernetes-X.Y.Z branch.
+
 7. In openshift/kubernetes repository, check out the new oc-A.B-kubernetes-X.Y.X branch and:
    1. Add the replace dependency for openshift/api and openshift/client-go pointing at latest SHA from that repo, eg.
       ```
@@ -50,7 +64,7 @@ superseded-by:
       github.com/openshift/api v3.9.1-0.20190822120857-58aab2885e38+incompatible // indirect
       ```
    3. Copy and paste the changes from apimachinery, client-go, cli-runtime and kubectl PRs above into kubernetes/staging/src/k8s.io/ directory,
-      and use git add *.go because we care only about go files.  This is a manual step, You can use curl like so for each file to copy file 
+      and use git add *.go because we care only about go files.  This is a manual step, You can use curl like so for each file to copy file
       changes from your PRs above:
       ```
       cd staging/src/k8s.io/repo
@@ -58,10 +72,10 @@ superseded-by:
       ```
    4. Run `hack/update-vendor.sh` to pick up openshift dependencies
    5. Commit the changes, then open a PR against the openshift/kubernetes oc-A.B-kubernetes-X.Y.Z branch.
-      Confirm the openshift/release change from step 4 is merged and the unit test is triggered in your PR. 
-8. In oc repository: 
+      Confirm the openshift/release change from step 4 is merged and the unit test is triggered in your PR.
+8. In oc repository:
    1. Edit the replace dependencies to point to the commits from the merged PRs from previous steps.
-   2. Edit the replace dependencies for all other k8s.io/repos to point to latest release (`release-1.17` here).
+   2. Edit the replace dependencies for all other k8s.io/repos to point to latest release (`release-1.18` here).
       It's useful to add a commit for steps 1,2.
    3. Run `go mod tidy` _then_ `go mod vendor` and verify the changes before committing.
    3. Update kubectl version fields injected in Makefile (using `git describe --long --tags --abbrev=7` in kubernetes fork).
@@ -80,4 +94,3 @@ superseded-by:
 ## FAQ
 
 https://github.com/golang/go/wiki/Modules
-
