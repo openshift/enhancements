@@ -226,7 +226,7 @@ spec:
 ```
 apiVersion: "logging.openshift.io/v1"
 kind: "ClusterLogForwarder"
-metadata:
+spec:
   outputs:
    - name: MyInfra ...
    - name: MyApp ...
