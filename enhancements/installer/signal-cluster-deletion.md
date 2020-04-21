@@ -68,6 +68,8 @@ spec:
 
 Add an admission plugin that prevents delete when `blockTeardown` has been set.
 
+We believe it would be best to add the CRD and admission plugin to the cluster version operator. We don't foresee this requiring a controller and doing a separate operator seems like overkill for this object.
+
 #### Install
 
 Create a `Alive` object during installation.
