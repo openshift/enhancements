@@ -57,15 +57,25 @@ what this project is addressing.
 
 ## Proposal
 
-A new kubernetes-nmstate handler DaemonSet is deployed in the cluster part of the OpenShift installation.
+A new kubernetes-nmstate operator Deployment is deployed to the cluster as part of the the OpenShift
+installation, via CVO.
+
+The operator has a single CRD, called `NMstate`. When a custom resource of kind `NMstate`, with 
+a name of 'nmstate' is created, it will then create the CRDs for the kubernetes-nmstate handler.
+Then, the namespace, RBAC, and finally the DaemonSet are applied. Custom resources of kind `NMstate`
+with other names will be ignored.
+
+A new kubernetes-nmstate handler DaemonSet is deployed in the cluster by the operator.
 This DaemonSet contains nmstate package and interacts with the NetworkManager
-on the host by mounting the related dbus. The project contains two
-Custom Resource Definitions, `NodeNetworkState` and `NodeNetworkConfigurationPolicy`.
-`NodeNetworkState` objects are created per each node in the cluster and can be
-used to report available interfaces and network configuration. These objects
-are created by kubernetes-nmstate and must not be touched by a user.
+on the host by mounting the related dbus. The project contains three
+Custom Resource Definitions, `NodeNetworkState`, `NodeNetworkConfigurationPolicy` and
+`NodeNetworkConfigurationEnactment`. `NodeNetworkState` objects are created per each
+node in the cluster and can be used to report available interfaces and network configuration.
+These objects are created by kubernetes-nmstate and must not be touched by a user.
 `NodeNetworkConfigurationPolicy` objects can be used to specify desired
-networking state per node or set of nodes. It uses API similar to `NodeNetworkState`.
+networking state per node or set of nodes. It uses API similar to `NodeNetworkState`. 
+`NodeNetworkConfigurationEnactment` objects will be created per each node, per each matching
+`NodeNetworkConfigurationPolicy`.
 
 kubernetes-nmstate DaemonSet creates a custom resource of `NodeNetworkState` type per each node and
 updates the network topology from each OpenShift node.
@@ -77,6 +87,16 @@ Multiple `NodeNetworkConfigurationPolicy` custom resources can be created.
 Upon receiving a notification event of `NodeNetworkState` update,
 kubernetes-nmstate Daemon verify the correctness of `NodeNetworkState` custom resource and
 apply the selected profile to the specific node.
+
+`NodeNetworkConfigurationEnactment` objects is a read-only object that represents Policy exectuion
+per each matching Node. It will expose configuration status per each Node.
+
+A new container image (kubernetes-nmstate-handler) will be created.
+
+A new container image (kubernetes-nmstate-operator) will be created. However, the operator
+and the handler will co-exist in the same upstream repo.
+
+An upstream API group of nmstate.io is currently used.
 
 ### User Stories
 
@@ -132,7 +152,7 @@ kubernetes-nmstate runs as a DaemonSet.
 
 ## Implementation History
 
-### Version 4.4
+### Version 4.6
 
 Tech Preview
 
