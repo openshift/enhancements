@@ -5,11 +5,15 @@ authors:
 reviewers:
   - dgoodwin
   - abhinavdahiya
+  - wking
+  - eparis
 approvers:
   - dgoodwin
   - abhinavdahiya
+  - wking
+  - eparis
 creation-date: 2020-03-30
-last-updated: 2020-04-06
+last-updated: 2020-04-21
 status: provisional
 ---
 
@@ -31,12 +35,12 @@ Operators can create external resources in clouds and other services that have n
 
 ### Goals
 
-Signal that cluster deletion has begun through deletion of a new CRD `ClusterAlive` and wait for that object to be deleted during uninstall before continuing with removing cluster resources such as instances, storage and networking.
+Signal that cluster deletion has begun through deletion of a new CRD `Alive` and wait for that object to be deleted during uninstall before continuing with removing cluster resources such as instances, storage and networking.
 
 ### Non-Goals
 
-* Attaching finalizers to operator resources based on the `ClusterAlive` object which would facilitate removal of operator resources.
-* Removing resources other than the `ClusterAlive` object during cluster uninstall.
+* Attaching finalizers to operator resources based on the `Alive` object which would facilitate removal of operator resources.
+* Removing resources other than the `Alive` object during cluster uninstall.
 
 ## Proposal
 
@@ -50,28 +54,33 @@ Signal that cluster deletion has begun through deletion of a new CRD `ClusterAli
 
 #### API
 
-Introduce a new CRD `ClusterAlive` from which operator resources could attach a finalizer initiating cascading delete when the `ClusterAlive` resource is deleted.
+Introduce a new CRD `Alive` from which operator resources could attach a finalizer initiating cascading delete when the `Alive` resource is deleted.
 
 ```yaml
-apiVersion: v1
-kind: ClusterAlive
+apiVersion: v1alpha1
+kind: Alive
 metadata:
   name: cluster
+  namespace: openshift-config
 spec:
   blockTeardown: true  # block teardown of operator resources
 ```
 
+Add an admission plugin that prevents delete when `blockTeardown` has been set.
+
 #### Install
 
-Create a `ClusterAlive` object during installation. (Is a manifest the right place to create for new clusters ?)
+Create a `Alive` object during installation.
 
 #### Upgrade
 
-Create `ClusterAlive` object for existing clusters. (Is this the right place to create for existing clusters ?)
+Create `Alive` object for existing clusters.
 
 #### Uninstall
 
-Delete a cluster's `ClusterAlive` resource during uninstall when requested via flag such as `openshift-install destroy cluster --cluster-alive-delete`. Cluster destroy will wait for a default amount of time and fail if `ClusterAlive` deletion was not successful. The default timeout will not be configurable and users will be expected to attempt shutdown multiple times upon failure.
+Delete a cluster's `Alive` resource during uninstall when requested via flag such as `openshift-install destroy cluster --cluster-alive-delete`. Cluster destroy will wait for a default amount of time and fail if `Alive` deletion was not successful. The default timeout will not be configurable and users will be expected to attempt shutdown multiple times upon failure.
+
+`destroy --cluster-alive-delete` will fail if `blockTeardown` has been set for a cluster's `Alive` object and report that an admin is blocking teardown for this cluster. This will either be checked directly or attempted and rejected by the admission plugin.
 
 ### Risks and Mitigations
 
@@ -79,11 +88,13 @@ Delete a cluster's `ClusterAlive` resource during uninstall when requested via f
 
 ### Test Plan
 
-In OpenShift CI, clusters will try to delete their `ClusterAlive` object and if that fails, all infra resources will be destroyed.
+In OpenShift CI, clusters will try to delete their `Alive` object and if that fails, all infra resources will be destroyed.
 
 ```
-destroy cluster --cluster-alive-delete || true
-destroy cluster
+retval = openshift-install destroy cluster --cluster-alive-delete
+if retval != success
+openshift-install destroy cluster
+return retval
 ```
 
 ### Graduation Criteria
@@ -102,14 +113,14 @@ This enhancement will follow standard graduation criteria.
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 - Available by default
+- API (v1alpha1) will not be moved to stable until it has been tested for a considerable period of time internally.
 
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
 
 #### Removing a deprecated feature
 
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
+Not applicable.
 
 ### Upgrade / Downgrade Strategy
 
