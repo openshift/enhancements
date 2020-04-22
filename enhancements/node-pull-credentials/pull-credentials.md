@@ -43,7 +43,7 @@ installation in builds, imagestream imports and pull-through operations. This
 is particularly important for images pulled from `registry.redhat.io`, which
 requires a pull secret.
 
-Today pull secrets provided during cluster install are available on the
+Today pull credentials provided during cluster install are available on the
 node's filesystem. If user attempts to import an image stream or pull-through
 from these locations, OpenShift fails as none of `openshift-api`, `builder` or
 `image-registry` use the credentials provided during the installation.
@@ -124,12 +124,17 @@ volumes:
   merging with other pull credentials that are linked to the `builder` service
   account. If the `BuildConfig` specifies a pull secret, we will continue the
   current behavior of using the provided pull secret as an override.
+- Custom builds are not going to leverage node pull credentials to mitigate the
+  risk of exposing them(see Risks and Mitigations below).
 
 #### Registry pull-through
 
-- As done for Image Stream Import, mount pull credentials inside the image
-  registry pod.
-- Pull credentials will then be consumed by the registry.
+- As image-registry does not run in privileged mode we need to mount install
+  pull credentials instead of the node path(`/var/lib/kubelet/config.json`).
+- Image registry operator needs to copy secret `pull-secret` from namespace
+  `openshift-config` into image-registry namespace and mount it on registry
+  pod.
+- Installation pull credentials will then be consumed by the registry.
 
 ### Risks and Mitigations
 
@@ -151,9 +156,11 @@ risk is that the user may copy the credentials into a resulting image.
 
 Mitigations:
 
-As far as I verified(and this needs to be once more tested) it is impossible
-to spawn a shell inside the builder pods. I also tried to copy the credentials
-from builder's filesystem into a resulting image but it failed.
+It is impossible to spawn a shell inside the builder pods. I also tried to copy
+the credentials from builder's filesystem into a resulting image but it failed.
+There is an exception though: in case of custom builds one may be able to copy
+node's pull credentials, pottentially exposing them. Due to this issue we are
+not going to leverage node pull credentials during custom builds.
 
 #### Pushing to registries using node's credentials
 
@@ -194,7 +201,7 @@ never be exposed through any API endpoint.
 Kubernetes implements a feature that allows users to temporary create 
 [ephemeral](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
 containers into a running pod. This could potentially allow users to copy
-mounted pull secrets from a build pod as the ephemeral pod may allow `rsh`.
+mounted pull credentials from a build pod as the ephemeral pod may allow `rsh`.
 
 Mitigations
 
