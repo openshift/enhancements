@@ -19,6 +19,7 @@ see-also:
   - https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20191017-kubeadm-based-control-plane.md
   - https://github.com/openshift/enhancements/blob/master/enhancements/etcd/cluster-etcd-operator.md
   - https://github.com/openshift/enhancements/blob/master/enhancements/etcd/disaster-recovery-with-ceo.md
+  - https://github.com/openshift/enhancements/blob/master/enhancements/kube-apiserver/auto-cert-recovery.md
   - https://github.com/openshift/machine-config-operator/blob/master/docs/etcd-quorum-guard.md
   - https://github.com/openshift/cluster-kube-scheduler-operator
   - https://github.com/openshift/cluster-kube-controller-manager-operator
@@ -26,7 +27,6 @@ see-also:
   - https://github.com/openshift/cluster-kube-apiserver-operator
   - https://github.com/openshift/cluster-openshift-apiserver-operator
 replaces:
-  - https://github.com/openshift/enhancements/pull/278
 superseded-by:
 ---
 
@@ -44,7 +44,7 @@ superseded-by:
 
 For clarity in this doc we set the definition for "Control Plane" as "The collection of stateless and stateful processes which enable a Kubernetes cluster to meet minimum operational requirements". This includes: kube-apiserver, kube-controller-manager, kube-scheduler, kubelet and etcd.
 
-This proposal outlines a solution for presenting the Control Plane compute as a single scalable resource (i.e machineSet) for each domain failure. Particularly:
+This proposal outlines a solution for presenting the Control Plane compute as a single scalable resource (i.e machineSet) for each failure domain. Particularly:
 - Proposes to let the installer create a MachineSet for each master Machine.
 - Proposes to let the installer create a Machine Health Check resource to monitor the Control Plane Machines.
 
@@ -57,12 +57,12 @@ This proposal outlines a solution for presenting the Control Plane compute as a 
 
 The Control Plane is the most critical and sensitive entity of a running cluster. Today OCP Control Plane instances are "pets" and therefore fragile. There are multiple scenarios where adjusting the compute capacity which is backing the Control Plane components might be desirable either for resizing or repairing.
 
-Currently there is nothing that automates or eases this task. The steps for the Control Plane to be resized in any manner or to recover from a tolerable failure are completely manual. Different teams are following different "Standard Operating Procedure" documents scattered around with manual steps resulting in loss of information, confusion and extra efforts for engineers and users.
+Currently there is nothing that automates or eases this task. The steps for the Control Plane to be resized in any manner or to recover from a tolerable failure (etcd quorum is not lost) are completely manual. Different teams are following different "Standard Operating Procedure" documents scattered around with manual steps resulting in loss of information, confusion and extra efforts for engineers and users.
 
 ### Goals
 
-- To have a declarative mechanism to scale Control Place compute resources.
-- To have a declarative mechanism to ensure a given number of Control Place compute resources is available at a time.
+- To have a declarative mechanism to scale Control Plane compute resources.
+- To have a declarative mechanism to ensure a given number of Control Plane compute resources is available at a time.
 - To support default declarative self-healing and replacement of Control Plane compute resources.
 
 ### Non-Goals / Future work
@@ -89,7 +89,7 @@ Currently there is nothing that automates or eases this task. The steps for the 
 Currently the installer chooses the failure domains out of a particular provider availability and it creates a Control Plane Machine resource for each of them.
 
 This proposes two additional steps:
-- To let the installer create MachineSets for the master Machines.
+- To let the installer create MachineSets for each master Machine to be adopted.
 - To let the installer create a Machine Health Check resource to monitor the Control Plane Machines.
 
 The lifecycle of the compute resources still remains decoupled and orthogonal to the lifecycle and management of the Control Plane components hosted by the compute resources. All of these components, including etcd are expected to keep self managing themselves as the cluster shrink and expand the Control Plane compute resources.
@@ -103,7 +103,7 @@ The lifecycle of the compute resources still remains decoupled and orthogonal to
 - As an operator running User Provider Infrastructure (UPI), I want to expose my non-machine API machines and offer them to the Control Plane controller so I can have the ability to resize the control plane in a declarative, automated and seamless manner.
 
 #### Story 3
-- As an operator of an OCP Dedicated Managed Platform, I want to give users flexibility to add as many workers nodes as they want or to enable autoscaling on worker nodes so I need to have ability to resize the control plane instances in a declarative, automated and seamless manner to react quickly to cluster growth.
+- As an operator of an OCP Dedicated Managed Platform, I want to give users flexibility to add as many workers nodes as they want or to enable autoscaling on worker nodes so I need to have ability to resize the control plane instances in a declarative and seamless manner to react quickly to cluster growth.
 
 #### Story 4
 - As a SRE, I want to have consumable API primitives in place to resize Control Plane compute resources so I can develop upper level automation tooling atop. E.g Control Plane autoresizing to support a severe growth peak of the number of worker nodes.
@@ -115,18 +115,18 @@ The lifecycle of the compute resources still remains decoupled and orthogonal to
 - As a multi cluster operator, I want to have a universal user experience for managing the Control Plane in a declarative manner across any cloud provider, bare metal and any flavour of the product that have in common the topology assumed in this doc.
 
 #### Story 7
-- As a developer, I want to be able to deploy the smallest possible cluster to save costs, i.e one instance Control Plane.
+- As a developer, I want to be able to deploy the smallest possible cluster to save costs, i.e one instance Control Plane and resize to more instances as I see fit.
 
 ### Implementation Details/Notes/Constraints [optional]
 
-To satisfy the goals, motivation and stories above this proposes to let the installer to create MachineSets to own the Machine objects for each failure domain and a Machine Health Checking to monitor the Control Plane machines.
+To satisfy the goals, motivation and stories above, this proposes to let the installer to create MachineSets to own the Machine objects for each failure domain and a Machine Health Check to monitor the Control Plane machines.
 
 #### Bootstrapping
 Currently during a regular IPI bootstrapping process the installer uses Terraform to create a bootstrapping instance and 3 master instances. Then it creates Machine resources to "adopt" the existing master instances.
 
 Additionally:
 - It will create MachineSets to adopt those machines by looking up known labels (Adopting behaviour already exists in machineSet logic).
-	- `machine.openshift.io/cluster-api-MachineSet": <cluster_name>-<label>-<zone>-controlPlane`
+	- `machine.openshift.io/cluster-api-machineset": <cluster_name>-<label>-<zone>-controlplane`
 	- `machine.openshift.io/cluster-api-cluster":    clusterID`
 
 #### Declarative horizontal scaling
@@ -181,16 +181,27 @@ The contract for the machine API is by honouring Pod Disruption Budgets (PBD), i
 
 - Exhaustive unit testing.
 - Exhaustive integration testing via [envTest](https://book.kubebuilder.io/reference/testing/envtest.html).
-- E2e testing on the [machine API](https://github.com/openshift/cluster-api-actuator-pkg/tree/master/pkg) and origin e2e test suite:
-	- Scale out.
+- E2e testing on the [machine API](https://github.com/openshift/cluster-api-actuator-pkg/tree/master/pkg) and origin e2e test suite. Given a running cluster:
+  - Scale out.
+    - Loop over machineSets for masters and increase replicas.
+    - Wait for new nodes to go ready.
 	- Scale in.
+    - Loop over machineSets for masters and decrease replicas.
+    - Wait for new nodes to go away. See exisisting one to remain ready.
 	- Vertical scaling forcing machine recreation.
+    - Loop over machineSets for masters.
+    - Change a providerSpecific property which defines the instance capacity.
+    - Request all master machines to be deleted.
+    - Wait for new machines to come up with new capacity. Wait for existing machines to go away while cluster remains healthy.
 	- Simulate unhealthy nodes and remediation.
-- E2e testing on the origin e2e test suite.
+    - Force 2 master nodes out of 3 to go unhealthy, e.g kill kubelet.
+    - Wait for machines get request for deletion by the MHC.
+    - Wait for a new nodes to come up healthy.
+    - Wait for old machines to go away.
 
 ### Graduation Criteria
 
-All the resources leveraged in this proposal i.e MachineSet and Machine Health Check are already GA beta.
+All the resources leveraged in this proposal i.e MachineSet and Machine Health Check are already GA.
 This proposal will be released in 4.N as long as:
 - All the testing above is in place.
 - The cluster etcd operator manages all the etcd operational aspects including scaling down.
@@ -201,7 +212,8 @@ This proposal will be released in 4.N as long as:
 
 New IPI clusters deployed after the targeted release will run the MachineSets and MHC deployed by the installer out of the box.
 
-For existing clusters this is opt-in. We should pursue cluster homogenous topology. To that end we should provide the exact steps and encourage users in any user facing doc to create the MachineSets and MHC for the Control Plane Machines.
+For UPI clusters and existing IPI clusters this is opt-in. We should pursue cluster homogenous topology. To that end we should provide the exact steps and encourage users in any user facing doc to create the MachineSets and MHC for the Control Plane Machines.
+
 
 ### Version Skew Strategy
 
