@@ -213,12 +213,13 @@ The CBO will:
   with the MAO.
 - Add a new `baremetal` `ClusterOperator` with an additional
   `Disabled` status for non-baremetal platforms.
-- Use a new namespace called `openshift-baremetal`.
+- Use the existing `openshift-machine-api` namespace where the
+  BareMetalHost resources are also located.
 - Install the `metal3.io` `Provisioning` (cluster-scoped) and
   `BareMetalHost` (namespaced) CRDs.
-- Run under a new `openshift-baremetal/cluster-baremetal-operator`
+- Run under a new `openshift-machine-api/cluster-baremetal-operator`
   `ServiceAccount`.
-- Be launched by a `openshift-baremetal/cluster-baremetal-operator`
+- Be launched by a `openshift-machine-api/cluster-baremetal-operator`
   `Deployment`, copying much of the MAO pod spec in terms of
   `system-node-critical` priority class, running on masters, security
   context, resource requests, etc.
@@ -229,8 +230,8 @@ The CBO will:
   type other than `BareMetal`.
 - Based on the values in the `Provisioning` resource, create a
   `metal3` `Deployment` and associated `metal3-mariadb-password` under
-  the `openshift-baremetal` namespace. This is the same as the MAO
-  currently creates under the `openshift-machine-api` namespace.
+  the `openshift-machine-api` namespace. This is the same as the MAO
+  currently creates.
 
 ### Test Plan
 
