@@ -34,7 +34,7 @@ superseded-by:
 
 ## Open Questions
 
-1. How to handle upgrades?
+1. ~~How to handle upgrades?~~
 2. Which release should this change target?
 
 ## Summary
@@ -232,11 +232,132 @@ The BMO will:
 
 ### Graduation Criteria
 
-### Upgrade / Downgrade Strategy
+### Upgrade / Downgrade / Verson Skew Strategy
 
+The key thing to consider for upgrades is how to smoothly transition
+the `metal3` deployment in the `openshift-machine-api` namespace from
+the MAO to the CBO.
 
-### Version Skew Strategy
+We assume that the CBO will first appear in `4.N.0` and take over from
+the MAO in that release. We can merge changes into `4.N-1.y` paving
+the way for this and, if necessary, require an upgrade to given
+`4.N-1.y` version before the upgrade to `4.N.0`. Since we only support
+upgrading directly from `4.N-1` to `4.N`, we can remove all upgrade
+handling code in `4.N+1`.
 
+#### Prior Art
+
+We will take inspiration from the
+[Separate OAuth API-Resources](https://github.com/openshift/enhancements/blob/master/enhancements/authentication/separate-oauth-resources.md)
+enhancement
+
+> Add code in 4.(n-1) to the cluster-openshift-apiserver-operator that
+> prevents it from managing an apiservice if it is "claimed" by the
+> cluster-authentication-operator via an annotation and if the
+> cluster-authentication-operator is at least at 4.n.
+
+In the related
+[cluster-openshift-apiserver-operator PR](https://github.com/openshift/cluster-openshift-apiserver-operator/pull/294)
+the details are clear - `cluster-authentication-operator` indicates
+it is "at least at 4.n" by setting the `managingOAuthAPIServer` to
+`True` in the status field of its. Then `cluster-authentication-operator`
+"claims" an apiservice by setting the `authentication.operator.openshift.io/managed`
+annotation.
+
+Presumably the "at least at 4.n" check is required in addition to the
+annotation to handle a downgrade scenario - where the annotation is
+set, but `cluster-authentication-operator` has been downgraded.
+
+#### Design
+
+We need the following changes to MAO:
+
+1. Respect a "gate" allowing CBO "claim" the resource.
+
+   We will use [the existing `machine.openshift.io/owned` annotation](http://github.com/openshift/machine-api-operator/pull/424)
+   on the `metal3` deployment to indicate that MAO is managing the
+   resource. A new `baremetal.openshift.io/owned` annotation will
+   indicate that CBO is in control. Only one of these annotations
+   should be set on a resource but, for the avoidance of doubt, CBO
+   takes precedence.
+
+   Before CBO is be added to the `4.N-dev` release image, MAO will
+   need to respect this gate - it must not attempt to manage the
+   `metal3` deployment if CBO has claimed the resource. This MAO
+   change will be backported to `4.N-1`.
+
+2. An "at least at 4.N" downgrade check.
+
+   In order to guard against a downgrade scenario where CBO had
+   claimed the `metal3` deployment - but the cluster has since been
+   downgraded and CBO (manually) removed - we need some way of
+   checking CBO is actually still around. We will use the existence of
+   a `baremetal` clusteroperator for this purpose. Users would need to
+   manually remove this resource after a downgrade.
+
+3. A change to remove `metal3` deployment from MAO.
+
+   In `4.N-dev`, once the CBO has been added to the release, we can
+   remove all awareness of the `metal3` deployment from MAO.
+
+#### Upgrade/Downgrade Scenarios
+
+In order to check our intuition about the above, we can exhaustively
+consider all possible combinations of the upgrade starting and ending
+point, and reverting back to the starting point.
+
+| State | MAO     | CBO            |
+| ----- | --------| -------------- |
+| A     | ungated | none           |
+| B     | gated   | none           |
+| C     | gated   | claim resource |
+| D     | none    | claim resource |
+
+First is the scenario where we upgrade from a release where MAO's
+management of `metal3` is ungated. We can't support upgrading from
+this point to a release which includes CBO.
+
+* A->B: new MAO checks gate before updating resource
+* A->C: ~~new MAO checks gate before updating resource, CBO claims
+  resource - problematic if old MAO is still running~~
+* A->D: ~~new MAO ignores `metal3`, CBO claims resource - problematic
+  if old MAO is still running~~
+
+Next is from a release where MAO's management of the resource is
+gated. All scenarios can be supported.
+
+* B->C: CBO is introduced and claims the resource, old and new MAO
+  respects the gate
+* B->D: CBO is introduced and claims the resouce, old MAO respects the
+  gate, new MAO ignores `metal3`
+
+And the final trivial scenario:
+
+* C->D: old and new CBO claim the resource, old MAO respects the gate,
+  new MAO ignores `metal3`
+
+What's clear is that we cannot support a transition to `C` or `D`
+without first going through `B`. So if we assume that `C` or `D` is
+what we ship as the `4.N.0` release, then users must upgrade to `B` in
+`4.N-1.y` before upgrading to `>=4.N.0`. Ideally, we should ship `B`
+in `4.N-1.0`.
+
+Now, the downgrade scenarios:
+
+* B->A: no CBO, new MAO ignores gate, old MAO respects gate
+* C->B: old CBO claims resource, old and new MAO respects gate -
+  manual intervention needed to delete old CBO
+* C->A: ~~old CBO claims resource, old MAO respects gate, new MAO
+  ignores gate~~
+* D->C: old and new CBO claims resource, old MAO ignores `metal3`, new
+  MAO respects gate
+* D->B: old CBO claims resource, old MAO ignores `metal3`, new MAO
+  respects gate - manual intervention needed to delete old CBO
+* D->A: ~~old CBO claims resource, old MAO ignores `metal3`, new MAO
+  ignores gate~~
+
+And so we see the reverse of the upgrade restriction - you can only
+downgrade to `B` from `A`.
 
 ## Implementation History
 
