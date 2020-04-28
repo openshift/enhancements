@@ -55,11 +55,11 @@ OVN-Kubernetes.
 
 ### Goals
 
-Enable OpenFlow hardware offload for OVN datapath
+Enable OVS hardware offload for OVN datapath
 
 ### Non-Goals
 
-Replace OpenFlow software based solution
+Using hardware offload for any part of the OpenShift control plane
 
 ## Proposal
 
@@ -83,29 +83,22 @@ Besides CNO and SR-IOV Operator changes, there are several other dependencies.
 - Multus supports overwriting cluster network definition by specifying a
 customized default net-attach-def in pod annotation. Customized net-attach-def
 will still use `ovn-k8s-cni-overlay` CNI plugin, but with an special annotation
-that requests a SR-IOV device.
+that requests a SR-IOV device. Customized net-attach-def will be created
+automatically by SR-IOV Operator when switchdev mode device is configured.
 
 - RHCOS image shall be based on RHEL-8.3 for fully support of OVS Hardware
 Offload with connection track feature.
 
 - OpenvSwitch package version 2.13.
 
-- Mellanox SR-IOV VF-LAG provides hardware link-aggregation (LAG) for hardware
-offloaded ports. It allows offloading of OVS rules to a linux `bond` network
-device that combines two idential and hardware offload capable Physical
-Functions (PFs). In order to use SR-IOV VF-LAG, a bond interface needs to be
-created and used as geneve endpoint of OVS bridge. With the SR-IOV VF LAG
-capability, the NIC PFs can receive the rules that the OVS tries to offload to
-the linux bond net device and offload them to the hardware e-switch.
-
-#### RHCOS
-
-- RHEL 8.3 be used as RHCOS image base for fully support of OVS Hardware Offload
-with connection track feature.
-
-#### OpenvSwitch
-
-- OpenvSwitch package [version 2.13](https://github.com/openshift/ovn-kubernetes/pull/122) is currently used in OpenShift.
+- To use OVS Hardware Offload with link redundency, a bond interface needs to
+be created and used as geneve endpoint of OVS bridge. Mellanox SR-IOV VF-LAG
+provides hardware link-aggregation (LAG) for hardware offloaded ports. It
+allows offloading of OVS rules to a linux `bond` network device that combines
+two idential and hardware offload capable Physical Functions (PFs). With the
+SR-IOV VF LAG capability, the NIC PFs can receive the rules that the OVS tries
+to offload to the linux bond net device and offload them to the hardware
+e-switch.
 
 #### OVN-Kubernetes
 
@@ -143,7 +136,10 @@ Customized annotations will contain a resource name requesting SR-IOV device.
 
 - SR-IOV config daemon (a DaemonSet managed by SR-IOV Operator) will support
 changing e-switch mode from `legacy` to `switchdev` on the PF device and
-exposing VF representor information in `SriovNetworkNodeState` status.
+exposing VF representor information in `SriovNetworkNodeState` status. The
+daemon will retain the names of PF device and VF representors by applying udev
+rules. In order to guarantee the orders required by switchdev mode and VF LAG,
+a systemd service profile will be used to apply switchdev related configurations.
 
 - SR-IOV network device plugin (a Device Plugin DaemonSet managed by SR-IOV
 Operator) supports advertising VF resource to kubelet.
@@ -151,54 +147,45 @@ Operator) supports advertising VF resource to kubelet.
 #### Machine Config Operator (MCO) [optional]
 
 - MCO will be used to create linux bond interface on two identical PFs that
-are capable of doing OVS hardware offload and create vlan interfaces on bond
-interface. The supported bond modes are `Active-Backup`, `Active-Active`
-and `LACP`. This is not required if OVS Hardware Offload is used on PF
-device directly.
-
-### User Stories
-
-#### Story 1
-
-Workflow of creating a SR-IOV pod using OVS hardware offload:
-- [optional] Deploy a baremetal cluster with API network on bonded PFs
-- Enable OVS hardware offload for OpenvSwitch instances via CNO
-- Install SR-IOV Operator from Operator Hub
-- Provision PFs to desired number of VFs via SR-IOV Operator
-- Create a pod specifying cluster network with customized net-attach-def
+are capable of doing OVS hardware offload. The supported bond modes are
+`Active-Backup`, `Active-Active` and `LACP`. This is not required if OVS
+Hardware Offload is used on PF device directly.
 
 ### Implementation Details/Notes/Constraints
 
-- When enabling OVS Hardware Offload with SR-IOV VF LAG, PFs should first be
-provisioned with desired number of VFs, then configure PFs to `switchdev`
-mode, linux bond interface shall be created after above two steps. Since linux
-bond configuration can be applied via ignition file, it's important that SR-IOV
-Operator (installed in day 2) makes sure `switchdev` configurations are applied
-before linux bond configuration, this probably requires a node rebooting to
-guarantee the order.
+- SR-IOV Operator should first provision PFs with desired number of VFs,
+then configure PFs to `switchdev` mode.
+
+- When enabling OVS Hardware Offload with SR-IOV VF LAG, MCO needs to apply
+linux bond configuration. It's important that SR-IOV Operator (installed day 2)
+makes sure `switchdev` configurations are applied before linux bond
+configuration, this requires a node rebooting to guarantee the order if linux
+bond configuration is applied upfront.
 
 - When enabling OVS `hw-offload` option for OpenvSwitch daemon, it is required
 that ovsdb is created first.
 
 ### Risks and Mitigations
 
-RHEL-8.3 is not used as base image for RHCOS when 4.6 gets released. RHEL-8.3
-contains kernel and driver changes to fully support OVS Hardware Offload with
-connection track feature.
+RHEL-8.3 contains kernel and driver changes to fully support OVS Hardware
+Offload with connection track feature. If RHEL-8.3 is not used for RHCOS in
+4.6, OVS Hardware Offload feature will not be fully available.
 
 ### Test Plan
 
 - The changes in each relevant component must pass full e2e suite.
-- OVS hardware offload functional tests must pass on supported NICs.
+- Origin e2e tests mast pass on bare metal with OVS Hardware Offload enabled
+in OpenvSwitch daemon.
+- OVS hardware offload function must work on supported NICs.
 
 ### Graduation Criteria
 
-Tech Preview:
-- MCO supports configuring bond and vlan interfaces
-- Cluster Network Operator has API definition to enable OVS hardware offload
-- OVN-Kubernetes can configure VF and associated representor
-- Document how to use customized net-attach-def with Multus
-- SR-IOV Operator has API definition to configure `switchdev` device type
+To Tech Preview:
+- Bare metal cluster can be brought up when hardware offload is enabled.
+- A mixed of pods using offload and not using offload can co-exist on
+different nodes and communicate with each other.
+- Network policies can be applied to block pod-to-pod, service-to-service
+and pod-to-service traffic.
 
 ### Upgrade / Downgrade Strategy
 
