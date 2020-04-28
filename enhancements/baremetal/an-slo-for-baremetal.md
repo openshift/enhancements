@@ -39,21 +39,25 @@ superseded-by:
 
 ## Summary
 
-The Bare Metal Operator provides bare metal machine management
-capabilities needed for the Machine API provider on the `baremetal`
-platform, and there is no equivalent for this component on other
-platforms.
+The `cluster-baremetal-operator` component will provide bare metal
+machine management capabilities needed for the Machine API provider on
+the `baremetal` platform. There is no equivalent for this component on
+other platforms.
 
-The Bare Metal Operator is currently managed by the Machine API
-Operator in a fashion that requires the Machine API Operator to have
-significant bare metal specific knowledge. This proposal outlines a
-plan for the Bare Metal Operator to become a fully-fledged Second
-Level Operator under the management of the Cluster Version Operator.
+This functionality is currently provided by `machine-api-operator`
+directly via `baremetal-operator` from the Metal3 project, and related
+components. This situation requires the Machine API Operator to have
+significant bare metal specific knowledge.
 
-(To avoid likely confusion, please note that this proposal describes a
-new project tentatively named Bare Metal Operator (BMO), implying that
-the current baremetal-operator project will be renamed to reflect the
-fact it is "just a controller").
+This proposal outlines a plan for a new bare metal specific component
+as a fully-fledged Second Level Operator under the management of the
+Cluster Version Operator.
+
+The new `cluster-baremetal-operator` will initially merely adopt the
+existing bare metal specific components - including
+`baremetal-operator` from `machine-api-operator`. However, we expect
+that additional bare metal specific functionality will be added to
+this new operator over time.
 
 ## Motivation
 
@@ -93,9 +97,9 @@ There are two problems emerging with this design:
   responsibilities on any other platform.
 
 * Expanding needs for bare metal specific manifests - for example, new
-  CRDs used to drive new BMO capabilities - to be installed early in
-  the cluster bring-up means introducing yet more bare metal specific
-  concerns into the MAO.
+  CRDs used to drive new baremetal capabilities - to be installed
+  early in the cluster bring-up means introducing yet more bare metal
+  specific concerns into the MAO.
 
 Steps (2) and (3) are aspects of cluster bring-up which the CVO is
 clearly well-suited. However, to date, it was understood that creating
@@ -118,14 +122,14 @@ the `baremetal` platform.
 Recognizing that bare metal support warrants the creation of a new
 "subsystem":
 
-1. Create a new, OpenShift-specific project called the Bare Metal
-   Operator.
+1. Create a new, OpenShift-specific project called
+   `cluster-baremetal-operator` aka CBO.
 2. This project should implement a new SLO which is responsible for
    installing bare metal specific CRDs and running the BareMetalHost
    controller and related Metal3 components.
-3. The BMO should meet all of the standard expectations of an SLO,
+3. The CBO should meet all of the standard expectations of an SLO,
    including for example keeping a ClusterOperator resource updated.
-4. On infrastructure platforms other than `baremetal`, the BMO should
+4. On infrastructure platforms other than `baremetal`, the CBO should
    following emerging patterns for "not in use" components, for
    example setting its cluster operator condition to `Disabled=true`,
    `Available=true`, and `Progressing=False`.
@@ -143,17 +147,17 @@ Recognizing that bare metal support warrants the creation of a new
 
 ## Design Details
 
-The Bare Metal Operator is a new Second Level Operator (SLO) whose
-operand is a controller for the BareMetalHost resource and associated
-components from the Metal3 project. The below sections covers
-different areas of the design of this new SLO.
+`cluster-baremetal-operator` is a new Second Level Operator (SLO)
+whose operand is a controller for the BareMetalHost resource and
+associated components from the Metal3 project. The below sections
+covers different areas of the design of this new SLO.
 
 ### Standard SLO Behaviors
 
 As an SLO, the BMO is expected to adhere to the standard expected
 behaviours of SLO, including:
 
-1. The BMO image should be tagged with
+1. The CBO image should be tagged with
    `io.openshift.release.operator=true` and contain a `/manifests`
    directory with all of the manifests it requires the CVO to apply,
    along with an `image-references` file listing the images referenced
@@ -176,7 +180,7 @@ considered in future:
 
 ### "Not In Use" SLO Behaviors
 
-Unlike most other SLOs, the BMO is not applicable to all cluster
+Unlike most other SLOs, CBO is not applicable to all cluster
 configurations. On clusters running on an infrastructure platform
 other than `baremetal` it should adhere to the emerging expected
 behaviors for "not in use" SLOs, including:
@@ -199,9 +203,9 @@ similar cases following different patterns include:
   `Progressing=False`, `Available=True` with
   `Reason=OperatorDisabledByAdmin` for all three conditions.
 
-### BMO Details
+### cluster-baremetal-operator Details
 
-The BMO will:
+The CBO will:
 
 - Be a new `openshift/cluster-baremetal-operator` project.
 - Publish an image called `cluster-baremetal-operator`.
@@ -371,7 +375,7 @@ downgrade to `B` from `A`.
 
 In order to fully encapsulate the responsibilities of the BMO in an
 operator - and remove the bare metal specific code and manifests from
-the MAO - the MAO coul add a generic operator management framework
+the MAO - the MAO could add a generic operator management framework
 for platform specific operators, and the BMO would integrate with this
 framework.
 
@@ -385,9 +389,9 @@ only be a single user of this framework.
 
 ### Add platform awareness to the CVO
 
-In order to reduce the impact of the BMO when running on non bare
+In order to reduce the impact of the CBO when running on non bare
 metal platforms, the CVO could gain the ability to manage operators
-that are platform-specific, meaning the BMO would move only be
+that are platform-specific, meaning the CBO would move only be
 installed and run when the CVO detects (via a
 `io.openshift.release.platform` image label, for example) that this
 operator is required on this platform.
@@ -402,7 +406,7 @@ The [cluster profiles
 enhancement](https://github.com/openshift/enhancements/pull/200) offer
 a generic framework for conditions that affect how the CVO applies the
 content in a release image. This framework could be used in this case
-by creating a `baremetal` cluster profile, and the BMO would only be
+by creating a `baremetal` cluster profile, and the CBO would only be
 installed when this profile is active.
 
 As per the enhancement document, cluster profiles are being introduced
@@ -413,7 +417,7 @@ single cluster profile can be activated at a time, and such a
 `baremetal` profile is not something that would naturally be mutually
 exclusive with other potential profiles.
 
-Compared to proposed mechanism to reduce the impact of the BMO on non
+Compared to proposed mechanism to reduce the impact of the CBO on non
 bare metal platforms - i.e. the `Disabled` state - there are greater
 potential downsides from jumping into using cluster profiles for this
 at this early stage.
@@ -425,5 +429,3 @@ at this early stage.
 - https://github.com/metal3-io/baremetal-operator/issues/227
 - https://github.com/openshift/enhancements/pull/90
 - https://github.com/openshift/enhancements/pull/102
-
-
