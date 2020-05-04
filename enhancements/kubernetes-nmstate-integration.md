@@ -103,6 +103,10 @@ An upstream API group of nmstate.io is currently used.
 #### Bond creation
 
 * Be able to create bond interfaces on OpenShift nodes.
+ 
+  Typically, MCO + Ignition would be utilized. However, in a Day 1 install, that may not be possible.
+  It may be necessary for the bond/vlan configuration be done before Ignition can even be reached.
+  
 * Create a vlan interface on top of the bond inter.
 
 #### Assign ip address
