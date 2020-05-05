@@ -51,7 +51,8 @@ Reduce administrative overhead to run a cluster and ability to respond to failur
 
 - Providing administrator-defined short-circuiting of automated remediation when multiple nodes are unhealthy at the same time.
 
-- Allowing a new and custom remediation developed outside the machine-healthcheck controller and enable its use via annotation, e.g baremetal reboot.
+- Enable experimental remediation systems to be developed outside the machine-healthcheck controller via annotation, e.g baremetal reboot.
+  - If a strong need for multiple external remediation systems ever emerge a follow up proposal fleshing out stronger integration details must be provided for this to be supported as non-experimetal.
 
 
 ### Non-Goals
@@ -156,9 +157,9 @@ Out of band:
 
 ![Machine health check](./mhc.svg)
 
-#### Out of tree remediation controller, e.g baremetal reboot:
-- An external remediation can plug in by setting the `healthchecking.openshift.io/strategy: reboot` on the MHC resource.
-- An external remediation controller remediation could then watch machines annotated with `healthchecking.openshift.io/remediation: reboot` and react as it sees fit.
+#### Out of tree experimental remediation controller, e.g baremetal reboot:
+- An external remediation can plug in by setting the `machine.openshift.io/remediation-strategy` on the MHC resource.
+- An external remediation controller remediation could then watch machines annotated with `machine.openshift.io/remediation-strategy: external-baremetal` and react as it sees fit.
 
 ### Risks and Mitigations
 
