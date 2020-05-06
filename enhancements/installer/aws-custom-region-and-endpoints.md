@@ -84,7 +84,7 @@ The user can provide a list of API endpoints for various services.
 // ServiceEndpoint store the configuration of a url to
 // override existing defaults of AWS Services.
 type ServiceEndpoint struct {
-    Service string `json:"service"`
+    Name string `json:"name"`
 
     // This must be a HTTPS URL
     URL     string `json:"url"`
@@ -109,9 +109,9 @@ The yaml representation by the user would look like:
 platform:
   aws:
     serviceEndpoints:
-    - service: ec2
+    - name: ec2
       url: https://ec2.custom.url
-    - service: s3
+    - name: s3
       url: https://s3.custom.url
 ```
 
@@ -181,7 +181,7 @@ type AWSPlatformSpec struct {
 // override existing defaults of AWS Services.
 // Currently Supports - EC2, IAM, ELB, S3 and Route53.
 type AWSServiceEndpoint struct {
-  Service string `json:"service"`
+  Name string `json:"name"`
 
   // This must be a HTTPS URL
   URL     string `json:"url"`
