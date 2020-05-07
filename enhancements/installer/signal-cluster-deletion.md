@@ -7,13 +7,15 @@ reviewers:
   - abhinavdahiya
   - wking
   - eparis
+  - ecordell
+
 approvers:
   - dgoodwin
   - abhinavdahiya
   - wking
   - eparis
 creation-date: 2020-03-30
-last-updated: 2020-04-21
+last-updated: 2020-05-07
 status: provisional
 ---
 
@@ -47,8 +49,15 @@ Signal that cluster deletion has begun through deletion of a new CRD `Alive` and
 ### User Stories
 
 #### Story 1
+As an OpenShift administrator, I would like for any external resources created in service of the cluster be removed when when I delete the cluster, so that:
+* I do not have to track down those resources and remove them manually
+* I do not have to pay for resources that are not being used.
 
 #### Story 2
+As an OpenShift (software, big-O) Operator, I would like to have a way to know that the cluster is being shut down, so that I can perform any necessary cleanup steps and remove external resources.
+
+#### Story 3
+As an OpenShift administrator, I would like to have a way to indicate that certain external resources that would normally be cleaned up on cluster deletion be preserved on cluster delete, so that I don't lose important resources stored externally.
 
 ### Implementation Details/Notes/Constraints
 
@@ -68,7 +77,7 @@ spec:
 
 Add an admission plugin that prevents delete when `blockTeardown` has been set.
 
-We believe it would be best to add the CRD and admission plugin to the cluster version operator. We don't foresee this requiring a controller and doing a separate operator seems like overkill for this object.
+*Note*: We proposed adding the CRD and admission plugin (which pevents delete) to the cluster version operator and it was decided that they would be better placed within OLM. We would prefer not to create a separate operator for a CRD and admission plugin as that would require a repository and release engineering. We're requesting feedback on where to put these resources.
 
 #### Install
 
