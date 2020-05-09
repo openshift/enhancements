@@ -434,6 +434,155 @@ bare metal platforms - i.e. the `Disabled` state - there are greater
 potential downsides from jumping into using cluster profiles for this
 at this early stage.
 
+## Discussion
+
+**Q: Should BMO be CVO-managed, OLM-managed, or SLO-managed?**
+
+@smarterclayton
+
+I believe [BMO] should be managed by the machine api operator. CVO
+does not manage "operators", it manages resources. It does not do
+conditional logic for operator deployment. That's the responsibility
+of second level operators, of which MAO is one.
+
+I don't see much difference between the current mechanism of MAO
+deploying an actuator (a controller AKA an operator) and MAO deploying
+the bare metal operator.
+
+Why can't launching BMO under MAO be exactly like launching an
+actuator, and then BMO manages the actuator? Or simply make the bare
+metal actuator own the responsibility of managing lifecycle of its
+components?
+
+How can we make "managing sub operators" cheaper by reducing
+deployment complexity?
+
+There needs to be a second level operator that either deploys or
+manages the appropriate machine components for the current
+infrastructure platform.
+
+There appears to be a missing “machine-infrastructure” operator that
+acts like cluster network operator and deploys the right
+components. I’m really confused why that wouldn’t just be “machine api
+operator”.
+
+Having unique operators per infrastructure sounds like an anti pattern
+if we already have a top level operator.
+
+@deads2k
+
+There are development and support benefits to being able to divide
+responsibilities between the machine-api-operator making calls to a
+cloud provider API from the mechanisms that provides those cloud
+provider APIs themselves and the support infrastructure for the
+machines. Doing so forces good planning and API boundaries on both the
+MAO and the baremetal deployments. … clear separation of
+responsibility and failures for both developers and customers.
+
+@smarterclayton
+
+An SLO is a "component" or "subsystem" - given what we know today,
+bare metal feels like our one infrastructure platform that most
+deserves to be viewed as its own subsystem.
+
+**Q: How should BMO behave if it is SLO-managed?**
+
+@deads2k
+
+[Add BMO] to the payload and then the baremetal operator would put
+itself into a Disabled state if it was on a non-metal platform.
+
+@smarterclayton
+
+Disabled operators already need special treatment in the API. They
+must be efficient and self-effacing when not used, like the image
+registry, samples, or insights operators must (mark disabled, be
+deemphasized in UI).
+
+The baremetal-operator is installed by default, if infrastructure is
+!= BareMetal on startup then it just pauses (and does nothing) and
+sets its cluster operator condition to Disabled=true, Available=true,
+Progressing=False with appropriate messages, or if infrastructure ==
+BareMetal, then it runs as normal. The cluster operator object is
+always set, but when disabled user interfaces should convey that
+disabled state differently than failing (by graying it out).
+
+BMO must fully participate in CVO lifecycle. CVO enforces upgrade
+rules. BMO API must be stable.
+
+**Q: Should bare metal specific CRDs be installed on all clusters or
+  only on bare metal clusters?**
+
+@smarterclayton
+
+[Bare metal specific CRDs] feel like they are part of MAO, just like
+CNO installs CRDs for the two core platform types. In general, CNO
+already demonstrates this pattern and is successful doing so, so the
+default answer for this pattern is MAO should behave like CNO and any
+deviation needs justification.
+
+@derekwaynecarr
+
+I think its an error that we have namespaces and crds deployed to a
+cluster for contexts that are not appropriate. we should aspire to
+move away from that rather than continue to lean into it. for example,
+every cluster has a openshift-kni-infra or openshift-ovirt-infra even
+where it is not appropriate.
+
+**Q: Why not use CVO profiles to control when BMO is deployed?**
+
+@smarterclayton
+
+CVO Profiles were not intended to be dynamic or conditional (and there
+are substantial risks to doing that).
+
+Profiles don't seem appropriate for conditional parameterization of
+the payload based on global configuration
+
+The general problem with profiles is that they expand the scope of the
+templating the payload provides. [..] If we expanded this to include
+operators that are determined by infrastructure, then we're
+potentially introducing a new variable (not just a new profile), since
+we very well may want to deploy bare metal operator in a hypershift
+mode.
+
+**Q: Why not name the new operator "metal3-operator"? Should this
+  operator come from the Metal3 upstream project?**
+
+@markmc
+
+Naming - in terms of what name shows up in `oc get clusteroperator`, I
+think that should be a name reflecting the functionality in user terms
+rather than the software project brand. And if `baremetal` is the name
+of the clusteroperator, then I think it makes sense to follow that
+through and metal3 is an implementation detail.
+
+Scope - if we imagine other bare metal related functionality in
+OpenShift that isn't directly related to the Metal3 project, do we
+think that should fall under another SLO, or this one? I think it's
+best to say this new SLO is where bare metal related functionality
+would be managed.
+
+Upstream project - you could imagine an upstream project which would
+encapsulate the [kustomize-based deployment
+scenarios](https://github.com/openshift/baremetal-operator/blob/master/docs/ironic-endpoint-keepalived-configuration.md#kustomization-structure)
+in the metal3/baremetal-operator project. We could re-use something
+like that, but we would also need to add OpenShift integration
+downstream - e.g. the clusteroperator, and checking the platform type
+in the infrastructure resource. Is there an example of another SLO
+that is derived from an operator that is more generally applicable?
+
+**Q: Why not use `ownerReferences` on the `metal3` deployment to
+  indicate that it is owned by the CBO?**
+
+(Discussion ongoing in the PR)
+
+**Q: If the concern is there is "too much bare metal stuff" in the MAO
+  repo, wouldn't that concern also apply to the [vSphere
+  actuator](https://github.com/openshift/machine-api-operator/tree/master/pkg/controller/vsphere)?**
+
+(Discussion ongoing in the PR)
+
 ## References
 
 - "/enhancements/baremetal/baremetal-provisioning-config.md"
