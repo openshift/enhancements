@@ -243,9 +243,16 @@ The CBO will:
 
 ### Upgrade / Downgrade / Version Skew Strategy
 
-The key thing to consider for upgrades is how to smoothly transition
-the `metal3` deployment in the `openshift-machine-api` namespace from
-the MAO to the CBO.
+Every time we restart the pod managed by the `metal3` deployment we
+lose the contents of the ironic database, because there is no
+persistent storage for that data. Any work ironic has in progress
+would also be lost. So it's better to minimize restarts as much as
+possible, and one way to do that during this upgrade is to take over
+the existing deployment instead of launching a new one.
+
+And so the key thing to consider for this upgrade is how to smoothly
+transition the `metal3` deployment in the `openshift-machine-api`
+namespace from the MAO to the CBO.
 
 We assume that the CBO will first appear in `4.N.0` and take over from
 the MAO in that release. We can merge changes into `4.N-1.y` paving
