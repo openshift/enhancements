@@ -234,7 +234,8 @@ The CBO will:
 - Based on the values in the `Provisioning` resource, create a
   `metal3` `Deployment` and associated `metal3-mariadb-password` under
   the `openshift-machine-api` namespace. This is the same as the MAO
-  currently creates.
+  currently creates. In other words, the initial purpose of the CBO
+  will be to reconcile the `Provisioning` singleton resource.
 
 ### Test Plan
 
