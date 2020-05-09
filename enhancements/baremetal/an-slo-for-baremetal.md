@@ -215,8 +215,11 @@ The CBO will:
   `Disabled` status for non-baremetal platforms.
 - Use the existing `openshift-machine-api` namespace where the
   BareMetalHost resources are also located.
-- Install the `metal3.io` `Provisioning` (cluster-scoped) and
-  `BareMetalHost` (namespaced) CRDs.
+- Install the `metal3.io` [`Provisioning`
+  (cluster-scoped)](https://github.com/openshift/machine-api-operator/blob/40cbead/install/0000_30_machine-api-operator_04_metal3provisioning.crd.yaml)
+  and [`BareMetalHost`
+  (namespaced)](https://github.com/openshift/machine-api-operator/blob/40cbead/install/0000_30_machine-api-operator_08_baremetalhost.crd.yaml)
+  CRDs.
 - Run under a new `openshift-machine-api/cluster-baremetal-operator`
   `ServiceAccount`.
 - Be launched by a `openshift-machine-api/cluster-baremetal-operator`
@@ -226,7 +229,7 @@ The CBO will:
 - Implement a controller reconciling the singleton
   `provisioning-configuration` cluster-scoped `Provisioning` resource
 - Do nothing except set `Disabled=true`, `Available=true`, and
-  `Progressing=False` when the `Infrastructure` resource a platform
+  `Progressing=False` when the `Infrastructure` resource is a platform
   type other than `BareMetal`.
 - Based on the values in the `Provisioning` resource, create a
   `metal3` `Deployment` and associated `metal3-mariadb-password` under
@@ -237,7 +240,7 @@ The CBO will:
 
 ### Graduation Criteria
 
-### Upgrade / Downgrade / Verson Skew Strategy
+### Upgrade / Downgrade / Version Skew Strategy
 
 The key thing to consider for upgrades is how to smoothly transition
 the `metal3` deployment in the `openshift-machine-api` namespace from
@@ -265,9 +268,9 @@ In the related
 [cluster-openshift-apiserver-operator PR](https://github.com/openshift/cluster-openshift-apiserver-operator/pull/294)
 the details are clear - `cluster-authentication-operator` indicates
 it is "at least at 4.n" by setting the `managingOAuthAPIServer` to
-`True` in the status field of its. Then `cluster-authentication-operator`
-"claims" an apiservice by setting the `authentication.operator.openshift.io/managed`
-annotation.
+`True` in the status field of its `authentication` resource. Then
+`cluster-authentication-operator` "claims" an `apiservice` by setting
+the `authentication.operator.openshift.io/managed` annotation.
 
 Presumably the "at least at 4.n" check is required in addition to the
 annotation to handle a downgrade scenario - where the annotation is
@@ -277,7 +280,7 @@ set, but `cluster-authentication-operator` has been downgraded.
 
 We need the following changes to MAO:
 
-1. Respect a "gate" allowing CBO "claim" the resource.
+1. Respect a "gate" allowing CBO to "claim" the resource.
 
    We will use [the existing `machine.openshift.io/owned` annotation](http://github.com/openshift/machine-api-operator/pull/424)
    on the `metal3` deployment to indicate that MAO is managing the
