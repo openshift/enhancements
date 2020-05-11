@@ -2,6 +2,7 @@
 title: signal-cluster-deletion
 authors:
   - "@abutcher"
+  - "@dgoodwin"
 reviewers:
   - dgoodwin
   - abhinavdahiya
@@ -33,14 +34,17 @@ status: provisional
 
 Operators can create external resources in clouds and other services that have no opportunity to be cleaned up when a cluster is uninstalled, causing extra work for cluster maintainers to track down and remove these resources. Signalling cluster deletion would allow operators to clean up external resources during uninstallation and would ensure that total cleanup is an automatic process.
 
+This process will still be best effort as it is always possible users may manually cleanup resources without allowing this mechanism to run to completion.
+
 ## Motivation
 
 ### Goals
 
-Signal that cluster deletion has begun through deletion of a new CRD `Alive` and wait for that object to be deleted during uninstall before continuing with removing cluster resources such as instances, storage and networking.
+Signal that cluster deletion has begun and give operators or other cluster components time to teardown before continuing with removing cluster resources such as instances, storage and networking.
 
 ### Non-Goals
 
+* Teardown of the actual cluster itself. (control plane, instances, etc) This process is expected to still be run external to the cluster.
 * Attaching finalizers to operator resources based on the `Alive` object which would facilitate removal of operator resources.
 * Removing resources other than the `Alive` object during cluster uninstall.
 
@@ -72,26 +76,32 @@ metadata:
   name: cluster
   namespace: openshift-config
 spec:
-  blockTeardown: true  # block teardown of operator resources
 ```
-
-Add an admission plugin that prevents delete when `blockTeardown` has been set.
 
 *Note*: We proposed adding the CRD and admission plugin (which pevents delete) to the cluster version operator and it was decided that they would be better placed within OLM. We would prefer not to create a separate operator for a CRD and admission plugin as that would require a repository and release engineering. We're requesting feedback on where to put these resources.
 
 #### Install
 
-Create a `Alive` object during installation.
+Create an `Alive` object during installation.
 
 #### Upgrade
 
-Create `Alive` object for existing clusters.
+Create an `Alive` object for existing clusters.
 
 #### Uninstall
 
-Delete a cluster's `Alive` resource during uninstall when requested via flag such as `openshift-install destroy cluster --cluster-alive-delete`. Cluster destroy will wait for a default amount of time and fail if `Alive` deletion was not successful. The default timeout will not be configurable and users will be expected to attempt shutdown multiple times upon failure.
+Projects that initiate teardown of OpenShift clusters externally should make use of this CR if they would like to avoid issues with dangling resources.
 
-`destroy --cluster-alive-delete` will fail if `blockTeardown` has been set for a cluster's `Alive` object and report that an admin is blocking teardown for this cluster. This will either be checked directly or attempted and rejected by the admission plugin.
+  1. Delete the Alive custom resource.
+  1. Wait a period of time to allow operators to complete their teardown.
+  1. If the cluster is not reachable, proceed with normal cluster teardown regardless of the potential dangling resources.
+  1. If timeout is hit and the Alive resource still exists, proceed with teardown regardless of the potential dangling resources.
+
+These steps would need to be taken in openshift-install and Hive, ARO, ROKS, etc.
+
+An openshift-install implementation would be exposed by a new command line flag, and fail hard if the timeout is hit. User would need to re-run to keep trying, or omit the flag to proceed anyhow.
+
+We accept that some clusters will be provisioned with tooling that does not respect this and possibly orphan resources. This is a best effort opt-in solution.
 
 ### Risks and Mitigations
 
@@ -119,7 +129,7 @@ This enhancement will follow standard graduation criteria.
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
 
-#### Tech Preview -> GA 
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
