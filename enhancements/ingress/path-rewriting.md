@@ -67,9 +67,44 @@ single-host option because upstream Ingress controllers support path rewriting.
 For instance with the nginx controller adding the following annotation does
 the trick:
 
+`traefik.ingress.kubernetes.io/rewrite-target: /`
 `nginx.ingress.kubernetes.io/rewrite-target: /$1`
 
 We would like to support these annotations for Routes as well.
+We don't need support of regex path matching as `Route.spec.path` is not using regex as well.
+
+**Route-specific annotations**
+
+| Variable	| Description | Environment variable used as default |
+| --------- | ----------- | ------------------------------------ |
+| router.openshift.io/rewrite-target | Sets the rewrite path of the request on the backend.| |
+
+**Route-rewrite examples**
+
+| Route.spec.path	| Request path | Rewrite target | Output |
+| --------------- | ----------- | --------------- | ------ |
+| /foo | /foo | / | / |
+| /foo | /foo/ | / | / |
+| /foo | /foo/bar | / | /bar |
+| /foo | /foo/bar/ | / | /bar/ |
+| /foo | /foo | /bar | /bar |
+| /foo | /foo/ | /bar | /bar/ |
+| /foo | /foo/bar | /baz | /baz/bar |
+| /foo | /foo/bar/ | /baz | /baz/bar |
+| /foo | /foo | /baz | /baz/bar |
+| /foo/ | /foo | / | Application is not available (Error 404) |
+| /foo/ | /foo/ | / | / |
+| /foo/ | /foo/bar | / | /bar |
+
+**Annotation example**
+
+```
+kind: Route
+metadata:
+  name: example
+  annotations:
+    haproxy.router.openshift.io/rewrite-target: /
+```
 
 ## Alternatives
 
