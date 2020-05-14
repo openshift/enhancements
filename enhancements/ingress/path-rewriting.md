@@ -73,28 +73,8 @@ the trick:
 We would like to support these annotations for Routes as well.
 We don't need support of regex path matching as `Route.spec.path` is not using regex as well.
 
-**Route-specific annotations**
-
-| Variable	| Description | Environment variable used as default |
-| --------- | ----------- | ------------------------------------ |
-| router.openshift.io/rewrite-target | Sets the rewrite path of the request on the backend.| |
-
-**Route-rewrite examples**
-
-| Route.spec.path	| Request path | Rewrite target | Output |
-| --------------- | ----------- | --------------- | ------ |
-| /foo | /foo | / | / |
-| /foo | /foo/ | / | / |
-| /foo | /foo/bar | / | /bar |
-| /foo | /foo/bar/ | / | /bar/ |
-| /foo | /foo | /bar | /bar |
-| /foo | /foo/ | /bar | /bar/ |
-| /foo | /foo/bar | /baz | /baz/bar |
-| /foo | /foo/bar/ | /baz | /baz/bar |
-| /foo | /foo | /baz | /baz/bar |
-| /foo/ | /foo | / | Application is not available (Error 404) |
-| /foo/ | /foo/ | / | / |
-| /foo/ | /foo/bar | / | /bar |
+**Rewrite Target documentation**
+Documentation proposal at https://github.com/openshift/openshift-docs/pull/22021
 
 **Annotation example**
 
