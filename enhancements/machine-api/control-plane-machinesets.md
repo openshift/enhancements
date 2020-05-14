@@ -40,30 +40,40 @@ superseded-by:
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
+
+## Glossary
+
+Control Plane: The collection of stateless and stateful processes which enable a Kubernetes cluster to meet minimum operational requirements. This includes: kube-apiserver, kube-controller-manager, kube-scheduler, kubelet and etcd.
+
 ## Summary
 
-For clarity in this doc we set the definition for "Control Plane" as "The collection of stateless and stateful processes which enable a Kubernetes cluster to meet minimum operational requirements". This includes: kube-apiserver, kube-controller-manager, kube-scheduler, kubelet and etcd.
+This proposal outlines a solution to provide self managed Control Plane Machines:
+  - Ensures that Control Plane Machines are recreated on a deletion request at any time.
+  - Ensures that Control Plane Machines are auto repaired when a node goes unready (Machine Health Check).
 
-This proposal outlines a solution for presenting the Control Plane compute as a single scalable resource (i.e machineSet) for each failure domain. Particularly:
-- Proposes to let the installer create a MachineSet for each master Machine.
-- Proposes to let the installer create a Machine Health Check resource to monitor the Control Plane Machines.
+Particularly:
+- Proposes to introduce a new CRD `ControlPlane` which automates the adoption of any existing Control Plane Machine:
+      - The ControlPlane controller creates and manages a MachineSet to back each Control Plane Machine that is found at any time.
+      - The ControlPlane controller creates and manages a Machine Health Check resource to monitor the Control Plane Machines.
 
-**Note:**
-- This will enable to create a new CRD to manage the Control Plane as a single scalable resource on top of MachineSets, autoscaling and fully automated rolling upgrades if desired in the near future. This is out of the scope for this particular proposal.
+This proposal assumes that all etcd operational aspects are managed by the cluster-etcd-operator orthogonally in a safe manner while manipulating the compute resources.
 
-- A separate proposal is created to let the installer create Machine Health Checking resources to monitor the worker Machines. This is out of the scope for this particular proposal.
+The contract between the etcd operations and the compute resources is given by the PDBs that blocks machine's deletion. 
+Depends on https://issues.redhat.com/browse/ETCD-74?jql=project%20%3D%20ETCD.
+
 
 ## Motivation
 
 The Control Plane is the most critical and sensitive entity of a running cluster. Today OCP Control Plane instances are "pets" and therefore fragile. There are multiple scenarios where adjusting the compute capacity which is backing the Control Plane components might be desirable either for resizing or repairing.
 
-Currently there is nothing that automates or eases this task. The steps for the Control Plane to be resized in any manner or to recover from a tolerable failure (etcd quorum is not lost) are completely manual. Different teams are following different "Standard Operating Procedure" documents scattered around with manual steps resulting in loss of information, confusion and extra efforts for engineers and users.
+Currently there is nothing that automates or eases this task. The steps for the Control Plane to be resized in any manner or to recover from a tolerable failure (a etcd quorum is not lost but a single node goes unready) are completely manual.
+
+Different teams are following different "Standard Operating Procedure" documents scattered around with manual steps resulting in loss of information, confusion and extra efforts for engineers and users.
 
 ### Goals
 
-- To have a declarative mechanism to scale Control Plane compute resources.
-- To have a declarative mechanism to ensure a given number of Control Plane compute resources is available at a time.
-- To support default declarative self-healing and replacement of Control Plane compute resources.
+- To have a declarative mechanism to ensure that existing Control Plane Machines are recreated on a deletion request at any time.
+- To auto repair unready Control Plane Nodes.
 
 ### Non-Goals / Future work
 
@@ -81,70 +91,62 @@ Currently there is nothing that automates or eases this task. The steps for the 
 - To manage the life cycle of Control Plane components
 - To automate the provisioning and decommission of the bootstrapping instance managed by the installer.
 - To provide autoscaling support for the Control Plane.
-  - This proposal is a necessary first step for Control Plane autoscaling. It focuses on settling on the primitives to abstract away the Control Plane as scalable resources. In a follow up RFE we will discuss how/when to auto scale the MachineSet resources as a single entity based on relevant cluster metrics e.g number of workers, number of etcd objects, etc.
+  - This proposal is a necessary first step for enabling Control Plane autoscaling.
+  - It focuses on settling on the primitives to abstract away the Control Plane as a single entity.
+  - In a follow up RFE we will discuss how/when to auto scale the the controC Plane Machines based on relevant cluster metrics e.g number of workers, number of etcd objects, etc.
 - To support fully automated rolling upgrades for the Control Plane compute resources. Same reason as above.
 
 ## Proposal
 
 Currently the installer chooses the failure domains out of a particular provider availability and it creates a Control Plane Machine resource for each of them.
 
-This proposes two additional steps:
-- To let the installer create MachineSets for each master Machine to be adopted.
-- To let the installer create a Machine Health Check resource to monitor the Control Plane Machines.
+This proposes to let the installer create an additional ControlPlane resource that will adopt and manage the lifecycle of those Machines.
 
 The lifecycle of the compute resources still remains decoupled and orthogonal to the lifecycle and management of the Control Plane components hosted by the compute resources. All of these components, including etcd are expected to keep self managing themselves as the cluster shrink and expand the Control Plane compute resources.
 
 ### User Stories [optional]
 
 #### Story 1
-- As an operator running Installer Provider Infrastructure (IPI), I want flexibility to run [large or small clusters](https://kubernetes.io/docs/setup/best-practices/cluster-large/#size-of-master-and-master-components) so I need to have the ability to resize the control plane in a declarative, automated and seamless manner.
+- As an operator installer a new OCP cluster I want flexibility to run [large or small clusters](https://kubernetes.io/docs/setup/best-practices/cluster-large/#size-of-master-and-master-components) so I need the ability to vertically resize the control plane in a declarative, automated and seamless manner.
+
+This proposal satisfy this by providing a semi-automated process to vertically resize Control Plane Machines by enforcing recreation.
 
 #### Story 2
-- As an operator running User Provider Infrastructure (UPI), I want to expose my non-machine API machines and offer them to the Control Plane controller so I can have the ability to resize the control plane in a declarative, automated and seamless manner.
+- As an operator running an existing OCP cluster, I want have a seamless path for my Control Plane Machines to be adopted and become self managed.
+
+This proposal enables this by providing the ControlPlane resource.
 
 #### Story 3
 - As an operator of an OCP Dedicated Managed Platform, I want to give users flexibility to add as many workers nodes as they want or to enable autoscaling on worker nodes so I need to have ability to resize the control plane instances in a declarative and seamless manner to react quickly to cluster growth.
 
+This proposal enables this by providing a semi-automated vertical resizing process as described in "Declarative Vertical scaling".
+
 #### Story 4
-- As a SRE, I want to have consumable API primitives in place to resize Control Plane compute resources so I can develop upper level automation tooling atop. E.g Control Plane autoresizing to support a severe growth peak of the number of worker nodes.
+- As a SRE, I want to have consumable API primitives in place to resize Control Plane compute resources so I can develop upper level automation tooling atop. E.g Automate Story 3 to support a severe growth peak of the number of worker nodes.
 
 #### Story 5
-- As an operator, I want my machine API cluster infrastructure to be self healing so I want faulty nodes to be remediated automatically for safety scenarios. This includes having self healing Control Plane machines.
+- As an operator, I want faulty nodes to be remediated automatically. This includes having self healing Control Plane machines.
 
 #### Story 6
 - As a multi cluster operator, I want to have a universal user experience for managing the Control Plane in a declarative manner across any cloud provider, bare metal and any flavour of the product that have in common the topology assumed in this doc.
 
-#### Story 7
-- As a developer, I want to be able to deploy the smallest possible cluster to save costs, i.e one instance Control Plane and resize to more instances as I see fit.
-
 ### Implementation Details/Notes/Constraints [optional]
 
-To satisfy the goals, motivation and stories above, this proposes to let the installer to create MachineSets to own the Machine objects for each failure domain and a Machine Health Check to monitor the Control Plane machines.
+To satisfy the goals, motivation and stories above, this proposes to let the installer to create a ControlPlane object to adopt and manage the lifecycle the Control Plane Machines.
+
+The ControlPlane CRD will be exposed by the Machine API Operator (MAO) to the Cluster Version Operator (CVO).
+The ControlPlane controller will be managed by the Machine API Operator.
 
 #### Bootstrapping
 Currently during a regular IPI bootstrapping process the installer uses Terraform to create a bootstrapping instance and 3 master instances. Then it creates Machine resources to "adopt" the existing master instances.
 
-Additionally:
-- It will create MachineSets to adopt those machines by looking up known labels (Adopting behaviour already exists in machineSet logic).
-	- `machine.openshift.io/cluster-api-machineset": <cluster_name>-<label>-<zone>-controlplane`
-	- `machine.openshift.io/cluster-api-cluster":    clusterID`
+Additionally it will create a ControlPlane resource to manage the lifecycle of those Machines:
+  - The ControlPlane controller will create MachineSets to adopt those machines by looking up known labels (Adopting behaviour already exists in machineSet logic).
+  	- `machine.openshift.io/cluster-api-machineset": <cluster_name>-<label>-<zone>-controlplane`
+  	- `machine.openshift.io/cluster-api-cluster":    clusterID`
+  - The ControlPlane controller will create and manage a Machine Health Checking resource targeting the Control Plane Machines. Specific MHC details can be found [here](https://github.com/openshift/enhancements/blob/master/enhancements/machine-api/machine-health-checking.md)
 
-#### Declarative horizontal scaling
-- Each MachineSet can be scaled in/out by changing the replica number or via "scale" subresource.
-- Out of band the Cluster etcd Operator is responsible for watching the existing nodes and taking care of the etcd operational aspects.
-- During scaling in operations any machine deletion will always honour Pod Disruption Budgets (PBD). This gives etcd guard the chance to block a deletion that might be considered disruptive.
-
-#### Declarative Vertical scaling
-- With MachineSets in place this is semi-automated:
-	- A particular provider property can be changed by any consumer in the MachineSet spec.
-	- This won't affect existing Machines but it would apply for upcoming Machines.
-	- Machine creation with the new spec property can be forced by scaling out or deleting existing machines, e.g `kubectl delete machine name`
-
-#### Self healing (Machine Health Checking)
-- Specific MHC details can be found [here](https://github.com/openshift/enhancements/blob/master/enhancements/machine-api/machine-health-checking.md)
-
-- The Installer will create a Machine Health Checking resource targeting the Control Plane Machines.
-
+Example:
 ```
 apiVersion: machine.openshift.io/v1beta1
 kind: MachineHealthCheck
@@ -166,14 +168,72 @@ spec:
   maxUnhealthy: "34%"
 ```
 
--   Any machine deletion will always honour Pod Disruption Budgets (PBD). This gives etcd guard the chance to block a deletion that it considers disruptive.
+#### Declarative Vertical scaling
+- This is semi-automated:
+	- A particular provider property can be changed by any consumer in the MachineSet spec e.g `instanceType`.
+	- Deleting the Machine will trigger the creation of a fresh one with new `instanceType`.\
+  - Any consumer might choose to automated this process as it sees fit.
 
-TODO: Currently multiple MHC can target the same Machine. We should revisit a stronger mechanisim to prevent undesired MHC to target Control Plane Machines.
+#### Declarative horizontal scaling
+- Out of scope:
+  - We'll reserve the ability to scale horizontally for farther iterations if required. For the initial implementation the ControlPlane controller will limit the underlying machineSet horizontal scale capabilities to solely enforce recreation of any of the adopted Machines.
+
+#### Autoscaling
+- Out of scope:
+  - This proposal sets the foundation for enabling vertical autoscaling. It enables any consumer to develop autoscaling atop the semi-automated process for "Declarative Vertical scaling" described above.
+  - In a future proposal we plan to add vertical autoscaling ability on the ControlPlane resource.
+
+- Any machine deletion will always honour and it will be blocked on Pod Disruption Budgets (PBD). This gives etcd guard the chance to block a deletion that it considers disruptive.
+
+#### API Changes
+
+```
+controlplane.openshift.machine.io/v1beta1
+
+// ControlPlane is the Schema for the ControlPlane API.
+type ControlPlane struct {
+  metav1.TypeMeta   `json:",inline"`
+  metav1.ObjectMeta `json:"metadata,omitempty"`
+
+  Spec   ControlPlaneSpec   `json:"spec,omitempty"`
+  Status ControlPlaneStatus `json:"status,omitempty"`
+}
+
+// ControlPlaneSpec defines the desired state of ControlPlaneSpec.
+type ControlPlaneSpec struct {
+
+  // Defaults to true.
+  // This can be disable for complex scenarios where manual introspection is needed.
+  EnableNodeAutorepair bool `json:"enableautorepair,omitempty"`
+
+  // Out of scope.
+  // EnableAutoscaling
+
+  // Out of scope. Consider to enable a fully automated rolling upgrade for all control plane machines changing a single place.
+  // This would possibly require externalizing the infra info and decoupling it from the failure domain definition e.g az.
+  // InfrastructureTemplate
+}
+
+type ControlPlaneStatus struct {
+  // Total number of non-terminated machines targeted by this control plane
+  // (their labels match the selector).
+  // +optional
+  Replicas int32 `json:"replicas,omitempty"`
+
+  // Total number of fully running and ready control plane machines.
+  // +optional
+  ReadyReplicas int32 `json:"readyReplicas,omitempty"`
+
+  // TODO
+  // Conditions
+}
+```
 
 ### Risks and Mitigations
 
-During horizontal scaling operations there are multiple sensitive scenarios like scaling from 1 to 2. As soon as the etcd API is notified of the new member the cluster loses quorum until that new member starts and joins the cluster. This as well as any other operational aspect of etcd healthiness must be still handled by the [Cluster etcd Operator](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/cluster-etcd-operator.md#motivation).
-The contract for the machine API is by honouring Pod Disruption Budgets (PBD), including those given by etcd guard.
+There are multiple sensitive scenarios like growing from 1 to 2. As soon as the etcd API is notified of the new member the cluster loses quorum until that new member starts and joins the cluster. This as well as any other operational aspect of etcd healthiness must be still handled by the [Cluster etcd Operator](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/cluster-etcd-operator.md#motivation).
+
+The contract for the machine API is by honouring Pod Disruption Budgets (PBD), which includes the etcd guard PDB.
 
 ## Design Details
 
@@ -182,38 +242,36 @@ The contract for the machine API is by honouring Pod Disruption Budgets (PBD), i
 - Exhaustive unit testing.
 - Exhaustive integration testing via [envTest](https://book.kubebuilder.io/reference/testing/envtest.html).
 - E2e testing on the [machine API](https://github.com/openshift/cluster-api-actuator-pkg/tree/master/pkg) and origin e2e test suite. Given a running cluster:
-  - Scale out.
-    - Loop over machineSets for masters and increase replicas.
-    - Wait for new nodes to go ready.
-	- Scale in.
-    - Loop over machineSets for masters and decrease replicas.
-    - Wait for new nodes to go away. See exisisting one to remain ready.
-	- Vertical scaling forcing machine recreation.
+  - Vertical scaling forcing machine recreation.
     - Loop over machineSets for masters.
     - Change a providerSpecific property which defines the instance capacity.
     - Request all master machines to be deleted.
     - Wait for new machines to come up with new capacity. Wait for existing machines to go away while cluster remains healthy.
-	- Simulate unhealthy nodes and remediation.
+  - Simulate unhealthy nodes and remediation.
     - Force 2 master nodes out of 3 to go unhealthy, e.g kill kubelet.
     - Wait for machines get request for deletion by the MHC.
     - Wait for a new nodes to come up healthy.
     - Wait for old machines to go away.
+  - Disruptive Machines deletion.
+    - Delete all Control Plane Machines.
+    - Wait for drain to block deletion.
+    - Wait for new Machines to come up.
+    - Wait for old Machines to go away.
+
 
 ### Graduation Criteria
 
-All the resources leveraged in this proposal i.e MachineSet and Machine Health Check are already GA.
 This proposal will be released in 4.N as long as:
 - All the testing above is in place.
-- The cluster etcd operator manages all the etcd operational aspects including scaling down.
+- The cluster etcd operator aknowldege that it manages all the etcd operational aspects including [scaling down](https://issues.redhat.com/browse/ETCD-74?jql=project%20%3D%20ETCD).
 - There is considerable internal usage and manual disruptive QE testing feedback.
 - This is beta tested pre-release during a considerable period of time either internally or by an early adopter user through the dev preview builds.
 
 ### Upgrade / Downgrade Strategy
 
-New IPI clusters deployed after the targeted release will run the MachineSets and MHC deployed by the installer out of the box.
+New IPI clusters deployed after the targeted release will run the ControlPlane resource deployed by the installer out of the box.
 
-For UPI clusters and existing IPI clusters this is opt-in. We should pursue cluster homogenous topology. To that end we should provide the exact steps and encourage users in any user facing doc to create the MachineSets and MHC for the Control Plane Machines.
-
+For UPI clusters and existing IPI clusters this is opt-in. As a user I can opt-int by creating a ControlPlane resource, i.e `kubectl create ControlPlane`
 
 ### Version Skew Strategy
 
@@ -226,7 +284,9 @@ For UPI clusters and existing IPI clusters this is opt-in. We should pursue clus
 
 ## Alternatives
 
-1. Higher level CRD and controller: The Control Plane scaling capabilities could be managed by a single scalable resource built atop MachineSets just like a deployment uses replica sets. This is explored here https://github.com/openshift/enhancements/pull/278. Instead this proposal focuses on the first step and primitives that will enable any farther abstraction.
+1. Let the installer to deploy only machineSets to adopt the Control Plane Machines. This would put too much burden on users to upgrade to self managed Control Plane Machines. Multiple manual error prone steps would need to be documented. Also this would give users a to high degree of flexibilty for horizontall scaling operations which might result confusing and unproductive.
+
+Instead, the higher level ControlPlane resource provides a seamless upgrade path. Also it gates the underlying machineSets horizontal scaling capabilities to match our UX desires.
 
 2. Cluster etcd Operator could develop the capabilities to manage and scale machines. However this would break multiple design boundaries:
 The Cluster etcd Operator has the ability to manage etcd members at Pod level without being necessarily tied to the lifecycle of Nodes or Machines.
