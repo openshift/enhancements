@@ -73,12 +73,12 @@ Different teams are following different "Standard Operating Procedure" documents
 ### Goals
 
 - To have a declarative mechanism to ensure that existing Control Plane Machines are recreated on a deletion request at any time.
-- To auto repair unready Control Plane Nodes.
+- To auto repair unhealthy Control Plane Nodes.
 
 ### Non-Goals / Future work
 
 - To integrate with any existing etcd topology e.g external clusters. Stacked etcd with dynamic member identities, local storage and the Cluster etcd Operator are an assumed invariant.
-- To managed individual Control Plane components. Self hosted Control Plane components that are self managed by their operators is an assumed invariant:
+- To manage individual Control Plane components. Self hosted Control Plane components that are self managed by their operators is an assumed invariant:
 	- Rolling OS upgrades and config changes at the software layer are managed by the Machine Config Operator.
 	- etcd Guard that ensures a PDB to honour quorum is managed by the Machine Config Operator.
 	- Each individual Control Plane component i.e Kube API Server, Scheduler and controller manager are self hosted and managed by their operators.
@@ -109,10 +109,10 @@ The lifecycle of the compute resources still remains decoupled and orthogonal to
 #### Story 1
 - As an operator installer a new OCP cluster I want flexibility to run [large or small clusters](https://kubernetes.io/docs/setup/best-practices/cluster-large/#size-of-master-and-master-components) so I need the ability to vertically resize the control plane in a declarative, automated and seamless manner.
 
-This proposal satisfy this by providing a semi-automated process to vertically resize Control Plane Machines by enforcing recreation.
+This proposal satisfies this by providing a semi-automated process to vertically resize Control Plane Machines by enforcing recreation.
 
 #### Story 2
-- As an operator running an existing OCP cluster, I want have a seamless path for my Control Plane Machines to be adopted and become self managed.
+- As an operator running an existing OCP cluster, I want to have a seamless path for my Control Plane Machines to be adopted and become self managed.
 
 This proposal enables this by providing the ControlPlane resource.
 
@@ -132,7 +132,7 @@ This proposal enables this by providing a semi-automated vertical resizing proce
 
 ### Implementation Details/Notes/Constraints [optional]
 
-To satisfy the goals, motivation and stories above, this proposes to let the installer to create a ControlPlane object to adopt and manage the lifecycle the Control Plane Machines.
+To satisfy the goals, motivation and stories above, this proposes to let the installer to create a ControlPlane object to adopt and manage the lifecycle of the Control Plane Machines.
 
 The ControlPlane CRD will be exposed by the Machine API Operator (MAO) to the Cluster Version Operator (CVO).
 The ControlPlane controller will be managed by the Machine API Operator.
@@ -171,12 +171,12 @@ spec:
 #### Declarative Vertical scaling
 - This is semi-automated:
 	- A particular provider property can be changed by any consumer in the MachineSet spec e.g `instanceType`.
-	- Deleting the Machine will trigger the creation of a fresh one with new `instanceType`.\
-  - Any consumer might choose to automated this process as it sees fit.
+	- Deleting the Machine will trigger the creation of a fresh one with new `instanceType`.
+  - Any consumer might choose to automate this process as it sees fit.
 
 #### Declarative horizontal scaling
 - Out of scope:
-  - We'll reserve the ability to scale horizontally for farther iterations if required. For the initial implementation the ControlPlane controller will limit the underlying machineSet horizontal scale capabilities to solely enforce recreation of any of the adopted Machines.
+- We'll reserve the ability to scale horizontally for further iterations if required. For the initial implementation the ControlPlane controller will limit the underlying machineSet horizontal scale capabilities to solely enforce recreation of any of the adopted Machines.
 
 #### Autoscaling
 - Out of scope:
@@ -212,6 +212,7 @@ type ControlPlaneSpec struct {
   // Out of scope. Consider to enable a fully automated rolling upgrade for all control plane machines changing a single place.
   // This would possibly require externalizing the infra info and decoupling it from the failure domain definition e.g az.
   // InfrastructureTemplate
+  // DomainFailures []string
 }
 
 type ControlPlaneStatus struct {
@@ -271,7 +272,7 @@ This proposal will be released in 4.N as long as:
 
 New IPI clusters deployed after the targeted release will run the ControlPlane resource deployed by the installer out of the box.
 
-For UPI clusters and existing IPI clusters this is opt-in. As a user I can opt-int by creating a ControlPlane resource, i.e `kubectl create ControlPlane`
+For UPI clusters and existing IPI clusters this is opt-in. As a user I can opt-in by creating a ControlPlane resource, i.e `kubectl create ControlPlane`
 
 ### Version Skew Strategy
 
