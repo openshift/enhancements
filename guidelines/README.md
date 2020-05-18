@@ -29,6 +29,11 @@ If it has broad impact, place it in the root of [the `enhancements` directory](.
 
 Yes. OKD is an open, inclusive, and diverse community, and there is absolutely no room for ambiguous clauses.
 
+### Is it “bare metal”, “baremetal”, “bare-metal”, “Baremetal”, or “BareMetal”?
+
+Follow the [style guide from
+metal3-io](https://github.com/metal3-io/metal3-docs/blob/master/design/bare-metal-style-guide.md)
+
 ### My FAQ isn't answered here!
 
 Open an issue and ask or even better open a PR with a question and proposed answer.
