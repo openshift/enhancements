@@ -2,6 +2,7 @@
 title: kubernetes-nmstate
 authors:
   - "@schseba"
+  - "@bcrochet"
 reviewers:
 
 approvers:
@@ -16,7 +17,7 @@ status:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
+- [X] Enhancement is `implementable`
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
@@ -63,7 +64,10 @@ installation, via CVO.
 The operator has a single CRD, called `NMstate`. When a custom resource of kind `NMstate`, with 
 a name of 'nmstate' is created, it will then create the CRDs for the kubernetes-nmstate handler.
 Then, the namespace, RBAC, and finally the DaemonSet are applied. Custom resources of kind `NMstate`
-with other names will be ignored.
+with other names will be ignored. 
+
+The `NMState` CR accepts a node filter, allowing one to add a label to nodes to indicate where the
+DaemonSet will be deployed.
 
 A new kubernetes-nmstate handler DaemonSet is deployed in the cluster by the operator.
 This DaemonSet contains nmstate package and interacts with the NetworkManager
