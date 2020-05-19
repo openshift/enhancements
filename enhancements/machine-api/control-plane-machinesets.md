@@ -47,12 +47,12 @@ Control Plane: The collection of stateless and stateful processes which enable a
 
 ## Summary
 
-This proposal outlines a solution to provide self managed Control Plane Machines:
+This proposal outlines a first step towards providing a single entity to fully manage all the aspects of the Control Plane compute: 
   - Ensures that Control Plane Machines are recreated on a deletion request at any time.
   - Ensures that Control Plane Machines are auto repaired when a node goes unready (Machine Health Check).
 
 Particularly:
-- Proposes to introduce a new CRD `ControlPlane` which automates the adoption of any existing Control Plane Machine:
+- This introduces a new CRD `ControlPlane` which provides a simple single semantic/entity that adopts master machines and backs them with well known controllers (machineSet and MHC):
   - The ControlPlane controller creates and manages a MachineSet to back each Control Plane Machine that is found at any time.
   - The ControlPlane controller creates and manages a Machine Health Check resource to monitor the Control Plane Machines.
 
@@ -98,9 +98,17 @@ Different teams are following different "Standard Operating Procedure" documents
 
 ## Proposal
 
-Currently the installer chooses the failure domains out of a particular provider availability and it creates a Control Plane Machine resource for each of them.
+Currently the installer chooses the failure domains out of a particular provider availability and it creates a Control Plane Machine resource for each of them. This introduces a `ControlPlane` CRD and controller that will adopt and manage the lifecycle of those Machines. On new clusters the installer will instantiate a ControlPlane resource.
 
-This introduces a `ControlPlane` CRD and controller that will adopt and manage the lifecycle of those Machines. On new clusters the installer will instantiate a ControlPlane resource. 
+This is a first step towards the longer term goal of providing a single entity to fully manage all aspects of the controlPlane. This iteration proposes:
+- A simple single semantic/entity that adopts master machines and backs them with well known controllers (machineSet and MHC).
+- To keep the user facing API surface intentionally narrowed. See [#api-changes](#api-changes)
+
+Although is out of the scope for the first implementation, to provide long term vision and aligment this sketchs how a possible second iteration could look like:
+- Abstract the failureDomain semantic from providers to the core machine object.
+- Introduce an InfrastructureTemplate/providerSpec reference and DomainFailures in the ControlPlane API.
+- This would provide a single provider config to be reused and to be changed across any control plane machine.
+- This would give the ControlPlane controller all the semantics it needs to fully automate vertical rolling upgrades across multiple failure domains while provider config changes would need to happen in one single place.
 
 
 The lifecycle of the compute resources still remains decoupled and orthogonal to the lifecycle and management of the Control Plane components hosted by the compute resources. All of these components, including etcd are expected to keep self managing themselves as the cluster shrink and expand the Control Plane compute resources.
@@ -216,7 +224,7 @@ type ControlPlaneSpec struct {
   // Out of scope. Consider to enable a fully automated rolling upgrade for all control plane machines changing a single place.
   // This would possibly require externalizing the infra info and decoupling it from the failure domain definition e.g az.
   // InfrastructureTemplate
-  // DomainFailures []string
+  // FailureDomains []string
 }
 
 type ControlPlaneStatus struct {
