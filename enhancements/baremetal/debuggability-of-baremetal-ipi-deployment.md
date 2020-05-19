@@ -93,13 +93,13 @@ and useful information is presented to the user about how to rectify the
 problem, so this enhancement request will focus on failures that occur
 from terraform onward.
 
-### Kinds of deployment failure
+### Kinds of deployment failures
 
 #### Infrastructure Automation (Terraform)
 
-Baremetal IPI relies on terraform to provision a libvirt bootstrap
+Bare metal IPI relies on terraform to provision a libvirt bootstrap
 virtual machine, and bare metal control plane hosts. We use
-terraform-provider-libvirt and terraform-provider-ironic to accomplish
+`terraform-provider-libvirt` and `terraform-provider-ironic` to accomplish
 those goals.
 
 terraform-provider-ironic reports failures when it cannot reach the
@@ -109,8 +109,8 @@ we do not provide useful information to the user about what to do.
 #### Bootstrap Failures
 
 The bootstrap runs a couple of baremetal-specific services, including
-Ironic as well as a utility that populates introspection data for
-the control plane.
+Ironic and a utility that populates hardware information for
+the control plane hosts.
 
 Bootstrap typically fails for baremetal when we can't download the
 machine-os image into our local HTTP cache.  Less common, but still
