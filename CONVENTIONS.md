@@ -57,6 +57,10 @@ experience across web consoles, command line tooling, and documentation.
 
 #### Naming
 
+We prefer clear and consistent names that describe the concepts in a human friendly, terse, and jargon-free manner for all aspects of the system - components, API and code types, and concepts.  Jargon is discouraged as it increases friction for new users. Where possible reuse or combine words that are part of other names when those concepts overlap.
+
+For instance, the core component that rolls out the desired version of an OpenShift cluster is called the cluster-version-operator - it is an "operator" (a term with appropriate context in this domain) that controls the "version" of the "cluster". Other components reuse this pattern - this consistency allows a human to infer similarity and reorient as new or unfamiliar components are introduced over time. Likewise the API object that drives the behavior of the cluster related to versions and upgrades is known as `ClusterVersion` (allowing a human to guess at its function from either direction).
+
 * Image 
   * Operator: 
   * Non-operator:
