@@ -105,10 +105,10 @@ This is a first step towards the longer term goal of providing a single entity t
 - To keep the user facing API surface intentionally narrowed. See [#api-changes](#api-changes)
 
 Although is out of the scope for the first implementation, to provide long term vision and aligment this sketchs how a possible second iteration could look like:
-- Abstract the failureDomain semantic from providers to the core machine object.
-- Introduce an InfrastructureTemplate/providerSpec reference and DomainFailures in the ControlPlane API.
+- Abstract the `failureDomain` semantic from providers to the core machine object.
+- Introduce an `InfrastructureTemplate/providerSpec` reference and FailureDomains in the ControlPlane API.
 - This would provide a single provider config to be reused and to be changed across any control plane machine.
-- This would give the ControlPlane controller all the semantics it needs to fully automate vertical rolling upgrades across multiple failure domains while provider config changes would need to happen in one single place.
+- This would give the `ControlPlane` controller all the semantics it needs to fully automate vertical rolling upgrades across multiple failure domains while provider config changes would need to happen in one single place.
 
 
 The lifecycle of the compute resources still remains decoupled and orthogonal to the lifecycle and management of the Control Plane components hosted by the compute resources. All of these components, including etcd are expected to keep self managing themselves as the cluster shrink and expand the Control Plane compute resources.
