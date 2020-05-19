@@ -74,7 +74,7 @@ and reduce the perception of complexity in baremetal IPI deployments.
 
 ### Non-Goals
 
-- Addressing the underlying causes of the failures are not the goal of
+- Addressing the underlying causes of the failures is not the goal of
   this enhancement.
 
 ## Proposal
