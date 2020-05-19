@@ -191,8 +191,8 @@ Since operators managed by OLM are not managed ART pipeline, there are some cons
      What / when is going to mirror the operator & driver images?
      The installation will time out when cluster-storage operator can't install a CSI driver via OLM.
 
-2. When / how often are index images updated after operator release?
-   Even when we synchronize operator & OCP errata release as suggested above, clusters may not be installable until OLM sees the operator in the index image.
+     A: currently not possible.
+
 
 3. When a CSI driver operator becomes installed by default and installed by cluster-storage-operator, all CI jobs must have the current version of the operator available in OLM in the cluster.
    Currently, all 4.5 CI clusters show only 4.4 operators.
@@ -215,6 +215,12 @@ Answered questions:
 4. Since most CSI operators has to be singletons, we need to stop users from installing the operator multiple times in different namespaces. Currently this is not possible.
 
   A. We use `AllNamespaces` install mode - an operator with this mode can be installed only once in a cluster. Still, user has possiblity to override the namespace where the operator actually runs, which complicates update from "optional" operator to "installed by default" (see Upgrade from optional operator to a driver installed by default)
+
+6. When / how often are index images updated after operator release?
+   Even when we synchronize operator & OCP errata release as suggested above, clusters may not be installable until OLM sees the operator in the index image.
+
+   Answered on "Operator Framework (Eng + PM) sync call with Operator Teams" - index images are synced almost immediatelly after Errata is shipped (in under 1 hour).
+   Similarly, staging index for QA is regenerated after new builds are added to an errata.
 
 
 ## Timeline
