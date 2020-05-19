@@ -139,8 +139,10 @@ Whether the control plane or worker nodes, provisioning of bare metal
 hosts can fail in the same ways, although the communication path to
 provide feedback is different in each case. For the control plane,
 information about failure is presented to the user via terraform. For
-workers, it would be through information on the `BareMetalHost`
-resource, and the baremetal-operator logs.
+workers, it is currently only shown on the `BareMetalHost` resource or
+by examining baremetal-operator logs. Failure to deploy a worker should
+be reflected by marking either the `machine-api-operator` or the future
+`cluster-baremetal-operator` degraded.
 
 Provisioning can fail in many ways. The most difficult to troubleshoot
 are simply when we fail to hear back from a host. Buggy UEFI firmware
@@ -232,8 +234,11 @@ machine-api-operator teams, for example.
 
 ### Upgrade / Downgrade Strategy
 
-Upgrades/downgrades are not applicable, as these are day 1
-considerations only. There is no impact on upgrades or downgrades.
+This enhancement largely consists of day 1 considerations, however we
+are suggesting that worker deployment failures be reflected as a
+Degraded operator status either in `machine-api-operator` or
+`cluster-baremetal-operator`.  This would prevent an upgrade and is an
+intentional change in behavior.
 
 ### Version Skew Strategy
 
@@ -241,7 +246,6 @@ As these are day 1 considerations for greenfield deployments, no version
 skew strategy is needed.
 
 ## Implementation History
-
 
 ## Drawbacks
 
