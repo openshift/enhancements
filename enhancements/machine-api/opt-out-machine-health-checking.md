@@ -243,7 +243,7 @@ it would scale the MachineSet back down and try another MachineSet to add new ca
 
 A concern is that MachineHealthChecks could interfere with this health checking logic and prevent the autoscaler from
 adding new compute capacity. To ensure there are no conflicts,
-everal scenarios must be tested to check whether there may be conflicts
+several scenarios must be tested to check whether there may be conflicts
 
 #### Scenarios
 ##### Machine fails to launch due to user config error
@@ -301,7 +301,7 @@ What happens after Machine Fails:
 Steps to reproduce:
 - Create cluster on AWS
 - Deploy ClusterAutoscaler to cluster
-- Deploy MahcineHealthCheck to cluster
+- Deploy MachineHealthCheck to cluster
 - Disable CVO
 - Remove the following section from the `openshift-machine-api-aws` credentials request
   - `kubectl edit credentialsrequests -n openshift-cloud-credential-operator openshift-machine-api-aws`
@@ -371,8 +371,7 @@ Because of the special nature of Control-Plane Machines, including them in an MH
 allow the MHC to remediate more than one Control-Plane machine at any one time (assuming three Control-Plane machines),
 could cause the cluster to lose quorum for Etcd and potentially even lose the data altogether.
 
-If Control-Plane Machines are to be covered by a MachineHealthCheck, the `maxUnhealthy` parameter must be appropriate to
-ensure that the MachineHealthCheck does not ever cause the Etcd cluster to lose quorum.
-For this reason, Control-Plane Machines should not be mixed with worker Machines within an MHC\*.
-
-\*If the MaxUnhealthy value were forced to be 1 Machine only, then this would be safe.
+If Control-Plane Machines are to be covered by a MachineHealthCheck, the `maxUnhealthy` parameter must be set
+appropriately to ensure that the MachineHealthCheck does not ever cause the Etcd cluster to lose quorum.
+For this reason, Control-Plane Machines should not be mixed with worker Machines within an MHC
+(Note however, iff the `maxUnhealthy` value were forced to be 1 Machine only, then this would be safe).
