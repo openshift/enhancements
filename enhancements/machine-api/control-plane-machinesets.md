@@ -53,8 +53,8 @@ This proposal outlines a solution to provide self managed Control Plane Machines
 
 Particularly:
 - Proposes to introduce a new CRD `ControlPlane` which automates the adoption of any existing Control Plane Machine:
-      - The ControlPlane controller creates and manages a MachineSet to back each Control Plane Machine that is found at any time.
-      - The ControlPlane controller creates and manages a Machine Health Check resource to monitor the Control Plane Machines.
+  - The ControlPlane controller creates and manages a MachineSet to back each Control Plane Machine that is found at any time.
+  - The ControlPlane controller creates and manages a Machine Health Check resource to monitor the Control Plane Machines.
 
 This proposal assumes that all etcd operational aspects are managed by the cluster-etcd-operator orthogonally in a safe manner while manipulating the compute resources.
 
@@ -100,7 +100,8 @@ Different teams are following different "Standard Operating Procedure" documents
 
 Currently the installer chooses the failure domains out of a particular provider availability and it creates a Control Plane Machine resource for each of them.
 
-This proposes to let the installer create an additional ControlPlane resource that will adopt and manage the lifecycle of those Machines.
+This introduces a `ControlPlane` CRD and controller that will adopt and manage the lifecycle of those Machines. On new clusters the installer will instantiate a ControlPlane resource. 
+
 
 The lifecycle of the compute resources still remains decoupled and orthogonal to the lifecycle and management of the Control Plane components hosted by the compute resources. All of these components, including etcd are expected to keep self managing themselves as the cluster shrink and expand the Control Plane compute resources.
 
@@ -176,7 +177,10 @@ spec:
 
 #### Declarative horizontal scaling
 - Out of scope:
-- We'll reserve the ability to scale horizontally for further iterations if required. For the initial implementation the ControlPlane controller will limit the underlying machineSet horizontal scale capabilities to solely enforce recreation of any of the adopted Machines.
+- We'll reserve the ability to scale horizontally for further iterations if required. For the initial implementation the ControlPlane controller will limit the underlying machineSet horizontal scale capabilities.
+- It will ensure the machineSet replicas is always 1 to enforce recreation of any of the adopted Machines.
+- If the machineSet replicas were to be modified out of band, the ControlPlane controller will set it back to 1 while enforcing a "newest" delete policy on the machineSet.
+
 
 #### Autoscaling
 - Out of scope:
