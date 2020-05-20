@@ -35,16 +35,6 @@ superseded-by:
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions
-
-1. Should the installer error or warn when compute replicas quantity is
-   not met, even if at lest 2 workers deployed (enough to get a
-   functional cluster)?
-2. In order to bubble up information about worker failures to the
-   installer, the most likely solution to me seems to use operator
-   status as Degraded, with a relevant error message. Could we mark
-   machine-api-operator when workers fail to roll out?
-
 ## Summary
 
 In OpenShift 4.5, we improved the existing installer validations for
@@ -113,7 +103,7 @@ troubleshooting.
 
 #### Bootstrap Failures
 
-The bootstrap runs a couple of baremetal-specific services, including
+The bootstrap host runs some baremetal-specific services including
 Ironic and a utility that populates hardware details for the control
 plane hosts.
 
@@ -123,7 +113,7 @@ sometimes seen are that services such as dnsmasq, mariadb, ironic-api,
 ironic-conductor, or ironic-inspector fail.
 
 Failures on bootstrap services rarely result in any indication to the
-user that something went wrong other than that there was a timeout.
+user that something went wrong other than a timeout.
 
 The installer has a feature for log gathering on bootstrap failure that
 does not work on baremetal. This should be the first priority, but even
