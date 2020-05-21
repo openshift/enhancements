@@ -95,7 +95,7 @@ previous rebase branch was based on:
 git rev-list -1 <upstream tag>
 ```
 
-The first commit in the previous rebase branch OBwill be the one immediately following
+The first commit in the previous rebase branch will be the one immediately following
 the commit identified by the hash of the upstream tag:
 
 ```
@@ -128,7 +128,8 @@ Assuming the local repo has the new rebase branch checked out:
 go run k8s.io/publishing-bot/cmd/godeps-gen <(go list -m -json all | jq 'select(.Version!="v0.0.0")') > Godeps/Godeps.json
 ```
 
-Commit the resulting file with the command as the commit message.
+Commit the resulting file with the command as the commit message. The changes to go.mod
+and go.sum made by `go run` can be reverted.
 
 ## Picking commits from the previous rebase branch to the new branch
 
@@ -158,7 +159,9 @@ color each commit in the spreadsheet to indicate to reviewers whether or not a c
 was picked and the rationale for your choice.
 
 Where it makes sense to do so, squash carried changes that are tightly coupled to
-simplify future rebases.
+simplify future rebases. If the commit message of a carry does not conform to
+expectations, feel free to revise and note the change in the spreadsheet row for the
+commit.
 
 ## Updating dependencies
 
@@ -187,6 +190,7 @@ Make sure to commit the result of a vendoring update with `UPSTREAM: <drop>: bum
 Once the dependencies have been cleaned up, it's time to prepare the branch for a PR:
 
  - Clean up gofmt by running `hack/update-gofmt.sh`
+   - Where possible, apply gofmt changes to carry commits.
  - Update generated files by running `make update`
    - This step depends on etcd being installed in the path, which can be accomplished
      by running `hack/install-etcd.sh`.
