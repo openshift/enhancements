@@ -93,7 +93,6 @@ If the CCO is enabled per normal best practice install, this field will be ignor
 
 However if CCO is disabled, it will compare the ClusterVersion.Spec.AvailableUpdates to this list of ReconciledAvailableUpdates. If *any* available update is not present in the reconciled list, the CCO will report Upgradable=False.
 
-
 ### Initial Installation
 
 ```bash
@@ -162,6 +161,8 @@ History`.
 Copying net new CredentialsRequests from future upgrades, minting credentials, storing them in a temporary location, and copying them to their final location during the upgrade is particularly nebulous.
 
 Involves a significant amount of new code.
+
+If included in "oc adm", would require vendoring and compiling basically all of cred operator so we can run the reconcile loop. (including all cloud provider libraries)
 
 ## Alternatives
 
