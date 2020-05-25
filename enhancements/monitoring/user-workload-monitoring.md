@@ -146,13 +146,9 @@ As a member of the operations team, I'd like to have an overview about all the P
 
 ### US13
 
-As a member of the operations team, I'd like to configure more replicas for the new Prometheus servers.
-
-### US14
-
 As a member of the operations team, I'd like to give dedicated users the permission to enable/disable and configure the user workload monitoring stack.
 
-### US15
+### US14
 
 As a member of the operations team I want to see all alerts (cluster and user workload alerts) in the admin perspective and can silence any of them.
 
@@ -360,8 +356,6 @@ embedding `get/create/edit/delete` permissions.
 User workload monitoring is not enabled by default. It must be explicitly enabled by the user.
 User workload monitoring is enabled just by creating an empty `workload-monitoring-config` configmap in the `openshift-monitoring` namespace.
 
-The user workload monitoring configuration allows to set all existing configuration options as for the in-cluster stack with the addition to set the replica count of the user workload monitoring Prometheus instances.
-
 Note: Long term the existing `cluster-monitoring-config` and `workload-monitoring-config` will be moved to dedicated custom resources and CRDs but are out of scope for this enhancement.
 
 ### Resource impact
@@ -386,13 +380,12 @@ As a first step a similar high cardinality alert will be used as in [9] and pote
 
 The above will be encapsulated in one single alert.
 This alert will be declared as `info` level only and transmitted via Telemetry.
+
 Additional telemetry metrics are going to be gathered to have more insights about the usage of user workload monitoring in clusters:
 
 - Active series
 - Rate of sample ingested
 - Memory usage
-- CPU usage of prometheus
-- Replica count of Prometheus instances
 
 Over time we will learn about better thresholds and potentially also about better alerts.
 Additional protection mechanism may be introduced at a later point using front proxy tools like bomb squad [11].
