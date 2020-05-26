@@ -45,7 +45,7 @@ components that make up the project, but exceptions are allowed when necessary.
 
 The conventions are intended to help with consistency across the project. Users
 of the platform expect consistency in the experience and operation of the cluster.
-Developers of the platform expect consistency in the code to quickly identify issuses
+Developers of the platform expect consistency in the code to quickly identify issues
 across codebases. Consistency enables shared understanding, simplifies explanations,
 and reduces accidental complexity.
 
