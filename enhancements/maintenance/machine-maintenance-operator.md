@@ -4,16 +4,16 @@ authors:
   - "@dofinn"
 reviewers:
   - "@cblecker"
-	- "@jharrington22"
-	- "@jewzaam"
-	- "@jeremyeder"
-	- "@michaelgugino"
-	- "@derekwaynecarr"
+  - "@jharrington22"
+  - "@jewzaam"
+  - "@jeremyeder"
+  - "@michaelgugino"
+  - "@derekwaynecarr"
 approvers:
-	- "@michaelgugino"
-	- "@derekwaynecarr"
-	- "@bison"
-	- "@enxebre"
+  - "@michaelgugino"
+  - "@derekwaynecarr"
+  - "@bison"
+  - "@enxebre"
 creation-date: 2020-05-26
 last-updated: 2020-05-26
 status: provisional
