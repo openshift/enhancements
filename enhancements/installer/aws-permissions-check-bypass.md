@@ -94,13 +94,20 @@ in-cluster behavior of cloud-credential-operator.
 
 Extend the install-config type in the installer repo:
 ```
+type cloudCredentialsMode string
+
+const (
+	credentialsModeMint cloudCredentialsMode = "mint"
+	credentialsModePassthrough cloudCredentialsMode = "passthrough"
+)
+
 type InstallConfig struct {
 	// ForceCredentialsMode instructs the installer to not attempt to query
 	// the cloud permissions before attempting installation. It also passes
 	// down the desired credentials mode to the cloud-credential-operator
 	// so that it too does not attempt to query permissions.
 	// +optional
-	ForceCredentialsMode cloudcredop.CloudCredentialsMode `json:"forceCredentialsMode,omitempty"`
+	ForceCredentialsMode cloudCredentialsMode `json:"forceCredentialsMode,omitempty"`
 }
 ```
 
@@ -109,7 +116,8 @@ field to populate the config for the cloud-credential-operator so that CCO knows
 what mode it should be forced into.
 
 ### cloud-credential-operator
-Formalize the constants in cloud-credential-operator repo to export:
+Formalize the constants in cloud-credential-operator repo to define the
+acceptable credentials (matching the definitions in the installer):
 ```
 type CloudCredentialsMode string
 
@@ -139,6 +147,9 @@ type CloudCredentialOperatorConfigSpec struct {
 	// CredentialsRequests.
 	// +optional
 	ForceCredentialsMode CloudCredentialsMode `json:"forceCredentialsMode,omitempty"
+
+	// NOTE: also migrate existing fields in the CCO configmap used to
+	// disable CCO into this new config object.
 }
 ```
 
@@ -164,7 +175,7 @@ down the manifest for CCO to indicate that `mint` mode should be assumed:
 apiVersion: v1
 kind: CloudCredentialOperatorConfig
 metadata:
-  name: cloud-credential-operator-config
+  name: cluster
   namespace: openshift-cloud-credential-operator
 spec:
   forceCredentialsMode: "mint"
