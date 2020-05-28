@@ -265,3 +265,52 @@ Kubernetes 1.21 is current upstream target for removal of in-tree cloud provider
 
 * CSI drivers for their in-tree counterparts will become GA and CSI volumes will become default.
 * CSI migration is enabled and cannot be disabled (code for corresponding in-tree volume plugins and in-tree cloud providers doesn't event exist).
+
+## Infrastructure needed
+
+* CI: Ability to run OCP CI jobs with the latest operator images in OLM / OperatorHub.
+* Mirror CSI driver operators when mirroring OCP release images (`oc adm release mirror`).
+
+
+## Alternatives considered
+
+### Install CSI drivers by cluster-storage-operator
+
+#### Installation
+1. During installation, CVO starts cluster-storage-operator (CSO).
+2. CSO detects underlying cloud and starts operators for CSI driver(s) for the particular cloud.
+   * I.e. CSO deploys corresponding CSI driver operators, incl. their RBAC, CRD, Deployment and finally a CR.
+3. CSO monitors CRs of the CSI drivers and reports back their status ("Progressing", "Degraded", "Available", ...) in CSO's ClusterOperator status.
+
+#### Upgrade from OLM-managed operator
+In OCP 4.5, we plan to release AWS EBS and Manila CSI drivers via OLM. It's too late to move them to CSO.
+We designed their operators in a way that regardless where the CSI driver operator runs, the driver itself always runs in openshift-aws-ebs-csi-driver namespace (openshift-manila-csi-driver).
+
+1. During upgrade, CVO starts new 4.6 cluster-storage-operator (CSO).
+2. 4.6 CSO detects that there is AWS / Manila driver installed by OLM.
+3. CSO deletes Subscription of the operator. OLM removes the operator, but leaves the CRD, CR and the driver / operand running.
+4. CSI "adopts" the driver. It starts new operator (same as in "Installation" chapter above) and the operator adopts the old operand.
+
+In case there was no AWS / Manila CSI driver operator running during the update, CSO installs the corresponding operator as during installation, so user has a CSI driver running after update.
+
+Consequences:
+
+* CSI driver operators + the drivers must be part of OCP payload and managed by ART.
+  * 4.5 branch of the operator + driver must be managed manually (it still goes through OLM, outside of ART pipeline)
+  * 4.6 branch must be managed by ART.
+  * Optionally, we can create a new dist-git, so they're separate and ART tooling sees oly 4.6 content.
+* OperatorHub metadata from 4.6 must not contain AWS / Manila operator.
+  A cluster updating from 4.5 with these operators installed must still run the operators during update.
+  The OLM-managed operator will be unistalled during the update.
+* The CRD, CR and object names (Deployments, DaemonSet) of the operand / CSI driver must be the same as in 4.5, so the newly started operator updates these object, instead of creating separate instances.
+* No infrastructure updates necessary. No troubles with installation in disconnected clusters.
+
+#### Drawbacks
+
+* It is not possible to install a CSI driver on user request. Since our schedule is tight, we can live with this.
+  In 4.6, we install few selected CSI drivers during installation / update.
+* We do not validate that OLM is a good deployment vehicle for CSI drivers.
+  * OpenShift Container Storage (OCS) already validated that before, they are installed via OLM.
+  * We (AOS storage) can ship a sample CSI driver with a sample operator.
+    * Proving that OLM works.
+    * Serving as a sample how to write an CSI driver operator.
