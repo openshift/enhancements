@@ -45,6 +45,9 @@ A POC of the idea can be found [here](https://github.com/dofinn/machine-maintena
 
 Currently the machine-api marks an machine as stopped when they have been terminated/stopped by the cloud provider. A provider may terminate/stop and instance when there is an associated maintenance scheduled for it. This is also the case for users manually terminating/stopping machines via the console. The MMO is a proactive approach to executing the required (delete target machine CR)to enable the machine-api to manage machinesets. This operator would work in conjunction with MachineHealthCheck implimentation. 
 
+## Requirements
+That the machine-api collects schedules maintenaces from cloud providers and posts them in the status of the each machines CR
+
 ### Goals
 
 List the specific goals of the proposal. How will we know that this has succeeded?
