@@ -15,7 +15,7 @@ approvers:
   - "@bison"
   - "@enxebre"
 creation-date: 2020-05-26
-last-updated: 2020-05-26
+last-updated: 2020-05-28
 status: provisional
 
 # machine-maintenance-operator
@@ -37,21 +37,19 @@ status: provisional
 
 ## Summary
 
-This enhancement proposal explores the idea of having a machine-maintenance-operator(MMO) that acts as a machine 'nanny'. The MMO will actively search for scheduled maintenances for each infra/worker machine in the cluster along with validating the state of these machines against the cloud providers API. Upon finding a maintenance for a machine, the MMO will seek to execute this maintenance manually at the earliest convenient time as defined by an administrator. 
+This enhancement proposal explores the idea of having a machine-maintenance-operator(MMO) that will inspect each machine CR for scheduled events for each infra/worker machine in the cluster. Upon finding a maintenance for a machine, the MMO will seek to execute this maintenance manually at the earliest convenient time as defined by an administrator. 
 
 A POC of the idea can be found [here](https://github.com/dofinn/machine-maintenance-operator).
 
 ## Motivation
 
-Currently the machine-api fails to accurately detect the state of machines (validated in AWS) when they have been terminated/stopped by the cloud provider. A provider may terminate/stop and instance when there is an associated maintenance scheduled for it. This is also the case for users manually terminating/stopping machines via the console (validated in AWS). The MMO is a proactive approach to first detecting maintenances and/or machine state from the cloud provider, then executing the required to enable the machine-api to continue managing machines and machinesets. This operator would work in conjunction with MachineHealthCheck implimentation. 
+Currently the machine-api marks an machine as stopped when they have been terminated/stopped by the cloud provider. A provider may terminate/stop and instance when there is an associated maintenance scheduled for it. This is also the case for users manually terminating/stopping machines via the console. The MMO is a proactive approach to executing the required (delete target machine CR)to enable the machine-api to manage machinesets. This operator would work in conjunction with MachineHealthCheck implimentation. 
 
 ### Goals
 
 List the specific goals of the proposal. How will we know that this has succeeded?
 The machine-maintenance-operator will:
-* detect maintenances and execute them manually at their earliest and most convenient time
-* validate the state of the machine against its machine CR and the cloud providers API
-* validate the state of the machine behind a cloud providers load balancers and provide an alert upon recognition of a miss-match of state
+* detect maintenances from machine CRs and execute them manually at their earliest and most convenient time
 
 ### Non-Goals
 
@@ -64,16 +62,13 @@ This is not a solution for managing maintenances or machine state for master mac
 #### Story 1
 As a customer using OKD/OCP/OSD, I want my cluster/s to be proactive in handling events that are initiated by the cloud provider hosting my cluster. This will assure me that OKD/OCP/OSD accounts for machines in the cluster that require terminating or stopping to be proactively maintained and addressed with intention. 
 
-#### Story 2
-As an SRE supporting OSD, I want automated detection of cloud provider scheduled maintenance events. This will enable automated processes to proactively handle the event and execute the required with intent and validation, while also alerting me if required. 
-
-As an SRE supporting OSD, I want automated validation of machine state as advertised by the machine-api against the cloud provider. This will enable automated processes to proactively handle the event and execute the required with intent and validation, while also alerting me if required. 
-
-As an SRE supporting OSD, I want automated validation of machine state as advertised by the machine-api against the cloud providers load balancers (health checks). This will enable automated processes to proactively handle the event and execute the required with intent and validation, while also alerting me if required. 
-
 ### Implementation Details/Notes/Constraints [optional]
 
-The MMO will utilize a machineWatcher that retrieves a machineList{} from the machine-api and iterates through each machine while performing each check (maintenance/state/LB health). Once the machineWatcher has detected any of these events, a machinemaintenance CR will be posted to the openshift-machine-maintenance-operator namespace to be reconciled by the machinemaintenance controller. This controller will validate the state of the cluster prior to performing any maintenance. For example; is the cluster upgrading? is the cluster already performing a maintenance?
+Constraints: 
+* This implimentation will require the machine-api to query cloud providers for scheduled maintenances and publish them in the machines CR. 
+* GCP only allows maintenances to be queried from the node itself -> `curl http://metadata.google.internal/computeMetadata/v1/instance/maintenance-event -H "Metadata-Flavor: Google"`
+
+This operator will iterate through the machineList{} and inspect each machine CR for scheduled maintenances. If a maintenance is found, the controller will validate the state of the cluster prior to performing any maintenance. For example; is the cluster upgrading? is the cluster already performing a maintenance?
 
 These processes will only hold true for infra and worker roles of machines within the cluster. 
 
@@ -83,34 +78,28 @@ Not every cloud provider has the same kind of maintenances that inherit that sam
 
 Example: (AWS maintenance)[https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/monitoring-instances-status-check_sched.html#types-of-scheduled-events] vs (GCP maintenance)[https://cloud.google.com/compute/docs/storing-retrieving-metadata#maintenanceevents].
 
+
 ### Risks and Mitigations
 
 ## Design Details
 
-### maintenanceWatcher
-The maintenanceWatcher is a go routine that currently cycles every 60 minutes. It retrieves a list of machines and iterates through them to check if each machine has an associated scheduled maintenance. If a maintenance is found for a machine, a machinemaintenance CR is created with the event type from that cloud provider for reconciliation by the machinemaintenance controller. 
-
-For example, AWS events will result in the event type being either:
+AWS event types:
 * instance-stop
 * instance-retirement
 * instance-reboot
 * system-reboot
 * system-maintenance
 
-### stateWatcher
-The stateWatcher is a go routine that currently cycles every 10 minutes. It retrieves a list of machines and iterates through them to validate the state of machine from the machine-api with that of the cloud provider. If miss-match in state is found, machinemaintenance CR is created with event type "machine-state-missmatch" for reconciliation by the machinemaintenance controller.
-
-### lbWatcher
-The lbWatcher is a go routine that currently cycles every 10 minutes. It retrieves a list of machines and iterates through them to validate the health of machine from the machine-api with that of the cloud providers load balancers. This will only be targeted at infra and master machines. A machinemaintenance CR will be created with event type "lb-unhealthy" if a host is unexpectedly found unhealthy.
-
 ### machinemaintenance controller
-The machinemaintenance controller will reconcile all machinemaintenance CRs within its namespace. It will be responsible for first validating the state of the cluster prior to executing anything on a target object. Validating the state of the cluster will include will initially check for only is the cluster upgrading or is a maintenance already being performed. More use-cases can be added as seen fit. 
+The machinemaintenance controller will iterate through machine CRs and reconcile identified mainteances. It will be responsible for first validating the state of the cluster prior to executing anything on a target object. Validating the state of the cluster will include will initially check for only is the cluster upgrading or is a maintenance already being performed. More use-cases can be added as seen fit. 
 
 After cluster validation, the controller will ascertain if its in a maintenance window where is can execute maintenances (See open question 2). If in the case no maintenance windows are defined, the controller will continue as true. If the maintenance window logic is only applicable in OSD, the operator could validate if its "managed" prior to expecting these resources.
 
-The event type is then source from the CR and then is resolved by either deleting a target machine CR (so the machine-api creates a new one) or raising an alert for manual intervention (master maintenance scheduled or unhealthy LB target). 
+The event type is then sourced from the CR and then is resolved by either deleting a target machine CR (so the machine-api creates a new one) or raising an alert for manual intervention (master maintenance scheduled). 
 
-Upon deleting a machine CR, the machinemaintenance CR status will be updated to in-progress. After deletion is confirmed, the controller will query the cloud provider API with the event ID to confirm it is no longer valid before deleting the CR. 
+This is a very UDP type of approach. 
+
+The MMo could also look to store state of its actions in its on machinemaintenance CR that it would create from a machine CR. 
 
 ### Example machinemaintenance CR
 
@@ -129,6 +118,8 @@ spec:
 status:
   maintenance: "in-progress"
 ```
+
+The MMO would then delete this CR after validating the target machine has been deleted and new one created indicating that the maintenance is completed. 
 
 ### Alerting
 An alert will be raised for the following conditions:
