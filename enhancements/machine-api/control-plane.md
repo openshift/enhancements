@@ -14,7 +14,7 @@ approvers:
 
 creation-date: 2020-04-02
 last-updated: yyyy-mm-dd
-status: implementable
+status: provisional
 see-also:
   - https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20191017-kubeadm-based-control-plane.md
   - https://github.com/openshift/enhancements/blob/master/enhancements/etcd/cluster-etcd-operator.md
@@ -34,7 +34,7 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
+- [ ] Enhancement is `provisional`
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
