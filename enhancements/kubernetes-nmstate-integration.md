@@ -50,7 +50,7 @@ what this project is addressing.
 
 ### Goals
 
-- Deploy kubernetes-nmstate as part of openshift
+- Dynamic network interface configuration for OpenShift on Day 2 via an API
 
 ### Non-Goals
 
@@ -106,40 +106,59 @@ An upstream API group of nmstate.io is currently used.
 
 #### Bond creation
 
-* Be able to create bond interfaces on OpenShift nodes.
- 
-  Typically, MCO + Ignition would be utilized. However, in a Day 1 install, that may not be possible.
-  It may be necessary for the bond/vlan configuration be done before Ignition can even be reached.
-  
-* Create a vlan interface on top of the bond inter.
+* As an OpenShift administrator, my customer base will change. Each customer will have different needs,
+  network-wise. Most will be able to utilize the typical network. Some customers may need more bandwidth
+  than a single pipe can provide. In order to satisfy these customers' neds, I would like to have
+  the ability to create a bond on my nodes dynamically, without the need for a reboot.
+
+#### VLAN create
+
+* As an OpenShift administrator, my customer base will change. Each customer will have different needs,
+  network-wise. Most will be able to utilize the typical network. Some customers may need more than
+  one network, and desire a VLAN setup. In order to satisfy these customers' needs, I would like to have
+  the ability to create a VLAN on top of a node interface, without the need for a reboot. 
 
 #### Assign ip address
 
-* Assign static and/or dynamic ip address on interfaces
-* Assign ipv4 and/or ipv6
+* As an OpenShift administrator, I have a need to create interfaces, such as VLAN interfaces, and 
+  assign either a static or a dynamic IP address to that interface. I would like the ability to configure
+  either a static address or dynamic address without the need for a reboot. 
+
+* As an OpenShift administrator, I have the need to create a bridge, add an existing interface to
+  the bridge, and move the IP from that interface to the bridge, all without having to reboot the node.
 
 #### Create/Update/Remove network routes
 
-* Be able to Create/Update/Remove network routes for different interfaces like (bond,ethernet,sriov vf and sriov pf)
+* As an OpenShift administrator, I have a need to create/update/remove network routes for specific
+  interfaces. This might include source routing. This is necessary without having to reboot the node.
 
 #### Manage/Configure host SR-IOV network device
 
-* Be able to change host Virtual functions configuration (not managed by the sriov-operator) like vlans mtu driver etc..
+* As an OpenShift administrator, I would like to be able to change host Virtual functions configuration
+ (those not managed by the sriov-operator) like vlans, mtu, driver etc.
 
 #### Rollback
 
-* Be able to rollback network configuration 
-if we lose connectivity to the openshift api server after applying a policy.
+* As an OpenShift administrator, if a configuration that I apply is somehow invalid, I would like to be
+  able to rollback network configuration if network connectivity is lost to the OpenShift api server 
+  after a policy is applied. This should be done without my intervention, and restore connectivity as
+  it was prior to application of the faulty configuration.
 
 ### Implementation Details
 
-The proposal introduces kubernetes-nmstate as Tech Preview.
+https://docs.google.com/document/d/1k7_vWtVRbOvTmOOTFx7qRPvYXJh3YyBPvuwh6H-g_jA/edit#heading=h.cdwyj2vhalzy
 
 ## Design Details
 
+Distributed. Pod on every labeled node.
+
 ### Test Plan
 
-- Functional tests will be implemented
+- Unit tests (implemented)
+- e2e tests of kubernetes-nmstate handler (implemented)
+- e2e tests of kubernetes-nmstate operator (implemented)
+
+All tests will be automated in CI.
 
 ### Graduation Criteria
 
@@ -152,11 +171,16 @@ Initial support for kubernetes-nmstate will be Tech Preview
 
 #### Tech Preview -> GA
 
+- Record a session, with slides, explaining usage for sharing with CEE.
+- Documented under CNV
+
 ### Upgrade / Downgrade Strategy
+
+The kubernetes-nmstate operator will handle upgrades. Downgrades are not specified ATM.
 
 ### Version Skew Strategy
 
-kubernetes-nmstate runs as a DaemonSet.
+
 
 ## Implementation History
 
@@ -167,3 +191,6 @@ Tech Preview
 ## Infrastructure Needed
 
 This requires a github repo be created under openshift org to hold a clone from kubernetes-nmstate
+Any CI system could run the unit tests as-is. There is no need for specialized hardware.
+The e2e tests require multiple interfaces on the nodes.
+
