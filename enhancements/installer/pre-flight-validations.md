@@ -125,6 +125,16 @@ There will be no changes to the existing flows.
 
 ## Design Details
 
+### Proposed Design
+
+In order to accomodate a number of sprawling tests, we need to develop a framework for running them. The framework must have the following garuntees:
+- returns an accurate list of all validation errors discovered during run
+- allows tests for the same component to be grouped into packages
+- allows you to specify dependencies between test packages
+  - example: a set of tests the validate openstack's quota depends on tests that validate the clouds.yaml
+- does not run a package when a package that is a downstream dependency fails or returns validation errors
+- run all packages in the most optimal way possible
+
 ### Test Plan
 
 The code for the framework and the validations will have unit tests.
