@@ -82,7 +82,7 @@ Numerous customer complaints have resulted in this issue being highly escalated.
 ### Goals
 
 1. To enable the OpenShift 4.4 installer to succesfully deploy a cluster on an OpenStack cloud that uses self signed certificates for auth.
-2. Openshift 4.4 can succesfully and stabily run on OpenStack clusters that use self signed certificates for auth.
+2. OpenShift 4.4 can succesfully and stabily run on OpenStack clusters that use self signed certificates for auth.
 3. Backport to 4.3
 
 ## Proposal

@@ -63,7 +63,7 @@ The proposal is to transfer the ownership of the DR scripts from MCO, remove all
 simplify other existing scripts for backing up and restoring the cluster state. 
 
 With the simplification of the scripts, different disaster recovery scenarios are documented properly to utilize the
-simplified scripts along with other Openshift utility commands to achieve the recovery of the cluster. 
+simplified scripts along with other OpenShift utility commands to achieve the recovery of the cluster. 
 
 ## Implementation Plan
 ###  Transfer the ownership of the DR files from the MCO to CEO

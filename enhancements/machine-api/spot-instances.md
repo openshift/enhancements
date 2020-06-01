@@ -243,7 +243,7 @@ This risk will be documented and it will be strongly advised that users do not a
 
 #### Spot instances and Autoscaling
 
-The Kubernetes Cluster Autoscaler, deployed to Openshift clusters, is currently unaware of differences
+The Kubernetes Cluster Autoscaler, deployed to OpenShift clusters, is currently unaware of differences
 between Spot instances and on-demand instances.
 
 If, while the cloud provider has no capacity, or the bid price is too low for AWS/Azure,

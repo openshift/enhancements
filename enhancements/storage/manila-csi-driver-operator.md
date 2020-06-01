@@ -43,7 +43,7 @@ This document describes [Manila](https://docs.openstack.org/manila/latest/) [CSI
 
 ## Proposal
 
-Our main goal is to add RWX volume support in Openshift 4 on OpenStack. So we are going to use Manila through the CSI driver available in upstream as a part of [cloud-provider-openstack](https://github.com/kubernetes/cloud-provider-openstack/tree/master/pkg/csi/manila) repo.
+Our main goal is to add RWX volume support in OpenShift 4 on OpenStack. So we are going to use Manila through the CSI driver available in upstream as a part of [cloud-provider-openstack](https://github.com/kubernetes/cloud-provider-openstack/tree/master/pkg/csi/manila) repo.
 
 To maintain the lifecycle of the driver we want to implement an operator, that will handle all administrative tasks: deploy, restore, upgrade, healthchecks, and so on.
 
