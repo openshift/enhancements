@@ -79,6 +79,9 @@ Once you have decided on a name for a new component, follow these conventions:
 
 #### Terms
 
+* OpenShift or openshift, but NEVER Openshift
+  * OpenShift - any text intended for user consumption such as display names, descriptions, or documentation
+  * openshift - names that use lower case spellings either by requirement or convention, such as namespaces and images
 * baremetal, Bare Metal, bare metal, BareMetal: follow the [style guide from
 metal3-io](https://github.com/metal3-io/metal3-docs/blob/master/design/bare-metal-style-guide.md)
 
