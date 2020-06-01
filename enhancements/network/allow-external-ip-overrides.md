@@ -29,7 +29,7 @@ superseded-by:
 
 ## Summary
 
-The Openshift API server provides a set of network admission plugins. One of these plugins is the external IP range checker.
+The OpenShift API server provides a set of network admission plugins. One of these plugins is the external IP range checker.
 There is an [externalIPNetworkCIDRs](https://docs.openshift.com/container-platform/3.11/install_config/master_node_configuration.html#master-node-config-network-config "externalipnetworkcidr") parameter 
 that controls the allowable range of external IPs that a service can have in a cluster. 
 This enhancement proposal is to modify the external IP range checker admission plugin to allow an admin user with 
@@ -66,7 +66,7 @@ specified at the cluster level.
 
 ## Proposal
 
-- As an administrator with [sufficient privilege](#admin-user) on a 4.x Openshift cluster, I want the ability to 
+- As an administrator with [sufficient privilege](#admin-user) on a 4.x OpenShift cluster, I want the ability to 
 specify external IPs which may fall out of the range specified by cluster administrators for services belonging to my app.
 
 This proposal is to add an RBAC check in case the external IPs specified for the service don't fall in the range of the 
@@ -142,4 +142,4 @@ user has [sufficient privileges](#admin-user).
 
 ## Infrastructure Needed [optional]
 
-Openshift 4.x cluster
+OpenShift 4.x cluster

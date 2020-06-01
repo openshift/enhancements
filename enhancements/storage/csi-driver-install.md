@@ -30,7 +30,7 @@ superseded-by:
 
 ## Summary
 
-We want certain CSI drivers such as AWS, GCE, Cinder, Azure and vSphere to be installable on Openshift, so as
+We want certain CSI drivers such as AWS, GCE, Cinder, Azure and vSphere to be installable on OpenShift, so as
 they can be used along-side in-tree drivers and when upstream enables migration flag for these volume types, their
 replacement CSI drivers can take over and none of the storage features get affected.
 
@@ -40,8 +40,8 @@ Upstream Kubernetes is moving towards removing code of in-tree drivers and repla
 current expectation is that - all in-tree drivers that depend on cloudprovider should be removed from core Kubernetes by 1.21.
 This may not happen all at once and we expect migration for certain drivers to happen sooner.
 
-This does mean that - Openshift should be prepared to handle such migration. We have to iron out any bugs in driver themselves and
-their interfacing with Openshift. We need a way for users to use the CSI drivers and optionally enable migration from in-tree driver
+This does mean that - OpenShift should be prepared to handle such migration. We have to iron out any bugs in driver themselves and
+their interfacing with OpenShift. We need a way for users to use the CSI drivers and optionally enable migration from in-tree driver
 to CSI driver. To support upstream design - we will also need a way for users to disable the migration and keep using in-tree driver, until
 in-tree code is finally removed.
 
@@ -87,7 +87,7 @@ We propose that - we provide each driver mentioned above as a separate operator 
 is responsible for its installation and release. The operator is responsible for creating storageclass that the driver provides.
 
 The configuration of CSI driver can be done via OLM UI if required and CSI driver can access cloudprovider credentials
-from Openshift provided sources.The CR that is responsible for driver configuration can be installed by the operator
+from OpenShift provided sources.The CR that is responsible for driver configuration can be installed by the operator
 itself optionally or by the user. We expect operator configuration CR to be *cluster-scoped* rather than namespace scoped.
 
 The reason for choosing cluster-scoped CRs are two fold:
@@ -97,7 +97,7 @@ The reason for choosing cluster-scoped CRs are two fold:
 User should be able to edit the CR and change log level, managementState and update credentials(if operator configuration CR is mechanism by which credentials are delivered to the CSI driver) required for talking to storage backend.
 
 Installation via OLM however means that, when we want to enable these CSI drivers as default drivers,
-they must be installed by default in Openshift installs. We further propose that -
+they must be installed by default in OpenShift installs. We further propose that -
 Cluster Storage Operator(https://github.com/openshift/cluster-storage-operator)
 could create subscriptions for these driver operators when drivers have to be installed by default.
 
@@ -107,7 +107,7 @@ Expected workflow as optional driver (using EBS as an example):
 4. While the operator is installed in a user provider namespace, the CSI driver should be installed in a namespace pre-defined(for example - `openshift-csi-ebs-driver`) in the operator.
 3. EBS CSI driver is installed and it creates relevant storageclass that user can use to provision CSI EBS volumes.
 
-When a CSI driver operator is in technical preview, we expect that the operator will be available from a `beta` channel. Moving to a `stable` channel once a driver reaches GA will require Openshift admin to manually change subscribed channel from beta to stable. At this point we expect that, operator in GA state will simply **adopt** the resources(CRs) created by beta version of the operator.
+When a CSI driver operator is in technical preview, we expect that the operator will be available from a `beta` channel. Moving to a `stable` channel once a driver reaches GA will require OpenShift admin to manually change subscribed channel from beta to stable. At this point we expect that, operator in GA state will simply **adopt** the resources(CRs) created by beta version of the operator.
 
 
 #### Uninstallation of optional CSI driver operator.
@@ -124,7 +124,7 @@ should have a finalizer which will be removed by the operator when csi-driver op
 
 ### Expected workflow as default driver:
 
-When these drivers become mandatory part of Openshift cluster, we need to install them by default. This section in general only applies to drivers which want to be enabled by default in Openshift installation.
+When these drivers become mandatory part of OpenShift cluster, we need to install them by default. This section in general only applies to drivers which want to be enabled by default in OpenShift installation.
 
 1. CVO installs cluster-storage-operator.
 2. cluster-storage-operator detects cloudprovider on which cluster is running(lets say EBS).
@@ -162,11 +162,11 @@ When a CSI driver is moved from optional to a mandatory one, existing installati
      https://docs.openshift.com/container-platform/4.3/operators/olm-restricted-networks.html but index images should make it easier.
 
 
-2. We need a way for a CSI driver operator to say version range of Openshift against which it is supported.
+2. We need a way for a CSI driver operator to say version range of OpenShift against which it is supported.
 
   A: This is less of a problem with index images because all versions of operator is not available from same source.
 
-3. Are channel to which user is subscribed to automatically upgraded when Openshift version is bumped? For example: If we install an operator from 4.2 channel on OCP-4.2 and then upgrade to OCP-4.3, is subscription updated to use channel 4.3? Or this should be handled via `skipRange`?
+3. Are channel to which user is subscribed to automatically upgraded when OpenShift version is bumped? For example: If we install an operator from 4.2 channel on OCP-4.2 and then upgrade to OCP-4.3, is subscription updated to use channel 4.3? Or this should be handled via `skipRange`?
 
   A: Channels aren't automatically upgraded on OCP upgrade but we will be using stable and beta channel names rather than version specific channels.As
      proposed above we expect that an operator installed from stable channel will adopt resources created by beta channel.
