@@ -64,7 +64,7 @@ But not all customers can use wildcard certs. For that reason we now support
 fixed domain scenario using URLs with a fixed hostname and a variable path:
 https://example.com/<random-part>/. We have been able to implement this
 single-host option because upstream Ingress controllers support path rewriting.
-For instance with the nginx controller adding the following annotation does
+For instance with the traefik and nginx controllers adding the following annotations does
 the trick:
 
 `traefik.ingress.kubernetes.io/rewrite-target: /`
@@ -85,6 +85,19 @@ metadata:
   annotations:
     haproxy.router.openshift.io/rewrite-target: /
 ```
+
+## Design Details
+
+### Test Plan
+
+Considered the multiple supported examples of rewrite-path we are going 
+to add some unit test to verify them. We are NOT going to include any particular 
+e2e test.
+
+## Implementation History
+
+- 2020-05-12 Draft PRs submitted on https://github.com/openshift/router/pull/129 and 
+https://github.com/openshift/openshift-docs#22021
 
 ## Alternatives
 
