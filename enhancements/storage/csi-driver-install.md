@@ -159,6 +159,7 @@ Bases on current upstream plans & assumptions.
   The default storage class is for in-tree volume plugin (unless cluster admin changes it).
   * The drivers are managed by cluster-storage operator. If they were installed via OLM in a 4.5 cluster that's upgraded
     to 4.6, the CSI drivers are adopted as described above.
+* Added RHV / oVirt CSI driver operator. Installed by default in all clusters on RHV.
 
 #### Testing
 * Upgrade test from 4.5 with the driver installed via OLM.
