@@ -143,8 +143,8 @@ Details about what CSI driver it is going to be is out of scope of 4.6.
 Bases on current upstream plans & assumptions.
 
 ### OCP-4.5 (Kubernetes 1.18)
-* We support installation of AWS EBS and Manila CSI drivers with in-tree drivers. User can use both drivers at the same
-  time. The default storage class is for in-tree volume plugin (unless cluster admin changes it).
+* We support installation of AWS EBS (tech preview) and Manila CSI (GA) drivers with in-tree drivers. User can use both
+  drivers at the same time. The default storage class is for in-tree volume plugin (unless cluster admin changes it).
   * The driver is optional, not installed by default.
   * The driver is installed via OLM.
 * The CR required for operator configuration will be created by the user.
