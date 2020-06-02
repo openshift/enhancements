@@ -124,6 +124,14 @@ in openshift-aws-ebs-csi-driver namespace / openshift-manila-csi-driver.
 In case there was no AWS / Manila CSI driver operator running during the update, CSO installs the corresponding operator
 as during installation, so user has a CSI driver running after update.
 
+### Un-installation
+
+It is not possible to un-install a CSI driver / operator installed by cluster-storage-operator. Similarly to in-tree
+volume plugins that can't be un-installed, OCP will provide a default set of CSI drivers after installation for each
+cluster. Explicitly, deletion of a CSI driver CR will not result in CSI driver un-installation. Users that want to use
+their own / upstream CSI drivers must set the operator `Unmanaged` and delete the CSI driver manually, just like with
+any other cluster-scope OCP component.
+
 ### Documentation
 We require 3rd party CSI driver vendors to ship their CSI drivers via OLM. In order to prove that OLM has necessary
 capabilities, OCP will ship a sample CSI driver + CSI driver operator via OLM, together with a set of recommendations
