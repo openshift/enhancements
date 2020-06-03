@@ -1,1 +1,1 @@
-The README has [moved](guidelines/README.md).
+The README has [moved](../guidelines/README.md).
