@@ -96,6 +96,8 @@ AWS event types:
 ### machinemaintenance controller
 The machinemaintenance controller will iterate through machine CRs and reconcile identified mainteances. It will be responsible for first validating the state of the cluster prior to executing anything on a target object. Validating the state of the cluster will include will initially check for only is the cluster upgrading or is a maintenance already being performed. More use-cases can be added as seen fit. 
 
+If the cluster fails validation (for example is upgrading), the controller will requeue the object and process it again according to its `SyncPeriod` which would currently be proposed at 60 minutes. 
+
 After cluster validation, the controller will ascertain if its in a maintenance window where is can execute maintenances (See open question 2). If in the case no maintenance windows are defined, the controller will continue as true. If the maintenance window logic is only applicable in OSD, the operator could validate if its "managed" prior to expecting these resources.
 
 The event type is then sourced from the CR and then is resolved by either deleting a target machine CR (so the machine-api creates a new one) or raising an alert for manual intervention (master maintenance scheduled). 
