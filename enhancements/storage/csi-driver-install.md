@@ -93,7 +93,7 @@ OpenStack cloud and deploy the driver only when the service is present.
   and [`OperatorStatus`](https://github.com/openshift/api/blob/95abe2d2f4223d5931e418bf8e4d3773d16b42c0/operator/v1/types.go#L97).
   In the future, each CSI driver may introduce its own configuration fields.
 * Each CSI driver runs in a dedicated namespace, typically `openshift-<backed>-csi-driver` (`openshift-aws-ebs-csi-driver`).
-  * TODO: or run everything in cluster-storage namespace? OLM installs into openshift-aws-ebs-csi-driver, we would need to delete it before starting a new driver in cluster-storage. 
+  * TODO: or run everything in cluster-storage namespace? OLM installs into openshift-aws-ebs-csi-driver, we would need to delete it before starting a new driver in cluster-storage.
 * TODO: where the operator runs? cluster-storage namespace?
 * Each CSI driver uses cloud-credential-operator to obtain a role in the underlying cloud + its credentials to
   manipulate with the cloud storage API.
@@ -119,7 +119,7 @@ in openshift-aws-ebs-csi-driver namespace / openshift-manila-csi-driver.
 4. CSO runs the new CSI driver operator.
 5. The CSI driver operator adopts the old operand - it reconciles the old CSI driver objects (Deployment, DaemonSet,
    RBAC, ...) with updated 4.6 content. I.e., all objects created by the 4.6 operator must have the same name
-   as the objects created by the old 4.5 operator. 
+   as the objects created by the old 4.5 operator.
 
 In case there was no AWS / Manila CSI driver operator running during the update, CSO installs the corresponding operator
 as during installation, so user has a CSI driver running after update.
@@ -163,7 +163,7 @@ Bases on current upstream plans & assumptions.
 
 #### Testing
 * Upgrade test from 4.5 with the driver installed via OLM.
-  * This ensures that drivers installed via OLM are correctly adopted, without disturbing the cluster. 
+  * This ensures that drivers installed via OLM are correctly adopted, without disturbing the cluster.
 
 ### OCP-4.7 (Kubernetes 1.20)
 * GCE, Azure and Cinder CSI drivers become installed by default (with non-default storage class).
@@ -196,11 +196,64 @@ Kubernetes 1.21 is current upstream target for removal of in-tree cloud provider
 
 * ART must "adopt" existing AWS EBS and Manila CSI driver operator and drivers.
   * In 4.5, these operators are installed via OLM. We (storage team) are responsible for release + 4.5.z erratas.
-    (No 4.5.z releases are planned, but we need to be prepared for serious errors or CVEs.) 
+    (No 4.5.z releases are planned, but we need to be prepared for serious errors or CVEs.)
   * From 4.6, ART should manage these two operators + corresponding CSI drivers. These images become part of the
     release payload! All 4.6 and 4.6.z erratas are managed by ART.
-  
+
 ## Alternatives considered
+
+As an alternative approach, we are considering deploying CSI drivers using a central operator, as opposed to deploying them via dedicated operators like we presented before.
+
+Ideally, **cluster-storage-operator** (CSO) would play the role of installing the CSI drivers. In addition to deploying the default StorageClass for the cluster, like it currently
+does, CSO would also deploy everything necessary for the StorageClass to be functional: the CSI driver.
+
+This how the workflow would look like:
+
++--------------------------+    +--------------------------+     +--------+
+|                          |    |                          |     |        |
+| cluster-version-operator |+-->| cluster-storage-operator |+--> | driver |
+|                          |    |                          |     |        |
++--------------------------+    +--------------------------+     +--------+
+
+And this is how the workflow of our previous approach would look like:
+
++--------------------------+    +--------------------------+    +---------------------+    +--------+
+|                          |    |                          |    |                     |    |        |
+| cluster-version-operator |+-->| cluster-storage-operator |+-->| csi-driver-operator |+-> | driver |
+|                          |    |                          |    |                     |    |        |
++--------------------------+    +--------------------------+    +---------------------+    +--------+
+
+
+### Installation
+
+1. During installation, cluster-version-operator (CVO) starts CSO.
+2. CSO detects the underlying cloud platform and creates the CSI driver CR for that cloud platform, e.g., `AWSEBSDriver` for AWS.
+3. In addition to that, CSO creates a new controller to act on that CR.
+4. This controller's job is to sync the CSI driver for that given cloud. In other workds, it deploys the CSI driver and everything it else needs to work, i.e.,
+cloud credentials, RBAC, Deployment, DaemonSet, CSIDriver and StorageClass objects.
+5. The controller report the progress of the operand (CSI driver) in the CR deployed in step 2 above.
+6. CSO starts a new controller whose job is to watch all CSI drivers' CRs and reports back their status ("Progressing", "Degraded", "Available", ...) in CSO's ClusterOperator status.
+
+### Upgrade from OLM-managed operator
+
+CSO will deploy the CSI drivers in the `cluster-storage-operator` namespace. In OCP 4.5, AWS and Manilla operators deploy their operators in their respective namespaces,
+so we might end up with two CSI drivers installed in the cluster.
+
+There are two alternatives to overcome this problem.
+
+#### Alternative 1
+
+Document that the administrator needs to uninstall the 4.5 CSI Driver operator before upgrading to 4.6.
+
+The downside of this alternative is that we don't support an upgrade path for the operator.
+
+#### Alternative 2
+
+When started, CSO detects that there is a AWS or Manilla operator installed by OLM and remove it. Once the operator is gone, CSO deploys the new CSI driver.
+
+In this case, it's important that the CSI driver's StorageClass deployed by CSO has the same name as the one deployed by the CSI driver operator.
+
+This alternative migh impose another problem: AWS EBS CSI Driver Operator doesn't remove the operand if there are volumes using the CSI driver.
 
 ### Installation via OLM
 
