@@ -19,6 +19,21 @@ superseded-by:
   - "/enhancements/our-past-effort.md"
 ---
 
+Start by filling out this header template with metadata for this enhancement.
+
+* `reviewers`: This can be anyone that has an interest in this work.
+
+* `approvers`: All enhancements must be approved, but the appropriate people to
+  approve a given enhancement depends on its scope.  If an enhancement is
+  limited in scope to a given team or component, then a peer or lead on that
+  team or pillar is an appropriate approver.  If an enhancement captures
+  something more broad in scope, then a member of the OpenShift architects team
+  or someone they delegate would be appropriate.  Examples would be something
+  that changes the definition of OpenShift in some way, adds a new required
+  dependency, or changes the way customers are supported.  Use your best
+  judgement to determine the level of approval needed.  If you’re not sure,
+  just leave it blank and ask for input during review.
+
 # Neat Enhancement Idea
 
 This is the title of the enhancement. Keep it simple and descriptive. A good
