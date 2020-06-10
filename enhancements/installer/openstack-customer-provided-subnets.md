@@ -9,7 +9,7 @@ reviewers:
 approvers:
   - "@abhinavdahiya"
 creation-date: 2020-03-12
-last-updated: 2020-03-20
+last-updated: 2020-07-10
 status: planning
 ---
 
@@ -21,7 +21,7 @@ status: planning
 - [ x ] Design details are appropriately documented from clear requirements
 - [ x ] Test plan is defined
 - [ x ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [ x ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 In many large organizations, IT groups are separated into teams. A common separation of duties lies between networking/WAN and application or enabling technology deployments. One group will provision or assign OpenStack accounts with core management technology. A second group will be responsible for provisioning networks complete with subnet & zone selection, routing, VPN connections, and ingress/egress rules from the company. Lastly, an applications team (or individual business units) are given a quota for other OpenStack resources to provision application-specific items (instances, containers, databases, pipelines, load balancers, etc.).
