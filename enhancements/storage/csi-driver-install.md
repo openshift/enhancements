@@ -99,12 +99,13 @@ We would like to approach various goals of this KEP in different phases, because
 
 ## Proposal
 
-We are currently considering using CVO and cluster-storage-operator (CSO) for installation of cloud CSI drivers.
+We are currently considering using CVO and existing `cluster-storage-operator` (CSO) for installation of cloud CSI
+drivers. CSO detects undelrying cloud, runs individual CSI driver operators for the cloud and reports their
+aggregated status via its `ClusterOperator` CR.  
 
-Each CSI driver is deployed via a dedicated operator (i.e. each CSI driver has its own), to accommodate differences
-between the CSI drivers. For example, Manila CSI driver operator can detect if Manila service is present in underlying
-OpenStack cloud and deploy the driver only when the service is present.
-
+* Each CSI driver is deployed via a dedicated operator (i.e. each CSI driver has its own), to accommodate differences
+  between the CSI drivers. For example, Manila CSI driver operator can detect if Manila service is present in underlying
+  OpenStack cloud and deploy the driver only when the service is present.
 * Each CSI driver will provide its own CRD, `<backend>Driver` in `csi.openshift.io` API group. E.g. `AWSEBSDriver` or
   `ManilaDriver`. The CRD is non-namespaced - CSI drivers are global in the whole cluster.
   * Each CRD will allow only a single instance, named `cluster`.
@@ -112,19 +113,15 @@ OpenStack cloud and deploy the driver only when the service is present.
     [`OperatorSpec`](https://github.com/openshift/api/blob/95abe2d2f4223d5931e418bf8e4d3773d16b42c0/operator/v1/types.go#L48)
     and [`OperatorStatus`](https://github.com/openshift/api/blob/95abe2d2f4223d5931e418bf8e4d3773d16b42c0/operator/v1/types.go#L97).
     In the future, each CSI driver may introduce its own configuration fields.
-* Each CSI driver and its operator runs in `cluster-storage-operator` namespace.
+* Each CSI driver and its operator runs in `openshift-platform-csi-drivers` namespace.
   * We expect 1-2 CSI drivers per cloud platform, typically block + shared filesystem CSI driver such as AWS EBS and
     AWS EFS.
-  * Running both the operator + CSI driver in the same namespace simplifies RBAC - the operator needs permission to
-    manipulate stuff only in its namespace.
-  * By running all CSI drivers in the same namespace allows for reusal of RBAC rules - all the operators + drivers need
-    very similar, if not equal, RBAC rules.
-  * For the reference, here is expected content of `cluster-storage-operator` namespace:
-    * `cluster-storage-operator` itself.
-    * `cluster-csi-snapshot-controller-operator` and `cluster-csi-snapshot-controller`
-    * Cloud CSI operators + drivers, e.g.:
-       * `aws-ebs-csi-driver-operator`, `aws-ebs-csi-driver`
-       * `aws-efs-csi-driver-operator`, `aws-efs-csi-driver`
+  * Running both the operator + CSI driver in the same namespace has these benefits:
+    * Simpler RBAC rules - the operator needs permission to manipulate stuff only in its namespace.
+    * Reusal of RBAC rules - all the operators + drivers need very similar, if not equal, Roles/ClusterRoles.
+    * Better visibility - if there is a problem with a cloud CSI driver, it's clear where to look, on all OCP
+      installations.
+    * Not polluting OCP with 1-2 new namespace per cloud, with cloud-specific namespace names. 
 * Each CSI driver uses cloud-credential-operator to obtain a role in the underlying cloud + its credentials to
   manipulate with the cloud storage API.
 
@@ -133,11 +130,13 @@ OpenStack cloud and deploy the driver only when the service is present.
 2. CSO detects underlying cloud and starts operators for CSI driver(s) for the particular cloud.
    * I.e. CSO deploys corresponding CSI driver operators, incl. their ServiceAccount, RBAC, CRD, Deployment and finally
      a default CR.
-3. The CSI driver operator obtains cluster credentials via cloud-credential-operator and deploys the CSI driver,
+3. CSO still creates default storage classes for the in-tree volume plugins if needed, according to the timeline below.
+4. The CSI driver operator obtains cluster credentials via cloud-credential-operator and deploys the CSI driver,
    i.e. creates its RBAC, Deployment, DaemonSet and CSIDriver objects. Progress of the deployment is reported in
    `CR.Status` of the operator CR.
-4. CSO monitors CRs of the CSI drivers and reports back their status ("Progressing", "Degraded", "Available", ...) in
+5. CSO monitors CRs of the CSI drivers and reports back their status ("Progressing", "Degraded", "Available", ...) in
    CSO's ClusterOperator status.
+
 
 ### Upgrade from OLM-managed operator
 In OCP 4.5, we released AWS EBS and Manila CSI drivers via OLM. It's too late to move them to CSO.
@@ -244,6 +243,24 @@ Kubernetes 1.21 is current upstream target for removal of in-tree cloud provider
     All 4.6 and 4.6.z erratas are managed by ART.
 
 ## Alternatives considered
+
+### Install CSI driver operators via a new operator in `openshift-platform-csi-drivers` namespace
+Instead of CSO, CSI driver operators could be started by a new operator, say `cluster-platform-csi-operator`, that
+would check on what cloud it runs and install the CSI drivers. CSO would create only the default storage classes
+for in-tree volume plugins it creates today.
+
+Benefits:
+
+* CSO is less complicated.
+* CSO does not need manipulate CSI driver operators in another namespace and can have tighter RBAC.
+* cluster-storage-operator does not need to be significantly refactored (which is necessary to install CSI driver
+operators). 
+
+Downsides:
+
+* Two operators instead of one, two ClusterOperator statuses to check for storage status.
+* On bare metal, we will have both CSO and `cluster-platform-csi-operator` doing nothing (as they both operate only on
+  clouds).
 
 ### Install CSI drivers directly in `cluster-storage-operator` 
 As an alternative approach, we are considering deploying CSI drivers using a central operator, as opposed to deploying them via dedicated operators like we presented before.
