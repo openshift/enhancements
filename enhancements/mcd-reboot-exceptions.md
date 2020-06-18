@@ -151,8 +151,9 @@ of this feature, at worst it is a performance issue and cannot be considered a
 regression over the current behaviour.
 
 False negatives can be mitigated by defaulting to the current behaviour
-(reboot), preventing the admin from tampering with the whitelist, and only
-adding new domains after Engineering and QE validate that the changes are safe.
+(reboot), preventing the admin from tampering with the list of domains with
+exceptions, and only adding new domains after Engineering and QE validate that
+the changes are safe.
 
 ## Design Details
 
@@ -216,10 +217,18 @@ versions after any engineering work that was required to make it possible.
 ## Drawbacks 
 
 The risks primarily fall into 4 categories:
-- configuration: that files could be be added to the whitelist even though they require a reboot in unidentified scenarios,
-- behavioural: that some config changes will result in a reboot, others not, and that admins cannot determine which in advance
-- support: that the implementation could introduce bugs that prevent necessary reboots from being triggered
-- tech debt: that the implementation will be hard to replace once a holistic approach is identified
+
+- configuration: that domains could be be added to the comparision function even
+  though they require a reboot in unidentified scenarios,
+
+- behavioural: that some config changes will result in a reboot, others not, and
+  that admins cannot determine which in advance
+
+- support: that the implementation could introduce bugs that prevent necessary
+  reboots from being triggered
+
+- tech debt: that the implementation may need to be replaced if a more holistic
+  approach is identified
 
 ## Alternatives
 
