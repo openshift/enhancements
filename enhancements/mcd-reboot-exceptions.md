@@ -42,7 +42,6 @@ superseded-by:
 - Should the parts of the configuration that do and don't require reboot be
   part of user facing documentation?
 
-
 ## Summary
 
 A node's configuration is managed by the MCO.  When the configuation is changed
@@ -104,10 +103,8 @@ performed as in prior 4.x versions.
 
 ### User Stories [optional]
 
-Detail the things that people will be able to do if this is implemented.
-Include as much detail as possible so that people can understand the "how" of
-the system. The goal here is to make this feel real for users without getting
-bogged down.
+The user stories below are intended to be illustrative of the different types of 
+services we need to build capabilities for.
 
 #### Story 1
 
