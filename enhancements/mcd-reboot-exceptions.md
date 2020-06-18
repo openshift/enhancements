@@ -6,12 +6,18 @@ reviewers:
   - "@crawford"
   - "@eparis"
   - "@rphillips"
+  - "@runcom"
+  - "@yuqi-zhang"
+  - "@kikisdeliveryservice"
+  - "@sinnykumari"
+  - "@ericavonb"
 approvers:
   - "@crawford"
   - "@eparis"
   - "@rphillips"
+  - "@runcom"
 creation-date: 2019-12-15
-last-updated: 2019-12-15
+last-updated: 2020-06-18
 status: provisional
 see-also:
   - NA
@@ -76,15 +82,18 @@ scenarios where engineering has verified that the configuration change:
 ### Non-Goals
 
 1. Removing all reboots from the system
-1. Allowing the admin to configure additional domains or strategies for applying configuration updates
+1. Allowing the admin to configure additional domains or strategies for applying
+   configuration updates
 
 ## Proposal
 
-1. Add a function to MCD that compares two MachineConfigs, and outputs an ordered list of known actions that are needed to apply it
-1. Modify any parts of MCD that assume drain and reboot always happens after writing to disk
+1. Add a function to MCD that compares two MachineConfigs, and outputs an
+   ordered list of known actions that are needed to apply it
+1. Modify any parts of MCD that assume drain and reboot always happens after
+   writing to disk
 1. Modify MCD to perform only the list of actions produced in step 1
 
-The full list of actions required for this feature to be useful are:
+The full list of post-write actions required for this feature to be useful are:
 
 - drain
 - reboot
@@ -117,6 +126,19 @@ of SSH keys to happen without a full cluster reboot, so that the credentials are
 usable (or revoked) in a timeframe comparable with traditional environments not
 hours.
 
+#### Story 3
+
+As an adminstrator of a bare metal cluster that takes a day to reboot, I want
+the system to use the least invasive method for applying configuration changes,
+so that I have periods of relative stability where I can accomodate the
+maintenance windows of less enlightened vendors.
+
+#### Story 4
+
+As an admin, I want to continue to force reboots for network configuration 
+updates and changes to kernel flags, so that they are applied in a timely 
+manner.
+
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -127,14 +149,13 @@ or by configuration element, is left for later discussion.
 
 The risks are of false positives (an update that requires a reboot does not
 trigger one), and false negatives (an update that does not require a reboot
-triggers one anyway).  While the latter may be unexpected by an admin that
-knows of this feature, at worst it is a performance issue and cannot be
-considered a regression over the current behaviour.
+triggers one anyway).  While the latter may be unexpected by an admin that knows
+of this feature, at worst it is a performance issue and cannot be considered a
+regression over the current behaviour.
 
 False negatives can be mitigated by defaulting to the current behaviour
 (reboot), preventing the admin from tampering with the whitelist, and only
-adding entries to the whitelist after Engineering and QE validate that no
-possible contents of the file could require a reboot.
+adding new domains after Engineering and QE validate that the changes are safe.
 
 ## Design Details
 
@@ -159,15 +180,13 @@ possible contents of the file could require a reboot.
 ##### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
-- Whitelist format stability
 - Sufficient test coverage
-- Provisional whitelist contents
+- Support for handling ICSP changes
 
 ##### Tech Preview -> GA 
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
-- A supportable whitelist
 
 ##### Removing a deprecated feature
 
@@ -199,18 +218,24 @@ versions after any engineering work that was required to make it possible.
 
 ## Drawbacks 
 
-The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
+The risks primarily fall into 4 categories:
+- configuration: that files could be be added to the whitelist even though they require a reboot in unidentified scenarios,
+- behavioural: that some config changes will result in a reboot, others not, and that admins cannot determine which in advance
+- support: that the implementation could introduce bugs that prevent necessary reboots from being triggered
+- tech debt: that the implementation will be hard to replace once a holistic approach is identified
 
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement.
+- Improve the MCD's logic for handling changes to CRDs.  This may require a
+  lot of things that need to be plumbed through in the MCO and may not be 
+  possible in the short term.
+
+- Define a higher level syntax that would contain additional information about
+  the action a field needs in order for any changes to be applied; and was be
+  able to be transformed into the appropriate Ignition format.  This would be a
+  much larger body of work that would not be possible to complete in the short 
+  term.
 
 ## Infrastructure Needed [optional]
 
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
-
-Listing these here allows the community to get the process for these resources
-started right away.
+None
