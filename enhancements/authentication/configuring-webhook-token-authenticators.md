@@ -76,7 +76,7 @@ expects an array of references to secrets, but upstream only allows a single aut
 will therefore be deprecated in favour of a new one, `spec.webhookTokenAuthenticator`.
 
 The secret reference which gets set in this field has to be validated. The referenced secret will be
-expected to contain a `kubeconfig` key with a valid kubeconfig configuration for the webhook. In 4.5,
+expected to contain a `kubeconfig` key with a valid kubeconfig configuration for the webhook. In 4.n,
 it will only be possible to configure a single element for the `wehbhookTokenAuthenticator` field
 and the referenced kubeconfigs will only be allowed to use the `-data` forms (e.g.
 `certificate-authority-data` is allowed whereas `certificate-authority` is not) of their fields to
@@ -100,7 +100,8 @@ secret's contents to files and specify these in the kube-apiserver configuration
 1. cluster-authentication-operator observes `authentication.config/cluster` `type` field
 2. if set to "IntegratedOAuth", it creates an `openshift-config/webhook-authentication-integrated-oauth`
   secret and adds it to the `webhookTokenAuthenticator` field of the `authentication.config/cluster`
-  resource
+  resource. If the `type` field is set to any other value, the operator will perform no action to the
+  `webhookTokenAuthenticator` field.
   - the above secret contains details that point kube-apiserver to the oauth-apiserver for token reviews
 3. during an authentication flow, kube-apiserver sends `tokenreviews.authentication.k8s.io` object to the
   oauth-apiserver for review
@@ -136,9 +137,8 @@ the integrated OAuth server, we will just re-use all the tests that we have alre
 
 To keep authentication working even during upgrades, we'll keep our kube-apiserver
 authenticator patch code in place for 4.n version (the first version with the new wiring),
-but will disable it if any webhook authenticators are set. The same conditional OpenShift authentication
-should also appear in the 4.(n-1) version, which is the first version to contain the oauth-apiserver
-deployment. The authenticator patching code should then be removed in 4.(n+1) version.
+but will disable it if any webhook authenticators are set. The authenticator patching code
+should then be removed in 4.(n+1) version.
 
 The cluster-authentication-operator in 4.n waits for the oauth-apiserver deployment
 to be healthy, and after that happens, it will create the `openshift-config/webhook-authentication-integrated-oauth`
