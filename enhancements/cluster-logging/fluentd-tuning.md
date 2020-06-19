@@ -1,5 +1,5 @@
 ---
-title: cluster-logging-log-forwarding
+title: Tuning Fluentd Output Peformance
 authors:
   - "@alanconway"
 reviewers:
@@ -37,12 +37,9 @@ In future releases:
   - valuesmay be overridden by (present or future) settings in other logging APIs.
   - new sections may be introduced for new implementations, they may not have equivalent settings to `fluentd`
 
-The `clusterloggings.logging.openshift.io` API will have a new field
-`spec.forwarding.fluentd` map. This is intended to be symmetric with the
-`spec.forwarding.collection` field. The `collection` field is for fluentd
-`input` plugins, the `forwarding` field is for `output` plugins. This emphasizes
-the distinct roles, which may be implemented using different technologies in
-future.
+The `clusterloggings.logging.openshift.io` API will have a new map field
+`spec.output.fluentd`. The `output` field is for tuning parameters for `output`
+plugins.
 
 ## Motivation
 
@@ -59,23 +56,23 @@ other.
 
 Goals:
 * Expose selected fluentd performance optimization parameters in the ClusterLogging API.
-* Apply defaults from forwarding.fluentd to the underlying `fluentd` configuration.
+* Apply defaults from output.fluentd to the underlying `fluentd` configuration.
 
 We will be successful when:
 * An administrator is able to set defaults for selected `fluentd` parameters.
 
 ### Non-Goals
 
-* Not implying that logging will always use `fluentd` or use it in the same way. `forwarding.fluentd` applies to the current implementation, it may be ignored in future releases.
+* Not implying that logging will always use `fluentd` or use it in the same way. `output.fluentd` applies to the current implementation, it may be ignored in future releases.
 * Not allowing general `fluentd` configuration: we expose only a subset of performance tuning parameters. Users that want full control of `fluentd` need to go unmanaged.
-* Not a generic performance tuning API: we may introduce such APIs in future, or introduce new `forwarding` sections. 
+* Not a generic performance tuning API: we may introduce such APIs in future, or introduce new `output` sections. 
 
 ## Proposal
 
 Field names are based on fluentd 1.0 `<buffer>` configuration section.
 See the [fluentd documentation](https://docs.fluentd.org/configuration/buffer-section#buffering-parameters) for details.
 
-Example below shows just the `forwarding` section of the ClusterLogging CR.
+Example below shows just the `output` section of the ClusterLogging CR.
 
 The field names are copied exactly from `fluentd` 1.0, including the use of "_"
 rather than camelCase. This emphasizes that these settings are not a general
@@ -86,7 +83,7 @@ Note: two important fields were renamed by `fluentd` between versions 0.12 and 1
 * `num_threads` -> `flush_thread_count`
 
 ```yaml
-forwarding:
+output:
   fluentd:
     buffer:
       # Memory use
@@ -116,8 +113,7 @@ The CLO *may* override these settings if they would break functional behavior,
 for example settings that are incompatible with a particular output type.
 
 In future the CLO *may* introduce new APIs that can overlap with tuning
-parameters in `forwarding` or `collection`. For example we might provide generic
-"retry" options on the forwarder API. How the overlap is resolved will be
+parameters in `output`. How the overlap is resolved will be
 decided if/when that happens.
 
 ### Implementation Details
