@@ -62,6 +62,7 @@ Labels are added to the normalized JSON record as a map field named `openshift.l
 ```
 {
   "message" : "2020-03-03 11:44:51,996 - SVTLogger - INFO",
+  "@timestamp" : "2020-03-03T11:44:51.996384+00:00",
   "level" : "unknown",
   "hostname" : "ip-10-0-153-186.us-east-2.compute.internal",
 
@@ -90,16 +91,6 @@ Labels are added to the normalized JSON record as a map field named `openshift.l
   "docker" : {
     "container_id" : "a2e6d10494f396a45e4a6e8f782a571cb7759cd45a3555c386976a1a9c62cf7c"
   },
-  "pipeline_metadata" : {
-    "collector" : {
-      "ipaddr4" : "10.0.153.186",
-      "inputname" : "fluent-plugin-systemd",
-      "name" : "fluentd",
-      "received_at" : "2020-03-03T11:44:52.189331+00:00",
-      "version" : "1.7.4 1.6.0"
-    }
-  },
-  "@timestamp" : "2020-03-03T11:44:51.996384+00:00",
 }
 ```
 
