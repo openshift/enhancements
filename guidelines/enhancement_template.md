@@ -74,13 +74,6 @@ around the enhancement process.
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions [optional]
-
-This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance, 
- > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this? 
-
 ## Summary
 
 The `Summary` section is incredibly important for producing high quality
@@ -137,6 +130,13 @@ How will security be reviewed and by whom? How will UX be reviewed and by whom?
 Consider including folks that also work outside your immediate sub-project.
 
 ## Design Details
+
+### Open Questions [optional]
+
+This is where to call out areas of the design that require closure before deciding
+to implement the design.  For instance, 
+ > 1. This requires exposing previously private resources which contain sensitive
+  information.  Can we do this? 
 
 ### Test Plan
 
