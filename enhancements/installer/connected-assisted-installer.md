@@ -184,6 +184,8 @@ the installer or to the cluster, so I can adapt my existing admin
 processes and infrastructure management tools instead of replacing
 them.
 
+There was some question about whether this story was relevant.
+
 #### Story 4
 
 As a cluster hardware administrator, I want to enable power control
@@ -208,6 +210,16 @@ The current implementation relies on
 that approach cannot be supported, users can proceed by providing an
 extra host (4 hosts to build a 3 node cluster, 6 hosts to build a 5
 node cluster, etc.).
+
+There was a question about how the agent is secured:
+
+Could you add some specifics notes on the security for this design?
+There are a lot of attack vectors in remote installation and auto-join
+systems, but maybe there are details I’m missing that make this model
+secure. Would be helpful to have them explicitly noted.
+
+This part of the change should be replaced with those details, when
+ready.
 
 ## Design Details
 
@@ -307,13 +319,13 @@ The idea is to find the best form of an argument why this enhancement should _no
 
 ## Alternatives
 
-The telco/edge bare metal team is working on support for automating
-virtual media and dropping the need for a separate provisioning
-network. Using the results will still require the user to understand
-how to tell the installer the BMC type and credentials and to ensure
-each host has an IP provided by an outside DHCP server. Hardware
-support for automating virtual media is not consistent between
-vendors.
+The bare metal installer-provisioned infrastructure team is working on
+support for automating virtual media and dropping the need for a
+separate provisioning network. Using the results will still require
+the user to understand how to tell the installer the BMC type and
+credentials and to ensure each host has an IP provided by an outside
+DHCP server. Hardware support for automating virtual media is not
+consistent between vendors.
 
 ## Infrastructure Needed [optional]
 
