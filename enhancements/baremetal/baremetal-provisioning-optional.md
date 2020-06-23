@@ -52,8 +52,9 @@ consolidated into a single enum field.
 
 ### Goals
 
-The goal of this enhancement is to allow installation of a baremetal IPI
-cluster without any provisioning network dependency.
+The goal of this enhancement is to allow further customization of a
+baremetal IPI deployment to permit disabling the provisioning network
+entirely.
 
 ### Non-Goals
 
@@ -175,5 +176,18 @@ clusters, and makes it harder to support.
 
 ## Alternatives
 
-The alternatives would be to require everyone to have a dedicated
-provisioning network.
+We originally considered and rejected the idea that we could just leave
+fields blank to indicate a particular feature should be turned off. For
+example a blank provisioning network CIDR would indicate to disable the
+entire network. A blank DHCP range would indicate you wanted to use
+external DHCP. However, both of these fields have non-empty defaults
+today.
+
+The goal of the baremetal IPI initiative from the beginning was to offer
+a "batteries included approach" -- the defaults should work for a
+majority, or at the very least some large plurality, of users. Removing
+default values and requiring users to specify them makes the platform
+more difficult to use.
+
+If the majority of users will not want a provisioning network, then we
+could opt to make that change instead.
