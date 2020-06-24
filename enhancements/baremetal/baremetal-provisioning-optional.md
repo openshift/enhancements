@@ -90,16 +90,16 @@ following release.
 
 ### Provisioning Services Matrix
 
-| Container             | Managed       | Unmanaged     | Disabled                |
-|-----------------------|---------------|---------------|-------------------------|
-| baremetal-operator    | X             | X             | X                       |
-| dnsmasq               | X             | TFTP Only     |                         |
-| httpd                 | X             | X             | X                       |
-| ironic-api            | X             | X             | X                       |
-| ironic-conductor      | X             | X             | X                       |
-| ironic-inspector      | X             | X             | X                       |
-| machine-os-downloader | X             | X             | X                       |
-| static-ip-manager     | X             | X             | X                       |
+| Container             | Managed              | Unmanaged            | Disabled         |
+|-----------------------|----------------------|----------------------|------------------|
+| baremetal-operator    | X                    | X                    | X                |
+| dnsmasq               | X                    | TFTP Only            |                  |
+| httpd                 | X                    | X                    | X                |
+| ironic-api            | X                    | X                    | X                |
+| ironic-conductor      | X                    | X                    | X                |
+| ironic-inspector      | X                    | X                    | X                |
+| machine-os-downloader | X                    | X                    | X                |
+| static-ip-manager     | Provisioning network | Provisioning network | External network |
 
 ### User Stories
 
