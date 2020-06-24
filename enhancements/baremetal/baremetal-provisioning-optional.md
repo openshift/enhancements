@@ -32,7 +32,8 @@ see-also:
 Today the baremetal IPI platform takes a "batteries included" approach
 that has a dedicated provisioning network, HTTP caches, DHCP and TFTP
 servers, fully managed provisioning with both PXE and virtual media, and
-some level of hardware management.
+some level of hardware management. The existing network requirements are
+[documented in the installer repo](https://github.com/openshift/installer/blob/2fa75fa52111009d2fd40d5a33b9cc01f037d501/docs/user/metal/install_ipi.md).
 
 In some situations it may be possible to remove the requirement for a
 provisioning network entirely, in particular in the case where
@@ -42,12 +43,13 @@ provisioning method.
 Previously, we added a flag to the installer that lets a user disable
 DHCP, this enhancement builds on that by making a configurable
 provisioning network profile to allow for managed, unmanaged, and
-disabled configurations.
+disabled configurations, with the possibility for future customizations
+that avoid introducing multiple flags.
 
 ## Motivation
 
-In order to reduce the number of boolean flags in the baremetal
-platform, the various options for the provisioning network will be
+In order to reduce the number of configuration options in the baremetal
+platform, the various profiles for the provisioning network will be
 consolidated into a single enum field.
 
 ### Goals
@@ -79,8 +81,12 @@ installer platform, that features an enum of possible values:
      accessible from the machine networks. User must provide 2 IP's on
      the external network that are used for the provisioning services.
 
-The same field will be added to the Provisioning CRD, with the
-provisioningDHCPExternal field removed.
+The same field will be added to the [Provisioning CRD](https://github.com/openshift/machine-api-operator/blob/0b8cc8c965174e9de65a7f2f4021a74c487cafb6/install/0000_30_machine-api-operator_04_metal3provisioning.crd.yaml),
+which is created by the installer and used to configure the day 2
+provisioning services. We will need to maintain the existing
+`provisioningDHCPExternal` field for one release, copy it's value to the
+new `ProvisioningNetwork` field, and then we can remove it in the
+following release.
 
 ### Provisioning Services Matrix
 
@@ -173,6 +179,14 @@ and be able to look at the older provisioningDHCPExternal field.
 This introduces yet another possible configuration for baremetal IPI,
 which further increases the potential differences between baremetal IPI
 clusters, and makes it harder to support.
+
+By removing the isolated provisioning network, we need to enable an
+authentication mechanism on the Ironic and Inspector API services. This
+is currently being investigated in the upstream community.
+
+Additionally, removing the provisioning network means that the BMC's
+need to reachable from an external network, which may not be suitable in
+some environments.
 
 ## Alternatives
 
