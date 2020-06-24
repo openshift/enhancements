@@ -11,7 +11,7 @@ approvers:
 - "@enxebre"
 - "@elmiko"
 creation-date: 2020-06-01
-last-updated: 2020-06-01
+last-updated: 2020-06-16
 status: implemented
 see-also:
   - "/enhancements/machine-api/cluster-autoscaler-operator.md"  
@@ -128,8 +128,9 @@ autoscaling perspective.
 
 #### Machine Controller
 
-The Machine Controller will be responsible for coordinating the underlying MachineSets and MachineDeployments to provide
-a uniform interface to the core of the Cluster Autoscaler. It will be responsible for:
+The [Machine Controller](https://github.com/openshift/kubernetes-autoscaler/blob/4abdca547be45a251ba33486324f0cac8664ca25/cluster-autoscaler/cloudprovider/clusterapi/clusterapi_controller.go#L51-L67)
+will be responsible for coordinating the underlying MachineSets and MachineDeployments to provide a uniform interface
+to the core of the Cluster Autoscaler. It will be responsible for:
 - Maintaining a cache of the state of the target cluster resources (Machines, MachineSets, MachienDeployments, Nodes)
 - Providing a list of "Cloud Provider" instances to the core autoscaler logic
 - Building and providing NodeGroups to the core autoscaler based on the state of the cluster
