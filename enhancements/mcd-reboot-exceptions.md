@@ -1,5 +1,5 @@
 ---
-title: mcd-reboot-dictionary
+title: mcd-domain-specific-application-of-config-changes
 authors:
   - "@beekhof"
 reviewers:
@@ -27,7 +27,7 @@ superseded-by:
   - NA
 ---
 
-# Domain specific minimisation of config driven cluster reboots
+# Domain specific application of config updates
 
 ## Release Signoff Checklist
 
@@ -45,8 +45,8 @@ superseded-by:
 ## Summary
 
 A node's configuration is managed by the MCO.  When the configuation is changed
-by the system or an admin, the MCO and MCD write a new version of the file to
-disk and reboot the system to ensure it is applied.
+by the system or an admin, the MCO causes the MCD to write a new version of the
+file to disk and reboot the system to ensure it is applied.
 
 This proposal is to allow drain and reboot to be optional and independant
 actions, to implement the ability to restart a systemd service, and to add a
@@ -139,8 +139,13 @@ manner.
 
 ### Implementation Details/Notes/Constraints [optional]
 
-How the comparision determines what constitutes a domain, whether by target file
-or by configuration element, is left for later discussion.
+How the function determines what constitutes a unit of configuration or "domain" 
+for the purposes of comparision and output is left for later discussion.
+
+Possibilities include basing the results on:
+- which file(s) the configuration changes end up in,
+- whether specific keys have or have not changed,
+- a combination of both
 
 ### Risks and Mitigations
 
@@ -158,6 +163,10 @@ the changes are safe.
 ## Design Details
 
 ### Test Plan
+
+Since the default and most common action for applying a configuration change 
+will remain draining and rebooting the cluster nodes, we use the term "exception"
+below to mean deviation from this approach.
 
 - Unit tests for the comparision function that cover
   - Identical, missing, and invalid MachineConfigs
