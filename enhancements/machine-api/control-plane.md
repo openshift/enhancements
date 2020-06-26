@@ -10,7 +10,12 @@ reviewers:
   - smarterclayton
   - derekwaynecarr
 approvers:
-  - TBD
+  - hexfusion
+  - jeremyeder
+  - abhinavdahiya
+  - joelspeed
+  - smarterclayton
+  - derekwaynecarr
 
 creation-date: 2020-04-02
 last-updated: yyyy-mm-dd
@@ -40,7 +45,6 @@ superseded-by:
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-
 ## Glossary
 
 Control Plane: The collection of stateless and stateful processes which enable a Kubernetes cluster to meet minimum operational requirements. This includes: kube-apiserver, kube-controller-manager, kube-scheduler, kubelet and etcd.
@@ -60,7 +64,6 @@ This proposal assumes that all etcd operational aspects are managed by the clust
 
 The contract between the etcd operations and the compute resources is given by the PDBs that blocks machine's deletion. 
 Depends on https://issues.redhat.com/browse/ETCD-74?jql=project%20%3D%20ETCD.
-
 
 ## Motivation
 
@@ -110,7 +113,6 @@ Although is out of the scope for the first implementation, to provide long term 
 - This would provide a single provider config to be reused and to be changed across any control plane machine.
 - This would give the `ControlPlane` controller all the semantics it needs to fully automate vertical rolling upgrades across multiple failure domains while provider config changes would need to happen in one single place.
 
-
 The lifecycle of the compute resources still remains decoupled and orthogonal to the lifecycle and management of the Control Plane components hosted by the compute resources. All of these components, including etcd are expected to keep self managing themselves as the cluster shrink and expand the Control Plane compute resources.
 
 ### User Stories [optional]
@@ -153,7 +155,7 @@ Additionally it will create a ControlPlane resource to manage the lifecycle of t
   - The ControlPlane controller will create MachineSets to adopt those machines by looking up known labels (Adopting behaviour already exists in machineSet logic).
   	- `machine.openshift.io/cluster-api-machineset": <cluster_name>-<label>-<zone>-controlplane`
   	- `machine.openshift.io/cluster-api-cluster":    clusterID`
-  - The ControlPlane controller will create and manage a Machine Health Checking resource targeting the Control Plane Machines. Specific MHC details can be found [here](https://github.com/openshift/enhancements/blob/master/enhancements/machine-api/machine-health-checking.md)
+  - The ControlPlane controller will create and manage a Machine Health Checking resource targeting the Control Plane Machines. It will keep a `maxUnhealthy` value non-disruptive for etcd quorum, i.e 1 out of 3. Specific MHC details can be found [here](https://github.com/openshift/enhancements/blob/master/enhancements/machine-api/machine-health-checking.md)
 
 Example:
 ```
@@ -185,9 +187,10 @@ spec:
 
 #### Declarative horizontal scaling
 - Out of scope:
-- We'll reserve the ability to scale horizontally for further iterations if required. For the initial implementation the ControlPlane controller will limit the underlying machineSet horizontal scale capabilities.
-- It will ensure the machineSet replicas is always 1 to enforce recreation of any of the adopted Machines.
-- If the machineSet replicas were to be modified out of band, the ControlPlane controller will set it back to 1 while enforcing a "newest" delete policy on the machineSet.
+  - We'll reserve the ability to scale horizontally for further iterations if required.
+- For the initial implementation the ControlPlane controller will limit the underlying machineSet horizontal scale capabilities:
+  - It will ensure the machineSet replicas is always 1 to enforce recreation of any of the adopted Machines.
+  - If the machineSet replicas were to be modified out of band, the ControlPlane controller will set it back to 1 while enforcing a "newest" delete policy on the machineSet.
 
 
 #### Autoscaling
@@ -195,7 +198,9 @@ spec:
   - This proposal sets the foundation for enabling vertical autoscaling. It enables any consumer to develop autoscaling atop the semi-automated process for "Declarative Vertical scaling" described above.
   - In a future proposal we plan to add vertical autoscaling ability on the ControlPlane resource.
 
-- Any machine deletion will always honour and it will be blocked on Pod Disruption Budgets (PBD). This gives etcd guard the chance to block a deletion that it considers disruptive.
+#### Node Autorepair
+- Any machine deletion will always honour and it will be blocked on Pod Disruption Budgets (PBD). This gives etcd guard the chance to block a deletion that it might consider to be disruptive for etcd quorum.
+- Deletion operations triggered by the managed Machine Health Check will be limited to `maxUnhealthy` value, i.e 1 out of 3. 
 
 #### API Changes
 
@@ -271,7 +276,6 @@ The contract for the machine API is by honouring Pod Disruption Budgets (PBD), w
     - Wait for new Machines to come up.
     - Wait for old Machines to go away.
 
-
 ### Graduation Criteria
 
 This proposal will be released in 4.N as long as:
@@ -284,7 +288,7 @@ This proposal will be released in 4.N as long as:
 
 New IPI clusters deployed after the targeted release will run the ControlPlane resource deployed by the installer out of the box.
 
-For UPI clusters and existing IPI clusters this is opt-in. As a user I can opt-in by creating a ControlPlane resource, i.e `kubectl create ControlPlane`
+For UPI clusters and existing IPI clusters this is opt-in. As a user I can opt-in by creating a ControlPlane resource, i.e `kubectl create ControlPlane`.
 
 ### Version Skew Strategy
 
