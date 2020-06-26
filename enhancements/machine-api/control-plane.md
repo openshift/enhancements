@@ -219,9 +219,9 @@ type ControlPlane struct {
 // ControlPlaneSpec defines the desired state of ControlPlaneSpec.
 type ControlPlaneSpec struct {
 
-  // Defaults to true.
+  // Defaults to false.
   // This can be disable for complex scenarios where manual introspection is needed.
-  EnableNodeAutorepair bool `json:"enableautorepair,omitempty"`
+  DisableNodeAutoRepair bool `json:"disableNodeAutoRepair,omitempty"`
 
   // Out of scope.
   // EnableAutoscaling
