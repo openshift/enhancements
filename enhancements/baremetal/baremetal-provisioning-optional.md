@@ -60,8 +60,11 @@ entirely.
 
 ### Non-Goals
 
-We do not intend to remove the static provisioning IP's at this time,
+- We do not intend to remove the static provisioning IP's at this time,
 but instead they will need to be IP's available in the external network.
+
+- As is the case for any other provisioning network decisions, this is a
+day 1 choice that we do not intend to support changing at a later time.
 
 ## Proposal
 
