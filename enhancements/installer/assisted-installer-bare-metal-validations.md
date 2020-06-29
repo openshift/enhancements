@@ -43,7 +43,7 @@ installer-provisioned infrastructure capabilities.
 The [connected-assisted-installer
 enhancement](./connected-assisted-installer.md) describes how an agent
 running on several bare-metal hosts receive a command from the
-assisted installer application to begin the installation of that
+assisted installer service to begin the installation of that
 host. One of the first tasks that each host performs upon receiving
 this instruction is to download, from the assisted installer, the
 appropriate Ignition file for that host's role. These ignition files
@@ -53,7 +53,7 @@ the `openshift-install create ignition-configs` command.
 This installer workflow mirrors the [bare-metal user-provisioned
 infrastructure
 workflow](https://github.com/openshift/installer/blob/master/docs/user/metal/install_upi.md)
-in that the the OpenShift installer is used to generate assets for the
+in that the OpenShift installer is used to generate assets for the
 cluster but the `openshift-install create cluster` command is not used
 to manage the deployment. However, the assisted installer does need to
 enable some `baremetal` installer-provisioned infrastructure platform
