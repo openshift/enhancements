@@ -88,7 +88,7 @@ So all the problems of configuring the PROXY trust bundles are present in config
 // InfrastructureSpec contains settings that apply to the cluster infrastructure.
 type InfrastructureSpec struct {
 	// trustedCA is a reference to a ConfigMap containing a CA certificate bundle.
-	// The trustedCA field should only be consumed by a infrastrcture API validator. The
+	// The trustedCA field should only be consumed by a infrastructure API validator. The
 	// validator is responsible for reading the certificate bundle from the required
 	// key "ca-bundle.crt", and writing the merged trust bundle to a ConfigMap 
 	// named "infrastructure-api-trusted-ca-bundle" in the "openshift-config-managed" namespace. 
@@ -129,7 +129,7 @@ All the existing operators like [kube-controller-manger-operator][kcm-o-inject],
 
 #### Machine API Operator
 
-The MAO(machine-api-operator) does not talk to infrastructure APIs itseld, rather it manages cluster-api providers per platform that communicate with these APIs. MAO should use the same process
+The MAO(machine-api-operator) does not talk to infrastructure APIs itself, rather it manages cluster-api providers per platform that communicate with these APIs. MAO should use the same process
 
 1. Create a ConfigMap in it's namespace that uses `config.openshift.io/inject-trusted-cabundle` to receive the trusted bundle, like [here][cro-inject].
 2. Mount the ConfigMap to appropriate location in the provider containers like [here][cio-mount-trust].
