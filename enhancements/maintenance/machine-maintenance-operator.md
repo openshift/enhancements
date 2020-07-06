@@ -31,7 +31,7 @@ status: provisional
 ## Open Questions
 >1. How applicable is this use-case to baremetal installations? 
 
->2. The ability to declare maintenance windows is currently being discussed in OSD. Nothing has be design in concrete meaning that this proposal has an undesigned depedency. However develop could commence on this operator and have the maintenance functionality retrospectively fitted. Is this a blocker for its acceptenance?
+>2. The ability to declare maintenance windows is currently being discussed in OSD. Nothing has been designed in concrete yet, meaning that this proposal has an undesigned dependency. However, development could commence on this operator and have the maintenance functionality retroactively fitted. Is this a blocker for its acceptance?
 
 >3. How applicable will this be to a cloud provider like GCP that performs live migrations of their VMs?
 
