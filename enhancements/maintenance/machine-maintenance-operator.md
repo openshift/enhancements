@@ -94,7 +94,7 @@ AWS event types:
 * system-maintenance
 
 ### machinemaintenance controller
-The machinemaintenance controller will iterate through machine CRs and reconcile identified mainteances. It will be responsible for first validating the state of the cluster prior to executing anything on a target object. Validating the state of the cluster will include will initially check for only is the cluster upgrading or is a maintenance already being performed. More use-cases can be added as seen fit. 
+The machinemaintenance controller will iterate through machine CRs and reconcile identified maintenances. It will be responsible for first validating the state of the cluster prior to executing anything on a target object. Validating the state of the cluster will include will initially check for only is the cluster upgrading or is a maintenance already being performed. More use-cases can be added as seen fit. 
 
 If the cluster fails validation (for example is upgrading), the controller will requeue the object and process it again according to its `SyncPeriod` which would currently be proposed at 60 minutes. 
 
