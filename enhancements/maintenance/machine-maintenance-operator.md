@@ -68,7 +68,7 @@ As a customer using OKD/OCP/OSD, I want my cluster/s to be proactive in handling
 ### Implementation Details/Notes/Constraints [optional]
 
 Constraints: 
-* This implimentation will require the machine-api to query cloud providers for scheduled maintenances and publish them in the machines CR. 
+* This implementation will require the machine-api to query cloud providers for scheduled maintenances and publish them in the machine's CR. 
 * GCP only allows maintenances to be queried from the node itself -> `curl http://metadata.google.internal/computeMetadata/v1/instance/maintenance-event -H "Metadata-Flavor: Google"`
 
 This operator will iterate through the machineList{} and inspect each machine CR for scheduled maintenances. If a maintenance is found, the controller will validate the state of the cluster prior to performing any maintenance. For example; is the cluster upgrading? is the cluster already performing a maintenance?
