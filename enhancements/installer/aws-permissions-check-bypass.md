@@ -64,9 +64,20 @@ Attempting to validate whether user `openshift` has permissions to perform
 `ec2:DescribeInstances` against region `us-east-1` will result in a
 determination that the user `openshift` cannot succesfully perform the API call,
 even though the actual `ec2:DescribeInstances` call works (as long as it is
-against the allowed region).
+against the allowed region). This false negative result occurs because AWS
+blocks calls to their global endpoints (eg aws.amazonaws.com), and IAM has no
+region endpoints so the permissions simulation calls (which are IAM calls) fail.
 
-In order to acomodate installing OpenShift in these environments, a way is
+A false positive can also manifest. An SCP policy that denies
+`ec2:DescribeInstances` to any user named `openshift` can be defined. In this
+case the validation will return a result indicating that the call is allowed,
+but when the `openshift` user tries to make the call, it ultimately is denied.
+
+In the first example, the installation would be halted even though the install
+could have succeeded. In the second, the install would be allowed to proceed and
+fail after pre-flight checks.
+
+In order to accommodate installing OpenShift in these environments, a way is
 needed for the individual performing the installation to indicate that these
 permissions checks should be skipped.
 
