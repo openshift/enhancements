@@ -104,7 +104,7 @@ The event type is then sourced from the CR and then is resolved by either deleti
 
 This is a very UDP type of approach. 
 
-The MMo could also look to store state of its actions in its on machinemaintenance CR that it would create from a machine CR. 
+The MMo could also look to store the state of its actions in its own machinemaintenance CR that it would create from a machine CR. 
 
 ### Example machinemaintenance CR
 
