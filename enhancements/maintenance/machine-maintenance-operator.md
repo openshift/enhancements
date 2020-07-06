@@ -98,7 +98,7 @@ The machinemaintenance controller will iterate through machine CRs and reconcile
 
 If the cluster fails validation (for example is upgrading), the controller will requeue the object and process it again according to its `SyncPeriod` which would currently be proposed at 60 minutes. 
 
-After cluster validation, the controller will ascertain if its in a maintenance window where is can execute maintenances (See open question 2). If in the case no maintenance windows are defined, the controller will continue as true. If the maintenance window logic is only applicable in OSD, the operator could validate if its "managed" prior to expecting these resources.
+After cluster validation, the controller will ascertain if its in a maintenance window where it can execute maintenances (See open question 2). In the case that no maintenance windows are defined, the controller will continue as true. If the maintenance window logic is only applicable in OSD, the operator could validate if its "managed" prior to expecting these resources.
 
 The event type is then sourced from the CR and then is resolved by either deleting a target machine CR (so the machine-api creates a new one) or raising an alert for manual intervention (master maintenance scheduled). 
 
