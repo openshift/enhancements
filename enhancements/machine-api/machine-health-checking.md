@@ -5,6 +5,7 @@ authors:
   - @ingvagabund
   - @enxebre
   - @cynepco3hahue
+  - @JoelSpeed
 reviewers:
   - @derekwaynecarr
   - @michaelgugino
@@ -17,8 +18,8 @@ approvers:
   - @michaelgugino
 
 creation-date: 2019-09-09
-last-updated: 2019-09-09
-status: implementable
+last-updated: 2020-06-26
+status: implemented
 see-also:
 replaces:
 superseded-by:
@@ -28,7 +29,7 @@ superseded-by:
 
 ## Release Signoff Checklist
 
- - [x] Enhancement is `implementable`
+- [x] Enhancement is `implementable`
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
@@ -163,6 +164,19 @@ Out of band:
 
 ### Risks and Mitigations
 
+#### MachineHealthCheck and Cluster Autoscaler interactions
+
+Both the MachineHealthCheck and Cluster Autoscaler implement health checking for Machines in different ways.
+The Cluster Autoscaler attempts to determine the health of MachineSets by looking at whether Machines are successfully
+joining the cluster within a given period.
+
+With MachineHealthChecks installed, they may interfere with the Cluster Autoscalers health check logic.
+See [How does the ClusterAutoscaler interact with MachineHealthCheck](#how-does-th-clusterautoscaler-interact-with-machinehealthcheck)
+for details of how they interfere.
+
+To mitigate this risk, the MachineHealthCheck controller should [implement back off](https://issues.redhat.com/browse/OCPCLOUD-800)
+to prevent hot loops on broken user configuration.
+Once this is implemented, it should be safe to use MachineHealthChecks and Cluster Autoscaler together.
 
 ## Design Details
 
@@ -249,3 +263,175 @@ I want automated remediation on some nodes, but not all -- I may have "pet" mach
 Solution: Create a MachineDisruptionBudget targeting both the "cattle" and "pets" with appropriate thresholds. This is not possible without MachineDisruptionBudget or, possibly, one-off opt-out annotations.
 
 ## Infrastructure Needed
+
+## Related Information
+
+### How does a Machine Health Check determine which Machines it should target for health checking?
+
+A MachineHealthCheck uses a `selector` to specify which Machines it should consider as its targets.
+The selector supports [set-based requirements](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#resources-that-support-set-based-requirements)
+so there are three options for specifying a selector for a Machine Health Check.
+
+#### An Empty Selector
+
+An empty selector matches all Machines. This means it would include the Control-Plane Machines,
+all Machines created by the default MachineSets and any Machines that users create post installation.
+
+#### Using exact labels
+
+Using the `matchLabels` part of the selector allows specifying a list of key value pairs that must be present on the Machine.
+This means that Machines must have all of the labels specified to be considered to match the selector.
+This could be used to specify that the MHC selects all Machines with the `cluster-api-machine-role: worker` label,
+which would match all MachineSets created by the installer, but not Control-Plane nodes,
+nor necessarily any MachineSets created by users post installation.
+
+#### Using expressions
+
+Using the `matchExpressions` part of the selector allows more complicated expressions to be created for selecting on labels.
+Each expression consists of a key, operator and values.
+This allows users to select a label with value that matches a set of values (operator: In),
+a label with a value that is not in a set of values (operator: NotIn). Or check that a label exists or not.
+
+These expressions could be used to select all Machines that do not have the label `cluster-api-machine-role: master`,
+ie, all Machines in the cluster that are not part of the Control-Plane.
+This would include all MachineSets created by the installer and any created by users post installation.
+
+### How does the ClusterAutoscaler interact with MachineHealthCheck?
+
+The ClusterAutoscaler uses its own health checking to determine if a MachineSet is unhealthy after scaling up.
+Should it determine the MachineSet to be unhealthy,
+it would scale the MachineSet back down and try another MachineSet to add new capacity to the cluster.
+
+MachineHealthChecks could interfere with this health checking logic and prevent the autoscaler from adding new compute capacity.
+To ensure there are no conflicts, several scenarios must be tested to check whether there may be conflicts
+
+#### Scenarios
+##### Machine fails to launch due to user config error
+
+Steps to reproduce:
+1. Create cluster on AWS
+2. Deploy ClusterAutoscaler to cluster
+3. Deploy MachineHealthCheck to cluster
+4. Modify MachineSet to start on Spot instances with very low spot price
+  ```yaml
+  providerSpec:
+    value:
+      ...
+      spotMarketOptions:
+        maxPrice: "0.001" # Low to prevent EC2 instance being created
+  ```
+5. Create deployment of dummy pods with some resources requested
+6. Scale deployment until ClusterAutoscaler scales modified MachineSet
+
+What happens after Machine Fails:
+- If the number of Failed Machines is greater than `maxUnhealthy`:
+  - Example:
+    - This may happen if a large number of nodes are scaled in a single MachineSet and they all fail to provision
+      (eg AMI missing, or instance type not available in AZ)
+  - MachineHealthCheck:
+    - Remediation is short circuited, takes no action
+  - Cluster Autoscaler:
+    - Autoscaler determines nodes are unregistered
+    - After 15 minutes (MaxNodeProvisionTime) autoscaler scales MachineSets back as expected and re-attempts scaling
+  - Conclusion:
+    - In this scenario, the MHC has no effect on the operation of the Cluster Autoscaler
+
+- If the number of Failed Machine is less than `maxUnhealthy`:
+  - Example:
+    - This may happen under normal scaling, if a low number of machines are scaled and Fail,
+      or if a number of machines are scaled, some Fail and the others eventually register
+  - MachineHealthCheck:
+    - While number of unhealthy machines exceed `maxUnhealthy`, no remediation occurs
+    - Once `maxUnhealthy` not breached, hot loop of deletion and recreation of Machines caused by MachineHealthCheck
+      immediately remediating failed Machines and MachineSet recreating Machines
+  - Cluster Autoscaler:
+    - Cannot track health of MachineSet as Machines are being deleted too quickly
+    - Unable to determine broken MachineSet is unhealthy, therefore unable to attempt to scale alternate MachineSet as designed
+  - Conclusion:
+    - MachineHealthCheck breaks the assumptions of the Cluster Autoscaler and as such the Cluster Autoscaler cannot
+      determine that the MachineSet is currently unhealthy
+    - New capacity may never be added to the cluster if the Cluster Autoscaler choses a broken MachineSet,
+      therefore the Cluster Autoscaler is broken by MachineHealthCheck at presents
+    - This problem could potentially be resolved by introducing back-off for the MachineHealthCheck remediation controller
+      (https://issues.redhat.com/browse/OCPCLOUD-800)
+    - Alternatively this could be resolved by not remediating machines that have `Failed` but this would be a major change in behaviour
+
+##### Machine fails to launch after being accepted by AWS
+
+Steps to reproduce:
+1. Create cluster on AWS
+2. Deploy ClusterAutoscaler to cluster
+3. Deploy MachineHealthCheck to cluster
+4. Disable CVO
+5. Remove the following section from the `openshift-machine-api-aws` credentials request
+  - `kubectl edit credentialsrequests -n openshift-cloud-credential-operator openshift-machine-api-aws`
+ ```yaml
+  - action:
+    - kms:Decrypt
+    - kms:Encrypt
+    - kms:GenerateDataKey
+    - kms:GenerateDataKeyWithoutPlainText
+    - kms:DescribeKey
+    effect: Allow
+    resource: '*'
+  - action:
+    - kms:RevokeGrant
+    - kms:CreateGrant
+    - kms:ListGrants
+    effect: Allow
+    policyCondition:
+      Bool:
+        kms:GrantIsForAWSResource: true
+    resource: '*'
+  ```
+6. Create a KMS key and set a MachineSet to use this key to encrypt disks using this key
+7. Create deployment of dummy pods with some resources requested
+8. Scale Deployment until ClusterAutoscaler scales modified MachineSet
+
+What happens:
+- Example:
+  - Credentials do not give permission to use KMS key given for decrypting EBS volume. AWS accepts instance request but fails to launch.
+- Result:
+  - AWS accepts instance launch request, returns provider ID
+  - Machine controller updates Machine to Provisioned
+  - AWS attempts to launch instance, fails, puts in terminated state
+  - Machine controller marks Machine as Failed because instance is terminated
+- Conclusion:
+  - This scenario behaves in exactly the same way as the previous scenario
+
+### How does a Machine Health Check interact with Control-Plane Machine?
+
+At present, Machine Health Checks will not remediate Control-Plane machines.
+Since Control-Plane Machines are not owned by any controller, deleting Control-Plane machines would have to be recreated manually.
+
+Until automation is created (see [proposal](https://github.com/openshift/enhancements/pull/292))
+for management of Control-Plane machines, they should be excluded from Machine Health Checks as health checking them will be redundant.
+
+Once automation is created, a Machine Health Check could be used to remediate problems with the Control-Plane machines,
+though it must ensure that the Etcd cluster remains healthy and as such,
+should be managed by something to ensure the MaxUnhealthy parameter is set appropriately for the size of the Etcd cluster.
+
+### How does the MaxUnhealthy field work?
+
+Each MachineHealthCheck has a `maxUnhealthy` field.
+This field can be used to prevent the MachineHealthCheck from remediating problems with Machines if there are
+already too many unhealthy Machines within the cluster.
+
+For example, if the value of `maxUnhealthy` was `50%`, and in a 10 node cluster, 6 nodes were determined to be unhealthy,
+the `maxUnhealthy` value would prevent the MachineHealthCheck from making any remediation actions on the Machines.
+This mechanism prevents the MachineHealthCheck from potentially worsening a catastrophic or cascading failure with a cluster.
+
+An important note is that currently, the `maxUnhealthy` value is only respected for the single MachineHealthCheck that is being reconciled.
+This means that, if two MachineHealthChecks covered the same Machine or Machines, one of the MachineHealthChecks could have
+a less restrictive `maxUnhealthy` and allow a Machine to be remediated when the other MachineHealthCheck would have blocked remediation.
+
+This means that, if a MachineHealthCheck covered all nodes, the value will include the Control-Plane machines
+and they will be factored into the calculation to determine if MaxUnhealthy has been breached.
+Because of the special nature of Control-Plane Machines, including them in an MHC with other nodes that would potentially
+allow the MHC to remediate more than one Control-Plane machine at any one time (assuming three Control-Plane machines),
+could cause the cluster to lose quorum for Etcd and potentially even lose the data altogether.
+
+If Control-Plane Machines are to be covered by a MachineHealthCheck, the `maxUnhealthy` parameter must be set
+appropriately to ensure that the MachineHealthCheck does not ever cause the Etcd cluster to lose quorum.
+For this reason, Control-Plane Machines should not be mixed with worker Machines within an MHC
+(Note however, if and only if the `maxUnhealthy` value were forced to be 1 Machine only, then this would be safe).
