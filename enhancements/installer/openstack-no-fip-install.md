@@ -46,7 +46,6 @@ This enhancement does not intend to provide any guidance or features that go fur
 In order to implement this feature fully, the following changes must be made:
 1. Make `externalNetwork` an optional argument in the install-config when `machinesSubnet` is set
 2. Make setting  `lbFloatingIP` when no external network is passed enforced as invalid usage
-3. Make the API and ingress VIPs dynamically assigned by default, and only assign fixed IPs if they are specified in the install config
 
 ### Design Details
 
@@ -57,10 +56,6 @@ Implementing this can be done by changing the validations and the defaults so th
 #### Disable `lbFloatingIP` when no external network is passed
 
 In the installer, the external network is used to provision floating IPs as well as the router. The router no longer gets created when using `machinesSubnet`, so the only changes that would need to be made are changes in the installers defaults and validations that allow the a blank `lbFloatingIP` to be pased. Then we will have to make a conditional block that does not attach the floating IP when `lbFloatingIP` is blank.
-
-#### Make the API and ingress VIPs dynamically assigned by default, and only assign fixed IPs if they are specified in the install config
-
-This should be handled by adding OpenStack specific code to the baremetal-runtime-config to enable it to look up ports in a cluster. This would break the circular dependency chain the installer currently has, and allow us to allocate the VIP ports dynamically, rather than assigning fixed IPs.
 
 ### User Stories
 
