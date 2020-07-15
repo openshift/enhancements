@@ -113,7 +113,7 @@ aggregated status via its `ClusterOperator` CR.
     [`OperatorSpec`](https://github.com/openshift/api/blob/95abe2d2f4223d5931e418bf8e4d3773d16b42c0/operator/v1/types.go#L48)
     and [`OperatorStatus`](https://github.com/openshift/api/blob/95abe2d2f4223d5931e418bf8e4d3773d16b42c0/operator/v1/types.go#L97).
     In the future, each CSI driver may introduce its own configuration fields.
-* Each CSI driver and its operator runs in `openshift-platform-csi-drivers` namespace.
+* Each CSI driver and its operator runs in `openshift-cluster-csi-drivers` namespace.
   * We expect 1-2 CSI drivers per cloud platform, typically block + shared filesystem CSI driver such as AWS EBS and
     AWS EFS.
   * Running both the operator + CSI driver in the same namespace has these benefits:
@@ -244,7 +244,7 @@ Kubernetes 1.21 is current upstream target for removal of in-tree cloud provider
 
 ## Alternatives considered
 
-### Install CSI driver operators via a new operator in `openshift-platform-csi-drivers` namespace
+### Install CSI driver operators via a new operator in `openshift-cluster-csi-drivers` namespace
 Instead of CSO, CSI driver operators could be started by a new operator, say `cluster-platform-csi-operator`, that
 would check on what cloud it runs and install the CSI drivers. CSO would create only the default storage classes
 for in-tree volume plugins it creates today.
