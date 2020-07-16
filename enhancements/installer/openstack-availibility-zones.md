@@ -8,8 +8,8 @@ reviewers:
   - "@fedosin"
 approvers:
 creation-date: 2020-07-15
-last-updated: 2020-07-15
-status: implementable
+last-updated: 2020-12-15
+status: implemented
 ---
 
 # OpenStack Availability Zones
@@ -19,13 +19,12 @@ status: implementable
 - [x]  Enhancement is `implementable`
 - [x] Design details are appropriately documented from clear requirements
 - [x] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [x] Graduation criteria for dev preview, tech preview, GA
+- [x] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Open Questions
 
 - Will the node's AZ be used for its volume? Will this effect the behavior of the cluster?
-- Can persistent volume claims be made against volumes that are in a different AZs?
 
 ## Summary
 
@@ -45,17 +44,17 @@ The installer should automatically discover all availability zones (AZs) and dis
 
 ### User Stories
 
-#### Day 2 Additional Machinepool
+#### Day 2 Additional MachineSet
 
 As a user, I want to be able to add Machinepools on a different AZ then the one the installer is currently installed on in order to increase the availibility of my cluster, and to re-distribute the load.
 
 #### Install time Machinepool AZ customization
 
-As a user, I want to customize which AZs each Machinepool can be installed onto when the cluster is first installed.
+As a user, I want to customize which AZs each MachineSet can be installed onto when the cluster is first installed.
 
 #### Default AZ discovery and HA installation
 
-When I install OpenShift on an openstack cluster that has multiple AZs, I want the installer to discover the available AZs and install the cluster across all of them in a way that is highly available without taking away from the user experience.
+When I install OpenShift on an OpenStack cluster that has multiple AZs, I want the installer to discover the available AZs and install the cluster across all of them in a way that is highly available without taking away from the user experience.
 
 ## Implementation Details/Notes/Constraints
 
@@ -80,11 +79,12 @@ When the installer is run without explicit AZs provided, it should reference the
 
 - If persistent volume claims cannot be made against volumes in different AZs, then that would be a huge user experience issue, and could delay or block the feature.
 
+
 ## Design Details
 
 ### Test Plan
 
-We will test this with the standard suite of unit tests and are also equipped to test in QE. 
+We will test this with the standard suite of unit tests and are also equipped to test in QE.
 
 ### Graduation Criteria
 
@@ -122,4 +122,4 @@ OpenStack is a very customizable cloud platform, and so AZs can be across the da
 
 ## Alternatives
 
-Not applicable
+Customers can use UPI to create machines in their desired AZ and add them to the cluster as is currently documented.
