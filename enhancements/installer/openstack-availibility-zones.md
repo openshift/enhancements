@@ -2,14 +2,15 @@
 title: openstack-availibility-zones
 authors:
   - "@egarcia"
-  - "@pprenetti"
+  - "@pprinetti"
 reviewers:
   - "@mandre"
   - "@fedosin"
+  - "@pprinetti"
 approvers:
 creation-date: 2020-07-15
-last-updated: 2020-07-15
-status: implementable
+last-updated: 2021-01-04
+status: implemented
 ---
 
 # OpenStack Availability Zones
@@ -19,17 +20,22 @@ status: implementable
 - [x]  Enhancement is `implementable`
 - [x] Design details are appropriately documented from clear requirements
 - [x] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [x] Graduation criteria for dev preview, tech preview, GA
+- [x] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Open Questions
 
-- Will the node's AZ be used for its volume? Will this effect the behavior of the cluster?
-- Can persistent volume claims be made against volumes that are in a different AZs?
+### Will the node's AZ be used for its volume? Will this effect the behavior of the cluster?
+
+This is configurable. By default OSP on OCP will try to use the same Nova and Cinder availability zones. However, the user has the ability to set [`ignore-volume-az`][ignore-volume-az-docs] in the installer to ignore a Cinder Zone. They also can use [topology aware cinder CSI](https://issues.redhat.com/browse/OSASINFRA-2182) for named Cinder Zones.
+
+[ignore-volume-az-docs]: https://github.com/openshift/installer/blob/master/docs/user/openstack/known-issues.md#cinder-availability-zones
 
 ## Summary
 
-The installer should automatically discover all availability zones (AZs) and distribute the control plane and compute nodes across them to maximize availibility by default. To accomodate use cases with AZ restrictions, the installer should also allow users to specify a set of them for each machinepool.
+The installer's default behavior is to allow Nova to decide what availability zone (AZ) to schedule nodes on based on how its [default_schedule_zone] is set. This enhancement gives the user the option to control what Nova AZ the OpenShift servers are created on for each machine pool.
+
+[default_schedule_zone]: https://docs.openstack.org/nova/train/configuration/config.html#DEFAULT.default_schedule_zone
 
 ## Motivation
 
@@ -45,17 +51,17 @@ The installer should automatically discover all availability zones (AZs) and dis
 
 ### User Stories
 
-#### Day 2 Additional Machinepool
+#### Day 2 Additional MachineSet
 
-As a user, I want to be able to add Machinepools on a different AZ then the one the installer is currently installed on in order to increase the availibility of my cluster, and to re-distribute the load.
+As a user, I want to be able to add a MachineSet on a different AZ than the ones the current Compute nodes are currently running on.
 
 #### Install time Machinepool AZ customization
 
-As a user, I want to customize which AZs each Machinepool can be installed onto when the cluster is first installed.
+As a user, I want control over which Availability zones the Compute nodes are distributed to.
 
 #### Default AZ discovery and HA installation
 
-When I install OpenShift on an openstack cluster that has multiple AZs, I want the installer to discover the available AZs and install the cluster across all of them in a way that is highly available without taking away from the user experience.
+When I install OpenShift on an OpenStack cluster that has multiple AZs, I want the installer to discover the available AZs and install the cluster across all of them in a way that is highly available without taking away from the user experience.
 
 ## Implementation Details/Notes/Constraints
 
@@ -79,12 +85,13 @@ When the installer is run without explicit AZs provided, it should reference the
 ### Risks and Mitigations
 
 - If persistent volume claims cannot be made against volumes in different AZs, then that would be a huge user experience issue, and could delay or block the feature.
+- The user may select zones that are at or near capacity to deploy instances, resulting in the installer being unable to deploy them.
 
 ## Design Details
 
 ### Test Plan
 
-We will test this with the standard suite of unit tests and are also equipped to test in QE. 
+We will test this with the standard suite of unit tests and are also equipped to test in QE.
 
 ### Graduation Criteria
 
@@ -122,4 +129,4 @@ OpenStack is a very customizable cloud platform, and so AZs can be across the da
 
 ## Alternatives
 
-Not applicable
+Customers can use UPI to create machines in their desired AZ and add them to the cluster as is currently documented.
