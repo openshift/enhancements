@@ -269,6 +269,21 @@ How will security be reviewed and by whom? How will UX be reviewed and by whom?
 
 Consider including folks that also work outside your immediate sub-project.
 
+## Preliminary Data
+
+This section documents preliminary results that justify the rationale and/or 
+feasability of this enhancement.
+
+1. _Confirmed:_ service endpoints experience long delays during upgrades at the 
+   kube-controller-manager rollout slows down the endpoint update because it 
+   takes an outage on local kube-apiserver rollout. We are addressing by 
+   switching to the internal LB.
+
+2. _Suspected:_ connection refused from kube-apiserver to openshift-apiserver
+   endpoint during upgrade. It's not obvious if this expected due to SDN 
+   rollout (in which case we should consider reordering) or if it is 
+   unexpected.
+
 ## Design Details
 
 ### Test Plan
