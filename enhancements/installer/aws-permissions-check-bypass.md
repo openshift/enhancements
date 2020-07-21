@@ -85,6 +85,13 @@ Additionally, a mechanism is needed to indicate to the cloud-credential-operator
 to force it into either `mint` or `passthrough` mode, so that it too can avoid
 attempting to validatate permissions.
 
+Wile adding the new mechanism to allow specifying `mint` or `passthrough`,
+extend the idea to allow indicating that CCO should be in the disabled/manual
+mode for the disconnected VPC case (where the IAM API is unavailable) or when
+the user simply does not want CCO to be processing CredentialsRequests (the user
+will provide credentials manually).  This will allow deprecating the current
+process of creating a ConfigMap to put CCO in the disabled/manual mode.
+
 ### Goals
 
 Enable successfull installation and operation of OpenShift in these AWS accounts
@@ -113,18 +120,17 @@ const (
 )
 
 type InstallConfig struct {
-	// ForceCredentialsMode instructs the installer to not attempt to query
+	// CredentialsMode instructs the installer to not attempt to query
 	// the cloud permissions before attempting installation. It also passes
 	// down the desired credentials mode to the cloud-credential-operator
 	// so that it too does not attempt to query permissions.
 	// +optional
-	ForceCredentialsMode cloudCredentialsMode `json:"forceCredentialsMode,omitempty"`
+	CredentialsMode cloudCredentialsMode `json:"credentialsMode,omitempty"`
 }
 ```
 
-The installer will then take the value defined in the `forceCredentialsMode`
-field to populate the config for the cloud-credential-operator so that CCO knows
-what mode it should be forced into.
+The installer will make available the user's install-config as a ConfigMap that
+the cloud-credential-operator can then use to affect CCO runtime behavior.
 
 ### cloud-credential-operator
 Formalize the constants in cloud-credential-operator repo to define the
@@ -133,15 +139,17 @@ acceptable credentials (matching the definitions in the installer):
 type CloudCredentialsMode string
 
 const (
-	// MintMode is the annotation on the cluster's cloud credentials to
-	// indicate that CCO should be creating users for each
+	// MintMode indicates that CCO should be creating users for each
 	// CredentialsRequest.
 	MintMode CloudCredentialsMode = "mint"
 
-	// PassthroughMode is the annotation on the cluster's cloud credentials
-	// to indicate that CCO should just copy over the cluster's cloud
+	// PassthroughMode indicates that CCO should just copy over the cluster's cloud
 	// credentials for each CredentialsRequest.
 	PassthroughMode CloudCredentialsMode = "passthrough"
+
+	// ManualMode indicates that CCO should not process CredentialsRequests.
+	// (this is used when the admin will be providing credentials manually).
+	ManualMode CloudCredentialsMode = "manual"
 )
 ```
 
@@ -162,6 +170,10 @@ type CloudCredentialOperatorConfigSpec struct {
 	// NOTE: also migrate existing fields in the CCO configmap used to
 	// disable CCO into this new config object.
 }
+
+Since the CCO runs as a bootstrap Pod, the process for rendering the CCO pieces
+will use the contents of the install-config ConfigMap to build the runtime
+configuration to ensure CCO runs in the desired mode.
 ```
 
 ### User Stories [optional]
@@ -175,7 +187,7 @@ the value in the install-config.yaml.
 
 ```
 ./openshift-install create install-config --dir my-aws-cluster
-# edit generated install-config to add the `forceCredentialsMode: "mint"` field
+# edit generated install-config to add the `credentialsMode: "mint"` field
 ./openshift-install create cluster --dir my-aws-cluster
 ```
 
