@@ -51,6 +51,19 @@ custom manner.  For more information on the existing `IngressIPs` feature:
 
 ### Goals
 
+Some more context is helpful before specifying the goals of this enhancement.
+When a Service has an external IP address, the OpenShift network plugin in use
+must already prepare networking on Nodes to be able to receive traffic with
+that IP address as a destination.  The network plugin does not know or care
+about how that traffic reaches the Node because the mechanism differs depending
+on which platform the cluster is running on.  Once that traffic reaches a Node,
+the existing Service proxy functionality handles forwarding that traffic to a
+Service backend, including some degree of load balancing.
+
+With this context in mind, the goal of this enhancement is less about load
+balancing itself, and more about providing mechanisms of routing traffic to
+Nodes for external IP addresses used for Service Load Balancers.
+
 A SLB solution must provide these high level features:
 
 * Management of one or more pools of IP addresses to be allocated for SLBs
@@ -63,8 +76,11 @@ A SLB solution must provide these high level features:
   (likely BGP), but should also be usable in smaller, simpler environments
   using L2 protocols.  Tradeoffs include:
     * Layer 2 (gratuitous ARP for IPv4, NDP for IPv6) - good for wide range of
-      environment compatibility, but limiting for larger clusters
+      environment compatibility, but limiting for larger clusters.  All traffic
+      for a single Service Load Balancer IP address must go through one node.
     * Layer 3 (BGP) - good for integration with networks for larger clusters
+      and opens up the possibility for a greater degree of load balancing using
+      ECMP to send traffic to multiple Nodes for a single Service Load Balancer
 * Suitable for large scale clusters (target up to 2000 nodes).
 * Must be compatible with at least the following cluster network types:
   [OpenShift-SDN](https://github.com/openshift/sdn) and
@@ -102,6 +118,39 @@ The layer 2 mode has the advantage of working in more environments.  We could
 also consider a MetalLB enhancement that makes it understand different L2
 domains and manage different IP address pools for each domain where SLBs may
 reside.
+
+### How Load Balancing Works with MetalLB
+
+As mentioned in the Goals section, MetalLB does not have to implement load
+balancing itself.  It only implements ensuring load balancer IP addresses are
+reachable on appropriate Nodes.  The way a cluster uses MetalLB does have an
+impact on how load balancing works, though.
+
+When the Layer 2 mode is in use, all traffic for a single external IP address
+must go through a single Node in the cluster.  MetalLB is responsible for
+choosing which Node this should be.  From that Node, the Service proxy will
+distribute load across the Endpoints for that Service.  This provides a degree
+of load balancing, as long as the Service traffic does not exceed what can go
+through a single Node.
+
+The BGP mode of MetalLB offers some improved capabilities.  It is possible for
+the router(s) for the cluster to send traffic for a single external IP address
+to multiple Nodes.  This removes the single Node bottleneck.  The number of
+Nodes which can be used as targets for the traffic depends on the configuration
+of a given Service.  There is a field on Services called
+[`externalTrafficPolicy` that can be `cluster` or
+`local`](https://kubernetes.io/docs/tasks/access-application-cluster/create-external-load-balancer/#preserving-the-client-source-ip).
+
+* `local` -- In this mode, the pod expects to receive traffic with the original
+  source IP address still intact. To achieve this, the traffic must go directly
+  to a Node where one of the Endpoints for that Service is running. Only those
+  Nodes advertise the Service IP in this case.
+
+* `cluster` -- In this mode, traffic may arrive on any Node and will be
+  redirected to another Node if necessary to reach a Service Endpoint. The
+  source IP address will be changed to the Node's IP to ensure traffic returns
+  via the same path it arrived on. The Service IP is advertised for all Nodes
+  for these Services.
 
 ### User Stories
 
