@@ -69,14 +69,11 @@ We will be successful when:
 
 ## Proposal
 
-Field names are based on fluentd 1.0 `<buffer>` configuration section.
+Field names are based on fluentd 1.0 `<buffer>` configuration section, but
+using `lowerCamelCase` instead of `lowercase_with_underscores`.
 See the [fluentd documentation](https://docs.fluentd.org/configuration/buffer-section#buffering-parameters) for details.
 
 Example below shows just the `forwarder` section of the ClusterLogging CR.
-
-The field names are copied exactly from `fluentd` 1.0, including the use of "_"
-rather than camelCase. This emphasizes that these settings are not a general
-API, they set defaults directly for the underlying `fluentd`.
 
 Note: two important fields were renamed by `fluentd` between versions 0.12 and 1.0:
 * `queue_limit_length` -> `total_limit_size`
@@ -87,20 +84,20 @@ forwarder:
   fluentd:
     buffer:
       # Memory use
-      chunk_limit_size: 1m
-      total_limit_size: 32m             # Replaces 'queue_limit_length' in 0.12
-      overflow_action: exception
+      chunkLimitSize: 1m
+      totalLimitSize: 32m             # Replaces 'queue_limit_length' in 0.12
+      overflowAction: exception
 
       # Flushing output behavior
-      flush_thread_count: 2              # Replaces 'num_threads' in 0.12
-      flush_mode: interval
-      flush_interval: 5s
-      flush_at_shutdown: false
+      flushThreadCount: 2              # Replaces 'num_threads' in 0.12
+      flushMode: interval
+      flushInterval: 5s
+      flushAtShutdown: false
 
       # Retries
-      retry_wait: 1                      # The wait interval for the first retry.
-      retry_type: exponential_backoff    # Set 'periodic' for constant intervals.
-      retry_max_interval: 300
+      retryWait: 1                      # The wait interval for the first retry.
+      retryType: exponential_backoff    # Set 'periodic' for constant intervals.
+      retryMaxInterval: 300
 ```
 
 Note: All these settings relate to the latency vs. throughput
