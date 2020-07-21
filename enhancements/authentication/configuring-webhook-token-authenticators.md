@@ -85,6 +85,9 @@ configure certificate authority, client certificate and key.
 This path is compatible with kubernetes as it is possible to directly map the referenced
 secret's contents to files and specify these in the kube-apiserver configuration.
 
+The new `spec.webhookTokenAuthenticator` structure gets extended by the `cacheTTL time.Duration`
+field that maps to the `--authentication-token-webhook-cache-ttl` option of the kube-apiserver.
+
 #### Backend - kube-apiserver-operator
 
 1. Observes any changes in the `webhookTokenAuthenticator` field (and changes to the referenced secret)
@@ -97,13 +100,31 @@ secret's contents to files and specify these in the kube-apiserver configuration
 
 #### Backend - Integrated OAuth Server Token Authentication
 
+0. cluster-authentication-operator adds a new `system:openshift:openshift-token-validation`
+   cluster role to its manifests:
+   ```yaml
+   rules:
+   - nonResourceURLs:
+     - "/tokenvalidation"
+     verbs:
+     - "post"
+   ```
 1. cluster-authentication-operator observes `authentication.config/cluster` `type` field
-2. if set to "IntegratedOAuth", it creates an `openshift-config/webhook-authentication-integrated-oauth`
-  secret and adds it to the `webhookTokenAuthenticator` field of the `authentication.config/cluster`
-  resource. If the `type` field is set to any other value, the operator will perform no action to the
-  `webhookTokenAuthenticator` field.
+2. if the `type` field is set to "IntegratedOAuth":
 
-   - the above secret contains details that point kube-apiserver to the oauth-apiserver for token reviews
+    - it creates an `openshift-oauth-apiserver/openshift-authenticator` service account and ensures that
+      a `system:openshift:openshift-token-validation` clusterrolebinding that binds this SA to the
+      `system:openshift:openshift-token-validation` clusterrole exists
+    - it waits for the service account to be provided with a token from the kube-controller-manager
+    - it creates an `openshift-config/webhook-authentication-integrated-oauth`
+      secret  and adds it to the `webhookTokenAuthenticator.kubeConfig` field of
+      the `authentication.config/cluster` resource
+    - it sets the `webhookTokenAuthenticator.cacheTTL` to 0 to prevent premature token timeout
+    - the above secret contains a kubeconfig that points kube-apiserver to the oauth-apiserver for token reviews
+      while using the `openshit-authenticator` SA's token to authenticate and authorize the token review requests
+
+- if the `type` field is set to anything else but "IntegratedOAuth", the operator will perform
+  no action
 
 3. during an authentication flow, kube-apiserver sends `tokenreviews.authentication.k8s.io` object to the
   oauth-apiserver for review
