@@ -85,7 +85,7 @@ Additionally, a mechanism is needed to indicate to the cloud-credential-operator
 to force it into either `mint` or `passthrough` mode, so that it too can avoid
 attempting to validatate permissions.
 
-Wile adding the new mechanism to allow specifying `mint` or `passthrough`,
+While adding the new mechanism to allow specifying `mint` or `passthrough`,
 extend the idea to allow indicating that CCO should be in the disabled/manual
 mode for the disconnected VPC case (where the IAM API is unavailable) or when
 the user simply does not want CCO to be processing CredentialsRequests (the user
@@ -112,20 +112,39 @@ in-cluster behavior of cloud-credential-operator.
 
 Extend the install-config type in the installer repo:
 ```
-type cloudCredentialsMode string
+type credentialsMode string
 
 const (
-	credentialsModeMint cloudCredentialsMode = "mint"
-	credentialsModePassthrough cloudCredentialsMode = "passthrough"
+	credentialsModeMint credentialsMode = "mint"
+	credentialsModePassthrough credentialsMode = "passthrough"
+	credentialsModeManual credentialsMode = "manual"
 )
 
 type InstallConfig struct {
-	// CredentialsMode instructs the installer to not attempt to query
-	// the cloud permissions before attempting installation. It also passes
-	// down the desired credentials mode to the cloud-credential-operator
-	// so that it too does not attempt to query permissions.
+	// CredentialsMode is used to explicitly set the mode with which
+	// CredentialsRequests are satisfied.
+	//
+	// If this field is set, then the installer will not attemp to query the
+	// cloud permissions before attempting installation. If the field is not
+	// set or empty, then the installer will perform its normal verification
+	// that the credentials provided are sufficient to perform an
+	// installation.
+	//
+	// There are three possible values for this field, but the valid values
+	// are dependent upon the platform being used.
+	// "mint": create new credentials with a subset of the overall
+	// permissions for each CredentialsRequest
+	// "passthrough": copy the credentials with all of the overall
+	// permissions for each CredentialsRequest
+	// "manual": CredentialsRequests must be handles manually by the user.
+	//
+	// For each of the following platforms, the field can be set to the
+	// specified values. For all other platforms, the field must not be set.
+	// AWS: "mint", "passthrough", "manual"
+	// Azure: "mint", "passthrough"
+	// GCP: "mint", "passthrough"
 	// +optional
-	CredentialsMode cloudCredentialsMode `json:"credentialsMode,omitempty"`
+	CredentialsMode credentialsMode `json:"credentialsMode,omitempty"`
 }
 ```
 
@@ -136,20 +155,20 @@ the cloud-credential-operator can then use to affect CCO runtime behavior.
 Formalize the constants in cloud-credential-operator repo to define the
 acceptable credentials (matching the definitions in the installer):
 ```
-type CloudCredentialsMode string
+type CredentialsMode string
 
 const (
-	// MintMode indicates that CCO should be creating users for each
+	// ModeMint indicates that CCO should be creating users for each
 	// CredentialsRequest.
-	MintMode CloudCredentialsMode = "mint"
+	ModeMint CredentialsMode = "mint"
 
-	// PassthroughMode indicates that CCO should just copy over the cluster's cloud
+	// ModePassthrough indicates that CCO should just copy over the cluster's cloud
 	// credentials for each CredentialsRequest.
-	PassthroughMode CloudCredentialsMode = "passthrough"
+	ModePassthrough CredentialsMode = "passthrough"
 
-	// ManualMode indicates that CCO should not process CredentialsRequests.
+	// ModeManual indicates that CCO should not process CredentialsRequests.
 	// (this is used when the admin will be providing credentials manually).
-	ManualMode CloudCredentialsMode = "manual"
+	ModeManual CredentialsMode = "manual"
 )
 ```
 
@@ -165,7 +184,7 @@ type CloudCredentialOperatorConfigSpec struct {
 	// checking and assume the designated mode when reconciling
 	// CredentialsRequests.
 	// +optional
-	ForceCredentialsMode CloudCredentialsMode `json:"forceCredentialsMode,omitempty"
+	ForceCredentialsMode CredentialsMode `json:"forceCredentialsMode,omitempty"
 
 	// NOTE: also migrate existing fields in the CCO configmap used to
 	// disable CCO into this new config object.
