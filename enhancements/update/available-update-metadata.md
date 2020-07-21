@@ -7,9 +7,11 @@ reviewers:
   - "@LalatenduMohanty"
   - "@smarterclayton"
 approvers:
-  - TBD
+  - "@LalatenduMohanty"
+  - "@sdodson"
+  - "@smarterclayton"
 creation-date: 2019-11-19
-last-updated: 2020-07-20
+last-updated: 2020-07-21
 status: implementable
 ---
 
@@ -71,15 +73,15 @@ type Release struct {
   // +required
   Image string `json:"image"`
 
-  // URL describes the contents of this release and will include
-  // references to other resources as necessary.  Go here if you know
-  // of no more-specific resource addressing your question for this
-  // release image.  For example, this could link errata or other
-  // release notes describing the release image.
+  // url contains information about this release. This URL is set by
+  // the 'url' metadata property on a release or the metadata returned by
+  // the update API and should be displayed as a link in user
+  // interfaces. The URL field may not be set for test or nightly
+  // releases.
   // +optional
   URL URL `json:"url,omitempty"`
 
-  // Channels is the set of Cincinnati channels to which the release
+  // channels is the set of Cincinnati channels to which the release
   // currently belongs.
   // +optional
   Channels []string `json:"channels,omitempty"`
@@ -99,9 +101,7 @@ In some cases (when an administrator requested an update that was not in the ava
 
 This enhancement declares the following to be well-known `metadata` properties in Cincinnati node objects:
 
-* `url` (optional), describes the contents of this release and will include references to other resources as necessary.
-    Go here if you know of no more-specific resource addressing your question for this release image.
-    For example, this could link errata or other release notes describing the release image.
+* `url` (optional), contains information about this release.
 * `io.openshift.upgrades.graph.release.channels` (optional), the comma-delimited set of channels to which the release currently belongs.
 
 Cincinnati implementations may, at their discretion, define, add, and remove additional properties as they see fit.
@@ -194,9 +194,10 @@ Components like the web console could bypass ClusterVersion and talk to the upst
 I prefer `homepage`, but [in this thread][homepage-vs-url], Clayton and Lala pushed back against it.
 The pushback seems to revolve around a belief that domains, organizations, projects and such can have homepages, but that releases are too specific to deserve that name.
 I think the homepage semantics can apply clearly to any noun, including releases as well as domains, organizations, etc.
-But I am comfortable with `url` as long as the declared semantics are "the most generic URI still scoped to this release", and that's what we have here via the "if you know of no more-specific resource" wording.
+I am comfortable with `url` as long as the declared semantics are "the most generic URI still scoped to this release, `url` is an appropriate reference for all information about the release".
+I have been unable to get Clayton to agree to wording expressing these semantics so far (more discussion [here][url-docs-a] and [here][url-docs-b]), but the existing wording does not rule out those semantics, so maybe we can update the docs later to clarify this point without it being an API-breaking change.
 
-And then `url` instead of `uri` because Kubernetes APIs have lots of URL precedent, despire RFC 3986's URIs making [the location vs. identifier distinction][rfc-3986-s1.1.3] in 2005.
+And then `url` instead of `uri` because Kubernetes APIs have lots of URL precedent, despite RFC 3986's URIs making [the location vs. identifier distinction][rfc-3986-s1.1.3] in 2005.
 
 ### Pass-through metadata maps
 
@@ -282,3 +283,5 @@ Leave the current `ClusterVersionStatus` alone and just continue to fill the now
 [rfc-3986-s1.1.3]: https://tools.ietf.org/html/rfc3986#section-1.1.3
 [upstream-metadata-suggestion]: https://github.com/openshift/enhancements/pull/123#discussion_r436848838
 [upstream-trust]: https://github.com/openshift/enhancements/pull/123#discussion_r349853363
+[url-docs-a]: https://github.com/openshift/enhancements/pull/408#discussion_r458743166
+[url-docs-b]: https://github.com/openshift/enhancements/pull/408#discussion_r460192651
