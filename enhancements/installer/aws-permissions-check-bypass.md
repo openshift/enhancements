@@ -167,7 +167,15 @@ const (
 	ModePassthrough CredentialsMode = "passthrough"
 
 	// ModeManual indicates that CCO should not process CredentialsRequests.
-	// (this is used when the admin will be providing credentials manually).
+	// This results in CCO not creating the Secrets to satisfy a
+	// CredentialsRequest. CCO will simply calculate metrics and report
+	// those, but a CredentialsRequest will never move to
+	// status.provisioned: True.
+	// Disconnected VPCs (where the IAM endpoints are not available) can use
+	// this to allow a user to pre-provision credentials and place them in
+	// the install-time manifests so that the cluster installation can succeed.
+	// This can also be used if a user does not want powerful credentials to
+	// be left residing in the cluster.
 	ModeManual CredentialsMode = "manual"
 )
 ```
