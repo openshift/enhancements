@@ -84,6 +84,7 @@ If a scheduled maintenance is detected for a master node, an alert should be rai
 Not every cloud provider has the same kind of maintenances that inherit that same degradation on the cluster.  Some of the features may need to be toggleable per provider. 
 
 Example: (AWS maintenance)[https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/monitoring-instances-status-check_sched.html#types-of-scheduled-events] vs (GCP maintenance)[https://cloud.google.com/compute/docs/storing-retrieving-metadata#maintenanceevents].
+AWS enables querying of scheduled events for their instances. AWS provides time to act on this events by scheduling X days in advance. GCP on the other hand provides on 60 seconds to act on a maintenance as they perform 'live migrations' that are expected to not impact workloads. As this is the case, the MMO may not be desirable for GCP, but this also may be dependent on the instance type being used. (GPU Instances)[https://cloud.google.com/compute/docs/gpus/gpu-host-maintenance] can not be live migrated on GCP. MMO may require a specific kind of maintenance to occur for this instance type. 
 
 
 ### Risks and Mitigations
