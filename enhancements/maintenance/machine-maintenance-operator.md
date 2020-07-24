@@ -71,7 +71,11 @@ Constraints:
 * This implimentation will require the machine-api to query cloud providers for scheduled maintenances and publish them in the machines CR. The MMO will only read from the machineCRs and store its state and status in its own machinemaintenance CR.
 * GCP only allows maintenances to be queried from the node itself -> `curl http://metadata.google.internal/computeMetadata/v1/instance/maintenance-event -H "Metadata-Flavor: Google"`
 
-This operator will iterate through the machineList{} and inspect each machine CR for scheduled maintenances. If a maintenance is found, the controller will validate the state of the cluster prior to performing any maintenance. For example; is the cluster upgrading? is the cluster already performing a maintenance?
+This operator will iterate through the machineList{} and inspect each machine CR for scheduled maintenances. If a maintenance is found, the controller will validate the state of machines and pre-validate the target machine performing any maintenance. For example; 
+* does target machine have PDB and/or Replica configurations that will impact apps during drain?
+	* If so raise an alert via AM advising manual intervention.
+* are any machines already attempting to drain?
+	* If so re-sync and check again at the `SyncPeriod`.
 
 These processes will only hold true for infra and worker roles of machines within the cluster. 
 
