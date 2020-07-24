@@ -31,28 +31,28 @@ status: provisional
 ## Open Questions
 >1. How applicable is this use-case to baremetal installations? 
 
->2. The ability to declare maintenance windows is currently being discussed in OSD. Nothing has been designed in concrete yet, meaning that this proposal has an undesigned dependency. However, development could commence on this operator and have the maintenance functionality retroactively fitted. Is this a blocker for its acceptance?
+>2. The ability to declare maintenance windows is currently being discussed in OSD. Nothing has been designed in concrete yet meaning that this proposal has an undesigned non blocking depedency. However develop could commence on this operator and have the maintenance functionality retrospectively fitted. Is this a blocker for its acceptenance?
 
 >3. How applicable will this be to a cloud provider like GCP that performs live migrations of their VMs?
 
 ## Summary
 
-This enhancement proposal explores the idea of having a machine-maintenance-operator(MMO) that will inspect each machine CR for scheduled events for each infra/worker machine in the cluster. Upon finding a maintenance for a machine, the MMO will seek to execute this maintenance manually at the earliest convenient time as defined by an administrator. 
+This enhancement proposal explores the idea of having a machine-maintenance-operator(MMO) that will inspect each machine CR for provider populated scheduled events for each infra/worker machine in the cluster. Upon finding a scheduled event (Example: Node reboot) for a machine, the MMO will seek to execute this maintenance at the earliest convenient time as defined by an administrator. 
 
 A POC of the idea can be found [here](https://github.com/dofinn/machine-maintenance-operator).
 
 ## Motivation
 
-Currently the machine-api marks a machine as stopped when it has been terminated/stopped by the cloud provider. A provider may terminate/stop an instance when there is an associated maintenance scheduled for it. This is also the case for users manually terminating/stopping machines via the console. The MMO is a proactive approach to executing the required action (for example, delete target machine CR) to enable the machine-api to manage machinesets. This operator would work in conjunction with MachineHealthCheck implementation. 
+Currently the machine-api marks an machine as stopped when they have been terminated/stopped by the cloud provider. A provider may terminate/stop and instance when there is an associated maintenance scheduled for it. This is also the case for users manually terminating/stopping machines via the console. The MMO is a proactive approach to executing the required (delete target machine CR)to enable the machine-api to manage machinesets. This operator would work in conjunction with MachineHealthCheck implimentation. 
 
 ## Requirements
-That the machine-api collects scheduled maintenances from cloud providers and posts them in the status of each machine's CR
+That the machine-api collects schedules maintenaces from cloud providers and posts them in the status of the each machines CR
 
 ### Goals
 
 List the specific goals of the proposal. How will we know that this has succeeded?
 The machine-maintenance-operator will:
-* detect maintenances from machine CRs and execute them manually at their earliest and most convenient time
+* detect maintenances from machine CRs and execute them at their earliest and most convenient time
 
 ### Non-Goals
 
@@ -63,12 +63,12 @@ This is not a solution for managing maintenances or machine state for master mac
 ### User Stories [optional]
 
 #### Story 1
-As a customer using OKD/OCP/OSD, I want my cluster/s to be proactive in handling events that are initiated by the cloud provider hosting my cluster. This will assure me that OKD/OCP/OSD accounts for machines in the cluster that require terminating or stopping to be proactively maintained and addressed with intention. 
+As a customer using OKD/OCP/OSD, I want my cluster/s to be proactive in handling events that are initiated by the provider hosting my cluster. This will assure me that OKD/OCP/OSD accounts for machines in the cluster that require terminating or stopping to be proactively maintained and addressed with intention. 
 
 ### Implementation Details/Notes/Constraints [optional]
 
 Constraints: 
-* This implementation will require the machine-api to query cloud providers for scheduled maintenances and publish them in the machine's CR. 
+* This implimentation will require the machine-api to query cloud providers for scheduled maintenances and publish them in the machines CR. 
 * GCP only allows maintenances to be queried from the node itself -> `curl http://metadata.google.internal/computeMetadata/v1/instance/maintenance-event -H "Metadata-Flavor: Google"`
 
 This operator will iterate through the machineList{} and inspect each machine CR for scheduled maintenances. If a maintenance is found, the controller will validate the state of the cluster prior to performing any maintenance. For example; is the cluster upgrading? is the cluster already performing a maintenance?
@@ -94,17 +94,17 @@ AWS event types:
 * system-maintenance
 
 ### machinemaintenance controller
-The machinemaintenance controller will iterate through machine CRs and reconcile identified maintenances. It will be responsible for first validating the state of the cluster prior to executing anything on a target object. Validating the state of the cluster will include will initially check for only is the cluster upgrading or is a maintenance already being performed. More use-cases can be added as seen fit. 
+The machinemaintenance controller will iterate through machine CRs and reconcile identified mainteances. It will be responsible for first validating the state of the cluster prior to executing anything on a target object. Validating the state of the cluster will include will initially check for only is the cluster upgrading or is a maintenance already being performed. More use-cases can be added as seen fit. 
 
 If the cluster fails validation (for example is upgrading), the controller will requeue the object and process it again according to its `SyncPeriod` which would currently be proposed at 60 minutes. 
 
-After cluster validation, the controller will ascertain if its in a maintenance window where it can execute maintenances (See open question 2). In the case that no maintenance windows are defined, the controller will continue as true. If the maintenance window logic is only applicable in OSD, the operator could validate if its "managed" prior to expecting these resources.
+After cluster validation, the controller will ascertain if its in a maintenance window where is can execute maintenances (See open question 2). If in the case no maintenance windows are defined, the controller will continue as true. If the maintenance window logic is only applicable in OSD, the operator could validate if its "managed" prior to expecting these resources.
 
 The event type is then sourced from the CR and then is resolved by either deleting a target machine CR (so the machine-api creates a new one) or raising an alert for manual intervention (master maintenance scheduled). 
 
 This is a very UDP type of approach. 
 
-The MMo could also look to store the state of its actions in its own machinemaintenance CR that it would create from a machine CR. 
+The MMO could also store state of its actions in its on machinemaintenance CR that it would create from a machine CR. 
 
 ### Example machinemaintenance CR
 
