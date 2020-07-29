@@ -82,8 +82,8 @@ out of the scope of this design.
 CLUSTER_PROFILE=[identifier]
 ```
 This environment variable would have to be specified in the CVO deployment. When
-no `CLUSTER_PROFILE=[identifier]` variable is specified, the `default` cluster profile
-is in effect.
+no `CLUSTER_PROFILE=[identifier]` variable is specified, the `self-managed-highly-available` 
+cluster profile is in effect.
 
 The following annotation may be used to include manifests for a given profile:
 
@@ -95,6 +95,8 @@ has been specified.
 
 Manifests may support inclusion in multiple profiles by including as many of these annotations
 as needed.
+
+Manifests must contain at least one inclusion annotation. 
 
 For items such as node selectors that need to vary based on a profile, different manifests
 will need to be created to support each variation in the node selector. This feature will
