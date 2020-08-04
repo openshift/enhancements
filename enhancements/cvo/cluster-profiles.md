@@ -39,8 +39,15 @@ manifests for each supported profile.
 ## Motivation
 
 To support different a deployment model in which not all operators rendered by
-the CVO by default are needed. This includes IBM Public Cloud, in which a 
-hosted control plane is used. Potentially it can also be used for Code Ready Containers.
+the CVO by default are needed.  Every usage of a Cluster Profile MUST have a corresponding
+enhancement describing its usage.  
+
+The initial target for this enhancement is to improve the IBM Cloud managed service offering
+to support alternative manifests for clusters that do not self-host the control plane.  Other
+scenarios may use this solution (such as Code Ready Containers) pending future enhancements.
+
+Alternative manfiests for any OpenShift release component must link to an enhancement that
+defines the profile type and intended usage.
 
 ### Goals
 
