@@ -9,8 +9,8 @@ approvers:
   - "@abhinavdahiya"
   - "@derekwaynecarr"
 creation-date: 2019-12-11
-last-updated: 2019-12-11
-status: implementable
+last-updated: 2020-08-05
+status: implemented
 see-also:
 replaces:
 superseded-by:
@@ -20,10 +20,10 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [x] Enhancement is `implementable`
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
+- [x] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
@@ -102,8 +102,10 @@ No special consideration.
 
 ## Implementation History
 
-Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`.
+* Teach the cluster-version operator to fast-fill ClusterOperators, [cvo#318](https://github.com/openshift/cluster-version-operator/pull/318), merged 2020-04-14.
+* Bugfix for [excluded manifests](ibm-public-cloud-support.md), [cvo#370](https://github.com/openshift/cluster-version-operator/pull/370).
+* GA with 4.5 in 4.5.1.
+* Backport to 4.4 still in flight, [cvo#376](https://github.com/openshift/cluster-version-operator/pull/376).
 
 ## Drawbacks
 

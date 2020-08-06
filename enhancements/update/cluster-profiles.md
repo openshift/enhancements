@@ -12,9 +12,10 @@ approvers:
   - "@derekwaynecarr"
   - "@smarterclayton"
 creation-date: 2020-02-04
-last-updated: 2019-02-04
+last-updated: 2020-08-05
 status: implementable
 see-also:
+  - "/enhancements/update/ibm-public-cloud-support.md"
 replaces:
 superseded-by:
 ---
@@ -100,6 +101,10 @@ will need to be created to support each variation in the node selector. This fea
 not support including/excluding sections of a manifest. In order to avoid drift and 
 maintenance burden, components may use a templating solution such as kustomize to generate
 the required manifests while keeping a single master source.
+
+## Implementation History
+
+* Teach cluster-version operator about profiles, [cvo#404](https://github.com/openshift/cluster-version-operator/pull/404), in flight.
 
 ## Alternatives
 

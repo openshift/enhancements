@@ -11,8 +11,8 @@ approvers:
   - "@sdodson"
   - "@smarterclayton"
 creation-date: 2019-11-19
-last-updated: 2020-07-21
-status: implementable
+last-updated: 2020-08-05
+status: implemented
 ---
 
 # Available-update Metadata
@@ -180,6 +180,8 @@ The YAML rendering of the old and updated type are compatible, with the only dif
 ## Implementation History
 
 * [API pull request][api-pull-request].
+* [CVO implementation][cluster-version-operator-pull-request], landed 2020-07-31.
+* Will GA with 4.6.
 
 ## Drawbacks
 
@@ -275,6 +277,7 @@ Leave the current `ClusterVersionStatus` alone and just continue to fill the now
 [cluster-version-operator-available-updates-handler]: https://github.com/openshift/cluster-version-operator/blob/751c6d0c872e05f218f01d2a9f20293b4dfcca88/pkg/cvo/cvo_test.go#L2284
 [cluster-versoin-operator-desired-copy]: https://github.com/openshift/cluster-version-operator/blob/8240a9b3711fa6938129d06ee8c6957a8f3b6464/pkg/cvo/cvo.go#L393-L421
 [cluster-version-operator-findUpdateFromConfig]: https://github.com/openshift/cluster-version-operator/blob/8240a9b3711fa6938129d06ee8c6957a8f3b6464/pkg/cvo/updatepayload.go#L294
+[cluster-version-operator-pull-request]: https://github.com/openshift/cluster-version-operator/pull/419
 [cluster-version-operator-update-lookup]: https://github.com/openshift/cluster-version-operator/blob/01adf75393b6e11d3d8c98ecfeeebd3feb998a6c/pkg/cvo/updatepayload.go#L297-L309
 [cluster-version-operator-update-translation]: https://github.com/openshift/cluster-version-operator/blob/8240a9b3711fa6938129d06ee8c6957a8f3b6464/pkg/cvo/availableupdates.go#L192-L198
 [console-channels]: https://github.com/openshift/console/pull/2935
