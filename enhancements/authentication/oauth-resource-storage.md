@@ -80,7 +80,7 @@ e.g. to implement a feature to log out all "other" tokens in a REST-ful way.
 We prefix oauth access and oauth authorize token names with a prefix:
 
 - no prefix for old tokens,
-- `"sha256:"` for new tokens. The name of the token objects is the sha256 hash 
+- `"sha256~"` for new tokens. The name of the token objects is the sha256 hash 
   of the actual token (not decoded, but plain base64) encoded as base64. The bearer
   token will also carry the prefix, but have the token in plain text.
 
@@ -95,6 +95,10 @@ In v4.(n+1):
 - we might remove the support to verify old tokens from the kube-apiserver authenticator.
   Note: this is a breaking API change as the user is able to add tokens manually without restriction. We would restrict it to sha256 tokens.
 - we might add a feature to allow logouts of all other sessions.
+
+Note: the tilde is a valid character in oauth tokens used as bearer tokens (according to 
+[RFC6750](https://tools.ietf.org/html/rfc6750#section-2.1)), and it works as character in URL paths. Colon,
+which we used in an earlier iteration of this enhancement is not valid for the former. 
 
 ### User Stories [optional]
 
@@ -137,15 +141,15 @@ oauth token against the API server (with a caching layer in-front).
 
 In v4.n and v4.n-1, it will be extended:
 
-- if the passed token in the request is prefixed with `sha256:` the token value
+- if the passed token in the request is prefixed with `sha256~` the token value
   is hashed and the hashed value is looked up to find the oauthaccesstoken 
   object.
   
 #### oauth-server
 
 The oauth-server creates access and authorize tokens. In v4.n and v4.n-1 (z-stream) 
-it will prefix the token with `sha256:` and the `registrystorage` package will use 
-`sha256:<hashed-token>` as object names. Old (unprefixed) tokens will be stored 
+it will prefix the token with `sha256~` and the `registrystorage` package will use 
+`sha256~<hashed-token>` as object names. Old (unprefixed) tokens will be stored 
 and read with the plain text name in order to allow disruption-free upgrade.
 
 - `oauth-server/pkg/osinserver/registrystorage`: 
@@ -187,8 +191,8 @@ Intentionally left empty. To be filled in the future.
 ### Upgrade / Downgrade Strategy
 
 - New kube-apiserver will authorize clients with old tokens (43 characters long) without prefix.
-- Old kube-apiserver of v4.(n-1) will be updated via z-stream release to handle `sha256:` prefixed tokens.
-- Bearer tokens with `sha256:` prefix are handled transparently by client-go clients.
+- Old kube-apiserver of v4.(n-1) will be updated via z-stream release to handle `sha256~` prefixed tokens.
+- Bearer tokens with `sha256~` prefix are handled transparently by client-go clients.
   The clients don't introspect tokens and the token format is not documented and
   no stable API.
 
