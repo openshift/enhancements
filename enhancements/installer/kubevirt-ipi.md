@@ -19,26 +19,26 @@ status: implementable
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift/docs]
+- [ ] User-facing documentation is created in [OpenShift/docs]
 
 ## Open Questions [optional]
 
 ## Summary
 
-This document describes how `kubevirt` becomes a platform provider for Openshift. \
+This document describes how `kubevirt` becomes a platform provider for OpenShift. \
 `kubevirt` is a virtualization platform running as an extension of Kubernetes. \
- We want to enable few options to install Openshift on `kubevirt` that will meet \
+ We want to enable few options to install OpenShift on `kubevirt` that will meet \
  different requirements of different use-cases. 
 
 
 ## Motivation
 
-- Achieve true multi-tenancy of Openshift were each tenant has dedicated control plane \
+- Achieve true multi-tenancy of OpenShift were each tenant has dedicated control plane \
  and have full control on its configuration. 
 
 ### Goals
 
-- provide a way to install Openshift on kubevirt infrastructure using 
+- provide a way to install OpenShift on kubevirt infrastructure using 
   the installer - an IPI installation. (1st day)
 - implementing a cluster-api provider to provide scaling and managing the cluster
   nodes (used by IPI, and useful for UPI, and also node management/fencing) (2nd day)
@@ -49,19 +49,19 @@ This document describes how `kubevirt` becomes a platform provider for Openshift
 
 ## Proposal
 
-This provider enables the Openshift Installer to provision VM resources in 
+This provider enables the OpenShift Installer to provision VM resources in 
 kubevirt infrastructure, that will be used as worker and masters of the clusters. It 
 will also create the bootstrap machine, and the configuration needed to get
 the initial cluster running by supplying a DNS service and load balancing.
 
-We want to approach deployment on Openshift and kubevirt as deployment on cloud similar to the
+We want to approach deployment on OpenShift and kubevirt as deployment on cloud similar to the
 deployments we have on public clouds as AWS and GCP rather than virtualization platform in a way 
 that the machine's network will be private, and the relevant endpoints will be exposed out of the
 cluster with platform services as we can or pods deployed in the infrastructure cluster to supply the services
 as DNS and Loadbalancing.
 
 We see two main network options for deployment over kubevirt:
-- Deploy the tenant cluster on the pods network and use Openshift services and routes
+- Deploy the tenant cluster on the pods network and use OpenShift services and routes
 to provide DNS and Load-Balancing.
 - Deploy the tenant cluster on a secondary network and provide DNS service and Load-Balancing
 as pods attached to the secondary network.
@@ -70,9 +70,9 @@ as pods attached to the secondary network.
 
 1. Survey
 
-    The installation starts and right after the user supplies his public ssh key,\
+    The installation starts and right after the user supplies their public ssh key,\
 and then choose `kubevirt` the installation will ask for all the relevant details\
-of the installation: **kubeconfig** for the infrastructure openshift, **namespace**, **storageClass** and \
+of the installation: **kubeconfig** for the infrastructure OpenShift, **namespace**, **storageClass** and \
  other kubevirt specific attributes. 
 The installer will validate it can communicate with the api, otherwise it will fail to proceed.\
 
@@ -99,10 +99,10 @@ the rest of the non-kubevirt specific question.
 3. Bootstrap
 
     The bootstrap VM has a huge Ignition config set using terraform as secrets and is visible\
-as secrets on the infra Openshift. kubevirt boots that VM with that content as ConfigDrive and the 
+as secrets on the infra OpenShift. kubevirt boots that VM with that content as ConfigDrive and the 
 bootstraping begins when the `bootkube.service` systemd service starts.\
 
-    This process described more thoroughly in the [installer overview document][https://github.com/openshift/installer/blob/37b99d8c9a3878bac7e8a94b6b0113fad6ffb77a/docs/user/overview.md#cluster-installation-process]
+    This process described more thoroughly in the [installer overview document][https://github.com/OpenShift/installer/blob/37b99d8c9a3878bac7e8a94b6b0113fad6ffb77a/docs/user/overview.md#cluster-installation-process]
 
 4. Masters bootstrap
 
@@ -202,7 +202,7 @@ joining the tenant cluster as masters and start scheduling pods.
     ####Option 1 - Direct storage CSI 
    The provisioned cluster will use CSI to attach storage using network to the VM guests.
    This can be OCS CSI driver to consume storage from OCS installed on the infra
-   Openshift as a tenant of OCS or any other external storage.
+   OpenShift as a tenant of OCS or any other external storage.
    
    ####Option 2 - Kubevirt CSI driver
    Develop CSI driver for kubevirt platform. \
@@ -338,4 +338,4 @@ know how will it handle the traffic and disk pressure. My guess is that we shoul
 minimize the load by not supporting parallel job invocations. Not sure its viable.\
 
 
-[baremetal-ipi-networking]: https://github.com/openshift/installer/blob/master/docs/design/baremetal/networking-infrastructure.md
+[baremetal-ipi-networking]: https://github.com/OpenShift/installer/blob/master/docs/design/baremetal/networking-infrastructure.md
