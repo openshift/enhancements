@@ -32,7 +32,7 @@ For pulling edges, we just need to find *one* sufficiently severe bug on the edg
 For initiating an update, users need confidence that there are no likely, severe bugs affecting their clusters.
 These are two different things.
 
-Getting [targeted edge blocking][targeted-edge-blocking] in place will allow us to decrease the amount of collateral damage where we currently have to pull an edge for all clusters to protect a known, vulnerable subset of clusters.
+Getting [targeted edge blocking](../targeted-update-edge-blocking.md) in place will allow us to decrease the amount of collateral damage where we currently have to pull an edge for all clusters to protect a known, vulnerable subset of clusters.
 And [alerting on available updates][alert-on-available-updates] will inform folks who have had an edge restored that they have been ignoring the (new) update opportunity.
 Between those two, and similar efforts, I don't think that broadcasting edge-pulled motivations is a useful activity, and I think encouraging users to actively consume our blocked-edge reasoning in order to green-light their own off-graph updates is actively harmful.
 Because do we support them if they hit some new bug?
@@ -59,4 +59,3 @@ And hopefully updates soon become boring, reliable details, and folks just set [
 [blocked-edges]: https://github.com/openshift/cincinnati-graph-data/tree/master/blocked-edges
 [off-graph-support]: https://github.com/openshift/openshift-docs/blame/0a4d88729eccc2323ff319346e7824ca2f964b9e/modules/understanding-upgrade-channels.adoc#L101-L102
 [phased-rollouts]: https://github.com/openshift/enhancements/pull/427
-[targeted-edge-blocking]: https://github.com/openshift/enhancements/pull/426
