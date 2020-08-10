@@ -3,9 +3,19 @@ title: on-prem-service-load-balancers
 authors:
   - "@russellb"
 reviewers:
-  - TBD
+  - @markmc
+  - @smarterclayton
+  - @derekwaynecarr
+  - @squeed
+  - @aojea
+  - @celebdor
+  - @abhinavdahiya
+  - @yboaron
+  - @cybertron
 approvers:
-  - TBD
+  - @knobunc
+  - @danwinship
+  - @danehans
 creation-date: 2020-05-14
 last-updated: 2020-05-14
 status: proposed
