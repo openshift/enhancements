@@ -15,9 +15,10 @@ reviewers:
 approvers:
   - "@derekwaynecarr"
 creation-date: 2020-02-04
-last-updated: 2020-02-04
-status: implementable
+last-updated: 2020-08-05
+status: implemented
 see-also:
+  - "/enhancements/update/cluster-profiles.md"
 replaces:
 superseded-by:
 ---
@@ -27,9 +28,9 @@ superseded-by:
 ## Release Signoff Checklist
 
 - [x] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
+- [x] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [x] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
@@ -249,3 +250,10 @@ of RHCOS nodes using the same mechanisms as in self-hosted OpenShift.
 
 ### Version Skew Strategy
 
+## Implementation History
+
+* Teach cluster-version operator about the new annotation, [cvo#252](https://github.com/openshift/cluster-version-operator/pull/252), merged 2019-11-13.
+* Add the exclude annotation to the cluster-version operator manifests, [cvo#269](https://github.com/openshift/cluster-version-operator/pull/269), merged 2019-11-14.
+* Add the exclude annotation to the machine-API operator manifests, [mao#437](https://github.com/openshift/machine-api-operator/pull/437), merged 2019-11-15.
+* Many more pull requests adding exclusion annotations.
+* Feature went live in 4.3 with 51 excluded manifests in 4.3.0.

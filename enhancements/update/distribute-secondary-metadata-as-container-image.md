@@ -12,7 +12,7 @@ approvers:
   - @sdodson
 creation-date: 2020-05-07
 last-updated: 2020-05-07
-status: provision
+status: provisional
 see-also:
 -
 replaces: []
