@@ -53,20 +53,30 @@ To debug our existing install and upgrade failures.
 
  1. allow a cluster observing tool to run in the CI cluster (this avoid restarts during upgrades)
  2. allow a cluster observer to provide data (including junit) to be collected by the CI job
+ 3. collect data from cluster observer regardless of whether the job succeeded or failed
+ 4. allow multiple observers per CI cluster
 
 ### Non-Goals
 
  1. allow a cluster observer to impact success or failure of a job
  2. allow a cluster observer to impact the running test.  This is an observer author failure.
  3. provide ANY dimension specific data. If an observer needs this, they need to integrate differently.
+ 4. allow multiple instances of a single cluster observer to run against one CI cluster
+ 5. allow providing the cluster observer from a repo being built. The images are provided separately.
 
 ## Proposal
+
+The overall goal: 
+ 1. have an e2e-observer process is expected to be running before a kubeconfig exists
+ 2. the kubeconfig should be provided to the e2e-observer at the earliest possible time.  Even before it can be used.
+ 3. the e2e-observer process is expected to detect the presence of the kubeconfig itself
+ 4. the e2e-observer process will accept a signal indicating that teardown begins
 
 ### Changes to CI
 This is a sketch of a possible path.
  1. Allow a non-dptp-developer to produces a pod template that mounts a `secret/<job>-kubeconfig` that will later contain a kubeconfig.
- 2. When the CI pod starts today (the one with setup containers and stuff), also create an instance of each pod template,
-    let's say `pod/<job>-resourcewatcher` and an empty `secret/<job>-kubeconfig`.
+ 2. Before a kubeconfig is present, create an instance of each pod template,
+    Let's say `pod/<job>-<e2e-observer-name>` and an empty `secret/<job>-kubeconfig`.
  3. As soon as a kubeconfig is available (these go into a known location in setup container today), write that
     `kubeconfig` into every `secret/<job>-kubeconfig` (you probably want to label them).
  4. When it is time for collection, the existing pod (I think it's teardown container), writes a new data entry at `.data['teardown']` into every 
@@ -81,10 +91,12 @@ This is a sketch of a possible path.
 
 ### Requirements on e2e-observer authors
  1. Your pod must be able to run against *every* dimension. No exceptions.  If your pod needs to quietly no-op, it can do that.
- 2. Your pod must be able to tolerate a kubeconfig that doesn't work.  The kubeconfig may point to a cluster than never comes up.
-    Or that hasn't come up yet.  Your pod must not suck on it.
- 3. If your pod fails, it will not fail the e2e job.  If you need to fail an e2e job reliably, you need something else.
- 4. Your pod must terminate when asked.
+ 2. Your pod must handle a case of a kubeconfig file that isn't present when the pod starts and appears afterward.
+    Or even doesn't appear at all.
+ 3. Your pod must be able to tolerate a kubeconfig that doesn't work.
+     The kubeconfig may point to a cluster than never comes up or that hasn't come up yet.  Your pod must not fail.
+ 4. If your pod fails, it will not fail the e2e job.  If you need to fail an e2e job reliably, you need something else.
+ 5. Your pod must terminate when asked.
 
 ## Alternatives
 
