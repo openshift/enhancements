@@ -1,0 +1,25 @@
+digraph updateDecisions {
+	new [ label="New edge available" ];
+	test [ label="Do local tests pass?" ];
+	pulled [ label="Does Red Hat pull the edge?" ];
+	localConfidence [ label="Are we confident in\nour local test coverage?" ];
+	redHatConfidence [ label="Are we confident Red Hat's\nreasoning is exhaustive?" ];
+	bug [ label="What bug(s) did Red Hat link?"; color="orange"; style="dashed" ];
+	apply [ label="Do the bug(s) apply to my clusters?" ];
+	update [ label="Production update" ];
+	wait [ label="Wait for a new edge" ];
+
+	new -> test;
+	test -> wait [ label="no" ];
+	wait -> new;
+	test -> pulled [ label="yes" ];
+	pulled -> update [ label="no" ];
+	pulled -> localConfidence [ label="yes" ];
+	localConfidence -> update [ label="yes"; color="orange"; style="dashed" ];
+	localConfidence -> redHatConfidence [ label="no"; color="blue"; penwidth="3" ];
+	redHatConfidence -> wait [ label="no"; color="blue"; penwidth="3" ];
+	redHatConfidence -> bug [ label="yes"; color="orange"; style="dashed" ];
+	bug -> apply;
+	apply -> wait [ label="yes" ];
+	apply -> update [ label="no" ];
+}
