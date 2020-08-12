@@ -293,6 +293,13 @@ files.  As long as the network configuration is not needed during the initial
 bootstrapping of a new Node, this interface provides access to any host network
 configuration that’s doable through NetworkManager.
 
+Note that `MachineConfig` resources apply to a `MachinePool` and not to a
+single host.  That makes this configuration interface helpful only for certain
+types of network configuration where the same configuration can be laid down
+across multiple hosts.  This interface would not work for applying static IP
+configuration across each individual host.  A future enhancement is needed to
+better serve that use case through the OpenShift API.
+
 #### Example
 
 Consider a bare metal cluster where the administrator would like to configure a
@@ -301,8 +308,8 @@ can be used to apply a new NetworkManager configuration file to do this.
 
 First, we must craft a config file to drop into the
 `/etc/NetworkManager/system-connections `directory on each host. For example
-purposes, I used this config file, which configures a VLAN interface with a
-static IP instead of relying on DHCP to be present on this VLAN.
+purposes, I used this config file, which configures a VLAN interface using
+DHCP.
 
 In this case I used a VLAN ID of 20, and the NIC is ens3.
 
@@ -313,9 +320,7 @@ type=vlan
 interface-name=vlan20
 autoconnect=true
 [ipv4]
-method=manual
-addresses=172.5.0.2/24
-gateway=172.5.0.1
+method=auto
 [vlan]
 parent=ens3
 id=20
