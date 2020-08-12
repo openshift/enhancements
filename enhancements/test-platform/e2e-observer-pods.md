@@ -62,32 +62,37 @@ To debug our existing install and upgrade failures.
  2. allow a cluster observer to impact the running test.  This is an observer author failure.
  3. provide ANY dimension specific data. If an observer needs this, they need to integrate differently.
  4. allow multiple instances of a single cluster observer to run against one CI cluster
- 5. allow providing the cluster observer from a repo being built. The images are provided separately.
 
 ## Proposal
 
 The overall goal: 
- 1. have an e2e-observer process is expected to be running before a kubeconfig exists
+ 1. have an e2e-observer process that is expected to be running before a kubeconfig exists
  2. the kubeconfig should be provided to the e2e-observer at the earliest possible time.  Even before it can be used.
  3. the e2e-observer process is expected to detect the presence of the kubeconfig itself
  4. the e2e-observer process will accept a signal indicating that teardown begins
 
 ### Changes to CI
 This is a sketch of a possible path.
- 1. Allow a non-dptp-developer to produces a pod template that mounts a `secret/<job>-kubeconfig` that will later contain a kubeconfig.
- 2. Before a kubeconfig is present, create an instance of each pod template,
-    Let's say `pod/<job>-<e2e-observer-name>` and an empty `secret/<job>-kubeconfig`.
+ 1. Allow a non-dptp-developer to produces a manifest outside of any existing resource that can define
+    1. image
+    2. process
+    3. potentially a bash entrypoint
+    4. env vars
+    that mounts a `secret/<job>-kubeconfig` that will later contain a kubeconfig.
+    This happens to neatly align to a PodTemplate, but any file not tied to a particular CI dimension can work.
+ 2. Before a kubeconfig is present, create an instance of each binary from #1 is created and an empty `secret/<job>-kubeconfig`.
  3. As soon as a kubeconfig is available (these go into a known location in setup container today), write that
     `kubeconfig` into every `secret/<job>-kubeconfig` (you probably want to label them).
- 4. When it is time for collection, the existing pod (I think it's teardown container), writes a new data entry at `.data['teardown']` into every 
-    `secret/<job>-kubeconfig`.
-    The value should be a timestamp.
- 5. Ten minutes after `.data['teardown']` is written, the teardown container rsyncs a well known directory,
+ 4. When it is time for collection, the existing pod (I think it's teardown container), issues a sig-term to the process or perhaps
+    writes a new data entry containing a timestamp into at `.data['teardown']` into every `secret/<job>-kubeconfig`.
+    The exactly mechanism isn't critical, but the file is unambiguous, level driven, externally communicative, and can happen for no
+    other reason.  The sig-term could happen for any reason, cannot be externally checked, and is not level driven.
+ 5. Ten minutes teardown begins, something in CI gathers a well known directory,
     `/var/e2e-observer`, which may contain `/var/e2e-observer/junit` and `/var/e2e-observer/artifacts`.  These contents
     are placed in some reasonable spot.
     
     This could be optimized with a file write in the other direction, but the naive approach doesn't require it.
-  6. All `pod/<job>-<e2e-observer-name>` are deleted.
+  6. All resources are cleaned up.  
 
 ### Requirements on e2e-observer authors
  1. Your pod must be able to run against *every* dimension. No exceptions.  If your pod needs to quietly no-op, it can do that.
