@@ -288,24 +288,11 @@ expectations).
 
 ### Graduation Criteria
 
-**Note:** *Section not required until targeted at a release.*
+None
 
-Define graduation milestones.
+### Examples
 
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-- Maturity levels - `Dev Preview`, `Tech Preview`, `GA`
-- Deprecation
-
-Clearly define what graduation means.
-
-#### Examples
-
-##### Example PodNetworkConnectivityCheck instance
+#### Example PodNetworkConnectivityCheck instance
 
 ```yaml
 kind: PodNetworkConnectivityCheck
@@ -345,7 +332,7 @@ status:
 
 ```
 
-##### Example PodNetworkConnectivityCheck instance with DNS
+#### Example PodNetworkConnectivityCheck instance with DNS
 ```yaml
 kind: PodNetworkConnectivityCheck
 version: network.openshift.io/v1alpha1
@@ -372,30 +359,6 @@ status:
         message: "etcd.openshift-etcd.sv resolved to 10.0.140.67"
         duration: "200ms"
 ```
-
-These are generalized examples to consider, in addition to the aforementioned
-[maturity levels][maturity-levels].
-
-##### Dev Preview -> Tech Preview
-
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-
-##### Tech Preview -> GA 
-
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
-
-##### Removing a deprecated feature
-
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
 
 ### Upgrade / Downgrade Strategy
 

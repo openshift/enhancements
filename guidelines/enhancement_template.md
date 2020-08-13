@@ -165,15 +165,23 @@ determine graduation.
 
 Consider the following in developing the graduation criteria for this
 enhancement:
-- Maturity levels - `Dev Preview`, `Tech Preview`, `GA`
-- Deprecation
 
-Clearly define what graduation means.
+- Maturity levels
+    - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
+    - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
+- [Deprecation policy][deprecation-policy]
+
+Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
+or by redefining what graduation means.
+
+In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
+
+[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
+[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
 
 #### Examples
 
-These are generalized examples to consider, in addition to the aforementioned
-[maturity levels][maturity-levels].
+These are generalized examples to consider, in addition to the aforementioned [maturity levels][maturity-levels].
 
 ##### Dev Preview -> Tech Preview
 
