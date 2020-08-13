@@ -37,7 +37,7 @@ superseded-by:
 - [x] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions [optional]
+## Open Questions
 
 - Should the parts of the configuration that do and don't require reboot be
   part of user facing documentation?
@@ -101,7 +101,7 @@ The full list of post-write actions required for this feature to be useful are:
 If the action results in an error, or takes too long, a reboot will be
 performed as in prior 4.x versions.
 
-### User Stories [optional]
+### User Stories
 
 The user stories below are intended to be illustrative of the different types of 
 services we need to build capabilities for.
@@ -137,7 +137,7 @@ updates and changes to kernel flags, so that they are applied in a timely
 manner.
 
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 How the function determines what constitutes a unit of configuration or "domain" 
 for the purposes of comparision and output is left for later discussion.
@@ -251,6 +251,6 @@ The risks primarily fall into 4 categories:
   much larger body of work that would not be possible to complete in the short 
   term.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 None

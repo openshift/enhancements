@@ -73,7 +73,7 @@ There is a pod that acts as a “sidecar” or “babysitter” for the openvswi
 Configuration for OVS is always presented as a set of key-value pairs that are inserted in to a configuration database. If needed, we should allow custom configuration to be expressed as a ConfigMap, which is reconciled to the database.
 
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 As a prototype, this can be implemented with just a few shell scripts. Ideally, it should be ultimately implemented as a go program that talks to the SystemD DBus API directly.
 

@@ -57,7 +57,7 @@ Add a new _RouteAdmissionPolicy_ field to the [IngressController API resource][h
 
 ### User Stories
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 The [Ingress Operator](https://github.com/openshift/cluster-ingress-operator) will use `RouteAdmissionPolicy` to configure the environment variable `ROUTER_DISABLE_NAMESPACE_OWNERSHIP_CHECK` in the [OpenShift Router](https://github.com/openshift/router).
 
@@ -158,6 +158,6 @@ This only implements one existing feature in the OpenShift Router that existed i
 - There are many environment variables exposed by the OpenShift Router which are not included in this proposal. An alternative proposal would be to allow setting environment variables directly through the ingress-controller CRD, but this would expose more feature in an uncontrolled manner.
 - This proposal implements an enum based [comment](https://github.com/openshift/api/pull/416#issuecomment-523658482), but there are only two values. This could be implemented as a boolean. There is an [existing PR](https://github.com/openshift/api/pull/416) with this implementation.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 [ingress-controller-api]: https://github.com/openshift/api/blob/release-4.2/operator/v1/types_ingress.go

@@ -255,7 +255,7 @@ The next capabilities are supported by the `baremetal-runtimecfg`:
   - https://github.com/openshift/baremetal-runtimecfg/blob/master/pkg/monitor/corednsmonitor.go
 
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 This has already been implemented for baremetal, Ovirt, vSphere and OpenStack.
 

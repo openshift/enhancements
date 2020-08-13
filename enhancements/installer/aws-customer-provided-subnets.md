@@ -203,7 +203,7 @@ Similar to the `Drawbacks` section the `Alternatives` section is used to
 highlight and record other possible approaches to delivering the value proposed
 by an enhancement.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 Use this section if you need things from the project. Examples include a new
 subproject, repos requested, github details, and/or testing infrastructure.

@@ -443,6 +443,6 @@ and potentially will be not feasible. Existing user workflow will be
 disrupted, so communication of these changes will also be very important.
 
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 None extra

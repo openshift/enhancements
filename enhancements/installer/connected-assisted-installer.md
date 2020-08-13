@@ -315,7 +315,7 @@ each host has an IP provided by an outside DHCP server. Hardware
 support for automating virtual media is not consistent between
 vendors.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 The existing code (see "Proof of Concept" above) will need to be moved
 into an official GitHub organization.

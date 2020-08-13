@@ -128,7 +128,7 @@ If we have extra space, keep more of the available logs.
 When trimming logs, prefer to trim logs for healthy pods more than unhealthy pods.  
 *Happy pods are all alike, but every unhappy pod is unhappy in its own way.*
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
@@ -270,6 +270,6 @@ The `inspect` command must skew +/- one like normal commands.
 
 ## Alternatives
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 [1]: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.10/#container-v1-core

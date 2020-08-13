@@ -153,7 +153,7 @@ with 2 members:
 	range. If unset, then the default IP address range (.10 to .100) would be
 	used. The value of the DHCP range can be changed even after insallation.
 
-### User Stories [optional]
+### User Stories
 
 1. As a Deployment Operator, I want Barametal IPI deployments to be customizable to
 hardware and network requirements.

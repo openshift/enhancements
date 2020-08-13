@@ -23,7 +23,7 @@ superseded-by:
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions [optional]
+## Open Questions
 
 This is where to call out areas of the design that require closure before deciding
 to implement the design.  For instance, 
@@ -139,7 +139,7 @@ The binary will:
 
 7. Repeat evey minute.
 
-### User Stories [optional]
+### User Stories
 
 Detail the things that people will be able to do if this is implemented.
 Include as much detail as possible so that people can understand the "how" of
@@ -150,7 +150,7 @@ bogged down.
 
 #### Story 2
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 What are the caveats to the implementation? What are some important details that
 didn't come across above. Go in to as much detail as necessary here. This might
@@ -438,7 +438,7 @@ Similar to the `Drawbacks` section the `Alternatives` section is used to
 highlight and record other possible approaches to delivering the value proposed
 by an enhancement.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 Use this section if you need things from the project. Examples include a new
 subproject, repos requested, github details, and/or testing infrastructure.

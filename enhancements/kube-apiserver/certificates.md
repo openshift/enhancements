@@ -122,7 +122,7 @@ They can change at any time, for any reason, without any notice.
 | secret/etcd-client | `kube-controller-manager --etcd-certfile` | installer | kube-apiserver, openshift-apiserver |
 
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 ### Risks and Mitigations
 

@@ -225,6 +225,6 @@ We could treat all the non-public Azure cloud environments as Custom Azure cloud
 - The installer can control the known cloud names easily.
 - The installer users the azurerm terraform provider that doesn't have support of custom resource endpoint URLs and would require use of the azurestack terraform provider. A change like that would be a lot more involved and therefore supporting known cloud names is a lot more easier to satisfy the goals.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 1. Access to MAG environment to test the changes.

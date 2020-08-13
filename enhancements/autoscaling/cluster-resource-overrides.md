@@ -76,13 +76,13 @@ the kube-apiserver.
  that we re-bootstrap.
 4. Expose the new operator via OLM and integrate our docs that way.
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
 #### Story 2
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 We *must* be able to re-bootstrap the cluster.  This means that a cluster with this admission plugin created must be able
 to be completely shut down and subsequently restarted.
@@ -176,7 +176,7 @@ Similar to the `Drawbacks` section the `Alternatives` section is used to
 highlight and record other possible approaches to delivering the value proposed
 by an enhancement.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 Use this section if you need things from the project. Examples include a new
 subproject, repos requested, github details, and/or testing infrastructure.
