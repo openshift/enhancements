@@ -1,5 +1,5 @@
 ---
-title: cluster-logging-log-forwarding
+title: cluster-logging-es-init
 authors:
   - "@jcantrill"
   - "@igor-karpukhin"
