@@ -113,21 +113,28 @@ purposes of configuring baremetal servers to be part of the cluster. The
 traffic on the provisioning network needs to be isolated from the traffic on
 the external network (hence 2 seperate networks.). The external network is used
 to carry cluster traffic which which includes cluster control plane traffic,
-application and data traffic.
+application and data traffic.  More detail on the networking requirements for
+the cluster can be found in [this document][10].
 
 Control Plane Deployment
+
+Details about DNS and load balancer automation for this platform are documented
+[here][11].
 
 1. A minimin Baremetal IPI deployment consists of 4 hosts, one to be used
 first as a provisioning host and later potentially re-purposed as a worker.
 The other 3 make up the control plane. These 4 hosts need to be connected
-to both the provisioning and external networks.
+to both the provisioning and external networks.  The provisioning host is a
+RHEL 8 host capable of running libvirt VMs.
 
 2. Installation can be kicked off by downloading and running
 "openshift-baremetal-install". This image differs from the "openshift-install"
 binary only because libvirt is needs to be always linked for the baremetal
 install. Removing a bootstrap node would remove the dependency on libvirt
 and then baremetal IPI installs can be part of the normal Openshift installer.
-This is in the roadmap for this work and being investigated.
+This is in the roadmap for this work and being investigated.  Note that it is
+still built from the same installer code base and is only a separate binary
+build.
 
 3. The installer starts a bootstrap VM on the provisioning host. With other
 platform types supported by OpenShift, a cloud already exists and the installer
@@ -140,16 +147,20 @@ the network interface on the provisioning host that is connected to the
 provisioning network needs to be provided to the installer.
 
 5. The bootstrap VM must be configured with a special well-known IP within the
-provisioning network that needs to provided as input to the installer.
+provisioning network that needs to provided as input to the installer.  This
+happens automatically and does not need any intervention by the cluster
+operator.
 
 6. The installer user Ironic in the bootstrap VM to provision each host that
 makes up the control plane. The installer uses terraform to invoke Ironic API
 that configures each host to boot over the provisioning network using DHCP
 and PXE.
 
-7. The bootstrap VM runs a DHCP server and responds with network infomation and
-PXE instructions when Ironic powers on a host. The host boots the Ironic Agent
-image which is hosted on the httpd instance also running on the bootstrap VM.
+7. The bootstrap VM runs a DHCP server on the isolated provisioning network and
+responds with network infomation and PXE instructions when Ironic powers on
+a host. The host boots the Ironic Agent image which is hosted on the httpd
+instance also running on the bootstrap VM.  Note that this DHCP server moves
+into the cluster as part of the `metal3` pod once the cluster comes up.
 
 8. After the Ironic Agent on the host boots and runs from its ramdisk image, it
 looks for the Ironic Service either using an URL passed in as a kernel command line
@@ -237,7 +248,7 @@ made for the Baremetal IPI case.
 
 ### Graduation Criteria
 
-Metal3 integration is in tech preview in 4.2 and is targetted for GA in 4.4.
+Metal3 integration is in tech preview in 4.2 and is targeted for GA in 4.6.
 
 Metal3 integration is currently missing an important piece to information on
 the baremetal servers and ther provisioning environment. Without this, true
@@ -245,7 +256,7 @@ end to end testing cannot be performed in order to graduate to GA.
 
 ### Upgrade / Downgrade Strategy
 
-Metal3 integration is in tech preview n 4.2 and missing key pieces that allows
+Metal3 integration is in tech preview in 4.2 and missing key pieces that allows
 a user to specify the baremetal server details and its provisioning setup. It
 is really not usable in this state without the help of external scripts that
 provied the above information in the form of a Config Map.
@@ -282,3 +293,5 @@ added to the OpenShift repo.
 [7]: https://github.com/openshift/installer/blob/master/docs/user/metal/install_ipi.md
 [8]: https://metal3.io/
 [9]: https://github.com/metal3-io/metal3-docs/blob/master/design/nodes-machines-and-hosts.md
+[10]: https://github.com/openshift/installer/blob/master/docs/user/metal/install_ipi.md
+[11]: https://github.com/openshift/installer/blob/master/docs/design/baremetal/networking-infrastructure.md
