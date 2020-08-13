@@ -40,7 +40,7 @@ below.
 
 Baremetal IPI deployments enable OpenShift to enroll baremetal servers to become
 Nodes that can run K8s workloads.
-The Baremetal Operator [1] along with other provisioning services (Ironic and
+The [Baremetal Operator][1] along with other provisioning services (Ironic and
 dependencies) run in their own pod called "metal3". This pod is deployed by the
 Machine API Operator when the Platform type is `BareMetal`. The OpenShift
 Installer is responsble for providing all the necessary configs required for
@@ -88,9 +88,9 @@ with the right configuration.
 With the addition of features described in this and other enhancements
 detailed in this current directory, OpenShift can be used to bring up
 a functioning cluster starting with a set of baremetal servers. As
-mentioned earlier, these enhancements rely on the Baremetal Operator (BMO)
-[1] running within the "metal3" pod to manage baremetal hosts. The BMO in
-turn relies on the Ironic service [3] to manage and provision baremetal
+mentioned earlier, these enhancements rely on the [Baremetal Operator (BMO)][1]
+running within the "metal3" pod to manage baremetal hosts. The BMO in
+turn relies on the [Ironic service][3] to manage and provision baremetal
 servers.
 
 1. Will enable the user to deploy a control plane with 3 master nodes.
@@ -100,20 +100,20 @@ nodes.
 
 ### Implementation Details/Notes/Constraints
 
-Baremetal IPI is integrated with OpenShift through the metal3.io [8] project.
+Baremetal IPI is integrated with OpenShift through the [metal3.io][8] project.
 Metal3.io is a set of Kubernetes controllers that wrap the OpenStack Ironic
 project to provide Kubernetes native APIs for managing deployment and
 monitoring of physical hosts.
 
 The installer support for Baremetal IPI deployments is described in more detail
-in [7]. The installer runs on a special "provisioning host" that needs to be
-connected to both a "provisioning network" and an "external network". The
-provisioning network is a dedicated network used just for the purposes of
-configuring baremetal servers to be part of the cluster. The traffic on the
-provisioning network needs to be isolated from the traffic on the external
-network (hence 2 seperate networks.). The external network is used to carry
-cluster traffic which which includes cluster control plane traffic, application
-and data traffic.
+in [this document][7]. The installer runs on a special "provisioning host" that
+needs to be connected to both a "provisioning network" and an "external
+network". The provisioning network is a dedicated network used just for the
+purposes of configuring baremetal servers to be part of the cluster. The
+traffic on the provisioning network needs to be isolated from the traffic on
+the external network (hence 2 seperate networks.). The external network is used
+to carry cluster traffic which which includes cluster control plane traffic,
+application and data traffic.
 
 Control Plane Deployment
 
@@ -195,7 +195,7 @@ address in the provisioning network are assigned to each of these hosts.
 
 2. The user adds hosts to the available inventory for their cluster by creating
 BareMetalHost CRs. For more information about the 3 CRs that already exist for a host
-transitioning from a baremetal host to a Node, please refer to [9].
+transitioning from a baremetal host to a Node, please refer to [this doc][9].
 
 3. The cluster-api-provider-baremetal (CAPBM) controller finds an unassigned/free
 BareMetalHost and uses it to fulfill a Machine resource. It then sets the configuration
@@ -229,7 +229,7 @@ Will be specified in follow-up enhancement requests mentioned above.
 ### Test Plan
 
 True e2e and integration testing can happen only after implementation for
-enhancement [2] lands. Until then, e2e testing is being performed with the
+[this enhancement][2] lands. Until then, e2e testing is being performed with the
 help of some developer scripts.
 
 Unit tests have been added to MAO and the Installer to test additions
@@ -262,22 +262,23 @@ respective requests.
 
 ## Implementation History
 
-Implementation to deploy a Metal3 cluster from the MAO was added via [4].
+Implementation to deploy a Metal3 cluster from the MAO was added via [this
+commit][4].
 
 ## Infrastructure Needed
 
 The Baremetal IPI solution depends on the Baremetal Operator and the baremetal
-Machine actuator both of which can be found at [5].
-OpenShift integration can be found here : [6].
+Machine actuator both of which can be found [here][5].
+OpenShift integration can be found [here][6].
 Implementation is complete on the metal3-io and relevant bits have been
-added to the OpenShift repo. 
+added to the OpenShift repo.
 
-[1] - https://github.com/metal3-io/baremetal-operator
-[2] - https://github.com/openshift/enhancements/blob/master/enhancements/baremetal/baremetal-provisioning-config.md
-[3] - https://github.com/openstack/ironic
-[4] - https://github.com/openshift/machine-api-operator/commit/43dd52d5d2dfea1559504a01970df31925501e35
-[5] - https://github.com/metal3-io
-[6] - https://github.com/openshift-metal3 
-[7] - https://github.com/openshift/installer/blob/master/docs/user/metal/install_ipi.md
-[8] - https://metal3.io/
-[9] - https://github.com/metal3-io/metal3-docs/blob/master/design/nodes-machines-and-hosts.md
+[1]: https://github.com/metal3-io/baremetal-operator
+[2]: https://github.com/openshift/enhancements/blob/master/enhancements/baremetal/baremetal-provisioning-config.md
+[3]: https://github.com/openstack/ironic
+[4]: https://github.com/openshift/machine-api-operator/commit/43dd52d5d2dfea1559504a01970df31925501e35
+[5]: https://github.com/metal3-io
+[6]: https://github.com/openshift-metal3 
+[7]: https://github.com/openshift/installer/blob/master/docs/user/metal/install_ipi.md
+[8]: https://metal3.io/
+[9]: https://github.com/metal3-io/metal3-docs/blob/master/design/nodes-machines-and-hosts.md
