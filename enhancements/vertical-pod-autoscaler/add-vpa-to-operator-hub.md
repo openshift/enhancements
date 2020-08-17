@@ -7,8 +7,8 @@ reviewers:
 approvers:
   - "@derekwaynecarr"
 creation-date: 2019-10-08
-last-updated: 2019-10-10
-status: provisional
+last-updated: 2020-08-17
+status: implemented
 ---
 
 # Make Vertical Pod Autoscaler available on OperatorHub
