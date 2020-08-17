@@ -57,12 +57,13 @@ possible point of confusion.
 ## Proposal
 
 Instead of creating the namespaces at install time as is currently done, add
-them to the list of resources to be synced in the operator. This will allow us
-to add logic that considers the platform before creating them.
+them to the list of resources to be synced in the machine-config-operator.
+This will allow us to add logic that considers the platform before creating
+them.
 
-For the naming, we propose `openshift-onprem` for all platforms that use these
-components. There is no need for a platform-specific name since only one
-platform can exist at a time anyway.
+For the naming, we propose `openshift-hosted-network-services` for all
+platforms that use these components. There is no need for a platform-specific
+name since only one platform can exist at a time anyway.
 
 ### User Stories [optional]
 
@@ -84,10 +85,10 @@ called.
 
 ### Open Questions [optional]
 
-Is `openshift-onprem` an acceptable name? There has also been discussion of
-calling it `openshift-machine-config-something` since it will be deployed by
-the MCO, but since these components are not part of MCO that feels like an
-odd fit.
+Is `openshift-hosted-network-services` an acceptable name? There has also been
+discussion of calling it `openshift-machine-config-something` since it will be
+deployed by the MCO, but since these components are not part of MCO that feels
+like an odd fit.
 
 ### Test Plan
 
