@@ -36,20 +36,6 @@ superseded-by:
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift/docs]
 
-## Open Questions
-
-1. Which is a preferred name for the new CR "Metal3ProvisioningController" or
-"Metal3Controller"?
-
-[Closed] Based on review comments it appears that "Metal3ProvisioningController"
-is the preferred name since it makes the contents of the config very clear.
-
-2. There is a possibility that the MCO would also have to refer to this new CR
-created in operator scope. Would it be OK for the MCO to access the CR with this
-(limited) scope?
-
-[Closed] MCO will be able to read config from this new CR if needed.
-
 ## Summary
 
 The configuration representing different provisioning network parameters used
@@ -77,7 +63,7 @@ to [2] for the necessary context for the enhancements proposed here.
 The Baremetal IPI deployments are different from the other platform types currently
 being supported by OpenShift in that there is no underlying cloud platform
 exposing an API as in public clouds e.g AWS, until the Baremetal Operator (BMO)
-along with Ironic services are run exposing an inventory of available hosts as
+along with provisioning services are run exposing an inventory of available hosts as
 custom resources.
 
 The "metal3" pod deployed by the Machine API operator (MAO) contains the BareMetal
@@ -96,10 +82,9 @@ fulfill a Machine.
 
 ### Goals
 
-The goal of this enhancement request is to provide details about the configuration
-being added to a new CR used only in "metal3" deployments. This new CR would be
-within the operator scope and will only contain configuration required by the
-provisioning service to boot baremetal servers.
+The goal of this enhancement request is to provide details about  a new CRD with
+configuration required bt Metal3 deployments to provision baremetal hosts. It
+would be created in metal3.io and will not be namespaced.
 
 ### Non-Goals
 
@@ -115,7 +100,7 @@ provisioning network for them to be PXE booted and given an IP address. To make
 this happen, the provisioning service needs to know which NIC, provisioning network,
 IP address and image URLs to use to download and boot images on these servers.
 
-A new CR called "Metal3ProvisioningController" would be created within the operator scope.
+A new CR called "Provisioning" would be created in metal3.io.
 
 This new CR would consist of the following:
 
@@ -134,24 +119,17 @@ address.) It is expected to be provided in the format : 10.1.0.3.
 ProvisioningIP and the ProvisioningDHCPRange are expected to be within this network.
 The value for this config is expected to be provided in the format : 10.1.0.0/24.
 
-4. ProvisioningDHCP : This configuration needs to convey two values: if the DHCP
-service needs to be managed within the cluster and if so what is the range of IP
-addresses that can used. Towards that end, this configuration would be a struct
-with 2 members:
-	1. ManagementType - The ManagementType is a string that can have any of
-	the following states "Managed", "Unmanaged", "Force", "Removed". In this
-	case, we are interested only in 2 states, "Managed" and "Removed". If the
-	ManagementType is "Removed" it means that the metal3 cluster would not be
-	responsible for managing DHCP addresses and an external DHCP server is
-	expected to be available and reachable by the cluster. If the ManagementType
-	is "Managed", then the DHCP range indicates the pool of IP addresses that
-	can used to assign to the baremetal hosts. This value cannot be changed
-	after installation.
+4. ProvisioningDHCPExternal : This configuration is an optional boolean value
+with a default of false. A value of true represents the case where the DHCP server
+is external to the Metal3 pod and expected to be provided before deployment. A
+value of false indicates that the DHCP server needs to be started within the
+Metal3 pod.
 
-	2. DHCPRange - The DHCPRange when set, is a string which consists of a pair of
-	comma seperated IP addresses representing the start and end of the IP address
-	range. If unset, then the default IP address range (.10 to .100) would be
-	used. The value of the DHCP range can be changed even after insallation.
+5. ProvisioningDHCPRange - The DHCPRange when set, is a string which consists of a
+pair of comma seperated IP addresses representing the start and end of the IP address
+range. If unset, then the default IP address range (.10 to .100) within the
+provisioning network would be used. The value of the DHCP range can be changed even
+after insallation.
 
 ### User Stories
 
@@ -164,18 +142,15 @@ being used in 4.2 and 4.3.)
 
 ## Design Details
 
-This new baremetal CR would be created in the "openshift-machine-api" namespace and as
-mentioned earlier would be in operator scope. Only one instance of this CR would be
-created by the installer and hence it is a singleton CR.
+This new baremetal CR would be created in metal3.io and will not be namespaced.
 
 Important details of the CR:
 
-Resource name - provisioningconfig.baremetal.operator.openshift.io
+Resource name - provisionings.metal3.io
 Instance name - main/default
-Namespace - openshift-machine-api
 Version - apiextensions.k8s.io/v1
 
-The new config items would be set by the installer and will be used by the MAO to
+The provisioning config resource is created by the installer and used by the MAO to
 generate more config items that are derivable from these basic parameters. Put
 together, these config parameters are passed in as environment variables to the various
 containers that make up a metal3 baremetal IPI deployment.
@@ -184,7 +159,7 @@ This baremetal provisioning CR contains configuration data for the provisioning 
 which are not values that should be configured by the end user via BareMetalHost objects.
 
 The configs described in this enhancement doc would be part of the Spec field of the CR.
-Only the ProvisioningDHCP.DHCPRange field can change after installtion, so this will be
+Only the ProvisioningDHCPRange field can change after installtion, so this will be
 marked as editable. All other config items will be marked as not editable.
  
 ### Test Plan
@@ -195,8 +170,8 @@ type is Baremetal.
 
 MAO reads this configuration and uses these to derive additional configuration
 required to bring up a metal3 cluster. E2e testing should make sure that MAO
-is able to bring up a metal3 cluster using config from this new Metal3Controller
-CR which has operator scope.
+is able to bring up a metal3 cluster using config from this new Provisioning
+CR.
 
 Once metal3 is up, the next level of testing should involve bringing up worker nodes.
 Also, testing needs to make sure we are still able to bring up worker nodes when there
