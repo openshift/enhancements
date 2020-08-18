@@ -57,9 +57,10 @@ possible point of confusion.
 ## Proposal
 
 Instead of creating the namespaces at install time as is currently done, add
-them to the list of resources to be synced in the machine-config-operator.
-This will allow us to add logic that considers the platform before creating
-them.
+them to the list of
+[resources to be synced](https://github.com/openshift/machine-config-operator/blob/master/pkg/operator/sync.go)
+in the machine-config-operator. This will allow us to add logic that considers
+the platform before creating them.
 
 For the naming, we propose `openshift-hosted-network-services` for all
 platforms that use these components. There is no need for a platform-specific
