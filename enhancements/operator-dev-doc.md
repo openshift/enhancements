@@ -8,7 +8,7 @@ We've created this document to serve as a common link for READMEs to answer `Wha
 `How do I build/update/test/deploy this code?`.
 
 Many OpenShift Operators were built using [openshift/library-go's framework](https://github.com/openshift/library-go/tree/master/pkg/operator)
-and also utilize [openshift/library-go's alpha-build-machinery](https://github.com/openshift/library-go/tree/master/alpha-build-machinery), a 
+and also utilize [openshift/library-go's build-machinery-go](https://github.com/openshift/build-machinery-go), a 
 collection of building blocks, Makefile targets, helper scripts, and other build-related machinery.  As a result, there are common methods 
 for building, updating, and developing these operators.  When adding features or investigating bugs, you may need to swap out a 
 component layer of a release payload for a locally built one.  Again, the process for doing this is shared among OpenShift operators, as well
@@ -79,7 +79,7 @@ $ oc get events -n [cluster-operator-namespace]
 ```
 
 ## How do I build|update|verify|run unit-tests
-In an openshift/repo that utilizes [openshift/library-go's alpha-build-machinery](https://github.com/openshift/library-go/tree/master/alpha-build-machinery), a useful command to list all make targets for a repository is:     
+In an openshift/repo that utilizes [openshift/library-go's build-machinery-go](https://github.com/openshift/build-machinery-go), a useful command to list all make targets for a repository is:     
 ```
 $ make help
 ```
