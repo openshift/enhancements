@@ -204,7 +204,7 @@ the following annotation:
 ```
 include.release.openshift.io/ibm-cloud-managed=true
 ```
-Manifests that should not be excluded such as control plane operators will not 
+Manifests that should be excluded such as control plane operators will not 
 include that annotation.
 
 #### Console Changes
