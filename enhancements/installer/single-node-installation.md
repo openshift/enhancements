@@ -26,7 +26,7 @@ superseded-by:
 
 # Single node installation
 
-Add a new `create aio-ignition` command to `openshift-installer` which
+Add a new `create aio-config` command to `openshift-installer` which
 allows a user to create an `aio.ign` Ignition configuration which
 launches a minimal all-in-one control plane using static pods.
 
@@ -40,7 +40,7 @@ launches a minimal all-in-one control plane using static pods.
 
 ## Summary
 
-The new installer `create aio-ignition` command generates an `aio.ign`
+The new installer `create aio-config` command generates an `aio.ign`
 file with a minimal all-in-one control plane using static pods. The
 installer command will use the same `install-config.yaml` input as the
 `create cluster` command.
@@ -102,10 +102,7 @@ these components.
 
 ## Proposal
 
-When a machine is booted with aio.ign, the aiokube systemd service is
-launched (similar to bootkube in the bootstrap ignition).
-
-The new installer `create aio-ignition` command generates an `aio.ign`
+The new installer `create aio-config` command generates an `aio.ign`
 file, based on an `install-config.yaml` file. The Ignition
 configuration includes assets such as TLS certificates and keys. When
 a machine is booted with CoreOS and this Ignition configuration, the
@@ -123,35 +120,34 @@ cluster.
 ### Initial POC
 
 What I did:
-- Updated the bootkube.sh script
-  ([here](https://github.com/eranco74/installer/commit/15c39c5b1bf0e08d8680116bfd9d3f126a05651b))
-- Setup the bootstrap control plane (without executing cluster-bootstrap)
-- Get the master ignition form the MCS
-- Extract the master ignition to disk using MCD --once-from option
-- Reload systemd daemon & Restart kubelet service
+- Added a new command to the openshift-installer `create aio-config`
+- Added aiokube.service and auikube.sh (based on bootkube)
+- Added kubelet.service and kubelet.conf for the aio-config target 
+- The aiokube setup the control plane (etcd, kube-apiserver, kube-controller-manager, kube-scheduler)
 
 To try this out:
-- Installer branch (https://github.com/eranco74/installer/tree/eran/aio)
+- Installer branch (https://github.com/eranco74/installer/tree/aio)
 - Build the installer (./hack/build.sh)
-- Generate ignition (copy install-config.yaml to ./mydir and run make generate)
-- Set up networking with `make network` (Provides DNS for `Cluster name: test-cluster, Base DNS: redhat.com`)
-- Spin up a VM with the “bootstrap” ignition with `make start`
-- Monitor the progress using `make ssh` and `journalctl -f -u bootkube.service`
-- Once the API is up, set the master node as schedulable (will be
-  removed) using `kubectl --kubeconfig=./mydir/auth/kubeconfig taint node master1 node-role.kubernetes.io/master:NoSchedule`
+- Add your pull secret to the ./install-config.yaml
+- Generate ignition - `make generate` (will copy an install config to ./mydir and run `./bin/openshift-install create aio-config --dir=mydir`)
+- Set up networking - `make network` (Provides DNS for `Cluster name: test-cluster, Base DNS: redhat.com`)
+- Download rhcos image - `make image` (will place rhcos-46.82.202007051540-0-qemu.x86_64.qcow2 under /tmp)
+- Spin up a VM with the aio.ign - `make start`
+- Monitor the progress using `make ssh` and `journalctl -f -u aiokube.service`
 
 Result:
 
 ```
-$ kubectl --kubeconfig=mydir/auth/kubeconfig  get nodes
-NAME      STATUS   ROLES    AGE     VERSION
-master1   Ready    master   3m17s   v1.18.3+1a1d81c
+$ kubectl --kubeconfig=./mydir/auth/kubeconfig get nodes 
+NAME      STATUS   ROLES           AGE   VERSION
+master1   Ready    master,worker   37s   v1.18.3+1a1d81c
 
-$ kubectl --kubeconfig=mydir/auth/kubeconfig  get pods -A
-NAMESPACE     NAME                                        READY   STATUS    RESTARTS   AGE
-kube-system   bootstrap-kube-apiserver-master1            2/2     Running   0          2m44s
-kube-system   bootstrap-kube-controller-manager-master1   1/1     Running   1          2m29s
-kube-system   bootstrap-kube-scheduler-master1            1/1     Running   0          2m37s
+$ kubectl --kubeconfig=./mydir/auth/kubeconfig get pods -A
+NAMESPACE     NAME                              READY   STATUS    RESTARTS   AGE
+kube-system   kube-apiserver-master1            2/2     Running   0          30s
+kube-system   kube-controller-manager-master1   1/1     Running   1          9s
+kube-system   kube-scheduler-master1            1/1     Running   0          11s
+
 ```
 
 Note that `etcd-metrics`, `etcd-member`, and `cluster-version-operator` are running but don’t show up as pods:
