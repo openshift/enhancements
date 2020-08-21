@@ -360,7 +360,7 @@ Server.
 
 ### RHCOS live ISO Environment
 
-As of OCP 4.5, [RHCOS includes a new live ISO/PXE ramdisk
+As of OCP 4.6, [RHCOS includes a new live ISO/PXE ramdisk
 environment](https://github.com/openshift/enhancements/pull/210) for installing
 RHCOS.  This environment is used to run
 [coreos-installer](https://github.com/coreos/coreos-installer/). Following that
