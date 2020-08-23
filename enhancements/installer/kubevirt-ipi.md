@@ -63,8 +63,11 @@ as DNS and Loadbalancing.
 We see two main network options for deployment over kubevirt:
 - Deploy the tenant cluster on the pods network and use OpenShift services and routes
 to provide DNS and Load-Balancing.
-- Deploy the tenant cluster on a secondary network and provide DNS service and Load-Balancing
-as pods attached to the secondary network.
+- Deploy the tenant cluster on a secondary network (using Multus) and provide DNS service and Load-Balancing
+as the same way as other KNI networking deployments using HAProxy, CoreDNS and keepalived running on the
+tenant cluster VMs. See the [baremetal ipi networking doc][baremetal-ipi-networking]
+
+ 
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -72,8 +75,8 @@ as pods attached to the secondary network.
 
     The installation starts and right after the user supplies their public ssh key,\
 and then choose `kubevirt` the installation will ask for all the relevant details\
-of the installation: **kubeconfig** for the infrastructure OpenShift, **namespace**, **storageClass** and \
- other kubevirt specific attributes. 
+of the installation: **kubeconfig** for the infrastructure OpenShift, **namespace**, **storageClass**, 
+ **networkName (NAD)** and other kubevirt specific attributes. 
 The installer will validate it can communicate with the api, otherwise it will fail to proceed.\
 
    With that the survey continues to the general cluster name, domain name, and \
@@ -92,9 +95,6 @@ the rest of the non-kubevirt specific question.
     
     When installing on pods network:
     - Services and routes for DNS and LB
-    
-    When installing on a secondary network:
-    - pods for running DNS and LB
 
 3. Bootstrap
 
@@ -138,6 +138,9 @@ joining the tenant cluster as masters and start scheduling pods.
         - With this approach admin of the infra cluster will need to be involved in
     the creation of each new tenant cluster since NADs need to be created and
     probably also nmstate will need to be used to create the topology on the hosts.
+    At the moment, we will assume that admin created all network resources before running the installer, 
+    and the created networkName (NAD) will be the input for the installer.  
+
         - Guest-agent is not available at the moment for RHCOS and when Multus is used \
          the VMI is depended on guest agent running inside the guest to report the IP address. 
     
@@ -180,17 +183,7 @@ joining the tenant cluster as masters and start scheduling pods.
     only between VMs(pods) that are related to the same provisioned cluster.
     
     ####Option 2 - Secondary network (Multus)
-    - set the cluster domain as subdomain of the infrastructure cluster.
     - Create VMs attached to the secondary network (NAD) that was configured.
-    - Create dnsmasq pod for DNS between VMs and pods on the secondary network.
-    - Create HAProxy pod for LB between the VMs
-        - The pod will be attached both to pods network and the secondary network.
-        - HAProxy backend will be set to the VMs.
-        - HAProxy fronted will listen both on the pods network interface and the secondary network interface.
-    - Create routes on the infarstructure cluster for the API and every other router referencing to a service
-    which expose the HAProxy pod.
-    - Create NAT Gateway pod to allow the VMs on the secondary network access outside the subnet through
-    the host network.
     - Isolation achieved by the secondary network, it's up to the admin to decide how to create the
     secondary networks that can use different VLAN/VXLAN/etc. 
     
