@@ -13,8 +13,8 @@ approvers:
   - "@ironcladlou"
   - "@knobunc"
 creation-date: 2019-11-20
-last-updated: 2019-12-03
-status: implementable
+last-updated: 2020-08-21
+status: implemented
 see-also:
 replaces:
 superseded-by:
@@ -32,9 +32,9 @@ superseded-by:
 
 ## Summary
 
-The ingress operator will publish the default certificate of the default
+The ingress operator publishes the default certificate of the default
 IngressController in a ConfigMap for other operators to consume.  This ConfigMap
-will be named `default-ingress-cert` and exist in the `openshift-config-managed`
+is named `default-ingress-cert` and exists in the `openshift-config-managed`
 namespace.  The intended consumers are other operators that need to incorporate
 the default certificate into their trust bundles in order to connect to Route
 resources.
@@ -42,7 +42,7 @@ resources.
 ## Motivation
 
 Operators need to be able to verify access via the default IngressController to
-the Routes that they create.  The default IngressController will use either a
+the Routes that they create.  The default IngressController uses either a
 default certificate that the operator generates using its own self-signed CA or
 a custom default certificate that the administrator configures, which may or may
 not be signed by a trusted root authority.  In any case, operators need to be
@@ -63,8 +63,8 @@ is outside the scope of this proposal.
 
 ## Proposal
 
-The ingress operator will publish the `default-ingress-cert` ConfigMap as
-described in the summary.
+The ingress operator was modified to publish the `default-ingress-cert`
+ConfigMap as described in the summary.
 
 ### User Stories
 
@@ -85,7 +85,7 @@ access to the route using the following steps:
 
 The ingress operator has a "certificate" controller, which lists and watches
 IngressControllers and ensures that each has a default certificate configured.
-This controller will be amended to perform the following additional steps:
+This controller was amended to perform the following additional steps:
 
 1. Check if the IngressController is the default one.  If not, skip the
    following steps.
@@ -120,7 +120,7 @@ certificate itself in the trusted certificates pool.  As the ConfigMap is not
 intended to be used outside of OpenShift's own operators, which are Go-based,
 publishing the certificate itself should not pose a problem.  Furthermore, the
 `default-ingress-cert` ConfigMap is an internal API, and to the extent that we
-document it at all, we will document that it has the default certificate, not
+document it at all, we should document that it has the default certificate, not
 the signing CA certificate.
 
 ## Design Details
@@ -128,12 +128,12 @@ the signing CA certificate.
 ### Test Plan
 
 The ConfigMap and its publication have well defined semantics.
-The controller that will publish `default-ingress-cert` has [unit test
+The controller that publishes `default-ingress-cert` has [unit test
 coverage](https://github.com/openshift/cluster-ingress-operator/blob/f48a2f92e0c0089e5ca432119fb87d8ebb5c808e/pkg/operator/controller/certificate/publish_ca_test.go).
 The operator has end-to-end tests, including
 [TestRouterCACertificate](https://github.com/openshift/cluster-ingress-operator/blob/f48a2f92e0c0089e5ca432119fb87d8ebb5c808e/test/e2e/operator_test.go#L394),
 to verify correct function of the "certificate" controller; this end-to-end test
-will be amended to cover the additional functionality.
+was amended to cover the additional functionality.
 
 ### Graduation Criteria
 
@@ -141,19 +141,17 @@ N/A.  This is an internal API.  See also "Upgrade / Downgrade Strategy".
 
 ### Upgrade / Downgrade Strategy
 
-The `default-ingress-cert` ConfigMap will supersede the current `router-ca`
-ConfigMap (see "Implementation History").  Once components that currently use
-the latter are updated to use the former, the latter will be removed.  The
-transition plan is as follows:
+The `default-ingress-cert` ConfigMap supersedes the `router-ca` ConfigMap (see
+"Implementation History").  Components that used the latter have been updated to
+use the former, and the latter has been removed:
 
-* The ingress operator will start publishing `default-ingress-cert` in 4.3.z.
-* The operators that currently use `router-ca` will start instead using
-  `default-ingress-cert` in 4.3.(z+1).
-* The ingress operator will stop publishing `router-ca` in 4.4.0.
+* In 4.3.3, the ingress operator started publishing `default-ingress-cert` ([openshift/cluster-ingress-operator331](https://github.com/openshift/cluster-ingress-operator/pull/331), [BZ#1788711](https://bugzilla.redhat.com/show_bug.cgi?id=1788711)).
+* In 4.4.0, the console operator changed from using `router-ca` to using `default-ingress-cert` ([openshift/console-operator#361](https://github.com/openshift/console-operator/pull/361)).
+* In 4.5.0, the ingress operator stopped publishing `router-ca` ([openshift/cluster-ingress-operator#377](https://github.com/openshift/cluster-ingress-operator/pull/377)).
 
 ### Version Skew Strategy
 
-TODO.
+N/A.
 
 ## Implementation History
 
@@ -168,14 +166,14 @@ publish `router-ca` if no IngressController exists that uses an
 operator-generated default certificate.
 
 The fact that the ingress operator conditionally publishes the `router-ca`
-ConfigMap poses a challenge for potential consumers, which cannot achieve their
-goals (typically, verifying a Route) if the ConfigMap does not exist, and the
-fact that `router-ca` contains the CA means that it _can only_ conditionally be
-published, as the ingress operator may not even have the CA certificate for a
-custom default certificate.
+ConfigMap in these OpenShift versions poses a challenge for potential consumers,
+which cannot achieve their goals (typically, verifying a Route) if the ConfigMap
+does not exist, and the fact that `router-ca` contains the CA means that it _can
+only_ conditionally be published, as the ingress operator may not even have the
+CA certificate for a custom default certificate.
 
-The `default-ingress-cert` ConfigMap will simplify matters for Go-based consumers,
-which will be able to assume that the new ConfigMap exists, always.
+The `default-ingress-cert` ConfigMap simplifies matters for Go-based consumers,
+which can assume that the new ConfigMap exists, always.
 
 The implementation history for `router-ca` precedes OpenShift 4.1 GA.
 [NE-139](https://jira.coreos.com/browse/NE-139) describes the initial
@@ -199,11 +197,11 @@ Following are the most salient PRs in the feature's history:
 * [openshift/console-operator#328 "Bug 1764704: Sync router-ca to the console namespace"](https://github.com/openshift/console-operator/pull/328)
   added `router-ca` to OpenShift Console's trust bundle.
 * [openshift/cluster-ingress-operator#329 "Always publish router-ca configmap"](https://github.com/openshift/cluster-ingress-operator/pull/329)
-  proposes making publication unconditional.
+  proposed making publication unconditional.
 * [openshift/cluster-ingress-operator#331 "publish a router-ca that can be used
   to verify routes in golang
   clients"](https://github.com/openshift/cluster-ingress-operator/pull/331)
-  implements the proposed API.
+  implemented the proposed API.
 
 ## Drawbacks
 
