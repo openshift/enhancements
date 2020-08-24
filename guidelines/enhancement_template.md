@@ -10,7 +10,7 @@ approvers:
   - "@oscardoe"
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
-status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced
+status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
 see-also:
   - "/enhancements/this-other-neat-thing.md"  
 replaces:
