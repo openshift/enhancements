@@ -3,7 +3,8 @@ title: bgp-overview
 authors:
   - "@russellb"
 reviewers:
-  - TBD
+  - "@danwinship"
+  - "@squeed"
 approvers:
   - TBD
 creation-date: 2020-08-11
@@ -40,6 +41,12 @@ OpenShift Nodes are connected to.
 
 ### Dynamic Routing for Egress Traffic
 
+*First, an aside on terminology: This is referring to IP Routing, and
+not the OpenShift feature called Routing that works at the HTTP layer.  There
+are also OpenShift features that use the word "egress", but in this context, we
+only mean to refer to traffic that is leaving the cluster and not related to
+any other features that use that name.*
+
 Some networks may have more than one router accessible from Nodes for
 availability reasons.  In this case an administrator may want to use BGP down
 to the Nodes themselves so they are aware of the multiple routing options and
@@ -51,11 +58,10 @@ custom configuration, but not with all network providers.  With OpenShift-SDN,
 it should be possible to run your own BGP routing daemon on the host via a
 `DaemonSet`.
 
-OVN-Kuberenetes uses a different host network configuration where egress
-traffic is routed by Open vSwitch flows programmed by OVN.  This mode is
-referred to as "shared gateway mode".  It means that a dynamic routing daemon
-must also feed those routes into OVN configuration, so it's not as straight
-forward as just running an existing daemon on the host.
+OVN-Kubernetes uses a different host network configuration where egress
+traffic is routed by Open vSwitch flows programmed by OVN.  It means that a
+dynamic routing daemon must also feed those routes into OVN configuration, so
+it's not as straight forward as just running an existing daemon on the host.
 
 A future enhancement is needed to describe how we would provide this
 functionality natively with OpenShift.
@@ -64,17 +70,18 @@ functionality natively with OpenShift.
 
 Many people become aware of BGP in the Kubernetes community via its use in
 [Calico][1].  The primary way BGP is used in Calico is as a control plane for
-the Pod network.  In other words, Calico uses BGP internally for Nodes to share
-the locations of Pod IP addresses in the cluster.
+the Pod network.  In this case, the use of BGP should be considered an
+implementation detail of the control plane.
 
 You may read Calico's own documentation to understand more details about how
 Calico uses BGP.
 
 There are other ways this control plane functionality can be implemented, such
 as using the Kubernetes API or by using some other custom control plane
-technology.  Both OpenShift-SDN and OVN-Kubernetes use alternative methods to
-implement their control planes and it is not feasible to change them to use
-BGP for this purpose.
+technology.  The key point is that there must be *something* that is
+responsible for distributing the information about the location of Pod IP
+addresses.  BGP is one possible approach to that, but using BGP for this use
+case is not a prerequisite for using BGP to satisfy other use cases.
 
 ### External Service Load Balancing
 
@@ -83,18 +90,23 @@ abstraction in front of a cloud's load balancer service.  Many on premise
 cluster environments do not have a load balancer service available, so these
 Services may not be used.
 
-It is possible to implement `LoadBalancer` Services for these on premise
-clusters other ways.  One way involves using a BGP speaker on Nodes to publish
-routes to Nodes where `LoadBalancer` IP addresses may be reached.  [MetalLB][2]
-is one project that implements this technique.  [OpenShift Enhancement #356][3]
-discusses the use of MetalLB with OpenShift in more detail.
+One way to expose a Service is to set the `Service.spec.externalIPs` field.
+Once this field has been set, if the IP address(es) are routed to one or more
+Nodes in the cluster, traffic to the Service port(s) will be forwarded to the
+appropriate Service Endpoints.  The major catch with using this interface is
+that routing of these external IP addresses to the Nodes is left up as an
+exercise to the cluster administrator.
+
+Another way to implement `LoadBalancer` Services for these on premise
+clusters is to use BGP speaker on Nodes to publish routes to Nodes where
+`LoadBalancer` IP addresses may be reached.  [MetalLB][2] is one project that
+implements this technique.  [OpenShift Enhancement #356][3] discusses the use
+of MetalLB with OpenShift in more detail.
 
 ### Exposing Pods or Services Directly
 
 Some users have expressed an interest in publishing routes for the Pod and
-Service networks via BGP.  This bypasses all of the usual interfaces used for
-getting traffic to applications in a cluster, so it's a bit of an awkward
-capability to offer from an architectural perspective.
+Service networks via BGP.
 
 If we wanted to offer this, it would not be very difficult.  At least with
 OpenShift-SDN and OVN-Kubernetes, Nodes are already set up to handle traffic
@@ -140,6 +152,18 @@ One example that should be avoided is any use of keepalived, as all Nodes
 running keepalived to manage a VIP (Virtual IP address) must reside on the same
 L2 segment since ARP (IPv4) or NDP (IPv6) is used to announce the new location
 of the VIP when it moves to a new Node.
+
+### Avoid any Hard Requirements on BGP
+
+Any use of BGP in OpenShift should remain optional.  We have some customers
+that do not want to use BGP at all, either for some technical or policy reason.
+We may explore using it to add optional features, but it should not be required
+for any OpenShift clusters.
+
+For example, we are considering [adding MetalLB][3] to OpenShift to support
+Services of `type=LoadBalancer`.  While MetalLB can use BGP, it also has an
+alternative `layer2` mode that can provide the same functionality, though with
+a different set of limitations.
 
 ## BGP Resources
 
