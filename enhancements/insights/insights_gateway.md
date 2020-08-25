@@ -51,9 +51,7 @@ The data are eventually sent to `https://cloud.redhat.com/api/ingress/v1/upload`
 
 One of the problems is that for each of the operators, one needs to configure
 correct credentials to authenticate the cluster against the remote resource
-(example in [cost management documentation](https://access.redhat.com/documentation
-/en-us/openshift_container_platform/4.5/html/getting_started_with_cost_management/
-assembly_adding_sources_cost#configuring_cost_mgmt-operator)). This leads to:
+(example in [cost management documentation](https://access.redhat.com/documentation/en-us/openshift_container_platform/4.5/html/getting_started_with_cost_management/assembly_adding_sources_cost#configuring_cost_mgmt-operator)). This leads to:
 
 - increased complexity for the user to set up this components
 - the need for each component to implement their own way to send the data 
@@ -97,7 +95,7 @@ that's already in place in insights-operator.
    https://insights-operator.openshift-insights.svc/rhinsights/v1/upload
    ```
 
-2. insights-operator will define a `ClusterRole`` granting access to this API via 'nonResourceURLs':
+2. insights-operator will define a `ClusterRole` granting access to this API via `nonResourceURLs`:
 
 ```
 apiVersion: rbac.authorization.k8s.io/v1
@@ -142,6 +140,17 @@ An OLM operator relying only on this feature will not work on an older version
 of the cluster, unless the operator has a fallback mechanism for this cases.
 This needs to be considered by the OLM operator author.
 
+Given this change broadens the scope of the pull-secret credentials for non-remote-health
+cases, the current way of [opting-out from the remote health](https://docs.openshift.com/container-platform/4.5/support/remote_health_monitoring/opting-out-of-remote-health-reporting.html)
+data collection needs to be revisited to either:
+
+a. note in the consequences that this will also affect other operators related to services in cloud.redhat.com
+
+b. provide a way to disable health data collection while keeping the secret in place
+
+Unless there is a specific case for (b), we would recommend for going with the simple solution in (a), as the assumption
+is for the customers concerned about their cluster being connected, there is not that big chance they would opt-out from
+health data monitoring, while allowing other components to send the data.
 
 ## Design Details
 
