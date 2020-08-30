@@ -11,22 +11,18 @@ approvers:
   - "@hardys"
   - "@crawford"
   - "@markmc"
-creation-date: yyyy-mm-dd
-last-updated: yyyy-mm-dd
-status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced
+creation-date: 2020-08-18
+last-updated: 2020-08-30
+status: provisional
 see-also:
   - "https://github.com/openshift/enhancements/pull/302"
   - "https://github.com/openshift/installer/pull/3978"
-replaces:
-  - "/enhancements/that-less-than-great-idea.md"
-superseded-by:
-  - "/enhancements/our-past-effort.md"
 ---
 
 
 # Single node installation
 
-Add a new `create aio-config` command to `openshift-installer` which
+Add a new `create single-node-config` command to `openshift-installer` which
 allows a user to create an `aio.ign` Ignition configuration which
 launches a minimal all-in-one control plane using static pods.
 
@@ -40,7 +36,7 @@ launches a minimal all-in-one control plane using static pods.
 
 ## Summary
 
-The new installer `create aio-config` command generates an `aio.ign`
+The new installer `create single-node-config` command generates an `aio.ign`
 file with a minimal all-in-one control plane using static pods. The
 installer command will use the same `install-config.yaml` input as the
 `create cluster` command.
@@ -100,9 +96,11 @@ these components.
   cluster.
 2. Support for expanding this all-in-one cluster to a regular cluster.
 
+3. cert rotation won't be handled. as a first step we will create certs with 10 years expiry.
+
 ## Proposal
 
-The new installer `create aio-config` command generates an `aio.ign`
+The new installer `create single-node-config` command generates an `aio.ign`
 file, based on an `install-config.yaml` file. The Ignition
 configuration includes assets such as TLS certificates and keys. When
 a machine is booted with CoreOS and this Ignition configuration, the
@@ -117,6 +115,7 @@ cluster.
 
 ### Implementation Details/Notes/Constraints [optional]
 
+
 ### Initial POC
 
 What I did:
@@ -126,7 +125,7 @@ What I did:
 - The aiokube setup the control plane (etcd, kube-apiserver, kube-controller-manager, kube-scheduler)
 
 To try this out:
-- Installer branch (https://github.com/eranco74/installer/tree/aio)
+- Installer branch: https://github.com/eranco74/installer/tree/aio (you can use https://github.com/eranco74/installer/tree/aio-4.6 for installing 4.6 release)
 - Build the installer (./hack/build.sh)
 - Add your pull secret to the ./install-config.yaml
 - Generate ignition - `make generate` (will copy an install config to ./mydir and run `./bin/openshift-install create aio-config --dir=mydir`)
@@ -190,7 +189,4 @@ tus.go:92] Unable to register node "localhost" with API server: nodes is forbidd
 
 ### Open Questions [optional]
 
-1. Operators are not running in the cluster and we need a way to rotate all certificates with a bash script using oc similar to this:
-   https://github.com/code-ready/snc/blame/master/kubelet-bootstrap-cred-manager-ds.yaml.in
-   Is this the best way to handle it?
-2. Are there any other ways these bootstrap static pods are deficient compared to the regular control plane static pods?
+1. Are there any other ways these bootstrap static pods are deficient compared to the regular control plane static pods?
