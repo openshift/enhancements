@@ -68,20 +68,17 @@ functionality natively with OpenShift.
 
 ### Pod Network Control Plane
 
-Many people become aware of BGP in the Kubernetes community via its use in
-[Calico][1].  The primary way BGP is used in Calico is as a control plane for
-the Pod network.  In this case, the use of BGP should be considered an
-implementation detail of the control plane.
-
-You may read Calico's own documentation to understand more details about how
-Calico uses BGP.
+One function that must be implemented for the Pod network is the control plane
+which keeps track of the physical location of each Pod IP address.  BGP is one
+technology which can be used to distribute this information among Nodes in a
+cluster.
 
 There are other ways this control plane functionality can be implemented, such
-as using the Kubernetes API or by using some other custom control plane
-technology.  The key point is that there must be *something* that is
-responsible for distributing the information about the location of Pod IP
-addresses.  BGP is one possible approach to that, but using BGP for this use
-case is not a prerequisite for using BGP to satisfy other use cases.
+as using the Kubernetes API (OpenShift-SDN) or by using some other custom
+control plane technology (OVN-Kubernetes).
+
+Using BGP for this function is *not* a prerequisite for using BGP to
+satisfy other use cases.
 
 ### External Service Load Balancing
 
@@ -171,6 +168,5 @@ a different set of limitations.
 * https://www.ciscopress.com/articles/article.asp?p=2756480
 * https://en.wikipedia.org/wiki/Border_Gateway_Protocol
 
-[1]: https://projectcalico.org
 [2]: https://metallb.universe.tf/
 [3]: https://github.com/openshift/enhancements/pull/356
