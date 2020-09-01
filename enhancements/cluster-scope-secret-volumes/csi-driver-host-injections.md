@@ -23,7 +23,7 @@ replaces:
   
 creation-date: 2020-03-17
 
-last-updated: 2020-08-03
+last-updated: 2020-09-01
 
 <!-- status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced -->
 status: implementable
@@ -243,7 +243,7 @@ spec:
         csi:
           driver: projectedresources.storage.openshift.io
           volumeAttributes:
-             projectedResourceName: the-projected-resource
+             share: the-projected-resource
 
 ```
 
@@ -319,7 +319,7 @@ spec:
         csi:
           driver: projectedresources.storage.openshift.io
           volumeAttributes:
-             projectedResourceName: the-projected-resource
+             share: the-projected-resource
 
 ```
  
