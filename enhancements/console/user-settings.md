@@ -54,12 +54,12 @@ User settings `ConfigMaps` will be stored in the `openshift-config-managed` name
 
 The console service account will be used to create, fetch, and update the `ConfigMaps` thereby preventing unauthorized access by any arbitrary user.
 
-Each user settings `ConfigMap` will have a generated name using `metadata.generateName: user-settings-`.
+Each user settings `ConfigMap` will have a generated name using `metadata.generateName: console-user-settings-`.
 
 In order to locate the `ConfigMap` associated to the user, labels will be used:
 
 - `console.openshift.io/user-settings: true`: identifies the `ConfigMap` for the purpose of user settings
-- `console.openshift.io/user: <user UID>`: associates the `ConfigMap` with its user by their unique identifier
+- `console.openshift.io/user: <user UID>`: associates the `ConfigMap` with its user by their unique identifier. `kubeadmin` has no `uid` therefore the value will be an empty string.
 
 Requires a nhe new role binding for the console service account to grants access to `create`, `update`, and `patch` for `ConfigMap` resources in the chosen namespace.
 
@@ -115,7 +115,7 @@ None
 
 ### Upgrade / Downgrade Strategy
 
-Support for this feature requires no special handling during upgrade. Default user settings will be provided.
+Some user settings today are stored in browser local storage. The Console frontend can implement support to merge these settings from local storage and override the defaults when no persisted user settings have been stored for the user.
 
 ### Version Skew Strategy
 
