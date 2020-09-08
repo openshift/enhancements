@@ -1,5 +1,5 @@
 ---
-title: kubevirt-platform-provider
+title: KubeVirt-platform-provider
 authors:
   - "@ravidbro"
 reviewers:
@@ -11,7 +11,7 @@ last-updated: 2020-07-14
 status: implementable
 ---
 
-# kubevirt-platform-provider
+# KubeVirt-platform-provider
 
 ## Release Signoff Checklist
 
@@ -25,10 +25,14 @@ status: implementable
 
 ## Summary
 
-This document describes how `kubevirt` becomes a platform provider for OpenShift. \
-`kubevirt` is a virtualization platform running as an extension of Kubernetes. \
- We want to enable few options to install OpenShift on `kubevirt` that will meet \
- different requirements of different use-cases. 
+This document describes how `KubeVirt` becomes a platform provider for OpenShift. \
+`KubeVirt` is a virtualization platform running as an extension of Kubernetes. \
+ We want to create a tenant cluster on top of existing OpenShift/Kubernetes cluster by creating
+ virtual machines by KubeVirt for every node in the tenant cluster (master and workers nodes)
+ and other Openshift/Kubernetes resources to allow **users** (not admins) of the infra cluster
+ to create a tenant cluster as it was an application running on the infra cluster.
+ To achieve that we will implement all the components needed for the installer and cluster-api-provider
+ for the machine-api to allow day 2 operations of resizing the cluster.
 
 
 ## Motivation
@@ -38,7 +42,7 @@ This document describes how `kubevirt` becomes a platform provider for OpenShift
 
 ### Goals
 
-- provide a way to install OpenShift on kubevirt infrastructure using 
+- provide a way to install OpenShift on KubeVirt infrastructure using 
   the installer - an IPI installation. (1st day)
 - implementing a cluster-api provider to provide scaling and managing the cluster
   nodes (used by IPI, and useful for UPI, and also node management/fencing) (2nd day)
@@ -50,17 +54,17 @@ This document describes how `kubevirt` becomes a platform provider for OpenShift
 ## Proposal
 
 This provider enables the OpenShift Installer to provision VM resources in 
-kubevirt infrastructure, that will be used as worker and masters of the clusters. It 
+KubeVirt infrastructure, that will be used as worker and masters of the clusters. It 
 will also create the bootstrap machine, and the configuration needed to get
 the initial cluster running by supplying a DNS service and load balancing.
 
-We want to approach deployment on OpenShift and kubevirt as deployment on cloud similar to the
+We want to approach deployment on OpenShift and KubeVirt as deployment on cloud similar to the
 deployments we have on public clouds as AWS and GCP rather than virtualization platform in a way 
 that the machine's network will be private, and the relevant endpoints will be exposed out of the
 cluster with platform services as we can or pods deployed in the infrastructure cluster to supply the services
 as DNS and Loadbalancing.
 
-We see two main network options for deployment over kubevirt:
+We see two main network options for deployment over KubeVirt:
 - Deploy the tenant cluster on the pods network and use OpenShift services and routes
 to provide DNS and Load-Balancing.
 - Deploy the tenant cluster on a secondary network (using Multus) and provide DNS service and Load-Balancing
@@ -74,13 +78,13 @@ tenant cluster VMs. See the [baremetal ipi networking doc][baremetal-ipi-network
 1. Survey
 
     The installation starts and right after the user supplies their public ssh key,\
-and then choose `kubevirt` the installation will ask for all the relevant details\
+and then choose `KubeVirt` the installation will ask for all the relevant details\
 of the installation: **kubeconfig** for the infrastructure OpenShift, **namespace**, **storageClass**, 
- **networkName (NAD)** and other kubevirt specific attributes. 
+ **networkName (NAD)** and other KubeVirt specific attributes. 
 The installer will validate it can communicate with the api, otherwise it will fail to proceed.\
 
    With that the survey continues to the general cluster name, domain name, and \
-the rest of the non-kubevirt specific question.
+the rest of the non-KubeVirt specific question.
 
 2. Resource creation - terraform
 
@@ -99,7 +103,7 @@ the rest of the non-kubevirt specific question.
 3. Bootstrap
 
     The bootstrap VM has a huge Ignition config set using terraform as secrets and is visible\
-as secrets on the infra OpenShift. kubevirt boots that VM with that content as ConfigDrive and the 
+as secrets on the infra OpenShift. KubeVirt boots that VM with that content as ConfigDrive and the 
 bootstraping begins when the `bootkube.service` systemd service starts.\
 
     This process described more thoroughly in the [installer overview document][https://github.com/OpenShift/installer/blob/37b99d8c9a3878bac7e8a94b6b0113fad6ffb77a/docs/user/overview.md#cluster-installation-process]
@@ -127,10 +131,10 @@ joining the tenant cluster as masters and start scheduling pods.
     - Pods network option
         -(OCP gap) The ports 22623/22624 that are used by MCS are blocked on the 
         pods network and prevent from the nodes to pull ignition and updates.
-        - (Kubevirt gap) Interface binding - Currently the only supported binding on the pods
+        - (KubeVirt gap) Interface binding - Currently the only supported binding on the pods
         network is masquerade which means that all nodes are behind NAT, each VM
         behind the NAT of his own pod.
-        - (Kubevirt gap) Static IP - Currently the VM egress IP is always the pod IP which is
+        - (KubeVirt gap) Static IP - Currently the VM egress IP is always the pod IP which is
         changing every time the VM restarts (and new pod is being created).
         
     - Secondary network option (MULTUS)
@@ -147,7 +151,7 @@ joining the tenant cluster as masters and start scheduling pods.
 - Storage
 
     Currently, attaching PV to a running VM (hot-plug) is not supported and may needed to develop CSI
-    driver for `kubevirt`.
+    driver for `KubeVirt`.
 
 
 ## Design Details
@@ -197,8 +201,8 @@ joining the tenant cluster as masters and start scheduling pods.
    This can be OCS CSI driver to consume storage from OCS installed on the infra
    OpenShift as a tenant of OCS or any other external storage.
    
-   ####Option 2 - Kubevirt CSI driver
-   Develop CSI driver for kubevirt platform. \
+   ####Option 2 - KubeVirt CSI driver
+   Develop CSI driver for KubeVirt platform. \
    This provider should forward the request to the infra cluster to allocate PV
    from the infra cluster storageClass and attach it to the relevant VM where the PV will be exposed to the guest
    as block device that the driver will attach to the requested pods.
