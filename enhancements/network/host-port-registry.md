@@ -90,6 +90,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 22623 | machine-config-server | node || masters only |
 | 22624 | machine-config-server | node || masters only |
 | 29101 | openshift-sdn | sdn || metrics |
+| 60000 | baremetal-operator | kni || metrics, 4.6+, control plane only |
 
 
 ### UDP
