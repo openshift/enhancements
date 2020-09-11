@@ -1,0 +1,14 @@
+digraph flow {
+	unrelated [ label="Bug does not have UpgradeBlocker" ];
+	suspect [ label="Bug has UpgradeBlocker\nbut none of the other labels" ];
+	componentDevQueue [ label="Bug has ImpactStatementRequested label\nand possibly also UpgradeBlocker" ];
+	graphAdminQueue [ label="Bug has ImpactStatementProposed label\nand possibly also UpgradeBlocker" ];
+	blocked [ label="Bug has UpdateRecommendationsBlocked label\nand possibly also UpgradeBlocker" ];
+
+	unrelated -> suspect [ label="suspected upgrade blocker" ];
+	suspect -> componentDevQueue [ label="bot requests\nimpact statement" ];
+	componentDevQueue -> graphAdminQueue [ label="component dev proposes\nan impact statement" ];
+	graphAdminQueue -> componentDevQueue [ label="graph admin quibbles\nwith impact statement" ];
+	graphAdminQueue -> unrelated [ label="graph admin accepts\n\"not a blocker\" impact statement" ];
+	graphAdminQueue -> blocked [ label="graph admin accepts\n\"blocker\" impact statement\nand lands blockers in graph-data" ];
+}
