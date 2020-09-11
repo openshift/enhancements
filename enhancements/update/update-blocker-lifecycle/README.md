@@ -109,6 +109,10 @@ This enhancement adds labels to make it clear whether the bug assignee is curren
 
 This enhancement formalizes the various steps in the decision process, allowing for some steps to be automated, and giving a clear `ImpactStatementProposed` queue for final block-or-not considertion.
 
+### API Extensions
+
+No API; just internal process.
+
 ### Risks and Mitigations
 
 No risks.
@@ -149,6 +153,18 @@ Or we may port closed bugs to new strategies, if that makes implementing the nex
 All of the data is in Bugzilla, and we control all the consumers for this internal workflow.
 So if we pivot strategies, we can turn off any robots and port everything that needs porting at once.
 There is no need to provision for version skew.
+
+### Operational Aspects of API Extensions
+
+No API; just internal process.
+
+#### Failure Modes
+
+No API; just internal process.
+
+#### Support Procedures
+
+No API; just internal process.
 
 ## Implementation History
 
