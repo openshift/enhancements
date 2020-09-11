@@ -64,31 +64,31 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 
 | Port  | Process   | Owning Team | Since | Notes |
 |-------|-----------|-------------|-------|-------|
-| 2379  | etcd      | etcd || masters only |
-| 2380  | etcd      | etcd || masters only |
-| 6443  | kube-apiserver | apiserver || masters only |
+| 2379  | etcd      | etcd || control plane only |
+| 2380  | etcd      | etcd || control plane only |
+| 6443  | kube-apiserver | apiserver || control plane only |
 | 9001  | machine-config-daemon oauth proxy | node || metrics |
 | 9100  | node-exporter | monitoring || metrics |
 | 9101  | openshift-sdn kube-rbac-proxy | sdn || metrics, openshift-sdn only |
-| 9102  | ovn-kubernetes master kube-rbac-proxy | sdn || metrics, masters only, ovn-kubernetes only |
+| 9102  | ovn-kubernetes master kube-rbac-proxy | sdn || metrics, control plane only, ovn-kubernetes only |
 | 9103  | ovn-kubernetes node kube-rbac-proxy | sdn || metrics |
 | 9537  | crio      | node || metrics |
-| 9641  | ovn-kubernetes northd | sdn | 4.3 | masters only, ovn-kubernetes only |
-| 9642  | ovn-kubernetes southd | sdn | 4.3 | masters only, ovn-kubernetes only |
-| 9643  | ovn-kubernetes northd | sdn | 4.3 | masters only, ovn-kubernetes only |
-| 9644  | ovn-kubernetes southd | sdn | 4.3 | masters only, ovn-kubernetes only |
-| 9978  | etcd      | etcd || metrics, masters only |
-| 9979  | etcd      | etcd || ?, masters only |
+| 9641  | ovn-kubernetes northd | sdn | 4.3 | control plane only, ovn-kubernetes only |
+| 9642  | ovn-kubernetes southd | sdn | 4.3 | control plane only, ovn-kubernetes only |
+| 9643  | ovn-kubernetes northd | sdn | 4.3 | control plane only, ovn-kubernetes only |
+| 9644  | ovn-kubernetes southd | sdn | 4.3 | control plane only, ovn-kubernetes only |
+| 9978  | etcd      | etcd || metrics, control plane only |
+| 9979  | etcd      | etcd || ?, control plane only |
 | 10010 | crio | node || stream port|
 | 10250 | kubelet | node || kubelet api |
-| 10251 | kube-scheduler | apiserver || healthz, masters only |
+| 10251 | kube-scheduler | apiserver || healthz, control plane only |
 | 10256 | openshift-sdn | sdn || healthz |
-| 10257 | kube-controller-manager | apiserver || metrics, healthz, masters only |
-| 10259 | kube-scheduler | apiserver || metrics, masters only |
-| 10357 | cluster-policy-controller | apiserver || healthz, masters only |
-| 17697 | kube-apiserver | apiserver || ?, masters only |
-| 22623 | machine-config-server | node || masters only |
-| 22624 | machine-config-server | node || masters only |
+| 10257 | kube-controller-manager | apiserver || metrics, healthz, control plane only |
+| 10259 | kube-scheduler | apiserver || metrics, control plane only |
+| 10357 | cluster-policy-controller | apiserver || healthz, control plane only |
+| 17697 | kube-apiserver | apiserver || ?, control plane only |
+| 22623 | machine-config-server | node || control plane only |
+| 22624 | machine-config-server | node || control plane only |
 | 29101 | openshift-sdn | sdn || metrics |
 
 
