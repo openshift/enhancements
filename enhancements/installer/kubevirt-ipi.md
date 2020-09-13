@@ -31,27 +31,30 @@ This document describes how [KubeVirt][kubevirt-website] becomes an infra provid
 
  We want to create a tenant cluster on top of existing OpenShift/Kubernetes cluster by creating
  virtual machines by KubeVirt for every node in the tenant cluster (master and workers nodes)
- and other Openshift/Kubernetes resources to allow **users** (not admins) of the infra cluster
+ and other OpenShift/Kubernetes resources to allow **users** (not admins) of the infra cluster
  to create a tenant cluster as it was an application running on the infra cluster.
  We will implement all the components needed for the installer and cluster-api-provider
- for the machine-api to allow day 2 operations of resizing the cluster.
+ for the machine-api to allow post-install operations of resizing the cluster.
 
 
 ## Motivation
 
 - Achieve true multi-tenancy of OpenShift were each tenant has dedicated control plane 
- and has full control on its configuration. 
+ and has full control on its configuration to allow each user to install different versions
+ with a different configuration as permissions settings and installed operators. 
 
 ### Goals
 
 - provide a way to install OpenShift on KubeVirt infrastructure using 
-  the installer - an IPI installation. (1st day)
+  the installer - an IPI installation. (install-time)
 - implementing a cluster-api provider to provide scaling and managing the cluster
-  nodes (used by IPI, and useful for UPI, and also node management/fencing) (2nd day)
-- Provide multi-tenancy and isolation between the tenant clusters
+  nodes (used by IPI, and useful for UPI, and node management/fencing) (post-install)
+- Provide multi-tenancy and isolation between the tenant clusters.
+- Provide tenant clusters with different versions and different configuration as permissions settings
+and installed operators.
 
 ### Non-Goals
-- UPI implementation will be provided separately.
+- Implement UPI flow.
 
 ## Proposal
 
@@ -60,15 +63,15 @@ KubeVirt infrastructure, that will be used as worker and masters of the clusters
 will also create the bootstrap machine, and the configuration needed to get
 the initial cluster running by supplying a DNS service and load balancing.
 
-We want to approach deployment on OpenShift and KubeVirt as deployment on cloud similar to the
+We want to approach deployment on KubeVirt as deployment on cloud similar to the
 deployments we have on public clouds as AWS and GCP rather than virtualization platform in a way 
 that the machine's network will be private, and the relevant endpoints will be exposed out of the
 cluster with platform services as we can or pods deployed in the infrastructure cluster to supply the services
-as DNS and Loadbalancing.
+as DNS and load balancing.
 
 We see two main network options for deployment over KubeVirt:
-- Deploy the tenant cluster on the pods network and use OpenShift services and routes
-to provide DNS and Load-Balancing.
+- Deploy the tenant cluster on the pods network and use OpenShift services and routes to provide 
+DNS and Load-Balancing. This option requires OpenShift to run KubeVirt and not Kubernetes.
 - Deploy the tenant cluster on a secondary network (using Multus) and provide DNS service and Load-Balancing
 as the same way as other KNI networking deployments using HAProxy, CoreDNS and keepalived running on the
 tenant cluster VMs. See the [baremetal ipi networking doc][baremetal-ipi-networking]
@@ -80,7 +83,7 @@ tenant cluster VMs. See the [baremetal ipi networking doc][baremetal-ipi-network
 1. Survey
 
     The installation starts and right after the user supplies their public ssh key,
-and then choose `KubeVirt` the installation will ask for all the relevant details
+and then chooses `KubeVirt` the installation will ask for all the relevant details
 of the installation: **kubeconfig** for the infrastructure OpenShift, **namespace**, **storageClass**, 
  **networkName (NAD)** and other KubeVirt specific attributes. 
 The installer will validate it can communicate with the api, otherwise it will fail to proceed.
@@ -92,15 +95,15 @@ the rest of the non-KubeVirt specific question.
 
    Terraform uses kubernetes provider to create:
 
-    - DataVolume with RHCOS image
+    - [DataVolume CR][data-volumes] with RHCOS image
 
          *Note:* In disconnected environment the user will need to provide a local image that the installer
           can upload to the namespace.
-    - secrets for the ignition configs of the VMs
+    - secrets for the Ignition configs of the VMs
     - 1 bootstrap machine
     - 3 masters
     
-    When installing on pods network:
+    Only on network option 1 - pods network:
     - Services and routes for DNS and LB
 
 3. Bootstrap
@@ -114,16 +117,16 @@ bootstraping begins when the `bootkube.service` systemd service starts.
 4. Masters bootstrap
 
     Master VMs are booting using a stub Ignition config that are waiting early in
-the Ignition service to load their Ignition config from a URL. That url is the
+the Ignition service to load their Ignition config from a URL. That URL is the
  `https://<internal-api-vip>/config/master` which is still not available until
 the **bootstrap** VM is exposing it. It takes few minutes till it does.
 
-    With the machine config available the masters pull their Ignition and boots up
-joining the tenant cluster as masters and start scheduling pods.
+    When the MachineConfigServer is available on the bootstrap, the masters pull their Ignition config 
+    and boot up joining the tenant cluster as masters and start scheduling pods.
 
 5. Workers bootstrap
 
-    After the masters and the control plane is up, we will scale the machineset to create workers
+    After the masters and the control plane is up, we will scale the MachineSet to create workers
     by the machine-api-operator.
 
 
@@ -133,12 +136,12 @@ joining the tenant cluster as masters and start scheduling pods.
 
     - Pods network option
         -(OCP gap) The ports 22623/22624 that are used by MCS are blocked on the 
-        pods network and prevent from the nodes to pull ignition and updates.
+        pods network and prevent from the nodes to pull Ignition config and updates.
         - (KubeVirt gap) Interface binding - Currently the only supported binding on the pods
         network is masquerade which means that all nodes are behind NAT, each VM
         behind the NAT of his own pod.
-        - (OpenShift/KubeVirt gap) Static IP - Currently OpenShift assumes that node's IP addresses are static,
-         and the VM egress IP is always the pod IP which is changing every time the VM restarts (and new pod is being created).
+        - (OpenShift/KubeVirt gap) Static IP - OpenShift assumes that node's IP addresses are static,
+         but KubeVirt VMs change IP between restarts.
         
     - Secondary network option (MULTUS)
     
@@ -340,3 +343,4 @@ minimize the load by not supporting parallel job invocations. Not sure its viabl
 
 [baremetal-ipi-networking]: https://github.com/OpenShift/installer/blob/master/docs/design/baremetal/networking-infrastructure.md
 [kubevirt-website]: https://kubevirt.io/
+[data-volumes]: https://github.com/kubevirt/containerized-data-importer#datavolumes
