@@ -47,7 +47,7 @@ to upgrade their clusters to deliver actual updates (either automatically or man
 
 Example of situation when the process is too slow:
 Two weeks ago we discovered an issue that for larger amount of generated alerts, IO Archives
-becomes too large (#148, CCXDEV-2673). We decided to fix it in all available versions (4.6, - 4.3)
+becomes too large (https://github.com/openshift/insights-operator/pull/148, https://bugzilla.redhat.com/show_bug.cgi?id=1862444). We decided to fix it in all available versions (4.6, - 4.3)
 We spent 3 days on development and review until it was merged in Master/4.6
 3 Days later we created PR for 4.5, it was merged 6 days later.
 6 days after we creted PR for 4.4 it is still not merged (now e2e tests are failing)
@@ -173,7 +173,7 @@ return to release image if Pod starts to fail.
 
 ## Design Details
 
-### <a name="implementation-phases"></a> Implementation phases
+### Implementation phases {:#implementation-phases}
 
 1. Implementation of *main* container and its orchestration in driver mode with execution of today’s Release version from Host
 with extracting the Gathering logic to *gatherer* and implementation of its host. At this phase driving will be disabled and 
