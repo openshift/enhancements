@@ -144,6 +144,27 @@ distribute traffic among the Nodes.
 A future enhancement needs to be filed to pursue this integration in more
 detail.
 
+### IP Anycast
+
+In both the [External Service Load Balancing](#external-service-load-balancing)
+and the [Exposing Pods or Services
+Directly](#exposing-pods-or-services-directly) sections, we discuss advertising
+some IP addresses via BGP to make them accessible from outside of the cluster.
+An extension would be to allow advertising the same IP address from more than
+one cluster (IP Anycast).
+
+This is particularly applicable to edge use cases where a client would be
+routed to the instance of a particular service IP with the fewest hops
+possible. This allows for regional affinity as the client is routed to the
+logically closest Node. This also allows for horizontal scalability, as
+additional clusters and Nodes could be created to spread client load across
+multiple service instances. Mobile clients may be expected to roam between
+endpoints as the number of hops changes with location, so this is suited to
+either fully stateless services over UDP such as DNS or video streaming, or
+semi-stateless services over TCP such as RESTful API endpoints. This technique
+could be used to load balance pods or services directly, or to expose multiple
+LoadBalancer instances.
+
 ### Virtual Network Interconnect and Hybrid Cloud
 
 The Pod network is by default an isolated virtual network.  There is sometimes
