@@ -144,11 +144,15 @@ distribute traffic among the Nodes.
 A future enhancement needs to be filed to pursue this integration in more
 detail.
 
-### Virtual Network Interconnect
+### Virtual Network Interconnect and Hybrid Cloud
 
 The Pod network is by default an isolated virtual network.  There is sometimes
 a desire to interconnect multiple virtual networks together.  This could be
 between multiple Kubernetes clusters, but it doesn't have to be the case.
+
+BGP, specifically MP-BGP, is commonly used as a signaling protocol, together
+with other data planes technologies like MPLS and VXLAN to interconnect virtual
+network at L2 or L3.
 
 BGP EVPN (Ethernet VPN, or Virtual Private Network) is a BGP technology that is
 discussed in the context of this use case.  BGP EVPN can be used to advertise
@@ -156,6 +160,10 @@ MAC addresses and IP-MAC address bindings.  BGP EVPN is not a full solution to
 this use case by itself, as it is a technology that can help implement part of
 the control plane.  There are more details that must be explored, including
 what the data plane looks like between the two clusters.
+
+BGP and MPLS is heavily used in the Telco area, and by the Cloud providers to
+interconnect their facilities to the Cloud, i.e. [AWS Direct
+connect](https://d1.awsstatic.com/whitepapers/Networking/integrating-aws-with-multiprotocol-label-switching.pdf).
 
 This is a significantly non-trivial effort.  Future enhancements are needed to
 discuss this in much more detail.
