@@ -9,10 +9,17 @@ reviewers:
 approvers:
   - "@sttts"
 creation-date: 2020-04-21
-last-updated: 2020-04-21
+last-updated: 2020-09-17
 ---
 
 # Rebasing openshift/kubernetes on kubernetes/kubernetes
+
+## Relevance
+
+This document provides instructions for rebasing release branches 4.5 and
+prior. Rebasing for releases 4.6 and above is documented in the
+[openshift/kubernetes](https://github.com/openshift/kubernetes/blob/master/REBASE.openshift.md)
+repository.
 
 ## Motivation for this document
 
