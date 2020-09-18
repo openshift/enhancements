@@ -69,9 +69,11 @@ functionality natively with OpenShift.
 ### Pod Network Control Plane
 
 One function that must be implemented for the Pod network is the control plane
-which keeps track of the physical location of each Pod IP address.  BGP is one
-technology which can be used to distribute this information among Nodes in a
-cluster.
+which keeps track of the physical location of each Pod IP address.  In other
+words, "Pod A is on Node X".  BGP is one technology which can be used to
+distribute this information among Nodes in a cluster.
+[Calico](#calico-and-bgp) is one example solution that uses BGP for this
+purpose.
 
 There are other ways this control plane functionality can be implemented, such
 as using the Kubernetes API (OpenShift-SDN) or by using some other custom
@@ -79,6 +81,30 @@ control plane technology (OVN-Kubernetes).
 
 Using BGP for this function is *not* a prerequisite for using BGP to
 satisfy other use cases.
+
+### Pod Network Traffic Routing and Avoiding Encapsulation
+
+Another way BGP could be used for the Pod network is to actually route traffic.
+Take the example of Pod A talking to Pod B.  Based on the discussion in [Pod
+Network Control Plane](#pod-network-control-plane), we may know that Pod A is
+on Node X and that Pod B is on Node Y.  BGP can also help get that traffic from
+Node X to Node Y.
+
+If the cluster nodes peer with routers in the network infrastructure supporting
+the OpenShift cluster, then Pod traffic can be routed through the network
+without this use of any tunnel encapsulation.  This can provide performance
+improvements to network throughput by avoiding the cost of tunnel
+encapsulation.  Hardware offload can help with tunnel encapsulation overhead,
+but the cost is still non-zero.  Hardware offload is also not available in all
+environments, such as when running on a virtual machine based public cloud.
+
+It's possible to partially avoid tunnel encapsulation without the use of BGP or
+another routing protocol.  If a network solution understands the underlying
+physical topology, it can skip tunnel encapsulation between nodes on the same
+layer 2 segment and only do encapsulation when L3 routing is required.  For
+example, [Calico can do
+this](https://docs.projectcalico.org/networking/vxlan-ipip) when not able to
+peer with the underlying network infrastructure via BGP.
 
 ### External Service Load Balancing
 
@@ -164,9 +190,34 @@ a different set of limitations.
 
 ## BGP Resources
 
+### General BGP Information
+
 * https://blog.cdemi.io/beginners-guide-to-understanding-bgp/
 * https://www.ciscopress.com/articles/article.asp?p=2756480
 * https://en.wikipedia.org/wiki/Border_Gateway_Protocol
+
+### Calico and BGP
+
+Calico is network provider for Kubernetes (and OpenShift) that uses BGP.  If
+you read about [its
+architecture](https://docs.projectcalico.org/reference/architecture/overview),
+you will see that some BGP components are central to the architecture.
+Calico's page on [Why BGP](https://www.projectcalico.org/why-bgp/) also
+provides some of their reasoning for using it.  This document doesn't intend to
+explain Calico fully, but since it's so common for Calico to come up when
+people think about Kubernetes and BGP that it's useful to talk about how it
+maps to the use cases discussed here.
+
+Calico uses BGP for the [Pod Network Control
+Plane](#pod-network-control-plane).  In the Calico docs, they refer to this as
+endpoint advertisement using BGP.  As discussed earlier in this doc, using BGP
+for this use case is not necessarily a prerequisite for using it for other
+network integration use cases.
+
+Calico can also use BGP to avoid tunnel encapsulation completely, but is also
+able to [selectively apply overlay
+networking](https://docs.projectcalico.org/networking/vxlan-ipip) if peering
+with the underlying network is not possible.
 
 [2]: https://metallb.universe.tf/
 [3]: https://github.com/openshift/enhancements/pull/356
