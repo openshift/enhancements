@@ -174,7 +174,9 @@ As an example:
 If an upstream component owner does not just accept PRs (e.g. selects an arbitrary go version or selects 
 an out of support ART equivalent from several releases ago), ART will not be able to reverse lookup the product 
 equivalent image. The component owner may believe they are building using a particular version of golang in 
-production, while they are not. It should be noted that, during this time, an alignment PR will remain open.
+production, while they are not. If a reverse lookup fails, ART will build with the component using
+the current state of ART metadata. It should be noted that, during this time, an alignment PR will remain 
+open and the overall release will be annotated as inconsistent (details follow).
 
 The proposal also implies that CI will make use of the FROM lines in the repository Dockerfiles. CI can 
 and will apply a mapping to these, but will derive the Golang version (or other versions of that matter) 
