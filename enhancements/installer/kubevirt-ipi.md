@@ -309,7 +309,7 @@ TODO
 
 ## Implementation History
 
-June 12th 2019 - Presented a fully working POC
+Sep 2020 - Presented a fully working POC
 
 ## Drawbacks
 
@@ -325,20 +325,9 @@ by an enhancement.
 
 - CI
 Running and end-to-end job is a must for this feature to graduate, and it is a
-non trivial task. oVirt is not a cloud solution and we need to provide a setup
-for a job invocation. We started with deploying a static oVirt deployment on GCP
-and it is working and able start an installation which is initiated from outside
-of GCP. Now we need to make sure the CI job can do the same.
-What's left is to make sure this instance network setup can work with the floating
-IP's we assign to it (the DNS and API VIPS). Currently we assume we can make that
-work because we control the dnsmasq inside VMs network.
-
-What could go wrong?
-- we may not be able to make the CI play nicely on time and we need as much help
-  and guidance here. 
-- multi ci jobs running in parallel will deploy 4 VMs on the infra, and I don't 
-know how will it handle the traffic and disk pressure. My guess is that we should
-minimize the load by not supporting parallel job invocations. Not sure its viable.
+non-trivial task. KubeVirt is not a cloud solution, and we need to provide a setup
+for a job invocation. We are starting with deploying a static OCP deployment on GCP
+as infra cluster.
 
 
 [baremetal-ipi-networking]: https://github.com/OpenShift/installer/blob/master/docs/design/baremetal/networking-infrastructure.md
