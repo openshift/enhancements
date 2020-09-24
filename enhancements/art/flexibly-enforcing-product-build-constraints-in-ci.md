@@ -99,10 +99,11 @@ Enhancement Goal:
   between upstream and downstream in order to provide organizational visibility. 
 
 ### Non-Goals
+This enhancement will not:
 - Improve coverage of minor Golang updates of the platform. Those updates only run openshift-tests 
   based tests (promotion jobs). We are aware that minor Golang updates do NOT have full test coverage, 
   e.g. unit, integration, operator tests are NOT run.
-- To allow upstream repositories to use arbitrary builder images. Even if this were desirable, 
+- Allow upstream repositories to use arbitrary builder images. Even if this were desirable, 
   it cannot be reproduced behind the firewall -- production builds cannot access the Internet 
   and all inputs to a given production build must themselves be produced as part of a production 
   build (e.g. an arbitrary golang version chosen upstream cannot be used downstream until a Red 
@@ -110,7 +111,7 @@ Enhancement Goal:
 - Within a given z-stream, allow users to pick a minor (eg. 1.15.1 vs 1.15.2) version of golang. 
   Instead, this proposal will ensure that the latest available patch level of the golang builder 
   image provided by the Red Hat golang team is used.
-- To solve the problem of building upstream Dockerfiles locally with tools like "podman build". 
+- Solve the problem of building upstream Dockerfiles locally with tools like "podman build". 
   With the current implementation, a Dockerfile which does not install any RPMs will build correctly 
   (in alignment with ART and CI) if the engineer is logged into the api.ci registry. 
   However, attempts to install RPM dependencies within a Dockerfile will fail as the yum 
