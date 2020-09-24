@@ -108,7 +108,8 @@ Enhancement Goal:
   build (e.g. an arbitrary golang version chosen upstream cannot be used downstream until a Red 
   Hat internal team builds  -- and supports -- that golang version as part of a production build).
 - Within a given z-stream, allow users to pick a minor (eg. 1.15.1 vs 1.15.2) version of golang. 
-  ART ensures that the latest available builder image provided by the golang team is used.
+  Instead, this proposal will ensure that the latest available patch level of the golang builder 
+  image provided by the Red Hat golang team is used.
 - To solve the problem of building upstream Dockerfiles locally with tools like "podman build". 
   With the current implementation, a Dockerfile which does not install any RPMs will build correctly 
   (in alignment with ART and CI) if the engineer is logged into the api.ci registry. 
@@ -200,6 +201,12 @@ The subsequent entry for a release in is/release would be a union of all istag i
 When rendering the release controller browser interface, a release payload possessing these annotations 
 will be displayed with an icon indicating inconsistency. When a user hovers their mouse over this icon, a 
 tooltip will display all inconsistencies that prevent this release from being released for production.
+
+An "inconsistent" release will still be accepted by the release controller if it passes standard
+testing. This is because inconsistency is completely normal during transitional periods (e.g. if
+a golang bump happens before feature complete). Inconsistency post feature-freeze will begin to affect
+ART pipelines & QE workflow, but the issues can be handled by those teams without disrupting the flow
+of nightlies. 
 
 ![Inconsistency Visualation](inconsistent.gif)
 
