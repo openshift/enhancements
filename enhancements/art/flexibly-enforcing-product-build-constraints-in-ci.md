@@ -192,16 +192,37 @@ ART believes the subsequent release cannot be used for a production. The release
 each inconsistency annotation within the ART imagestream into the subsequent release payload's imagestream 
 tag in is/release. 
 
-For example, if:
-`istag/4.5-art-latest:tests` has the annotation `"release.openshift.io/inconsistency": [ "Upstream and downstream build configurations differ" ]`
-`istag/4.5-art-latest:machine-os-content` has the annotation `"release.openshift.io/inconsistency": [ "Image build with disparate rpms" ]`
+To minimize the size of the annotations on the release imagestream (which is already near the 2MB limit),
+inconsistency annotations will have values of the form:
+```yaml
+component-a: [i1, i12]
+compoanen-b: [i1]
+```
+Where `i1`, `i12`, and other values are keys in a configmap on the same cluster. For example:
+```yaml
+i1: "Upstream and downstream build configurations differ"
+...
+i12: "Image build with disparate rpms"
+```
+
+When analyzing the 4.x-art-latest imagestream, if:
+`istag/4.5-art-latest:tests` has the annotation `'release.openshift.io/inconsistency': { 'tests': [ 'a1', 'a12' ] }` and
+`istag/4.5-art-latest:machine-os-content` has the annotation `'release.openshift.io/inconsistency': { 'machine-os-content': [ 'a2' ] }`
 
 The subsequent entry for a release in is/release would be a union of all istag inconsistency annotations:
-`istag/release:4.5.0...` would have the annotation `"release.openshift.io/inconsistency": [ "Image build with disparate rpms", "Upstream and downstream build configurations differ" ]`
+`istag/release:4.5.0...` would have the annotation:
+```
+'release.openshift.io/inconsistency': {
+    'tests': [ 'a1', 'a12' ],
+    'machine-os-content': [ 'a2' ]
+}
+```
 
 When rendering the release controller browser interface, a release payload possessing these annotations 
 will be displayed with an icon indicating inconsistency. When a user hovers their mouse over this icon, a 
-tooltip will display all inconsistencies that prevent this release from being released for production.
+tooltip will display all inconsistencies for each component that prevent this release from being promoted 
+into production. The codes, like `a1`, will be dereferenced and the associated messages will be displayed in 
+the tooltip.
 
 An "inconsistent" release will still be accepted by the release controller if it passes standard
 testing. This is because inconsistency is completely normal during transitional periods (e.g. if
@@ -209,7 +230,7 @@ a golang bump happens before feature complete). Inconsistency post feature-freez
 ART pipelines & QE workflow, but the issues can be handled by those teams without disrupting the flow
 of nightlies. 
 
-![Inconsistency Visualation](inconsistent.gif)
+![Inconsistency Visualization](inconsistent.gif)
 
 ### Risks and Mitigations
 
