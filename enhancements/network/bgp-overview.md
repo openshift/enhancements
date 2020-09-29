@@ -39,7 +39,7 @@ particularly with on premise clusters.
 It is possible to use BGP between the routers used to build the L3 network that
 OpenShift Nodes are connected to.
 
-### Dynamic Routing for Egress Traffic
+### L3 Redundancy for Nodes
 
 *First, an aside on terminology: This is referring to IP Routing, and
 not the OpenShift feature called Routing that works at the HTTP layer.  There
@@ -52,6 +52,11 @@ availability reasons.  In this case an administrator may want to use BGP down
 to the Nodes themselves so they are aware of the multiple routing options and
 potentially use ECMP (Equal Cost Multi Path) to distribute traffic
 across each of the routers.
+
+Another motivator for this configuration is to provide L3 redundancy instead of
+using bonding to provide L2 redundancy.  A node would publish a route to its IP
+to two different routers accessible by two different network interfaces. In
+this way
 
 This capability is not provided by OpenShift today.  It may be possible as a
 custom configuration, but not with all network providers.  With OpenShift-SDN,
