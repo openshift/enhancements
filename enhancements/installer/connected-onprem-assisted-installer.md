@@ -14,7 +14,7 @@ approvers:
   - "@abhinavdahiya"
   - "@eparis"
 creation-date: 2020-07-23
-last-updated: 2020-07-24
+last-updated: 2020-09-30
 status: implementable
 see-also:
   - "/enhancements/installer/connected-assisted-installer.md"  
@@ -25,7 +25,7 @@ see-also:
 ## Release Signoff Checklist
 
 - [X] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
+- [X] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
@@ -93,6 +93,29 @@ control or guarantees of reproducibility.
 
 ### Implementation Details/Notes/Constraints [optional]
 
+#### RHCOS Live ISO
+
+The user will download an RHCOS-based ISO from cloud.redhat.com, and it will
+already have embedded ignition including their pull secret and the systemd unit
+files required to run the assisted installer.
+
+The user will boot the live ISO and connect to it with their web browser. The
+on-premise assisted installer will itself be run with podman inside the live
+ISO.
+
+The user will need to boot the live ISO in a networking environment where either:
+
+1. The virtualization host has a L3 address that is routable from the hosts
+that will form the new cluster, and the host is configured to port-forward to
+the live ISO's VM.
+
+2. The live ISO VM will have a L3 address that is routable from the hosts that
+will form the new cluster. This is often referred to as "bridge networking".
+Notably, bridge networking is not the default if using libvirt on a RHEL or
+similar host; the default is for VMs to be on a subnet behind NAT. When Red Hat
+provides documentation on how to use the live ISO, it should reference or
+include guidance on how to accomplish such a networking setup.
+
 #### Single Use on Day 1 Only
 
 The on-premise assisted installer will run once per cluster. As a live ISO, it
@@ -108,16 +131,26 @@ installer service. The ISO needs to include:
 * a URL to where the assisted installer is running
 * a CA certificate so it can trust the assisted installer
 
-The assistant needs local access to a base RHCOS ISO in order to generate the
-Agent ISO. It will then run the following command, passing ignition either via
-`stdin` or as an additional argument.
+The assisted-service needs local access to a base RHCOS ISO in order to
+generate the Agent ISO. As of RHCOS 4.6, coreos-installer [can use the live
+ISO's own block device as the
+source.](https://github.com/coreos/coreos-installer/pull/197) That block
+device, found on the live ISO host at `/dev/disk/by-label/*coreos`, will be
+mounted into the assisted-service's container. assisted-service will run the
+following commands, passing ignition either via `stdin` or as an additional
+argument.
 
 ```
-coreos-installer iso embed -o /<output-path>/agent.iso /path/to/base/rhcos.iso
+cp /mnt/rhcos.iso ./agent.iso  # likely at some other mount point
+coreos-installer iso embed ./agent.iso
 ```
 
-To facilitate local access, the base ISO image will be included inside the
-assisted installer's container image.
+A [proposal to
+coreos-installer](https://github.com/coreos/coreos-installer/issues/382)
+suggests adding the ability for it to send output to stdout instead of saving
+it as a local file. That would enable assisted-service to avoid making a copy
+on the local filesystem, which consumes disk space that in the on-prem case is
+backed by RAM.
 
 #### S3
 
@@ -131,30 +164,50 @@ S3-like service in the on-premise implementation, the assisted installer
 service will write the generated ISO to its filesystem and serve that file
 through its API directly from the filesystem.
 
+#### TLS Trust
+
+Upon booting the assisted installer live ISO, it will generate a TLS
+certificate to be used in serving the API and UI. The public part of that
+certificate will be added to the ignition for ISOs that it generates, so that
+any client connecting to the assisted-service API from a discovered host will
+be able to trust the API.
+
+The Common Name in the certificate will be `assisted-api.local.openshift.io`.
+See the next section for details on how that will resolve.
+
+#### Hostname or IP for Service URL
+
+When the assisted installer generates Agent ISOs, it needs to include in that
+ISO a URL for its own API. To do so, it must determine an IP address or FQDN.
+Rather than make user provide that, it will use the following approach.
+
+When the assisted installer live ISO boots, it may get more than one IP
+address. It could get both an IPv4 and IPv6 address, or some users may find it
+necessary to assign it multiple addresses of one version or the other. Asking
+the user to pick just one address is undesirable because:
+
+* it adds a step
+* it may require the user to deeply investigate
+* the user may need the API and UI to listen on multiple addresses
+
+When ignition is generated for any host that needs to communicate back to the
+assisted-service API, it will include an entry that adds each IP address to
+that host's `/etc/hosts` file resolving to the name
+`assisted-api.local.openshift.io`. That way any client on the host will try all
+addresses if necessary to find one that it can route to. The addresses will be
+determined by an equivalent of running `hostname -I` on the assisted installer
+live ISO.
+
 ### Risks and Mitigations
 
 Communication between the Agent and the assisted installer must be protected
 with TLS. The Agent must be able to trust the assisted installer service so
-that it does not receive rogue provisioning instructions.
+that it does not receive rogue provisioning instructions. This is mitigated
+as described in the "TLS Trust" section above.
 
 ## Design Details
 
 ### Open Questions [optional]
-
-#### RHCOS ISO image delivery
-
-Is there a better way to make the base RHCOS ISO image available locally than
-including it in the assistant's container image? The user will end up
-downloading RHCOS twice; once for the live ISO that runs the assisted
-installer, and once as part of the assisted installer's container image. It is
-possible that the former will be in a different format, for example if they
-will run the live ISO on a particular virtualization platform.
-
-When run inside a RHCOS live ISO, `coreos-installer` will by default [install
-RHCOS using local data
-only](https://github.com/coreos/coreos-installer/pull/197); it does not need to
-download an image. Is a similar approach possible when running
-`coreos-installer iso embed`?
 
 ### Test Plan
 
@@ -233,9 +286,9 @@ user's machine. The user would copy a `podman` command from cloud.redhat.com and
 locally.
 
 Advantages include:
-* less stuff to download
 * no need to support a number of potential virtualization platforms
 * exposing the assisted installer's API service from a container may be easier in many cases than exposing it from a VM
+* in the future the live ISO can run on one of the hosts and serve the bootstrap role. This requires an OS on that host, which the live ISO provides.
 
 Downsides:
 * the user may not have podman available, even though it ships in RHEL, Fedora, and other distributions
