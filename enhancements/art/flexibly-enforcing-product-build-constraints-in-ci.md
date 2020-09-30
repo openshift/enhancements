@@ -166,7 +166,8 @@ As an example:
    discrepancy is ignored (the PR and BZ remain open).
 8. **Day N**: If, at any point after feature freeze, the ART build pipeline detects that an upstream repository is not using 
    the builder image defined in ART metadata, the release will be marked as inconsistent (visible in the release controller 
-   and programmatically accessible by checking an annotation). If the ART pipeline attempts to promote an inconsistent release, 
+   and programmatically accessible by checking an annotation). 
+   At GA (and thereafter), if the ART pipeline attempts to promote an inconsistent release, 
    it will abort unless it is manually overridden. The manual override would only be undertaken if it was determined, 
    with architectural approval, that the inconsistency was introduced erroneously and that the promotion is a critical 
    delivery (e.g. a CVE fix).
