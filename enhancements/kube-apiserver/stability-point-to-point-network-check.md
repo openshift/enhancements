@@ -279,10 +279,21 @@ feasability of this enhancement.
    takes an outage on local kube-apiserver rollout. We are addressing by 
    switching to the internal LB.
 
-2. _Suspected:_ connection refused from kube-apiserver to openshift-apiserver
-   endpoint during upgrade. It's not obvious if this expected due to SDN 
-   rollout (in which case we should consider reordering) or if it is 
-   unexpected.
+2. _Confirmed:_ connection refused from kube-apiserver to openshift-apiserver
+   endpoint during upgrade. Reason unknown. See the log entries corresponding 
+   to the `2020-07-22T13:37:21Z` timestamp in the 
+   `namespaces/openshift-kube-apiserver/controlplane.operator.openshift.io/podnetworkconnectivitychecks/kube-apiserver-ci-op-v92gtp5p-77d57-ds8mq-master-1-to-openshift-apiserver-service-172-30-23-188-443.yaml`
+   file in the
+   [must-gather.tar](https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/origin-ci-test/logs/release-openshift-origin-installer-e2e-gcp-upgrade-4.5-stable-to-4.6-ci/1285910416773353472/artifacts/e2e-gcp-upgrade/must-gather.tar)
+   archive for the 
+   [release-openshift-origin-installer-e2e-gcp-upgrade-4.5-stable-to-4.6-ci #1285910416773353472](https://prow.ci.openshift.org/view/gcs/origin-ci-test/logs/release-openshift-origin-installer-e2e-gcp-upgrade-4.5-stable-to-4.6-ci/1285910416773353472)
+   job.
+   
+3. _Suspected:_ OpenStack drops its external loadbalancer for ten seconds.
+
+4. _Confirmed:_ Azure host-network pods cannot reliably contact themselves via 
+   load balancers, leading to kubelet, sdn, kcm, ks instability.
+   https://github.com/openshift/machine-config-operator/pull/2089
 
 ## Design Details
 
