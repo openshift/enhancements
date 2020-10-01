@@ -14,7 +14,7 @@ approvers:
   - "@abhinavdahiya"
   - "@eparis"
 creation-date: 2020-07-23
-last-updated: 2020-09-30
+last-updated: 2020-10-06
 status: implementable
 see-also:
   - "/enhancements/installer/connected-assisted-installer.md"  
@@ -57,6 +57,7 @@ service on-premise.
 * Disconnected and air-gapped environments are not included in this enhancement.
 * Adding Nodes on day 2 will be addressed separately.
 * Utilizing a local container registry for mirrored content will be addressed in a future enhancement.
+* Running assisted-installer on one of the control plane hosts will be addressed in a future enhancement. For now the assisted-installer must run on a separate host.
 
 ## Proposal
 
@@ -103,7 +104,8 @@ The user will boot the live ISO and connect to it with their web browser. The
 on-premise assisted installer will itself be run with podman inside the live
 ISO.
 
-The user will need to boot the live ISO in a networking environment where either:
+The user will need to boot the live ISO in a networking environment where one
+of these is true:
 
 1. The virtualization host has a L3 address that is routable from the hosts
 that will form the new cluster, and the host is configured to port-forward to
@@ -115,6 +117,9 @@ Notably, bridge networking is not the default if using libvirt on a RHEL or
 similar host; the default is for VMs to be on a subnet behind NAT. When Red Hat
 provides documentation on how to use the live ISO, it should reference or
 include guidance on how to accomplish such a networking setup.
+
+3. The live ISO is booted on bare metal where it gets an L3 address that is
+routable from the hosts that will form the new cluster.
 
 #### Single Use on Day 1 Only
 
@@ -253,17 +258,8 @@ older versions are offered, by downloading it from cloud.redhat.com.
 
 ### Version Skew Strategy
 
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
-
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
+Not applicable. The on-premise modality of assisted installer does not have its
+own versioning.
 
 ## Implementation History
 
@@ -288,11 +284,11 @@ locally.
 Advantages include:
 * no need to support a number of potential virtualization platforms
 * exposing the assisted installer's API service from a container may be easier in many cases than exposing it from a VM
-* in the future the live ISO can run on one of the hosts and serve the bootstrap role. This requires an OS on that host, which the live ISO provides.
 
 Downsides:
 * the user may not have podman available, even though it ships in RHEL, Fedora, and other distributions
 * running containers with podman may be less familiar to users than running a live ISO
+* in the future the live ISO can run on one of the hosts and serve the bootstrap role. This requires an OS on that host, which the live ISO provides.
 
 ## Infrastructure Needed [optional]
 
