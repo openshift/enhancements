@@ -220,7 +220,8 @@ for any OpenShift clusters.
 For example, we are considering [adding MetalLB][3] to OpenShift to support
 Services of `type=LoadBalancer`.  While MetalLB can use BGP, it also has an
 alternative `layer2` mode that can provide the same functionality, though with
-a different set of limitations.
+a different set of limitations.  It's also possible to set up static routing
+for the IP addresses you desire to be reachable on your cluster.
 
 ## BGP Resources
 
