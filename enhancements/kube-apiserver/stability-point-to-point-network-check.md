@@ -129,9 +129,11 @@ The binary will:
 
 2. Perform each check found.
 
-3. Append entries to the `status.successes` and `status.failures` as needed.
+3. Append entries to the `status.successes` and `status.failures` logs as
+   needed, limited to ten entries in each log.
 
-4. Append entries to `status.outages` as needed.
+4. Append entries to `status.outages` as needed. Limited to the last twenty
+   outages.
 
 5. Update `status.conditions` as needed.
 
@@ -163,8 +165,7 @@ be a good place to talk about core concepts and how they relate.
 package v1alpha1
 
 import (
-	"time"
-
+	v1 "github.com/openshift/api/config/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -180,10 +181,18 @@ type PodNetworkConnectivityCheck struct {
 type PodNetworkConnectivityCheckSpec struct {
 	// SourcePod names the pod from which the condition will be checked
 	SourcePod string `json:"sourcePod"`
+
 	// EndpointAddress to check. A TCP address of the form host:port. Note that
 	// if host is a DNS name, then the check would fail if the DNS name cannot
 	// be resolved. Specify an IP address for host to bypass DNS name lookup.
 	TargetEndpoint string `json:"targetEndpoint"`
+
+	// TLSClientCert, if specified, references a kubernetes.io/tls type secret with 'tls.crt' and
+	// 'tls.key' entries containing an optional TLS client certificate and key to be used when
+	// checking endpoints that require a client certificate in order to gracefully preform the
+	// scan without causing excessive logging in the endpoint process. The secret must exist in
+	// the same namespace as this resource.
+	TLSClientCert v1.SecretNameReference `json:"tlsClientCert,omitempty"`
 }
 
 type PodNetworkConnectivityCheckStatus struct {
@@ -208,15 +217,23 @@ type LogEntry struct {
 	// Message explaining status in a human readable format.
 	Message string `json:"message"`
 	// Latency records how long the action mentioned in the entry took.
-	Latency time.Duration `json:"latency"`
+	Latency metav1.Duration `json:"latency"`
 }
 
 // OutageEntry records time period of an outage
 type OutageEntry struct {
 	// Start of outage detected
-	Start time.Time
+	Start metav1.Time
 	// End of outage detected
-	End time.Time
+	End metav1.Time
+	// StartLogs contains log entries related to the start of this outage. Should contain
+	// the original failure, any entries where the failure mode changed.
+	StartLogs []LogEntry `json:"startLogs,omitempty"`
+	// EndLogs contains log entries related to the end of this outage. Should contain the success
+	// entry that resolved the outage and possibly a few of the failure log entries that preceded it.
+	EndLogs []LogEntry `json:"endLogs,omitempty"`
+	// Message summarizes outage details in a human readable format.
+	Message string `json:"message,omitempty"`
 }
 
 type PodNetworkConnectivityCheckCondition struct {
@@ -310,8 +327,13 @@ status:
         message: "Failed connect to 10.0.134.23:2379; No route to host"
     outages:
       - start: '2020-04-20T14:11:18Z'
-      - start: '2020-03-20T12:10:00Z'
-        end: '2020-03-20T12:12:00Z'
+        message: "Failed connect to 10.0.134.23:2379; No route to host"
+        startLogs:
+          - time: '2020-04-20T14:11:18Z'
+            success: false
+            reason: ConnectError
+            message: "Failed connect to 10.0.134.23:2379; No route to host"
+            latency: "208ms"
     successes:
       - time: '2020-04-20T13:11:18Z'
         success: true
