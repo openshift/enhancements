@@ -271,7 +271,8 @@ Runs in a container in the interested pod. Executes check and updates `PodNetwor
 Usage: 
 
 ```
-p2pnc check tcp-endpoint
+$ POD_NAME=pod POD_NAMESPACE=ns check-endpoints
+```
 
 ``` 
 
@@ -334,6 +335,7 @@ status:
             reason: ConnectError
             message: "Failed connect to 10.0.134.23:2379; No route to host"
             latency: "208ms"
+        
     successes:
       - time: '2020-04-20T13:11:18Z'
         success: true
