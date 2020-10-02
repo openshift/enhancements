@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eidolon/wordwrap"
 	"github.com/google/go-github/v32/github"
 	"golang.org/x/oauth2"
 
@@ -18,8 +17,6 @@ import (
 	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/stats"
 )
-
-var wrapper = wordwrap.Wrapper(70, false)
 
 // fileExists checks if a file exists and is not a directory before we
 // try using it to prevent further errors.
@@ -37,16 +34,22 @@ func handleError(msg string) {
 }
 
 func formatDescription(text string, indent string) string {
-	paras := strings.SplitN(text, "\n", -1)
-	wrappedParas := []string{}
+	paras := strings.SplitN(text, "\n\n", -1)
+
+	unwrappedParas := []string{}
+
 	for _, p := range paras {
-		wrappedParas = append(wrappedParas, wrapper(p))
+		unwrapped := strings.ReplaceAll(p, "\n", " ")
+		quoted := fmt.Sprintf("%s> %s", indent, unwrapped)
+		unwrappedParas = append(unwrappedParas, quoted)
 	}
-	wrappedText := strings.Join(wrappedParas, "\n")
-	return wordwrap.Indent(wrappedText, indent, true)
+
+	joinOn := fmt.Sprintf("\n%s>\n", indent)
+
+	return strings.Join(unwrappedParas, joinOn)
 }
 
-const descriptionIndent = "\t      "
+const descriptionIndent = "  "
 
 func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool) {
 	fmt.Printf("\n## %s Enhancements\n", name)
