@@ -27,8 +27,9 @@ superseded-by:
 
 This is where to call out areas of the design that require closure before deciding
 to implement the design.  For instance, 
- > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this? 
+
+> 1. This requires exposing previously private resources which contain sensitive
+>    information.  Can we do this?
 
 ## Summary
 
@@ -44,6 +45,7 @@ or cluster ingress.
 
 This enhancement compliments existing metrics reported by REST client instrumentation. This enhancement derives
 additional value by:
+
 * REST calls can fail for a variety of reasons beyond simple DNS lookup and reachability of the target endpoint.
 * Limiting scope to DNS lookup and TCP connect to target endpoint. REST client can fail for a variety of other reasons.
 * Providing insights into target endpoints that are not accessed a REST client.
@@ -66,7 +68,24 @@ additional value by:
 
 ## Proposal
 
-### 1. One instance of a new `PodNetworkConnectivityCheck` CR per point to point connection.
+This enhancement will provide:
+
+1. `PodNetworkConnectivityCheck` resource definiton to define desired connectivity checks and maintain logs of the execution of those checks.
+
+2. `check-endpoints` binary to perform the connectivity checks.
+
+3. `ConnectivityCheckController` for operators to manage the creation of thier `PodNetworkConnectivityCheck` resources.
+
+
+
+### User Stories
+
+Detail the things that people will be able to do if this is implemented.
+Include as much detail as possible so that people can understand the "how" of
+the system. The goal here is to make this feel real for users without getting
+bogged down.
+
+#### As an OpenShift operator, I want to define point-to-point connections between my operand's pod and a target endpoint, so that my operand pod can report on the status of the connectivity to the target endpoint.
 
 A point to point connection is between a source pod and a target endpoint.
 
@@ -76,81 +95,75 @@ operator will observe the workload resources to determine the list of pods and c
 resource for each target endpoint per pod. Operators that directly manage a source pod (such as operators that manage 
 static-pods) will create `PodNetworkConnectivityCheck` resources for each target endpoint when creating the source pod.
 
-### 2. Detailed status, probably some kind of latency information.
+#### As an OpenShift administrator, I was to see detailed status of the current connectivity to a target endpoint, so that I may troubleshoot issues.
 
 The `PodNetworkConnectivityCheck` will maintain a log of the actions performed during a check, recording if the actions
 were successful, a reason for success or failure, latency of performing the action and some human readable message.
 
 **LogEntry:**
+
 ```go
 // LogEntry records events
 type LogEntry struct {
-	// Start time of check action.
-	Start metav1.Time `json:"time,omitempty"`
-	// Status indicates if the action performed by the check was successful or not.
-	Success bool `json:"status"`
-	// Reason for status in a machine readable format.
-	Reason LogEntryReason `json:"reason"`
-	// Message explaining status in a human readable format.
-	Message string `json:"message"`
-	// Latency records how long the action mentioned in the entry took.
-	Latency time.Duration `json:"latency"`
+    // Start time of check action.
+    Start metav1.Time `json:"time,omitempty"`
+    // Status indicates if the action performed by the check was successful or not.
+    Success bool `json:"status"`
+    // Reason for status in a machine readable format.
+    Reason LogEntryReason `json:"reason"`
+    // Message explaining status in a human readable format.
+    Message string `json:"message"`
+    // Latency records how long the action mentioned in the entry took.
+    Latency time.Duration `json:"latency"`
 }
-``` 
+```
 
-The start and end time of detected outages will be logged separately from the individual check actions.
+The `PodNetworkConnectivityCheck` resource will contain `status.success` and `status.failures` logs detailing the
+results of the actions that taken when performing a connectivity check.
 
-### 3. It should be possible to clean up garbage after a couple hours of inactivity.
+#### As an OpenShift administrator, I was to see details of current and past connectivity outages to a target endpoint, so that I may troubleshoot issues.
 
-A controller to prune `PodNetworkConnectivityCheck` resources, will be provided for inclusion into source pod operators.
+The start and end time of detected outages will be logged separately from the individual check actions. Outage entries
+will also record the first five log entries at the start of the outage and the last five log entries at the end of the
+outage.
 
-A `PodNetworkConnectivityCheck` resource would be pruned after 48 hours of inactivity.
+```go
+// OutageEntry records time period of an outage
+type OutageEntry struct {
+    // Start of outage detected
+    Start metav1.Time
+    // End of outage detected
+    End metav1.Time
+    // StartLogs contains log entries related to the start of this outage. Should contain
+    // the original failure, any entries where the failure mode changed.
+    StartLogs []LogEntry `json:"startLogs,omitempty"`
+    // EndLogs contains log entries related to the end of this outage. Should contain the success
+    // entry that resolved the outage and possibly a few of the failure log entries that preceded it.
+    EndLogs []LogEntry `json:"endLogs,omitempty"`
+    // Message summarizes outage details in a human readable format.
+    Message string `json:"message,omitempty"`
+}
+```
 
-Tools updating `PodNetworkConnectivityCheck` log entries should simultaneously delete the oldest log entry to ensure
-there are never more that 20 entries.
+### As an OpenShift operator, I want to clean up garbage, so that resource usage can be minimized.
 
-### 4. Don't delete aggressively, on upgrades, we have different endpoints
+A controller to prune `PodNetworkConnectivityCheck` resources, will be provided for inclusion into source pod operators,
+pruning  `PodNetworkConnectivityCheck` resources after 48 hours of inactivity.
 
-Source pods managed by workload controllers will have new `PodNetworkConnectivityCheck` resources to go along with their
-new names. The old `PodNetworkConnectivityCheck` resource will eventually go stale and be cleaned up by the provided
-pruning controller. 
+Tools updating `PodNetworkConnectivityCheck` log entries should simultaneously delete the oldest log and outage entries
+to ensure there are never more that 20 entries.
 
-Directly managed pods whose names do not change (such as static pods) will share `PodNetworkConnectivityCheck` resources
-across revisions and upgrades.
+### As an OpenShift administrator, I want a consistant insight into pods whose names change when redeployed, so that I can troubleshoot during upgrades and redeployments.
 
-### 5. Create a binary that can take multiple destinations paired with instances to write to.
+Operators shoud create `PodNetworkConnectivityCheck` resources with names agnostic to the source pod name, so that they
+can be shared across revisions and upgrades, preventing the resource from eventually going stale and be cleaned up by
+the provided pruning controller. Tools updating `PodNetworkConnectivityCheck` resources should tolerate changes in the
+source pod name or missing source pod names.
 
-### 6. Use that binary in containers included in each kas and oas (or other interesting) pod.
+### As an OpenShift operator, I want my operand pod to perform the connectivity checks, so that connectivity status can be logged.
 
-The binary will:
-
-1. List all `PodNetworkConnectivityCheck` resource in the same namespace, where `spec.sourcePodName` matches the pod the
-   binary is running in.
-
-2. Perform each check found.
-
-3. Append entries to the `status.successes` and `status.failures` logs as
-   needed, limited to ten entries in each log.
-
-4. Append entries to `status.outages` as needed. Limited to the last twenty
-   outages.
-
-5. Update `status.conditions` as needed.
-
-6. If unable to update the resource, retry updates at a later time.
-
-7. Repeat evey minute.
-
-### User Stories
-
-Detail the things that people will be able to do if this is implemented.
-Include as much detail as possible so that people can understand the "how" of
-the system. The goal here is to make this feel real for users without getting
-bogged down.
-
-#### Story 1
-
-#### Story 2
+The `check-endpoints` tool, provided by this enhancement, can be added by operators to thier operand pods to perform the
+connectivity checks and log the results.
 
 ### Implementation Details/Notes/Constraints
 
@@ -158,95 +171,95 @@ What are the caveats to the implementation? What are some important details that
 didn't come across above. Go in to as much detail as necessary here. This might
 be a good place to talk about core concepts and how they relate.
 
-#### RelatedEndpoint Custom Resource
+#### PodNetworkConnectivityCheck Custom Resource
 
 ```go
 // Package v1alpha1 is an API version in the controlplane.operator.openshift.io group
 package v1alpha1
 
 import (
-	v1 "github.com/openshift/api/config/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    v1 "github.com/openshift/api/config/v1"
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // PodNetworkConnectivityCheck
 type PodNetworkConnectivityCheck struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata"`
+    metav1.TypeMeta   `json:",inline"`
+    metav1.ObjectMeta `json:"metadata"`
 
-	Spec   PodNetworkConnectivityCheckSpec   `json:"spec"`
-	Status PodNetworkConnectivityCheckStatus `json:"status"`
+    Spec   PodNetworkConnectivityCheckSpec   `json:"spec"`
+    Status PodNetworkConnectivityCheckStatus `json:"status"`
 }
 
 type PodNetworkConnectivityCheckSpec struct {
-	// SourcePod names the pod from which the condition will be checked
-	SourcePod string `json:"sourcePod"`
+    // SourcePod names the pod from which the condition will be checked
+    SourcePod string `json:"sourcePod"`
 
-	// EndpointAddress to check. A TCP address of the form host:port. Note that
-	// if host is a DNS name, then the check would fail if the DNS name cannot
-	// be resolved. Specify an IP address for host to bypass DNS name lookup.
-	TargetEndpoint string `json:"targetEndpoint"`
+    // EndpointAddress to check. A TCP address of the form host:port. Note that
+    // if host is a DNS name, then the check would fail if the DNS name cannot
+    // be resolved. Specify an IP address for host to bypass DNS name lookup.
+    TargetEndpoint string `json:"targetEndpoint"`
 
-	// TLSClientCert, if specified, references a kubernetes.io/tls type secret with 'tls.crt' and
-	// 'tls.key' entries containing an optional TLS client certificate and key to be used when
-	// checking endpoints that require a client certificate in order to gracefully preform the
-	// scan without causing excessive logging in the endpoint process. The secret must exist in
-	// the same namespace as this resource.
-	TLSClientCert v1.SecretNameReference `json:"tlsClientCert,omitempty"`
+    // TLSClientCert, if specified, references a kubernetes.io/tls type secret with 'tls.crt' and
+    // 'tls.key' entries containing an optional TLS client certificate and key to be used when
+    // checking endpoints that require a client certificate in order to gracefully preform the
+    // scan without causing excessive logging in the endpoint process. The secret must exist in
+    // the same namespace as this resource.
+    TLSClientCert v1.SecretNameReference `json:"tlsClientCert,omitempty"`
 }
 
 type PodNetworkConnectivityCheckStatus struct {
-	// Successes contains logs successful check actions
-	Successes []LogEntry `json:"successes"`
-	// Failures contains logs of unsuccessful check actions
-	Failures []LogEntry `json:"failures"`
-	// Outages contains logs of time periods of outages
-	Outages []OutageEntry `json:"outages"`
-	// Conditions summarize the status of the check
-	Conditions []metav1.ConditionStatus `json:"conditions"`
+    // Successes contains logs successful check actions
+    Successes []LogEntry `json:"successes"`
+    // Failures contains logs of unsuccessful check actions
+    Failures []LogEntry `json:"failures"`
+    // Outages contains logs of time periods of outages
+    Outages []OutageEntry `json:"outages"`
+    // Conditions summarize the status of the check
+    Conditions []metav1.ConditionStatus `json:"conditions"`
 }
 
 // LogEntry records events
 type LogEntry struct {
-	// Start time of check action.
-	Start metav1.Time `json:"time,omitempty"`
-	// Status indicates if the action performed by the check was successful or not.
-	Success bool `json:"status"`
-	// Reason for status in a machine readable format.
-	Reason LogEntryReason `json:"reason"`
-	// Message explaining status in a human readable format.
-	Message string `json:"message"`
-	// Latency records how long the action mentioned in the entry took.
-	Latency metav1.Duration `json:"latency"`
+    // Start time of check action.
+    Start metav1.Time `json:"time,omitempty"`
+    // Status indicates if the action performed by the check was successful or not.
+    Success bool `json:"status"`
+    // Reason for status in a machine readable format.
+    Reason LogEntryReason `json:"reason"`
+    // Message explaining status in a human readable format.
+    Message string `json:"message"`
+    // Latency records how long the action mentioned in the entry took.
+    Latency metav1.Duration `json:"latency"`
 }
 
 // OutageEntry records time period of an outage
 type OutageEntry struct {
-	// Start of outage detected
-	Start metav1.Time
-	// End of outage detected
-	End metav1.Time
-	// StartLogs contains log entries related to the start of this outage. Should contain
-	// the original failure, any entries where the failure mode changed.
-	StartLogs []LogEntry `json:"startLogs,omitempty"`
-	// EndLogs contains log entries related to the end of this outage. Should contain the success
-	// entry that resolved the outage and possibly a few of the failure log entries that preceded it.
-	EndLogs []LogEntry `json:"endLogs,omitempty"`
-	// Message summarizes outage details in a human readable format.
-	Message string `json:"message,omitempty"`
+    // Start of outage detected
+    Start metav1.Time
+    // End of outage detected
+    End metav1.Time
+    // StartLogs contains log entries related to the start of this outage. Should contain
+    // the original failure, any entries where the failure mode changed.
+    StartLogs []LogEntry `json:"startLogs,omitempty"`
+    // EndLogs contains log entries related to the end of this outage. Should contain the success
+    // entry that resolved the outage and possibly a few of the failure log entries that preceded it.
+    EndLogs []LogEntry `json:"endLogs,omitempty"`
+    // Message summarizes outage details in a human readable format.
+    Message string `json:"message,omitempty"`
 }
 
 type PodNetworkConnectivityCheckCondition struct {
-	// Type of the condition
-	Type PodNetworkConnectivityCheckConditionType `json:"type"`
-	// Status of the condition
-	Status metav1.ConditionStatus `json:"status"`
-	// machine readable reason for the condition's last transition.
-	Reason string `json:"reason,omitempty"`
-	// human readable message indicating details about last transition.
-	Message string `json:"message,omitempty"`
-	// Last time the condition transit from one status to another.
-	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
+    // Type of the condition
+    Type PodNetworkConnectivityCheckConditionType `json:"type"`
+    // Status of the condition
+    Status metav1.ConditionStatus `json:"status"`
+    // machine readable reason for the condition's last transition.
+    Reason string `json:"reason,omitempty"`
+    // human readable message indicating details about last transition.
+    Message string `json:"message,omitempty"`
+    // Last time the condition transit from one status to another.
+    LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
 }
 
 type LogEntryReason string
@@ -254,15 +267,13 @@ type LogEntryReason string
 type PodNetworkConnectivityCheckConditionType string
 
 const (
-	Reachable    PodNetworkConnectivityCheckConditionType = "Reachable"
-	DNSDone      LogEntryReason                           = "DNSDone"
-	DNSError     LogEntryReason                           = "DNSError"
-	ConnectDone  LogEntryReason                           = "ConnectDone"
-	ConnectError LogEntryReason                           = "ConnectError"
+    Reachable    PodNetworkConnectivityCheckConditionType = "Reachable"
+    DNSDone      LogEntryReason                           = "DNSDone"
+    DNSError     LogEntryReason                           = "DNSError"
+    ConnectDone  LogEntryReason                           = "ConnectDone"
+    ConnectError LogEntryReason                           = "ConnectError"
 )
-
 ```
-
 
 #### Point-to-point Network Check Tool
 
@@ -274,18 +285,46 @@ Usage:
 $ POD_NAME=pod POD_NAMESPACE=ns check-endpoints
 ```
 
-``` 
+The `check-endpoint` binary will:
 
+1. List all `PodNetworkConnectivityCheck` resource in the same namespace, where `spec.sourcePodName` matches the pod the binary is running in.
+
+2. For each `PodNetworkConnectivityCheck`, start a separate goroutine that:
+
+   1. Performs the connectivity check.
+
+   2. Append entries to the `status.successes` and `status.failures` logs as needed, limited to ten entries in each log
+
+   3. Append entries to `status.outages` as needed. Limited to the last twenty outages.
+
+   4. Update `status.conditions` as needed.
+
+   5. Repeat evey minute.
+
+#### ConnectivityCheckController
+
+A `ConnectivityCheckController` will be provided by this enhancement that can be extended by an operator to manage the
+`PodNetworkConnectivityCheck` resources that it wishes to create. An operator can use the `ConnectivityCheckController`
+and provide it with a `PodNetworkConnectivityCheckFunc` function that generates the desired `PodNetworkConnectivityCheck` resources.
+
+```go
+type PodNetworkConnectivityCheckFunc func(ctx context.Context, syncContext factory.SyncContext) ([]*v1alpha1.PodNetworkConnectivityCheck, error)
+```
 
 ### Risks and Mitigations
 
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
+In clusters with overloaded or severly degraded networks the connectivity check activity can make matters worse by
+either contributing to the overload or making it more difficult to debug due to the increased netwrok traffic. To
+mitigate this, the `check-endpoints` tool will:
 
-How will security be reviewed and by whom? How will UX be reviewed and by whom?
+* Batch `PodNetworkConnectivity` updates in order to minimize the number of updates.
 
-Consider including folks that also work outside your immediate sub-project.
+* Pause the creation of events if they are detected to be excessive (30 in 30 seconds or 600 in 10 minutes). When the tool resumes creating events, a summary event will be created for the missed events.
+
+Additionally, the operator connectivity check controller can be disabled entirely if needed by setting
+`spec.unsupportedConfigOverrides.operator.enableConnectivityCheckController='False'` in the operator's config. When the
+connectivity check controller is disable, the `PodNetworkConnectivityCheck` resource definition will be deleted. The
+`check-endpoints` tool will go idle upon detecting the deletion of the `PodNetworkConnectivityCheck` resource definition.
 
 ## Design Details
 
@@ -294,6 +333,7 @@ Consider including folks that also work outside your immediate sub-project.
 **Note:** *Section not required until targeted at a release.*
 
 Consider the following in developing a test plan for this enhancement:
+
 - Will there be e2e and integration tests, in addition to unit tests?
 - How will it be tested in isolation vs with other components?
 
@@ -335,7 +375,7 @@ status:
             reason: ConnectError
             message: "Failed connect to 10.0.134.23:2379; No route to host"
             latency: "208ms"
-        
+
     successes:
       - time: '2020-04-20T13:11:18Z'
         success: true
@@ -353,10 +393,10 @@ status:
         reason: ConnectError
         message: "Failed connect to 10.0.134.23:2379; No route to host"
         latency: "208ms"
-
 ```
 
 #### Example PodNetworkConnectivityCheck instance with DNS
+
 ```yaml
 kind: PodNetworkConnectivityCheck
 version: network.openshift.io/v1alpha1
@@ -391,6 +431,7 @@ is in the test plan.
 
 Consider the following in developing an upgrade/downgrade strategy for this
 enhancement:
+
 - What changes (in invocations, configurations, API use, etc.) is an existing
   cluster required to make on upgrade in order to keep previous behavior?
 - What changes (in invocations, configurations, API use, etc.) is an existing
@@ -403,6 +444,7 @@ What are the guarantees? Make sure this is in the test plan.
 
 Consider the following in developing a version skew strategy for this
 enhancement:
+
 - During an upgrade, we will always have skew among components, how will this impact your work?
 - Does this enhancement involve coordinating behavior in the control plane and
   in the kubelet? How does an n-2 kubelet without this feature available behave
