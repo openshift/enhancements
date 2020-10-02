@@ -112,7 +112,6 @@ func GetSummary(pr int) (summary string, err error) {
 	}
 	summary = fmt.Sprintf("(no '## Summary' section found in %s)", filenames[0])
 	fileRef := fmt.Sprintf("%s:%s", prRef(pr), filenames[0])
-	fmt.Fprintf(os.Stderr, "looking for summary in %s\n", fileRef)
 	content, err := getFileContents(fileRef)
 	if err != nil {
 		return summary, errors.Wrap(err, fmt.Sprintf("could not get content of %s", fileRef))
