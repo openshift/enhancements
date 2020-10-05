@@ -198,7 +198,13 @@ discuss this in much more detail.
 
 This section summarizes the common design considerations for OpenShift in
 support of BGP related features.
+### Administrator Experience
 
+Establishing BGP sessions is not a simple task, and requires a number of unavoidable manual steps and site-specific parameters. It also requires coordination between (what is likely) multiple departments or groups within a typical organization. Politically, the ability to speak BGP to a network grants significant privileges, since (by default) BGP sessions are trusted completely. A misbehaving BGP participant can easily cause massive outages -- even to networks far outside the OpenShift environment. Any design must take this in to account.
+
+Technically, any solution must make it easy for administrators to configure the same BGP peering parameters as they would expect on a router. In addition to the required settings (e.g. AS, peer, password), administrators expect additional knobs that make BGP usable (e.g. communities, timing parameters, multihop, AS prepends). The current status of all peerings must be exposed, since administrators rely on this to debug their networks and trust that OpenShift is not misbehaving.
+
+Documentation and training should reflect the complexity of BGP-based operations, and potential users should be made aware of any prerequisites and technical challenges. Everyone should be aware of the buy-in required for enabling BGP. 
 ### Avoid L2 (Layer 2) Domain Assumptions
 
 We must avoid the assumption of Nodes residing on the same L2 domain as much as
