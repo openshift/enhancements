@@ -106,8 +106,11 @@ Most of the steps outlined above is common to all CSI driver operator and vSpher
 
 There are certain aspects of driver which require special handling:
 
-1. When vSphere CSI operator starts, using credentials provided by cluster-storage-operator, it will first verifiy vCenter version and HW version of VMs. If vCenter version is not 6.7u3 or greater and HW version is not 15 or greater on all VMs - it will set `vSphereOperatorDisabled: true` and stop further processing.
+1. When vSphere CSI operator starts, using credentials provided by cluster-storage-operator, it will first verifiy vCenter version and HW version of VMs. If vCenter version is not 6.7u3 or greater and HW version is not 15 or greater on all VMs - it will set `vSphereOperatorDisabled: true` and stop further processing. If additional VMs are added later into the cluster and they do not have HW version 15 or greater, Operator will mark itself as `degraded` and nodes which don't have right HW version will have annotation `vsphere.driver.status.csi.openshift.io: degraded` added to them.
+
+
 2. Since VMWare will ship its own vSphere CSI driver operator via OLM, it should be possible to disable default cluster-storage-operator managed operator(i.e this operator). Currently we are planning to let user set `ManagementState: Removed` in `ClusterCSIDriver` CR, which will cause operand to be removed(i.e the CSI driver) but operator will still be running. This will allow user to use external vSphere CSI operatrs.
+
 3. If a storage policy is found in `vsphere.Platform` then a StorageClass will be created for vSphere CSI driver. If no storage policy is configured in `vsphere.Platform` then no storageClass will be created and it is expected that admin will manually create a storageClass after cluster installation.
 
 
