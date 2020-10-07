@@ -209,8 +209,9 @@ The CBO will:
 
 - Be a new `openshift/cluster-baremetal-operator` project.
 - Publish an image called `cluster-baremetal-operator`.
-- Use CVO run-level 30, so its manifests will be applied in parallel
-  with the MAO.
+- Use CVO run-level 31, so its manifests will be applied after MAO ones. This
+  is required since MAO defines the `openshift-machine-api` namespace which
+  is required also by CBO.
 - Add a new `baremetal` `ClusterOperator` with an additional
   `Disabled` status for non-baremetal platforms.
 - Use the existing `openshift-machine-api` namespace where the
@@ -237,7 +238,17 @@ The CBO will:
   currently creates. In other words, the initial purpose of the CBO
   will be to reconcile the `Provisioning` singleton resource.
 
+#### Operator framework
+
+CBO will be built using [kubebuilder](https://github.com/kubernetes-sigs/kubebuilder). It has been decided to adopt it
+since it is compatible with the `operator-sdk`.
+
 ### Test Plan
+
+- The operator will be tested in the OpenShift CI via e2e tests triggered using the [e2e-metal-ipi](https://github.com/openshift/release/blob/master/ci-operator/step-registry/baremetalds/e2e/baremetalds-e2e-workflow.yaml) workflow defined in the OpenShift CI steps registry
+- The [OpenShift extended platform tests](https://github.com/openshift/openshift-tests) will be enriched to verify that:
+  - CBO gets deployed for a baremetal host
+  - Metal3 deployment is managed by CBO
 
 ### Graduation Criteria
 
@@ -315,6 +326,7 @@ We need the following changes to MAO:
 
    In `4.N-dev`, once the CBO has been added to the release, we can
    remove all awareness of the `metal3` deployment from MAO.
+   Note that this will not be removed in version 4.7.
 
 #### Upgrade/Downgrade Scenarios
 
@@ -590,3 +602,4 @@ that is derived from an operator that is more generally applicable?
 - https://github.com/metal3-io/baremetal-operator/issues/227
 - https://github.com/openshift/enhancements/pull/90
 - https://github.com/openshift/enhancements/pull/102
+- https://github.com/kubernetes-sigs/kubebuilder
