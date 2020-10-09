@@ -29,7 +29,7 @@ func fileExists(filename string) bool {
 }
 
 func handleError(msg string) {
-	fmt.Fprintf(os.Stderr, fmt.Sprintf("%s\n", msg))
+	fmt.Fprintf(os.Stderr, "%s\n", msg)
 	os.Exit(1)
 }
 

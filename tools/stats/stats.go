@@ -45,7 +45,6 @@ func New(daysBack int, staleMonths int, orgName, repoName string, devMode bool, 
 type Stats struct {
 	org          string
 	repo         string
-	minAge       int
 	earliestDate time.Time
 	staleDate    time.Time
 	devMode      bool
