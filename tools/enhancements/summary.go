@@ -123,6 +123,8 @@ func GetGroup(pr int) (filename string, err error) {
 	if err != nil {
 		return "", errors.Wrap(err, "could not determine the list of modified files")
 	}
+	// First look for an actual enhancement document...
+	// FIXME: What if we find more than one?
 	for _, name := range filenames {
 		if strings.HasPrefix(name, "enhancements/") {
 			parts := strings.Split(name, "/")
@@ -132,7 +134,17 @@ func GetGroup(pr int) (filename string, err error) {
 			return "general", nil
 		}
 	}
-	return "", fmt.Errorf("could not find an enhancement file for PR %d", pr)
+	// If there was no enhancement, take the root directory of the
+	// first file that has a directory.
+	for _, name := range filenames {
+		if strings.Contains(name, "/") {
+			parts := strings.Split(name, "/")
+			return parts[0], nil
+		}
+	}
+	// If there was no directory, assume a "general" change like
+	// OWNERS file.
+	return "general", nil
 }
 
 // GetSummary reads the files being changed in the pull request to
