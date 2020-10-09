@@ -75,11 +75,25 @@ func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 				}
 			}
 		}
-		fmt.Printf("- [%d](%s): (%d/%d) %s (%s)\n",
+
+		group, err := enhancements.GetGroup(*prd.Pull.Number)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: failed to get group of PR %d: %s\n",
+				*prd.Pull.Number, err)
+			group = "uncategorized"
+		}
+		groupPrefix := fmt.Sprintf("%s: ", group)
+		if strings.HasPrefix(*prd.Pull.Title, groupPrefix) {
+			// avoid redundant group prefix
+			groupPrefix = ""
+		}
+
+		fmt.Printf("- [%d](%s): (%d/%d) %s%s (%s)\n",
 			*prd.Pull.Number,
 			*prd.Pull.HTMLURL,
 			prd.RecentActivityCount,
 			prd.AllActivityCount,
+			groupPrefix,
 			*prd.Pull.Title,
 			author,
 		)
