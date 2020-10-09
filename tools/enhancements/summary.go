@@ -100,21 +100,6 @@ func extractSummary(body string) string {
 	return b.String()
 }
 
-// getEnhancementFilename returns the filename of the enhancement
-// document modified by the pull request
-func getEnhancementFilename(pr int) (filename string, err error) {
-	filenames, err := getModifiedFiles(pr)
-	if err != nil {
-		return "", errors.Wrap(err, "could not determine the list of modified files")
-	}
-	for _, name := range filenames {
-		if strings.HasPrefix(name, "enhancements/") {
-			return name, nil
-		}
-	}
-	return "", fmt.Errorf("could not find an enhancement file for PR %d", pr)
-}
-
 // GetGroup returns the grouping of the enhancement, based
 // on the filename. Documents are normally named
 // "enhancements/group/title.md" or "enhancements/title.md"
