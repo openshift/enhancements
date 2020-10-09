@@ -118,10 +118,10 @@ func getEnhancementFilename(pr int) (filename string, err error) {
 // GetGroup returns the grouping of the enhancement, based
 // on the filename. Documents are normally named
 // "enhancements/group/title.md" or "enhancements/title.md"
-func GetGroup(pr int) (filename string, err error) {
+func GetGroup(pr int) (filename string, isEnhancement bool, err error) {
 	filenames, err := getModifiedFiles(pr)
 	if err != nil {
-		return "", errors.Wrap(err, "could not determine the list of modified files")
+		return "", false, errors.Wrap(err, "could not determine the list of modified files")
 	}
 	// First look for an actual enhancement document...
 	// FIXME: What if we find more than one?
@@ -129,9 +129,9 @@ func GetGroup(pr int) (filename string, err error) {
 		if strings.HasPrefix(name, "enhancements/") {
 			parts := strings.Split(name, "/")
 			if len(parts) == 3 {
-				return parts[1], nil
+				return parts[1], true, nil
 			}
-			return "general", nil
+			return "general", true, nil
 		}
 	}
 	// If there was no enhancement, take the root directory of the
@@ -139,12 +139,12 @@ func GetGroup(pr int) (filename string, err error) {
 	for _, name := range filenames {
 		if strings.Contains(name, "/") {
 			parts := strings.Split(name, "/")
-			return parts[0], nil
+			return parts[0], false, nil
 		}
 	}
 	// If there was no directory, assume a "general" change like
 	// OWNERS file.
-	return "general", nil
+	return "general", false, nil
 }
 
 // GetSummary reads the files being changed in the pull request to

@@ -34,7 +34,7 @@ func handleError(msg string) {
 }
 
 func formatDescription(text string, indent string) string {
-	paras := strings.SplitN(text, "\n\n", -1)
+	paras := strings.SplitN(strings.ReplaceAll(text, "\r", ""), "\n\n", -1)
 
 	unwrappedParas := []string{}
 
@@ -76,7 +76,7 @@ func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 			}
 		}
 
-		group, err := enhancements.GetGroup(*prd.Pull.Number)
+		group, isEnhancement, err := enhancements.GetGroup(*prd.Pull.Number)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "WARNING: failed to get group of PR %d: %s\n",
 				*prd.Pull.Number, err)
@@ -98,12 +98,21 @@ func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 			author,
 		)
 		if withDescription {
-			summary, err := enhancements.GetSummary(*prd.Pull.Number)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "WARNING: failed to get summary of PR %d: %s\n",
-					*prd.Pull.Number, err)
+			var summary string
+			if isEnhancement {
+				summary, err = enhancements.GetSummary(*prd.Pull.Number)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "WARNING: failed to get summary of PR %d: %s\n",
+						*prd.Pull.Number, err)
+				}
+			} else {
+				if prd.Pull.Body != nil {
+					summary = *prd.Pull.Body
+				}
 			}
-			fmt.Printf("\n%s\n\n", formatDescription(summary, descriptionIndent))
+			if summary != "" {
+				fmt.Printf("\n%s\n\n", formatDescription(summary, descriptionIndent))
+			}
 		}
 	}
 }
