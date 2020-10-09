@@ -29,12 +29,12 @@ func fileExists(filename string) bool {
 }
 
 func handleError(msg string) {
-	fmt.Fprintf(os.Stderr, fmt.Sprintf("%s\n", msg))
+	fmt.Fprintf(os.Stderr, "%s\n", msg)
 	os.Exit(1)
 }
 
 func formatDescription(text string, indent string) string {
-	paras := strings.SplitN(text, "\n\n", -1)
+	paras := strings.SplitN(strings.ReplaceAll(text, "\r", ""), "\n\n", -1)
 
 	unwrappedParas := []string{}
 
@@ -75,21 +75,51 @@ func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 				}
 			}
 		}
-		fmt.Printf("- [%d](%s): (%d/%d) %s (%s)\n",
+
+		group, isEnhancement, err := enhancements.GetGroup(*prd.Pull.Number)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: failed to get group of PR %d: %s\n",
+				*prd.Pull.Number, err)
+			group = "uncategorized"
+		}
+		groupPrefix := fmt.Sprintf("%s: ", group)
+		if strings.HasPrefix(*prd.Pull.Title, groupPrefix) {
+			// avoid redundant group prefix
+			groupPrefix = ""
+		}
+
+		// Sometimes we have a superfluous "enhancement:" prefix in
+		// the PR title
+		title := *prd.Pull.Title
+		if strings.HasPrefix(strings.ToLower(title), "enhancement:") {
+			title = strings.TrimLeft(title[12:], " ")
+		}
+
+		fmt.Printf("- [%d](%s): (%d/%d) %s%s (%s)\n",
 			*prd.Pull.Number,
 			*prd.Pull.HTMLURL,
 			prd.RecentActivityCount,
 			prd.AllActivityCount,
-			*prd.Pull.Title,
+			groupPrefix,
+			title,
 			author,
 		)
 		if withDescription {
-			summary, err := enhancements.GetSummary(*prd.Pull.Number)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "WARNING: failed to get summary of PR %d: %s\n",
-					*prd.Pull.Number, err)
+			var summary string
+			if isEnhancement {
+				summary, err = enhancements.GetSummary(*prd.Pull.Number)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "WARNING: failed to get summary of PR %d: %s\n",
+						*prd.Pull.Number, err)
+				}
+			} else {
+				if prd.Pull.Body != nil {
+					summary = *prd.Pull.Body
+				}
 			}
-			fmt.Printf("\n%s\n\n", formatDescription(summary, descriptionIndent))
+			if summary != "" {
+				fmt.Printf("\n%s\n\n", formatDescription(summary, descriptionIndent))
+			}
 		}
 	}
 }
