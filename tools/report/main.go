@@ -88,13 +88,20 @@ func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 			groupPrefix = ""
 		}
 
+		// Sometimes we have a superfluous "enhancement:" prefix in
+		// the PR title
+		title := *prd.Pull.Title
+		if strings.HasPrefix(strings.ToLower(title), "enhancement:") {
+			title = strings.TrimLeft(title[12:], " ")
+		}
+
 		fmt.Printf("- [%d](%s): (%d/%d) %s%s (%s)\n",
 			*prd.Pull.Number,
 			*prd.Pull.HTMLURL,
 			prd.RecentActivityCount,
 			prd.AllActivityCount,
 			groupPrefix,
-			*prd.Pull.Title,
+			title,
 			author,
 		)
 		if withDescription {
