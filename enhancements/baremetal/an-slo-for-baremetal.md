@@ -209,9 +209,12 @@ The CBO will:
 
 - Be a new `openshift/cluster-baremetal-operator` project.
 - Publish an image called `cluster-baremetal-operator`.
-- Use CVO run-level 31, so its manifests will be applied after MAO ones. This
-  is required since MAO defines the `openshift-machine-api` namespace which
-  is required also by CBO.
+- Use CVO run-level 31 for CBO manifests, so they will be applied after MAO ones (run level 30). 
+  It's not possible to use the same run level as MAO would require CBO to maintain its own copy of 
+  the `openshift-machine-api` namespace definition (which is shared by the two operators) and having 
+  two copies of it (one in MAO, the other in CBO) adds the extra burden to keep them in sync. 
+  The two copies going out of sync can result in instabilities and icnreasing CBO's run level is one 
+  way to avoid that.
 - Add a new `baremetal` `ClusterOperator` with an additional
   `Disabled` status for non-baremetal platforms.
 - Use the existing `openshift-machine-api` namespace where the
@@ -240,8 +243,9 @@ The CBO will:
 
 #### Operator framework
 
-CBO will be built using [kubebuilder](https://github.com/kubernetes-sigs/kubebuilder). It has been decided to adopt it
-since it is compatible with the `operator-sdk`.
+CBO will be built using [kubebuilder](https://github.com/kubernetes-sigs/kubebuilder). 
+It has been decided to adopt it since it is compatible with the `operator-sdk` and the
+`operator-sdk` does not provide any additional features needed by the new operator.
 
 ### Test Plan
 
@@ -326,8 +330,9 @@ We need the following changes to MAO:
 
    In `4.N-dev`, once the CBO has been added to the release, we can
    remove all awareness of the `metal3` deployment from MAO.
-   Note that this will not be removed in version 4.7.
-
+   Note that this will be removed in version 4.7 (except for the 
+   annotation handling)
+   
 #### Upgrade/Downgrade Scenarios
 
 In order to check our intuition about the above, we can exhaustively
