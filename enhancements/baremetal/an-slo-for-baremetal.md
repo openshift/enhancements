@@ -209,8 +209,12 @@ The CBO will:
 
 - Be a new `openshift/cluster-baremetal-operator` project.
 - Publish an image called `cluster-baremetal-operator`.
-- Use CVO run-level 30, so its manifests will be applied in parallel
-  with the MAO.
+- Use CVO run-level 31 for CBO manifests, so they will be applied after MAO ones (run level 30). 
+  It's not possible to use the same run level as MAO would require CBO to maintain its own copy of 
+  the `openshift-machine-api` namespace definition (which is shared by the two operators) and having 
+  two copies of it (one in MAO, the other in CBO) adds the extra burden to keep them in sync. 
+  The two copies going out of sync can result in instabilities and icnreasing CBO's run level is one 
+  way to avoid that.
 - Add a new `baremetal` `ClusterOperator` with an additional
   `Disabled` status for non-baremetal platforms.
 - Use the existing `openshift-machine-api` namespace where the
@@ -237,7 +241,18 @@ The CBO will:
   currently creates. In other words, the initial purpose of the CBO
   will be to reconcile the `Provisioning` singleton resource.
 
+#### Operator framework
+
+CBO will be built using [kubebuilder](https://github.com/kubernetes-sigs/kubebuilder). 
+It has been decided to adopt it since it is compatible with the `operator-sdk` and the
+`operator-sdk` does not provide any additional features needed by the new operator.
+
 ### Test Plan
+
+- The operator will be tested in the OpenShift CI via e2e tests triggered using the [e2e-metal-ipi](https://github.com/openshift/release/blob/master/ci-operator/step-registry/baremetalds/e2e/baremetalds-e2e-workflow.yaml) workflow defined in the OpenShift CI steps registry
+- The [OpenShift extended platform tests](https://github.com/openshift/openshift-tests) will be enriched to verify that:
+  - CBO gets deployed for a baremetal host
+  - Metal3 deployment is managed by CBO
 
 ### Graduation Criteria
 
@@ -315,7 +330,9 @@ We need the following changes to MAO:
 
    In `4.N-dev`, once the CBO has been added to the release, we can
    remove all awareness of the `metal3` deployment from MAO.
-
+   Note that this will be removed in version 4.7 (except for the 
+   annotation handling)
+   
 #### Upgrade/Downgrade Scenarios
 
 In order to check our intuition about the above, we can exhaustively
@@ -590,3 +607,4 @@ that is derived from an operator that is more generally applicable?
 - https://github.com/metal3-io/baremetal-operator/issues/227
 - https://github.com/openshift/enhancements/pull/90
 - https://github.com/openshift/enhancements/pull/102
+- https://github.com/kubernetes-sigs/kubebuilder
