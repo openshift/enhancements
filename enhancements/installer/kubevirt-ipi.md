@@ -263,6 +263,7 @@ TODO
 - End user documentation, relative API stability
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
+- Approved review by the installer team.
 
 ##### Tech Preview -> GA 
 
