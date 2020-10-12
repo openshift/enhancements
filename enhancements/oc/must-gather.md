@@ -92,13 +92,13 @@ To provide your own must-gather image, it must....
 
 If the `oc adm must-gather` tool's pod cannot be scheduled or run on the cluster, the `oc adm must-gather` tool will, after a timeout, fall-back to running `oc adm inspect clusteroperators` locally. 
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
 #### Story 2
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 What are the caveats to the implementation? What are some important details that
 didn't come across above. Go in to as much detail as necessary here. This might
@@ -159,4 +159,4 @@ The `oc` command must skew +/- one like normal commands.
 
 ## Alternatives
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed

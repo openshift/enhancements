@@ -118,7 +118,7 @@ therefore risk of compromise) for a given service account token.
     tokens signed by the previous private key will continue to validate since the
     corresponding public key will still be used to validate bound tokens.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 Bound tokens are not currently required until bootstrap is complete, so it should be
 reasonable to delay support of bound tokens until the post-bootstrap phase.

@@ -52,7 +52,7 @@ We propose that in order to be certified, a CSI driver should meet the following
   * The driver must be installed via the operator that will be available in our marketplace.
 * Once all tests pass, the CSI driver vendor should provide our certification team with the output of the tests in order to prove they passed.
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
@@ -62,7 +62,7 @@ As a storage vendor, I want to make my CSI driver available to OCP users so that
 
 As an OCP user, I want to store my application data to a given storage backend using a certified CSI driver.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 No technical work needs to be done in the `openshift-tests` utility, as it already contains the `openshift/csi` test suite.
 
@@ -123,4 +123,4 @@ In order to run all tests of the `openshift/csi` test suite, CSI driver vendors 
 
 ## Alternatives
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed

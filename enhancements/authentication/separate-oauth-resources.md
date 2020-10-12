@@ -24,7 +24,7 @@ superseded-by:
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift/docs]
 
-## Open Questions [optional]
+## Open Questions
 
 ## Summary
 
@@ -62,7 +62,7 @@ backported to 4.n-1.
 
 If we stop at any any intermediate step, we are still safe to ship.
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
@@ -112,7 +112,7 @@ Similar to the `Drawbacks` section the `Alternatives` section is used to
 highlight and record other possible approaches to delivering the value proposed
 by an enhancement.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 Use this section if you need things from the project. Examples include a new
 subproject, repos requested, github details, and/or testing infrastructure.

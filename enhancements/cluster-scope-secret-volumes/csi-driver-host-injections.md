@@ -23,10 +23,10 @@ replaces:
   
 creation-date: 2020-03-17
 
-last-updated: 2020-04-17
+last-updated: 2020-09-01
 
 <!-- status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced -->
-status: provisional
+status: implementable
 
 
   
@@ -43,7 +43,7 @@ status: provisional
 - [/] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions [optional]
+## Open Questions
 
 > 1. If data on the CSI volume represents data the Pod's SA no longer has access to that data because of ACL/RBAC changes,
 >from a storage/CSI volume perspective are there any best practices on how to deal with the data?  The CSI driver can
@@ -100,7 +100,7 @@ impossible to avoid that.
 
 ## Proposal
 
-### User Stories [optional]
+### User Stories
 
 1. As a cluster admin with an OpenShift subscription, I want to share the entitlement keys and configuration with my 
 users' workload Pods so that containers in those Pods can install RHEL subscription content.
@@ -114,7 +114,7 @@ facilitate those scenarios across multiple namespaces.
 4. As a cluster admin who has to rotate credentials shared via this proposal, and I remove access to new versions of
 the credentials, I want to stop updating content within the existing pods consuming the content. 
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 #### Install
 
@@ -167,7 +167,7 @@ An admin creates a new cluster level custom resource for encapsulating the shara
 
 
 ```yaml
-kind: ProjectedResource
+kind: Share
 apiVersion: projected-resource.storage.openshift.io/v1
 metadata:
   name: shared-cool-secret
@@ -190,7 +190,7 @@ rules:
 - apiGroups:
   - projected-resource.storage.openshift.io
   resources:
-  - projectedResources
+  - shares
   resourceNames:
   - shared-cool-secret
   verbs:
@@ -204,24 +204,24 @@ So, how does an end user discover and utilize our new CR?
 
 First, a few considerations around discovery:
 
-- one option for cluster admins is to allow "low level" users to get/list `ProjectedResources`; i.e. `oc get projectedresoureces`;
+- one option for cluster admins is to allow "low level" users to get/list `Shares`; i.e. `oc get shares`;
  those users can then discover and use them without further involvement from the cluster admin; i.e. the RBAC example above
  is applied to those "low level" users
 - if this is not acceptable, then some sort of exchange needs to occur between the user and cluster admin
 - that exchange results in either cluster admin providing "just enough" information to the user to update their objects so
-the underlying, associated Pod references CSI volumes using `ProjectedResources`
-- or the cluster admin modifies the user's object(s) so they get their `ProjectedResources`
+the underlying, associated Pod references CSI volumes using `Shares`
+- or the cluster admin modifies the user's object(s) so they get their `Shares`
 
-Second, a few considerations around how we update objects, so they "get" `ProjectedResources` associated with them:
+Second, a few considerations around how we update objects, so they "get" `Shares` associated with them:
 
 - Pod objects themselves, or any API object that exposes the Pod's `volumes` array as part of providing an API that is 
 converted by a controller into a Pod, can directly add a volume of the CSI type with the correct metadata in the volumeAttributes, a la 
 
 ```yaml
 csi:
-  driver: projectedresources.storage.openshift.io
+  driver: projected-resources.storage.openshift.io
     volumeAttributes:
-      projectedResourceName: the-projected-resource
+      share: the-projected-resource
 
 ```
 
@@ -243,7 +243,7 @@ spec:
         csi:
           driver: projectedresources.storage.openshift.io
           volumeAttributes:
-             projectedResourceName: the-projected-resource
+             share: the-projected-resource
 
 ```
 
@@ -319,7 +319,7 @@ spec:
         csi:
           driver: projectedresources.storage.openshift.io
           volumeAttributes:
-             projectedResourceName: the-projected-resource
+             share: the-projected-resource
 
 ```
  
@@ -544,6 +544,6 @@ persistent volume styled approach with CSI:
   - there is an analogous method `deleteHostpathVolume` for deleting the directory.
 
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 N/A

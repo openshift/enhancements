@@ -30,7 +30,7 @@ includes [forward](https://coredns.io/plugins/forward/) as the first plugin impl
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions [optional]
+## Open Questions
 
 1. How are API changes handled for cluster downgrades?
 2. Should the number of `Servers` be restricted due to Gap 4?
@@ -336,6 +336,6 @@ Major milestones in the life cycle of a proposal should be tracked in `Implement
 
 Possible alternatives are listed [here](https://docs.google.com/document/d/17OEwYs9HuCeGtFKfJLwtk809C6MIjZmguce5-LQYxIM/edit?usp=sharing).
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 TODO

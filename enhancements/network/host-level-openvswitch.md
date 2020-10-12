@@ -6,12 +6,13 @@ authors:
 reviewers:
   - "@danwinship"
   - "@smarterclayton"
-  - "@crawford"
+  - "@sdodson"
+  - "@cgwalters"
   - "@phoracek"
 approvers:
   - TBD
 creation-date: 2019-12-11
-last-updated: 2019-12-11
+last-updated: 2020-04-14
 status: provisional
 
 ---
@@ -73,10 +74,13 @@ There is a pod that acts as a “sidecar” or “babysitter” for the openvswi
 Configuration for OVS is always presented as a set of key-value pairs that are inserted in to a configuration database. If needed, we should allow custom configuration to be expressed as a ConfigMap, which is reconciled to the database.
 
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 As a prototype, this can be implemented with just a few shell scripts. Ideally, it should be ultimately implemented as a go program that talks to the SystemD DBus API directly.
 
+Downstream programs can request OVS installation by setting a bit in the CNO configuration.
+
+The installation process for BYORHEL needs to be adjusted accordingly.
 
 ### Risks and Mitigations
 
@@ -118,8 +122,8 @@ The proposed change pins the kernel and ovs-vswitchd together. This actually **r
 ## Implementation History
 
 - *v3.10*: openvswitch switched from host-level to containerized as part of openshift-sdn.
-- *v4.4* (proposed): ovn-kubernetes uses host-level openvswitch
-- *v4.5* (proposed): openshift-sdn migrates to host-level openvswitch
+- *v4.5* (in prototype): ovn-kubernetes uses host-level openvswitch
+- *v4.6* (proposed): openshift-sdn migrates to host-level openvswitch
 
 ## Drawbacks
 
@@ -134,5 +138,3 @@ We can continue using our existing containerized openvswitch. However, we’ve s
 We could design a more generic “systemd bridge layer” that manages arbitrary units. Then, all consumers of openvswitch, etc. could independently request activation. This approach may naturally follow as progress is made.
 
 We could have the SDN processes enable openvswitch by writing the correct files to disk via the MCO. The disadvantage is that the unit’s status (logs, liveness) will not be reflected in the API.
-
-

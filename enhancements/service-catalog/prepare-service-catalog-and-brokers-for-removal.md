@@ -97,7 +97,7 @@ each of the operators add alerting code.
 The operators will need a new dependency.
 [alerting client](https://github.com/prometheus/alertmanager/blob/master/client/client.go)
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 The 4 operators, Service Catalog Controller Manager operator (svcat-cm-op),
 Service Catalog APIServer operator (svcat-apiserver-op), the Ansible Service
@@ -235,6 +235,6 @@ Similar to the `Drawbacks` section the `Alternatives` section is used to
 highlight and record other possible approaches to delivering the value proposed
 by an enhancement.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 N/A

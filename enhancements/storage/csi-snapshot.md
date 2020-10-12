@@ -114,7 +114,7 @@ type CSISnapshotStatus struct {
 The CRD and its `cluster` instance is created by CVO from the csi-snapshot-controller-operator manifest.
 
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
@@ -128,7 +128,7 @@ As OCS developer, I want to user CSI external-snapshotter sidecar shipped and su
 
 We (OpenShift storage team) are going to ship the external-snapshotter sidecar in the same way as other CSI sidecars (provisioner, attacher, node-driver-registrar, ...)
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 This feature has already been implemented upstream. Therefore, this feature requires a Kubernetes rebase of 1.15 or later.
 
@@ -188,7 +188,7 @@ There is no dev-preview phase.
 
 ## Alternatives
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 Nothing special, just:
 

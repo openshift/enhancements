@@ -12,8 +12,8 @@ approvers:
   - "@bison"
   - "@michaelgugino"
 creation-date: 2020-02-04
-last-updated: 2020-02-04
-status: provisional
+last-updated: 2020-06-26
+status: implemented
 see-also:
 replaces:
 superseded-by:
@@ -23,10 +23,10 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [x] Enhancement is `implementable`
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
+- [x] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
@@ -86,41 +86,6 @@ the following requirements for integration will work for each of AWS, Azure and 
 #### Termination handler design
 
 To enable graceful termination of workloads running on non-guaranteed instances,
-three controllers will need to be implemented to watch for termination notices
-and gracefully move workloads
-
-##### Termination Pod DaemonSet
-
-The Termination Pod DaemonSet would be deployed will be deployed by the Machine API Operator and
-will select Nodes which are labelled as spot instances.
-This will ensure the Termination Pod only runs on instances that need it.
-
-The spot label can be added by the cloud provider actuators as they create instances,
-provided they support spot instances and the instance is a spot instance.
-
-##### Termination Pod
-
-The Termination Pod is the Pod that will be deployed to individual Nodes to
-monitor for termination notices for that Node.
-
-It will operate on the following logic:
-- Call actuator method to watch for termination notice
-  - This should return a channel which is to be closed when the termination notice is observed
-- Wait for the actuator signal channel to be closed
-- Taint the Node
-- Delete the Machine for the Node that the Pod is running on
-- Stop watching for further termination notices
-
-This will be a controller within the Machine API Operator repository and will
-be deployed by the Termination Pod DaemonSet.
-This will require a new method for each cloud provider actuator to watch for termination notices.
-
-###### Alternative draining
-
-As an alternative to directly deleting the Machine objects,
-the Termination Pod could instead add a condition to the Node object for Node that the Pod is running on.
-
-This condition could be used by an optional MachineHealthCheck which would monitor the Nodes for this condition.
 
 #### Cloud Provider Implementation Specifics
 
@@ -420,6 +385,11 @@ This means that the instances will be cycled regularly and as such, good handlin
 GCP gives a 30 second warning for termination of Preemptible instances.
 This signal comes via an ACPI G2 soft-off signal to the machine, which, could be intercepted to start a graceful termination of pods on the machine.
 There are [existing projects](https://github.com/GoogleCloudPlatform/k8s-node-termination-handler) that already do this.
+
+Alternatively, GCP provides a [metadata service](https://cloud.google.com/compute/docs/instances/create-start-preemptible-instance#detecting_if_an_instance_was_preempted)
+that is accessible from the instances themselves that allows the instance to determine whether or not it has been preempted.
+This is similar to what is provided by AWS and Azure and should be used to allow the termination handler implementation
+to be consistent across the three providers.
 
 In the case that the node is reaching its 24 hour termination mark,
 it may be safer to preempt this warning and shut down the node before the 30s shut down signal.

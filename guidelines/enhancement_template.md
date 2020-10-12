@@ -19,6 +19,21 @@ superseded-by:
   - "/enhancements/our-past-effort.md"
 ---
 
+Start by filling out this header template with metadata for this enhancement.
+
+* `reviewers`: This can be anyone that has an interest in this work.
+
+* `approvers`: All enhancements must be approved, but the appropriate people to
+  approve a given enhancement depends on its scope.  If an enhancement is
+  limited in scope to a given team or component, then a peer or lead on that
+  team or pillar is an appropriate approver.  If an enhancement captures
+  something more broad in scope, then a member of the OpenShift architects team
+  or someone they delegate would be appropriate.  Examples would be something
+  that changes the definition of OpenShift in some way, adds a new required
+  dependency, or changes the way customers are supported.  Use your best
+  judgement to determine the level of approval needed.  If you’re not sure,
+  just leave it blank and ask for input during review.
+
 # Neat Enhancement Idea
 
 This is the title of the enhancement. Keep it simple and descriptive. A good
@@ -58,13 +73,6 @@ around the enhancement process.
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-
-## Open Questions [optional]
-
-This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance, 
- > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this? 
 
 ## Summary
 
@@ -123,6 +131,13 @@ Consider including folks that also work outside your immediate sub-project.
 
 ## Design Details
 
+### Open Questions [optional]
+
+This is where to call out areas of the design that require closure before deciding
+to implement the design.  For instance, 
+ > 1. This requires exposing previously private resources which contain sensitive
+  information.  Can we do this? 
+
 ### Test Plan
 
 **Note:** *Section not required until targeted at a release.*
@@ -150,15 +165,23 @@ determine graduation.
 
 Consider the following in developing the graduation criteria for this
 enhancement:
-- Maturity levels - `Dev Preview`, `Tech Preview`, `GA`
-- Deprecation
 
-Clearly define what graduation means.
+- Maturity levels
+    - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
+    - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
+- [Deprecation policy][deprecation-policy]
+
+Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
+or by redefining what graduation means.
+
+In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
+
+[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
+[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
 
 #### Examples
 
-These are generalized examples to consider, in addition to the aforementioned
-[maturity levels][maturity-levels].
+These are generalized examples to consider, in addition to the aforementioned [maturity levels][maturity-levels].
 
 ##### Dev Preview -> Tech Preview
 
@@ -192,6 +215,34 @@ enhancement:
   cluster required to make on upgrade in order to keep previous behavior?
 - What changes (in invocations, configurations, API use, etc.) is an existing
   cluster required to make on upgrade in order to make use of the enhancement?
+
+Upgrade expectations:
+- Each component should remain available for user requests and
+  workloads during upgrades. Any exception to this should be
+  identified and discussed here.
+- Micro version upgrades - users should be able to skip forward versions within a
+  minor release stream without being required to pass through intermediate
+  versions - i.e. `x.y.N->x.y.N+2` should work without requiring `x.y.N->x.y.N+1`
+  as an intermediate step.
+- Minor version upgrades - you only need to support `x.N->x.N+1` upgrade
+  steps. So, for example, it is acceptable to require a user running 4.3 to
+  upgrade to 4.5 with a `4.3->4.4` step followed by a `4.4->4.5` step.
+- While an upgrade is in progress, new component versions should
+  continue to operate correctly in concert with older component
+  versions (aka "version skew"). For example, if a node is down, and
+  an operator is rolling out a daemonset, the old and new daemonset
+  pods must continue to work correctly even while the cluster remains
+  in this partially upgraded state for some time.
+
+Downgrade expectations:
+- If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
+  misbehaving, it should be possible for the user to rollback to `N`. It is
+  acceptable to require some documented manual steps in order to fully restore
+  the downgraded cluster to its previous state. Examples of acceptable steps
+  include:
+  - Deleting any CVO-managed resources added by the new version. The
+    CVO does not currently delete resources that no longer exist in
+    the target version.
 
 ### Version Skew Strategy
 

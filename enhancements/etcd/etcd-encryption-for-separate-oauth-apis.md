@@ -25,7 +25,7 @@ superseded-by:
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift/docs]
 
-## Open Questions [optional]
+## Open Questions
 
 ## Summary
 
@@ -82,7 +82,7 @@ On the next release `n+1` we will copy over the keys to avoid creating new ones.
    - it will report whether all instances of `oauth-apiserver` converged to the same revision
    - make sure that `oauth-apiserver` deployer won't synchronize the secrets
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
@@ -150,4 +150,4 @@ History`.
 
 1. Turn off encryption before upgrading to new version and turn it on right after. It would be simple but not desirable by the end users. 
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed

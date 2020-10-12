@@ -267,7 +267,7 @@ Acceptance Criteria
 - Kernel arg configuration by the MCD works the same on all supported platforms
 
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 What are the caveats to the implementation? What are some important details that
 didn't come across above. Go in to as much detail as necessary here. This might
