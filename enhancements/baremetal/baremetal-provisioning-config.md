@@ -158,7 +158,7 @@ with 2 members:
 1. As a Deployment Operator, I want Barametal IPI deployments to be customizable to
 hardware and network requirements.
 
-2. As an Openshift Administrator, I want Baremetal IPI deployments to take place without
+2. As an OpenShift Administrator, I want Baremetal IPI deployments to take place without
 manual workarounds like creating a ConfigMap for the config (which is the current approach
 being used in 4.2 and 4.3.) 
 
@@ -208,7 +208,7 @@ metal3 cluster has been up and a few workers have come up successfully.
 ### Upgrade / Downgrade Strategy
 
 Baremetal Platform type will be available for customers to use for the first
-time in Openshift 4.3. And, when it is installed, it will always start as a
+time in OpenShift 4.3. And, when it is installed, it will always start as a
 fresh baremetal installation at least in 4.3. There is no use case where a 4.2
 installation would be upgraded to a 4.3 installation with Baremetal Platform
 support enabled.

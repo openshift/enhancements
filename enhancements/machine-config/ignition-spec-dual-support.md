@@ -35,13 +35,13 @@ superseded-by:
 ## Summary
 
 This enhancement proposal aims to add dual Ignition specification version 2/3
-(Ignition version 0/2) support to Openshift 4.x, which currently only support
+(Ignition version 0/2) support to OpenShift 4.x, which currently only support
 Ignition version 0 spec 2 for OS provisioning and machine config updates. We
 aim to introduce a  method to switch all new and existing clusters to Ignition
 spec version 3 at some version of the cluster, which will be performed by the
 Machine-Config-Operator (Henceforth MCO). The switching will be non-breaking
 for clusters that have no un-translatable configs (see below), and will have
-a grace period for admins to intervene and transition otherwise. The Openshift
+a grace period for admins to intervene and transition otherwise. The OpenShift
 installer and underlying control plane/bootstrap configuration, as well as RHEL 
 CoreOS (Henceforth RHCOS) package version will also be updated.
 
@@ -67,7 +67,7 @@ All new installs will be on spec 3 only. Existing clusters that have non spec 3
 Ignition config machineconfigs will not be allowed to update to the new version.
 
  - RHCOS bootimages switches to only accept Ignition spec 3 configs
- - The Openshift installer is updated to generate spec 3 configs
+ - The OpenShift installer is updated to generate spec 3 configs
  - Remaining MC* components generate spec 3 only
  - MCO enforces that all configs are spec 3 before allowing the CVO to start the update
 
@@ -111,7 +111,7 @@ OKD and OCP.
 - [ ] The MCO gains the ability to manage installer-generated stub master/worker Ignition configs (separate enhancement proposal)
 - [ ] Ignition-dracut spec 2 and spec 3 diffs are aligned
 - [ ] RHCOS bootimages switches to only accept Ignition spec 3 configs
-- [ ] The Openshift installer is updated to generate spec 3 configs
+- [ ] The OpenShift installer is updated to generate spec 3 configs
 - [ ] The MCC gains the ability for users to provide necessary changes to update spec 2 to spec 3
 - [ ] MCO enforces that all configs are spec 3 before allowing the CVO to start the update
 - [ ] Further tests/docs are added
@@ -253,7 +253,7 @@ Acceptance criteria:
 Acceptance criteria:
  - Essentially the same as story 1
 
-** As a user of Openshift, I’d like to install a fresh Ignition spec 3 cluster **
+** As a user of OpenShift, I’d like to install a fresh Ignition spec 3 cluster **
 
 Acceptance criteria:
  - The workflow remains the same for an IPI cluster
@@ -325,7 +325,7 @@ Most of the actual configs for master/workers are generated in the MCO via
 templates, and served by the MCS. Thus the installer would need to, during
 phase 2, generate spec 3 configs. For existing clusters, there exists a need
 to update the stub master/worker configs, which today exists as secrets
-unmanaged by any component in Openshift. See
+unmanaged by any component in OpenShift. See
 "Managing stub master/worker Ignition configs" section below.
 
 At the time of writing this proposal, there exist FCOS/OKD branches for the
@@ -339,14 +339,14 @@ with this change.
 
 Note: This will be also be a separate enhancement proposal.
 
-Today in Openshift, the installer generates stub Ignition configs for master
+Today in OpenShift, the installer generates stub Ignition configs for master
 and worker nodes. These stub configs serve as initial configs given to
 RHCOS bootimages for master/worker. They function to tell Ignition that actual
 Ignition configs will be served at port 22623, under /config/master or
 /config/worker, for Ignition to fetch during its run. 
 
 The Ignition stub config is then saved as `master-user-data` and `worker-user-data`
-secrets in Openshift. These stub configs are defined in a MachineSet, e.g.
+secrets in OpenShift. These stub configs are defined in a MachineSet, e.g.
 
 ```
 userDataSecret:
@@ -356,13 +356,13 @@ Which the MAO can interpret to fetch for the machine, when provisioning new
 machines.
 
 The issue today is that after installer creates these secrets, they are
-effectively "forgotten". No componenent in Openshift manages these secrets.
+effectively "forgotten". No componenent in OpenShift manages these secrets.
 The only way to update these secrets would be if a user knows the name, and
 manually changes it to another valid Ignition config.
 
 When Ignition spec 3 bootimages come into the picture, there currently exists
 no method to create a new MachineSet to referece new Ignition configs to serve
-to these machines. A component of the Openshift system (likely the MCO) thus
+to these machines. A component of the OpenShift system (likely the MCO) thus
 needs to create new secrets/update existing secrets to point to new stub
 configs with spec 3. The MCS can then serve these spec 3 configs at different
 directories at the same port, and it will be up to correctly defined
@@ -406,7 +406,7 @@ There could be many edge cases we have not yet considered. There are other
 potential difficulties such as serving the correct Ignition config. See above
 section on risks and mitigations.
 
-Starting from some version of Openshift, likely v4.6, we can remove dual
+Starting from some version of OpenShift, likely v4.6, we can remove dual
 support and be fully Ignition spec 3.
 
 Kubernetes 1.16 onwards has support for CRD versioning:

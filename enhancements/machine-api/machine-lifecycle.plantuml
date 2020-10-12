@@ -1,0 +1,53 @@
+@startuml machine-lifecycle
+start
+repeat
+  repeat
+    :Get machine;
+  repeat while (Validate machine) is (error)
+  backward:Add finalizers;
+repeat while (Machine has no finalizers) is (true)
+-> false;
+if (Machine has deletion timestamp) then (true)
+  :Set phase to "Deleting";
+  :Drain node;
+  :Call actuator Delete();
+  -[#black,dotted]->
+  #LightBlue:Terminate cloud instances and related resources;
+  -[#black,dotted]->
+  :Delete node;
+  :Remove finalizers;
+else (false)
+  if (Machine phase is "Failed") then (true)
+
+else (false)
+  if (Cloud instance exists) then (true)
+    :Call actuator Update();
+    -[#black,dotted]->
+    #LightBlue:Ensure provider ID is set;
+    -[#black,dotted]->
+    #LightBlue:Update machine status with adresses and provider status;
+    -[#black,dotted]->
+    if (Machine has a node) then (true)
+      :Set phase to "Running";
+    else (false)
+      :Set phase to "Provisioned";
+    endif
+  else (false)
+    if (Machine has assigned provider ID or addresses) then (true)
+      :Set phase to "Failed";
+    else (false)
+      :Set phase to "Provisioning";
+      :Call actuator Create();
+      -[#black,dotted]->
+      #LightBlue:Create cloud instances and related resources;
+      -[#black,dotted]->
+      #LightBlue:Ensure provider ID is set;
+      -[#black,dotted]->
+      #LightBlue:Create machine status that includes adresses and provider status;
+      -[#black,dotted]->
+    endif
+  endif
+endif
+endif
+stop
+@enduml
