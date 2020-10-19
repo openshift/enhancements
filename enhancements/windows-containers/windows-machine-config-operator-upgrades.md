@@ -9,7 +9,7 @@ approvers:
   - "@sdodson"
   - "@derekwaynecarr"
 creation-date: 2020-07-10
-last-updated: 2020-07-10
+last-updated: 2020-10-19
 status: implementable
 ---
 
@@ -86,13 +86,16 @@ it stays their responsiblity to provide an updated image.
 
 ### Design Details
 
-WMCO is published to OperatorHub as a Red Hat operator. When a new WMCO version
-is released, and the new version is compatible with the current cluster
-version, an update can occur. While we cannot explicity specify a required OCP
-version for the WMCO upgrade, each new OCP version upgrade should include a
-Kubernetes version upgrade. This allows us to use the [minKubeVersion](https://github.com/operator-framework/operator-lifecycle-manager/blob/master/doc/design/building-your-csv.md#operator-metadata)
-field in WMCO's CSV, which stops the operator from upgrading if the next
-WMCO version does not have at least the specified Kubernetes version.
+WMCO is published to OperatorHub as a Red Hat operator. Each minor version of
+OpenShift has a different Red Hat operators index. By adding the label
+`com.redhat.openshift.versions` to the WMCO dist-git Dockerfile, and setting
+its value to the appropriate OCP version, we can specify which operator index
+WMCO will be released to.
+
+When a cluster is upgraded OLM will switch to using a new Red Hat operators
+index. Because WMCO is named the same in both indexes, OLM will upgrade WMCO
+from the previous version, up to the latest version available in the new
+cluster.
 
 This update will either happen automatically, or require approval, based on
 the settings given through OLM when initially installing the operator.
