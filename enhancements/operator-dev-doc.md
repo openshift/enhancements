@@ -23,7 +23,15 @@ To get a description of a CO run
 ```console
 $ oc describe co/clusteroperatorname
 ```
-Operators are controllers for a 
+
+For simplicity, ClusterOperator resources only include negative conditions (i.e. if a condition required by an operator is not met). When
+troubleshooting a degraded cluster operator, it may be helpful to see all conditions, negative and positive. This can be observed by checking
+the description of the corresponding operator custom resource:
+```console
+$ oc describe clusteroperatorname.operator.openshift.io/cluster
+```
+
+Operators are controllers for a
 [Custom Resource](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/).  Operators automate many tasks
 in application management, such as deployments, backups, upgrades, leader election, reconciling resources, etc.
 
