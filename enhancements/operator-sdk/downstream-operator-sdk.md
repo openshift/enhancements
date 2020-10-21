@@ -75,6 +75,7 @@ pull from downstream images.
   * Provide operator-lib downstream
 * Create shell-script to help automate the process
   * As an operator-sdk developer, I would like a way to easily bring upstream SDK releases downstream for release with OpenShift
+  * As an operator-sdk developer, I would like to run the upstream tests downstream in an OpenShift cluster
 * Continue delivering Ansible and Helm operator base images
   * As an Ansible operator developer, I would want to continue having a released downstream Ansible operator image I could base my operator on.
   * As a Helm operator developer, I would want to continue having  a released downstream Helm operator image I could base my operator on.
@@ -141,8 +142,6 @@ branch:
 * ci
   * dockerfiles
     * variety of Dockerfiles used to build images for running tests
-* tests
-  * e2e test scripts
 * prow.Makefile # Makefile used by CI
 * patches
   * contain the patch files that may be carried
@@ -218,10 +217,7 @@ plan is to do a 4.7 release of OperatorSDK from the existing
 
 ### Open Questions [optional]
 
-1. Do we deliver operator-sdk on the developers.redhat.com like we do odo?
-   * https://developers.redhat.com/products/odo/overview
-
-2. Do we need an RPM?
+N/A
 
 ### Test Plan
 
@@ -230,7 +226,8 @@ tests for the Ansible and Helm operators.
 
 ### Graduation Criteria
 
-Operator SDK will go out once the downstream builds work.
+Operator SDK will go out once the downstream builds work. The Operator SDK will
+be downloadable from the [Red Hat Developer page][rh-dev-page].
 
 ### Upgrade / Downgrade Strategy
 
@@ -350,8 +347,8 @@ the repos:
 * ci
   * dockerfiles
     * variety of Dockerfiles used to build images for running tests
-* tests
-  * e2e test scripts
+  * tests
+    * e2e test scripts
 * prow.Makefile # Makefile used by CI
 * patches
   * contain the patch files that may be carried
@@ -384,8 +381,10 @@ the repos:
 ## Other resources
 
 * [Adding CI Configuration for New Repositories][new-repos]
+* [Red Hat Developer page][rh-dev-page]
 
 [gendiff](https://linux.die.net/man/1/gendiff)
 [overlay-files](#overlay-branch-directory-structures)
 [upstream-merge](https://github.com/jmrodri/scripts/blob/master/UPSTREAM-MERGE.sh),
 [new-repos](https://steps.ci.openshift.org/help/release#new-repos)
+[rh-dev-page](https://developers.redhat.com/topics/kubernetes/operators)
