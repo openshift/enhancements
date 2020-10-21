@@ -148,19 +148,14 @@ branch:
 * release
   * ansible
     * ansible_collections # contains the sync ansible collections
-    * bin # entrypoint and other binaries for ansible base images
     * Dockerfiles # various dockerfiles
   * helm
-    * bin # entrypoint and other binaries for helm base images
     * Dockerfiles # various dockerfiles
   * sdk
-    * bin # entrypoint and other binaries for sdk base images
     * Dockerfiles # various dockerfiles
   * scorecard-test
-    * bin # entrypoint and other binaries for images
     * Dockerfiles # various dockerfiles
   * scorecard-test-kuttl
-    * bin # entrypoint and other binaries for images
     * Dockerfiles # various dockerfiles
 * vendor
   * contains the dependencies for the project
@@ -355,19 +350,14 @@ the repos:
 * release
   * ansible
     * ansible_collections # contains the sync ansible collections
-    * bin # entrypoint and other binaries for ansible base images
     * Dockerfiles # various dockerfiles
   * helm
-    * bin # entrypoint and other binaries for helm base images
     * Dockerfiles # various dockerfiles
   * sdk
-    * bin # entrypoint and other binaries for sdk base images
     * Dockerfiles # various dockerfiles
   * scorecard-test
-    * bin # entrypoint and other binaries for images
     * Dockerfiles # various dockerfiles
   * scorecard-test-kuttl
-    * bin # entrypoint and other binaries for images
     * Dockerfiles # various dockerfiles
 * vendor
   * contains the dependencies for the project
