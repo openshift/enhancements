@@ -42,7 +42,7 @@ to an existing well known CNAME record.
 
 ### Goals
 
-1. Enable the cluster administor to specify the default apps domain seperate
+1. Enable the cluster administor to specify the default apps domain separate
 from the installed cluster domain.
 
 ## Proposal
