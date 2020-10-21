@@ -122,6 +122,10 @@ match the upstream branches 1 for 1. So downstream `master` will track upstream
 occur with minimal conflicts. These downstream branches will NOT contain any
 special downstream fixes, they are strictly mirrors of the upstream.
 
+The autosyncing will occur on a frequent basis configured in the
+[configuration file][auto-config]. The frequency will be determined by our
+needs.
+
 We will manage our own OpenShift release branches. These branches will be a
 combination of a tagged upstream branch plus the overlay branch.
 
@@ -378,3 +382,4 @@ the repos:
 [upstream-merge](https://github.com/jmrodri/scripts/blob/master/UPSTREAM-MERGE.sh),
 [new-repos](https://steps.ci.openshift.org/help/release#new-repos)
 [rh-dev-page](https://developers.redhat.com/topics/kubernetes/operators)
+[auto-config](https://github.com/fabianvf/ocp-osdk-downstream-automation/blob/master/deploy/cronjob.yaml#L40-L69)
