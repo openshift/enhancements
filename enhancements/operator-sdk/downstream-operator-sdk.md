@@ -244,7 +244,7 @@ official OpenShift documentation.
 #### Branching
 
 As described in the [Repos](#repos) and [Syncing](#syncing) sections, the
-downstream repos will use it's a different branching strategy.
+downstream repos will use a different branching strategy.
 
 The downstream repos will contain mirrors of the upstream repos, an overlay
 branch, and release branches that correspond to OpenShift releases.
