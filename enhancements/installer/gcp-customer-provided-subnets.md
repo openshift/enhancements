@@ -57,7 +57,7 @@ Resources owned by the cluster and resources must be clearly identifiable.
 
 Destroy cluster must make sure that no resources are deleted that didn't belong to the cluster. leaking resources is preferred than any possibility of deleting non-cluster resource.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 #### Resources provided to the installer
 

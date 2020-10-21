@@ -202,6 +202,6 @@ Complicates the forwarder.
 
 None.
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 Nothing new.

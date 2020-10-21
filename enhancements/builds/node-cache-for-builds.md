@@ -62,7 +62,7 @@ that need to be pulled when the build commences.
 As a developer using OpenShift to build container images I want builds to use image layers cached on
 the node So that builds don't have to pull all layers in their base images and builds run faster.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 1. The build controller will mount the node image cache located at `/var/lib/containers/storage`
    into the build pod as `readOnly`. The host path mount will use the `DirectoryOrCreate` type

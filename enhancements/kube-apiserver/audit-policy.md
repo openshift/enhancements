@@ -28,7 +28,7 @@ superseded-by:
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions [optional]
+## Open Questions
 
 ## Summary
 
@@ -172,7 +172,7 @@ Any kind of further, deeper policy configuration, e.g. that filters by API group
 is explicitly not part of this proposal and requires work on the [upstream dynamic audit](https://github.com/kubernetes/enhancements/blob/f1a799d5f4658ed29797c1fb9ceb7a4d0f538e93/keps/sig-auth/0014-dynamic-audit-configuration.md)
 mechanism and its promotion to beta eventually, or a post-processing mechanism of the audit logs.
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
@@ -194,7 +194,7 @@ change up to request payload level detail, but accept increased resource usage.
 As an even more security and regulatory demanding customer, I want to log **every** non-sensitive request
 both for read **and** for write operations, but also accept even more increased resource usage. 
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 The proposed API looks like this: 
 
@@ -303,46 +303,7 @@ expectations).
 
 ### Graduation Criteria
 
-**Note:** *Section not required until targeted at a release.*
-
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-- Maturity levels - `Dev Preview`, `Tech Preview`, `GA`
-- Deprecation
-
-Clearly define what graduation means.
-
-#### Examples
-
-These are generalized examples to consider, in addition to the aforementioned
-[maturity levels][maturity-levels].
-
-##### Dev Preview -> Tech Preview
-
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-
-##### Tech Preview -> GA 
-
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
-
-##### Removing a deprecated feature
-
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
+None
 
 ### Upgrade / Downgrade Strategy
 

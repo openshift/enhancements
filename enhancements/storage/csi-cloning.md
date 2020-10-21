@@ -48,12 +48,12 @@ This feature has already been implemented upstream, and is described in https://
 
 We will be releasing the `csi-external-provisioner` sidecar image with cloning support (already enabled by default) as Technology Preview. This sidecar will be provided to internal teams, such as CNV and OCS, for their drivers. No other consumer is supported, although it is eligible for use by any CSI driver.
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 As an OCS developer, I want to release the CSI Driver with cloning support so that drivers which include this feature, such as OCS, can use the API to easily Clone a volume.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 This feature has already been implemented upstream. Therefore, this feature requires the Kubernetes 1.16 rebase, and the `csi-external-provisioner` to be released with cloning support.
 We must also include e2e tests for this feature.
@@ -99,7 +99,7 @@ Additional references:
 
 ## Alternatives
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 None. The csi-external-provisioner repository will be updated to include this feature.
 

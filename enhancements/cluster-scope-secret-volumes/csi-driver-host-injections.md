@@ -23,7 +23,7 @@ replaces:
   
 creation-date: 2020-03-17
 
-last-updated: 2020-08-03
+last-updated: 2020-09-01
 
 <!-- status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced -->
 status: implementable
@@ -43,7 +43,7 @@ status: implementable
 - [/] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-## Open Questions [optional]
+## Open Questions
 
 > 1. If data on the CSI volume represents data the Pod's SA no longer has access to that data because of ACL/RBAC changes,
 >from a storage/CSI volume perspective are there any best practices on how to deal with the data?  The CSI driver can
@@ -100,7 +100,7 @@ impossible to avoid that.
 
 ## Proposal
 
-### User Stories [optional]
+### User Stories
 
 1. As a cluster admin with an OpenShift subscription, I want to share the entitlement keys and configuration with my 
 users' workload Pods so that containers in those Pods can install RHEL subscription content.
@@ -114,7 +114,7 @@ facilitate those scenarios across multiple namespaces.
 4. As a cluster admin who has to rotate credentials shared via this proposal, and I remove access to new versions of
 the credentials, I want to stop updating content within the existing pods consuming the content. 
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 #### Install
 
@@ -243,7 +243,7 @@ spec:
         csi:
           driver: projectedresources.storage.openshift.io
           volumeAttributes:
-             projectedResourceName: the-projected-resource
+             share: the-projected-resource
 
 ```
 
@@ -319,7 +319,7 @@ spec:
         csi:
           driver: projectedresources.storage.openshift.io
           volumeAttributes:
-             projectedResourceName: the-projected-resource
+             share: the-projected-resource
 
 ```
  
@@ -544,6 +544,6 @@ persistent volume styled approach with CSI:
   - there is an analogous method `deleteHostpathVolume` for deleting the directory.
 
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 N/A

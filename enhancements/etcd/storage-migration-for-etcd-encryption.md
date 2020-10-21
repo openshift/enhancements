@@ -75,7 +75,7 @@ We will use the upstream `kube-storage-version-migrator` (the controller-based s
   * Enable CI on `openshift/kube-storage-version-migrator` repo.
 * Utilize `StorageVersionMigration` API when etcd storage encryption keys are updated.
 
-## User Stories [optional]
+## User Stories
 
 * kube-apiserver-operator can request a resource migration and confirm when the migration has completed. 
 
@@ -175,7 +175,7 @@ This component should not be invoked during an upgrade.
 
 ## Alternatives
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 ### New github projects:
 

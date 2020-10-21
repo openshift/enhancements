@@ -238,7 +238,7 @@ The series of actions performed on the recovery node by `cluster-restore.sh` can
 
 ## Alternatives
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 ### New github projects:
 

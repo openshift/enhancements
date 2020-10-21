@@ -43,7 +43,7 @@ installer-provisioned infrastructure capabilities.
 The [connected-assisted-installer
 enhancement](./connected-assisted-installer.md) describes how an agent
 running on several bare-metal hosts receive a command from the
-assisted installer application to begin the installation of that
+assisted installer service to begin the installation of that
 host. One of the first tasks that each host performs upon receiving
 this instruction is to download, from the assisted installer, the
 appropriate Ignition file for that host's role. These ignition files
@@ -53,7 +53,7 @@ the `openshift-install create ignition-configs` command.
 This installer workflow mirrors the [bare-metal user-provisioned
 infrastructure
 workflow](https://github.com/openshift/installer/blob/master/docs/user/metal/install_upi.md)
-in that the the OpenShift installer is used to generate assets for the
+in that the OpenShift installer is used to generate assets for the
 cluster but the `openshift-install create cluster` command is not used
 to manage the deployment. However, the assisted installer does need to
 enable some `baremetal` installer-provisioned infrastructure platform
@@ -100,7 +100,7 @@ to allow the latter 2 capabilities to be configured for
 user-provisioned infrastructure, without requiring configuration that
 is only relevant to the first capability.
 
-### User Stories [optional]
+### User Stories
 
 #### Story 1
 
@@ -118,7 +118,7 @@ the cluster is being built using the installer-provisioned
 infrastructure workflow or the user-provisioned workflow so I can
 apply only the rules necessary for each case.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 All of the validation is currently performed during early phases of
 the installer for the `InstallConfig` target. The user-provisioned
@@ -202,41 +202,7 @@ verify that no extra validation rules are applied.
 
 ### Graduation Criteria
 
-**Note:** *Section not required until targeted at a release.*
-
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-- Maturity levels - `Dev Preview`, `Tech Preview`, `GA`
-- Deprecation
-
-Clearly define what graduation means.
-
-#### Examples
-
-These are generalized examples to consider, in addition to the aforementioned
-[maturity levels][maturity-levels].
-
-##### Dev Preview -> Tech Preview
-
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-
-##### Tech Preview -> GA 
-
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
+None
 
 ## Implementation History
 

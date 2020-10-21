@@ -10,7 +10,7 @@ approvers:
   - "@oscardoe"
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
-status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced
+status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
 see-also:
   - "/enhancements/this-other-neat-thing.md"  
 replaces:
@@ -165,15 +165,23 @@ determine graduation.
 
 Consider the following in developing the graduation criteria for this
 enhancement:
-- Maturity levels - `Dev Preview`, `Tech Preview`, `GA`
-- Deprecation
 
-Clearly define what graduation means.
+- Maturity levels
+    - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
+    - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
+- [Deprecation policy][deprecation-policy]
+
+Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
+or by redefining what graduation means.
+
+In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
+
+[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
+[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
 
 #### Examples
 
-These are generalized examples to consider, in addition to the aforementioned
-[maturity levels][maturity-levels].
+These are generalized examples to consider, in addition to the aforementioned [maturity levels][maturity-levels].
 
 ##### Dev Preview -> Tech Preview
 
@@ -207,6 +215,34 @@ enhancement:
   cluster required to make on upgrade in order to keep previous behavior?
 - What changes (in invocations, configurations, API use, etc.) is an existing
   cluster required to make on upgrade in order to make use of the enhancement?
+
+Upgrade expectations:
+- Each component should remain available for user requests and
+  workloads during upgrades. Any exception to this should be
+  identified and discussed here.
+- Micro version upgrades - users should be able to skip forward versions within a
+  minor release stream without being required to pass through intermediate
+  versions - i.e. `x.y.N->x.y.N+2` should work without requiring `x.y.N->x.y.N+1`
+  as an intermediate step.
+- Minor version upgrades - you only need to support `x.N->x.N+1` upgrade
+  steps. So, for example, it is acceptable to require a user running 4.3 to
+  upgrade to 4.5 with a `4.3->4.4` step followed by a `4.4->4.5` step.
+- While an upgrade is in progress, new component versions should
+  continue to operate correctly in concert with older component
+  versions (aka "version skew"). For example, if a node is down, and
+  an operator is rolling out a daemonset, the old and new daemonset
+  pods must continue to work correctly even while the cluster remains
+  in this partially upgraded state for some time.
+
+Downgrade expectations:
+- If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
+  misbehaving, it should be possible for the user to rollback to `N`. It is
+  acceptable to require some documented manual steps in order to fully restore
+  the downgraded cluster to its previous state. Examples of acceptable steps
+  include:
+  - Deleting any CVO-managed resources added by the new version. The
+    CVO does not currently delete resources that no longer exist in
+    the target version.
 
 ### Version Skew Strategy
 

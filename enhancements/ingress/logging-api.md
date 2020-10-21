@@ -14,7 +14,7 @@ approvers:
   - "@knobunc"
 creation-date: 2020-03-19
 last-updated: 2020-03-19
-status: implementable
+status: implemented
 see-also: cluster-logging/cluster-logging-log-forwarding
 replaces:
 superseded-by:
@@ -25,9 +25,9 @@ superseded-by:
 ## Release Signoff Checklist
 
 - [X] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [X] Design details are appropriately documented from clear requirements
+- [X] Test plan is defined
+- [X] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
@@ -202,15 +202,21 @@ unspecified the default is "local1"); `Container` has no parameters:
 // SyslogLoggingDestinationParameters describes parameters for the Syslog
 // logging destination type.
 type SyslogLoggingDestinationParameters struct {
-	// endpoint identifies the syslog endpoint that receives log messages.
-	// The endpoint must be a host name or IP address and a UDP port number.
-	// Specify the value in the format of a colon-separated name or address
-	// and port number: host:port
+	// address is the IP address of the syslog endpoint that receives log
+	// messages.
 	//
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
 	// +required
-	Endpoint string `json:"endpoint"`
+	Address string `json:"address"`
+
+	// port is the UDP port number of the syslog endpoint that receives log
+	// messages.
+	//
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +required
+	Port uint32 `json:"port"`
 
 	// facility specifies the syslog facility of log messages.
 	//
@@ -234,9 +240,12 @@ destination using `spec.logging.access.destination`.  To specify a destination,
 the user must specify either `Container` or `Syslog` for
 `spec.logging.access.destination.type`.  If the destination type is `Syslog`,
 the user must specify a destination endpoint using
-`spec.logging.access.destination.syslog.endpoint` and may specify a facility
-using `spec.logging.access.destination.syslog.facility`.  The user may specify
-`spec.logging.access.httpLogFormat` to customize the log format.  For example, the following is the definition of an IngressController that logs to a syslog endpoint with IP address 1.2.3.4 and port 10514:
+`spec.logging.access.destination.syslog.address` and
+`spec.logging.access.destination.syslog.port` and may specify a facility using
+`spec.logging.access.destination.syslog.facility`.  The user may specify
+`spec.logging.access.httpLogFormat` to customize the log format.  For example,
+the following is the definition of an IngressController that logs to a syslog
+endpoint with IP address 1.2.3.4 and port 10514:
 
 ```yaml
 apiVersion: operator.openshift.io/v1
@@ -253,7 +262,8 @@ spec:
       destination:
         type: Syslog
         syslog:
-          endpoint: 1.2.3.4:10514
+          address: 1.2.3.4
+          port: 10514
 ```
 
 #### Validation
@@ -270,14 +280,10 @@ described by the field type's `+kubebuilder:validation:Enum` marker.
 The API validates the `spec.logging.access.destination.syslog.facility` field
 value as described by the field's `+kubebuilder:validation:Enum` marker.
 
-If the ingress controller specifies a syslog destination, the operator checks
-the `spec.logging.access.destination.syslog.endpoint` field value when admitting
-the ingress controller.  The operator ensures that the value can be parsed into
-a host name or IP address and port number.  The operator may perform additional
-checks, such as probing the endpoint.  If the operator identifies any problems
-with the value at admission time, the operator rejects the ingress controller
-and reports the problems using the ingress controller's "Admitted" status
-condition.
+If the ingress controller specifies a syslog destination, the API validates that
+the `spec.logging.access.destination.syslog.address` field value is an IPv4 or
+IPv6 address and that the `spec.logging.access.destination.syslog.port` field
+value is a valid port number.
 
 ### User Stories
 

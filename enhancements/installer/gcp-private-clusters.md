@@ -138,32 +138,6 @@ This enhancement will follow standard graduation criteria.
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
 
-#### Examples
-
-These are generalized examples to consider, in addition to the aforementioned
-[maturity levels][maturity-levels].
-
-##### Dev Preview -> Tech Preview
-
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-
-##### Tech Preview -> GA 
-
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
-
-##### Removing a deprecated feature
-
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
-
 ### Upgrade / Downgrade Strategy
 
 N/A
@@ -184,7 +158,7 @@ A limitation of this design is that no health check for the machine config serve
 
 Other alternatives were considered but this is the only known feasible design. As mentioned above, using external network load balancers and limiting public access with firewalls is not possible, because tagged VM instances can not be granted access through source tags. 
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 * Network deployment in GCP CI account which includes VPC, subnets, NAT gateways, Internet gateway that provide egress to the Internet for instance in private subnet.
 * VPN accessibility to the network deployment created above.
