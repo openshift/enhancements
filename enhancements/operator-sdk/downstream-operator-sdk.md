@@ -29,8 +29,8 @@ superseded-by:
 
 - [x] Enhancement is `implementable`
 - [x] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [x] Test plan is defined
+- [x] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
@@ -238,6 +238,12 @@ We will run the tests in the OpenShift CI cluster. We will *not* use
 [kind][kind] downstream. There may need to be some patches maintained downstream
 and/or some changes upstream to ensure the tests run in an OpenShift cluster.
 
+Since OpenShift CI creates a new cluster for each CI run, this can get
+expensive. We need to be good stewards of the CI clusters and ensure we are
+running the tests sufficiently enough to have a good feel for the quality of the
+syncs, but not so much that we are burning through CI resources. At this time we
+don't have a solution.
+
 ### Graduation Criteria
 
 Operator SDK will go out once the downstream builds work. The Operator SDK will
@@ -390,7 +396,7 @@ the repos:
 * vendor
   * contains the dependencies for the project
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 * New openshift/operator-lib repo
 * New openshift/operator-sdk repo
