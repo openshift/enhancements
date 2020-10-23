@@ -170,12 +170,15 @@ branch:
 Typically we want to submit all bugs upstream, have them release then sync the
 release downstream. But there will be times we need to fix a problem downstream
 to resolve a bug that we can’t wait for an upstream release. The process here
-will be twofold.
+will be to keep patches separate to avoid conflicts during syncing.
 
-1. For fixes to vendored dependencies, have a patch in the patches directory
-   that will be applied to the vendor after we run go mod vendor.
-1. For fixes to mainline code, fix the mainline code directly. NOTE: these changes
-   will be lost when re-running UPSTREAM-MERGE.sh script.
+For fixes to vendored dependencies, have a patch in the patches directory
+that will be applied to the vendor after we run go mod vendor.
+
+For fixes to mainline code, have a patch in the patches directory that will be
+applied before builds. In order to do this, we may have to create a downstream
+`Makefile` that could include the upstream `Makefile` if we need to insert
+patches step.
 
 For either of the above, we will always submit the patches to the appropriate
 upstream repos.
