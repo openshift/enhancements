@@ -143,24 +143,25 @@ mirrored upstream branch to create a downstream release branch.
 The following is a list of directories and files that will exist in the overlay
 branch:
 
-* ci
-  * dockerfiles
-    * variety of Dockerfiles used to build images for running tests
-* prow.Makefile # Makefile used by CI
-* patches
-  * contain the patch files that may be carried
-* release
-  * ansible
-    * ansible_collections # contains the sync ansible collections
-    * Dockerfiles # various dockerfiles
-  * helm
-    * Dockerfiles # various dockerfiles
-  * sdk
-    * Dockerfiles # various dockerfiles
-  * scorecard-test
-    * Dockerfiles # various dockerfiles
-  * scorecard-test-kuttl
-    * Dockerfiles # various dockerfiles
+* openshift # directory to contain downstream overlay
+  * ci
+    * dockerfiles
+      * variety of Dockerfiles used to build images for running tests
+  * prow.Makefile # Makefile used by CI
+  * patches
+    * contain the patch files that may be carried
+  * release
+    * ansible
+      * ansible_collections # contains the sync ansible collections
+      * Dockerfiles # various dockerfiles
+    * helm
+      * Dockerfiles # various dockerfiles
+    * sdk
+      * Dockerfiles # various dockerfiles
+    * scorecard-test
+      * Dockerfiles # various dockerfiles
+    * scorecard-test-kuttl
+      * Dockerfiles # various dockerfiles
 * vendor
   * contains the dependencies for the project
 
@@ -216,8 +217,20 @@ plan is to do a 4.7 release of OperatorSDK from the existing
 
 ### Test Plan
 
-The existing set of Operator SDK tests will be run downstream. Today we run
-tests for the Ansible and Helm operators.
+The existing set of Operator SDK upstream tests will be run downstream. Today
+we run tests for the Ansible and Helm operators. A list of the upstream tests we
+would run downstream:
+
+* `test-sanity` # sanity checks like formatting and linters
+* `test-unit`   # unit tests
+* `test-e2e`    # e2e tests
+
+The `test-links` target will *not* be run, since that is used to verify the
+links in the upstream docs.
+
+We will run the tests in the OpenShift CI cluster. We will *not* use
+[kind][kind] downstream. There may need to be some patches maintained downstream
+and/or some changes upstream to ensure the tests run in an OpenShift cluster.
 
 ### Graduation Criteria
 
@@ -379,3 +392,4 @@ the repos:
 [new-repos](https://steps.ci.openshift.org/help/release#new-repos)
 [rh-dev-page](https://developers.redhat.com/topics/kubernetes/operators)
 [auto-config](https://github.com/fabianvf/ocp-osdk-downstream-automation/blob/master/deploy/cronjob.yaml#L40-L69)
+[kind](https://kind.sigs.k8s.io/)
