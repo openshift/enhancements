@@ -133,15 +133,18 @@ There is an initial prototype of the syncing code already:
 
 https://github.com/fabianvf/ocp-osdk-downstream-automation
 
-#### Overlay Branch Directory Structures
+#### Downstream Only Directory Structures
 
-Today, we have the following files in the `ocp-release-operator-sdk` repo. This
-usually doesn't impact the merge but it is a set of files that are NOT upstream.
-So we will put these in an overlay branch that can be used to lay down over the
-mirrored upstream branch to create a downstream release branch.
+Today, we have a set of files scattered through the `ocp-release-operator-sdk`
+repo which are NOT in the upstream. For example, `ci` and `release` directories.
+Instead of having them in the root of the repo, we will create an `openshift`
+directory to house all the files not part of the upstream except the `vendor`
+directory which must be in the root since it contains the Golang dependencies.
 
-The following is a list of directories and files that will exist in the overlay
-branch:
+Having them in a separate directory will also make it easier to do the [Overlay
+Branch](#overlay-branch) alternative if the need arises.
+
+The `openshift` directory will contain the following files and sub-directories:
 
 * openshift # directory to contain downstream overlay
   * ci
@@ -297,6 +300,15 @@ The disadvantage to this is that each release branch is not managed by ART.
 One alternative is to have a monorepo and sync all upstream repos to a single
 repo. While this is a possible solution it would be more difficult to maintain
 for the needs of the SDK team.
+
+### Overlay Branch
+
+Another idea that was floated was having the specific downstream files stored in
+an overlay branch that would then be "overlayed" an upstream branch to create a
+release branch. For example, release-4.9 would be created from
+operator-sdk/v2.0.x plus the overlay branch. As of right now, there doesn't
+seem to be a major need for having this over just a specific directory in
+master.
 
 ### Semi-manual syncing of repos
 
