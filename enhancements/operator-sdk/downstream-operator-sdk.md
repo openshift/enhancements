@@ -64,7 +64,7 @@ pull from downstream images.
 
 ## Proposal
 
-### User Stories [optional]
+### User Stories
 
 * Deliver an operator-sdk binary
   * As an operator developer, I would want the SDK that I use to support the supported OpenShift clusters.
@@ -81,7 +81,7 @@ pull from downstream images.
   * As a Helm operator developer, I would want to continue having  a released downstream Helm operator image I could base my operator on.
 
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 #### Repos
 
@@ -213,10 +213,6 @@ plan is to do a 4.7 release of OperatorSDK from the existing
 `openshift/ocp-release-operator-sdk` repo.
 
 ## Design Details
-
-### Open Questions [optional]
-
-N/A
 
 ### Test Plan
 
