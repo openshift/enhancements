@@ -70,6 +70,15 @@ An important way to think about this is that we can still ascribe a *single vers
 
 Note this will also likely enable us to move `open-vm-tools` out of the host and have the MCO install it on VSphere environments for example.
 
+#### Adding Extensions
+
+When adding a new extension the following criteria generally should be met:
+
+- containerizing the technology is not an option
+- the technology and content is shippable by Red Hat
+- the technology is specific to a particular platform/cloud _or_ use case
+- the technology is not necessary at first boot
+
 ### Risks and Mitigations
 
 #### 3rd party RPMs
