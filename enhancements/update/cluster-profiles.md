@@ -102,6 +102,9 @@ not support including/excluding sections of a manifest. In order to avoid drift 
 maintenance burden, components may use a templating solution such as kustomize to generate
 the required manifests while keeping a single master source.
 
+The current installation profile is called `self-managed-high-availability`. All current
+manifests must specify it. Future profiles may choose.
+
 ## Implementation History
 
 * Teach cluster-version operator about profiles, [cvo#404](https://github.com/openshift/cluster-version-operator/pull/404), in flight.
