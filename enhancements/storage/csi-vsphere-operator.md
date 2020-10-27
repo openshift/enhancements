@@ -79,19 +79,19 @@ The cluster-storage-operator will deploy all the resources necessary for creatin
 3. The operator will get RBAC rules necessary for running the operator and its operand (i.e the actual vSphere CSI driver).
 4. A deployment will be created for starting the operator and will be managed by cluster-storage-operator.
 5. A instance of `ClusterCSIDriver` will be created to faciliate managment of driver operator.  `ClusterCSIDriver` is already defined in - https://github.com/openshift/api/blob/master/operator/v1/types_csi_cluster_driver.go but needs to be expanded to include vSphere CSI driver.
-6. cluster-storage-operator will create required cloud-credentials for talking with vCenter API.
+6. cluster-storage-operator will request CVO to create required cloud-credentials for talking with vCenter API.
 
 #### Driver deployment via vsphere-csi-driver-operator.
 
 The operator itself will be responsible for running the driver and all the required sidecars (attacher, provisioner etc).
 
-1. The operator will create namespace `openshift-cluster-csi-drivers` to deploy the driver and sidecars.
+1. The operator will assume namespace `openshift-cluster-csi-drivers` is already created for the driver.
 2. A service account will be created for running the driver.
 3. The operator will create RBAC rules necessary for running the driver and sidecars.
 4. A deployment will be created and managed by operator to handle control-plane sidecars and controller-plane driver deployment with controller-side of CSI services.
 5. A DaemonSet will be created and managed by operator to run node side of driver operations.
 6. A `CSIDriver` object will be created to expose driver features to control-plane.
-7. The driver operator will use and expose cloud-credentials created by cluster-storage-operator.
+7. The driver operator will use and expose cloud-credentials created by CVO.
 
 Most of the steps outlined above is common to all CSI driver operator and vSphere CSI driver is not unique among those aspects.
 
@@ -103,26 +103,32 @@ There are certain aspects of driver which require special handling:
 
 Currently while deploying Openshift a user can configure datastore used by OCP via install-config.yaml. vSphere CSI driver however can't use datastore directly and must be configured with vSphere storage policy. 
 
-To solve this problem vsphere CSI operator is going to create a storagePolicy by tagging selected datastore in the installer. This will require OCP to have expanded permissions of creating storagePolicies.
+To solve this problem vsphere CSI operator is going to create a storagePolicy by tagging selected datastore in the installer. This will require OCP to have expanded permissions of creating storagePolicies. After creating the storagePolicy, the vSphere CSI operator will also create corresponding storageclass.
 
 If CSI operator can not create storage Policy for some reason:
 
-- The operator will continue installing CSI driver without creating storageClass. The operation of creating storagePolicy and storageClass will be however retried expecting permissions to be fixed or transient errors to go away.
-- It is expected that user will manually create a storageClass to consume vSphere CSI volumes if CSI operator can not create storagePolicy and storageClass.
-- CSI operator will mark itself as degraded but CSO itself will not be degraded and vSphere CSI operator's degraded status must be handled in a different way in CSO.
+- The operator will mark itself as disabled and stop further driver installation.
+- It will periodically retry installation and wait for admin to grant permissions to create StoragePolicy.
 - Create a metric if storagePolicy and storageClass creation fails in 4.7.
 
 ##### Hardware and vCenter version handling
 
-When vSphere CSI operator starts, using credentials provided by cluster-storage-operator, it will first verifiy vCenter version and HW version of VMs. If vCenter version is not 6.7u3 or greater and HW version is not 15 or greater on all VMs - it will mark itself as degraded but continue with driver installation. If additional VMs are added later into the cluster and they do not have HW version 15 or greater, Operator will mark itself as `degraded` and nodes which don't have right HW version will have annotation `vsphere.driver.status.csi.openshift.io: degraded` added to them.
+When vSphere CSI operator starts, using credentials provided by cluster-storage-operator, it will first verifiy vCenter version and HW version of VMs. If vCenter version is not 6.7u3 or greater and HW version is not 15 or greater on all VMs and this is a fresh install(i.e there is no `CSIDriver` object already installed by this operator) - it will:
+
+1. Mark itself as disabled, stop CSI driver installation.
+2. Add clear message to indicate the error.
+3. It will keep retrying installation with exponential backoff assuming admin manually fixes the HW version of VMs.
+
+
+If additional VMs are added later into the cluster and they do not have HW version 15 or greater, Operator will mark itself as `degraded` and nodes which don't have right HW version will have annotation `vsphere.driver.status.csi.openshift.io: degraded` added to them.
 
 Additionally vSphere CSI operator will report HW version of VMs that make up the cluster as a metric.
 
 ##### Presence of existing drivers in the cluster being upgraded
 
-A customer may install vSphere driver from external sources. In 4.7 we will install the CSI driver operator but will not proceed with driver install if an existing install of CSI driver is detected. The operator will be marked as degraded but it will not degrade overall CSO status.
+A customer may install vSphere driver from external sources. In 4.7 we will install the CSI driver operator but will not proceed with driver install if an existing install of CSI driver is detected. The operator will mark itself as disabled but it will not degrade overall CSO status.
 
-Since VMWare will ship its own vSphere CSI driver operator via OLM, it should be possible to disable default cluster-storage-operator managed operator(i.e this operator). Currently we are planning to let user set `ManagementState: Removed` in `ClusterCSIDriver` CR, which will cause operand to be removed(i.e the CSI driver) but operator will still be running. This will allow user to use external vSphere CSI operatrs.
+We will additionally gather metrics for such installation and decide in 4.8 timeframe, if we need to mark such clusters as "unupgradable".
 
 #### Disabling the operator
 
