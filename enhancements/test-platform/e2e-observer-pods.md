@@ -80,19 +80,23 @@ This is a sketch of a possible path.
     4. env vars
     that mounts a `secret/<job>-kubeconfig` that will later contain a kubeconfig.
     This happens to neatly align to a PodTemplate, but any file not tied to a particular CI dimension can work.
- 2. Before a kubeconfig is present, create an instance of each binary from #1 is created and an empty `secret/<job>-kubeconfig`.
- 3. As soon as a kubeconfig is available (these go into a known location in setup container today), write that
+ 2. Allow a developer to bind configured observer(s) to a job by one of the following mechanisms:
+    1. attach the observer(s) to a step, so that any job which runs that step will run the observer
+    2. attach the observer(s) to a workflow, so that any job which runs the workflow will run the observer
+    3. attach the observer(s) to a literal test configuraiton, so that an observer could be added in a repo's test stanza
+ 3. Allow a developer to opt out of running named observer(s) by one of the following mechanisms:
+    1. opt out of the observer(s) in a workflow, so that any job which runs the workflow will not run the observer
+    2. opt out of the observer(s) in a literal test configuraiton, so that an observer could be excluded in a repo's test stanza
+ 4. Before a kubeconfig is present, create an instance of each binary from #1 is created and an empty `secret/<job>-kubeconfig`.
+ 5. As soon as a kubeconfig is available (these go into a known location in setup container today), write that
     `kubeconfig` into every `secret/<job>-kubeconfig` (you probably want to label them).
- 4. When it is time for collection, the existing pod (I think it's teardown container), issues a sig-term to the process or perhaps
-    writes a new data entry containing a timestamp into at `.data['teardown']` into every `secret/<job>-kubeconfig`.
-    The exactly mechanism isn't critical, but the file is unambiguous, level driven, externally communicative, and can happen for no
-    other reason.  The sig-term could happen for any reason, cannot be externally checked, and is not level driven.
- 5. Ten minutes teardown begins, something in CI gathers a well known directory,
+ 6. When it is time for collection, the existing pod (I think it's teardown container), issues a SIGTERM to the process.
+ 7. Ten minutes teardown begins, something in CI gathers a well known directory,
     `/var/e2e-observer`, which may contain `/var/e2e-observer/junit` and `/var/e2e-observer/artifacts`.  These contents
     are placed in some reasonable spot.
     
     This could be optimized with a file write in the other direction, but the naive approach doesn't require it.
-  6. All resources are cleaned up.  
+ 8. All resources are cleaned up.  
 
 ### Requirements on e2e-observer authors
  1. Your pod must be able to run against *every* dimension. No exceptions.  If your pod needs to quietly no-op, it can do that.
