@@ -205,7 +205,7 @@ configuration that makes the correct adjustments to the deployment
 [without waiting for 3 master nodes](https://github.com/openshift/cluster-etcd-operator/blob/98590e6ecfe282735c4eff01432ae40b29f81202/pkg/etcdenvvar/etcd_env.go#L72))
 
 In addition, some components are not relevant for this cluster
-profile (e.g. console, cluster-autoscaler, marketplace?) and shouldn't
+profile (e.g. console, cluster-autoscaler, keepalived for ingressVIP and apiVIP) and shouldn't
 be deployed at all.
 
 
@@ -228,9 +228,10 @@ ecosystem.*
    for a host to boot, including bonded interfaces, access to multiple
    VLANs, and static IPs. How do we anticipate configuring those?
 3. The machine-config-operator works by (almost always) rebooting a host.
-   Is that going to be OK in these single-node deployments? Do we want
-   the machine-config-operator disabled? Do we want it to run in a
-   different mode where reboots are not performed?
+   Is that going to be OK in these single-node deployments?  Do we want it to run in a
+   MCO is used by PAO (optional OLM operator) and NTO to apply the computed host OS and kernel tuning values. 
+   It is also used to allocate hugepages.
+   Do we want it to run in a different mode where reboots are not performed?
 
 ### Test Plan
 
