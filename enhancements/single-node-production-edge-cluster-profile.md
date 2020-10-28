@@ -227,11 +227,12 @@ ecosystem.*
 2. Similarly, telco workloads typically require special network setups
    for a host to boot, including bonded interfaces, access to multiple
    VLANs, and static IPs. How do we anticipate configuring those?
-3. The machine-config-operator works by (almost always) rebooting a host.
-   Is that going to be OK in these single-node deployments?  Do we want it to run in a
-   MCO is used by PAO (optional OLM operator) and NTO to apply the computed host OS and kernel tuning values. 
-   It is also used to allocate hugepages.
-   Do we want it to run in a different mode where reboots are not performed?
+3. The machine-config-operator works by (almost always) rebooting a
+   host.  Is that going to be OK in these single-node deployments?
+   MCO is used by the performance-api-operator (an optional OLM
+   operator) and NTO to apply the computed host OS and kernel tuning
+   values.  It is also used to allocate hugepages.  Do we want it to
+   run in a different mode where reboots are not performed?
 
 ### Test Plan
 
