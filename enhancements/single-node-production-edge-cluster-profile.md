@@ -229,10 +229,10 @@ ecosystem.*
    VLANs, and static IPs. How do we anticipate configuring those?
 3. The machine-config-operator works by (almost always) rebooting a
    host.  Is that going to be OK in these single-node deployments?
-   MCO is used by the performance-api-operator (an optional OLM
-   operator) and NTO to apply the computed host OS and kernel tuning
-   values.  It is also used to allocate hugepages.  Do we want it to
-   run in a different mode where reboots are not performed?
+   MCO is used by the performance-addon-operator and the
+   network-tuning-operator to apply the computed host OS and kernel
+   tuning values.  It is also used to allocate hugepages.  Do we want
+   it to run in a different mode where reboots are not performed?
 
 ### Test Plan
 
