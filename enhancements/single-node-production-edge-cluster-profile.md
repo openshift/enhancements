@@ -184,30 +184,107 @@ deployment, with some limitations (see non-goals above). The user
 will not require special support exceptions to receive technical assistance
 for the features supported by the configuration.
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 Some OpenShift components (such as Etcd and Ingress) require
 a minimum of 2 or 3 nodes. The `single-node-production-edge`
 cluster profile will configure these components as appropriate
 for a single node.
 
-Known gaps:
-- `cluster-etcd-operator` will not deploy the etcd cluster without minimum of 3 master nodes (can be changed by enabling `useUnsupportedUnsafeNonHANonProductionUnstableEtcd`)
-- Even with the unsupported feature flag, `etcd-quorum-guard` still requires 3 nodes due to its replica count.
-- `cluster-authentication-operator` will not deploy `OAuthServer` without minimum of 3 master nodes (can be change by enabling `useUnsupportedUnsafeNonHANonProductionUnstableOAuthServer`)
-- `cluster-ingress-operator` deploys the router with 2 replicas. On a single node one will fail to start and the ingress will show as degraded.
-
 When we are deploying a cluster with the `single-node-production-edge`
-cluster profile the relevant operators should support a non-HA
+cluster profile, the relevant operators should support a non-HA
 configuration that makes the correct adjustments to the deployment
 (e.g., `cluster-ingress-operator` should deploy a single router,
-`cluster-etcd-operator` should deploy the `etcd-member`
-[without waiting for 3 master nodes](https://github.com/openshift/cluster-etcd-operator/blob/98590e6ecfe282735c4eff01432ae40b29f81202/pkg/etcdenvvar/etcd_env.go#L72))
+`cluster-etcd-operator` should deploy the `etcd-member` [without
+waiting for 3 master
+nodes](https://github.com/openshift/cluster-etcd-operator/blob/98590e6ecfe282735c4eff01432ae40b29f81202/pkg/etcdenvvar/etcd_env.go#L72))
 
-In addition, some components are not relevant for this cluster
-profile (e.g. console, cluster-autoscaler, keepalived for ingressVIP and apiVIP) and shouldn't
-be deployed at all.
+In addition, some components are not relevant for this cluster profile
+(e.g. console, cluster-autoscaler, keepalived for ingressVIP and
+apiVIP) and shouldn't be deployed at all.
 
+#### cluster-etcd-operator
+
+By default, `cluster-etcd-operator` will not deploy the etcd cluster
+without minimum of 3 master nodes. This can be changed by enabling
+`useUnsupportedUnsafeNonHANonProductionUnstableEtcd`.
+
+```shell
+# allow etcd-operator to start the etcd cluster without minimum of 3 master nodes
+oc patch etcd cluster --type=merge -p="$(cat <<- EOF
+
+ spec:
+   unsupportedConfigOverrides:
+     useUnsupportedUnsafeNonHANonProductionUnstableEtcd: true
+EOF
+)"
+```
+
+Even with the unsupported feature flag, `etcd-quorum-guard` still
+requires 3 nodes due to its replica count. The `etcd-quorum-guard`
+Deployment is managed by the `cluster-verison-operator`, so it needs
+to be marked as unmanaged before it can be scaled down.
+
+```shell
+# tell the cluster-version-operator not to manage etcd-quorum-guard
+oc patch clusterversion/version --type='merge' -p "$(cat <<- EOF
+ spec:
+    overrides:
+      - group: apps/v1
+        kind: Deployment
+        name: etcd-quorum-guard
+        namespace: openshift-machine-config-operator
+        unmanaged: true
+EOF
+)"
+
+# scale down etcd-quorum-guard
+oc scale --replicas=1 deployment/etcd-quorum-guard -n openshift-etcd
+```
+
+#### cluster-authentication-operator
+
+By default, the `cluster-authentication-operator` will not deploy
+`OAuthServer` without minimum of 3 master nodes. This can be change by
+enabling `useUnsupportedUnsafeNonHANonProductionUnstableOAuthServer`.
+
+```shell
+# allow cluster-authentication-operator to deploy OAuthServer without minimum of 3 master nodes
+oc patch authentications.operator.openshift.io cluster --type=merge -p="$(cat <<- EOF
+
+ spec:
+   managementState: "Managed"
+   unsupportedConfigOverrides:
+     useUnsupportedUnsafeNonHANonProductionUnstableOAuthServer: true
+EOF
+)"
+```
+
+#### cluster-ingress-operator
+
+By default, the `cluster-ingress-operator` deploys the router with 2
+replicas. On a single node one will fail to start and the ingress will
+show as degraded. The `router-default` Deployment is managed by the
+`cluster-version-operator`, so it needs to be marked as unmanaged
+before it can be scaled down.
+
+```shell
+# tell the cluster-version-operator not to manage router-default
+oc patch clusterversion/version --type='merge' -p "$(cat <<- EOF
+
+ spec:
+    overrides:
+      - group: apps/v1
+        kind: Deployment
+        name: router-default
+        namespace: openshift-ingress
+        unmanaged: true
+EOF
+)"
+
+# scale down ingress
+oc scale --replicas=1 deployments/router-default -n openshift-ingress
+```
 
 ### Risks and Mitigations
 
