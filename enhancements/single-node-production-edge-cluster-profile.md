@@ -71,7 +71,7 @@ owners desire:
 
 And so, these users who have adopted Kubernetes at their their central
 management sites wish to have independent Kubernetes clusters at the
-more remote sites. 
+more remote sites.
 
 Of the several options explored for supporting the use of Kubernetes
 patterns for managing workloads at these sites (see the alternatives
@@ -152,7 +152,7 @@ The profile describes single-node, all-in-one, deployments, so there
 is no need to support provisioning additional workers. The
 machine-api-operator and cluster-baremetal-operator will not be
 included in clusters using this profile. Remediation (by rebooting or
-reprovisioning the host) will be handled by an orchestration tool 
+reprovisioning the host) will be handled by an orchestration tool
 running outside of the node.
 
 In the telco RAN use case, high-availability is typically achieved by
@@ -171,7 +171,7 @@ of edge computing use cases. As such, OpenShift's usual cluster
 configuration mechanisms will be favored where there is a likelihood
 that there will be edge computing use case with differing requirements.
 For example, there is no expectation that this new profile will use
-the real-time kernel by default - this will continue to be a 
+the real-time kernel by default - this will continue to be a
 `MachineConfig` choice as per
 [enhancements/support-for-realtime-kernel](https://github.com/openshift/enhancements/blob/master/enhancements/support-for-realtime-kernel.md). *See open questions*
 
@@ -299,7 +299,7 @@ end to end tests.**
 
 ### Upgrade / Downgrade Strategy
 
-In-place upgrades and downgrades will not be supported for this first 
+In-place upgrades and downgrades will not be supported for this first
 iteration. Upgrades will initially only be achieved by redeploying
 the machine and its workload.
 
@@ -336,7 +336,7 @@ define static pods for the control plane services.
 
 Either approach may be useful for more constrained environments, but
 the effort involved - including the effort required to make any
-relevant optional software available for this deployment type - 
+relevant optional software available for this deployment type -
 is not obviously worth the resource savings in the less
 resource-contrained environments addressed this proposal.
 
