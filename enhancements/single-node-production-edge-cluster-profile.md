@@ -264,26 +264,11 @@ EOF
 
 By default, the `cluster-ingress-operator` deploys the router with 2
 replicas. On a single node one will fail to start and the ingress will
-show as degraded. The `router-default` Deployment is managed by the
-`cluster-version-operator`, so it needs to be marked as unmanaged
-before it can be scaled down.
+show as degraded.
 
 ```shell
-# tell the cluster-version-operator not to manage router-default
-oc patch clusterversion/version --type='merge' -p "$(cat <<- EOF
-
- spec:
-    overrides:
-      - group: apps/v1
-        kind: Deployment
-        name: router-default
-        namespace: openshift-ingress
-        unmanaged: true
-EOF
-)"
-
-# scale down ingress
-oc scale --replicas=1 deployments/router-default -n openshift-ingress
+# patch ingress operator to run a single router pod
+oc patch -n openshift-ingress-operator ingresscontroller/default --type=merge --patch '{"spec":{"replicas": 1}}'
 ```
 
 ### Risks and Mitigations
