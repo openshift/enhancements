@@ -26,7 +26,7 @@ superseded-by:
 - [x] Design details are appropriately documented from clear requirements
 - [x] Test plan is defined
 - [x] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/**
+- [x] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/**
 
 ## Summary
 
@@ -39,8 +39,7 @@ We want certain CSI drivers such as AWS, GCE, Cinder, Azure and vSphere to be in
 ## Motivation
 
 Upstream Kubernetes is moving towards removing code of in-tree drivers and replacing them with their CSI counterpart. Our
-current expectation is that - all in-tree drivers that depend on cloudprovider should be removed from core Kubernetes by 1.21.
-This may not happen all at once and we expect migration for certain drivers to happen sooner.
+current expectation is that - all in-tree drivers that depend on cloudprovider start to be removed from core Kubernetes by 1.21.
 
 This does mean that OpenShift should be prepared to handle such migration. We have to iron out any bugs in driver themselves and
 their interfacing with OpenShift. We need a way for users to use the CSI drivers and optionally enable migration from in-tree driver
@@ -80,10 +79,17 @@ We would like to approach various goals of this KEP in different phases, because
 
 * Support installation of oVirt, GCE, Cinder, vSphere, AzureDisk CSI drivers.
   * Note that exact list of cloud CSI drivers is subject of change during each OCP release planning.
+* Support of out-of-tree cloud controller managers, where Kubernetes components don't have cloud provider linked in.
+  * In-tree volume plugin is disabled in this mode.
+  * This implies that corresponding CSI driver is installed and its StorageClass is the default one.
+  * This does not imply CSI migration! Only freshly clusters installed clusters are supported in this mode.
+
+### Phase-3 Goals
+
 * Provide a way for users to enable in-tree to CSI migration. It basically replaces whole in-tree volume plugin with a less tested CSI implementation. While it's not a strict requirement, we'd like to have the migration optional for at least one release.
 * Provide a way for users to disable in-tree to CSI migration.
 
-### Phase-3 Goals
+### Phase-4 Goals
 
 * Enable all cloud-specific CSI drivers as default drivers and CSI provided storageclass as default storageclass.
 * Optionally allow users to configure CSI driver install.
@@ -99,20 +105,19 @@ We would like to approach various goals of this KEP in different phases, because
 
 ## Proposal
 
-We are currently considering using CVO and existing `cluster-storage-operator` (CSO) for installation of cloud CSI
-drivers. CSO detects undelrying cloud, runs individual CSI driver operators for the cloud and reports their
-aggregated status via its `ClusterOperator` CR.  
+`cluster-storage-operator` (CSO) installs cloud CSI drivers:
+
+1. CSO detects undelrying cloud
+2. CSO runs individual CSI driver operators for the cloud.
+3. Individual CSI driver operators install their drivers + StorageClasses and report their health via ClusterCSIDriver
+   CR, consumed by CSO to report overall CSO status.
 
 * Each CSI driver is deployed via a dedicated operator (i.e. each CSI driver has its own), to accommodate differences
   between the CSI drivers. For example, Manila CSI driver operator can detect if Manila service is present in underlying
   OpenStack cloud and deploy the driver only when the service is present.
-* Each CSI driver will provide its own CRD, `<backend>Driver` in `csi.openshift.io` API group. E.g. `AWSEBSDriver` or
-  `ManilaDriver`. The CRD is non-namespaced - CSI drivers are global in the whole cluster.
-  * Each CRD will allow only a single instance, named `cluster`.
-  * Initially, the CRDs will be equal and provide only common
-    [`OperatorSpec`](https://github.com/openshift/api/blob/95abe2d2f4223d5931e418bf8e4d3773d16b42c0/operator/v1/types.go#L48)
-    and [`OperatorStatus`](https://github.com/openshift/api/blob/95abe2d2f4223d5931e418bf8e4d3773d16b42c0/operator/v1/types.go#L97).
-    In the future, each CSI driver may introduce its own configuration fields.
+* CSI driver operators use single CRD, `ClusterCSIDriver` in `operator.openshift.io` group.
+  * Each CSI driver operator has its own instance of the CR.
+  * Names of `ClusterCSIDriver` CRs are hardcoded and must correspond to the CSI driver name.
 * Each CSI driver and its operator runs in `openshift-cluster-csi-drivers` namespace.
   * We expect 1-2 CSI drivers per cloud platform, typically block + shared filesystem CSI driver such as AWS EBS and
     AWS EFS.
@@ -121,20 +126,27 @@ aggregated status via its `ClusterOperator` CR.
     * Reusal of RBAC rules - all the operators + drivers need very similar, if not equal, Roles/ClusterRoles.
     * Better visibility - if there is a problem with a cloud CSI driver, it's clear where to look, on all OCP
       installations.
-    * Not polluting OCP with 1-2 new namespace per cloud, with cloud-specific namespace names. 
+    * Not polluting OCP with 1-2 new namespace per cloud, with cloud-specific namespace names.
+  * The only exception from this rule is Manila.
+     * The operator still runs in `openshift-cluster-csi-drivers` namespace.
+     * The CSI driver runs in namespace `openshift-manila-csi-driver`.
+     * Reason for this split is migration from OLM. In OCP 4.5, Manila CSI driver operator was available through OLM and
+       the driver ran in namespace `openshift-manila-csi-driver`. At the same time, the driver was GA. To enable
+       seamless upgrade from 4.5 to 4.6, we decided not to change the driver namespace.
 * Each CSI driver uses cloud-credential-operator to obtain a role in the underlying cloud + its credentials to
-  manipulate with the cloud storage API.
+  manipulate with the cloud storage API. `CredentialsRequest` is included in CSO's manifests.
 
 ### Installation
 1. During installation, CVO starts cluster-storage-operator (CSO).
-2. CSO detects underlying cloud and starts operators for CSI driver(s) for the particular cloud.
+2. CVO also creates all `CredentialsRequest` for all CSI drivers. This is common for all `CredentialsRequest` and it
+   allows cluster admins to provide their own credentials.
+3. CSO detects underlying cloud and starts operators for CSI driver(s) for the particular cloud.
    * I.e. CSO deploys corresponding CSI driver operators, incl. their ServiceAccount, RBAC, CRD, Deployment and finally
-     a default CR.
-3. CSO still creates default storage classes for the in-tree volume plugins if needed, according to the timeline below.
-4. The CSI driver operator obtains cluster credentials via cloud-credential-operator and deploys the CSI driver,
-   i.e. creates its RBAC, Deployment, DaemonSet and CSIDriver objects. Progress of the deployment is reported in
-   `CR.Status` of the operator CR.
-5. CSO monitors CRs of the CSI drivers and reports back their status ("Progressing", "Degraded", "Available", ...) in
+     a default `ClusterCSIDriver` CR.
+4. CSO still creates default storage classes for the in-tree volume plugins if needed, according to the timeline below.
+5. The CSI driver operator deploys the CSI driver, i.e. creates its RBAC, Deployment, DaemonSet and CSIDriver objects.
+    Progress of the deployment is reported in `ClusterCSIDriver.Status` of the operator CR.
+6. CSO monitors `ClusterCSIDriver` CRs and reports back their status ("Progressing", "Degraded", "Available", ...) in
    CSO's ClusterOperator status.
 
 
@@ -143,25 +155,20 @@ In OCP 4.5, we released AWS EBS and Manila CSI drivers via OLM. It's too late to
 We designed their operators in a way that regardless where the CSI driver operator runs, the driver itself always runs
 in openshift-aws-ebs-csi-driver namespace / openshift-manila-csi-driver.
 
+We don't support upgrade of a 4.5 cluster with AWS CSI driver to 4.6 - the operator + driver is technical preview.
+Users must un-install the operator before upgrade.
+
+Upgrade from 4.5 with Manila CSI driver (GA in 4.5) works as follows:
+
 1. During upgrade, CVO starts new 4.6 cluster-storage-operator (CSO).
-2. 4.6 CSO detects that there is AWS / Manila driver installed by OLM.
+2. 4.6 CSO detects that there is Manila driver installed by OLM.
 3. CSO deletes Subscription of the operator. OLM removes the operator, but leaves the CRD, CR and the driver / operand running.
-4. CSO deletes the old namespace (`openshift-aws-ebs-csi-driver` / `openshift-manila-csi-driver`) and all non-namespaced
-   objects of the old operator (ClusterRoles and such). The only thing kept is the StorageClass of the old operator
-   and the old operator CR (which is the same as the new operator CR).
-5. CSO runs the new CSI driver operator in `cluster-storage-operator` namespace.
+4. CSO runs the new CSI driver operator in `openshift-cluster-csi-drivers` namespace.
+5. Manila CSI driver operator adopts the CSI driver running in `openshift-manila-csi-driver` namespace, i.e. updates
+   its Deployment / DaemonSet to new versions and keeps the driver running there.
 
 In case there was no AWS / Manila CSI driver operator running during the update, CSO installs the corresponding operator
 as during installation, so user has a CSI driver running after update.
-
-Note that between step 4. and 5., the CSI driver is not present in the cluster, while its storage class is.
-* Newly created PVCs won't be provisioned during this transition period. They will be provisioned after the new CSI
-  driver is installed.
-* Newly started / deleted pods that use storage provided by the CSI driver can't attach/mount/unmount/detach their
-  volumes. Some errors about this may be reported to user. Pod startup / shutdown is retired periodically and will
-  continue after the new CSI driver installation completes.
-
-Extensive testing is needed for this OLM -> CSO migration.
 
 ### Un-installation
 
@@ -176,7 +183,7 @@ We require 3rd party CSI driver vendors to ship their CSI drivers via OLM. In or
 capabilities, OCP will ship a sample CSI driver + CSI driver operator via OLM, together with a set of recommendations
 how a CSI driver operator should work, as a separate enhancement.
 
-Details about what CSI driver it is going to be is out of scope of 4.6.
+Details about what CSI driver it is going to be is out of scope of 4.7.
 
 ## Timeline
 Bases on current upstream plans & assumptions.
@@ -209,13 +216,22 @@ Note that vSphere CSI driver may be included in 1.19, discussion and design is s
 
 
 ### OCP-4.7 (Kubernetes 1.20)
-* GCE, Azure and Cinder CSI drivers become installed by default (with non-default storage class).
-* vSphere CSI driver installation (as optional).
-  * Current vSphere driver is not backward compatible. We expect some changes and stabilization upstream. Our gut feeling is +/- Kubernetes 1.20 timeframe.
-* We will allow users to enable or disable CSI migration. Disabling the migration should not remove the driver.
-* Sample CSI driver operator + CSI driver is available on OperatorHub.
+* GCE and Cinder CSI drivers become installed by default (with non-default storage class).
+* We allow in-tree cloud provider to be optionally disabled on OpenStack platform during installation as tech preview.
+  * CSO must not create storage class for the in-tree volume plugin.
+  * Cinder CSI driver operator must create the default storage class.
+  * Explicitly, we do not support migration in this release! PVs with in-tree Cinder volumes will not work at all in
+    such a cluster.
+  * Details on how the cloud provider is disabled is / will be covered by another enhancement (external CCM).
 
 #### Testing
+* Disabling in-tree OpenStack cloud provider + its volume plugin will be tested as part of external CCM feature.
+
+### OCP-4.8 (Kubernetes 1.21)
+Kubernetes 1.21 is current upstream target for removal of in-tree cloud providers and their volume plugins! We expect
+that only some volume plugins will be removed from Kubernetes at this time, if any.
+
+* We will allow users to enable or disable CSI migration. Disabling the migration should not remove the driver.
 * Run e2e tests with CSI migration on.
   * Requires testing harness to edit/create a CR to enable migration and wait for migration to complete - kinda open question.
   * Will require a new prow job.
@@ -227,12 +243,7 @@ Note that vSphere CSI driver may be included in 1.19, discussion and design is s
    * Ensure that with somewhat increased number of watchers etc, things still keep working.
 * Long-running e2e tests.
   * To make sure the CSI driver can sustain more than 1 hour of regular e2e tests.
-
-### OCP-4.8 (Kubernetes 1.21)
-Kubernetes 1.21 is current upstream target for removal of in-tree cloud providers and their volume plugins!
-
-* CSI drivers for their in-tree counterparts will become GA and CSI volumes will become default.
-* CSI migration is enabled and cannot be disabled (code for corresponding in-tree volume plugins and in-tree cloud providers doesn't event exist).
+* Sample CSI driver operator + CSI driver is available on OperatorHub.
 
 ## Infrastructure needed
 
@@ -241,6 +252,34 @@ Kubernetes 1.21 is current upstream target for removal of in-tree cloud provider
     (We don't plan any 4.5.z releases, but we need to be prepared for serious errors or CVEs.)
   * From 4.6, ART should manage these two operator + CSI driver images. These images become part of the release payload!
     All 4.6 and 4.6.z erratas are managed by ART.
+
+## CSI drivers
+
+Github repositories
+
+| CSI Driver | Upstream repo | Downstream fork | Operator repo | ClusterCSIDriver / CSIDriver name | Tech Prev | GA |
+|-|-|-|-|-|-|-|
+| AWS EBS | [kubernetes-sigs/aws-ebs-csi-driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) | [aws-ebs-csi-driver](https://github.com/openshift/aws-ebs-csi-driver) | [aws-ebs-csi-driver-operator](https://github.com/openshift/aws-ebs-csi-driver-operator) | ebs.csi.aws.com | 4.5 |  |
+| OpenStack Manila | [kubernetes/cloud-provider-openstack](https://github.com/kubernetes/cloud-provider-openstack) | [cloud-provider-openstack](https://github.com/openshift/cloud-provider-openstack) | [csi-driver-manila-operator](https://github.com/openshift/csi-driver-manila-operator) | manila.csi.openstack.org |  | 4.5 |
+| oVirt | [oVirt/csi-driver](https://github.com/oVirt/csi-driver) | [ovirt-csi-driver](https://github.com/openshift/ovirt-csi-driver) | [ovirt-csi-driver-operator](https://github.com/openshift/ovirt-csi-driver-operator) | csi.ovirt.org | 4.6 |  |
+| OpenStack Cinder | [kubernetes/cloud-provider-openstack](https://github.com/kubernetes/cloud-provider-openstack) | [cloud-provider-openstack](https://github.com/openshift/cloud-provider-openstack) | [openstack-cinder-csi-driver-operator](https://github.com/openshift/openstack-cinder-csi-driver-operator) | cinder.csi.openstack.org | 4.7 |  |
+| GCE PD | [kubernetes-sigs/gcp-compute-persistent-disk-csi-driver](https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver) |  |  | pd.csi.storage.gke.io | 4.7 |  |
+| vSphere | [kubernetes-sigs/vsphere-csi-driver](https://github.com/kubernetes-sigs/vsphere-csi-driver) |  |  | csi.vsphere.vmware.com | 4.8? |  |
+| Azure Disk | [kubernetes-sigs/azuredisk-csi-driver](https://github.com/kubernetes-sigs/azuredisk-csi-driver) |  |  | disk.csi.azure.com | 4.8? |  |
+| Azure File | [kubernetes-sigs/azurefile-csi-driver](https://github.com/kubernetes-sigs/azurefile-csi-driver) |  |  | file.csi.azure.com | 4.8? |  |
+
+Container images
+
+| CSI Driver | Imagestream (prow) | OKD image | redhat.registry.io |
+|-|-|-|-|
+| AWS EBS | aws-ebs-csi-driver | origin-aws-ebs-csi-driver | ose-aws-ebs-csi-driver-rhel7 |
+| OpenStack Manila | csi-driver-manila csi-driver-nfs | origin-csi-driver-manila origin-csi-driver-nfs | ose-csi-driver-manila-rhel8 |
+| oVirt | ovirt-csi-driver | origin-ovirt-csi-driver | ovirt-csi-driver-rhel7 |
+| OpenStack Cinder | openstack-cinder-csi-driver | origin-openstack-cinder-csi-driver | ? |
+| GCE PD |  |  |  |
+| vSphere |  |  |  |
+| Azure Disk |  |  |  |
+| Azure File |  |  |  |
 
 ## Alternatives considered
 
