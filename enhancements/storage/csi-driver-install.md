@@ -255,7 +255,7 @@ that only some volume plugins will be removed from Kubernetes at this time, if a
 
 ## CSI drivers
 
-Github repositories
+Github repositories should follow pattern `<cloud or vendor>-<backend>-csi-driver`, if it makes sense.
 
 | CSI Driver | Upstream repo | Downstream fork | Operator repo | ClusterCSIDriver / CSIDriver name | Tech Prev | GA |
 |-|-|-|-|-|-|-|
@@ -263,12 +263,14 @@ Github repositories
 | OpenStack Manila | [kubernetes/cloud-provider-openstack](https://github.com/kubernetes/cloud-provider-openstack) | [cloud-provider-openstack](https://github.com/openshift/cloud-provider-openstack) | [csi-driver-manila-operator](https://github.com/openshift/csi-driver-manila-operator) | manila.csi.openstack.org |  | 4.5 |
 | oVirt | [oVirt/csi-driver](https://github.com/oVirt/csi-driver) | [ovirt-csi-driver](https://github.com/openshift/ovirt-csi-driver) | [ovirt-csi-driver-operator](https://github.com/openshift/ovirt-csi-driver-operator) | csi.ovirt.org | 4.6 |  |
 | OpenStack Cinder | [kubernetes/cloud-provider-openstack](https://github.com/kubernetes/cloud-provider-openstack) | [cloud-provider-openstack](https://github.com/openshift/cloud-provider-openstack) | [openstack-cinder-csi-driver-operator](https://github.com/openshift/openstack-cinder-csi-driver-operator) | cinder.csi.openstack.org | 4.7 |  |
-| GCE PD | [kubernetes-sigs/gcp-compute-persistent-disk-csi-driver](https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver) |  |  | pd.csi.storage.gke.io | 4.7 |  |
-| vSphere | [kubernetes-sigs/vsphere-csi-driver](https://github.com/kubernetes-sigs/vsphere-csi-driver) |  |  | csi.vsphere.vmware.com | 4.8? |  |
-| Azure Disk | [kubernetes-sigs/azuredisk-csi-driver](https://github.com/kubernetes-sigs/azuredisk-csi-driver) |  |  | disk.csi.azure.com | 4.8? |  |
-| Azure File | [kubernetes-sigs/azurefile-csi-driver](https://github.com/kubernetes-sigs/azurefile-csi-driver) |  |  | file.csi.azure.com | 4.8? |  |
+| GCE PD | [kubernetes-sigs/gcp-compute-persistent-disk-csi-driver](https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver) | gcp-pd-csi-driver | gcp-pd-csi-driver-operator | pd.csi.storage.gke.io | 4.7 |  |
+| vSphere* | [kubernetes-sigs/vsphere-csi-driver](https://github.com/kubernetes-sigs/vsphere-csi-driver) | vmware-vsphere-csi-driver* | vmware-vsphere-csi-driver-operator* | csi.vsphere.vmware.com | 4.8? |  |
+| Azure Disk | [kubernetes-sigs/azuredisk-csi-driver](https://github.com/kubernetes-sigs/azuredisk-csi-driver) | azure-disk-csi-driver* | azure-disk-csi-driver-operator* | disk.csi.azure.com | 4.8? |  |
+| Azure File | [kubernetes-sigs/azurefile-csi-driver](https://github.com/kubernetes-sigs/azurefile-csi-driver) | azure-file-csi-driver* | azure-file-csi-driver* | file.csi.azure.com | 4.8? |  |
 
-Container images
+*) These items are proposals for future repos.
+
+Container images should have the same pattern as github repos - `ose-<github repo>-rhel[7|8]`, if it makes sense.
 
 | CSI Driver | Imagestream (prow) | OKD image | redhat.registry.io |
 |-|-|-|-|
