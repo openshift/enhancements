@@ -311,20 +311,23 @@ does, CSO would also deploy everything necessary for the StorageClass to be func
 
 This how the workflow would look like:
 
+```
 +--------------------------+    +--------------------------+     +--------+
 |                          |    |                          |     |        |
 | cluster-version-operator |+-->| cluster-storage-operator |+--> | driver |
 |                          |    |                          |     |        |
 +--------------------------+    +--------------------------+     +--------+
+```
 
 And this is how the workflow of our previous approach would look like:
 
+```
 +--------------------------+    +--------------------------+    +---------------------+    +--------+
 |                          |    |                          |    |                     |    |        |
 | cluster-version-operator |+-->| cluster-storage-operator |+-->| csi-driver-operator |+-> | driver |
 |                          |    |                          |    |                     |    |        |
 +--------------------------+    +--------------------------+    +---------------------+    +--------+
-
+```
 
 #### Installation
 
