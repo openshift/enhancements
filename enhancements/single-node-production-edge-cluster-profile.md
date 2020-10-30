@@ -271,6 +271,14 @@ show as degraded.
 oc patch -n openshift-ingress-operator ingresscontroller/default --type=merge --patch '{"spec":{"replicas": 1}}'
 ```
 
+#### machine-config-operator
+
+The machine-config-operator includes a check in code that the number
+of control plane nodes is 3. Removing this or changing the minimum is
+required to allow the operator to complete its work, for example to
+enable the realtime kernel on a single node with the appropriate
+performance profile settings.
+
 ### Risks and Mitigations
 
 *What are the risks of this proposal and how do we mitigate. Think broadly. For
