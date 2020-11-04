@@ -2,11 +2,13 @@
 title: Supporting out-of-tree drivers on OpenShift
   - "@zvonkok"
 reviewers:
-  - TBD
-  - "@mrunalp"
+  - "@ashcrow"
+  - "@darkmuggle"
+  - "@cgwalter"
 approvers:
-  - TBD
-  - "@mrunalp"
+  - "@ashcrow"
+  - "@cgwalters" 
+  - "@darkmuggle"
 creation-date: 2020-04-03
 last-updated: 2020-07-21
 status: provisional
@@ -88,7 +90,7 @@ Delivers the stencil code and configuration files for building and delivering km
 
 2. The kernel module code that needs to be compiled
 
-This repo represents the kernel module code that contains the source code for building the kernel module. This repo can be delivered by vendors and generally knows nothing about containers. Most importantly, if someone wanted to deliver this kernel module via the KVC framework, the owners of the code don't need to be consulted. The project provides an [example kmod repo](https://github.com/kmods-via-containers/simple-kmod).
+This repo represents the kernel module code that contains the source code for building the kernel module. This repo can be delivered by vendors and generally knows *nothing* about containers. Most importantly, if someone wanted to deliver this kernel module via the KVC framework, the owners of the code don't need to be consulted. The project provides an [example kmod repo](https://github.com/kmods-via-containers/simple-kmod).
 
 3. A KVC framework repo for the kernel module to be delivered
 
@@ -164,33 +166,25 @@ Based on SRO we are going to create a new operator that will solely be used for 
 
 SRO can be seen as the upstream project where we test new features and enable more hardware accelerators where this new operator will be the downstream operator shipped by OpenShift for out-of-tree drivers. 
 
-These are options for the name of the operator: 
-
-1. DriverContainerOperator (DCO)
-2. KernelModuleOperator (KMO) 
-3. DynamicKernelModuleOperator (DKMO)
-4. SpecialResourceOperator v2.0 (SRO)
-
-
-Going forward we will use **DKMO** as the placeholder for the new name of the Operator. 
+The new version of SRO will have an API update and hence called SROv2. 
 
 
 #### Combining both approaches
 
-For managing the module in a container we are going to use KVC as the framework of choice. Targeting RHCOS solves the problem also for RHEL7 and RHEL8. The management of those KVC containers aka DriverContainers are managed by DKMO. 
+For managing the module in a container we are going to use KVC as the framework of choice. Targeting RHCOS solves the problem also for RHEL7 and RHEL8. The management of those KVC containers aka DriverContainers are managed by SROv2. 
 
 #### Day-2 DriverContainer Management OpenShift
  
 
-For any day-2 kernel module management or delivery we propose using DKMO as the building block on OpenShift. 
+For any day-2 kernel module management or delivery we propose using SROv2 as the building block on OpenShift. 
 
-We will run a single copy of the DKMO as part of OpenShift that is able to handle multiple kernel module drivers using the following proposed CR below.
+We will run a single copy of the SROv2 as part of OpenShift that is able to handle multiple kernel module drivers using the following proposed CR below.
 
 The following section will cover three kernel module instantiations (1) A single kernel module (2) multiple kernel modules with build artifacts (3) full-stack enablement. 
 
 There are three main parts involved in the enablement of a kernel module. We have a specific (1) set of meta information needed for each kernel module, a (2) set of manifests to deploy a DriverContainer and lastly (3) a framework running inside the container for managing the kernel module (dkms like functions). 
 
-The following section will walk one through the enablement of the different use-case scenarios. After deploying the operator the first step is to create an instance of a special-resource. Following are some example CRs how to one would instantiate DKMO to manage a kernel module or hardware driver. 
+The following section will walk one through the enablement of the different use-case scenarios. After deploying the operator the first step is to create an instance of a special-resource. Following are some example CRs how to one would instantiate SROv2 to manage a kernel module or hardware driver. 
 
 #### Example CR for a single kernel module #1 
 
@@ -207,7 +201,7 @@ spec:
 ```
 
 
-The second example shows the combined capabilities of DKMO for dealing with multiple driver containers and artifacts. On the other side DKMO can also be used in a minimalistic form where we only deploy a simple kmod. The example CR above would create only one DriverContainer from the git repository provided. For each kernel module one would provide one CR with the needed information. 
+The second example shows the combined capabilities of SROv2 for dealing with multiple driver containers and artifacts. On the other side SROv2 can also be used in a minimalistic form where we only deploy a simple kmod. The example CR above would create only one DriverContainer from the git repository provided. For each kernel module one would provide one CR with the needed information. 
 
 #### Example CR for a hardware vendor (all settings) #2
 
@@ -216,10 +210,14 @@ apiVersion: sro.openshift.io/v1alpha1
 kind: SpecialResource
 metadata:
   name: <vendor>-<hardware>
-  namespace: openshift-sro
 spec:
   metadata:
     namespace: <vendor>-<driver>
+  environment:
+  - key: "key_id"
+    value: "ACCESS_KEY_ID"
+  - key: "access_key"
+    value: "SECRET_ACCESS_KEY"
   driverContainer:
     source: 
       git: 
@@ -241,34 +239,38 @@ spec:
         destinationDir: "/usr/src/"
       images:
       - name: "<vendor>-{{.KernelVersion}}:latest"
-      kind: ImageStreamTag
-      namespace: "<vendor>-<hardware>"
-      pullSecret: "vendor-secret"
-      paths:
-      - sourcePath: "/usr/src/<vendor>/<artifact>
-        destinationDir: "/usr/src/"
+        kind: ImageStreamTag
+        namespace: "<vendor>-<hardware>"
+        pullSecret: "vendor-secret"
+        paths:
+        - sourcePath: "/usr/src/<vendor>/<artifact>
+          destinationDir: "/usr/src/"
       claims:
       - name: "<vendor>-pvc"
       mountPath: "/usr/src/<vendor>-<internal>"
   node: 
     selector: "feature.../pci-<VENDOR_ID>.present"
   dependsOn:
-    - name: <CR_NAME_VENDOR_ID_DKMO>
+    - name: <CR_NAME_VENDOR_ID_SRO>
     - name: <CR_NAME_VENDOR_ID_KJI>
 ```
 
-All created CRs should be in the namespace where the operator is deployed (currently openshift-sro). The DKMO can take care of creating and deleting of the namespace for the specialresource. Otherwise one would have an manual step in creating the new namespace before creating the CR for a specialresource, which make cleanup of a specialresource easy, just by deleting the namespace. If there is no spec.metadata.namespace supplied DKMO will set the namespace to the CR name per default to separate each resources. 
+Since SROv2 will manage several special resources in different namespaces, hence the CRD will have cluster scope. The SROv2 can take care of creating and deleting of the namespace for the specialresource. Otherwise one would have an manual step in creating the new namespace before creating the CR for a specialresource, which make cleanup of a special resource easy, just by deleting the namespace. If there is no spec.metadata.namespace supplied SROv2 will set the namespace to the CR name per default to separate each resources. 
 
-With the above information DKMO is capable of deducing all needed information to build and manage a DriverContainer. All manifests in DKMO are templates that are templatized during reconciliation with runtime and meta information. 
+With the above information SROv2 is capable of deducing all needed information to build and manage a DriverContainer. All manifests in SROv2 are templates that are templatized during reconciliation with runtime and meta information. 
 
 ```
 ----------------------------- SNIP ---------------------------------
 metadata:
   name: <vendor>-<hardware>
-  namespace: openshift-sro
 spec:
   metadata:
     namespace: <vendor>-<hardware>
+  environment:
+  - key: "key_id"
+    value: "ACCESS_KEY_ID"
+  - key: "access_key"
+    value: "SECRET_ACCESS_KEY"
   driverContainer:
     source: 
       git: 
@@ -277,9 +279,11 @@ spec:
 ----------------------------- SNIP ---------------------------------
 ```
 
-The name e.g. is used to prefix all resources (Pod, DameonSet, RBAC, ServiceAccount, Namespace, etc) created for this very specific **{vendor}-{hardware}**. The DriverContainer section expects at least the git repository (mandatory) from a vendor. This repository has all tools and scripts to build the kernel module. The base image for a DriverContainer is an UBI7,8 with the KVC (kmod-via-containers) framework installed. 
+The name e.g. is used to prefix all resources (Pod, DameonSet, RBAC, ServiceAccount, Namespace, etc) created for this very specific **{vendor}-{hardware}**. The DriverContainer section expects optionally the git repository from a vendor. This repository has all tools and scripts to build the kernel module. The base image for a DriverContainer is an UBI7,8 with the KVC (kmod-via-containers) framework installed. Simpler builds can be accomplished by including the Dockerfile into the Build YAML.
 
 KVC provides hooks to build, load, unload the kernel modules and a wrapper for userspace utilities. We might extend the number of hooks to have a similar interface as dkms. 
+
+The environment section can be used to provide a arbitrary set of key value pairs that can be later templatized for any kind of information needed in the enablement stack.
 
 ```
 ----------------------------- SNIP ---------------------------------
@@ -324,7 +328,7 @@ Run arguments can be used to provide configuration settings for the driver. Some
       mountPath: "/usr/src/<vendor>-<internal>"
 ----------------------------- SNIP ---------------------------------
 ```
-The next section is used to tell DKMO where to find build artifacts from other drivers. Some drivers need e.g. symbol information from kernel modules, header files or the complete driver sources to be built successfully. We are providing two ways for these artifacts to be consumed. (1) Some vendors expose the build artifacts in a hostPath. The DriverContainer with KVC needs a hook for preparing the sources, which means it would copy from sourcePath on the host to the destinationDir in the DriverContainer. (2) The other way to get build artifacts is to use an DriverContainer image that is already built do get the needed artifacts (We are assuming here that the vendor is not exposing any artifacts to the host). We can leverage those images in a multi-stage build for the DriverContainer. 
+The next section is used to tell SROv2 where to find build artifacts from other drivers. Some drivers need e.g. symbol information from kernel modules, header files or the complete driver sources to be built successfully. We are providing two ways for these artifacts to be consumed. (1) Some vendors expose the build artifacts in a hostPath. The DriverContainer with KVC needs a hook for preparing the sources, which means it would copy from sourcePath on the host to the destinationDir in the DriverContainer. (2) The other way to get build artifacts is to use an DriverContainer image that is already built do get the needed artifacts (We are assuming here that the vendor is not exposing any artifacts to the host). We can leverage those images in a multi-stage build for the DriverContainer. 
 ```
 ----------------------------- SNIP ---------------------------------
   node: 
@@ -334,20 +338,22 @@ The next section is used to tell DKMO where to find build artifacts from other d
 
 The next section is used to filter the nodes on which a kernel module or driver should be deployed on. It makes no sense to deploy drivers on nodes where the hardware is not available. Furthermore this can also be used to target even subsets of special nodes either by creating labels manually or leveraging NFDs hook functionality. 
 
-To retrieve the correct image we are using DKMOs templating to inject the correct runtime information, here we are using **{{.KernelVersion}}** as a unique identifier for DriverContainer images. 
+To retrieve the correct image we are using SROv2s templating to inject the correct runtime information, here we are using **{{.KernelVersion}}** as a unique identifier for DriverContainer images. 
 
-For the case when no external or internal repository is available or in a disconnected environment, DKMO can consume also sources from a PVC. This makes it easy to provide DKMO with packages or artifacts that are only available offline.
+For the case when no external or internal repository is available or in a disconnected environment, SROv2 can consume also sources from a PVC. This makes it easy to provide SROv2 with packages or artifacts that are only available offline.
 ```
 ----------------------------- SNIP ---------------------------------
   dependsOn:
-    - name: <CR_NAME_VENDOR_ID_DKMO>
+    - name: <CR_NAME_VENDOR_ID_SROv2>
+      imageReference: "true"
     - name: <CR_NAME_VENDOR_ID_KJI>
 ----------------------------- SNIP ---------------------------------
 ```
-There are kernel-modules that are relying on symbols that another kernel-module exports which is also handled by DKMO. We can model this dependency by the dependsOn tag. Multiple DKMO CR names can be provided that have to be done (all states ready) first before the current CR can be kicked off. CRs with now dependsOn tag can be executed/created/handled simultaneously. 
+There are kernel-modules that are relying on symbols that another kernel-module exports which is also handled by SROv2. We can model this dependency by the dependsOn tag. Multiple SROv2 CR names can be provided that have to be done (all states ready) first before the current CR can be kicked off. CRs with now dependsOn tag can be executed/created/handled simultaneously. 
 
-Users should usually deploy only the top-level CR ans DKMO will take care of instantiating the dependencies. There is no need to create all the CRs in the dependency, DKMO will take care of it. 
+Users should usually deploy only the top-level CR ans SROv2 will take care of instantiating the dependencies. There is no need to create all the CRs in the dependency, SROv2 will take care of it. 
 
+If special resource *A* uses a container image from another special resource *B* e.g using it as a base container for a build, SROv2 will setup the correct RBAC rules to make this work. 
 
 
 ```
@@ -360,20 +366,20 @@ Users should usually deploy only the top-level CR ans DKMO will take care of ins
 ----------------------------- SNIP ---------------------------------
 ```
 
-One can also use template variables in the CR that are correctly templatized by DKMO in the final manifest. DKOM does a 2 pass templatizing, 1st pass is to inject the variable intot the manifest and the second pass it templatize this given variable. Even if we do not know the runtime information beforehand of an cluster we can use it in a CR. 
+One can also use template variables in the CR that are correctly templatized by SROv2 in the final manifest. DKOM does a 2 pass templatizing, 1st pass is to inject the variable intot the manifest and the second pass it templatize this given variable. Even if we do not know the runtime information beforehand of an cluster we can use it in a CR. 
 
  
 #### DriverContainer Manifests
 
-The third part of enablement are the manifests for the DriverContainer. DKMO provides a set of predefined manifests that are completely templatized and DKMO updates each tag with runtime and meta information. They can be used for any kernel module. Each Pod has a ConfigMap as an entrypoint, this way custom commands or modification can be easily added to any container running with DKMO. See [https://red.ht/34ubzq3](https://red.ht/34ubzq3) for a complete list of annotations and template parameters. 
+The third part of enablement are the manifests for the DriverContainer. SROv2 provides a set of predefined manifests that are completely templatized and SROv2 updates each tag with runtime and meta information. They can be used for any kernel module. Each Pod has a ConfigMap as an entrypoint, this way custom commands or modification can be easily added to any container running with SROv2. See [https://red.ht/34ubzq3](https://red.ht/34ubzq3) for a complete list of annotations and template parameters. 
 
-To ensure that a DriverContainer is successfully running DKMO provides several annotations to steer the behaviour of deployment. We can enforce an ordered startup of different stages. If the drivers are not loaded it makes no sense to startup e.g. a DevicePlugin it will simply fail and all other dependent resources as well. 
+To ensure that a DriverContainer is successfully running SROv2 provides several annotations to steer the behaviour of deployment. We can enforce an ordered startup of different stages. If the drivers are not loaded it makes no sense to startup e.g. a DevicePlugin it will simply fail and all other dependent resources as well. 
 
-DriverContainers can be annotated and are telling DKMO to wait for full deployment of DaemonSets or Pods. DKMO watches the status of the resources. Some DriverContainers can be in a running state but are executing some scripts before being fully operational. DKMO provides a special annotation for the manifest to look for a specific regex in the container logs to match before declaring a DriverContainer as operational. This way we can guarantee that drivers are loaded and subsequent resources are running successfully. 
+DriverContainers can be annotated and are telling SROv2 to wait for full deployment of DaemonSets or Pods. SROv2 watches the status of the resources. Some DriverContainers can be in a running state but are executing some scripts before being fully operational. SROv2 provides a special annotation for the manifest to look for a specific regex in the container logs to match before declaring a DriverContainer as operational. This way we can guarantee that drivers are loaded and subsequent resources are running successfully. 
 
 #### Supporting Disconnected Environments
 
-DKMO will first try to pull a DriverContainer. If the DriverContainer does not exist, DKMO will kick off a BuildConfig to build the DriverContainer on the cluster. Administrators could build a DriverContainer upfront and push it to an internal registry. If is able to pull it, it will ignore the BuildConfig and try to deploy another DriverContainer if specified (ImageContentSourcePolicy). 
+SROv2 will first try to pull a DriverContainer. If the DriverContainer does not exist, SROv2 will kick off a BuildConfig to build the DriverContainer on the cluster. Administrators could build a DriverContainer upfront and push it to an internal registry. If is able to pull it, it will ignore the BuildConfig and try to deploy another DriverContainer if specified (ImageContentSourcePolicy). 
 
 ### Operator Metrics & Alerts
 
@@ -419,9 +425,9 @@ as we have to allow containers to access host labels.
 For DriverContainers to build the kernel modules we need entitlements first. The e2e story is described here: [https://bit.ly/2XjZq5D](https://bit.ly/2XjZq5D)
 We need to provide an interface for vendors to hook in their business logic of building the drivers
 For prebuilt containers pullable from a vendor's repository we're going to use a ImageContentSourcePolicy, currently only pulling by digest works, we cannot pull by label now. We need to accommodate this in the naming scheme of a DriverContainer.
-If a DriverContainer needs additional RPM packages in a proxy environment we need to update the configuration for dnf and rhsm. They do not respect the environmental variables for a proxy. The documentation is missing how to use the annotation for a workload to have those automatically populated (BZ: [https://bugzilla.redhat.com/show_bug.cgi?id=1822765](https://bugzilla.redhat.com/show_bug.cgi?id=1822765) ). 
+If a DriverContainer needs additional RPM packages in a proxy environment we need to update the configuration for dnf and rhsm. 
  
-Steps to enable proxy setting for yum, dnf, rhsm in a container all of those tools ignore the environment variables (BZs filed)
+Steps to enable proxy setting for yum, dnf, rhsm in a container 
 
 ```
 $ sudo vim /etc/dnf/dnf.conf
