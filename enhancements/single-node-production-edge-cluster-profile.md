@@ -279,6 +279,19 @@ required to allow the operator to complete its work, for example to
 enable the realtime kernel on a single node with the appropriate
 performance profile settings.
 
+
+#### Other deployments which have replicas set to 2:
+##### NOTE: the Operator will auto-scale this deployments back to 2 in case it changes
+
+* openshift-authentication/oauth-openshift
+* openshift-console/console
+* openshift-console/downloads
+* openshift-monitoring/prometheus-adapter
+* openshift-monitoring/thanos-querier
+* openshift-operator-lifecycle-manager/packageserver
+
+
+
 ### Risks and Mitigations
 
 *What are the risks of this proposal and how do we mitigate. Think broadly. For
