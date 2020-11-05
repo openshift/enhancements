@@ -48,7 +48,7 @@ This enhancement proposes deployment of vSphere CSI driver on Openshift as a def
 
 ## Proposal
 
-OCP ships with a vsphere-csi-driver-operator by default which is managed by [cluster-storage-operator](https://github.com/openshift/cluster-storage-operator/).
+OCP ships with a vmware-vsphere-csi-driver-operator by default which is managed by [cluster-storage-operator](https://github.com/openshift/cluster-storage-operator/).
 vSphere CSI driver has few dependencies on installer though and they are:
 
 ### Installer dependency
@@ -81,7 +81,7 @@ The cluster-storage-operator will deploy all the resources necessary for creatin
 5. A instance of `ClusterCSIDriver` will be created to faciliate managment of driver operator.  `ClusterCSIDriver` is already defined in - https://github.com/openshift/api/blob/master/operator/v1/types_csi_cluster_driver.go but needs to be expanded to include vSphere CSI driver.
 6. cluster-storage-operator will request CVO to create required cloud-credentials for talking with vCenter API.
 
-#### Driver deployment via vsphere-csi-driver-operator.
+#### Driver deployment via vmware-vsphere-csi-driver-operator.
 
 The operator itself will be responsible for running the driver and all the required sidecars (attacher, provisioner etc).
 
@@ -173,6 +173,6 @@ There is no dev-preview phase.
 
 ## Infrastructure Needed
 
-* vsphere-csi-driver GitHub repository (forked from upstream).
-* vsphere-csi-driver-operator GitHub repository.
-* vsphere-csi-driver and vsphere-csi-driver-operator images.
+* vmware-vsphere-csi-driver GitHub repository (forked from upstream).
+* vmware-vsphere-csi-driver-operator GitHub repository.
+* vmware-vsphere-csi-driver and vmware-vsphere-csi-driver-operator images.
