@@ -222,7 +222,7 @@ EOF
 
 Even with the unsupported feature flag, `etcd-quorum-guard` still
 requires 3 nodes due to its replica count. The `etcd-quorum-guard`
-Deployment is managed by the `cluster-verison-operator`, so it needs
+Deployment is managed by the `cluster-version-operator`, so it needs
 to be marked as unmanaged before it can be scaled down.
 
 ```shell
@@ -280,8 +280,12 @@ enable the realtime kernel on a single node with the appropriate
 performance profile settings.
 
 
-#### Other deployments which have replicas set to 2:
-##### NOTE: the Operator will auto-scale this deployments back to 2 in case it changes
+#### Other deployments
+
+All of these operators need to have their replica count set to 1.
+
+**Note**: The cluster-version-operator will restore these deployments
+back to 2 replicas.
 
 * openshift-authentication/oauth-openshift
 * openshift-console/console
