@@ -89,15 +89,62 @@ metal3-io](https://github.com/metal3-io/metal3-docs/blob/master/design/bare-meta
 
 OpenShift APIs follow the [Kubernetes API conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md).
 
-### Operators
+### Cluster Conventions 
+
+A number of rules exist for individual components of the cluster in order to ensure
+the overall goals of the cluster can be achieved. These ensure OpenShift is resilient,
+reliable, and consistent for administrators.
+
+#### Use Operators To Manage Components
 
 The OpenShift project is an early adopter of, and makes extensive use of, [the
-operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/),
-and so it is incumbent on us to establish some conventions around operators.
+operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/) and
+it is used to manage all elements of the cluster.
+
+* All components are managed by operators
+  * All cluster component operators are expected to deploy, reconfigure, self-heal, and report status about its health back to the cluster
+  * The cluster-version-operator (CVO) provides a minimum lifecycle for the core operators that
+    are required to get OLM running, and OLM runs all other operators
+  * The core operators are updated together and represent the minimum set of function for an OpenShift cluster
+  * Any operator that is an optional part of OpenShift or has a different lifecycle than the core OpenShift release must run under OLM
+* All configuration is exposed as API resources on cluster
+  * This is often described as "core configuration" and is in the "config.openshift.io" API group
+  * Global configuration that controls the cluster is grouped by function and are singletons named "cluster" - each of these has a `spec` field that controls configuration of that type for one or more components
+    * For example, the `Proxy` object named `cluster` has a field `spec.httpsProxy` that should be used by every component on the cluster to configure HTTP API requests the component may make outside the cluster
+  * The `status` field of global configuration contains either dynamic or static data that other components may need to use to properly function
+    * A small set of status configuration is set at install time and is immutable (although this set is intended to be small)
+  * All other configuration is expected to work like normal Kube objects - changeable at any time, validated, and any failures reported via the status fields of that API
+    * Components that read `status` of configuration should continuously poll / watch that configuration for change
+* Every component must remain available to consumers without disruption during upgrades and reconfiguration
+  * See the next section for more details
+
+
+#### Upgrade and Reconfiguration
+
+* Every component must remain available to consumers without disruption during upgrades and reconfiguration
+  * Disruption caused by node restarts is allowed but must respect disruption policies (PodDisruptionBudget) and should be optimized to reduce total disruption
+    * Administrators may control the impact to workloads by pausing machine configuration pools until they wish to take outage windows, which prevents nodes from being restarted
+  * The kube-apiserver and all aggregated APIs must not return errors, reject connections, or pause for abnormal intervals (>5s) during change 
+    * API servers may close long running connections gracefully (watches, log streams, exec connections) within a reasonable window (60s)
+  * Components that support workloads directly must not disrupt end-user workloads during upgrade or reconfiguration
+    * E.g. the upgrade of a network plugin must serve pod traffic without disruption (although tiny increases in latency are allowed)
+    * All components that currently disrupt end-user workloads must prioritize addressing those issues, and new components may not be introduced that add disruption
+
+
+#### Resources and Limits
+
+All cluster components must declare resource requests for CPU and memory, and should not describe limits.
+
+The CPU request of components scheduled onto the control plane should be proportional to existing etcd limits for a 6 node cluster running the standard e2e suite (if etcd on a control plane component uses 600m during an e2e run, and requests 100m, and the component uses 350m, then the component should request `100m/600m * 350m`).  Components scheduled to all nodes should be proportional to the SDN CPU request during the standard e2e suite.  
+
+The memory request of cluster components should be set at 10% higher than their p90 memory usage over a standard e2e suite execution.
+
+Limits should be not set because components cannot anticipate how they scale in usage in all customer environments and a crashlooping OOM component is something we must detect and handle gracefully regardless. Setting memory limits leaves administrators with no option to react to valid changes usage dynamically.
+
 
 #### Taints and Tolerations
 
-An operator deployed by the CVO should run on master nodes and therefore should
+An operator deployed by the CVO should run on control plane nodes and therefore should
 tolerate the following taint:
 
 * `node-role.kubernetes.io/master`
