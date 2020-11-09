@@ -13,6 +13,8 @@ approvers:
 creation-date: 2019-11-19
 last-updated: 2020-08-05
 status: implemented
+see-also:
+  - "/enhancements/update/channel-metadata.md"
 ---
 
 # Available-update Metadata
