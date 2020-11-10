@@ -9,7 +9,7 @@ approvers:
   - "@sdodson"
   - "@derekwaynecarr"
 creation-date: 2020-07-10
-last-updated: 2020-10-19
+last-updated: 2020-11-09
 status: implementable
 ---
 
@@ -60,7 +60,7 @@ will then be able to configure VMs that will be created in place of the
 terminated ones.
 
 In order to allow for this to occur with minimal service disruption, it is
-recommended that users have at least two Windows nodes within the cluster.
+recommended that users have at least three Windows nodes within the cluster.
 
 All Windows Kubernetes component updates will be tied to WMCO releases.
 
@@ -113,9 +113,13 @@ associated with the node. The [Machine API Operator](https://github.com/openshif
 will drain and delete the node before the Machine deletion completes. It will
 then create a new Machine to reconcile the MachineSet replica count. WMCO will
 configure this new machine and apply the new version annotation. The max amount
-of unavailable nodes at a time will be dependent on the maxUnavailable field
-in the [MachineSet](https://github.com/openshift/machine-api-operator/blob/master/config/machineset.yaml)
-created for Windows machines. WMCO will not render more than the specified
+of unavailable nodes at a time will be dependent on the maxUnhealthy field defined
+internally by the WMCO. This field ensures that we only have maxUnhealthy number of
+nodes that are not ready during upgrades. A Windows node is not ready if it
+is missing the version annotation set by WMCO. Having limited number of unavailable 
+nodes avoids the downtime of the workloads running on the Windows nodes. The maxUnhealthy
+value defaults to 1 per MachineSet minimizing the number of unavailable nodes and will 
+be configurable by the users in future releases. WMCO will not render more than the specified
 amount of Windows nodes unavailable.
 
 This design requires that all Windows Machines are backed by a MachineSet. This
@@ -132,7 +136,8 @@ The procedure for an upgrade is as follows:
    Machines are configured and join the cluster as a node. Each of them are
    given an annotation indicating the WMCO version that configured them.
 4) Each Windows node is checked for the WMCO version annotation, if the
-   annotated version of a Windows node does not match the WMCO version,
+   annotated version of a Windows node does not match the WMCO version, and
+   the number of unavailable Windows nodes is less than maxUnhealthy value,
    the associated Machine is deleted.
 5) When a replacement Machine is created by the Machine API Operator, WMCO will
    reconcile again and configure the VM. This will repeat until all Windows
