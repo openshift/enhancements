@@ -155,34 +155,45 @@ Add create db, delete, and batch insert APIs to the model layer of operator-regi
 
 Add a new set of operator registry commands to utilize those new APIs:
 
-`operator-registry create`
-    - inputs: none
-    - outputs: empty operator registry database
-    
-`operator-registry add`
-    - inputs: $operatorBundleImagePath, $dbFile
-    - outputs: updated database file
-    ex: `operator-registry add quay.io/community-operators/foo:sha256@abcd123 example.db`
-    
-`operator-registry add --batch`
-    - inputs: $operatorBundleImagePath, $dbFile
-    - outputs: updated database file
-    ex: `operator-registry add "quay.io/community-operators/foo:sha256@abcd123,quay.io/community-operators/bar:sha256@defg456" example.db`
-    
-`operator-registry delete`
-    - inputs: $operatorName, $dbFile
-    - outputs: updated database file without $operatorName included
-    ex: `operator-registry delete bar example.db`
+- `operator-registry create`
 
-`operator-registry delete-latest`
-    - inputs: $operatorName, $dbFile
-    - outputs: updated database file without latest version of $operatorName included
-    ex: `operator-registry delete-latest foo example.db`
+  + inputs: none
+  + outputs: empty operator registry database
+    
+- `operator-registry add`
 
-`operator-registry manifest`
-    - inputs: $dbFile
-    - outputs: file with list of bundle images the index was built on
-    ex: `operator-registry manifest example.db`
+  + inputs: $operatorBundleImagePath, $dbFile
+  + outputs: updated database file
+
+  ex: `operator-registry add quay.io/community-operators/foo:sha256@abcd123 example.db`
+    
+- `operator-registry add --batch`
+
+  + inputs: $operatorBundleImagePath, $dbFile
+  + outputs: updated database file
+
+  ex: `operator-registry add "quay.io/community-operators/foo:sha256@abcd123,quay.io/community-operators/bar:sha256@defg456" example.db`
+    
+- `operator-registry delete`
+
+  + inputs: $operatorName, $dbFile
+  + outputs: updated database file without $operatorName included
+
+  ex: `operator-registry delete bar example.db`
+
+- `operator-registry delete-latest`
+
+  + inputs: $operatorName, $dbFile
+  + outputs: updated database file without latest version of $operatorName included
+
+  ex: `operator-registry delete-latest foo example.db`
+
+- `operator-registry manifest`
+
+  + inputs: $dbFile
+  + outputs: file with list of bundle images the index was built on
+
+  ex: `operator-registry manifest example.db`
 
 As a point of context, these operations all output new database files. The intent of creating these commands is to allow the creation of new container images based on historical context of previous versions. These commands will be wrapped in tooling (outside the scope of this enhancement) that will be run as part of build environments or for local development. We are not creating a way for these commands to be run from inside the context of a cluster.
 
@@ -191,15 +202,17 @@ As a point of context, these operations all output new database files. The inten
 Currently the operator-registry database has a table to the effect of:
 
 OperatorBundle
-    -name: foo
-    -bundle: "{$jsonblob}"
+
+  - name: foo
+  - bundle: "{$jsonblob}"
     
 We will add a field to this table that will reference the bundle image path and, when the operator is not the latest version of the default channel, will not include the bundle blob itself:
 
 OperatorBundle
-    -name: foo
-    -bundle: NULL
-    -bundlePath: "quay.io/community-operators/foo:sha256@abcd123"
+
+  - name: foo
+  - bundle: NULL
+  - bundlePath: "quay.io/community-operators/foo:sha256@abcd123"
     
 Additionally, we will update the grpc API that OLM currently uses to get the bundle that if it attempts to pull the non latest version will return null. In that case, it will make a second query to get the bundlePath. Then we will create a pod with that image that will serve the bundle data by writing the data to a configmap that can be read by OLM.
 
