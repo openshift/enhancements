@@ -11,3 +11,10 @@ lint: bin/golangci-lint
 
 bin/golangci-lint:
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./bin v1.31.0
+
+test:
+	go test ./...
+
+cover:
+	go test -coverprofile=cover.out $(GO_TEST_FLAGS) ./...
+	go tool cover -func=cover.out
