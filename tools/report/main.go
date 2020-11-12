@@ -88,12 +88,7 @@ func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 			groupPrefix = ""
 		}
 
-		// Sometimes we have a superfluous "enhancement:" prefix in
-		// the PR title
-		title := *prd.Pull.Title
-		if strings.HasPrefix(strings.ToLower(title), "enhancement:") {
-			title = strings.TrimLeft(title[12:], " ")
-		}
+		title := enhancements.CleanTitle(*prd.Pull.Title)
 
 		fmt.Printf("- [%d](%s): (%d/%d) %s%s (%s)\n",
 			*prd.Pull.Number,
