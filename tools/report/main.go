@@ -82,6 +82,13 @@ func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 				*prd.Pull.Number, err)
 			group = "uncategorized"
 		}
+
+		// ignore pull requests with only changes in the tools
+		// directory
+		if group == "tools" {
+			continue
+		}
+
 		groupPrefix := fmt.Sprintf("%s: ", group)
 		if strings.HasPrefix(*prd.Pull.Title, groupPrefix) {
 			// avoid redundant group prefix
