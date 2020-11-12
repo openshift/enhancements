@@ -32,6 +32,26 @@ func TestCleanTitle(t *testing.T) {
 			Input:    "Enhancement: Remove the prefix",
 			Expected: "Remove the prefix",
 		},
+		{
+			Scenario: "WIP:",
+			Input:    "WIP: Remove the prefix",
+			Expected: "Remove the prefix",
+		},
+		{
+			Scenario: "[wip]",
+			Input:    "[WIP] Remove the prefix",
+			Expected: "Remove the prefix",
+		},
+		{
+			Scenario: "combo",
+			Input:    "[WIP] enhancement: Remove the prefix",
+			Expected: "Remove the prefix",
+		},
+		{
+			Scenario: "combo-no-whitespace",
+			Input:    "[WIP]enhancement:Remove the prefix",
+			Expected: "Remove the prefix",
+		},
 	} {
 		t.Run(tc.Scenario, func(t *testing.T) {
 			actual := CleanTitle(tc.Input)

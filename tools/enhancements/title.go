@@ -2,11 +2,15 @@ package enhancements
 
 import "strings"
 
+var (
+	titlePrefixes = []string{"wip:", "[wip]", "enhancement:"}
+)
+
 func CleanTitle(title string) string {
-	// Sometimes we have a superfluous "enhancement:" prefix in
-	// the PR title
-	if strings.HasPrefix(strings.ToLower(title), "enhancement:") {
-		title = strings.TrimLeft(title[12:], " ")
+	for _, prefix := range titlePrefixes {
+		if strings.HasPrefix(strings.ToLower(title), prefix) {
+			title = strings.TrimLeft(title[len(prefix):], " ")
+		}
 	}
 	return title
 }
