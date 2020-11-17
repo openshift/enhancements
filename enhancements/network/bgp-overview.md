@@ -194,6 +194,280 @@ connect](https://d1.awsstatic.com/whitepapers/Networking/integrating-aws-with-mu
 This is a significantly non-trivial effort.  Future enhancements are needed to
 discuss this in much more detail.
 
+## Design Details
+
+### BGP Architectural Components
+
+#### BGP Speaker
+A component capable of publishing routes only.
+#### BGP Routing Daemon
+A component capable of both sending and receiving routes.
+#### BGP Route Programming
+A component that knows how to take routes and program them.
+#### Project Specific Integrations
+Project integrations -- project/product specific integration components.
+
+### Software Components
+
+The basic behavior is as follows:
+
+* A per-node daemon monitors OVN SB DB for relevant changes and updates FRR
+accordingly.
+* FF listens to BGP peers publishing new routes which get consumed by FRR.
+Zebra will then configure Linux Networking (and perhaps OVN via its southbound
+interface) appropriately.
+
+```
+
+                               -----------------------+
+                               |  +---------------+   |
+                               |  |               |   |
+                  +---------------+   OVN NB DB   |   |
+                  |            |  |               |   |
+                  |            |  +---------------+   |
+                  |            |  +---------------+   |
+                  |            |  |               |   |
+                  |            |  |   ovn-northd  |   |
+                  |            |  |               |   |
+                  |            |  +---------------+   |
+                  |            |  +---------------+   |
+                  |            |  |               |   |
+                  |            |  |   OVN SB DB   |   |
+                  |            |  |               |   |
+                  |            |  +---------------+   |
+                  |            +----------------------+
+                  |                       |    |
+                  |                       |    |
+            +-----+---+                   |    +-------------------+
+            |         |                   |                        |
+            |   OCP   |                   |                        |
+            |         |        +---------------------------------------------+
+            +---------+        |   +----------------+              |         |
+                               |   |                |              |         |
+                               |   | FRR Controller |    +---------v------+  |
+                               |   |                |    |                |  |
+                               |   +--------+-------+    | OVN Controller |  |
+                               |            |            |                |  |
+                               |            |            +----------------+  |
+                               | +-------------------+   +----------------+  |
++------------+                 | |FRR +----------+   |   |                |  |
+|            |                 | |    |          |   |   |  ovsdb+server  |  |
+|  BGP Peer  <------------------------>   bgpd   |   |   |                |  |
+|            |                 | |    |          |   |   +----------------+  |
++------------+                 | |    +----------+   |   +----------------+  |
+                               | |    +----------+   |   |                |  |
+                               | |    |          |   |   |  OVS vswitchd  |  |
+                               | |    |   zebra  |   |   |                |  |
+                               | |    |          |   |   +--------+-------+  |
+                               | |    +--------+-+   |            |          |
+                               | |             |     |            |          |
+                               | |    south    |     |            |          |
+                               | +-------------------+            |          |
+                               +---------------------------------------------+
+                                               |                  |
+                               +---------------------------------------------+
+                               |               |                  |          |
+                               |  +------------v---+     +--------+-------+  |
+                               |  |                |     |                |  |
+                               |  | Kernel Routing |     | openvswitch.ko |  |
+                               |  |                |     |                |  |
+                               |  +----------------+     +----------------+  |
+                               +---------------------------------------------+
+
+```
+#### FRR
+FRR is a fully featured, high performance, free software IP routing suite. FRR
+implements all standard routing protocols such as BGP, RIP, OSPF, IS-IS and more
+(see Feature Matrix), as well as many of their extensions. FRR is a high
+performance suite written primarily in C.
+
+#### zebra
+
+FRR is implemented as a number of daemons that work together to build the
+routing table. These daemons talk to 'zebra', which is the daemon that is
+responsible for coordinating routing decisions and talking to the dataplane (see
+[here](#BGP-Route-Programming) above). 'zebra' implements a plugin architecture
+that allows integration with different platform-dependent (southbound)
+forwarding planes (plugins).
+
+##### zebra (platform-dependent components)
+'zebra' uses platform-dependent code to interface with the underlying
+(southbound) forwarding planes. (e.g. Linux Kernel Networking)
+
+On Linux, FRR can install routing decisions into the OS kernel, allowing the
+kernel networking stack to make the corresponding forwarding decisions.
+
+#### bgpd
+
+'bgpd' is the routing daemon responsible for BGP. It works with 'zebra' to
+coordinate routing decisions with other daemons before installing routes on the
+dataplane. It will be the main component to interface with BGP peers for
+capability negotiation and route exchange and contain the BGP Protocol logic.
+'bgpd' acts as a [BGP Routing Daemon](#BGP-Routing-Daemon).
+
+**Note:** 'bgpd' includes a [mode](http://docs.frrouting.org/en/latest/bgp.html#redistribution)
+that will automatically advertise kernel routes to bgp peers subject to
+[filters](http://docs.frrouting.org/en/latest/filter.html?highlight=filtering#filtering).
+
+##### bgpd.conf
+
+'bgpd.conf' provides the configuration for an FRR BGP instance on a host. For
+example, this will need to specify at a minimum:
+
+* **router bgp**: ASN for local BGP instance
+* **interface** : Interfaces managed by the local BGP instance
+* **neighbor** : IP address and ASN for a remote BGP Peer. There may be
+multiples of these.
+* **network**   : IP network that can announced to BGP peers
+
+This can be configured through a configuration file, vtysh (a command-line
+utility provided with FRR), or through an experimental (northbound) gRPC
+interface. An example configuration file for enabling BGP between two nodes can
+be seen here. This would set up two BGP peers on the same AS and exchange a
+"network" between each node.
+
+host1:
+```
+hostname <hostname host1>
+password zebra
+router bgp 7675
+ network <published network e.g. 192.168.1.0/24>
+ neighbor <IP host 2> remote-as 7675
+```
+host2:
+```
+hostname <hostname host2>
+password zebra
+router bgp 7675
+ network <published network e.g. 192.168.2.0/24>
+ neighbor <IP host 1> remote-as 7675
+```
+
+After configuring FRR it will be possible to add a loopback address (from a
+published network range) and ping that address from the other node as BGP will
+have automatically added the necessary routes.
+
+For example,
+
+host 1:
+```
+ip addr add 192.168.1.1 dev lo0
+```
+host 2:
+```
+ping 192.168.1.1
+```
+
+On either node, it is possible to see status information about BGP by running
+the following commands:
+```
+$ sudo vtysh
+
+Hello, this is FRRouting (version 7.6-dev).
+Copyright 1996-2005 Kunihiro Ishiguro, et al.
+
+hostname # show bgp summary # shows information about connected peers
+hostname # show bgp detail # shows information about networks
+
+```
+
+**Note:** The terminology here is a little confusing. Loopback address refers
+to an IP address added to the loopback device not a loopback address from the
+127.0.0.0/8 address range.
+
+##### FRR gRPC
+
+FRR provides an experimental YANG-based (northbound) gRPC interface to allow
+configuration of FRR by generating language-specific bindings.
+
+This interface is experimental. What does this mean:
+
+* The implementation on the current stable release `stable/7.4` does not
+currently work, giving an "assert()" error. However, on "master", it is possible
+to successfully start the gRPC server for a daemon. This suggests that the
+feature is currently in active development.
+* Configuration is not well-documented. It also requires a recent version of
+libyang (not available in F32) that can be compiled and installed from source.
+* There is documentation for how to use the gRPC interface but **only** for the
+Ruby programming language. Although it should be possible to generate bindings
+across most languages (e.g. Python, Golang) but not C (only C++).
+* I managed to generate Python bindings and hack together a PoC that worked to
+some extent, allowing the client to read BGP configuration. The steps are
+documented below.
+
+From this, it appears some effort would be required in order to productize this
+interface for use. However, the other option for configuring FRR
+programmatically would be to write to a configuration that gets reloaded on
+changes, or write commands to the FRR CLI `vtysh`. Both of which should be
+sufficient for our needs.
+
+In order to configure it, the following instructions can be followed to develop
+Python bindings to the Northbound FRR configuration interface.
+
+### FRR Controller
+
+This design requires a component on the host monitoring OVN (OVN SB) for changes
+and then configuring FRR in response to those changes.
+
+## Use Cases
+
+For the primary use cases, we can explore the above architecture to check its
+suitability. Initially focus on "External Service Load Balancing" and "Exposing
+Pods or Services Directly" as these seem to have the biggest pull from customers
+and will require our BGP components to publish and consume routes.
+They are also (probably) the least complex to implement.
+
+### Exposing Pods or Services Directly (Priority 1) [WIP]
+
+```
+                                                          +----------+        +----------+       +----------+
+                                                          |          |        |          |       |          |
++---------------------------------------------------------> BGP Peer +--------> BGP Peer +-------> BGP Peer |
+|                                                         |   (RR)   |        |          |       |          |
+|   FRR sends BGP UPDATE message to peer                  +-----+----+        +-----+----+       +-----+----+
+|   specifying:                                                 |                   |                  |
+|   x.x.x.x/32 next hop is a.a.a.a/32                           |                   |                  |
+|   y.y.y.y/32 next hop is b.b.b.b/32                           |                   |                  |
+|   z.z.z.z/32 next hop is c.c.c.c/32                           |                   |                  |
+|                                                               |                   |                  |
+|  +-------------------------------------------+                |                   |                  |
+|  |Host +---------+             +---------+   |          +-----v----+        +-----v----+       +-----v----+     +----------+
+|  |     |         | Pod IP =    |         |   |          |          |        |          |       |          |     |          |
++--------+   FRR   |             | SERVICE +<-------------+  Router  +--------+  Router  +-------+  Router  <-----+  Client  |
+|  |     |         | x.x.x.x/32  |         |   |          |          |        |          |       |          |     |          |
+|  |     +---------+             +---------+   |          +----------+        +----------+       +----------+     +----------+
+|  +-------------------------------------------+
+|                       Loopback IP = a.a.a.a/32
+|
+|  +-------------------------------------------+
+|  |Host +---------+             +---------+   |          +----------+
+|  |     |         | Pod IP =    |         |   |          |          |
++--------+   FRR   |             | SERVICE |   |          |  Router  |
+|  |     |         | y.y.y.y/32  |         |   |          |          |
+|  |     +---------+             +---------+   |          +----------+
+|  +-------------------------------------------+
+|                       Loopback IP = b.b.b.b/32
+|
+|  +-------------------------------------------+
+|  |Host +---------+             +---------+   |          +----------+
+|  |     |         | Pod IP =    |         |   |          |          |
++--------+   FRR   |             | SERVICE |   |          |  Router  |
+   |     |         | z.z.z.z/32  |         |   |          |          |
+   |     +---------+             +---------+   |          +----------+
+   +-------------------------------------------+
+                        Loopback IP = c.c.c.c/32           e.g. Leaf Router   e.g. Spine Router   e.g. DC Gateway
+
+```
+[Open] This would depend if we were using shared gateway mode or local gateway
+mode. Shared gateway seems a little easier as we may not need to integrate with
+the linux networking stack
+[Open] For exposing services, how will we do port translation? BGP won't allow
+that.
+
+### External Service Load Balancing (Priority 2) [WIP]
+
+
+
 ## Common Design Considerations
 
 This section summarizes the common design considerations for OpenShift in
@@ -204,7 +478,7 @@ Establishing BGP sessions is not a simple task, and requires a number of unavoid
 
 Technically, any solution must make it easy for administrators to configure the same BGP peering parameters as they would expect on a router. In addition to the required settings (e.g. AS, peer, password), administrators expect additional knobs that make BGP usable (e.g. communities, timing parameters, multihop, AS prepends). The current status of all peerings must be exposed, since administrators rely on this to debug their networks and trust that OpenShift is not misbehaving.
 
-Documentation and training should reflect the complexity of BGP-based operations, and potential users should be made aware of any prerequisites and technical challenges. Everyone should be aware of the buy-in required for enabling BGP. 
+Documentation and training should reflect the complexity of BGP-based operations, and potential users should be made aware of any prerequisites and technical challenges. Everyone should be aware of the buy-in required for enabling BGP.
 ### Avoid L2 (Layer 2) Domain Assumptions
 
 We must avoid the assumption of Nodes residing on the same L2 domain as much as
