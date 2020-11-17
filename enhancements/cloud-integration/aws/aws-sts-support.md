@@ -105,7 +105,7 @@ Users will have to manually provision the IAM roles, policies, and Secrets for e
 			"Action": "sts:AssumeRoleWithWebIdentity",
 			"Condition": {
 				"StringEquals": {
-					"<OIDC_PROVIDER_URL_without_https://>:sub": "system:serviceaccount:<CredReq spec.Namespace>:<CredReq .spec.ServiceAccountName>"
+					"<OIDC_PROVIDER_URL_without_https://>:sub": "system:serviceaccount:<CredReq spec.Namespace>:<Operator pod ServiceAccount>"
 				}
 			}
 		}
@@ -119,7 +119,7 @@ stringData:
   credentials: |-
     [default]
     role_arn=[ AWS Role ARN created for CredentialsRequest ]
-    web_identity_token_file=/var/run/cloudcredentials/token
+    web_identity_token_file=/var/run/secrets/openshift/serviceaccount/token
 kind: Secret
 metadata:
   name: [ CredReq .spec.SecretName ]
