@@ -142,6 +142,8 @@ Cluster install workflow becomes:
 
 The OpenShift cluster will now install without ever using a long live credential. Kubernetes will handle the rotation of the tokens via the projected service account, which are then trusted by AWS via the OIDC / identity provider trust relationship established by the user manually before installing the cluster.
 
+A [tool has been written](https://github.com/sjenning/sts-preflight) that may be available to help users automate some of the initial AWS setup.
+
 Documentation will be provided on this install process, as well as rotating the OIDC signing keys.
 
 #### Future Phases
