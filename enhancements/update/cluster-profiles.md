@@ -72,6 +72,28 @@ worker nodes instead of master nodes.
 
 ### Design
 
+#### Cluster profile annotation
+
+The following annotation may be used to include manifests for a given profile:
+
+```
+include.release.openshift.io/[identifier]=true
+```
+
+Manifests may support inclusion in multiple profiles by including as many of these annotations
+as needed.
+
+For items such as node selectors that need to vary based on a profile, different manifests
+will need to be created to support each variation in the node selector. This feature will
+not support including/excluding sections of a manifest. In order to avoid drift and 
+maintenance burden, components may use a templating solution such as kustomize to generate
+the required manifests while keeping a single master source.
+
+The current installation profile is called `self-managed-high-availability`. All current
+manifests must specify it. Future profiles may choose.
+
+#### Environment variable
+
 A cluster profile is specified to the CVO as an identifier in an environment
 variable. For a given cluster, only one CVO profile may be in effect.
 
@@ -85,25 +107,8 @@ This environment variable would have to be specified in the CVO deployment. When
 no `CLUSTER_PROFILE=[identifier]` variable is specified, the `default` cluster profile
 is in effect.
 
-The following annotation may be used to include manifests for a given profile:
-
-```
-include.release.openshift.io/[identifier]=true
-```
-This would make the CVO render this manifest only when `CLUSTER_PROFILE=[identifier]`
+`include.release.openshift.io/[identifier]=true` would make the CVO render this manifest only when `CLUSTER_PROFILE=[identifier]`
 has been specified. 
-
-Manifests may support inclusion in multiple profiles by including as many of these annotations
-as needed.
-
-For items such as node selectors that need to vary based on a profile, different manifests
-will need to be created to support each variation in the node selector. This feature will
-not support including/excluding sections of a manifest. In order to avoid drift and 
-maintenance burden, components may use a templating solution such as kustomize to generate
-the required manifests while keeping a single master source.
-
-The current installation profile is called `self-managed-high-availability`. All current
-manifests must specify it. Future profiles may choose.
 
 ## Implementation History
 
