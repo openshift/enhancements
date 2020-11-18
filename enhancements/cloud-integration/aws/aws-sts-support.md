@@ -90,7 +90,9 @@ openshift-install will be modified to accept user provided service account signi
 For each `CredentialsRequest` the user will need to manually create the relevant Secret and role
 Users will have to manually provision the IAM roles, policies, and Secrets for each `CredentialsRequest`. This process will also require the name of the `ServiceAccount` that the pod consuming the credentials uses, which is typically created by the operator itself. However, we do not presently have the `ServiceAccount` name modeled in the `CredentialsRequest` API, and would like to defer doing this until we have more real world data and experience before making a permanent API commitment. As such, credentials will be documented as a list policy permissions, service account names, and target secrets, which the user will have to iterate:
 
-  1. Create an IAM Role with no policy attached, tagged with `kubernetes.io/cluster/[infraid]=owned` so it can be cleaned up on deprovision. (type = web identity, identity provider created by the admin manually)
+  1. Create an IAM Role with no policy attached, type = web identity, identity provider created by the admin manually.
+    1. If the role will not be shared across multiple clusters and should be removed when the cluster is deprovisioned, tag it with `kubernetes.io/cluster/[infraid]=owned`.
+    1. Note that openshift-install destroy cluster will not cleanup the OIDC provider itself today.
   1. Attach an in-line policy to the role which matches the permissions in the `CredentialsRequest` or documentation.
   1. Ensure the trust relationship for the Role points to the cluster’s AWS IAM OIDC ARN with conditions to limit which `ServiceAccount` can assume this role.
      ```json
@@ -131,8 +133,7 @@ Cluster install workflow becomes:
 
   1. Create an S3 bucket to publish OIDC keys.
   1. Generate and publish OIDC keys.
-  1. Create an AWS IAM identity provider.
-  1. Configure their local AWS credentials to use STS.
+  1. Create an AWS IAM OIDC identity provider.
   1. `openshift-install create install-config`
   1. Provide their OIDC keys in a manifest, which will be used to configure the Kube APIServer to be used to sign bound service account keys so they are trusted by AWS.
   1. Modify `spec.credentialsMode` in the generated install-config.yaml to set CCO to manual mode. (this mechanism already exists)
@@ -163,7 +164,24 @@ Non-CVO managed third-party or OLM operators may be using `CredentialsRequests`.
 
 ### Test Plan
 
-It is likely infeasible to automate testing around a manual CCO mode with non-trivial setup steps. For the most part we will need to rely on manual testing by engineering and QE test plans. Future phases where we may automate more of this could change this.
+#### CI Account Setup
+
+  1. Create an AWS IAM OIDC provider in CI account. Make sure this and related resources are skipped from pruning.
+  1. Create IAM roles for all the operators using the OIDC provider. Make sure these roles are also skipped from pruning.
+
+#### Add Another Multi-Step Workflow
+
+  1. Add a ipi-conf step to set the credentialMode: Manual
+  1. Store the Bound Service Account Singning key in CI cluster as secret.
+  1. Use CI steps to inject this credential to one of the step see https://docs.ci.openshift.org/docs/architecture/step-registry/#injecting-custom-credentials
+  1. Create a step that adds following items to the $SHARED_DIR/manifests such that the install step will add those files before running create cluster.
+    * manifests/cluster-authentication-02-config.yaml (static)
+    * tls/bound-service-account-signing-key.key (from the credential)
+    * manifests/secret-{*for each operator*} (static)
+    * see https://github.com/openshift/release/blob/ed755e202de5d04dbeb72ec91670f13e9a722022/ci-operator/step-registry/ipi/install/install/ipi-install-install-commands.sh#L45-L49
+    * maybe also enable non-manifest folder for tls.
+  1. This should test OpenShift clusters components using STS for AWS authentication and running the same e2e.
+
 
 ### Upgrade / Downgrade Strategy
 
