@@ -135,9 +135,10 @@ Cluster install workflow becomes:
   1. Generate and publish OIDC keys.
   1. Create an AWS IAM OIDC identity provider.
   1. `openshift-install create install-config`
-  1. Provide their OIDC keys in a manifest, which will be used to configure the Kube APIServer to be used to sign bound service account keys so they are trusted by AWS.
   1. Modify `spec.credentialsMode` in the generated install-config.yaml to set CCO to manual mode. (this mechanism already exists)
-  1. Generate secret yaml containing an AWS credentials file which configures the client to use STS, and references to token file mounted in. (see above)
+  1. `openshift-install create manifests`
+  1. Provide their OIDC keys in a manifest, which will be used to configure the Kube APIServer to be used to sign bound service account keys so they are trusted by AWS.
+  1. For each required credential, generate `Secret` yaml containing an AWS credentials file which configures the client to use STS, and references to token file mounted in. (see above)
   1. Include secret yaml definitions generated in the steps above.
   1. `openshift-install create cluster`
 
