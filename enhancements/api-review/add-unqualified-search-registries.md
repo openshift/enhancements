@@ -46,6 +46,8 @@ Users can currently configure `AllowedRegistries`, `BlockedRegistries`, and `Ins
 
 ### Non-Goals
 
+- Builds and Imagestream Imports will not support the use of short names. There is an added complexity for these components to figure out the correct credentials needed for the short names and the security risks associated with using short names. Since we highly discourage short names, we are only adding support for `unqualified-search-registries` at the runtime level. Users can only use short names in their pod spec and only cri-o/podman will support it.
+
 ## Proposal
 
 The Image API is extended by adding an optional `UnqualifiedSearchRegistries` field with type `[]string` to `RegistrySources`:
@@ -93,9 +95,6 @@ The user can use multiple internal registries to pull images with short names wi
 Implementing this enhancement requires changes in:
 - openshift/api
 - openshift/machine-config-operator
-- builds
-- imagestream imports
-- image-registry-pull-through
 
 This is what the `/etc/containers/registries.conf` file currently looks like on the nodes:
 
@@ -132,15 +131,20 @@ Note: adding a drop-in file at `/etc/containers/registries.conf.d` completely ov
 The new list of `unqualified-search-registries` will be the list specified in the drop-in file at `/etc/containers/registries.conf.d`.
 When a user runs a pod using an image short name, cri-o/podman/buildah will check `reg1.io`, `reg2.io`, and `reg3.io` for any images matching the short name.
 
-The shared package used by builds to create a registries.conf that matches what is on the node will also have to be updated to handle this new option. Imagestream imports and image-registry-pull-through currently use docker libraries, and handle the configuration of insecure, allowed, and blocked registries separately - we will have to do a similar thing to handle unqualified-search-registries until these components are able move over to using the containers/image library.
-
-Documentations: We will document that we heavily advise against using this feature unless it is absolutely needed. An example case would be when a user has multiple internal registries whose DNS changes frequently, so image short name has to be used in the image spec. We will also document that when you do this, the whole list is overridden and there is no fall back to the default list of `unqualified-search-registries`.
+Documentations: We will document that we heavily advise against using this feature unless it is absolutely needed due to the security risks. An example case would be when a user has multiple internal registries whose DNS changes frequently, so image short name has to be used in the image spec. We will also document that when you do this, the whole list is overridden and there is no fall back to the default list of `unqualified-search-registries`. We will also document that the `unqualified-search-registries` list will not work with the builds and imagestream imports components. It will only work with the pod spec when using short names.
 
 ### Risks and Mitigations
 
-Need to ensure that all the components that deal with image management are updated to handle this new option so that they are all on the same page. The `unqualified-search-registries` field already exists in the `/etc/containers/registries.conf` file on all nodes in a cluster. This enhancement just adds the ability for the user to be able to configure this list. An API change for adding the `UnqualifiedSearchRegistry` field to the images.config.openshift.io CR is needed.
-Builds, Imagestream imports, and image-registry-pull-through will have to handle `unqualified-search-registries` as well to ensure that we are consistent across all the components that deal with image pull and management.
-Also, CRI-O will be doing the image search and will have access to the credentials for all the registries in the list.
+The `unqualified-search-registries` field already exists in the `/etc/containers/registries.conf` file on all nodes in a cluster. This enhancement just adds the ability for the user to be able to configure this list. An API change for adding the `UnqualifiedSearchRegistry` field to the images.config.openshift.io CR is needed and updates to the MCO code to handle this new option will be needed..
+CRI-O will be doing the image search and will be using the cluster wide pull secret to get the credentials for all the registries in the list.
+
+We will document a big warning about the security risks of using short names. This includes the following:
+
+- Users are subject to network and reistry-originating attacks when using external registries.
+- If the pod pull secret contains docker.io credentials, these credentials will be sent to all the registries in the search list.
+- Only the cluster-wide pull secret can be used for credentials and the namespaced docker.io credentials available to the kubelet.
+
+Customers should only use this when they are using internal registries to reduce the possible security risks affecting them.
 
 ## Design Details
 
