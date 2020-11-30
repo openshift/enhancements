@@ -24,7 +24,7 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
+- [x] Enhancement is `implementable`
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
@@ -76,10 +76,10 @@ scheduler.
 Note that for any of these profiles, the definition is based on intent and the underlying implementation may change 
 between releases to maintain that original intent (corresponding to any changes in the upstream scheduler's plugins).
 
-* `LowUtilization`: this profile attempts to spread pods evenly across nodes to get low resource usage per node. 
+* `LowNodeUtilization`: this profile attempts to spread pods evenly across nodes to get low resource usage per node. 
 This will use the default scheduler profile as defined in the kube-scheduler's internal registry.
 
-* `HighUtilization`: this attempts to pack as many pods as possible on to as few nodes as possible, to minimize node 
+* `HighNodeUtilization`: this attempts to pack as many pods as possible on to as few nodes as possible, to minimize node 
 count with high usage per node. This will disable `NodeResourcesLeastAllocated` and enable `NodeResourcesMostAllocated` to enable
 bin-packing of workloads onto nodes.
 
