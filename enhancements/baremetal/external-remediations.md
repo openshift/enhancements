@@ -53,6 +53,7 @@ mechanism for implementing custom remediation logic.
 
 - Create the ability to define customized remediation flows outside of the Machine Health Check and CAPI codebase.
 - Migrate the existing external remediation mechanism to the new one.
+- Ensure that at most one external mechanism will attempt to recover the node.
 
 ### Non-Goals
 
