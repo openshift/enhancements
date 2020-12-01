@@ -51,7 +51,8 @@ mechanism for implementing custom remediation logic.
 
 ### Goals
 
-- Create the ability to define customized remediation flows outside of the Machine Health Check and CAPI codebase.
+- Create the ability to define customized remediation flows outside of the Machine Health Check and Machine API
+Operator codebase.
 - Migrate the existing external remediation mechanism to the new one.
 - Ensure that at most one external mechanism will attempt to recover the node.
 
@@ -134,7 +135,7 @@ of the full custom ERC flow.
 MachineHealthCheck:
 ```yaml
     kind: MachineHealthCheck
-    apiVersion: cluster.x-k8s.io/v1alphaX
+    apiVersion: machine.openshift.io/v1beta1
     metadata:
       name: REMEDIATION_GROUP
       namespace: NAMESPACE_OF_UNHEALTHY_MACHINE
@@ -154,7 +155,7 @@ Metal3RemediationTemplate:
     apiVersion: remediation.metal3.io/v1alphaX
     metadata:
       name: M3_REMEDIATION_GROUP
-      namespace: NAMESPACE_OF_UNHEALTHY_MACHINE
+      namespace: openshift-machine-api
     spec:
       template:
         spec:
@@ -170,11 +171,11 @@ Metal3Remediation:
     kind: Metal3Remediation
     metadata:
       name: NAME_OF_UNHEALTHY_MACHINE
-      namespace: NAMESPACE_OF_UNHEALTHY_MACHINE
+      namespace: openshift-machine-api
       finalizer:
       - remediation.metal3.io
       ownerReferences:
-      - apiVersion:cluster.x-k8s.io/v1alphaX
+      - apiVersion: machine.openshift.io/v1beta1
         kind: Machine
         name: NAME_OF_UNHEALTHY_MACHINE
         uid: ...
