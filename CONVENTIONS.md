@@ -129,6 +129,17 @@ it is used to manage all elements of the cluster.
   * Components that support workloads directly must not disrupt end-user workloads during upgrade or reconfiguration
     * E.g. the upgrade of a network plugin must serve pod traffic without disruption (although tiny increases in latency are allowed)
     * All components that currently disrupt end-user workloads must prioritize addressing those issues, and new components may not be introduced that add disruption
+* The platform should not disrupt workloads (reboot nodes) during normal operation
+  * If an admin requests a change to the system that has the clear expectation of disruption, the system may cause workload disruption (for example, an upgrade or machine configuration change should trigger a rolling reboot because that is expected)
+  * If an admin configures an optional mechanism like machine health checks or automatic upgrades, they are explicitly opting in to workload disruption and this constraint does not apply
+  * Normal system operation may not disrupt workloads and components must avoid triggering that disruption
+    * The most common disruption is triggering workload drains or restarts (usually via nodes) and that is not allowed except through explicit user-triggered actions
+    * During normal operation all APIs and behaviors should remain available and responsive for all single machine failures
+    * Components that are leader-elected must transfer leadership within a reasonable interval after a single machine failure:
+      * Critical components such as scheduler and core controllers for all workload APIs - 15s
+      * Important components for machine and system management that are responsible for recovering from failures - 30-60s
+      * All other components - 90-120s
+    * For example, certificate or CA rotation might temporarily (<10 seconds) delay starting or restarting pods due to the Kubelet restarting, but must not cause machine reboots
 
 
 #### Resources and Limits
