@@ -193,7 +193,7 @@ These are generalized examples to consider, in addition to the aforementioned [m
 - End user documentation, relative API stability
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
-- Enumerate service level objectives (SLIs), expose SLIs as metrics
+- Enumerate service level indicators (SLIs), expose SLIs as metrics
 - Write symptoms-based alerts for the component(s)
 
 ##### Tech Preview -> GA 
@@ -227,7 +227,7 @@ enhancement:
 
 Upgrade expectations:
 - Each component should remain available for user requests and
-  workloads during upgrades. Ensure the components leverage best practices in handling voluntary disruption. Any exception to this should be
+  workloads during upgrades. Ensure the components leverage best practices in handling [voluntary disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to this should be
   identified and discussed here.
 - Micro version upgrades - users should be able to skip forward versions within a
   minor release stream without being required to pass through intermediate
