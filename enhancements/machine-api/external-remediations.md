@@ -5,9 +5,10 @@ authors:
 reviewers:
   - @beekhof
   - @n1r1
-  - TBD
 approvers:
-  - TBD
+  - @JoelSpeed
+  - @michaelgugino
+  - @enxebre
 creation-date: 2020-11-29
 last-updated: 2020-11-29
 status: implementable
@@ -33,7 +34,7 @@ The machine healthcheck controller's remediation strategy is deleting the machin
 create a new one. This isn't the best remediation strategy in all environments.
 
 There is already a mechanism to provide an alternative, external remediation strategy, by adding an annotation to the
-`MachineHealthCheck` and then to `Machine`s. However, this is isn't very maintainable.
+`MachineHealthCheck` and then to `Machine`s. However, this is isn't very maintainable and diverges from upstream.
 
 With this enhancement we propose a better, future-proof mechanism, that aligns us with the mechanism implemented upstream.
 This proposal is a backport of parts of the upstream machine healthcheck proposal [0], which
