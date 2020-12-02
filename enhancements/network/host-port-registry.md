@@ -66,6 +66,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 |-------|-----------|-------------|-------|-------|
 | 2379  | etcd      | etcd || control plane only |
 | 2380  | etcd      | etcd || control plane only |
+| 6180  | httpd     | kni | 4.4 | baremetal provisioning server, control plane only |
+| 6181  | httpd     | kni | 4.7 | baremetal image cache, control plane only |
 | 6443  | kube-apiserver | apiserver || control plane only |
 | 9001  | machine-config-daemon oauth proxy | node || metrics |
 | 9100  | node-exporter | monitoring || metrics |
