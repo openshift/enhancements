@@ -66,9 +66,13 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 |-------|-----------|-------------|-------|-------|
 | 2379  | etcd      | etcd || control plane only |
 | 2380  | etcd      | etcd || control plane only |
+| 3306  | mariadb   | kni | 4.4 | baremetal ironic DB, control plane only |
+| 5050  | ironic-inspector | kni | 4.4 | baremetal provisioning, control plane only |
 | 6180  | httpd     | kni | 4.4 | baremetal provisioning server, control plane only |
 | 6181  | httpd     | kni | 4.7 | baremetal image cache, control plane only |
+| 6385  | ironic-api   | kni | 4.4 | baremetal provisioning, control plane only |
 | 6443  | kube-apiserver | apiserver || control plane only |
+| 8089  | ironic-conductor | kni | 4.4 | baremetal provisioning, control plane only |
 | 9001  | machine-config-daemon oauth proxy | node || metrics |
 | 9100  | node-exporter | monitoring || metrics |
 | 9101  | openshift-sdn kube-rbac-proxy | sdn || metrics, openshift-sdn only |
