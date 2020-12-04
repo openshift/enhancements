@@ -84,8 +84,8 @@ func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 		}
 
 		// ignore pull requests with only changes in the tools
-		// directory
-		if group == "tools" {
+		// directory or this-week posts
+		if group == "tools" || group == "this-week" {
 			continue
 		}
 
