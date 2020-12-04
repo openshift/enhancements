@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -63,6 +64,10 @@ func getModifiedFiles(pr int) (filenames []string, err error) {
 	for _, name := range strings.Split(string(out), "\n") {
 		trimmed := strings.TrimSpace(name)
 		if trimmed != "" {
+			// Ignore anything that doesn't look like a markdown file.
+			if filepath.Ext(trimmed) != ".md" {
+				continue
+			}
 			filenames = append(filenames, trimmed)
 		}
 	}
