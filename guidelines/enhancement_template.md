@@ -71,6 +71,7 @@ around the enhancement process.
 - [ ] Enhancement is `implementable`
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
+- [ ] Operational readiness criteria is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
@@ -102,12 +103,14 @@ and make progress.
 
 This is where we get down to the nitty gritty of what the proposal actually is.
 
-### User Stories [optional]
+### User Stories
 
 Detail the things that people will be able to do if this is implemented.
 Include as much detail as possible so that people can understand the "how" of
 the system. The goal here is to make this feel real for users without getting
 bogged down.
+
+Include a story on how this proposal will be operationalized:  lifecycled, monitored and remediated at scale.
 
 #### Story 1
 
@@ -145,6 +148,7 @@ to implement the design.  For instance,
 Consider the following in developing a test plan for this enhancement:
 - Will there be e2e and integration tests, in addition to unit tests?
 - How will it be tested in isolation vs with other components?
+- What additional testing is necessary to support managed OpenShift service-based offerings?
 
 No need to outline all of the test cases, just the general strategy. Anything
 that would count as tricky in the implementation and anything particularly
@@ -189,12 +193,17 @@ These are generalized examples to consider, in addition to the aforementioned [m
 - End user documentation, relative API stability
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
+- Enumerate service level indicators (SLIs), expose SLIs as metrics
+- Write symptoms-based alerts for the component(s)
 
 ##### Tech Preview -> GA 
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 - Available by default
+- Backhaul SLI telemetry
+- Document SLOs for the component
+- Conduct load testing
 
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
@@ -218,7 +227,7 @@ enhancement:
 
 Upgrade expectations:
 - Each component should remain available for user requests and
-  workloads during upgrades. Any exception to this should be
+  workloads during upgrades. Ensure the components leverage best practices in handling [voluntary disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to this should be
   identified and discussed here.
 - Micro version upgrades - users should be able to skip forward versions within a
   minor release stream without being required to pass through intermediate
