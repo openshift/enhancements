@@ -64,6 +64,9 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 
 | Port  | Process   | Owning Team | Since | Notes |
 |-------|-----------|-------------|-------|-------|
+| 80    | haproxy   | net edge    | 3.0 | HTTP routes; baremetal only; only on workers running router pod replicas |
+| 443   | haproxy   | net edge    | 3.0 | HTTPS routes; baremetal only; only on workers running router pod replicas |
+| 1936  | openshift-router | net edge | 3.0 | healthz/stats; baremetal only; only on workers running router pod replicas |
 | 2379  | etcd      | etcd || control plane only |
 | 2380  | etcd      | etcd || control plane only |
 | 3306  | mariadb   | kni | 4.4 | baremetal ironic DB, control plane only |
@@ -96,6 +99,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 10257 | kube-controller-manager | apiserver || metrics, healthz, control plane only |
 | 10259 | kube-scheduler | apiserver || metrics, control plane only |
 | 10357 | cluster-policy-controller | apiserver || healthz, control plane only |
+| 10443 | haproxy   | net edge    | 3.0 | HAProxy internal `fe_no_sni` frontend; localhost only; baremetal only; only on workers running router pod replicas |
+| 10444 | haproxy   | net edge    | 3.0 | HAProxy internal `fe_sni` frontend; localhost only; baremetal only; only on workers running router pod replicas |
 | 17697 | kube-apiserver | apiserver || ?, control plane only |
 | 22623 | machine-config-server | node || control plane only |
 | 22624 | machine-config-server | node || control plane only |
