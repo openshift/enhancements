@@ -121,10 +121,12 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 |-------|-----------|-------------|-------|-------|
 | 4180  | machine-config-daemon oauth-proxy | node ||
 | 8797  | machine-config-daemon | node |4.0| metrics |
+| 9443 | kube-controller-manager | workloads || recovery-controller|
 | 9977  | etcd | etcd || ? |
 | 10248 | kubelet | node || healthz |
 | 10300 | various CSI drivers | storage | 4.6 | healthz |
 | 10301 | various CSI drivers | storage | 4.6 | healthz |
+| 11443 | kube-scheduler | workloads || recovery-controller|
 | 29102 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
 | 29103 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
 
