@@ -2,14 +2,14 @@
 title: manifests-from-sdtin
 authors:
   - "@oglok"
+  - "@copejon"
 reviewers:
   - "@fzdarsky"
-  - "@copejon"
 approvers:
   - "@crawford"
 creation-date: 2020-12-24
 last-updated: 2020-12-24
-status: implementable
+status: provisional
 ---
 
 # Manifests from STDIN
