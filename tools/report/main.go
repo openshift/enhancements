@@ -83,12 +83,6 @@ func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 			group = "uncategorized"
 		}
 
-		// ignore pull requests with only changes in the tools
-		// directory or this-week posts
-		if group == "tools" || group == "this-week" {
-			continue
-		}
-
 		groupPrefix := fmt.Sprintf("%s: ", group)
 		if strings.HasPrefix(*prd.Pull.Title, groupPrefix) {
 			// avoid redundant group prefix
@@ -124,6 +118,29 @@ func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 			}
 		}
 	}
+}
+
+func filterPRDs(prds []*stats.PullRequestDetails) []*stats.PullRequestDetails {
+	results := []*stats.PullRequestDetails{}
+
+	for _, prd := range prds {
+
+		group, _, err := enhancements.GetGroup(*prd.Pull.Number)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: failed to get group of PR %d: %s\n",
+				*prd.Pull.Number, err)
+			group = "uncategorized"
+		}
+
+		// ignore pull requests with only changes in the tools
+		// directory or this-week posts
+		if group == "tools" || group == "this-week" {
+			continue
+		}
+
+		results = append(results, prd)
+	}
+	return results
 }
 
 func sortByID(prds []*stats.PullRequestDetails) {
@@ -219,26 +236,28 @@ func main() {
 	sortByID(theStats.Closed)
 	sortByID(theStats.New)
 	sortByActivityCountDesc(theStats.Active)
-	sortByID(theStats.Old)
-	sortByID(theStats.Idle)
-	sortByID(theStats.Stale)
-	sortByID(theStats.Revived)
 
 	year, month, day := time.Now().Date()
 	fmt.Printf("# This Week in Enhancements - %d-%d-%d\n", year, month, day)
 
-	showPRs("Merged", theStats.Merged, true)
-	showPRs("Closed", theStats.Closed, false)
-	showPRs("New", theStats.New, true)
-	showPRs("Active", theStats.Active, false)
+	showPRs("Merged", filterPRDs(theStats.Merged), true)
+	showPRs("Closed", filterPRDs(theStats.Closed), false)
+	showPRs("New", filterPRDs(theStats.New), true)
+	showPRs("Active", filterPRDs(theStats.Active), false)
 
 	if *full {
-		showPRs(fmt.Sprintf("Revived (closed more than %d days ago, but with new comments)",
-			*daysBack), theStats.Revived, false)
-		showPRs(fmt.Sprintf("Idle (no comments for at least %d days)", *daysBack), theStats.Idle, false)
+		sortByID(theStats.Old)
+		sortByID(theStats.Idle)
+		sortByID(theStats.Stale)
+		sortByID(theStats.Revived)
+
+		showPRs(fmt.Sprintf("Revived (closed more than %d days ago, but with new comments)", *daysBack),
+			filterPRDs(theStats.Revived), false)
+		showPRs(fmt.Sprintf("Idle (no comments for at least %d days)", *daysBack),
+			filterPRDs(theStats.Idle), false)
 		showPRs(fmt.Sprintf("Old (older than %d months, but discussion in last %d days)",
-			*staleMonths, *daysBack), theStats.Old, false)
+			*staleMonths, *daysBack), filterPRDs(theStats.Old), false)
 		showPRs(fmt.Sprintf("Stale (older than %d months, not discussed in last %d days)",
-			*staleMonths, *daysBack), theStats.Stale, false)
+			*staleMonths, *daysBack), filterPRDs(theStats.Stale), false)
 	}
 }
