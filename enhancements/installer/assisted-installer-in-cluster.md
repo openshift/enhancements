@@ -13,7 +13,7 @@ reviewers:
 approvers:
   - TBD
 creation-date: 2020-12-22
-last-updated: 2021-01-10
+last-updated: 2021-01-11
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
 see-also:
 replaces:
@@ -83,21 +83,33 @@ inventory.
 
 ### Implementation Details/Notes/Constraints
 
-#### Co-existing with SaaS
+#### Concurrent development with SaaS
 
-The assisted service is currently deployed as a SaaS on cloud.redhat.com with
-a non-k8s REST API and a SQL database. The software implementing that needs to
-co-exist with the software that runs in a cluster and exposing a k8s-native API,
-while sharing most of the same features and behaviors.
+The assisted service is currently deployed as a SaaS on cloud.redhat.com with a
+non-k8s REST API and a SQL database. The software implementing that needs to
+continue to exist with those design choices in order to meet the scale needs of
+a service that runs on the internet.
 
-The first implementation of controllers that provide a CRD-based API will be added
-to the existing [assisted-service](https://github.com/openshift/assisted-service)
-code in a way that allows the existing REST API to continue existing and running
-side-by-side, including its database.
+Those design choices are not the best fit for an in-cluster service. Based on
+OpenShift's approach to infrastructure management of using kubernetes-native
+APIs, an implementation of the assisted service's features that is based on
+CRDs is additionally necessary. Both implementations of similar functionality
+need to be developed and maintained concurrently.
+
+The first implementation of controllers that provide a CRD-based API will be
+added to the existing
+[assisted-service](https://github.com/openshift/assisted-service) code in a way
+that allows the existing REST API to continue existing and running
+side-by-side, including its database. An end user, whether human or automation,
+will only need to interact with the CRDs; the database and REST API will be
+implementation details that can be removed in the future. While continuing to
+run a separate database and continuing to utilize parts of the existing REST
+API are not ideal for an in-cluster service, this approach is the only
+practical way to deliver a working solution in a short time frame.
 
 While making a separate version that is Kubernetes-native with no SQL DB is on
-the table for the long term, it is not feasible to implement and maintain two
-versions in the near-term.
+the table for the long term, it is not feasible to implement and maintain such
+a different pattern in the near-term.
 
 #### Assisted Installer k8s-native API
 
