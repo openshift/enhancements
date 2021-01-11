@@ -13,7 +13,7 @@ reviewers:
 approvers:
   - TBD
 creation-date: 2020-12-22
-last-updated: 2020-12-22
+last-updated: 2021-01-10
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
 see-also:
 replaces:
@@ -40,7 +40,7 @@ users' clusters for two purposes:
 
 1. A cluster created by the Assisted Installer needs the ability to add workers
 on day 2.
-2. Multi-cluster management, such as through hive and ACM, should be
+2. Multi-cluster management, such as through hive and RHACM, should be
 able to utilize the capabilities of the Assisted Installer.
 
 This enhancement proposes the first iteration of running the Assisted Installer
@@ -50,15 +50,12 @@ in end-user clusters to meet the purposes above.
 
 ### Goals
 
-* Expose the Assisted Installer's capabilities as a kubernetes-native API.
+* Expose the Assisted Installer's capabilities as a kubernetes-native API. Some
+portion may be exposed through [hive](https://github.com/openshift/hive)'s API.
 * Enable any OpenShift cluster deployed by the Assisted Installer to add worker nodes on day 2.
 * Enable multi-cluster management tooling to create new clusters using Assisted Installer.
-* Utilize [metal3](https://metal3.io/) to boot the assisted discovery ISO for bare-metal deployments.
-* Ensure the design is be extensible for installing on other platforms.
-* Utilize the Assisted Service and Agent with minimal changes to avoid
-adversely affecting the cloud.redhat.com deployment.  While making a version
-that is Kubernetes-native with no SQL DB is on the table for the long term,
-it is not feasible to implement and maintain two versions in the near-term.
+* Enable automated creation and booting of the assisted discovery ISO for bare-metal deployments.
+* Ensure the design is extensible for installing on other platforms.
 
 ### Non-Goals
 
@@ -85,6 +82,22 @@ installation agent-based workflow to create clusters from a pool of bare metal
 inventory.
 
 ### Implementation Details/Notes/Constraints
+
+#### Co-existing with SaaS
+
+The assisted service is currently deployed as a SaaS on cloud.redhat.com with
+a non-k8s REST API and a SQL database. The software implementing that needs to
+co-exist with the software that runs in a cluster and exposing a k8s-native API,
+while sharing most of the same features and behaviors.
+
+The first implementation of controllers that provide a CRD-based API will be added
+to the existing [assisted-service](https://github.com/openshift/assisted-service)
+code in a way that allows the existing REST API to continue existing and running
+side-by-side, including its database.
+
+While making a separate version that is Kubernetes-native with no SQL DB is on
+the table for the long term, it is not feasible to implement and maintain two
+versions in the near-term.
 
 #### Assisted Installer k8s-native API
 
@@ -115,93 +128,38 @@ service will include a database; sqlite if possible, or else postgresql.
 For modest clusters that do not have persistent storage available but need
 day-2 ability to add nodes, the database will need to be reconstructable in
 case its current state is lost. Thus the CRs will be the source of truth for
-the specs, and the controller will upon statup first ensure that the DB
+the specs, and the controller will upon startup first ensure that the DB
 reflects the desired state in CRs. The source of truth for the status, however,
 is the actual state of the agents running on the hosts being installed and not
 necessarily what was previously recorded.
 
+For hub clusters that are used for multi-cluster creation and management,
+persistent storage will be a requirement.
+
 Agents that are running on hardware and waiting for installation-related
 instructions will continue to communicate with the assisted service using the
-existing REST API. In the future that may transition to using a CRD.
+existing REST API. In the future that may transition to using a CRD directly.
+In the meantime, status will be propagated to the appropriate k8s resource when
+an agent reports relevant information.
 
 **AgentDrivenInstallationImage**
 This resource represents a discovery image that should be used for booting
 hosts. In the REST API this resource is embedded in the "cluster" resource, but
 for kubernetes-native is more natural for it to be separate.
 
-Spec:
- * clusterName: string
- * sshPublicKey: string
- * pullSecretName: string (reference to k8s secret)
- * ignitionOverrides: object
- * staticIpConfiguration: object
+A first draft of this CRD has been
+[implemented](https://github.com/openshift/assisted-service/blob/master/internal/controller/api/v1alpha1/image_types.go)
 
-Status:
- * state: string
- * sizeBytes: integer
- * downloadUrl: string
- * createdAt: string
- * expiresAt: string
 
-**AgentDrivenClusterInstallation**
-This resource correlates to the "cluster" resource in the assisted installer's
-current API.
+**ClusterDeployment**
+Hive's ClusterDeployment CRD will be extended to include all cluster details
+that the agent-based install needs. There will not be a new cluster resource.
+The contents of this API correlate to the "cluster" resource in the assisted
+installer's current REST API.
 
-Spec:
- * name: string
- * approved: boolean (used for starting installation)
- * openshiftVersion: string
- * baseDnsDomain: string
- * clusterNetworkCidr: string
- * clusterNetworkHostPrefix: integer
- * serviceNetworkCidr: string
- * apiVip: string
- * apiVipDnsName: string
- * ingressVip: string
- * machineNetworkCidr: string
- * sshPublicKey: string
- * vipDhcpAllocation: boolean
- * httpProxy: string
- * httpsProxy: string
- * noProxy: string
- * userManagedNetworking: boolean
- * additionalNtpSource: string
- * installConfigOverrides: string
+The details of this are being discussed on [a hive
+PR](https://github.com/openshift/hive/pull/1247).
 
-Status:
-* state: string enum
-* stateInfo: string
-* host_networks: array of (cidr, host_ids)
-* install_started_at: string
-* hosts: int
-* progress:
-  * progress_info: string
-  * progress_updated_at: string
-* validation_info:
-  * configuration:
-    * is_pull_secret_set: [success, failure, pending, error]
-  * host_data:
-    * all_hosts_are_ready_to_install: [success, failure, pending, error]
-    * sufficient_masters_count: [success, failure, pending, error]
-  * network:
-    * machine_cidr_defined: [success, failure, pending, error]
-    * cluster_cidr_defined: [success, failure, pending, error]
-    * service_cidr_defined: [success, failure, pending, error]
-    * no_cidrs_overlapping: [success, failure, pending, error]
-    * network_prefix_valid: [success, failure, pending, error]
-    * machine_cidr_equals_to_calculated_cidr: [success, failure, pending, error]
-    * api_vip_defined: [success, failure, pending, error]
-    * api_vip_valid: [success, failure, pending, error]
-    * ingress_vip_defined: [success, failure, pending, error]
-    * ingress_vip_valid: [success, failure, pending, error]
-    * dns_domain_defined: [success, failure, pending, error]
-    * ntp_server_configured: [success, failure, pending, error]
-* connectivity_majority_groups: string
-* updated_at: string
-* created_at: string
-* install_started_at: string
-* install_completed_at: string
-* controller_logs_collected_at: string
 
 **AgentDrivenHostInstallation**
 AgentDrivenHostInstallation represents a host that is destined to become part
@@ -209,117 +167,9 @@ of an OpenShift cluster, and is running an agent that is able to run inspection
 and installation tasks. It correlates to the "host" resource in the Assisted
 Installer's REST API.
 
-Spec:
- * clusterName: string
- * role: [auto-assign, master, worker]
- * hostname: string
- * machineConfigPool: string
- * disks:
-   * diskId: string
-   * role: [none, install]
- * enabled: boolean
- * ignitionConfigOverrides: string
- * installerArgs: string
-
-Status:
- * state: string enum
- * stateInfo: string
- * stateUpdatedAt: string
- * logsCollectedAt:string
- * installerVersion: string
- * createdAt: string
- * updatedAt: string
- * checkedInAt: string
- * hostname: string
- * bootstrap: boolean
- * discoveryAgentVersion: string
- * inventory:
-   * timestamp: string
-   * hostname: string
-   * bmcAddress: string
-   * bmcV6Address: string
-   * memory:
-     * physicalBytes: integer
-     * usableBytes: integer
-   * cpu:
-     * count: integer
-     * frequency: number
-     * flags: array of strings
-     * modelName: string
-     * architecture: string
-   * interfaces: array
-     * ipv6Addresses: array of strings
-     * vendor: string
-     * name: string
-     * hasCarrier: bool
-     * product: string
-     * mtu: integer
-     * ipv4Addresses: array of strings
-     * biosDevname: string
-     * clientId: string
-     * macAddress: string
-     * flags: array of strings
-     * speedMbps: integer
-   * disks: array
-     * driveType: string
-     * vendor: string
-     * name: string
-     * path: string
-     * hctl: string
-     * byPath: string
-     * model: string
-     * wwn: string
-     * serial: string
-     * sizeBytes: integer
-     * bootable: boolean
-     * smart: string
-   * boot:
-     * current_boot_mode:string
-     * pxeInterface:string
-   * system_vendor:
-     * serialNumber:string
-     * productName:string
-     * manufacturer: string
-     * virtual: boolean
- * validation_info:
-   * hardware:
-     * hasInventory: [success, failure, pending, error]
-     * hasMinCpuCores: [success, failure, pending, error]
-     * hasMinMemory: [success, failure, pending, error]
-     * hasMinValidDisks: [success, failure, pending, error]
-     * hasCpuCoresForRole: [success, failure, pending, error]
-     * hasMemoryForRole: [success, failure, pending, error]
-     * isHostnameValid: [success, failure, pending, error]
-     * isHostnameUnique: [success, failure, pending, error]
-     * isPlatformValid: [success, failure, pending, error]
-   * network:
-     * isConnected: [success, failure, pending, error]
-     * isMachineCidrDefined: [success, failure, pending, error]
-     * belongsToMachineCidr: [success, failure, pending, error]
-     * isApiVipConnected: [success, failure, pending, error]
-     * belongsToMajorityGroup: [success, failure, pending, error]
-     * isNtpSynced: [success, failure, pending, error]
-  * progress:
-    * currentStage: enum
-    * progressInfo: string
-    * stageStartedAt: string
-    * stageUpdatedAt: string
- * connectivity: array of
-   * host
-   * l2Connectivity
-     * outgoingNic: string
-     * outgoingIpAddress: string
-     * remoteIpAddress: string
-     * remoteMac: string
-     * successful: boolean
-   * l3Connectivity
-     * outgoingNic: string
-     * remoteIpAddress: string
-     * successful: boolean
- * apiVipConnectivity: boolean
- * ntpSources: array of
-   * sourceName: string
-   * sourceState: [synced, combined, not_combined, error, variable, unreachable]
+The details of this API are being discussed in a [pull
+request](https://github.com/openshift/assisted-service/pull/861) that
+implements the CRD.
 
 
 #### REST API Access
@@ -343,20 +193,26 @@ Hive has a [ClusterDeployment
 CRD](https://github.com/openshift/hive/blob/master/docs/using-hive.md#clusterdeployment)
 resource that represents a cluster to be created. It includes a "platform"
 section where platform-specific details can be captured. For an agent-based
-workflow, this section will include whatever information is necessary to get an
-ISO and boot hosts.
+workflow, this section will include whatever information the agent-based
+install tooling needs to know about the cluster that it will be creating.
 
-A new field in the ClusterDeployment spec will optionally reference an
-AgentDrivenClusterInstallation resource, which describes everything that the
-agent-based install tooling needs to know about the cluster that it will be
-creating. Some or all of that new resource may be folded into ClusterDeployment
-in the future, but in the immediate term, keeping it separate will enable much
-quicker development.
-
-Hive or ACM will optionally orchestrate the booting of bare metal hosts by:
+RHACM will optionally orchestrate the booting of bare metal hosts by:
 
 1. Get an ISO URL from assisted operator.
 1. Use metal3's BareMetalHost to boot the live ISO on some hardware.
+
+#### Use of metal3
+
+[metal3](https://metal3.io/) will be used to boot the assisted discovery ISO
+for bare-metal deployments. Specifically, the BareMetalHost API will be used
+from a hub cluster to boot the discovery ISO on hosts that will be used to
+form new clusters.
+
+For this first iteration, it is assumed that the hub cluster itself is using
+the bare metal platform, and thus will have baremetal-operator installed
+and available for use. In the future it may be desirable to make the metal3
+capabilities available on hub clusters that are not using the bare metal
+platform.
 
 #### BareMetalHost can boot live ISOs
 
@@ -369,6 +225,30 @@ hardware as the first step toward provisioning that hardware.
 #### CAPBM 
 
 [Cluster-API Provider Bare Metal](https://github.com/openshift/cluster-api-provider-baremetal/) will need to gain the ability to interact with the new assisted installer APIs. Specifically it will need to match a Machine with an available assisted Agent that is ready to be provisioned. This will be in addition to matching a Machine with a BareMetalHost, which it already does today.
+
+Other platforms may benefit from similar capability, such as on-premise virtualization
+platforms. Ideally the ability to match a Machine with an Agent will be delivered
+so that it can be integrated into multiple machine-api providers. Each platform would
+perform this workflow:
+
+1. A Machine gets created, usually as a result of a MachineSet scaling up.
+1. The platform does whatever is necessary to boot the discovery live ISO on a host.
+1. The platform waits for a corresponding Agent resource to appear.
+1. The Agent gets associated with the Machine.
+1. The agent-based provisioning workflow is initiated by the machine-api provider.
+
+#### Host Approval
+
+It is important that when an agent checks in, it not be allowed to join a
+cluster until an actor has approved it. From a security standpoint, it is not
+ok for anyone who can access a copy of a discovery ISO and/or access the API
+where agents report themselves to implicitly have the capability to join a
+cluster as a Node.
+
+The host CRD has a field called "Role" that defaults to unset, and it must be
+set prior to provisioning to one of "master", "worker", or "auto-assign". The
+act of assigning a role and a cluster to a host will implicitly approve it to
+join that cluster with the specified role.
 
 #### Day 2 Add Node Boot-it-Yourself
 
@@ -410,7 +290,7 @@ This scenario takes place from a hub cluster, adding a worker node to a spoke cl
 
 #### Create Cluster
 
-This scenario takes place on a hub cluster where hive and possible ACM are
+This scenario takes place on a hub cluster where hive and possibly RHACM are
 present. This scenario does not include centralized machine management.
 
 1. User creates BareMetalAssets containing BMC credentials.
@@ -438,12 +318,22 @@ Consider including folks that also work outside your immediate sub-project.
 
 #### Can we use sqlite?
 
-It would be advantageous to use sqlite for the database. The [gorm library
+It would be advantageous to use sqlite for the database especially on
+stand-alone clusters, so that it is not necessary to deploy and manage
+an entire RDBMS, nor ship and support its container image. The [gorm library
 supports sqlite](https://gorm.io/docs/connecting_to_the_database.html#SQLite),
 but it is not clear if assisted service is compatible. In particular, the [use
 of FOR
 UPDATE](https://github.com/openshift/assisted-service/blob/e70af7dcf59763ee6c697fb409887f00ab5540f5/pkg/transaction/transaction.go#L8)
 might be problematic.
+
+For hub clusters doing multi-cluster creation and management, there is an
+expectation that persistent storage availability and scale concerns will be a
+better fit for running a full RDBMS.
+
+A suggestion has been made that in situations where there is a single process
+running the assisted service, locking can happen in-memory instead of in the
+database. Further analysis is required.
 
 #### baremetal-operator watching multiple namespaces?
 
@@ -452,6 +342,9 @@ hosts, should we be creating those BareMetalHost resources in a separate
 namespace from those that are associated with the hub cluster itself?
 
 What work is involved in having BMO watch additional namespaces?
+
+Upstream, the metal3 project is already running baremetal-operator watching
+multiple namespaces, so there should not be software changes required.
 
 #### BareMetalAsset: does it have value in these scenarios?
 
@@ -472,11 +365,6 @@ Scenario B: user maintains an inventory of hosts as BareMetalHosts. They are
 directly used to boot live ISOs as part of agent-based provisioning. When a
 user selects BMHs for cluster creation, they may be moved into a new
 cluter-specific namespace by deleting and re-creating them.
-
-#### Host Approval
-
-In the "Day 2 Add Node Boot-it-Yourself", how should the user approve a host
-for installation?
 
 #### Centralized Machine Management
 
