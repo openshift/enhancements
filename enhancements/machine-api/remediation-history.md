@@ -26,7 +26,7 @@ status: implementable
 
 ## Summary
 
-Record and show limited remediation history.
+Record and show limited remediation history in baremetal environments.
 
 ## Motivation
 
@@ -43,7 +43,8 @@ reboots at 2am on Wednesdays.
 
 ### Non-Goals
 
-- Record an unlimited history of remediations.
+- Record an *unlimited* history of remediations.
+- Collect or provide information on *why* a node has a certain node condition which triggered remediation.
 
 ## Proposal
 
@@ -56,6 +57,60 @@ condition triggered the remediation, and the timestamps of
 - when the node is healthy again.
 
 This information can be displayed in the UI in a table on a machine healthcheck details page.
+
+MHC type enhancement:
+
+```go
+
+// MachineHealthCheckStatus defines the observed state of MachineHealthCheck
+type MachineHealthCheckStatus struct {
+
+	[...]
+
+	// History of remediations triggered by this machine health check
+	RemediationHistory []Remediation `json:"remediationHistory,omitempty"`
+}
+
+// Remediation tracks a remediation triggered by this machine health check
+type Remediation struct {
+	// the kind of the remediation target, usually node or machine
+	// +kubebuilder:validation:Type=string
+	TargetKind string `json:"targetKind"`
+
+	// the name of the machine or node which is remediated
+	// +kubebuilder:validation:Type=string
+	TargetName string `json:"targetName"`
+
+	// the condition type which triggered this remediation
+	// +kubebuilder:validation:Type=string
+	ConditionType *corev1.NodeConditionType `json:"conditionType,omitempty"`
+
+	// the condition status which triggered this remediation
+	// +kubebuilder:validation:Type=string
+	ConditionStatus *corev1.ConditionStatus `json:"conditionStatus,omitempty"`
+
+	// the reason for the remediation if not a condition
+	// +kubebuilder:validation:Type=string
+	Reason string `json:"reason,omitempty"`
+
+	// the time when the unhealthy condition was detected
+	Detected *metav1.Time `json:"detected"`
+
+	// the time when remediation started
+	Started *metav1.Time `json:"started,omitempty"`
+
+	// the time when the node is fenced
+	Fenced *metav1.Time `json:"fenced,omitempty"`
+
+	// the time when the machine or node is healthy again
+	Finished *metav1.Time `json:"finished,omitempty"`
+
+	// the type of remediation, e.g. "machineDeletion" or "external"
+	// +kubebuilder:validation:Type=string
+	Type string `json:"remediationType,omitempty"`
+}
+
+```
 
 Example MHC:
 
@@ -158,11 +213,13 @@ TBD
 
 - Using events
   
-  The UI already displays events (in its own tab), but they aren't stored for very long, which will make it harder to see which nodes
-  are having recurring issues.
+  - The UI already displays events (in its own generic events tab), but events only have a short TTL (configurable,
+    defaults to 3 hours in OpenShift), which makes it hard to see which nodes are having recurring issues over a longer duration.
+  - Parsing events and composing a remediation overview is harder on the UI than to just display the MHC status.
 
 
 - Using metrics
 
-  Metrics are a good tool for recording e.g. how often remediations are triggered and how long they take in average, but
+  - Metrics are a good tool for recording e.g. how often remediations are triggered and how long they take in average, but
   not so much for tracking single remediations in the desired detail.
+  - Parsing getting and parsing metrics, and composing a remediation overview from them, is harder on the UI than to just display the MHC status.
