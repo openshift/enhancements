@@ -51,36 +51,73 @@ The downsides of requiring a bootstrap node for Single Node OpenShift are:
 
 1. The obvious additional node.
 2. Requires external dependencies:
-   a. Load balancer (only for bootstrap phase)
-   b. Requires DNS (configured per installation)
+   1. Load balancer (only for bootstrap phase)
+   2. Preconfigured DNS (for each deployment)
 3. Cannot use Bare Metal IPI:
-   a. Adds irrelevant dependencies - vips, keepalived, mdns
-   b. Requires same L2 between bootstrap and the Single Node OpenShift
+   1. Adds additional dependencies - VIPs, keepalived, mdns
 
 ### Goals
 
 * Describe an approach for installing Single Node OpenShift in a BareMetal environment for production use.
-* Minimal changes to OpenShift installer and the implementation shouldn't affect existing deployment flows.
+* The implementation should require minimal changes to the OpenShift installer and the should not affect existing deployment flows.
 * Installation should result a clean Single Node OpenShift without any bootstrap leftovers.
-
+* Describe an approach that can be carried out by a user manually or automated by an orchestration tool.
 
 ### Non-Goals
 
 * Addressing a similar installation flow for multi-node clusters.
-* High-availability for Single Node OpenShift.
 * Single-node-developer (CRC) cluster-profile installation.
-* Supporting cloud deployment for bootstrap in place (since livecd cannot be used). It will be addressed as part of future enhancement.
-* Upgrading Single Node OpenShift will be addressed as part of a future enhancement.
+* Supporting cloud deployment for bootstrap in place. Using a live CD image is challenging in cloud environments, so this work is postponed to a future enhancement.
 
 ## Proposal
 
-The installer will be enhanced to provide a way to generate a single node ignition configuration. 
-The user will be able to boot a RHCOS live CD with that ignition to initiate the installation.
-The live CD will perform the cluster bootstrap flow.
-A master ignition including the control plane static pods will be created as part of the bootstrap. The master ignition will then be used on reboot to complete the installation and bring up Single Node OpenShift.
-Use of the liveCD helps to ensure that we have a clean bootstrap
-flow with just the master ignition as the handoff point.
+The OpenShift install process relies on an ephemeral bootstrap
+environment so that none of the hosts in the running cluster end up
+with unique configuration left over from computing how to create the
+cluster. When the bootstrap virtual machine is removed from the
+process, the temporary files, logs, etc. from that phase should still
+be segregated from the "real" OpenShift files on the host. This means
+it is useful to retain a "bootstrap environment", as long as we can
+avoid requiring a separate host to run a virtual machine.
 
+The focus for single-node deployments right now is edge use cases,
+either for telco RAN deployments or other situations where a user may
+have several instances being managed centrally. That means it is
+important to make it possible to automate the workflow for deploying,
+even if we also want to retain the option for users to deploy by hand.
+In the telco RAN case, single-node deployments will be managed from a
+central "hub" cluster using tools like RHACM, Hive, and metal3.
+
+The baseboard management controller (BMC) in enterprise class hardware
+can be given a URL to an ISO image and told to attach the image to the
+host as though it was inserted into a CD-ROM or DVD drive. An image
+booted from an ISO can use a ramdisk as a place to create temporary
+files, without affecting the persistent storage in the host.  This
+capability makes the existing live ISO for RHCOS a good foundation on
+which to build this feature. A live ISO can serve as the "bootstrap
+environment", separate from the real OpenShift system on persistent
+storage in the host. The BMC in the host can be used to automate
+deployment via a multi-cluster orchestration tool.
+
+The RHCOS live ISO image uses Ignition to configure the host, just as
+the RHCOS image used for running OpenShift does. This means Ignition
+is the most effective way to turn an RHCOS live image into a
+special-purpose image for performing the installation.
+
+We propose the following steps for deploying single-node instances of
+OpenShift:
+
+1. Have the OpenShift installer generate a special Ignition config for
+   a single-node deployment.
+2. Combine that Ignition config with an RHCOS live ISO image to build
+   an image for deploying OpenShift on a single node.
+3. Boot the new image on the host.
+4. Bootstrap the deployment, generating a new master Ignition config
+   and the static pod definitions for OpenShift. Write them, along
+   with an RHCOS image, to the disk in the host.
+5. Reboot the host to the internal disk, discarding the ephemeral live
+   image environment and allowing the previously generated artifacts
+   to complete the installation and bring up OpenShift.
 
 ### User Stories
 
@@ -93,108 +130,120 @@ for the features supported by the configuration.
 
 ### Implementation Details/Notes/Constraints
 
-The OpenShift installer `create ignition-configs` command will generate a `bootstrap-in-place-for-live-iso.ign`
-file, when the number of replicas for the control plane (in the `install-config.yaml`) is `1`.
+The installation images for single-node clusters will be unique for
+each cluster. The user or orchestration tool will create an
+installation image by combining the
+`bootstrap-in-place-for-live-iso.ign` created by the installer with an
+RHCOS live image using `coreos-install embed`. Making the image unique
+allows us to build on the existing RHCOS live image, instead of
+delivering a different base image, and means that the user does not
+need any infrastructure to serve Ignition configs to hosts during
+deployment.
 
-The `bootstrap-in-place-for-live-iso.ign` will be embedded into an RHCOS liveCD by the user using the `coreos-install embed` command.
-
-The user will boot a machine with this liveCD and the liveCD will start executing a similar flow to a bootstrap node in a regular installation.
-
-`bootkube.sh` running on the live ISO will execute the rendering logic.
-The live ISO environment provides a scratch place to write bootstrapping files so that they don't end up on the real node. This eliminates a potential source of errors and confusion when debugging problems.
-
-The bootstrap static pods will be generated in a way that the control plane operators will be able to identify them and either continue in a controlled way for the next revision, or just keep them as the correct revision and reuse them.
-
-`cluster-bootstrap` will apply all the required manifests (under ``/opt/openshift/manifests/``)
-
-Bootkube will get the master Ignition from `machine-config-server` and
-generate an updated master Ignition combining the original ignition with the control plane static pods manifests and all required resources including etcd data.
-`bootkube.sh` will write the new master Ignition along with RHCOS to disk.
-At this point `bootkube` will reboot the node and let it complete the cluster creation.
-
-After the host reboots, the `kubelet` service will start the control plane static pods.
-Kubelet will send a CSR (see below) and join the cluster.
-CVO will deploy all cluster operators.
-The control plane operators will rollout a new revision (if necessary).
+In order to add a viable, working etcd post reboot, we will take a
+snapshot of etcd and add it to the Ignition config for the host.
+After rebooting, we will use the restored `etcd-member` from the
+snapshot to rebuild the database. This allows etcd and the API service
+to come up on the host without having to re-apply all of the
+kubernetes operations run during bootstrapping.
 
 #### OpenShift-installer
 
-We will add logic to the installer to create `bootstrap-in-place-for-live-iso.ign` Ignition config.
-This Ignition config will diverge from the default bootstrap Ignition:
-bootkube.sh:
-1. Start cluster-bootstrap without required pods (`--required-pods=''`)
-2. Run cluster-bootstrap with `--bootstrap-in-place` entrypoint to enrich the master Ignition.
-3. Write RHCOS image and the master Ignition to disk.
+The OpenShift installer will be updated so that the `create
+ignition-configs` command generates a new
+`bootstrap-in-place-for-live-iso.ign` file when the number of replicas
+for the control plane in the `install-config.yaml` is `1`.
+
+This Ignition config will have a different `bootkube.sh` from the
+default bootstrap Ignition. In addition to the standard rendering
+logic, the modified script will:
+
+1. Start `cluster-bootstrap` without required pods by setting `--required-pods=''`
+2. Run `cluster-bootstrap` with the `--bootstrap-in-place` option.
+3. Fetch the master Ignition and combine it with the original Ignition
+   config, the control plane static pod manifests, the required
+   kubernetes resources, and the bootstrap etcd database snapshot to
+   create a new Ignition config for the host.
+3. Write the RHCOS image and the combined Ignition config to disk.
 4. Reboot the node.
 
 #### Cluster-bootstrap
 
-By default, `cluster-bootstrap` starts the bootstrap control plane and creates all the manifests under ``/opt/openshift/manifests``.
-`cluster-bootstrap` also waits for a list of required pods to be ready. These pods are expected to start running on the control plane nodes.
-In case we are running the bootstrap in place, there is no control plane node that can run those pods. `cluster-bootstrap` should apply the manifest and tear down the control plane. If `cluster-bootstrap` fails to apply some of the manifests, it should return an error.
+`cluster-bootstrap` will have a new entrypoint `--bootstrap-in-place`
+which will get the master Ignition as input and will enrich the master
+Ignition with control plane static pods manifests and all required
+resources, including the etcd database.
 
+`cluster-bootstrap` normally waits for a list of required pods to be
+ready. These pods are expected to start running on the control plane
+nodes when the bootstrap and control plane run in parallel. That is
+not possible when bootstrapping in place, so when `cluster-bootstrap`
+runs with the `--bootstrap-in-place` option it should only apply the
+manifests and then tear down the control plane.
 
-`cluster-bootstrap` will have a new entrypoint `--bootstrap-in-place` which will get the master Ignition as input and will enrich the master Ignition with control plane static pods manifests and all required resources including etcd data.
+If `cluster-bootstrap` fails to apply some of the manifests, it should
+return an error.
 
 #### Bootstrap / Control plane static pods
 
-The control plane components we will add to the master Ignition are (to be placed under `/etc/kubernetes/manifests`):
+The control plane components we will copy from
+`/etc/kubernetes/manifests` into the master Ignition are:
 
 1. etcd-pod
 2. kube-apiserver-pod
 3. kube-controller-manager-pod
 4. kube-scheduler-pod
 
-Control plane required resources to be added to the Ignition:
+These components also require other files generated during bootstrapping:
 
 1. `/var/lib/etcd`
 2. `/etc/kubernetes/bootstrap-configs`
-3. /opt/openshift/tls/* (`/etc/kubernetes/bootstrap-secrets`)
-4. /opt/openshift/auth/kubeconfig-loopback (`/etc/kubernetes/bootstrap-secrets/kubeconfig`)
+3. `/opt/openshift/tls/*` (`/etc/kubernetes/bootstrap-secrets`)
+4. `/opt/openshift/auth/kubeconfig-loopback` (`/etc/kubernetes/bootstrap-secrets/kubeconfig`)
 
-**Note**: `/etc/kubernetes/bootstrap-secrets` and `/etc/kubernetes/bootstrap-configs` will be deleted after the node reboots by the post-reboot service (see below), and the OCP control plane is ready.
+**Note**: `/etc/kubernetes/bootstrap-secrets` and `/etc/kubernetes/bootstrap-configs` will be deleted by the `post-reboot` service, after the node reboots (see below).
 
-The control plane operators (that will run on the node post reboot) will manage the rollout of a new revision of the control plane pods.
+The bootstrap static pods will be generated in a way that the control
+plane operators will be able to identify them and either continue in a
+controlled way for the next revision, or just keep them as the correct
+revision and reuse them.
 
-#### etcd data
+#### Post-reboot service
 
-In order to add a viable, working etcd post reboot, we will take a snapshot of etcd and add it to the master Ignition.
-Post reboot we will use the restored etcd-member from the snapshot.
+We will add a new `post-reboot` service for approving the kubelet and
+the node Certificate Signing Requests. This service will also cleanup
+the bootstrap static pods resources when the OpenShift control plane
+is ready.
 
-Another option is to stop the etcd pod (move the static pod manifest from `/etc/kubernetes/manifests`).
-When stopped, etcd will save its state and exit. We can then add the `/var/lib/etcd` directory to the master Ignition config.
-After the reboot, etcd should start with all the data it had prior to the reboot.
+Since we start with a liveCD, the bootstrap services (`bootkube`, `approve-csr`, etc.), `/etc` and `/opt/openshift` temporary files are written to the ephemeral filesystem of the live image, and not to the node's real filesystem.
 
-#### Post reboot
-
-We will add a new `post-reboot` service for approving the kubelet and the node Certificate Signing Requests.
-This service will also cleanup the bootstrap static pods resources once the OCP control plane is ready.
-Since we start with a liveCD, the bootstrap services (`bootkube`, `approve-csr`, etc.), `/etc` and `/opt/openshift` "garbage" are written to the ephemeral filesystem of the liveCD, and not to the node's real filesystem.
 The files that we need to delete are under:
-`/etc/kubernetes/bootstrap-secrets` and `/etc/kubernetes/bootstrap-configs`
+
+* `/etc/kubernetes/bootstrap-secrets`
+* `/etc/kubernetes/bootstrap-configs`
+
 These files are required for the bootstrap control plane to start before it is replaced by the control plane operators.
-Once the OCP control plane static pods are deployed we can delete the files as they are no longer required. 
+Once the OCP control plane static pods are deployed we can delete the files as they are no longer required.
 
 ### Initial Proof-of-Concept
 
-User flow
-1. Generate bootstrap ignition using the OpenShift installer.
-2. Embed this Ignition to an RHCOS liveCD.
-3. Boot a machine with this liveCD.
+A proof-of-concept implementation is available for experimenting with
+the design.
 
 This POC uses the following services for mitigating some gaps:
-- `patch.service` for allowing single node installation. it won't be required once [single-node production deployment](https://github.com/openshift/enhancements/pull/560/files) is implemented.
+- `patch.service` for allowing single node installation. This won't be required after [single-node production deployment](https://github.com/openshift/enhancements/pull/560) is implemented.
 - `post_reboot.service` for approving the node CSR and bootstrap static pods resources cleanup post reboot.
 
-Steps to try it out:
-- Clone the installer branch: `iBIP_4_6` from https://github.com/eranco74/installer.git
-- Build the installer (`TAGS=libvirt hack/build.sh`)
-- Add your ssh key and pull secret to the `./install-config.yaml`
-- Generate ignition - `make generate`
-- Set up networking - `make network` (provides DNS for `Cluster name: test-cluster, Base DNS: redhat.com`)
-- Download rhcos image - `make embed` (download RHCOS liveCD and embed the bootstrap Ignition)
-- Spin up a VM with the the liveCD - `make start-iso`
-- Monitor the progress using `make ssh` and `journalctl -f -u bootkube.service` or `kubectl --kubeconfig ./mydir/auth/kubeconfig get clusterversion`
+To try it out:
+
+1. Clone the installer branch: `iBIP_4_6` from https://github.com/eranco74/installer.git
+2. Build the installer with the command: `TAGS=libvirt hack/build.sh`
+3. Add your ssh key and pull secret to the `./install-config.yaml`
+4. Generate the Ignition config with the command `make generate`
+5. Set up DNS for `Cluster name: test-cluster, Base DNS: redhat.com` running: `make network`
+6. Download an RHCOS live image and add the bootstrap Ignition config by running: `make embed`
+7. Spin up a VM with the the liveCD with the command: `make start-iso`
+8. Monitor the progress using `make ssh` and `journalctl -f -u bootkube.service` or `kubectl --kubeconfig ./mydir/auth/kubeconfig get clusterversion`
 
 ### Risks and Mitigations
 
@@ -204,30 +253,25 @@ ecosystem.*
 
 *How will security be reviewed and by whom? How will UX be reviewed and by whom?*
 
-## Design Details
+#### Custom Manifests for CRDs
 
-### Open Questions
+One limitation of single-node deployments not present in multi-node
+clusters is handling some custom resource definitions (CRDs). During
+bootstrapping of a multi-node cluster, the bootstrap host and real
+cluster hosts run in parallel for a time. This means that the
+bootstrap host can iterate publishing manifests to the API server
+until the operators running on the other hosts are up and define their
+CRDs. If it takes a little while for those operators to install their
+CRDs, the bootstrap host can wait and retry the operation. In a
+single-node deployment, the bootstrap environment and real node are
+not active at the same time. This means the bootstrap process may
+block if it tries to create a custom resource using a CRD that is not
+installed.
 
-1. How will the user specify custom configuration, such as installation disk, static IPs?
-2. Number of revisions for the control plane - do we want to make changes to the bootstrap static pods to make them closer to the final ones?
-3. What do we do with the CRDs that are generated by operators instead of installed from manifests managed by the CVO?
+While most CRDs are created by the `cluster-version-operator`, some
+CRDs are created later by the cluster operators. These CRDs from
+cluster operators are not present during bootstrapping:
 
-### Bootable installation artifact (future work)
-
-In order to embed the bootstrap-in-place-for-live-iso Ignition config to the liveCD the user need to get the liveCD and the coreos-installer binary.
-We consider adding `openshift-install create single-node-iso` command that that result a liveCD with the bootstrap-in-place-for-live-iso.ign embeded.
-It can also take things like additional manifests for setting the RT kernel (and kernel args) via MachineConfig as well
- as supporting injecting network configuration as files and choosing the target disk drive for coreos-installer.
-Internally, create single-node-iso would compile a single-node-iso-target.yaml into Ignition (much like coreos/fcct)
- and include it along with the Ignition it generates and embed it into the ISO.
-
-### Limitations
-
-While most CRDs get created by CVO some CRDs are created by the operators, since during the bootstrap phase there is no schedulable node, 
- operators can't run, these CRDs won't be created until the node pivot to become the master node. 
-This imposes a limitation on the user when specifying custom manifests prior to the installation. 
-
-These are the CRDs that are not present during bootstrap:
 * clusternetworks.network.openshift.io
 * controllerconfigs.machineconfiguration.openshift.io
 * egressnetworkpolicies.network.openshift.io
@@ -239,6 +283,20 @@ These are the CRDs that are not present during bootstrap:
 * volumesnapshotclasses.snapshot.storage.k8s.io
 * volumesnapshotcontents.snapshot.storage.k8s.io
 * volumesnapshots.snapshot.storage.k8s.io
+
+This limitation is unlikely to be triggered by manifests created by
+the OpenShift installer, but we cannot control what extra manifests
+users add to their deployment. Users need to be made aware of this
+limitation and encouraged to avoid creating custom manifests using
+CRDs installed by cluster operators instead of the
+`cluster-version-operator`.
+
+## Design Details
+
+### Open Questions
+
+1. How will the user specify custom configuration, such as installation disk, or static IPs?
+2. Number of revisions for the control plane - do we want to make changes to the bootstrap static pods to make them closer to the final ones?
 
 ### Test Plan
 
@@ -305,31 +363,81 @@ History`.
 ## Drawbacks
 
 1. The API will be unavailable from time to time during the installation.
-2. Coreos-installer cannot be used in the cloud environment.
-      
+2. Coreos-installer cannot be used in a cloud environment.
+3. We need to build new integration with RHACM and Hive for orchestration.
+
 ## Alternatives
 
 ### Installing using remote bootstrap node
 
-Run the bootstrap node in a HUB cluster as VM.
-This approach is appealing because it keeps the current installation flow.
-Requires external dependencies. 
+We could continue to run the bootstrap node in a HUB cluster as VM.
+
+This approach is appealing because it keeps the current installation
+flow.
+
 However, there are drawbacks:
-1. It will require Load balancer and DNS per installation.
-2. Deployments run remotely via L3 connection (high latency (up to 150ms), low BW in some cases), this isn't optimal for etcd cluster (one member is running on the bootstrap during the installation) 
-3. Running the bootstrap on the HUB cluster present a (resources) scale issue (~50*(8GB+4cores)), limits ACM capacity
 
-### Installing without liveISO
+1. It will require configuring a Load balancer and DNS for each cluster.
+2. In some cases, deployments run over L3 connection with high latency
+   (up to 150ms) and low bandwidth to sites where there is no
+   hypervisor. We would therefore need to run the bootstrap VM
+   remotely, and form the etcd cluster with members on both sides of
+   the poor connection. Since etcd has requirements for low latency,
+   high bandwidth, connections between all nodes, this is not ideal.
+3. The bootstrap VM requires 8GB of RAM and 4 CPU cores. Running the
+   bootstrap VM on the hub cluster constrains the number of
+   simultaneous deployments that can be run based on the CPU and RAM
+   capacity of the hub cluster.
 
-Run the bootstrap flow on the node disk and clean up all the bootstrap residues once the node fully configured.
-This is very similar to the current enhancement installation approach but without the requirement to start from liveCD. 
-This approach advantage is that it will work on cloud environment. 
-The disadvantage is that it's more prune to result a single node deployment with bootstrap leftovers.
+### Installing without a live image
+
+We could run the bootstrap flow on the node's regular disk and clean
+up all the bootstrap residue once the node is fully configured.  This
+is very similar to the current enhancement installation approach but
+without the requirement to start from a live image.  The advantage of
+this approach is that it will work in a cloud environment as well as
+on bare metal.  The disadvantage is that it is more prone to result in
+a single node deployment with bootstrapping leftovers in place,
+potentially leading to confusion for users or support staff debugging
+the instances.
 
 
-### Installing using a baked Ignition file.
+### Installing using an Ignition config not built into the live image
 
-The installer will generate an ignition config.
-This Ignition configuration includes all assets required for launching the single node cluster (including TLS certificates and keys).
-When booting a machine with CoreOS and this Ignition configuration the Ignition config will lay down the control plane operator static pods.
-The ignition config will also create a static pod that functions as cluster-bootstrap (this pod should delete itself once it’s done) and apply the OCP assets to the control plane.
+We could have the installer generate an Ignition config that includes
+all of the assets required for launching the single node cluster
+(including TLS certificates and keys).  When booting a machine with
+CoreOS and this Ignition configuration, the Ignition config would lay
+down the control plane operator static pods and create a static pod
+that functions as `cluster-bootstrap` This pod should delete itself
+after it is done applying the OCP assets to the control plane.
+
+### Preserve etcd database instead of a snapshot
+
+Another option for preserving the etcd database when pivoting from
+bootstrap to production is to copy the entire database, instead of
+using a snapshot operation.  When stopped, etcd will save its state
+and exit. We can then add the `/var/lib/etcd` directory to the master
+Ignition config.  After the reboot, etcd should start with all the
+data it had prior to the reboot. By using a snapshot, instead of
+saving the entire database, we will have more flexibility to change
+the production etcd configuration before restoring the content of the
+database.
+
+### Creating a bootable installation artifact directly from the installer
+
+In order to embed the bootstrap-in-place-for-live-iso Ignition config
+to the liveCD the user needs to download the liveCD image and the
+`coreos-installer` binary.  We considered adding an `openshift-install
+create single-node-iso` command that that result a liveCD with the
+`bootstrap-in-place-for-live-iso.ign` embeded.  The installer command
+could also include custom manifests, especially `MachineConfig`
+instances for setting the realtime kernel, setting kernel args,
+injecting network configuration as files, and choosing the target disk
+drive for `coreos-installer`.  Internally, `create single-node-iso`
+would compile a single-node-iso-target.yaml into Ignition (much like
+coreos/fcct) and include it along with the Ignition it generates and
+embed it into the ISO.
+
+This approach has not been rejected entirely, and may be handled with
+a future enhancement.
