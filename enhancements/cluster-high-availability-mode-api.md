@@ -87,9 +87,9 @@ operands that normally run on control nodes.
 The `infrastructureTopology` field will use an enum to express the
 expectations for operands that normally run on infrastructure nodes.
 
-Possible values are `HighlyAvailable` and `SingleNode`. The default is
+Possible values are `HighlyAvailable` and `SingleReplica`. The default is
 `HighlyAvailable`, which represents the behavior operators have today
-in a "normal" cluster. The `SingleNode` setting will be used in
+in a "normal" cluster. The `SingleReplica` setting will be used in
 single-node deployments (developer and production), and operators
 should not configure their operands for highly-available
 operation.
@@ -100,14 +100,14 @@ and `infrastructureTopology` status fields based on the replica counts
 for the cluster when it is created.
 
 When the control plane replica count is `< 3`, the
-`controlPlaneTopology` is set to `SingleNode`. Otherwise it is set to
+`controlPlaneTopology` is set to `SingleReplica`. Otherwise it is set to
 `HighlyAvailable`.
 
 When worker replica count is `0`, the control plane nodes are
 also configured as workers. Therefore the `infrastructureTopology`
 value will be the same as the `controlPlaneTopology` value.  When the
 worker replica count is `1`, the `infrastructureTopology` is set to
-`SingleNode`.  Otherwise it is set to `HighlyAvailable`.
+`SingleReplica`.  Otherwise it is set to `HighlyAvailable`.
 
 A future enhancement may add support for an `External` topology,
 indicating that the operand is running somewhere other than a node in
@@ -152,7 +152,7 @@ We will add logic to the installer to use the profile name to create a
 manifest to set up the singleton of the `infrastructure` API resource
 with the appropriate settings for both fields. For example, a
 single-node production deployment would have `controlPlaneTopology`
-and `infrastructureTopology` both set to `SingleNode`.
+and `infrastructureTopology` both set to `SingleReplica`.
 
 ### Risks and Mitigations
 
