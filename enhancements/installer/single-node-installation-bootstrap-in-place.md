@@ -189,12 +189,13 @@ return an error.
 
 #### Bootstrap / Control plane static pods
 
-We will review the list of revisions for apiserver/etcd and see if we can
- reduce them by reducing revisions caused by observations of known conditions.
- For example in a single node we know what the etcd endpoints will be in advance,
- We can avoid a revision by observing this post install.
- This work will go a long way to reducing disruption during install and improve
- MTTR for upgrade re-deployments and failures.
+We will review the list of revisions for apiserver/etcd and see if we
+can reduce them by reducing revisions caused by observations of known
+conditions.  For example in a single node we know what the etcd
+endpoints will be in advance, We can avoid a revision by observing
+this post install.  This work will go a long way to reducing
+disruption during install and improve MTTR for upgrade re-deployments
+and failures.
 
 The control plane components we will copy from
 `/etc/kubernetes/manifests` into the master Ignition are:
@@ -402,7 +403,7 @@ up all the bootstrap residue once the node is fully configured.  This
 is very similar to the current enhancement installation approach but
 without the requirement to start from a live image.  The advantage of
 this approach is that it will work in a cloud environment as well as
-on bare metal.  The disadvantage is that it is more prone to result in
+on bare metal. The disadvantage is that it is more prone to result in
 a single node deployment with bootstrapping leftovers in place,
 potentially leading to confusion for users or support staff debugging
 the instances.
@@ -412,11 +413,18 @@ the instances.
 
 We could have the installer generate an Ignition config that includes
 all of the assets required for launching the single node cluster
-(including TLS certificates and keys).  When booting a machine with
+(including TLS certificates and keys). When booting a machine with
 CoreOS and this Ignition configuration, the Ignition config would lay
 down the control plane operator static pods and create a static pod
 that functions as `cluster-bootstrap` This pod should delete itself
 after it is done applying the OCP assets to the control plane.
+The disadvantage in this approach is that it's very different than 
+the regular installation flow which involve a bootstrap node.
+It also adds more challenges such as:
+1. The installer machine (usually the Admin laptop) will need to pull
+20 container images in order to render the Ignition.
+2. The installer will need to know the node IP in advance for rendering
+etcd certificates
 
 ### Preserve etcd database instead of a snapshot
 
@@ -447,3 +455,29 @@ embed it into the ISO.
 
 This approach has not been rejected entirely, and may be handled with
 a future enhancement.
+
+### Allow bootstrap-in-place in cloud environment (future work)
+
+For bootstrap-in-place model to work in cloud environemnt we need to mitigate the following gaps:
+1. The bootstrap-in-place model relay on the live ISO environment as a place to write bootstrapping files so that they don't end up on the real node.
+Optional mitigation: We can mimic this environment by mounting some directories as tmpfs during the bootstrap phase.
+2. The bootstrap-in-place model uses coreos-installer to write the final Ignition to disk along with the RHCOS image.
+Optional mitigation: We can boot the machine with the right RHCOS image for the release.
+Instead of writing the Ignition to disk we will use the cloud credentials to update the node Ignition config in the cloud provider.
+
+### Check control plane replica count in `create ignition-configs`
+
+Instead of adding a new installer command, we could use the current command for generating Ignition configs
+`create ignition-configs` to generate the `bootstrap-in-place-for-live-iso.ign` file,
+by adding logic to the installer that check the number of replicas for the control
+ plane (in the `install-config.yaml`) is `1`.
+This approach might conflict with CRC/SNC which also run openshift-install with a 1-replica control plane.
+
+### Use `create ignition-configs` with environment variable to generate the `bootstrap-in-place-for-live-iso.ign`.
+
+We also considered adding a new environment variable `OPENSHIFT_INSTALL_EXPERIMENTAL_BOOTSTRAP_IN_PLACE`
+for marking the new path under the `ignition-configs` target.
+We decided to add `single-node-ignition-config` target to in order to gain:
+1. Allow us to easily add different set of validations (e.g. ensure that the number of replicas for the control plane is 1).
+2. We can avoid creating unnecessary assets (master.ign and worker.ign).
+3. Less prune to user errors than environment variable.
