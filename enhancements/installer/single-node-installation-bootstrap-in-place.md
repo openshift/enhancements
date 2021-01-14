@@ -67,7 +67,8 @@ The downsides of requiring a bootstrap node for Single Node OpenShift are:
 
 * Addressing a similar installation flow for multi-node clusters.
 * Single-node-developer (CRC) cluster-profile installation.
-* Supporting cloud deployment for bootstrap in place. Using a live CD image is challenging in cloud environments, so this work is postponed to a future enhancement.
+* Supporting cloud deployment for bootstrap in place. Using a live CD image is challenging in cloud environments,
+ so this work is postponed to a future enhancement.
 
 ## Proposal
 
@@ -96,7 +97,8 @@ files, without affecting the persistent storage in the host.  This
 capability makes the existing live ISO for RHCOS a good foundation on
 which to build this feature. A live ISO can serve as the "bootstrap
 environment", separate from the real OpenShift system on persistent
-storage in the host. The BMC in the host can be used to automate
+storage in the host, with just the master Ignition as the handoff point.
+The BMC in the host can be used to automate
 deployment via a multi-cluster orchestration tool.
 
 The RHCOS live ISO image uses Ignition to configure the host, just as
@@ -107,8 +109,8 @@ special-purpose image for performing the installation.
 We propose the following steps for deploying single-node instances of
 OpenShift:
 
-1. Have the OpenShift installer generate a special Ignition config for
-   a single-node deployment.
+1. Add a new create single-node-ignition-config command to openshift-installer
+   which generate a single node Ignition config for a single-node deployment.
 2. Combine that Ignition config with an RHCOS live ISO image to build
    an image for deploying OpenShift on a single node.
 3. Boot the new image on the host.
@@ -149,10 +151,11 @@ kubernetes operations run during bootstrapping.
 
 #### OpenShift-installer
 
-The OpenShift installer will be updated so that the `create
-ignition-configs` command generates a new
-`bootstrap-in-place-for-live-iso.ign` file when the number of replicas
-for the control plane in the `install-config.yaml` is `1`.
+Add new `create single-node-ignition-config` command to the installer to create
+ `bootstrap-in-place-for-live-iso.ign` Ignition config.
+This new target will not output master.ign and worker.ign.
+Allow the user to specify the target disk drive for coreos-installer using environment
+ variable `OPENSHIFT_INSTALL_EXPERIMENTAL_BOOTSTRAP_IN_PLACE_COREOS_INSTALLER_ARGS`.
 
 This Ignition config will have a different `bootkube.sh` from the
 default bootstrap Ignition. In addition to the standard rendering
@@ -185,6 +188,13 @@ If `cluster-bootstrap` fails to apply some of the manifests, it should
 return an error.
 
 #### Bootstrap / Control plane static pods
+
+We will review the list of revisions for apiserver/etcd and see if we can
+ reduce them by reducing revisions caused by observations of known conditions.
+ For example in a single node we know what the etcd endpoints will be in advance,
+ We can avoid a revision by observing this post install.
+ This work will go a long way to reducing disruption during install and improve
+ MTTR for upgrade re-deployments and failures.
 
 The control plane components we will copy from
 `/etc/kubernetes/manifests` into the master Ignition are:
@@ -230,20 +240,7 @@ Once the OCP control plane static pods are deployed we can delete the files as t
 A proof-of-concept implementation is available for experimenting with
 the design.
 
-This POC uses the following services for mitigating some gaps:
-- `patch.service` for allowing single node installation. This won't be required after [single-node production deployment](https://github.com/openshift/enhancements/pull/560) is implemented.
-- `post_reboot.service` for approving the node CSR and bootstrap static pods resources cleanup post reboot.
-
-To try it out:
-
-1. Clone the installer branch: `iBIP_4_6` from https://github.com/eranco74/installer.git
-2. Build the installer with the command: `TAGS=libvirt hack/build.sh`
-3. Add your ssh key and pull secret to the `./install-config.yaml`
-4. Generate the Ignition config with the command `make generate`
-5. Set up DNS for `Cluster name: test-cluster, Base DNS: redhat.com` running: `make network`
-6. Download an RHCOS live image and add the bootstrap Ignition config by running: `make embed`
-7. Spin up a VM with the the liveCD with the command: `make start-iso`
-8. Monitor the progress using `make ssh` and `journalctl -f -u bootkube.service` or `kubectl --kubeconfig ./mydir/auth/kubeconfig get clusterversion`
+To try it out: [bootstrap-in-place-poc](https://github.com/eranco74/bootstrap-in-place-poc.git)
 
 ### Risks and Mitigations
 
@@ -295,7 +292,7 @@ CRDs installed by cluster operators instead of the
 
 ### Open Questions
 
-1. How will the user specify custom configuration, such as installation disk, or static IPs?
+1. How will the user specify custom configurations, such as static IPs?
 2. Number of revisions for the control plane - do we want to make changes to the bootstrap static pods to make them closer to the final ones?
 
 ### Test Plan
