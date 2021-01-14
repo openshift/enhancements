@@ -297,6 +297,14 @@ limitation and encouraged to avoid creating custom manifests using
 CRDs installed by cluster operators instead of the
 `cluster-version-operator`.
 
+#### Post-reboot service makes single-node deployments different from multi-node clusters
+
+The `post-reboot` service is only used with single-node
+deployments. This makes those deployments look different in a way that
+may lead to confusion when debugging issues on the cluster. To
+mitigate this, we can add documentation to the troubleshooting guide
+to explain the service and its role in the cluster.
+
 #### Bootstrap logs retention
  
  Due to the bootstrap-in-place behavior all bootstrap artifacts
