@@ -235,6 +235,15 @@ The files that we need to delete are under:
 These files are required for the bootstrap control plane to start before it is replaced by the control plane operators.
 Once the OCP control plane static pods are deployed we can delete the files as they are no longer required.
 
+#### Prerequisites for a Single Node deployment with bootstrap-in-place
+The requirements are a subset of the requirements for user-provisioned infrastructure installation.
+1. Configure DHCP or set static IP addresses for the node.
+The node IP should be persistent, otherwise TLS SAN will be invalidated and will cause the communications between apiserver and etcd to fail.
+2. DNS records:
+* api.<cluster_name>.<base_domain>.
+* api-int.<cluster_name>.<base_domain>.
+* *.apps.<cluster_name>.<base_domain>.
+* <hostname>.<cluster_name>.<base_domain>.
 ### Initial Proof-of-Concept
 
 A proof-of-concept implementation is available for experimenting with
