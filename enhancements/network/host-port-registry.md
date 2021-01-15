@@ -112,6 +112,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 
 | Port  | Process   | Owning Team | Since | Notes |
 |-------|-----------|-------|-------|-------|
+| 500   | ovn-kubernetes IPsec | sdn | 4.7 | ovn-kubernetes only |
+| 4500  | ovn-kubernetes IPsec | sdn | 4.7 | ovn-kubernetes only |
 | 4789  | openshift-sdn vxlan | sdn | 3.0 | openshift-sdn only |
 | 6081  | ovn-kubernetes geneve | sdn | 4.3 | ovn-kubernetes only |
 
