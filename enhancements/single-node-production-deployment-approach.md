@@ -327,6 +327,17 @@ that do depend on apiserver availability would need to be resilient to
 these events. OpenShift core components are already resilient in this
 way.
 
+#### Disruptive Configuration Changes
+
+Single-node deployments of OpenShift necessarily will be prone to
+disruption when `MachineConfig` changes are applied, especially if the
+change triggers a system reboot. When this occurs, workloads will be
+inaccessible for as long as it takes the host to completely reboot and
+for OpenShift to restart. Users choosing single-node deployments need
+to be aware of the trade-off in resiliency that comes with using fewer
+resources, so we will need to ensure our user-facing documentation
+provides adequate warning.
+
 #### Cluster Machine Approver
 
 Auto-approval of certificate signing requests requires 2 sources of
