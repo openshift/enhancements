@@ -53,14 +53,13 @@ The downsides of requiring a bootstrap node for Single Node OpenShift are:
 2. Requires external dependencies:
    1. Load balancer (only for bootstrap phase)
    2. Preconfigured DNS (for each deployment)
-3. Cannot use Bare Metal IPI:
-   1. Adds additional dependencies - VIPs, keepalived, mdns
 
 ### Goals
 
 * Describe an approach for installing Single Node OpenShift in a BareMetal environment for production use.
-* The implementation should require minimal changes to the OpenShift installer and the should not affect existing deployment flows.
-* Installation should result a clean Single Node OpenShift without any bootstrap leftovers.
+* The implementation should require minimal changes to the OpenShift installer,
+it should strive to reuse existing code and should not affect existing deployment flows.
+* Installation should result in a clean Single Node OpenShift without any bootstrap leftovers.
 * Describe an approach that can be carried out by a user manually or automated by an orchestration tool.
 
 ### Non-Goals
@@ -194,7 +193,7 @@ can reduce them by reducing revisions caused by observations of known
 conditions.  For example in a single node we know what the etcd
 endpoints will be in advance, We can avoid a revision by observing
 this post install.  This work will go a long way to reducing
-disruption during install and improve MTTR for upgrade re-deployments
+disruption during install and improve mean time to recovery for upgrade re-deployments
 and failures.
 
 The control plane components we will copy from
@@ -297,6 +296,34 @@ users add to their deployment. Users need to be made aware of this
 limitation and encouraged to avoid creating custom manifests using
 CRDs installed by cluster operators instead of the
 `cluster-version-operator`.
+
+#### Bootstrap logs retention
+ 
+ Due to the bootstrap-in-place behavior all bootstrap artifacts
+ will be lost once the bootstrap the node reboots.
+In a regular installation flow the bootstrap node goes down only once
+ the control plane is running, and the bootstrap node served its purpose.
+In case of bootstrap in place things can go wrong after the reboot.
+The bootstrap logs can aid in troubleshooting a subsequently failed install. 
+
+Mitigation by gathering the bootstrap logs before reboot.
+ bootstrap will gather logs from itself using /usr/local/bin/installer-gather.sh.
+ Once gathering is complete, the bundle will be added to the master ignition,
+ thus making the bootstrap logs available from the master after reboot.
+ The log bundle will be deleted once the installation completes.
+ 
+The installer `gather` command works as usual before the reboot.
+We will add a new script called installer-master-bootstrap-in-place-gather.sh.
+ This script will be delivered to the master using via Ignition to the same
+ location where the bootstrap node usually has installer-gather.sh.
+The installer-master-bootstrap-in-place-gather.sh, will be called by the
+ `openshift-install gather` command that believes its collecting logs from a bootstrap node.
+The script however behaves slightly different, instead of collecting bootstrap logs
+and then remotely running /usr/local/bin/installer-masters-gather.sh on all master nodes,
+ the script will collect the bootstrap logs from the bundle copied to via the master-ignition,
+ and collect master logs by running /usr/local/bin/installer-masters-gather.sh directly
+ on itself. The final archiving of all the logs into the home directory,
+ exactly the same as /usr/local/bin/installer-gather.sh.
 
 ## Design Details
 
