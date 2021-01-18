@@ -7,6 +7,8 @@ reviewers:
   - "@miciah"
   - "@standa"
   - "@spadgett"
+  - "@sur"
+  - "@lilic"
 approvers:
   - "@sttts"
   - "@miciah"
@@ -48,6 +50,8 @@ A stock installation has the following routes which may need customization of bo
 5. openshift-monitoring       grafana
 6. openshift-monitoring       prometheus-k8s
 7. openshift-monitoring       thanos-querier
+8. image-registry (this isn't appearing in my installation, but @Miciah says it's there)
+9. openshfit-logging (this would be natural, though I think it comes via OLM, so we may have to definitively answer that)
 
 It is just as easy to create a generic solution that provides one stop shopping for cluster-admins as it is to produce
 a series of one-off solutions.
@@ -56,7 +60,7 @@ slightly different documentation.
 
 ### Goals
 
-1. provide a way for cluster-admins to see all the customizeable routes in the cluster.
+1. provide a way for cluster-admins to see all the routes that have flexible names and serving certificates in the cluster.
 2. provide a single API that is consistent for every route they need to configure
 3. provides a way to have an operator with scope limited permissions read the serving cert/key pairs
 4. allow a cluster-admin to specify a different DNS name.
@@ -72,73 +76,88 @@ slightly different documentation.
 type IngressSpec struct {
     // other fields
 
-    // CustomizeableRoutes is a list of routes that a cluster-admin wants to customize.  It is logically keyed by
-    // .spec.customizeableRoutes[index].{namespace,name}.
-    // To determine the set of possible keys, look at .status.customizeableRoutes where participating operators place
+    // ComponentRoutes is a list of routes that a cluster-admin wants to customize.  It is logically keyed by
+    // .spec.componentRoutes[index].{namespace,name}.
+    // To determine the set of possible keys, look at .status.componentRoutes where participating operators place
     // current route status keyed the same way.
-    CustomizeableRoutes []CustomizeableRouteSpec
+    // If a ComponentRoute is created with a namespace,name tuple that does not match status, that piece of config will
+    // not have an effect.  If an operator later reads the field, it will eventually (but not necessarily immediately)
+    // honor the pre-existing spec values.
+    ComponentRoutes []ComponentRouteSpec
 }
 
 type IngressStatus struct {
     // other fields
 
-    // CustomizeableRoutes is where participating operators place the current route status for routes which the cluster-admin
+    // ComponentRoutes is where participating operators place the current route status for routes which the cluster-admin
     // can customize hostnames and serving certificates.
     // How the operator uses that serving certificate is up to the individual operator.
-    CustomizeableRoutes []CustomizeableRouteStatus
+    // An operator that creates entries in this slice should clean them up during removal (if it can be removed).
+    // An operator must also handle the case of deleted status without churn.
+    ComponentRoutes []ComponentRouteStatus
 }
 
-type CustomizeableRouteSpec struct{
-    // namespace is the namespace of the route to customize.  It must be a real namespace.
+type ComponentRouteSpec struct{
+    // namespace is the namespace of the route to customize.  It must be a real namespace.  Using an actual namespace
+    // ensures that no two components will conflict and the same component can be installed multiple times.
     Namespace string
     // name is the *logical* name of the route to customize.  It does not have to be the actual name of a route resource.
     // Keep in mind that this is your API for users to customize.  You could later rename the route, but you cannot rename
     // this name.
     Name string
-    // desiredHost is the name that a cluster-admin wants to specify
-    DesiredHost string
+    // Hostname is the host name that a cluster-admin wants to specify
+    Hostname string
     // ServingCertKeyPairSecret is a reference to a secret in namespace/openshift-config that is a kubernetes tls secret.
     // The serving cert/key pair must match and will be used by the operator to fulfill the intent of serving with this name.
     // That means it could be embedded into the route or used by the operand directly.
     // Operands should take care to ensure that if they use passthrough termination, they properly use SNI to allow service
     // DNS access to continue to function correctly.
+    // SANs in the certificate are ignored, but SNI can be used to make operator managed certificates (like internal load balancers
+    // and service serving certificates) serve correctly.
     ServingCertKeyPairSecret SecretNameReference
 
     // possible future, we could add a set of SNI mappings.  I suspect most operators would not properly handle it today.
 }
 
-type CustomizeableRouteStatus struct{
-    // namespace is the namespace of the route to customize.  It must be a real namespace.
+type ComponentRouteStatus struct{
+    // namespace is the namespace of the route to customize.  It must be a real namespace.  Using an actual namespace
+    // ensures that no two components will conflict and the same component can be installed multiple times.
     Namespace string
     // name is the *logical* name of the route to customize.  It does not have to be the actual name of a route resource.
     // Keep in mind that this is your API for users to customize.  You could later rename the route, but you cannot rename
     // this name.
     Name string
-    // defaultHost is the normal name of this route.
-    DefaultHost string
+    // defaultHostname is the normal host name of this route.  It is provided in case cluster-admins find it more recognizeable
+    // and having it here makes it possible to answer, "if I remove my configuration, what will the name be".
+    DefaultHostname string
     // ConsumingUsers is a slice of users that need to have read permission on the secrets in order to use them.
     // This will usually be an operator service account.
     ConsumingUsers []string
-    // currentHost is the current name used to by the route.  Routes can have more than one exposed name, even though we
+    // currentHostnames is the current name used to by the route.  Routes can have more than one exposed name, even though we
     // only allow one route.spec.host.
-    CurrentHosts []string
+    CurrentHostnames []string
 
-    // conditions are available, degraded, progressing.  This allows consistent reporting back and feedback that is well
+    // conditions are degraded and progressing.  This allows consistent reporting back and feedback that is well
     // structured.  These particular conditions have worked very well in ClusterOperators.
+    // Degraded == true means that something has gone wrong trying to handle the ComponentRoute.  The CurrentHostnames
+    // may or may not be operating successfully.
+    // Progressing == true means that the component is taking some action related to the ComponentRoute
     Conditions []ConfigCondition
 
     // relatedObjects allows listing resources which are useful when debugging or inspecting how this is applied.
-    // They may be aggregated into an overal status RelatedObjects to be automatically by oc adm inspect
+    // They may be aggregated into an overall status RelatedObjects to be automatically shown by oc adm inspect
     RelatedObjects []ObjectReference
     
     
 
     // This API does not include a mechanism to distribute trust, since the ability to write this resource would then 
     // allow interception.  Instead, if we need such a mechanism, we can talk about creating a way to allow narrowly scoped
-    // updates to a configmap containing ca-bundle.crt for each CustomizeableRoute.
+    // updates to a configmap containing ca-bundle.crt for each ComponentRoute.
     // CurrentCABundle []byte
 }
 ```
+
+Validation rules to be specified in the openshift/api PR, but basic restrictions on strings as you'd expect.
 
 
 ### User Stories
@@ -147,7 +166,7 @@ type CustomizeableRouteStatus struct{
 To use this, a cluster-admin would
 1.  Either read docs to find the namespace,name tuples or look at an existing cluster and read ingresses.config.openshift.io.
 2.  Create the serving cert/key pair secret in ns/openshift-config
-3.  Create an entry in `ingresses.config.openshift.io.spec.customizeableRouteSpec` for their customization
+3.  Create an entry in `ingresses.config.openshift.io.spec.componentRouteSpec` for their customization
 4.  Wait to see the corresponding change in status.
 
 
@@ -157,8 +176,8 @@ To use this, a cluster-admin would
 
 #### Control loop to manage secret read permissions in openshift-config
 List/watch for individual names has been possible for several releases.
-A control loop in either the ingress operator or the cluster config operator will watch for ingress.spec.customizeableRouteSpec.servingCertKeyPairSecret
-and will create a role/rolebinding for the corresponding ingress.status.customizeableRouteStatus.consumingUsers.
+A control loop in either the ingress operator or the cluster config operator will watch for ingress.spec.componentRouteSpec.servingCertKeyPairSecret
+and will create a role/rolebinding for the corresponding ingress.status.componentRouteStatus.consumingUsers.
 This will allow an operator (or other binary with that user) to get/list/watch on the particular secret.
 
 This means that the power to mutate ingresses.config.openshift.io and ingresses.config.openshfit.io/status
@@ -173,7 +192,8 @@ copying the secret so it can be mounted.
 It would also be possible (though I'm less sure someone would use it), to provide a route injection option for serving cert/key
 pairs.
 
-Library-go is also an ideal spot to provide functionality to provide request route hosts.
+Library-go is also an ideal spot to provide functionality to inject route hosts.  Something like our StaticResource
+controller which automatically handles the API status and the required route changes.
 
 ### Risks and Mitigations
 
