@@ -48,9 +48,9 @@ Enable CloudWatch metric collection.
 
 [CloudWatch][concepts] defines *log groups* and *log streams*. To paraphrase the documentation:
 
->  A log stream is a sequence of log events that share the same source ... For example, an Apache access log on a specific host.
-
->  Log groups define groups of log streams that share the same retention, monitoring, and access control settings ... For example, if you have a separate log stream for the Apache access logs from each host, you could group those log streams into a single log group called MyWebsite.com/Apache/access_log.
+> A log stream is a sequence of log events that share the same source ... For example, an Apache access log on a specific host.
+>
+> Log groups define groups of log streams that share the same retention, monitoring, and access control settings ... For example, if you have a separate log stream for the Apache access logs from each host, you could group those log streams into a single log group called MyWebsite.com/Apache/access_log.
 
 In other words a *log stream* corresponds to the smallest distinct source of logs.
 A *log group* is a collection of related *log streams*.
@@ -91,10 +91,10 @@ New API fields in the `output.cloudwatch` section:
 
 - `region`: (string) AWS region name, required to connect.
 - `groupBy`: (string, default "logType") Take group name from logging meta-data. Values:
-   - `logType`: one of "application", "infrastructure", or "audit"\
-     Note that *infrastructure* and  *audit* logs are always grouped by `logType`.
-   - `namespaceName`: *application* logs are grouped by namespace name.
-   - `namespaceUUID`: *application* logs are grouped by namespace UUID.
+  - `logType`: one of "application", "infrastructure", or "audit"\
+    Note that *infrastructure* and  *audit* logs are always grouped by `logType`.
+  - `namespaceName`: *application* logs are grouped by namespace name.
+  - `namespaceUUID`: *application* logs are grouped by namespace UUID.
 
 Existing fields:
 
@@ -112,17 +112,17 @@ The CloudWatch *log group names* are different depending on the use case.
 
 #### I want to forward logs to CloudWatch instead of a local store
 
-```
+```yaml
 apiVersion: "logging.openshift.io/v1"
 kind: "ClusterLogForwarder"
 spec:
   outputs:
   - name: CloudWatchOut
-	type: cloudwatch
-	cloudwatch:
-	  region: myregion
-	secret:
-	   name: mysecret
+    type: cloudwatch
+    cloudwatch:
+      region: myregion
+    secret:
+       name: mysecret
   pipelines:
   - inputRefs: [application, infrastructure, audit]
     outputRefs: [CloudWatchOut]
@@ -134,18 +134,18 @@ CloudWatch group names are: "application", "infrastructure", "audit"
 
 To group by namespace name:
 
-```
+```yaml
 apiVersion: "logging.openshift.io/v1"
 kind: "ClusterLogForwarder"
 spec:
   outputs:
   - name: CloudWatchOut
-	type: cloudwatch
-	cloudwatch:
-	  region: myregion
-	  groupBy: namespaceName
-	secret:
-	   name: mysecret
+    type: cloudwatch
+    cloudwatch:
+      region: myregion
+      groupBy: namespaceName
+    secret:
+       name: mysecret
   pipelines:
   - inputRefs: [application, infrastructure, audit]
     outputRefs: [CloudWatchOut]
@@ -208,29 +208,29 @@ To support custom logs we add:
 For example, I want to group most logs by log type, except for logs from
 namespaces [magic1, magic2] which should be in log group "magic".
 
-```
+```yaml
 apiVersion: "logging.openshift.io/v1"
 kind: "ClusterLogForwarder"
 spec:
   intputs:
   - name: MagicApp
     application:
-	  namespaces: [ magic1, magic2 ]
+      namespaces: [ magic1, magic2 ]
   outputs:
   - name: CloudWatchOut
-	type: cloudwatch
-	cloudwatch:
-	  region: myregion
-	  groupBy: logType
-	  groupByOptional: [ openshift.labels.logGroup ]
-	secret:
-	   name: mysecret
+    type: cloudwatch
+    cloudwatch:
+      region: myregion
+      groupBy: logType
+      groupByOptional: [ openshift.labels.logGroup ]
+    secret:
+       name: mysecret
   pipelines:
   - inputRefs: [application, infrastructure, audit]
     outputRefs: [CloudWatchOut]
   - inputRefs: [MagicApp]
     outputRefs: [CloudWatchOut]
-	labels: { logGroup: magic }
+    labels: { logGroup: magic }
 ```
 
 ### Open Questions

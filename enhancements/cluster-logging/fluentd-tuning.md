@@ -33,9 +33,10 @@ These settings are:
 
 These settings have weaker forward-compatibility guarantees than the rest of the API.
 In future releases:
-  - `fluentd` settings may be ignored, if the logging implementation changes.
-  - valuesmay be overridden by (present or future) settings in other logging APIs.
-  - new sections may be introduced for new implementations, they may not have equivalent settings to `fluentd`
+
+- `fluentd` settings may be ignored, if the logging implementation changes.
+- valuesmay be overridden by (present or future) settings in other logging APIs.
+- new sections may be introduced for new implementations, they may not have equivalent settings to `fluentd`
 
 The `clusterloggings.logging.openshift.io` API will have a new map field
 `spec.forwarder.fluentd`. The `forwarder` field is for global tuning parameters
@@ -65,7 +66,7 @@ We will be successful when:
 
 * Not implying that logging will always use `fluentd` or use it in the same way. `forwarder.fluentd` applies to the current implementation, it may be ignored in future releases.
 * Not allowing general `fluentd` configuration: we expose only a subset of performance tuning parameters. Users that want full control of `fluentd` need to go unmanaged.
-* Not a generic performance tuning API: we may introduce such APIs in future, or introduce new `forwarder` sections. 
+* Not a generic performance tuning API: we may introduce such APIs in future, or introduce new `forwarder` sections.
 
 ## Proposal
 

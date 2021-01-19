@@ -31,7 +31,15 @@ superseded-by: []
 
 ## Summary
 
-The purpose of this is to increase the configuration for an ES cluster to better optimize indices and cluster priorities and maintain that they can still be queried. This has a potential to improve retention of our logs (but is not our focus). Currently our logs are either maintained as a high priority index or they are deleted. We seek to emulate the back-end process that Elasticsearch makes available in the form of [x-pack API](https://www.elastic.co/guide/en/elasticsearch/reference/6.8/index-lifecycle-management-api.html) end points.
+The purpose of this is to increase the configuration for an ES cluster
+to better optimize indices and cluster priorities and maintain that
+they can still be queried. This has a potential to improve retention
+of our logs (but is not our focus). Currently our logs are either
+maintained as a high priority index or they are deleted. We seek to
+emulate the back-end process that Elasticsearch makes available in the
+form of [x-pack
+API](https://www.elastic.co/guide/en/elasticsearch/reference/6.8/index-lifecycle-management-api.html)
+end points.
 
 ## Motivation
 
@@ -62,7 +70,14 @@ We will be successful when:
 
 Currently we offer a mechanism for users to configure their index lifecycles based on two states: hot and delete. By default indices are created and stay in the hot state, where they can be rolled over based on a configuration, however they stay in a "hot" state until they are eventually deleted based on the delete policy.
 
-Elasticsearch offers mechanisms to move indices between hot, warm, cold, and delete and discusses approaches for this [in a blog article](https://www.elastic.co/blog/implementing-hot-warm-cold-in-elasticsearch-with-index-lifecycle-management). However, this functionality is a x-pack feature and we do not support these. [Opendistro](https://opendistro.github.io/for-elasticsearch-docs/docs/ism/) offers a way to do this as well, however their plugins require ES7. We achieve our current functionality using cronjobs -- one for delete and one for rollover.
+Elasticsearch offers mechanisms to move indices between hot, warm,
+cold, and delete and discusses approaches for this [in a blog
+article](https://www.elastic.co/blog/implementing-hot-warm-cold-in-elasticsearch-with-index-lifecycle-management). However,
+this functionality is a x-pack feature and we do not support
+these. [Opendistro](https://opendistro.github.io/for-elasticsearch-docs/docs/ism/)
+offers a way to do this as well, however their plugins require ES7. We
+achieve our current functionality using cronjobs -- one for delete and
+one for rollover.
 
 Within the context of Elasticsearch ILM:
 1) Moving the index into a Warm state means: the index is force merged (to reduce the number of segments in its shards); its replica count is reduced; the index priority is reduced.
@@ -101,7 +116,7 @@ Given that having three cronjobs for a single index (with all three policies def
 
 We will create another phase spec as a placeholder for Warm:
 
-```
+```go
 type IndexManagementPhasesSpec struct {
   // +nullable
   Hot *IndexManagementHotPhaseSpec `json:"hot,omitempty"`

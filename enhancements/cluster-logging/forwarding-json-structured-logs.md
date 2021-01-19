@@ -113,7 +113,7 @@ Logging terminology can have overlapping meanings, this document uses the follow
 
 ## Proposal
 
-#### Data model
+### Data model
 
 Two new top-level fields added to the record [data model][data_model]:
 
@@ -197,7 +197,7 @@ See the [Elasticsearch notes](#es-notes) for more details.
 
 **Note**: If there is only one JSON schema, the `schema` field is not necessary.
 
-##### Example 1: Identify applications by namespace.
+##### Example 1: Identify applications by namespace
 
 Pods in namespaces "fred" and "bob" use the "patchy" schema, pods in namespaces "jill" and "jane" use the "bulldog" schema.
 
@@ -220,7 +220,7 @@ pipeline:
   outputRefs: default
 ```
 
-##### Example 2: Identify applications by labels.
+##### Example 2: Identify applications by labels
 
 The applications using each schema must be identified by k8s labels.
 Note this is often _already done_ as part of a Deployment.
@@ -249,7 +249,7 @@ pipelines:
 
 ### Implementation Details
 
-#### Elasticsearch version-specific workarounds.
+#### Elasticsearch version-specific workarounds
 
 The existing Elasticsearch logging store requires "flattening" of the `kubernetes.labels` map:
 

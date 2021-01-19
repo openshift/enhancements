@@ -59,7 +59,7 @@ This is a map of name:value pairs to apply to each log record passing through th
 
 Labels are added to the normalized JSON record as a map field named `openshift.labels`, for example.
 
-```
+```json
 {
   "message" : "2020-03-03 11:44:51,996 - SVTLogger - INFO",
   "@timestamp" : "2020-03-03T11:44:51.996384+00:00",
@@ -98,7 +98,7 @@ Labels are added to the normalized JSON record as a map field named `openshift.l
 
 The output type may give additional options for encoding labels, for example:
 
-```
+```text
   - output
       type: syslog
       syslog:
@@ -115,7 +115,7 @@ as required by [RFC 5424](https://tools.ietf.org/html/rfc5424#section-6.3.2)
 
 #### As cluster admin I want to label all outgoing messages with a cluster-id
 
-```
+```text
 pipeline:
   labels: { clusterId: C1234 }
   inputRefs: [application, infrastructure, audit]
@@ -124,7 +124,7 @@ pipeline:
 
 #### As cluster admin I want to label each message type differently, but send all to the same output
 
-```
+```text
 pipeline:
   labels: { logType: normal }
   inputRefs: [application]
@@ -154,7 +154,7 @@ configuration to add labels to each record going through the pipeline.
 ### Fluentd configuration examples
 
 Example of generated fluentd configuration
-```
+```text
 <label @SOME_PIPELINE>
   <filter **>
     @type record_transformer

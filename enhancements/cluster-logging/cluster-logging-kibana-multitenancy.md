@@ -105,7 +105,7 @@ We want to avoid using the `private` tenant as it would be a duplicate of the us
 
 As part of configuring multitenancy for Kibana, we would need to add the following to the Kibana config:
 
-```
+```text
 elasticsearch.requestHeadersWhitelist: ["securitytenant","Authorization"]
 opendistro_security.multitenancy.enabled: true
 opendistro_security.multitenancy.tenants.enable_global: false
@@ -117,7 +117,7 @@ opendistro_security.multitenancy.enable_filter: false
 
 In addition to needing to configure Kibana to allow multitenancy, we need to update the Elasticsearch `roles.yml` to specify `tenant_permissions` for each user's role.
 
-```
+```yaml
 example-role:
   reserved: false
   hidden: false
@@ -147,7 +147,7 @@ example-role:
 
 In order to create custom tenants to provide for users, we need to define them and then list them as a `tenant_patterns` entry.
 
-```
+```yaml
 ---
 _meta:
   type: "tenants"
