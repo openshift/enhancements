@@ -97,7 +97,7 @@ Specifically for each `ClusterVersionStatus` property:
 Then, in the cluster-version operator (CVO), this enhancement proposes porting existing logic like [available-update translation][cluster-version-operator-update-translation] and [available-update lookup][cluster-version-operator-update-lookup] to preserve the Cincinnati metadata, with information from the release image itself taking precedence over information from Cincinnati.
 In some cases (when an administrator requested an update that was not in the available update set), this would require an additional Cincinnati request to retrieve metadata about the requested release.
 
-#### Metadata properties
+### Metadata properties
 
 This enhancement declares the following to be well-known `metadata` properties in Cincinnati node objects:
 
@@ -148,7 +148,14 @@ The only difference is that [`force`][api-force] will no longer be propagated, a
 
 When the [`desiredUpdate`][api-desiredUpdate] is found in [`availableUpdates`][api-availableUpdates] (by matching [`image`][api-update], falling back to matching by [`version`][api-update]), then Cincinnati metadata will be available under `url` and `channels` immediately.
 
-When the [`desiredUpdate`][api-desiredUpdate] is not found in [`availableUpdates`][api-availableUpdates] but is known to Cincinnati, `metadata` and `upstreamMetadata` will initially be empty (as in the *image unknown to Cincinnati* case described above), but following release image retrieval `metadata` will be populated with the release image metadata, and following the next [`upstream`][api-upstream] request `upstreamMetadata` will be populated with the returned metadata.
+When the [`desiredUpdate`][api-desiredUpdate] is not found in
+[`availableUpdates`][api-availableUpdates] but is known to Cincinnati,
+`metadata` and `upstreamMetadata` will initially be empty (as in the
+*image unknown to Cincinnati* case described above), but following
+release image retrieval `metadata` will be populated with the release
+image metadata, and following the next [`upstream`][api-upstream]
+request `upstreamMetadata` will be populated with the returned
+metadata.
 
 ### Risks and Mitigations
 
@@ -164,7 +171,7 @@ There will be no testing outside of cluster-version operator unit tests, where a
 
 The ClusterVersion object is already GA, so there would be nothing to graduate or space to cook a preview implementation.
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 This change would remove [the `force` property][api-force] from [`desired`][api-desired] and [`availableUpdates`][api-availableUpdates].
 But that property was optional before and did not have clear semantics in either location, so the removal should break no consumers.
@@ -249,7 +256,7 @@ In addition, the current release (being reconciled by the cluster-version operat
 
 We'd add new `ClusterVersionStatus` properties like:
 
-```
+```go
 // Current is the release version which is currently being reconciled by the cluster-version operator.
 Current string `json:"current,omitempty"`
 
