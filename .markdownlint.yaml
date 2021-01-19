@@ -2,3 +2,6 @@
 
 # forematter metadata seems to trigger this
 single-title: false
+
+# hard tabs are used when pasting go example code into files
+no-hard-tabs: false
