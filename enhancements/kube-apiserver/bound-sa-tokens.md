@@ -139,13 +139,13 @@ a good indication that legacy token usage is unaffected.
 There is already comprehensive test coverage of the bound token feature in upstream
 kube. It should therefore be reasonable to limit test coverage to indications that bound
 token usage has been properly configured:
- - Validating that a bound token can be requested via the TokenRequest API
- - Validating that a pod can request a bound token via volume projection
+- Validating that a bound token can be requested via the TokenRequest API
+- Validating that a pod can request a bound token via volume projection
 
 The key management proposed by this enhancement will also need to be tested:
- - The absence of the bound token secret should result in creation of the secret with a new keypair
- - The absence of the bound token configmap should result in creation of the configmap
-   populated with the public key of the current keypair
+- The absence of the bound token secret should result in creation of the secret with a new keypair
+- The absence of the bound token configmap should result in creation of the configmap
+  populated with the public key of the current keypair
 
 It probably makes sense to manually verify integration with the AWS pod identity webhook,
 since this is the primary motivation for this enhancement. It may make sense to delegate
