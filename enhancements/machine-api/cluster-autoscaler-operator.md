@@ -185,7 +185,7 @@ options of the Cluster Autoscaler.
 Notably this will be a subset of the full options limited to the options detailed in the specification below.
 Omitted options will be set to sensible defaults (Eg log level).
 
-```
+```go
 // ClusterAutoscalerSpec defines the desired state of ClusterAutoscaler
 type ClusterAutoscalerSpec struct {
 	// Constraints of autoscaling resources
@@ -275,7 +275,7 @@ an object reference pointing to the desired MachineSet.
 It will also allow the user to provide maximum and minimum boundaries for the number of Machines that each MachineSet
 should be allowed to contain. Note these boundaries are inclusive.
 
-```
+```go
 // MachineAutoscalerSpec defines the desired state of MachineAutoscaler
 type MachineAutoscalerSpec struct {
 	// MinReplicas constrains the minimal number of replicas of a scalable resource

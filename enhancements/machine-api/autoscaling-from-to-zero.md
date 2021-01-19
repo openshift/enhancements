@@ -24,7 +24,7 @@ superseded-by:
 
 ## Release Signoff Checklist
 
- - [x] Enhancement is `implementable`
+- [x] Enhancement is `implementable`
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
@@ -62,15 +62,20 @@ This proposes to let each actuator to contain the provider specific logic to fet
 
 #### Machine API Autoscaler provider
 
-The autoscaler exposes [TemplateNodeInfo](https://github.com/openshift/kubernetes-autoscaler/blob/253ee49441750815c70b606f242eb76164d9bdc4/cluster-autoscaler/cloudprovider/cloud_provider.go#L152) on the `NodeGroup` interface to let provider implementers to expose the information of an empty (as if just started) node. This is used in scale-up simulations to predict what would a new node look like if a node group was expanded.
+The autoscaler exposes
+[TemplateNodeInfo](https://github.com/openshift/kubernetes-autoscaler/blob/253ee49441750815c70b606f242eb76164d9bdc4/cluster-autoscaler/cloudprovider/cloud_provider.go#L152)
+on the `NodeGroup` interface to let provider implementers to expose
+the information of an empty (as if just started) node. This is used in
+scale-up simulations to predict what would a new node look like if a
+node group was expanded.
 
 - The [machine API autoscaler provider](https://github.com/openshift/kubernetes-autoscaler/tree/master/cluster-autoscaler/cloudprovider/openshiftmachineapi) `nodegroup` implementation operates over scalable resources i.e `machineSets`.
 
-- We want to enable any provider to expose in a machineSet any the details needed by the autoscaler to scale from zero. 
+- We want to enable any provider to expose in a machineSet any the details needed by the autoscaler to scale from zero.
 
 - The autoscaler can then use this details to populate a `schedulernodeinfo.NodeInfo` object enabling scaling from zero. To this end we propose the following annotations for a machineSet:
 
-```
+```text
 machine.openshift.io/vCPU
 machine.openshift.io/memoryMb
 machine.openshift.io/GPU
@@ -79,12 +84,22 @@ machine.openshift.io/maxPods
 
 - Details which are non provider specific can be inferred directly from the [machineSet machine template](https://github.com/openshift/machine-api-operator/blob/master/pkg/apis/machine/v1beta1/machineset_types.go#L80) e.g labels, taints.
 
-- The `TemplateNodeInfo` implementation will look very similar to [AWS](https://github.com/openshift/kubernetes-autoscaler/blob/253ee49441750815c70b606f242eb76164d9bdc4/cluster-autoscaler/cloudprovider/aws/aws_cloud_provider.go#L321)/[Azure](https://github.com/openshift/kubernetes-autoscaler/blob/253ee49441750815c70b606f242eb76164d9bdc4/cluster-autoscaler/cloudprovider/azure/azure_scale_set.go#L598) autoscaler implementations:
-but `buildNodeFromTemplate` will get what it needs from the given `nodeGroup`/`machineSet` annotations.
+- The `TemplateNodeInfo` implementation will look very similar to
+  [AWS](https://github.com/openshift/kubernetes-autoscaler/blob/253ee49441750815c70b606f242eb76164d9bdc4/cluster-autoscaler/cloudprovider/aws/aws_cloud_provider.go#L321)/[Azure](https://github.com/openshift/kubernetes-autoscaler/blob/253ee49441750815c70b606f242eb76164d9bdc4/cluster-autoscaler/cloudprovider/azure/azure_scale_set.go#L598)
+  autoscaler implementations: but `buildNodeFromTemplate` will get
+  what it needs from the given `nodeGroup`/`machineSet` annotations.
 
 - If the autoscaler can't find the relevant annotations mentioned above, it will keep preventing the node group to be scaled to zero and log an error if the `machine.openshift.io/cluster-api-autoscaler-node-group-min-size` annotation is equal to 0.
 
-- OCP defaults to 250 maxPods https://github.com/openshift/machine-config-operator/blob/1cb73f2c059788573ce32e951adb4ca2295e2479/templates/worker/01-worker-kubelet/_base/files/kubelet.yaml#L18. We'll let the machine API autoscaler provider to lookup the `machine.openshift.io/maxPods` annotation and default to 250 if it's not found. For customised environments such as the user created its own kubelet config with a different maxPods number to be consumed by a machineSet, they can set the `machine.openshift.io/maxPods` appropriately on the same machineSet so the autoscaler will see that number.
+- OCP defaults to 250 maxPods
+  https://github.com/openshift/machine-config-operator/blob/1cb73f2c059788573ce32e951adb4ca2295e2479/templates/worker/01-worker-kubelet/_base/files/kubelet.yaml#L18. We'll
+  let the machine API autoscaler provider to lookup the
+  `machine.openshift.io/maxPods` annotation and default to 250 if it's
+  not found. For customised environments such as the user created its
+  own kubelet config with a different maxPods number to be consumed by
+  a machineSet, they can set the `machine.openshift.io/maxPods`
+  appropriately on the same machineSet so the autoscaler will see that
+  number.
 
 #### Providers implementation
 
@@ -100,7 +115,14 @@ but `buildNodeFromTemplate` will get what it needs from the given `nodeGroup`/`m
 
 ### Risks and Mitigations
 
-- Changing current behaviour for exisisting clusters. Although this will introduce support for scaling from/to zero in already running autoscaled clusters, this behaviour is opt-in by setting `MinReplicas=0` https://github.com/openshift/cluster-autoscaler-operator/blob/master/pkg/apis/autoscaling/v1beta1/machineautoscaler_types.go#L15. Current `MinReplicas` values must be still honoured by the provider. Therefore the new feature should be transparent for existing machineAutoscaler resources.
+- Changing current behaviour for exisisting clusters. Although this
+  will introduce support for scaling from/to zero in already running
+  autoscaled clusters, this behaviour is opt-in by setting
+  `MinReplicas=0`
+  https://github.com/openshift/cluster-autoscaler-operator/blob/master/pkg/apis/autoscaling/v1beta1/machineautoscaler_types.go#L15. Current
+  `MinReplicas` values must be still honoured by the
+  provider. Therefore the new feature should be transparent for
+  existing machineAutoscaler resources.
 
 ## Design Details
 

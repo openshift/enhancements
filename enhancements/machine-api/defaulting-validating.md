@@ -60,7 +60,7 @@ Failing earlier and communicating it meaningfully is better. In this line we wan
 
 Today the machine API embeds the particular cloud provider API as a raw extension.
 
-```
+```go
 // ProviderSpec defines the configuration to use during node creation.
 type ProviderSpec struct {
   Value *runtime.RawExtension `json:"value,omitempty"`
@@ -82,7 +82,13 @@ As an operator I want the product to communicate meaningfully when my input is b
 
 - The MAO will expose to the CVO a `Service` referenced in the webhook config that will resolve to the `Endpoint` where the webhook is running.
 
-- The webhook server can be managed by the same manager that manages the MachineSet controller. This is a convenient place so it will let us manage single `MutatingWebhookConfiguration` and `ValidatingWebhookConfiguration` resources that can be extended with multiple `paths` for other machine API resources, e.g `MachineSet`, `machineHealthCheck`, etc. All being reachable by the same `Service` resolving to the same `Endpoint`.
+- The webhook server can be managed by the same manager that manages
+  the MachineSet controller. This is a convenient place so it will let
+  us manage single `MutatingWebhookConfiguration` and
+  `ValidatingWebhookConfiguration` resources that can be extended with
+  multiple `paths` for other machine API resources, e.g `MachineSet`,
+  `machineHealthCheck`, etc. All being reachable by the same `Service`
+  resolving to the same `Endpoint`.
 
 - The serving certs and CA bundle for the webhook server will be managed by the https://github.com/openshift/service-ca-operator via `service.beta.openshift.io/serving-cert-secret-name:` and `"service.beta.openshift.io/inject-cabundle": "true"` annotations.
 
@@ -132,12 +138,17 @@ The above is still desirable but more of an orthogonal long term goal. Once we g
 
 In order to improve the current UX with defaults and validation, this alternative is not a requirement but a complement.
 
-- Instead of running the webhook server from one of the cross provider controllers i.e MachineSet we could provide some facility library and let each particular provider to manage it. This split would increase complexity and would only let us enable the `MutatingWebhookConfiguration` and `ValidatingWebhookConfiguration` once every single provider implementation have udpated their machine controller to run the webhook server to satisfy the `Endpoint` for the `Service`.
+- Instead of running the webhook server from one of the cross provider
+  controllers i.e MachineSet we could provide some facility library
+  and let each particular provider to manage it. This split would
+  increase complexity and would only let us enable the
+  `MutatingWebhookConfiguration` and `ValidatingWebhookConfiguration`
+  once every single provider implementation have udpated their machine
+  controller to run the webhook server to satisfy the `Endpoint` for
+  the `Service`.
 
 To avoid the above we could also move the responsability of managing the `MutatingWebhookConfiguration` and `ValidatingWebhookConfiguration` down to the provider machine controller.
 
 That would mean we'd need an additional webhook config, service and server for the other machine API resources e.g MachineSet, machineHealthCheck or tie their lifecycle to the particular machine controllers as well which makes it impractical.
 
 Therefore we favour simplicity and control by defining, plumbing and running the webhook for all providers in the Machine API Operator repo.
-
-

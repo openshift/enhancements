@@ -25,7 +25,7 @@ superseded-by:
 
 ## Release Signoff Checklist
 
- - [x] Enhancement is `implementable`
+- [x] Enhancement is `implementable`
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
@@ -134,7 +134,7 @@ The machine controller will set the right phase when its communication flow with
 
 ### Risks and Mitigations
 
-For it to happen in a non disruptive manner for actuators this proposal is intentionally keeping the surface change small by not breaking the create()/exists()/update() actuators interface. 
+For it to happen in a non disruptive manner for actuators this proposal is intentionally keeping the surface change small by not breaking the create()/exists()/update() actuators interface.
 
 Once this is settled we might consider to simplify the interface.
 
