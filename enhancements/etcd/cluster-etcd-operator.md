@@ -15,7 +15,7 @@ approvers:
 creation-date: 2019-10-1
 last-updated: 2020-2-5
 status: implementable
-see-also: 
+see-also:
 replaces:
 superseded-by:
 ---
@@ -79,30 +79,34 @@ This controller maintains the list of endpoints in `oc -n openshift-etcd get end
 It always places the IP addresses and DNS names for every master node, even those without pods.
 It never creates the instance.  In the future, it should honor the `oc -n kube-system get configmap/bootstrap`.
 
-#### Reads
+**Reads**
  1. `oc get nodes -l node-role.kubernetes.io/master:`
  2. `oc -n openshift-etcd get endpoints/host-etcd` - to find the bootstrap host IP
  3. DNS to convert node `.status.addresses[internalIP]` into DNS names
 
-#### Writes
+**Writes**
+
 `oc -n openshift-etcd get endpoints/host-etcd`
  1. `.annotations["alpha.installer.openshift.io/dns-suffix"]` is set to infrastructure.config.openshift.io|.status.etcdDiscoveryDomain
  2. .spec.address.hostname is set to the part of the DNS name minus the etcdDiscoveryDomain
  3. .spec.address.ip is set to the first internal IP of the node.
 
-#### Consumers
+**Consumers**
+
 `oc -n openshift-etcd get endpoints/host-etcd` can be used to build etcd clients.
-It is used in this operator and in the KAS-o and OAS-o.  
+It is used in this operator and in the KAS-o and OAS-o.
 
 ### EtcdMembersController
 This controller directly contacts etcd to determine the status of individual members.
 It is a read-only controller that ensures visibility into the members in etcd.
 It is currently time-driven (simplest possible thing that could work), in the future, it should establish a watch against etcd.
 
-#### Reads
+**Reads**
+
 Membership directly from etcd.
 
-#### Writes
+**Writes**
+
 .status.conditions
  1. EtcdMembersDegraded - true if there any unhealthy or unknown members in the list.
  2. EtcdMembersProgressing - true if there are any members that at not-started.
@@ -110,35 +114,38 @@ Membership directly from etcd.
 
 ### ResourceSyncController
 This controller copies certs, keys, and CA bundles from sources to destinations where they are consumed.
-Things like the etcd-serving-ca from the `ns/openshift-config` to `ns/openshift-etcd-operator` as a for instance. 
+Things like the etcd-serving-ca from the `ns/openshift-config` to `ns/openshift-etcd-operator` as a for instance.
 
 ### ConfigObserver
 Dead for now, but a place holder if we ever had a means to configure or tune etcd.
 
 ### StatusController
-The standard status controller that unions *Degraded, *Available, *Progressing conditions from etcds.operator.openshift.io for
+
+The standard status controller that unions *Degraded*, *Available*, *Progressing* conditions from etcds.operator.openshift.io for
 summarization to a single Degraded, Available, Progressing condition in clusteroperators.config.openshift.io/etcd.
 
 ### BootstrapTeardownController
 Removes the etcd-bootstrap member from the etcd cluster after enough etcd members have joined.
 
-#### Reads
- 1. etcd membership -
-    1. to determine if etcd-bootstrap is present and whether enough other members are present.
-    2. to ensure that no etcd member is unhealthy
- 2. kubeapiserver.operator.openshift.io and `oc -n openshift-kube-apiserver get configmap` -
-    to determine if the kube-apiservers have observed the replacement etcd members.  If they haven't
-    removing the etcd-bootstrap will result in an outage.
- 3. `oc -n kube-system get configmap/bootstrap` to determine if bootstrapping is complete.
-    If it is present, then we can definitely remove etcd-bootstrap.
- 4. `oc -n kube-system get event bootstrap-finished` to determine if cluster-bootstrap is complete.
-    This or the bootstrap configmap is enough to allow removing the member to proceed.
-    If the member is removed too early, it can cause the bootstrap-kube-apiserver to fail, which causes
-    bootstrapping to fail.
-    
-#### Writes
- 1. directly modifies etcd membership by removing the etcd-bootstrap member.
- 
+**Reads**
+
+1. etcd membership -
+   1. to determine if etcd-bootstrap is present and whether enough other members are present.
+   2. to ensure that no etcd member is unhealthy
+2. kubeapiserver.operator.openshift.io and `oc -n openshift-kube-apiserver get configmap` -
+   to determine if the kube-apiservers have observed the replacement etcd members.  If they haven't
+   removing the etcd-bootstrap will result in an outage.
+3. `oc -n kube-system get configmap/bootstrap` to determine if bootstrapping is complete.
+   If it is present, then we can definitely remove etcd-bootstrap.
+4. `oc -n kube-system get event bootstrap-finished` to determine if cluster-bootstrap is complete.
+   This or the bootstrap configmap is enough to allow removing the member to proceed.
+   If the member is removed too early, it can cause the bootstrap-kube-apiserver to fail, which causes
+   bootstrapping to fail.
+
+**Writes**
+
+1. directly modifies etcd membership by removing the etcd-bootstrap member.
+
 ### StaticResourceController
 The standard controller for creating fixed (non-changing) resources for an operator.
 This is things like our namespaces, serviceaccounts, rolebindings, etc.
@@ -147,20 +154,22 @@ This is things like our namespaces, serviceaccounts, rolebindings, etc.
 This controller adds members to etcd (equivalent of `etcd add-member`).
 It can only add one member at time.
 
-#### Reads
- 1. etcd membership - to determine if every member in the cluster is healthy.
-    If they are not healthy, then no new member can be added.
- 2. `oc -n openshift-etcd get pods`, filtered to etcd-pod-* - to determine if there is an unready pod
-    which is a target for adding to the cluster.
-    1. pod must be unready
-    2. pod must not already be in the etcd cluster
-    3. pod must have a DNS name
- 3. DNS to determine the etcdDiscoveryDomain based name of master nodes.
- 4. master nodes, to determine their first internal IP address.
+**Reads**
 
-#### Writes
- 1. etcd membership - adds a node's etcd DNS name to the member list
- 
+1. etcd membership - to determine if every member in the cluster is healthy.
+    If they are not healthy, then no new member can be added.
+2. `oc -n openshift-etcd get pods`, filtered to etcd-pod-* - to determine if there is an unready pod
+   which is a target for adding to the cluster.
+   1. pod must be unready
+   2. pod must not already be in the etcd cluster
+   3. pod must have a DNS name
+3. DNS to determine the etcdDiscoveryDomain based name of master nodes.
+4. master nodes, to determine their first internal IP address.
+
+**Writes**
+
+1. etcd membership - adds a node's etcd DNS name to the member list
+
 ### StaticPodController
 The standard controller for managing static pods, like the KAS-o, KCM-o, KS-o.
 
@@ -168,21 +177,21 @@ The standard controller for managing static pods, like the KAS-o, KCM-o, KS-o.
 This controller shapes the static pod manifest itself.  It has some unique features of its output.
 
 #### Static Pod Shape
- 1. Every static pod has environment variables, configmaps, and secrets for every etcd member.
-    Put another way, the static pod can become the static pod for any member.
-    There are env vars like: `NODE_node_name_ETCD_PEER_URL_HOST` for each node_name.
- 2. During static-pod-installation, the installer-pod substitutes NODE_NAME and NODE_ENV_VAR_NAME directly into the bytes
-    laid into /etc/kubernetes/manifests/etcd-pod.yaml.
-    This allows a particular node to have a static pod with the right parameters by selecting the env var.
-    For example, that allow nodes to have arguments like `--peer-listen-url=$NODE_NODE_ENV_VAR_NAME_ETCD_PEER_URL_HOST`,
-    that will select the "correct" env var for their node. 
- 3. The static pod contacts the existing etcd to determine membership.
-    It waits until it is able to know that it is in the member list before trying to start.
-    When it does this, it is able to determine the member list to use to launch.
+1. Every static pod has environment variables, configmaps, and secrets for every etcd member.
+   Put another way, the static pod can become the static pod for any member.
+   There are env vars like: `NODE_node_name_ETCD_PEER_URL_HOST` for each node_name.
+2. During static-pod-installation, the installer-pod substitutes NODE_NAME and NODE_ENV_VAR_NAME directly into the bytes
+   laid into /etc/kubernetes/manifests/etcd-pod.yaml.
+   This allows a particular node to have a static pod with the right parameters by selecting the env var.
+   For example, that allow nodes to have arguments like `--peer-listen-url=$NODE_NODE_ENV_VAR_NAME_ETCD_PEER_URL_HOST`,
+   that will select the "correct" env var for their node.
+3. The static pod contacts the existing etcd to determine membership.
+   It waits until it is able to know that it is in the member list before trying to start.
+   When it does this, it is able to determine the member list to use to launch.
 
 
 ### Exceptional Scenarios
-These are things like DR or "off and on" again or "member is misbehaving" scenarios that need to work in a way that is 
+These are things like DR or "off and on" again or "member is misbehaving" scenarios that need to work in a way that is
 coherent with the operator controllers.
 This requires coordination between human operators (cluster-admins) and machine operators.
 
@@ -285,7 +294,7 @@ standalone etcd cert signer[3] used in 4.1 - 4.3.
 
 ### Graduation Criteria
 
-##### This feature will GA in 4.3 as long as:
+#### This feature will GA in 4.3 as long as
 
 1. Thorough end to end tests, especially around scaling and failure cases
 1. Thorough unit tests around core functionality
@@ -319,7 +328,7 @@ The cluster can function without intervention, but to fully restore 4.3, manual 
     The cluster can run in this state for a very long time.
  4. To clean up, upgrade again.  Or....
  5. Delete the openshift-etcd-operator namespace and wait for it to be removed.
- 6. **One master at at time**... 
+ 6. **One master at at time**...
     1. move the 4.4-etcd-pod to a backup location
     2. restore the etcd-member.yaml from its backup location
     3. wait for the etcd-member to rejoin
