@@ -185,7 +185,7 @@ spec:
     name: my-application
 ```
 
-#### Validation
+### Validation
 
 Omitting `spec.httpHeaders` or omitting
 `spec.httpHeaders.headerNameCaseAdjustments` specifies the default behavior.
@@ -200,30 +200,30 @@ specifies an invalid value, then the IngressController ignores the annotation.
 
 ### User Stories
 
-#### As a cluster administrator, I have a legacy server that expects the HTTP `host` header to be capitalized as `Host`.
+#### As a cluster administrator, I have a legacy server that expects the HTTP `host` header to be capitalized as `Host`
 
 To satisfy this use-case, the cluster administrator can specify `Host` in
 `spec.httpHeaders.headerNameCaseAdjustments`:
 
-```
+```console
 oc -n openshift-ingress-operator patch ingresscontrollers/default --type=merge --patch='{"spec":{"httpHeaders":{"headerNameCaseAdjustments":["Host"]}}}'
 ```
 
 The cluster administrator or application developer can annotate the
 application's Route:
 
-```
+```console
 oc annotate routes/my-application haproxy.router.openshift.io/h1-adjust-case=true
 ```
 
 The IngressController then adjusts the `host` request header as specified.
 
-#### As a cluster administrator, I have a legacy client that expects the HTTP `cache-control` header to be capitalized as `Cache-Control`.
+#### As a cluster administrator, I have a legacy client that expects the HTTP `cache-control` header to be capitalized as `Cache-Control`
 
 To satisfy this use-case, the cluster administrator can specify `Cache-Control`
 in `spec.httpHeaders.headerNameCaseAdjustments`:
 
-```
+```console
 oc -n openshift-ingress-operator patch ingresscontrollers/default --type=json --patch='[{"op":"add","path":"/spec/httpHeaders/headerNameCaseAdjustments/-","value":"Cache-Control"}]'
 ```
 
@@ -249,7 +249,7 @@ also specifies the `h1-case-adjust-bogus-client` setting.
 For example, if `ROUTER_H1_CASE_ADJUST` is set to `Host,X-Forwarded-For`, then
 the router specifies the following settings in the HAProxy configuration:
 
-```
+```text
 global
   # ...
   h1-case-adjust host Host
@@ -266,7 +266,7 @@ When a Route has the `haproxy.router.openshift.io/h1-adjust-case=true`
 annotation, the router specifies the `h1-case-adjust-bogus-server` setting on
 the configuration for that Route:
 
-```
+```text
 backend ...
   option h1-case-adjust-bogus-server
 ```

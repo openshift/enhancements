@@ -219,8 +219,6 @@ the `status` field would report the effective ingress certificate (or possibly
 the CA certificate, if available).  Optionally, the `spec` field could be used
 to configure a custom ingress CA certificate.
 
-#### Drawbacks
-
 Having certificate configuration in both the `Ingresses.config.openshift.io`
 resource and the `IngressControllers.operator.openshift.io` resource may be
 confusing to users.
@@ -238,7 +236,5 @@ with a specific label, for example
 analogous to the `config.openshift.io/inject-trusted-cabundle: "true"` label
 used to configure a trusted CA for [global cluster egress
 proxy](../proxy/global-cluster-egress-proxy.md).
-
-#### Drawbacks
 
 Similar drawbacks apply as with the "Cluster Configuration API" alternative.
