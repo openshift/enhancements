@@ -113,7 +113,7 @@ a directory and point the `openscap-chroot` binary there.
 
 ### User Stories
 
-#### As an OpenShift admin, I want to assess the degree of compliance of my cluster with FedRAMP moderate.
+#### As an OpenShift admin, I want to assess the degree of compliance of my cluster with FedRAMP moderate
 
 This is a use-case where the admin just wants to visualize the gaps in
 compliance. They would perform the remediation themselves, potentially
@@ -130,31 +130,31 @@ content provided by the OpenScap upstream or other "pre-approved" content.
 There [exists a PoC](https://github.com/jhrozek/compliance-operator) of the implementation.
 
 Some things to note from the PoC implementation are:
- * The operator itself schedules a pod per node in the cluster. This was selected
-   (instead of e.g. DaemonSet) because the pods don't have to be long-lived and
-   can just exit when the scan is done.
- * The collector container in the pod reads the contents of the scan results
-   from a file produced by the scanner container and uploads them to a ConfigMap.
-   This is perhaps a bit hacky, but most volume types do not support
-   ReadWriteMany access mode and we need to get the results from files in
-   N pods across N nodes. We could mount a per-pod volume and then gather
-   the results into another volume when the scan is done, but this still
-   means we need a post-run gather operation.
- * For viewing the results by administrator might use [a script](https://github.com/jhrozek/scapresults-k8s/blob/master/scapresults/fetchresults.py)
+* The operator itself schedules a pod per node in the cluster. This was selected
+  (instead of e.g. DaemonSet) because the pods don't have to be long-lived and
+  can just exit when the scan is done.
+* The collector container in the pod reads the contents of the scan results
+  from a file produced by the scanner container and uploads them to a ConfigMap.
+  This is perhaps a bit hacky, but most volume types do not support
+  ReadWriteMany access mode and we need to get the results from files in
+  N pods across N nodes. We could mount a per-pod volume and then gather
+  the results into another volume when the scan is done, but this still
+  means we need a post-run gather operation.
+* For viewing the results by administrator might use [a script](https://github.com/jhrozek/scapresults-k8s/blob/master/scapresults/fetchresults.py)
 
 ### Risks and Mitigations
- * The container running the openScap scan must mount the host root filesystem
-   in order to perform checks on the nodes. We would mitigate the risks by
-   mounting the volume read-only, but this still means the container would
-   run privileged.
- * For checking resources in the cluster, the operator needs to run with a
-   serviceAccount bound to a role that can read all the resources the operator
-   needs to check. This would be mitigated by checking that the operator only
-   has read access to those resources.
- * For cases remediations need to be done, something needs to have permissions
-   to create the MachineConfigs or other resources that need to be created.
-   What would be a safe scheme to do this so that we minimize the risks in case
-   the operator is compromised?
+* The container running the openScap scan must mount the host root filesystem
+  in order to perform checks on the nodes. We would mitigate the risks by
+  mounting the volume read-only, but this still means the container would
+  run privileged.
+* For checking resources in the cluster, the operator needs to run with a
+  serviceAccount bound to a role that can read all the resources the operator
+  needs to check. This would be mitigated by checking that the operator only
+  has read access to those resources.
+* For cases remediations need to be done, something needs to have permissions
+  to create the MachineConfigs or other resources that need to be created.
+  What would be a safe scheme to do this so that we minimize the risks in case
+  the operator is compromised?
 
 ## Design Details
 
@@ -163,7 +163,7 @@ The `compliance-operator` would use the following API to track a compliance scan
 ### API Specification
 The proposed compliance scan API instance with all the properties set:
 
-```
+```yaml
 apiVersion: complianceoperator.compliance.openshift.io/v1alpha1
 kind: ComplianceScan
 metadata:
@@ -176,7 +176,7 @@ spec:
 ```
 
 A minimal `ComplianceScan` instance with only the required properties set:
-```
+```yaml
 apiVersion: complianceoperator.compliance.openshift.io/v1alpha1
 kind: ComplianceScan
 metadata:
@@ -198,12 +198,12 @@ How we present the remediations and allow the cluster administrator to execute
 them is something that should be discussed more.
 
 On a high level, there will be three kinds of remediations:
- * General free-form text guidances. For example, your IDP must support 2FA.
- * More specific advise, but still needs to be applied manually. For example,
-   "configure a message of the day so that a legal notice gets displayed after
-   login by creating a ConfigMap called `motd` in the `openshift` namespace."
- * Gaps that can be remediated in a completely autonomous fashion. For example
-   making sure that the `auditd` service is enabled.
+* General free-form text guidances. For example, your IDP must support 2FA.
+* More specific advise, but still needs to be applied manually. For example,
+  "configure a message of the day so that a legal notice gets displayed after
+  login by creating a ConfigMap called `motd` in the `openshift` namespace."
+* Gaps that can be remediated in a completely autonomous fashion. For example
+  making sure that the `auditd` service is enabled.
 
 At first, we would like to display the remediation in the HTML report so that
 the administrator can copy the advise and, if it's possible to apply directly,
@@ -226,17 +226,17 @@ However, when it comes to applying the remediation, there are two options:
 
 In addition to unit tests in the operator code itself, a CI test would be
 provided that:
- * Rolls out the operator
- * Ensures the operator is running
- * Executes a scan
- * Ensures a result is produced and the scheduled container is cleaned up
-   * To make sure the content is applicable, we should pick one rule that would
-     always pass on a default installation (perhaps "Do other user accounts
-     than root with UID 0 exist?") and one that would always fail (perhaps
-     "Does a `motd` configMap exist?") and check that the results are as
-     expected.
- * Ensures that all resources created during the scan are cleaned up when
-   the parent `ComplianceScan` resource is removed
+* Rolls out the operator
+* Ensures the operator is running
+* Executes a scan
+* Ensures a result is produced and the scheduled container is cleaned up
+  * To make sure the content is applicable, we should pick one rule that would
+    always pass on a default installation (perhaps "Do other user accounts
+    than root with UID 0 exist?") and one that would always fail (perhaps
+    "Does a `motd` configMap exist?") and check that the results are as
+    expected.
+* Ensures that all resources created during the scan are cleaned up when
+  the parent `ComplianceScan` resource is removed
 
 ### Graduation Criteria
 
