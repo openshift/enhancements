@@ -22,7 +22,8 @@ superseded-by:
 1. Explicitly opt into go modules, even though we are inside a `GOPATH` directory,
    otherwise the default auto mechanism turns on, which when it notices vendor
    directory will turn go modules off.
-   ```
+
+   ```bash
    export GO111MODULE=on
    ```
 
@@ -32,7 +33,14 @@ superseded-by:
    in apimachinery, client-go, cli-runtime, kubectl and kubernetes and prime the repos with the basic
    state from k8s (see previous step).
 
-   **Info**: `oc-A.B-kubernetes-X.Y.Z` branches are usually pre-created, so it's sufficient to just check the branches already exist. Also, all the branches contain the latest changes from corresponding k8s repositories (without our carry patches if there are any). I.e. just a clean sync with upstream repositories. We need those as a base for applying our patches and syncing those to oc repository at the end.
+   **Info**: `oc-A.B-kubernetes-X.Y.Z` branches are usually
+   pre-created, so it's sufficient to just check the branches already
+   exist. Also, all the branches contain the latest changes from
+   corresponding k8s repositories (without our carry patches if there
+   are any). I.e. just a clean sync with upstream repositories. We
+   need those as a base for applying our patches and syncing those to
+   oc repository at the end.
+
    Also, in case you are working with pre-release candidates, all the branches will have corresponding suffix in addition. E.g. `oc-4.5-kubernetes-1.18.0-beta.2`.
 
 4. Open a PR in openshift/release to add this new branch of openshift/kubernetes, [similar to this](https://github.com/openshift/release/pull/7582).
@@ -56,17 +64,17 @@ superseded-by:
 
 7. In openshift/kubernetes repository, check out the new oc-A.B-kubernetes-X.Y.X branch and:
    1. Add the replace dependency for openshift/api and openshift/client-go pointing at latest SHA from that repo, eg.
-      ```
+      ```text
       github.com/openshift/api => github.com/openshift/api master
       ```
    2. Run `go list -m all` which will turn above line in go.mod into something like:
-      ```
+      ```text
       github.com/openshift/api v3.9.1-0.20190822120857-58aab2885e38+incompatible // indirect
       ```
    3. Copy and paste the changes from apimachinery, client-go, cli-runtime and kubectl PRs above into kubernetes/staging/src/k8s.io/ directory,
       and use git add *.go because we care only about go files.  This is a manual step, You can use curl like so for each file to copy file
       changes from your PRs above:
-      ```
+      ```console
       cd staging/src/k8s.io/repo
       curl -o path/to/file https://raw.githubusercontent.com/.....
       ```

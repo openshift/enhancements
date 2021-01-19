@@ -35,8 +35,8 @@ This enhancement outlines the changes necessary to `oc` to support disconnected 
 
 Disconnected installation of OLM catalogs can be done with the following `opm` commands:
 
-```
-$ opm registry build --appregistry-namespace=quay.io/community-operators --to disconnected-registry:5000/openshift/community-operators-catalog:4.2.1 
+```console
+$ opm registry build --appregistry-namespace=quay.io/community-operators --to disconnected-registry:5000/openshift/community-operators-catalog:4.2.1
 pulling quay.io/community-operators/etcd...
 buliding catalog...
 mirroring catalog...
@@ -55,7 +55,7 @@ This requires both `oc` and `opm` to be installed and available on bastion hosts
 * Define `oc` commands which can build and mirror all images required for mirroring to a disconnected environment
 
 ### Non-Goals
-* Provide an api for fine-grained control over which operators / operands are mirrored. 
+* Provide an api for fine-grained control over which operators / operands are mirrored.
 
 ## Proposal
 
@@ -69,7 +69,7 @@ The basic approach will be to:
 `oc` will be extended with a command (equivalent to the `opm` command)
 
 ```sh
-$ oc adm catalog build --appregistry-namespace=community-operators --to quay.io/ecordell/community-operators-catalog:4.2.1 
+$ oc adm catalog build --appregistry-namespace=community-operators --to quay.io/ecordell/community-operators-catalog:4.2.1
 ```
 
 `oc adm catalog build` will:
@@ -85,7 +85,7 @@ It will have the following flags:
 - `--to=ref` - the location that the image will be mirrored.
 - `--auth-token=string` - the auth token ([instructions](https://github.com/operator-framework/operator-courier#authentication)) for authenticating with appregistry.
 - `--appregistry-endpoint=url` - the CNR endpoint to authenticate against. Defaults to `"https://quay.io/cnr"`, the endpoint used by OpenShift 4.1-4.3.
-- `--appregistry-org=string` - the organization (namespace) in appregistry to mirror. Each repository within the namespace represents one operator. 
+- `--appregistry-org=string` - the organization (namespace) in appregistry to mirror. Each repository within the namespace represents one operator.
 - `--to-db=path` - if set, the operator database file will be saved at this path.
 
 This command generates and mirrors in one step, because we do not assume that there is any registry available aside from the target disconnected registry.
@@ -125,7 +125,7 @@ and the following flags:
 ### Full Example
 
 ```sh
-$ oc adm catalog build --appregistry-org=community-operators --to disconnected-registry:5000/openshift/community-operators-catalog:4.2.1 
+$ oc adm catalog build --appregistry-org=community-operators --to disconnected-registry:5000/openshift/community-operators-catalog:4.2.1
 pulling quay.io/community-operators/etcd...
 buliding catalog...
 mirroring catalog...
@@ -136,8 +136,8 @@ $ oc catalog mirror disconnected-registry:5000/openshift/community-operators-cat
 $ oc apply -f ./manifests
 ```
 
-## Deprecation Plan 
+## Deprecation Plan
 
-`oc adm catalog build` is only required for building catalog images from appregistry namespaces, which is supported in openshift 4.1-4.3. 
+`oc adm catalog build` is only required for building catalog images from appregistry namespaces, which is supported in openshift 4.1-4.3.
 
 Support for appregistry catalogs will be deprecated for 4.4, and after that point, support for `oc adm catalog build` can be removed. The images to feed to `oc adm catalog mirror` will be available for mirroring without further work by a user.

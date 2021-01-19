@@ -146,7 +146,7 @@ Attempt to gather the `/healthz`, `/version`, and `/metrics` endpoints from pod 
 
 ### Output Format
 
-```
+```text
 ├── cluster-scoped-resources
 │   ├── <API_GROUP_NAME>
 │   │   ├── <API_RESOURCE_PLURAL>.yaml
