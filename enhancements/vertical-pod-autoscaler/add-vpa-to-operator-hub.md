@@ -25,10 +25,17 @@ status: implemented
 
 1. Which global VPA controller options should we expose? The proposed set of options are as follows:
 
- 	- From the [admission-controller](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/pkg/admission-controller/main.go#L47-L58): none
-	- From the [updater](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/pkg/updater/main.go#L39-L48)  (see also [here](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/pkg/updater/priority/update_priority_calculator.go#L40-L42)): none
-	- From the [recommender](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/pkg/recommender/main.go#L35-L52)    (see also [here](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/pkg/recommender/logic/recommender.go#L26-L28) and    [here](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/pkg/recommender/routines/recommender.go#L43-L45)): `recommendation-margin-fraction`, `pod-recommendation-min-cpu-millicores` and
-`pod-recommendation-min-memory-mb`
+   - From the [admission-controller](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/pkg/admission-controller/main.go#L47-L58): none
+   - From the [updater](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/pkg/updater/main.go#L39-L48)  (see also [here](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/pkg/updater/priority/update_priority_calculator.go#L40-L42)): none
+   - From the
+     [recommender](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/pkg/recommender/main.go#L35-L52)
+     (see also
+     [here](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/pkg/recommender/logic/recommender.go#L26-L28)
+     and
+     [here](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/pkg/recommender/routines/recommender.go#L43-L45)):
+     `recommendation-margin-fraction`,
+     `pod-recommendation-min-cpu-millicores` and
+     `pod-recommendation-min-memory-mb`
 
 For any other options which are not configurable, the VPA Operator will be opinionated.
 
@@ -152,7 +159,7 @@ This individual tests will include:
 
 ### Graduation Criteria
 
-#### Tech Preview -> GA 
+#### Tech Preview -> GA
 
 - More testing, including upgrade and downgrade tests and improved e2e tests
 - Sufficient time for feedback
