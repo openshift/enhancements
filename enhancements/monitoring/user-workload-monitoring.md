@@ -64,7 +64,7 @@ Out of scope are:
 
 ## Proposal
 
-![](user-monitoring-deployment.png)
+![user monitoring deployment](user-monitoring-deployment.png)
 
 The existing cluster monitoring stack is going to be extended with additional Prometheus (P) servers
 and one additional Prometheus Operator (PO) reconciling user namespaces
@@ -176,7 +176,7 @@ a feature in prometheus-operator [4] ensures that reconciliation of the correspo
 will be limited to the `openshift-user-workload-monitoring` namespace for the user workload monitoring prometheus operator
 and `openshift-monitoring` namespace for the cluster monitoring prometheus operator.
 
-![](user-namespaces-custom-resources.png)
+![user namespaces custom resources](user-namespaces-custom-resources.png)
 
 User workload monitoring Prometheus Operator (green) reconciles Prometheus/Alertmanager/ThanosRuler custom resources
 in the `openshift-user-workload-monitoring` namespace only.
@@ -231,14 +231,14 @@ For this use case just one system is critical for alerts to work:
 
 ### Console integration
 
-##### Developer perspective
+#### Developer perspective
 
 Alerts/Recording Rules Aggregation implies that the user potentially chooses whether recording or alerting rules are being deployed on the user workload Prometheus or Thanos Ruler.
 In order to retrieve the full list of user workload recording alerting and recording rules the existing Thanos Querier gets support for the Prometheus `/api/v1/rules` and `/api/v1/alerts` API. Internally it fans out to the existing in-cluster Prometheus, the user workload monitoring Prometheus, and ThanosRuler. See [7] and [8] for further implementation details.
 
 Tenancy is achieved using prom-label-proxy and kube-rbac-proxy. Here, returned alerts and rules are constrained and filtered with the tenancy namespace label.
 
-##### Administrator perspective
+#### Administrator perspective
 
 The administrator perspective shows all recording and alerting rules originating both from the shipped cluster-monitoring stack as well as user defined rules in user workload Prometheus and Thanos Ruler using the same mechanism explained above but without tenancy enforcement.
 
@@ -246,11 +246,11 @@ The administrator perspective shows all recording and alerting rules originating
 
 Tenancy is achieved by leveraging the existing topology that is protecting cluster monitoring Prometheus already today.
 
-![](user-monitoring-request.png)
+![user monitoring request](user-monitoring-request.png)
 
 Here, kube-rbac-proxy sidecar is deployed along with prom-label-proxy in front of monitoring components that expose endpoints for querying metrics, recording rules, alerts, and silences.
 
-![](user-monitoring-rbac.png)
+![user monitoring rbac](user-monitoring-rbac.png)
 
 kube-rbac-proxy enforces RBAC constraints by verifying the request in flight.
 It uses a tenancy request parameter (namespace) and verifies the token in flight if the bearer token in flight has the appropriate permissions to access a configured resource given the HTTP verb in flight.
@@ -319,7 +319,7 @@ Embeds the `get prometheusrules.monitoring.coreos.com` permission. It allows to:
 
 1. Read PrometheusRule custom resources matching the permitted namespace.
 
-```
+```console
 $ oc -n <namespace> get prometheusrule <foo>.
 ```
 
@@ -331,7 +331,7 @@ Embeds the `create/edit/delete prometheusrules.monitoring.coreos.com` permission
 
 1. create/modify/delete PrometheusRule custom resources matching the permitted namespace.
 
-```
+```console
 $ oc -n <namespace> create/patch/delete prometheusrule <foo>.
 ```
 
