@@ -37,11 +37,17 @@ The suggested solution will change Keepalived to run in unicast mode by default 
 As mentioned above, currently Keepalived sends the VRRP management protocol via multicast. This requires a
 minimal amount of configuration, as the multicast peers do not need to be specified.
 However, there are likely to be environments where multicast has been disabled because
-of network policy. 
+of network policy.
 
 Additionally, moving to unicast will also solve the possible collisions when two or more clusters are on the same broadcast/multicast domain. This use case described in more detail in `user story #2` below.
 
-In environments where there are lots of existing virtual routers managing Virtual IPs with multicast messaging or disallow the multicast VRRP traffic completely, it is necessary to configure Keepalived unicast communication  rather than making it an optional configuration. Making it default ensures a successful deployment, so It makes sense to make it the default and if we want to continue to support multicast VRRP, have it as an option.
+In environments where there are lots of existing virtual routers
+managing Virtual IPs with multicast messaging or disallow the
+multicast VRRP traffic completely, it is necessary to configure
+Keepalived unicast communication rather than making it an optional
+configuration. Making it default ensures a successful deployment, so
+It makes sense to make it the default and if we want to continue to
+support multicast VRRP, have it as an option.
 
 ### Goals
 
@@ -63,7 +69,7 @@ Change the way we configure and update Keepalived to manage the VIPs using unica
 
 #### Story 1 - Allow deployment where networking doesn't permit multicast
 
-As an administrator, I want to deploy OpenShift on bare metal nodes with 
+As an administrator, I want to deploy OpenShift on bare metal nodes with
 installer-provisioned infrastructure (IPI) where the networking doesn't permit multicast.
 Some customers have restrictions on multicast network traffic (it impacts telco/edge customers since it’s not possible to use multicast between the regional and far-edge locations).
 The current deployment supports high availability for API and default ingress using multicast traffic for VRRP management of the VIP addresses.
@@ -92,9 +98,9 @@ As per the `ingress-vip`, it should resides on a node (either control or compute
 
 #### api-vip implementation
 
-Since the bootstrap IP address is not known until the server is up, a method for 
-retrieving that node will need to be implemented to allow the control plane nodes to include the 
-bootstrap IP address in their Keepalived configuration. 
+Since the bootstrap IP address is not known until the server is up, a method for
+retrieving that node will need to be implemented to allow the control plane nodes to include the
+bootstrap IP address in their Keepalived configuration.
 
 ##### Bootstrap node
 
@@ -112,7 +118,7 @@ The bootstrap node owns the `api-vip' during bootstrap phase because it's config
 
 ##### Control plane nodes
 
-The [Keepalived pod](https://github.com/openshift/machine-config-operator/blob/4c04978faf8ce36af046e18c7722d03f6e60133e/templates/common/baremetal/files/baremetal-keepalived.yaml) in control plane nodes already includes Keepalived and keepalived-monitor containers. 
+The [Keepalived pod](https://github.com/openshift/machine-config-operator/blob/4c04978faf8ce36af046e18c7722d03f6e60133e/templates/common/baremetal/files/baremetal-keepalived.yaml) in control plane nodes already includes Keepalived and keepalived-monitor containers.
 To support unicast mode, the keepalived-monitor should be updated to include the bootstrap node IP address and IP addresses of control plane nodes.
 
 The bootstrap IP address should be fetched from [etcd-endpoints ConfigMap annotation](https://github.com/openshift/cluster-etcd-operator/blob/abe09ece8184e1e18ca12872358bc5e1979e1286/pkg/operator/etcdendpointscontroller/etcdendpointscontroller.go#L96-#L97).
@@ -124,7 +130,11 @@ To avoid a circular dependency (Keepalived--> api-vip--> Keepalived) the control
 Add unicast support for the `ingress-vip` is simpler than the `api-vip`.
 
 The following steps should be done to enable unicast for `ingress-vip`:
-1. Update the Keepalived conf template files for both [control plane nodes](https://github.com/openshift/machine-config-operator/blob/4c04978faf8ce36af046e18c7722d03f6e60133e/templates/master/00-master/baremetal/files/baremetal-keepalived-keepalived.yaml#L49-#L73) and [compute nodes](https://github.com/openshift/machine-config-operator/blob/4c04978faf8ce36af046e18c7722d03f6e60133e/templates/worker/00-worker/baremetal/files/baremetal-keepalived-keepalived.yaml) to include the unicast details.
+1. Update the Keepalived conf template files for both [control plane
+   nodes](https://github.com/openshift/machine-config-operator/blob/4c04978faf8ce36af046e18c7722d03f6e60133e/templates/master/00-master/baremetal/files/baremetal-keepalived-keepalived.yaml#L49-#L73)
+   and [compute
+   nodes](https://github.com/openshift/machine-config-operator/blob/4c04978faf8ce36af046e18c7722d03f6e60133e/templates/worker/00-worker/baremetal/files/baremetal-keepalived-keepalived.yaml)
+   to include the unicast details.
 2. The keepalived-monitor container should be updated to [retrieve](https://github.com/openshift/baremetal-runtimecfg/blob/8242fd84d6c6d267d2d5551abf8e4f778b4f0615/pkg/config/node.go#L219-#L244) the nodes (both compute and control) IP addresses from the kube-apiserver and render them to Keepalived config.
 
 ### Risks and Mitigations
@@ -167,7 +177,7 @@ The following describes the required steps for updating Keepalived mode in the c
 2. Once the file has been identified by the [keepalived-monitor](https://github.com/openshift/machine-config-operator/blob/master/templates/common/baremetal/files/baremetal-keepalived.yaml#L89-#L113) the following actions will be carried out:
    - Verification that desired mode is different from current mode (otherwise exit)
    - Verification that upgrade process is completed, by the comparison between values of `machineconfiguration.openshift.io/currentConfig` and  `machineconfiguration.openshift.io/desiredConfig` in all nodes annotations.
-    - Generation of updated configuration file and initiation of reload message at the desired calculated time.
+   - Generation of updated configuration file and initiation of reload message at the desired calculated time.
 
 ## Implementation History
 

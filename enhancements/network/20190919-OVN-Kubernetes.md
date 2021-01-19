@@ -52,20 +52,20 @@ The node-level process (ovn-southd) is responsible for programming the
 flows from ovn-northd in to the vswitch on the local node. It also handles
 some bookkeeping.
 
-#### Controller
+### Controller
 There will be a controller daemonset on every master node. They will
 perform leader election directly via the Kubernetes API. The ovn-kubernetes
 process will, when it achieves leadership, will be responsible for
 starting the ovn-north process.
 
-#### Data store
+### Data store
 We will write a small controller that, based on the result of the leader
 election process, configures the databases (ovn-ndbd and ovn-sbdb) as
 master or backup. The master will be distributed via an endpoint. If a
 node is backup, it will watch for endpoint changes and update replication
 configuration as fit.
 
-#### Node-level
+### Node-level
 The node-level components are configured as a daemonset. They run on all
 nodes, including the control-plane. They watch for endpoint changes,
 watch the sbdb for changes, and configure the nodes.
@@ -111,4 +111,3 @@ version skew can occur between nodes.
 There are many. But we’ve been involved in the OVN and OVN-Kubernetes
 communities for a long time. We have the expertise, and we think it’s
 worth the investment.
-

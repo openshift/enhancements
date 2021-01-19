@@ -289,7 +289,7 @@ added to the OpenShift repo.
 [3]: https://github.com/openstack/ironic
 [4]: https://github.com/openshift/machine-api-operator/commit/43dd52d5d2dfea1559504a01970df31925501e35
 [5]: https://github.com/metal3-io
-[6]: https://github.com/openshift-metal3 
+[6]: https://github.com/openshift-metal3
 [7]: https://github.com/openshift/installer/blob/master/docs/user/metal/install_ipi.md
 [8]: https://metal3.io/
 [9]: https://github.com/metal3-io/metal3-docs/blob/master/design/nodes-machines-and-hosts.md

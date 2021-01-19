@@ -26,9 +26,9 @@ superseded-by:
 ## Open Questions
 
 This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance, 
+to implement the design.  For instance,
  > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this? 
+  information.  Can we do this?
 
 ## Summary
 
@@ -66,17 +66,17 @@ additional value by:
 
 ## Proposal
 
-### 1. One instance of a new `PodNetworkConnectivityCheck` CR per point to point connection.
+### 1. One instance of a new `PodNetworkConnectivityCheck` CR per point to point connection
 
 A point to point connection is between a source pod and a target endpoint.
 
-Component operators will create a `PodNetworkConnectivityCheck` resource per point-to-point connection. If an operator 
-is not managing the source pod directly, but via a workload controller (such as via a deployment or daemonset), the 
-operator will observe the workload resources to determine the list of pods and create a `PodNetworkConnectivityCheck` 
-resource for each target endpoint per pod. Operators that directly manage a source pod (such as operators that manage 
+Component operators will create a `PodNetworkConnectivityCheck` resource per point-to-point connection. If an operator
+is not managing the source pod directly, but via a workload controller (such as via a deployment or daemonset), the
+operator will observe the workload resources to determine the list of pods and create a `PodNetworkConnectivityCheck`
+resource for each target endpoint per pod. Operators that directly manage a source pod (such as operators that manage
 static-pods) will create `PodNetworkConnectivityCheck` resources for each target endpoint when creating the source pod.
 
-### 2. Detailed status, probably some kind of latency information.
+### 2. Detailed status, probably some kind of latency information
 
 The `PodNetworkConnectivityCheck` will maintain a log of the actions performed during a check, recording if the actions
 were successful, a reason for success or failure, latency of performing the action and some human readable message.
@@ -96,11 +96,11 @@ type LogEntry struct {
 	// Latency records how long the action mentioned in the entry took.
 	Latency time.Duration `json:"latency"`
 }
-``` 
+```
 
 The start and end time of detected outages will be logged separately from the individual check actions.
 
-### 3. It should be possible to clean up garbage after a couple hours of inactivity.
+### 3. It should be possible to clean up garbage after a couple hours of inactivity
 
 A controller to prune `PodNetworkConnectivityCheck` resources, will be provided for inclusion into source pod operators.
 
@@ -113,14 +113,14 @@ there are never more that 20 entries.
 
 Source pods managed by workload controllers will have new `PodNetworkConnectivityCheck` resources to go along with their
 new names. The old `PodNetworkConnectivityCheck` resource will eventually go stale and be cleaned up by the provided
-pruning controller. 
+pruning controller.
 
 Directly managed pods whose names do not change (such as static pods) will share `PodNetworkConnectivityCheck` resources
 across revisions and upgrades.
 
-### 5. Create a binary that can take multiple destinations paired with instances to write to.
+### 5. Create a binary that can take multiple destinations paired with instances to write to
 
-### 6. Use that binary in containers included in each kas and oas (or other interesting) pod.
+### 6. Use that binary in containers included in each kas and oas (or other interesting) pod
 
 The binary will:
 
@@ -251,12 +251,12 @@ const (
 
 Runs in a container in the interested pod. Executes check and updates `PodNetworkConnectivityCheck` resources for the pod.
 
-Usage: 
+Usage:
 
-```
+```console
 p2pnc check tcp-endpoint
 
-``` 
+```
 
 
 ### Risks and Mitigations

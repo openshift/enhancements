@@ -30,7 +30,7 @@ see-also:
 OpenShift's Serverless team has proposed an idea to create a "Quick Starts"
 mechanism which introduces users to various ways of interacting with serverless
 in the Console. Quick Starts should be a mechanism we can use to vastly improve
-our customer's initial user experience on a empty cluster or with all various 
+our customer's initial user experience on a empty cluster or with all various
 workflows:
 
 The goal of this proposal is to define a lightweight mechanism for OpenShift's
@@ -60,7 +60,7 @@ Help users with their understanding the principles of their workflows by guiding
 
 * Introduce CRD format that will be used for writing Quick Starts.
 * Introduce default repository for Quick Starts.
-  
+
 ### User Stories
 
 #### Story 1
@@ -92,7 +92,7 @@ As a operator creator I want to provide operator consumers with a guide on how t
 
 
 QuickStarts CR for [Explore Serverless](https://marvelapp.com/236ge4ig/screen/69908905):
-```
+```yaml
 apiVersion: console.openshift.io/v1
 kind: QuickStart
 metadata:
@@ -108,7 +108,7 @@ spec:
   tasks:
     - title: Install Serverless Operator
       description: The OperatorHub is where you can find a catalog of available Operators to install on your cluster ...
-      review: 
+      review:
         instructions: Make sure the Serverless Operator was successfully installed ...
         taskHelp: Try walking through the steps again to properly install the Serverless Operator
       recapitulation:
@@ -140,8 +140,16 @@ Each Quick Start CR can contain an icon that is specified in the `spec.icon` fie
 
 #### Quick Start's Access Review
 
-Since different users might not have access to specific actions on different resources, it would be pointless for them to go though a Quick Start and be unable to complete its tasks. For that reason the `spec` of the Quick Start CRD contains also `accessReviewResources` field, that should contain an array of resources and actions done on them, that user should perform during taking the Quick Start tour. User's access to the Quick Start is reviewed
-based on array of resource actions. In order for the user to see the Quick Start and take its tour, his access review needs to pass all the listed resources actions.
+Since different users might not have access to specific actions on
+different resources, it would be pointless for them to go though a
+Quick Start and be unable to complete its tasks. For that reason the
+`spec` of the Quick Start CRD contains also `accessReviewResources`
+field, that should contain an array of resources and actions done on
+them, that user should perform during taking the Quick Start
+tour. User's access to the Quick Start is reviewed based on array of
+resource actions. In order for the user to see the Quick Start and
+take its tour, his access review needs to pass all the listed
+resources actions.
 
 #### Air Gapped Environments
 

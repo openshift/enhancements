@@ -103,7 +103,7 @@ application.
 
 - Ease the consumption of the data that was passed into a user space networking
 application by providing a library that both provides an example of how the
-data can be collected and if desired, integrated directly into the application. 
+data can be collected and if desired, integrated directly into the application.
 
 - Ensure customers using SR-IOV can run user space networking applications in
 their deployment.
@@ -237,7 +237,7 @@ The following APIs will be exposed:
 - `GetCPUInfo()`
   - Returns the set of CPUs assigned to the pod.
   - **Note:** When pod is created with non-guaranteed QoS, this API returns all
-  available cpus on the node, not just those dedicated to a pod. 
+  available cpus on the node, not just those dedicated to a pod.
 
 - `GetInterfaces()`
   - Returns the set of interfaces associated with the pod and a structure for
@@ -283,7 +283,7 @@ enhancement, the library should be more useful to CNF developers. Also by moving
 to GA, the library may attract more users and provide feedback on ways to
 improve the usefulness of the library.
 
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 In Tech Preview, the following APIs are defined in
 `github.com/openshift/app-netutil/lib/v1alpha`:
@@ -296,7 +296,7 @@ In Tech Preview, the following APIs are defined in
   each interface containing the type of interface and the data specific to that
   interface type.
 
-##### Tech Preview -> GA 
+#### Tech Preview -> GA
 
 In GA, the following APIs are defined in
 `github.com/openshift/app-netutil/lib/v1`:
@@ -315,7 +315,7 @@ In GA, the following APIs are defined in
   - Returns the amount of hugepage memory reserved for the pod and page size.
   - New API.
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 

@@ -131,7 +131,7 @@ When `--release-image-signature-to-dir` is unset but `--to-dir` is set, the rele
 
 ### User Stories
 
-##### Mirroring to a central registry in a fully air gapped environment
+#### Mirroring to a central registry in a fully air gapped environment
 
 A fully air gapped environment is one in which your cluster nodes cannot access the internet.
 For this reason you must mirror the images and configuration manifests to a filesystem disconnected from that environment and then bring that host or removable media across that gap.
@@ -216,10 +216,16 @@ Users in that situation might be surprised that the cluster was unable to locate
 To mitigate these issues:
 
 * New versions of `oc` should continue to create particular configuration manifests types (e.g. release image signature ConfigMaps), even if newer clusters grow support for alternative mechanisms.
-* When pushing directly to a target cluster, `oc` might query the cluster to extract version information and warn about potential incompatibilies (e.g. "this cluster's version operator is too old to understand the release image signature ConfigMap I'm pushing" or, less usefully, "I'm a lot older than this cluster, and maybe a newer `oc` would be creating more manifests than I am").
-    The downsides to this approach are:
-    * It may be difficult to reliably determine if cluster components support a given object or not.
-    * There's no way to implement it in [the *pushing to disk* flow](#pushing-to-disk).
+* When pushing directly to a target cluster, `oc` might query the
+  cluster to extract version information and warn about potential
+  incompatibilies (e.g. "this cluster's version operator is too old to
+  understand the release image signature ConfigMap I'm pushing" or,
+  less usefully, "I'm a lot older than this cluster, and maybe a newer
+  `oc` would be creating more manifests than I am").
+
+  The downsides to this approach are:
+  * It may be difficult to reliably determine if cluster components support a given object or not.
+  * There's no way to implement it in [the *pushing to disk* flow](#pushing-to-disk).
 * New versions of `oc` could create [custom resources][custom-resources] instead of using generic types such as ConfigMaps.
     This way, configuration manifest application would generate errors when applying manifests to clusters which were too old to understand them.
     But it is too late to use this approach for release image signatures, because the ConfigMap support has [already landed][cvo-config-map-signatures].

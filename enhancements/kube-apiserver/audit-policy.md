@@ -33,10 +33,10 @@ superseded-by:
 ## Summary
 
 This enhancement describes a high-level API in the `config.openshift.io/v1` API group to configure the audit policy for the
-API servers in the system. The audit configuration will be part of the [`APIServers`](https://github.com/openshift/api/blob/master/config/v1/0000_10_config-operator_01_apiserver.crd.yaml) resource. 
+API servers in the system. The audit configuration will be part of the [`APIServers`](https://github.com/openshift/api/blob/master/config/v1/0000_10_config-operator_01_apiserver.crd.yaml) resource.
 It applies to all API servers at once.
 
-The API is meant to enable customers with stronger audit requirements than the average customer to increase the depth 
+The API is meant to enable customers with stronger audit requirements than the average customer to increase the depth
 (from _metadata_-only level, over _request payloads_ to _request and response payload_ level) of audit
 logs, accepting the increased resource consumption of the API servers.
 
@@ -44,23 +44,23 @@ This API is intentionally **not about filtering events**. Filtering is to be don
 It was proven through performance tests (compare alternatives section) that this trade-off is acceptable with small two-digit percent overhead.
 
 The API is not meant to replace the [upstream dynamic audit](https://github.com/kubernetes/enhancements/blob/f1a799d5f4658ed29797c1fb9ceb7a4d0f538e93/keps/sig-auth/0014-dynamic-audit-configuration.md) API
-now and in the future. I.e. the API of this enhancement is only about the master node audit files on disk, not about webhooks or 
+now and in the future. I.e. the API of this enhancement is only about the master node audit files on disk, not about webhooks or
 any other alternative audit log sink.
 
 ## Motivation
 
-The [advanced audit mechanism](https://kubernetes.io/docs/tasks/debug-application-cluster/audit/) was added 
-to kube-apiserver (and other API servers) many versions ago. There are two configuration mechanisms for the 
+The [advanced audit mechanism](https://kubernetes.io/docs/tasks/debug-application-cluster/audit/) was added
+to kube-apiserver (and other API servers) many versions ago. There are two configuration mechanisms for the
 audit policy:
 
-1. [**dynamic audit**](https://github.com/kubernetes/enhancements/blob/f1a799d5f4658ed29797c1fb9ceb7a4d0f538e93/keps/sig-auth/0014-dynamic-audit-configuration.md): an alpha API which lets the 
+1. [**dynamic audit**](https://github.com/kubernetes/enhancements/blob/f1a799d5f4658ed29797c1fb9ceb7a4d0f538e93/keps/sig-auth/0014-dynamic-audit-configuration.md): an alpha API which lets the
 user to create [`AuditSink`](https://github.com/kubernetes/api/blob/1fc28ea2498c5c1bc60693fab7a6741b0b4973bc/auditregistration/v1alpha1/types.go#L65) objects in the cluster with webhook backends which will receive the events.
 2. [**static file-based policies**](https://kubernetes.io/docs/tasks/debug-application-cluster/audit/#audit-policy): policies in the master host file system passed via flags to the API servers.
 
 The former is an alpha API supposed to replace the latter file-based policies. I.e. the latter is supposed
 to go away eventually.
 
-The former policies are very restricted in its current form by only allowing to set 
+The former policies are very restricted in its current form by only allowing to set
 - the [**audit level**](https://github.com/kubernetes/api/blob/1fc28ea2498c5c1bc60693fab7a6741b0b4973bc/auditregistration/v1alpha1/types.go#L102) of events (how much is logged, e.g. meta data only or complete requests or responses)
 - the [**stages**](https://github.com/kubernetes/api/blob/1fc28ea2498c5c1bc60693fab7a6741b0b4973bc/auditregistration/v1alpha1/types.go#L106) audit events are created in (request received, response started, response finished).
 
@@ -73,25 +73,26 @@ we hesitate to go the same route: if the file-based API goes away upstream, it i
 binaries without major effort.
 
 From the requirements we get from customers, it is apparent that the file-based policies are far too low-level, and
-too complex to get right (customer policies we see are insecure very often because users don't get the list of security-sensitive 
-resources right). Hence, this enhancement is about 
+too complex to get right (customer policies we see are insecure very often because users don't get the list of security-sensitive
+resources right). Hence, this enhancement is about
 
-- a high-level API 
-- which will satisfy the needs of most customers with strong regulatory or security requirement, 
+- a high-level API
+- which will satisfy the needs of most customers with strong regulatory or security requirement,
   i.e. it allows them to increase audit verbosity
 - without risking to log security-sensitive resources
 - and it is feasible to maintain the feature in the future when the dynamic audit API takes over.
 
 With performance tests we have proven that there is no strong reason to pre-filter audit logs before
 writing them to disk. Filtering can be done by custom solutions implemented by customers, or by
-using external log processing systems. Hence, we strictly separate filtering from setting the audit log 
+using external log processing systems. Hence, we strictly separate filtering from setting the audit log
 depth using the new API.
 
 ### Goals
 
-1. add an abstract audit policy configuration to `apiservers.config.openshift.io/v1` with few predefined policies
-  - starting with different audit depths policies only,
-  - but stay extensible in the future if necessary.
+1. add an abstract audit policy configuration to
+   `apiservers.config.openshift.io/v1` with few predefined policies
+   - starting with different audit depths policies only,
+   - but stay extensible in the future if necessary.
 2. applied by kube-apiserver, openshift-apiserver (and soon oauth-apiserver).
 
 ### Non-Goals
@@ -103,7 +104,7 @@ depth using the new API.
 
 ## Proposal
 
-We propose to add an `audit.profile` field to `apiservers.config.openshift.io/v1` which selects the 
+We propose to add an `audit.profile` field to `apiservers.config.openshift.io/v1` which selects the
 audit policy to be deployed to all OpenShift-provided API servers in the cluster. From the beginning
 we provide the following profiles:
 
@@ -138,9 +139,9 @@ we provide the following profiles:
       resources:
       - group: "user.openshift.io"
         resources: ["identities"]
-  
+
     # Here the tail begins which differs per profile:
-  
+
     # A catch-all rule to log all other requests at the Metadata level.
     - level: Metadata
       # Long-running requests like watches that fall under this rule will not
@@ -168,7 +169,7 @@ are not logged at all (because even their names are security-sensitive).
 Note: this is in line with [etcd-encryption enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/kube-apiserver/encrypting-data-at-datastore-layer.md#proposal)
 with the exception that payloads of configmaps are also audit logged in `WriteRequestBodies` and `AllRequestBodies` policies.
 
-Any kind of further, deeper policy configuration, e.g. that filters by API groups, user agents or namespaces 
+Any kind of further, deeper policy configuration, e.g. that filters by API groups, user agents or namespaces
 is explicitly not part of this proposal and requires work on the [upstream dynamic audit](https://github.com/kubernetes/enhancements/blob/f1a799d5f4658ed29797c1fb9ceb7a4d0f538e93/keps/sig-auth/0014-dynamic-audit-configuration.md)
 mechanism and its promotion to beta eventually, or a post-processing mechanism of the audit logs.
 
@@ -192,11 +193,11 @@ change up to request payload level detail, but accept increased resource usage.
 #### Story 4
 
 As an even more security and regulatory demanding customer, I want to log **every** non-sensitive request
-both for read **and** for write operations, but also accept even more increased resource usage. 
+both for read **and** for write operations, but also accept even more increased resource usage.
 
 ### Implementation Details/Notes/Constraints
 
-The proposed API looks like this: 
+The proposed API looks like this:
 
 ```yaml
 kind: APIServer
@@ -220,13 +221,13 @@ But we are not going to add these without a strong business case.
 - going beyond the proposed profiles, e.g. by filtering of API groups, user agents or namespaces, yields the risk that the
   defined semantics do not map to the future [upstream dynamic audit](https://github.com/kubernetes/enhancements/blob/f1a799d5f4658ed29797c1fb9ceb7a4d0f538e93/keps/sig-auth/0014-dynamic-audit-configuration.md)
   API types. In the file-based API of kube-apiserver, which implements powerful, but controversial rule behaviour, this kind
-  filters are possible, but it also turned out as the biggest blocker for moving it towards the dynamic variant as part of 
-  the Kubernetes REST API. We cannot and must not follow this failure as it is big risk to the maintainability and future 
+  filters are possible, but it also turned out as the biggest blocker for moving it towards the dynamic variant as part of
+  the Kubernetes REST API. We cannot and must not follow this failure as it is big risk to the maintainability and future
   feasibility of this OpenShift API.
 
 ## Design Details
 
-The profile defined in the `APIServer` singleton instance named `cluster` will be translated into 
+The profile defined in the `APIServer` singleton instance named `cluster` will be translated into
 the respective file-based audit policy of
 
 - kube-apiserver
@@ -260,7 +261,7 @@ The profile translate like this:
         - patch
         - create
         - delete
-        - deletecollection  
+        - deletecollection
       # catch-all rule to log all other requests at the Metadata level.
       - level: Metadata
         # Long-running requests like watches that fall under this rule will not
@@ -272,7 +273,7 @@ The profile translate like this:
 
     ```yaml
         ... # common head
-  
+
         # exclude resources where the body is security-sensitive
         - level: Metadata
           resources:
@@ -344,46 +345,46 @@ The idea is to find the best form of an argument why this enhancement should _no
 
 - we considered offering more fine-grained policies in order to reduce resource overhead. This turned out
   to be unnecessary as the overhead (CPU, memory, IO) is smaller than expected:
-  
-  ### Performance Test Results
 
-  - Platform: AWS
-  - OCP Version: 4.4.0-rc.2
-  - Kubernetes Version: v1.17.1
-  - Worker Node count: 250
-  - Master: 3
-  - Infrastructure: 3
-  - Masters Nodes: r5.4xlarge
-  - Infrastructure Nodes: m5.12xlarge
-  - Worker Nodes: m5.2xlarge
-  
-  The load was running: clusterloader - master vertical testing with 100 projects.
-    
-  The resource consumption was captured querying:
-    
-  -﻿`container_cpu_usage_seconds_total` looking at the `openshift-kube-apiserver` namespace
-  - `container_memory_rss looking` at the `openshift-kube-apiserver namespace`
-  -﻿`node_disk_read_bytes_total`.
-    
-  #### Results: 256 Nodes Idle
-  
-  | Policy | CPU | Memory | Disk |
-  | --- | --- | --- | --- |
-  | Baseline | 11.93% | 1.66GiB | 617kBs |
-  | Write Request | 21.55% | 1.792GiB | 654kBs |
-  | Write RequestResponse | 15.34% | 1.607GiB | 570kBs |
-  | R+W Request Response | 20.39% | 2.035GiB | 880kBs |
-  
-  #### Results: 256 Nodes Under load
-  
-  | Policy | CPU | Memory | Disk |
-  | --- | --- | --- | --- |
-  | Baseline | 39% | 2.154GiB | 1.277MBs |
-  | Write Request | 45% | 2.397GiB | 1.448MBs |
-  | Write RequestResponse | 32% | 2.085GiB | 1.3MBs |
-  | R+W Request Response | 47% | 2.393GiB | 1.974MBs |
-  
-  #### References
-  
-  - [1] target policies: https://gist.github.com/sttts/a36ecba4eb112f605b53b3276524aad1
-  - [2] performance analysis doc: https://docs.google.com/document/d/1061FPmY90686zu2Fcs_ya2SRBCyP0F4rQm4KVrEr8oI/edit#heading=h.jib9yfrphvof
+### Performance Test Results
+
+- Platform: AWS
+- OCP Version: 4.4.0-rc.2
+- Kubernetes Version: v1.17.1
+- Worker Node count: 250
+- Master: 3
+- Infrastructure: 3
+- Masters Nodes: r5.4xlarge
+- Infrastructure Nodes: m5.12xlarge
+- Worker Nodes: m5.2xlarge
+
+The load was running: clusterloader - master vertical testing with 100 projects.
+
+The resource consumption was captured querying:
+
+- `container_cpu_usage_seconds_total` looking at the `openshift-kube-apiserver` namespace
+- `container_memory_rss looking` at the `openshift-kube-apiserver namespace`
+- `node_disk_read_bytes_total`.
+
+#### Results: 256 Nodes Idle
+
+| Policy | CPU | Memory | Disk |
+| --- | --- | --- | --- |
+| Baseline | 11.93% | 1.66GiB | 617kBs |
+| Write Request | 21.55% | 1.792GiB | 654kBs |
+| Write RequestResponse | 15.34% | 1.607GiB | 570kBs |
+| R+W Request Response | 20.39% | 2.035GiB | 880kBs |
+
+#### Results: 256 Nodes Under load
+
+| Policy | CPU | Memory | Disk |
+| --- | --- | --- | --- |
+| Baseline | 39% | 2.154GiB | 1.277MBs |
+| Write Request | 45% | 2.397GiB | 1.448MBs |
+| Write RequestResponse | 32% | 2.085GiB | 1.3MBs |
+| R+W Request Response | 47% | 2.393GiB | 1.974MBs |
+
+#### References
+
+- [1] target policies: https://gist.github.com/sttts/a36ecba4eb112f605b53b3276524aad1
+- [2] performance analysis doc: https://docs.google.com/document/d/1061FPmY90686zu2Fcs_ya2SRBCyP0F4rQm4KVrEr8oI/edit#heading=h.jib9yfrphvof

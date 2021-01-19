@@ -24,13 +24,30 @@ status: planning
 - [ x ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
-In many large organizations, IT groups are separated into teams. A common separation of duties lies between networking/WAN and application or enabling technology deployments. One group will provision or assign OpenStack accounts with core management technology. A second group will be responsible for provisioning networks complete with subnet & zone selection, routing, VPN connections, and ingress/egress rules from the company. Lastly, an applications team (or individual business units) are given a quota for other OpenStack resources to provision application-specific items (instances, containers, databases, pipelines, load balancers, etc.).
+In many large organizations, IT groups are separated into teams. A
+common separation of duties lies between networking/WAN and
+application or enabling technology deployments. One group will
+provision or assign OpenStack accounts with core management
+technology. A second group will be responsible for provisioning
+networks complete with subnet & zone selection, routing, VPN
+connections, and ingress/egress rules from the company. Lastly, an
+applications team (or individual business units) are given a quota for
+other OpenStack resources to provision application-specific items
+(instances, containers, databases, pipelines, load balancers, etc.).
 
 Another example of this split is found in companies that provide public access to their OpenStack resources, giving their tenants/customers quota on compute and storage resources but providing pre-defined networks for them.
 
 In these scenarios, only OpenStack administrators will manage these networks, which will be generally provider networks, (as opposed to tenant networks), since they require physical network infrastructure configuration (typically VLANs). So when OpenStack tenants log in they will find them pre-created, shared with them and ready to use.
 
-To accomplish this, our infrastructure needs an OpenStack account access that can be separated into "networking infrastructure" versus "application". Networking infrastructure includes elements related to the networks (networks, subnets, routing tables, internet gateways, NAT, VPN). Application items include OpenStack resources directly touching nodes within the cluster (LBs, security groups, Swift containers, nodes). This is a typical separation of responsibilities among IT groups and deployment/provisioning pipelines within large companies.
+To accomplish this, our infrastructure needs an OpenStack account
+access that can be separated into "networking infrastructure" versus
+"application". Networking infrastructure includes elements related to
+the networks (networks, subnets, routing tables, internet gateways,
+NAT, VPN). Application items include OpenStack resources directly
+touching nodes within the cluster (LBs, security groups, Swift
+containers, nodes). This is a typical separation of responsibilities
+among IT groups and deployment/provisioning pipelines within large
+companies.
 
 ## Motivation
 
@@ -41,7 +58,7 @@ As an OpenStack user, I would like to deploy OpenShift onto pre-existing OpenSta
 There are no changes in expectations regarding publicly addressable parts of the cluster.
 
 ## Proposal
-- Installer allow users to provide a subnet that should be used for the cluster. 
+- Installer allow users to provide a subnet that should be used for the cluster.
 - In order to support provider networks in IPI, the subnet passed to the installer must meet these requirements:
   - have the capacity and ability for the installer to provision ports on the nodes subnet
   - have dhcp enabled
@@ -73,7 +90,16 @@ pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
 
-Clusters with provider networks often do not use floating IPs, and may have flat networking schemes. In order to accound for this, we will have to make floating IPs in the cluster optional, as well as the external network. so the first change we will make to address this is to make the parameter `platform.openstack.lbFloatingIP` optional. When unset, the installer will not attempt to attach a floating IP to the API port. Likewise, we will have to make the variable `platform.openstack.externalNetwork` optional. When this is unset, the installer will no longer create and attach a floting IP to the bootstrap node.
+Clusters with provider networks often do not use floating IPs, and may
+have flat networking schemes. In order to accound for this, we will
+have to make floating IPs in the cluster optional, as well as the
+external network. so the first change we will make to address this is
+to make the parameter `platform.openstack.lbFloatingIP` optional. When
+unset, the installer will not attempt to attach a floating IP to the
+API port. Likewise, we will have to make the variable
+`platform.openstack.externalNetwork` optional. When this is unset, the
+installer will no longer create and attach a floting IP to the
+bootstrap node.
 
 
 To allow the customer to set up their own custom external access infrastructure, we will have to let them set the `apiVIP` and `ingressVIP` port IPs ahead of the install, so that they can be added to their routing/loadbalancing scheme before the installer is run.
@@ -99,7 +125,7 @@ sshKey: ssh-ed25519 AAAA...
 - The installer should be able to support subnets on provider networks, as well as tenant networks.
 
 ### Resources Created by the Installer
-When the installer is passed a set of subnets, it will no longer create a network, a subnet on that network, the ports on that subnet, the routing, or the floating ips on those networks.  
+When the installer is passed a set of subnets, it will no longer create a network, a subnet on that network, the ports on that subnet, the routing, or the floating ips on those networks.
 
 The installer will continue to create:
 - Images

@@ -32,13 +32,13 @@ superseded-by:
 Kubelets need to be individually authenticated so that they can be individually authorized.
 Individual authentication and authorization allows for fine-grained API access control which limits API access to only
 those resources required to run the pods scheduled on a particular node.
-For example, kubelets can only read secrets that are mounted by pods scheduled to the node running the kubelet. 
+For example, kubelets can only read secrets that are mounted by pods scheduled to the node running the kubelet.
 
 ## Motivation
 
 ### Goals
 
-1. bootstrap credentials should be 
+1. bootstrap credentials should be
     1. long lived.  It should not expire on short time frames.
     2. revokable.  We must be able to revoke this credential if it is compromised.
 2. kubelets need to be individually authenticated
@@ -54,14 +54,14 @@ In Kubernetes, authentication and authorization are separate steps.
 1. Authentication identifies the client making a request.  This is where the username and list of groups comes from.
    See the [Kubernetes Authentication documentation](https://kubernetes.io/docs/reference/access-authn-authz/authentication/)
    for full details.
-    1. Client certificates authentication maps the common name to a username and maps the organization fields to the 
+    1. Client certificates authentication maps the common name to a username and maps the organization fields to the
        groups for that user.
        See the [x509 client certificate documentation](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#x509-client-certs)
-       for full details. 
+       for full details.
 2. Authorization determines whether a particular username, groups, extra-info (things like scopes) tuple is allowed to
    perform the requested action.
-   OpenShift always runs with [RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/), 
-   the [node authorizer](https://kubernetes.io/docs/reference/access-authn-authz/node/), 
+   OpenShift always runs with [RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/),
+   the [node authorizer](https://kubernetes.io/docs/reference/access-authn-authz/node/),
    and a scope limiting module specific to the OpenShift OAuth tokens.
    See the [Kubernetes Authorization documentation](https://kubernetes.io/docs/reference/access-authn-authz/authorization/)
    for full details.
@@ -76,7 +76,7 @@ Kubelet credential flows are not obvious, so we will document them here.  At a h
    on the kube-apiserver.
 2. machine-approver (or a cluster-admin) checks to see if the request CertificateSigningRequest is valid and if so approves.
 3. kube-controller-manager signs the approved CertificateSigningRequest.
-4. kubelet uses the client cert/key pair to authenticate to the kube-apiserver for its API requests. 
+4. kubelet uses the client cert/key pair to authenticate to the kube-apiserver for its API requests.
 
 #### Kubelet Bootstrap Credentials
 
@@ -184,4 +184,3 @@ enhancement:
    One way would be to create a configmap that is deleted four hours after it was created.
    If the configmap is removed, then the machineconfig for masters is updated.
    This leaves us with a four hour gap or a manual step to delete the configmap and wait for a rollout of all masters.
-

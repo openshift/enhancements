@@ -4,7 +4,7 @@
 
 From the `tools` directory, run:
 
-```
+```console
 go run ./report/main.go
 ```
 

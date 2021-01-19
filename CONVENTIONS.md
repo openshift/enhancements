@@ -62,7 +62,15 @@ experience across web consoles, command line tooling, and documentation.
 
 We prefer clear and consistent names that describe the concepts in a human friendly, terse, and jargon-free manner for all aspects of the system - components, API and code types, and concepts.  Jargon is discouraged as it increases friction for new users. Where possible reuse or combine words that are part of other names when those concepts overlap.
 
-For instance, the core component that rolls out the desired version of an OpenShift cluster is called the cluster-version-operator - it is an "operator" (a term with appropriate context in this domain) that controls the "version" of the "cluster". Other components reuse this pattern - this consistency allows a human to infer similarity and reorient as new or unfamiliar components are introduced over time. Likewise the API object that drives the behavior of the cluster related to versions and upgrades is known as `ClusterVersion` (allowing a human to guess at its function from either direction).
+For instance, the core component that rolls out the desired version of
+an OpenShift cluster is called the cluster-version-operator - it is an
+"operator" (a term with appropriate context in this domain) that
+controls the "version" of the "cluster". Other components reuse this
+pattern - this consistency allows a human to infer similarity and
+reorient as new or unfamiliar components are introduced over
+time. Likewise the API object that drives the behavior of the cluster
+related to versions and upgrades is known as `ClusterVersion`
+(allowing a human to guess at its function from either direction).
 
 Once you have decided on a name for a new component, follow these conventions:
 
@@ -89,7 +97,7 @@ metal3-io](https://github.com/metal3-io/metal3-docs/blob/master/design/bare-meta
 
 OpenShift APIs follow the [Kubernetes API conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md).
 
-### Cluster Conventions 
+### Cluster Conventions
 
 A number of rules exist for individual components of the cluster in order to ensure
 the overall goals of the cluster can be achieved. These ensure OpenShift is resilient,
@@ -124,7 +132,7 @@ it is used to manage all elements of the cluster.
 * Every component must remain available to consumers without disruption during upgrades and reconfiguration
   * Disruption caused by node restarts is allowed but must respect disruption policies (PodDisruptionBudget) and should be optimized to reduce total disruption
     * Administrators may control the impact to workloads by pausing machine configuration pools until they wish to take outage windows, which prevents nodes from being restarted
-  * The kube-apiserver and all aggregated APIs must not return errors, reject connections, or pause for abnormal intervals (>5s) during change 
+  * The kube-apiserver and all aggregated APIs must not return errors, reject connections, or pause for abnormal intervals (>5s) during change
     * API servers may close long running connections gracefully (watches, log streams, exec connections) within a reasonable window (60s)
   * Components that support workloads directly must not disrupt end-user workloads during upgrade or reconfiguration
     * E.g. the upgrade of a network plugin must serve pod traffic without disruption (although tiny increases in latency are allowed)
@@ -135,7 +143,13 @@ it is used to manage all elements of the cluster.
 
 All cluster components must declare resource requests for CPU and memory, and should not describe limits.
 
-The CPU request of components scheduled onto the control plane should be proportional to existing etcd limits for a 6 node cluster running the standard e2e suite (if etcd on a control plane component uses 600m during an e2e run, and requests 100m, and the component uses 350m, then the component should request `100m/600m * 350m`).  Components scheduled to all nodes should be proportional to the SDN CPU request during the standard e2e suite.  
+The CPU request of components scheduled onto the control plane should
+be proportional to existing etcd limits for a 6 node cluster running
+the standard e2e suite (if etcd on a control plane component uses 600m
+during an e2e run, and requests 100m, and the component uses 350m,
+then the component should request `100m/600m * 350m`).  Components
+scheduled to all nodes should be proportional to the SDN CPU request
+during the standard e2e suite.
 
 The memory request of cluster components should be set at 10% higher than their p90 memory usage over a standard e2e suite execution.
 

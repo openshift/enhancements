@@ -53,7 +53,7 @@ The minimal requirements includes:
   - hostname resolution for masters and workers nodes.
   - `api-int` hostname resolution.
 * Highly available load-balancing API access for internal clients.
-* Highly available access for default ingress. 
+* Highly available access for default ingress.
 
 ### Non-Goals
 
@@ -80,7 +80,7 @@ VIPs (Virtual IP) and keepalived are used to provide high availability.
 "virtual" ip address (VIP) that can failover between multiple hosts using
 [VRRP](https://www.haproxy.com/documentation/hapee/1-5r2/configuration/vrrp/#understanding-vrrp)
 
-#### Virtual IP addresses 
+#### Virtual IP addresses
 
 A VIP (Virtual IP) is used to provide failover of the service across the relevant machines
 (including the bootstrap instance).
@@ -92,7 +92,7 @@ Two VIPs are supported:
 
 The api-vip is used for API communication and it is provided by the user
 via the `install-config.yaml` [parameter](https://github.com/openshift/installer/blob/master/pkg/types/baremetal/platform.go#L86-L89)
-or `openshift-installer` terminal prompts. 
+or `openshift-installer` terminal prompts.
 
 The api-vip can be either private or public IPv4/IPv6 address.
 The external `api.$cluster_name.$base-domain` DNS record should point to api-vip.
@@ -126,7 +126,7 @@ is configured via the
 ignition template.
 The control plane keepalived configuration uses service checks to either add or remove points to the instance weight.
 Currently the service checks include:
-- curl locally the api on port 6443 and check local HAProxy instance health endpoint 
+- curl locally the api on port 6443 and check local HAProxy instance health endpoint
 
 The VIP will move to one of the control plane nodes, but only after the
 bootstrap process has completed and the bootstrap instance is stopped. This happens
@@ -178,11 +178,11 @@ not rely on being able to program an organization’s DNS infrastructure in all
 cases.  We address these challenges in the following way:
 
 1. Self host some DNS infrastructure to provide DNS resolution for records only
-   needed internal to the cluster. In case a request can't be resolved it should be forwarded 
-   to the upstream DNS servers. A CoreDNS instance (detailed described below) is used to provide this capability.    
+   needed internal to the cluster. In case a request can't be resolved it should be forwarded
+   to the upstream DNS servers. A CoreDNS instance (detailed described below) is used to provide this capability.
 2. Make use of mDNS (Multicast DNS) to dynamically discover the addresses of
    hosts that we must resolve records for.
-3. Update `/etc/resolv.conf` in [control plane and compute nodes](https://github.com/openshift/machine-config-operator/blob/master/templates/common/baremetal/files/NetworkManager-resolv-prepender.yaml) to forward requests to the self hosted DNS described in `1` above. 
+3. Update `/etc/resolv.conf` in [control plane and compute nodes](https://github.com/openshift/machine-config-operator/blob/master/templates/common/baremetal/files/NetworkManager-resolv-prepender.yaml) to forward requests to the self hosted DNS described in `1` above.
 
 **NOTE**:
 **Docs**: As indicated above Multicast DNS is being used.  The implications of
@@ -222,8 +222,8 @@ renders the `mdns-publisher` [configuration](https://github.com/openshift/machin
 Replacing `.NonVirtualIP`, `.Cluster.Name` and `.ShortHostname`.
 
 The `mdns-publisher` is the component that runs on each host to make itself
-discoverable by other hosts in the cluster.  Both control plane hosts and worker nodes 
-advertise `$node_hostname` names.  
+discoverable by other hosts in the cluster.  Both control plane hosts and worker nodes
+advertise `$node_hostname` names.
 
 `mdns-publisher` does not run on the bootstrap node, as there is no need for any
 other host to discover the IP address that the bootstrap instance gets from DHCP.
@@ -281,11 +281,11 @@ only Route53 will be needed to access the API.  The other potential issue
 will be determining the IP addresses for the VIPs but reusing the existing
 IPAM server might be an option.
 
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 

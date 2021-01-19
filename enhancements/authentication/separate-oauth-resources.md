@@ -78,7 +78,7 @@ The proposal is safe to ship at any point with clearly working upgrade/downgrade
 
 If the system works, we did it.
 
-##### Removing a deprecated feature
+### Removing a deprecated feature
 
 See upgrade/downgrade.
 

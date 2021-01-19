@@ -33,7 +33,7 @@ option called `unqualified-search-registries`. This is the list of registries th
 
 ## Motivation
 
-Today, when a user wants to pull images using short names, they have to create two `machineConfigs` (one for the master pool and one for the worker pool) that create a file under `/etc/containers/registries.conf.d` with the changes they want for `unqualified-search-registries`. 
+Today, when a user wants to pull images using short names, they have to create two `machineConfigs` (one for the master pool and one for the worker pool) that create a file under `/etc/containers/registries.conf.d` with the changes they want for `unqualified-search-registries`.
 
 Users may have multiple internal registries that they use for pulling images. The DNS of these registries could change, and that would require changing the image spec to match this, which can be tedious. Using `unqualified-search-registries` to be able to configure the list of registries to search from allows the user to use short names for image pulls.
 
@@ -46,7 +46,14 @@ Users can currently configure `AllowedRegistries`, `BlockedRegistries`, and `Ins
 
 ### Non-Goals
 
-- Builds and Imagestream Imports will not support the use of short names. There is an added complexity for these components to figure out the correct credentials needed for the short names and the security risks associated with using short names. Since we highly discourage short names, we are only adding support for `unqualified-search-registries` at the runtime level. Users can only use short names in their pod spec and only cri-o/podman will support it.
+- Builds and Imagestream Imports will not support the use of short
+  names. There is an added complexity for these components to figure
+  out the correct credentials needed for the short names and the
+  security risks associated with using short names. Since we highly
+  discourage short names, we are only adding support for
+  `unqualified-search-registries` at the runtime level. Users can only
+  use short names in their pod spec and only cri-o/podman will support
+  it.
 
 ## Proposal
 
@@ -56,7 +63,7 @@ The Image API is extended by adding an optional `UnqualifiedSearchRegistries` fi
 // RegistrySources holds cluster-wide information about how to handle the registries config.
 type RegistrySources struct {
     // ...
-    
+
 	// unqualifiedSearchRegistries are registries that will be searched when pulling images using short names.
 	// +optional
 	UnqualifiedSearchRegistries []string `json:"unqualifiedSearchRegistries,omitempty"`
@@ -88,7 +95,15 @@ The user can run `oc edit images.config.openshift.io cluster` and add `Unqualifi
 
 #### As a user, I would like to use multiple internal registries to pull my images
 
-The user can use multiple internal registries to pull images with short names without having to change the image spec every time that the registries' DNS changes. This can be done by configuring the list of `unqualified-search-registries` to reflect the changes in the internal registries names by running `oc edit images.config.openshift.io cluster` and add `UnqualifiedSearchRegistries` under `RegistrySources`. Once this is done, the containerRuntimeConfig controller will roll out the changes to the nodes.
+The user can use multiple internal registries to pull images with
+short names without having to change the image spec every time that
+the registries' DNS changes. This can be done by configuring the list
+of `unqualified-search-registries` to reflect the changes in the
+internal registries names by running `oc edit
+images.config.openshift.io cluster` and add
+`UnqualifiedSearchRegistries` under `RegistrySources`. Once this is
+done, the containerRuntimeConfig controller will roll out the changes
+to the nodes.
 
 ### Implementation Details/Notes/Constraints
 
@@ -98,7 +113,7 @@ Implementing this enhancement requires changes in:
 
 This is what the `/etc/containers/registries.conf` file currently looks like on the nodes:
 
-```
+```toml
 unqualified-search-registries = ['registry.access.redhat.com', 'docker.io']
 
 [[registry]]
@@ -107,7 +122,7 @@ unqualified-search-registries = ['registry.access.redhat.com', 'docker.io']
 
 This is an example of the cluster wide images.config.openshift.io:
 
-```
+```yaml
 apiVersion: config.openshift.io/v1
 kind: Image
 metadata:
@@ -122,7 +137,7 @@ spec:
 
 The above Image CR will create a drop-in file at `/etc/containers/registries.conf.d` on each file, which will look like:
 
-```
+```toml
 unqualified-search-registries = ['reg1.io', 'reg2.io', 'reg3.io']
 ```
 
@@ -131,7 +146,16 @@ Note: adding a drop-in file at `/etc/containers/registries.conf.d` completely ov
 The new list of `unqualified-search-registries` will be the list specified in the drop-in file at `/etc/containers/registries.conf.d`.
 When a user runs a pod using an image short name, cri-o/podman/buildah will check `reg1.io`, `reg2.io`, and `reg3.io` for any images matching the short name.
 
-Documentations: We will document that we heavily advise against using this feature unless it is absolutely needed due to the security risks. An example case would be when a user has multiple internal registries whose DNS changes frequently, so image short name has to be used in the image spec. We will also document that when you do this, the whole list is overridden and there is no fall back to the default list of `unqualified-search-registries`. We will also document that the `unqualified-search-registries` list will not work with the builds and imagestream imports components. It will only work with the pod spec when using short names.
+Documentations: We will document that we heavily advise against using
+this feature unless it is absolutely needed due to the security
+risks. An example case would be when a user has multiple internal
+registries whose DNS changes frequently, so image short name has to be
+used in the image spec. We will also document that when you do this,
+the whole list is overridden and there is no fall back to the default
+list of `unqualified-search-registries`. We will also document that
+the `unqualified-search-registries` list will not work with the builds
+and imagestream imports components. It will only work with the pod
+spec when using short names.
 
 ### Risks and Mitigations
 
@@ -182,5 +206,3 @@ History`.
 ## Drawbacks
 
 ## Alternatives
-
-

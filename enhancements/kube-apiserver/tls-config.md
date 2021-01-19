@@ -23,7 +23,7 @@ superseded-by:
 
 Cluster-admins need to be able to choose which cipher suites their kube-apiserver, oauth-server, and ingress controllers use.
 This is a balance of corporate policy and compatibility with existing systems.  This should be a shared, top level
-configuration amongst the affected components with a local override for ingress controllers to allow workloads to have a different 
+configuration amongst the affected components with a local override for ingress controllers to allow workloads to have a different
 level of TLS config restrictions than the infrastructure.
 
 ## Release Signoff Checklist
@@ -38,10 +38,10 @@ level of TLS config restrictions than the infrastructure.
 
 Cluster-admins need to be able to choose which cipher suites their kube-apiserver, oauth-server, and ingress controllers use.
 This is a balance of corporate policy and compatibility with existing systems.  This should be a shared, top level
-configuration amongst the affected components with a local override for ingress controllers to allow workloads to have a different 
+configuration amongst the affected components with a local override for ingress controllers to allow workloads to have a different
 level of TLS config restrictions than the infrastructure.
 
-The idea is to create a set of standard profiles: old, intermediate, modern, and custom that can be used.  Old, intermediate, 
+The idea is to create a set of standard profiles: old, intermediate, modern, and custom that can be used.  Old, intermediate,
 and modern are intent based.  We will update them as we see fit to stay up to date with standards as time goes on.  Custom
 allows a user to specify exactly which options they want.
 
@@ -54,7 +54,7 @@ is very easy to produce once, but very hard to maintain in an auto-updating worl
 
 1. Easily configure a uniform level of TLSConfig (ciphers, tls versions, and DH key size) across kube-apiserver, oauth-server,
  and all ingress controllers. These are the only known exposed services today.
-2. Allow overriding on a per-ingress-controller basis.  Workloads and infrastructure may have different requirements and we need to 
+2. Allow overriding on a per-ingress-controller basis.  Workloads and infrastructure may have different requirements and we need to
  support that use-case.
 
 ### Non-Goals
@@ -106,7 +106,7 @@ type TLSSecurityProfile struct {
 	// +nullable
 	Modern *ModernTLSProfile `json:"modern,omitempty"`
 	// custom is a user-defined TLS security profile. Be extremely careful using a custom
-	// profile as invalid configurations can be catastrophic. 
+	// profile as invalid configurations can be catastrophic.
 	//
 	// +optional
 	// +nullable
@@ -272,14 +272,14 @@ var TLSProfiles = map[TLSProfileType]*TLSProfileSpec{
 	},
 }
 
-``` 
+```
 
 The APIServer will get a new optional member like this:
 
 ```go
 type APIServerSpec struct {
 	// ...snip
-	
+
 	// tlsSecurityProfile specifies settings for TLS connections for externally exposed servers.
 	//
 	// If unset, a default (which may change between releases) is chosen.
@@ -292,7 +292,7 @@ The `TLSProfiles` map will be used to ensure that individual components honor th
 profiles.  This is congruent to how we coordinate features across operators.
 
 
-### Implementation Details/Notes/Constraints 
+### Implementation Details/Notes/Constraints
 
 Implementation has multiple steps.
 

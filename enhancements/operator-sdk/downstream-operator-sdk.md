@@ -349,7 +349,7 @@ updated when necessary the same way.
 
 The process to update `master` will be as follows:
 
-```
+```console
 cd operator-sdk
 git checkout master
 ./UPSTREAM-MERGE.sh v1.0.0
@@ -360,7 +360,7 @@ git push origin NAME_OF_BRANCH
 
 For updating a specific release branch the process will largely look the same:
 
-```
+```console
 cd operator-sdk
 git checkout release-4.6 # checkout specific branch to be updated
 ./UPSTREAM-MERGE.sh v0.19.5

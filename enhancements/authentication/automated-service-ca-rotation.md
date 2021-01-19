@@ -132,11 +132,11 @@ and the functionality could be separately extracted for operator reuse.
     - Reordering to solve for *D*:
       - *D* = *R* + *M*
     - Since each of *R* and *M* must be greater than *I*:
-      - *D* = *R* + *M* > 2 * *I*
+      - *D* = *R* + *M* > 2 \* *I*
     - Since *R* >= *M* should be true, simplify to *R* = *M*:
-      - *D* = 2 * *R* > 2 * *I*
+      - *D* = 2 \* *R* > 2 \* *I*
     - Substitute *I* = 12:
-      - *D* = 2 * *R* > 24
+      - *D* = 2 \* *R* > 24
     - Picking *R* = *M* = 13 will satisfy the relation, resulting in *D* = 26
   - Worst-case timelines with old and new values for CA duration:
     - Let minimum duration *M* = 6 months, total duration *D* = 12 months:
@@ -268,20 +268,20 @@ to the lack of a grace period for services and clients to converge on the new
 trust chain.
 
 - Testing in advance of service CA rotation whether consumers of CA artifacts are
-refreshing in a timely manner is complicated:
- - Unrefreshed clients and servers would be able to communicate without error
-   with both refreshed and unrefreshed clients and servers until the expiry of
-   the pre-rotation CA.
- - Detecting clients that do not refresh would require starting a cluster with
-   automatic rotation disabled and provisioned with a near-expiry service
-   CA. This would allow a subsequent forced rotation to flush out the failure of
-   unrefreshed clients when the pre-rotation CA had expired.
- - Without knowing that a given deployment or replicaset was automatically
-   responding to a serving cert being regenerated or a new ca bundle being
-   injected, a pod that references a serving cert secret or ca bundle configmap
-   could simply be deleted if it was started before the most recent rotation. This
-   would ensure that the pod was restarted with the current state of the service
-   ca artifacts it was consuming.
+  refreshing in a timely manner is complicated:
+  - Unrefreshed clients and servers would be able to communicate without error
+    with both refreshed and unrefreshed clients and servers until the expiry of
+    the pre-rotation CA.
+  - Detecting clients that do not refresh would require starting a cluster with
+    automatic rotation disabled and provisioned with a near-expiry service
+    CA. This would allow a subsequent forced rotation to flush out the failure of
+    unrefreshed clients when the pre-rotation CA had expired.
+  - Without knowing that a given deployment or replicaset was automatically
+    responding to a serving cert being regenerated or a new ca bundle being
+    injected, a pod that references a serving cert secret or ca bundle configmap
+    could simply be deleted if it was started before the most recent rotation. This
+    would ensure that the pod was restarted with the current state of the service
+    ca artifacts it was consuming.
 
 - Every team should confirm whether any components that interact with service
 serving CAs (either by consuming a service that is signed with one, or by

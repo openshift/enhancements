@@ -26,7 +26,14 @@ status: implementable
 
 ## Summary
 
-The OpenShift Console has many features targeting different personas; from the Administrator to the Developer. There are limited features in Console today that save settings in order to enhance the user experience upon returning to any particular page. These settings are stored in browser local storage and therefore are not accessible in another browser or device. Many features that could benefit from customization do not provide customization today due to lack of persisted user settings.
+The OpenShift Console has many features targeting different personas;
+from the Administrator to the Developer. There are limited features in
+Console today that save settings in order to enhance the user
+experience upon returning to any particular page. These settings are
+stored in browser local storage and therefore are not accessible in
+another browser or device. Many features that could benefit from
+customization do not provide customization today due to lack of
+persisted user settings.
 
 By introducing persisted user settings, many new and existing features will be designed with user settings in mind. Providing a richer experience which the user can tailor to their wants.
 
@@ -107,7 +114,13 @@ None
 
 Some user settings today are stored in browser local storage. The Console frontend will implement support to merge these settings from local storage and override the defaults when no persisted user settings have been stored for the user.
 
-Each key is defined by the code producing the user setting and is not intended to be maintained as an API. When upgrading to a new version of Console where the previous already had user settings, the onus will be on the code consuming each individual user setting to manage their own migration if the old value is no longer valid. This is the same procedure used in previous Console releases when dealing with user settings stored in local storage.
+Each key is defined by the code producing the user setting and is not
+intended to be maintained as an API. When upgrading to a new version
+of Console where the previous already had user settings, the onus will
+be on the code consuming each individual user setting to manage their
+own migration if the old value is no longer valid. This is the same
+procedure used in previous Console releases when dealing with user
+settings stored in local storage.
 
 It is suggested that the value of each user setting remain consistent across versions of the Console and if the data type or meaning of the value were to change that a new key be used instead of overriding the old value.
 

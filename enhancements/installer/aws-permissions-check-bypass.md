@@ -12,7 +12,7 @@ creation-date: 2020-05-07
 last-updated: 2020-05-15
 status: provisional
 see-also:
-  - ""  
+  - ""
 replaces:
   - ""
 superseded-by:
@@ -111,7 +111,7 @@ the credentials provided are sufficient for installation and to affect the
 in-cluster behavior of cloud-credential-operator.
 
 Extend the install-config type in the installer repo:
-```
+```go
 type credentialsMode string
 
 const (
@@ -154,7 +154,7 @@ the cloud-credential-operator can then use to affect CCO runtime behavior.
 ### cloud-credential-operator
 Formalize the constants in cloud-credential-operator repo to define the
 acceptable credentials (matching the definitions in the installer):
-```
+```go
 type CredentialsMode string
 
 const (
@@ -182,7 +182,7 @@ const (
 
 Introduce a config object to allow modifying the runtime behavior of CCO.
 
-```
+```go
 type CloudCredentialOperatorConfig struct {
 	Spec CloudCredentialOperatorConfigSpec `json:"spec"`
 }
@@ -212,7 +212,7 @@ installer with the `forceCredentialsMode` field set appropriately. This will
 generate manifests for CCO containing the CloudCredentialsConfig CR representing
 the value in the install-config.yaml.
 
-```
+```console
 ./openshift-install create install-config --dir my-aws-cluster
 # edit generated install-config to add the `credentialsMode: "mint"` field
 ./openshift-install create cluster --dir my-aws-cluster
@@ -221,7 +221,7 @@ the value in the install-config.yaml.
 This will cause the installer to skip any pre-flight permissions checks and lay
 down the manifest for CCO to indicate that `mint` mode should be assumed:
 
-```
+```yaml
 apiVersion: v1
 kind: CloudCredentialOperatorConfig
 metadata:
@@ -309,7 +309,7 @@ information when certain types of cloud API errors are encountered.
 ## Alternatives
 
 Working with AWS to enhance the permissions simulation API to cover these
-complex permissions situations. 
+complex permissions situations.
 
 Take the installer out of needing to worry about generating a manifest for CCO
 and just allow the person installing the cluster to provide their own

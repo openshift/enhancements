@@ -65,7 +65,7 @@ To debug our existing install and upgrade failures.
 
 ## Proposal
 
-The overall goal: 
+The overall goal:
  1. have an e2e-observer process that is expected to be running before a kubeconfig exists
  2. the kubeconfig should be provided to the e2e-observer at the earliest possible time.  Even before it can be used.
  3. the e2e-observer process is expected to detect the presence of the kubeconfig itself
@@ -94,9 +94,9 @@ This is a sketch of a possible path.
  7. Ten minutes teardown begins, something in CI gathers a well known directory,
     `/var/e2e-observer`, which may contain `/var/e2e-observer/junit` and `/var/e2e-observer/artifacts`.  These contents
     are placed in some reasonable spot.
-    
+
     This could be optimized with a file write in the other direction, but the naive approach doesn't require it.
- 8. All resources are cleaned up.  
+ 8. All resources are cleaned up.
 
 ### Requirements on e2e-observer authors
  1. Your pod must be able to run against *every* dimension. No exceptions.  If your pod needs to quietly no-op, it can do that.
@@ -116,4 +116,4 @@ Even today, we have a wide variance in the quality of artifacts from different j
 ### Modify the openshift-tests command
 This is easy for some developers, BUT as e2e monitor shows us, it doesn't provide enough information.
 We need information from before the test command is run to find many of our problems.
-Missing logs and missing intermediate resource states (intermediate operator status) are the most egregious so far. 
+Missing logs and missing intermediate resource states (intermediate operator status) are the most egregious so far.

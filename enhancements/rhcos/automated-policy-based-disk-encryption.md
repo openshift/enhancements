@@ -15,7 +15,7 @@ approvers:
   - "Steve Milner @ashcrow"
   - "Ian McLeod @imcleod"
   - "Micah Abbott @miabbott"
- 
+
 creation-date: 2019-09-20
 last-updated: 2019-09-20
 status: provisional
@@ -31,7 +31,7 @@ status: provisional
 - [ ] Policy Definition
 - [ ] Feature implemented and functional
 - [ ] Test plan is defined
-- [ ] Test plan implemented 
+- [ ] Test plan implemented
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 - [ ] Transition Plan to Ignition controlled policy application
@@ -92,7 +92,14 @@ Clevis handles the automated unlocking of the root filesystem.
 
 #### Story 1: Requirements
 
-ACME Corp policy requires operating system level encryption to be used for their bare metal servers to preserve data confidentiality after hard drives are de-commissioned.  Their servers have TPM2 devices, and by configuring a binding of the root device to the TPM, the data on the hard drives in inaccessible after they are removed from the servers.  However, this is transparent to the system administrators and does not require them to manually enter a passphrase or key during boot.
+ACME Corp policy requires operating system level encryption to be used
+for their bare metal servers to preserve data confidentiality after
+hard drives are de-commissioned.  Their servers have TPM2 devices, and
+by configuring a binding of the root device to the TPM, the data on
+the hard drives in inaccessible after they are removed from the
+servers.  However, this is transparent to the system administrators
+and does not require them to manually enter a passphrase or key during
+boot.
 
 #### Story 2: Upgrades
 
@@ -103,7 +110,7 @@ Clusters upgraded from earlier versions will have older boot images and hence no
 This proposal introduces dependencies on RHCOS and the the Installer only. The vast majority of the work will be done through operating system level hooks.
 * A new Dracut module will be added. Upstream `cryptsetup` has a in-tree [Dracut Module for disk-reencryption](https://gitlab.com/cryptsetup/cryptsetup/tree/master/misc/dracut_90reencrypt).  The module will need to be extended to support Cleivs configurations.
 * RHCOS will need to add Clevis and its dependencies. Clevis provides TPM2 and Tang support upon installation and provides the backbone for extending to additional key-stores.
-* Extend the Cloud CryptAgent to act as a Clevis Pin. This not a requirement for release. 
+* Extend the Cloud CryptAgent to act as a Clevis Pin. This not a requirement for release.
 * The initramfs will have a `coreos-encrypt.service` systemd unit implementing this.
 
 ## Design Details
@@ -130,7 +137,7 @@ At the time of this writing, encryption is configured by providing custom `Machi
 
 ### Dracut Module
 
-The upstream Crytpsetup project already has a Dracut module for [re-encrypting a root LUKS volume](https://gitlab.com/cryptsetup/cryptsetup/tree/master/misc/dracut_90reencrypt). This module will need to be extended to support using a NBDE policy. Its anticipated the extension work will be submitted upstream to the Clevis community. 
+The upstream Crytpsetup project already has a Dracut module for [re-encrypting a root LUKS volume](https://gitlab.com/cryptsetup/cryptsetup/tree/master/misc/dracut_90reencrypt). This module will need to be extended to support using a NBDE policy. Its anticipated the extension work will be submitted upstream to the Clevis community.
 
 On first boot, the Dracut module will:
 * Create a random passphrase and encrypt it using the policy.
@@ -139,7 +146,7 @@ On first boot, the Dracut module will:
 * Destroy the random passphrase's key-slot.
 
 If any of these steps fail, the node MUST panic with a message akin to:
-```
+```text
 FAILED TO APPLY ENCRYPTION POLICY FOR ROOT DISK!
 ERROR finding TPM2 device.
 ```
@@ -156,7 +163,7 @@ When Clevis binds a LUKS volume, a new JOSE object is written in the LUKS meta-d
 ### Policy Config Service
 
 Updates for the policy binding will be provided by a "service" to monitor for Clevis configurations changes. As a _very_ simple example of the service as a SystemD Unit::
-```
+```toml
 [Unit]
 Description=Clevis Configuration Monitor
 # clevis.json can be written by either Ignition or the Machine Config
@@ -174,9 +181,15 @@ In order to update a policy, the existing policy must be valid and accessable. T
 
 ### On-line Re-encryption
 
-Starting with CryptSetup 2.20, and in the forth-coming RHEL 8.1, online re-encryption is provided. Online re-encryption is not possible in a bare, unencrypted LUKS volume. The other problem with online re-encryption is that it has a considerable cost in terms of speed *and* IO performance. If the disk is a network-attached volume, the blocking I/O on the device and CPU and network will effectively render the node unusable.
+Starting with CryptSetup 2.20, and in the forth-coming RHEL 8.1,
+online re-encryption is provided. Online re-encryption is not possible
+in a bare, unencrypted LUKS volume. The other problem with online
+re-encryption is that it has a considerable cost in terms of speed
+*and* IO performance. If the disk is a network-attached volume, the
+blocking I/O on the device and CPU and network will effectively render
+the node unusable.
 
-```
+```console
 # cryptsetup reencrypt /dev/nvme0n1p3
 Enter passphrase for key slot 0:
 Auto-detected active dm device 'luks-a3fa8863-289a-4fdc-bb4d-f2848e66aa3e' for data device /dev/nvme0n1p3.
@@ -202,14 +215,23 @@ This design does not require any changes to the CoreOS installer. Once the CoreO
 
 #### Caveat Emptor
 
-With LUKS, [a passphrase is *NOT* the master key used for encryption](https://gitlab.com/cryptsetup/cryptsetup/blob/master/FAQ#L56-63); the master key is encrypted in the LUKS header on disk. Passphrases are used to unlock the master key. Each passphrase is stored in a "key-slot," which can be removed (`cryptsetup luksKillSlot...`). [An attacker could use an old snapshot or block-level backup to defeat encryption](https://gitlab.com/cryptsetup/cryptsetup/blob/master/FAQ#L56-63). If a user cycles a Clevis configuration, then existing block-level backups and snapshots should be secured unless a re-encryption operation is performed.
+With LUKS, [a passphrase is *NOT* the master key used for
+encryption](https://gitlab.com/cryptsetup/cryptsetup/blob/master/FAQ#L56-63);
+the master key is encrypted in the LUKS header on disk. Passphrases
+are used to unlock the master key. Each passphrase is stored in a
+"key-slot," which can be removed (`cryptsetup luksKillSlot...`). [An
+attacker could use an old snapshot or block-level backup to defeat
+encryption](https://gitlab.com/cryptsetup/cryptsetup/blob/master/FAQ#L56-63). If
+a user cycles a Clevis configuration, then existing block-level
+backups and snapshots should be secured unless a re-encryption
+operation is performed.
 
 ##### LUKS overhead: null cipher
 
 If a user opts out of the policy, then the root filesystem will be unencrypted in a bare LUKS container using the null cipher. When using the null cipher (no encryption), the overhead is negligible. The "overhead" really becomes cosmetic and introduces more steps to open a null-encrypted container.
 
 To illustrate the point, the current disk format mount process is simply: `mount /dev/disk/by-label/rootfs /mnt`, while the new process would be:
-```
+```console
 # echo "" | cryptsetup luksOpen /dev/vda4 coreos_crytpfs
 # mount /dev/mapper/coreos_cryptfs /mnt
 ```
@@ -219,21 +241,21 @@ Note: the above examples assumes a Linux rescue terminal with the dependencies.
 ##### Disaster Recovery
 
 Once a policy is applied, by necessity, any disaster recovery requires access to the key-escrow service. This means:
-* When bound to TPM2, the chasis is required. In the case of virtual TPM, the _exact same instance must be used_. 
+* When bound to TPM2, the chasis is required. In the case of virtual TPM, the _exact same instance must be used_.
 * If bound to a network service (Tang or KMS), then the service must be accessible.
 
 When Clevis binds the policy to a LUKS volume, it embeds a JSON document in a token named `clevis` and be extracted by:
-```
+```console
 # cryptsetup luksDump /dev/nbd0p3
 <REDACTED>
 Tokens:
   0: clevis
         Keyslot:  1
 ```
-The token can then be dumped via `cryptsetup token export <device> --token-id <id>.` 
+The token can then be dumped via `cryptsetup token export <device> --token-id <id>.`
 
 In the simple case of a TPM2 binding:
-```
+```console
 # cryptsetup token export  /dev/nbd0p3 --token-id 1 \
     | jq -r '.jwe.protected'  \
     | base64 -d \
@@ -254,7 +276,7 @@ In the simple case of a TPM2 binding:
 ```
 
 Assuming that the `clevis-luks-unlock` command is not available, a dump of the token can be read on another computer via:
-```
+```console
 # cat token.data \
     | jose fmt -j- -Og jwe -o- \
     | jose jwe fmt -i- -c \
@@ -303,7 +325,7 @@ Speed: Encrypted data carries a CPU burden. If a user does not opt-out of encryp
 * Workloads that are both CPU and disk-bound will be impacted.
 
 The cost to force encryption is best shown using a non-scientific test on a laptop:
-```
+```console
 root@:/tmp/test # cryptsetup benchmark --cipher=null
 # Tests are approximate using memory only (no storage IO).
 #     Algorithm |       Key |      Encryption |      Decryption
@@ -322,13 +344,19 @@ The default mode may create a false sense of security, see `Risks, and Migitatio
 ## Alternatives
 
 Previous ideas have explored various models, including:
-* Embedded OSTree in the Initramfs and using Ignition to setup encryption at boot time. This idea was rejected as it would create a ridiculously "fat" Initramfs and require significant changes to first boot. Another variation was to have an `ignition-ostree-copy` module that would copy the on-disk image into the initramfs, re-format the root file system (e.g., LUKS) and then continue boot. This would require changing to Ignition v3.
+* Embedded OSTree in the Initramfs and using Ignition to setup
+  encryption at boot time. This idea was rejected as it would create a
+  ridiculously "fat" Initramfs and require significant changes to
+  first boot. Another variation was to have an `ignition-ostree-copy`
+  module that would copy the on-disk image into the initramfs,
+  re-format the root file system (e.g., LUKS) and then continue
+  boot. This would require changing to Ignition v3.
 * Teach Ignition about Clevis. Ignition is Linux-aware, but distribution agnostic and runs only at first boot. Clevis and the required pins are very much specific to the Linux distribution. Given that OpenShift is using Ignition v2 and Fedora CoreOS is using Ignition v3, it is not feasible yet.
 * Encrypt the data, but not the operating system. Linux has, for some time, supported filesystem overlays for encryption via `ecryptfs.` LUKS-based block-level encryption is generally preferred over the file-based encryption of `ecryptfs.` The [performance of LUKS over ecryptfs is significant](https://www.phoronix.com/scan.php?page=article&item=ext4-crypto-418&num=1).
 
 ## Graphz
 For a graphic image:
-```
+```dot
 # http://www.graphviz.org/content/cluster
 digraph initramfs {
     compound=true
@@ -382,4 +410,5 @@ digraph initramfs {
     igndisks -> reencrypt -> clevis
     rootfs -> mountvar
     igncomplete -> initrd
-}```
+}
+```

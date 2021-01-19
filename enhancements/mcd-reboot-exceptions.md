@@ -103,7 +103,7 @@ performed as in prior 4.x versions.
 
 ### User Stories
 
-The user stories below are intended to be illustrative of the different types of 
+The user stories below are intended to be illustrative of the different types of
 services we need to build capabilities for.
 
 #### Story 1
@@ -132,14 +132,14 @@ maintenance windows of less enlightened vendors.
 
 #### Story 4
 
-As an admin, I want to continue to force reboots for network configuration 
-updates and changes to kernel flags, so that they are applied in a timely 
+As an admin, I want to continue to force reboots for network configuration
+updates and changes to kernel flags, so that they are applied in a timely
 manner.
 
 
 ### Implementation Details/Notes/Constraints
 
-How the function determines what constitutes a unit of configuration or "domain" 
+How the function determines what constitutes a unit of configuration or "domain"
 for the purposes of comparision and output is left for later discussion.
 
 Possibilities include basing the results on:
@@ -164,7 +164,7 @@ the changes are safe.
 
 ### Test Plan
 
-Since the default and most common action for applying a configuration change 
+Since the default and most common action for applying a configuration change
 will remain draining and rebooting the cluster nodes, we use the term "exception"
 below to mean deviation from this approach.
 
@@ -184,18 +184,18 @@ below to mean deviation from this approach.
 
 ### Graduation Criteria
 
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - Sufficient test coverage
 - Support for handling ICSP changes
 
-##### Tech Preview -> GA 
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
 - Deprecate the feature
@@ -223,7 +223,7 @@ versions after any engineering work that was required to make it possible.
 - Initial version: 15-12-2019
 - Updated: 18-06-2020
 
-## Drawbacks 
+## Drawbacks
 
 The risks primarily fall into 4 categories:
 
@@ -242,13 +242,13 @@ The risks primarily fall into 4 categories:
 ## Alternatives
 
 - Improve the MCD's logic for handling changes to CRDs.  This may require a
-  lot of things that need to be plumbed through in the MCO and may not be 
+  lot of things that need to be plumbed through in the MCO and may not be
   possible in the short term.
 
 - Define a higher level syntax that would contain additional information about
   the action a field needs in order for any changes to be applied; and was be
   able to be transformed into the appropriate Ignition format.  This would be a
-  much larger body of work that would not be possible to complete in the short 
+  much larger body of work that would not be possible to complete in the short
   term.
 
 ## Infrastructure Needed

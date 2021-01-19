@@ -85,12 +85,12 @@ A SLB solution must provide these high level features:
   correct Node(s).  Solution must support a scalable L3 method for doing this
   (likely BGP), but should also be usable in smaller, simpler environments
   using L2 protocols.  Tradeoffs include:
-    * Layer 2 (gratuitous ARP for IPv4, NDP for IPv6) - good for wide range of
-      environment compatibility, but limiting for larger clusters.  All traffic
-      for a single Service Load Balancer IP address must go through one node.
-    * Layer 3 (BGP) - good for integration with networks for larger clusters
-      and opens up the possibility for a greater degree of load balancing using
-      ECMP to send traffic to multiple Nodes for a single Service Load Balancer
+  * Layer 2 (gratuitous ARP for IPv4, NDP for IPv6) - good for wide range of
+    environment compatibility, but limiting for larger clusters.  All traffic
+    for a single Service Load Balancer IP address must go through one node.
+  * Layer 3 (BGP) - good for integration with networks for larger clusters
+    and opens up the possibility for a greater degree of load balancing using
+    ECMP to send traffic to multiple Nodes for a single Service Load Balancer
 * Suitable for large scale clusters (target up to 2000 nodes).
 * Must be compatible with at least the following cluster network types:
   [OpenShift-SDN](https://github.com/openshift/sdn) and
@@ -487,16 +487,16 @@ address larger scale clusters, we would have to do one of:
 
 * Require all SLBs to be hosted on Nodes within a single L2 domain within the
   cluster.
-    * This is very limiting for scale, so it’s either only applicable to
-      smaller clusters, or only a subset of the cluster can host SLB IP
-      addresses.
+  * This is very limiting for scale, so it’s either only applicable to
+    smaller clusters, or only a subset of the cluster can host SLB IP
+    addresses.
 * Make our SLB controller smart enough to understand different IP address
   pools, their associated L2 domains, and which Nodes are on which L2 domain.
-    * This helps scale, but increases the complexity of our implementation.
+  * This helps scale, but increases the complexity of our implementation.
 * Extend OVN / OVN-Kubernetes (either directly or via some integration) to
   support an L3 based address location advertisement (likely BGP).
-    * This doesn’t work for all environments, but the use of BGP is common and
-      understood in the Kubernetes ecosystem.
+  * This doesn’t work for all environments, but the use of BGP is common and
+    understood in the Kubernetes ecosystem.
 
 ## Infrastructure Needed
 

@@ -81,7 +81,7 @@ The tests these commands run are consistent (roughly) across all clouds and all 
 Individual operators, operands, and teams want to leverage the universal nature of these buckets, but they also want code
 locality of tests to the code driving those tests.
 Most developers are not CI experts and we don't need to raise the bar that high.
-Instead of creating mechanisms to allow this that require modification of critical release templates, 
+Instead of creating mechanisms to allow this that require modification of critical release templates,
 we can instead use the same technique used to create release payloads.
 
 Every team that wants to contribute to the universal set of tests can do so by creating an image that has an entrypoint
@@ -104,8 +104,8 @@ that teams that are familiar with how the test framework works have a vested int
 There will be a version skew all the time.
 A normal running circumstance is tests building on a different level of kube than the kube-apiserver.
 This is a good condition both for forcing stability and for separating update cadences.
-All the repos where we have done this so far have benefited from the looser coupling in terms of stability, understandability, and 
-motivation for investment in upstreams. 
+All the repos where we have done this so far have benefited from the looser coupling in terms of stability, understandability, and
+motivation for investment in upstreams.
 
 ## Alternatives
 

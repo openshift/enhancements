@@ -15,7 +15,7 @@ status:
 
 ---
 
-#  azure-internal-private-clusters
+# azure-internal-private-clusters
 
 ## Release Signoff Checklist
 
@@ -66,7 +66,7 @@ IP
 - The installer will no longer require the user to provide the
 BaseDomainResourceGroup as no public records need to be created for the
 cluster.
-- The cluster will still require access to the internet. 
+- The cluster will still require access to the internet.
 
 #### Resources provided to the installer
 
@@ -75,14 +75,14 @@ cluster.
 
 #### Installer Resources
 
-##### The installer will no longer create:
+##### The installer will no longer create
 
 - Public IP addresses
 - Public DNS records
 - Public load balancers
 - Public endpoints
 
-##### The installer will continue to create:
+##### The installer will continue to create
 
 - Private IP addresses
 - Private DNS records
@@ -93,7 +93,7 @@ cluster.
 #### Install Config
 
 Internal vs external clusters will be determined based on the new field in
-install-config as described in the AWS internal/private clusters design doc. 
+install-config as described in the AWS internal/private clusters design doc.
 
 #### Gather bootstrap
 
@@ -108,19 +108,19 @@ acceptable because all such cases will only be when the cluster is Private.
 #### Isolation between clusters
 
 Since we are installing to internal/private networks, isolation will not be an
-issue. 
+issue.
 
 #### Known limitations
 
 - We can’t attach or manipulate network security groups to an existing subnet since it’s not in our control. This means we can’t isolate between clusters also.
-- We can’t attach DNS records to the existing VNet, so we will need to use the new Azure private DNS zones. 
+- We can’t attach DNS records to the existing VNet, so we will need to use the new Azure private DNS zones.
 
 #### Destroy
 
 There should be no work required. For Azure, we filter on resource group. As a
-result, destroy should only delete resources that are in the resource group. 
+result, destroy should only delete resources that are in the resource group.
 
 #### CI
 
 CI jobs should setup a private VNet, routing, subnets, and then run the install
-using this configuration. 
+using this configuration.

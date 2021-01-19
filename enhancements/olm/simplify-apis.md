@@ -113,7 +113,7 @@ status:
         kind: Grumbo
         plural: grumbos
         singular: grumbo
-  
+
   updates:
     available:
     - name: community
@@ -230,7 +230,21 @@ To simplify operator permission management, OLM will adopt a permission approval
 - the initial installation is subject to the approval of a user w/ the required install permissions
 - subsequent updates are subject to re-approval when the required install permissions exceed the set approved for its predecessors
 
-In order to drive this UX, when an `Install` resource is created, OLM will associate it with a `ServiceAccount`, evaluate the `spec.contents` field, identify the required install permissions, and surface any permissions the `ServiceAccount` is missing via the `status.pending.permissions` field. Whenever pending permissions exist, OLM will set `spec.approval` to `Unapproved` and gate content application. To approve an installation, a user with the required install permissions must set its `spec.approval` field to `Approved`. OLM will use a `ValidatingAdmissionWebhook` to ensure a user has these permissions before allowing the field to be set. As side effect of approval, OLM will generate and bind the pending permissions to the `Install`'s `ServiceAccount`. After, OLM will attempt to apply the `Install`'s contents while authenticated as its `ServiceAccount`, repeating the approval process whenever permissions are found pending.
+In order to drive this UX, when an `Install` resource is created, OLM
+will associate it with a `ServiceAccount`, evaluate the
+`spec.contents` field, identify the required install permissions, and
+surface any permissions the `ServiceAccount` is missing via the
+`status.pending.permissions` field. Whenever pending permissions
+exist, OLM will set `spec.approval` to `Unapproved` and gate content
+application. To approve an installation, a user with the required
+install permissions must set its `spec.approval` field to
+`Approved`. OLM will use a `ValidatingAdmissionWebhook` to ensure a
+user has these permissions before allowing the field to be set. As
+side effect of approval, OLM will generate and bind the pending
+permissions to the `Install`'s `ServiceAccount`. After, OLM will
+attempt to apply the `Install`'s contents while authenticated as its
+`ServiceAccount`, repeating the approval process whenever permissions
+are found pending.
 
 ### User Stories
 
@@ -271,7 +285,7 @@ Components can be associated with an `Operator` by a label following the key con
 - using a deterministic label key lets users know the exact label used in advance
 - including the API version can help OLM handle migrations to future API iterations
 
-The resolved label selector for an `Operator` will be surfaced in the `status.components.matchLabels` field of its status. 
+The resolved label selector for an `Operator` will be surfaced in the `status.components.matchLabels` field of its status.
 
 ```yaml
 status:
@@ -282,7 +296,13 @@ status:
 
 **Note:** *Both namespace and cluster scoped resources are gathered using this label selector. Namespace scoped components are selected across all namespaces.*
 
-Once associated with an `Operator`, a component's reference will be listed in the `status.components.resource` field of that `Operator`. Component references will also be enriched with abnormal status conditions relevant to the operator. These conditions should follow [k8s status condition conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties) and in some cases may be copied directly from the component status.
+Once associated with an `Operator`, a component's reference will be
+listed in the `status.components.resource` field of that
+`Operator`. Component references will also be enriched with abnormal
+status conditions relevant to the operator. These conditions should
+follow [k8s status condition
+conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties)
+and in some cases may be copied directly from the component status.
 
 ```yaml
 status:
@@ -406,9 +426,21 @@ rules:
   - install
 ```
 
-For an `Operator` that specifies valid `CatalogSource` type updates, OLM will resolve the updated [component](https://en.wikipedia.org/wiki/Component_(graph_theory)) of the cluster-wide operator dependency graph that contains it. In other words, during the install/upgrade of a subject operator, OLM considers the install/upgrade of all operators for which an undirected dependency path connects it to the subject.
+For an `Operator` that specifies valid `CatalogSource` type updates,
+OLM will resolve the updated
+[component](https://en.wikipedia.org/wiki/Component_(graph_theory)) of
+the cluster-wide operator dependency graph that contains it. In other
+words, during the install/upgrade of a subject operator, OLM considers
+the install/upgrade of all operators for which an undirected
+dependency path connects it to the subject.
 
-In order to enable migration from `Subscriptions` to `Operators`, OLM will attempt to associate each existing `Subscription` with an `Operator` that specifies the same `package`, `channel`, and `CatalogSource`. If no matching `Operator` already exists, OLM will generate one with a matching `spec.updates` field of type `CatalogSource`. Once an association is made, the respective `Subscription` will be deleted.
+In order to enable migration from `Subscriptions` to `Operators`, OLM
+will attempt to associate each existing `Subscription` with an
+`Operator` that specifies the same `package`, `channel`, and
+`CatalogSource`. If no matching `Operator` already exists, OLM will
+generate one with a matching `spec.updates` field of type
+`CatalogSource`. Once an association is made, the respective
+`Subscription` will be deleted.
 
 **Note:** *For `Operators` that specify a `CatalogSource` shared by a `Subscription`, but only specify an `entrypoint`, OLM will query the `CatalogSource` for the `entrypoint`'s `package` and `channel`*
 

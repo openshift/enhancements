@@ -105,7 +105,7 @@ These stories define the core use cases OpenShift looks to address.
 
 #### Stable Enterprise Kubernetes
 
-As an enterprise IT organization deploying Kubernetes, 
+As an enterprise IT organization deploying Kubernetes,
 I should have a stable and reliable Kubernetes distribution that reduces my support and operational burden while allowing me to meet the organizational, legal, and functional requirements I must work within,
 so that I can quickly evaluate, integrate, and deploy Kubernetest to production.
 
@@ -123,7 +123,7 @@ This includes:
 #### Programmable containerized application deployment environment
 
 As an organization with an existing development pipeline, or one building a new enterprise application
-platform, or as a small to medium sized team using Kubernetes as a deployment target, 
+platform, or as a small to medium sized team using Kubernetes as a deployment target,
 I should expect Kubernetes and the necessary ecosystem components to remain stable over multiple-year timeframes,
 so that I can delivery applications more rapidly, with better operational efficiency, at higher scales, and with better availability.
 
@@ -143,9 +143,9 @@ This includes:
 
 #### Self-service developer platform
 
-As an organization looking to modernize, innovate, or standardize large portions of application development, 
+As an organization looking to modernize, innovate, or standardize large portions of application development,
 I should have tools and patterns that are easily accessible and consumable by a wide range of
-developer skillsets and that allow organizational, operational, or security practices to easily integrate, 
+developer skillsets and that allow organizational, operational, or security practices to easily integrate,
 so that I can rapidly improve my development organization efficiency and react more quickly to business needs.
 
 This includes:
@@ -160,7 +160,7 @@ This includes:
 
 #### Project reliability engineering
 
-As an open-source community and product focused organization, 
+As an open-source community and product focused organization,
 OKD and OpenShift should have a development lifecycle that leverages automation and data capture to rapidly test, release, and
 validate the projects being developed within the product,
 so that we can deliver higher quality software faster to more environments, with less regressions, and with a tighter feedback loop between developer and deployer.
@@ -193,7 +193,7 @@ cannot be realized. A brief sketch of the approach is covered below (in rough or
 2. Make the bootstrap node look more like a full master and have additional masters join
 3. Front the API servers and other master services with service load balancers
 4. Automatically recover when a master machine dies on cloud providers by creating a new machine (machine health check)
-5. Add out-of-the-box metal load balancing support (with metallb project?). 
+5. Add out-of-the-box metal load balancing support (with metallb project?).
 6. Allow masters to be vertically scaled by changing a machine size property and replacing mismatched masters
 7. Add a simple backup recovery experience to etcd operator instances that requires no additional scripting / commands (form new cluster with X after shutting down other workers)
 8. Allow the bootstrap node to be easily transitioned to a worker node post boot (to reduce minimum cluster requirements)

@@ -51,9 +51,9 @@ Thus, the proposed solution has the following advantages:
 ### Goals & Requirements
 
 1. OVS is run in a SystemD unit provided by the base OS, but is still manageable as if it were a Kubernetes Pod:
-  - kubectl logs works
-  - Liveness- and Readiness- probes reflect the unit’s state
-  - Note: it is a non-goal that deleting the sidecar Pod stops OVS
+   1. kubectl logs works
+   2. Liveness- and Readiness- probes reflect the unit’s state
+   3. Note: it is a non-goal that deleting the sidecar Pod stops OVS
 2. OVS is stable and more available than the current state.
 
 ### Non-Goals
@@ -84,7 +84,13 @@ The installation process for BYORHEL needs to be adjusted accordingly.
 
 ### Risks and Mitigations
 
-The biggest risk is that OVS is not running when we need it. The nice dependency management and ordering provided by SystemD doesn’t help us here. It could happen that, for whatever reason, the OVS consumer is scheduled and the OVS sidecar is not. One simple mitigation is PodAffinity. Or, we could include the babysitter process as a container inside ovn-kubernetes node daemonset, rather than a separate daemonset.
+The biggest risk is that OVS is not running when we need it. The nice
+dependency management and ordering provided by SystemD doesn’t help us
+here. It could happen that, for whatever reason, the OVS consumer is
+scheduled and the OVS sidecar is not. One simple mitigation is
+PodAffinity. Or, we could include the babysitter process as a
+container inside ovn-kubernetes node daemonset, rather than a separate
+daemonset.
 
 The second risk is one of adopting existing clusters. How we migrate from containerized to non-containerized openvswitch will require careful planning.
 

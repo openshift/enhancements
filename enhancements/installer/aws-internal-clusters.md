@@ -26,7 +26,14 @@ superseded-by:
 
 ## Summary
 
-Many customer environments don't require external connectivity from the outside world and as such, they would prefer not to expose the cluster endpoints to public. Currently the OpenShift installer exposes endpoints of the cluster like Kubernetes API, or OpenShift Ingress to the Internet, although most of these endpoints can be made Internal after installation with varying degree of ease individually, creating OpenShift clusters which are Internal by default is highly desirable for users.
+Many customer environments don't require external connectivity from
+the outside world and as such, they would prefer not to expose the
+cluster endpoints to public. Currently the OpenShift installer exposes
+endpoints of the cluster like Kubernetes API, or OpenShift Ingress to
+the Internet, although most of these endpoints can be made Internal
+after installation with varying degree of ease individually, creating
+OpenShift clusters which are Internal by default is highly desirable
+for users.
 
 ## Motivation
 
@@ -40,7 +47,13 @@ No additional isolation from other clusters in the network from the ones provide
 
 ## Proposal
 
-To create Internal clusters, the installer binary needs access to the VPC where the cluster will be created to communicate with the cluster’s Kubernetes API, therefore, installing to [existing subnets][aws-shared-networking] is required. In addition to the network connectivity to the endpoints of the cluster, the installer binary should also be able to resolve the newly created DNS records for the cluster.
+To create Internal clusters, the installer binary needs access to the
+VPC where the cluster will be created to communicate with the
+cluster’s Kubernetes API, therefore, installing to [existing
+subnets][aws-shared-networking] is required. In addition to the
+network connectivity to the endpoints of the cluster, the installer
+binary should also be able to resolve the newly created DNS records
+for the cluster.
 
 No public subnets are required, since no public load balancers will be created. And, since public records will not be needed, the requirement for a public Route 53 Zone matching the `BaseDomain` will be relaxed. The installer still creates the private R53 Zone for the cluster.
 
@@ -119,7 +132,15 @@ The `default` ingresscontroller for the cluster on AWS has LoadBalancer scope se
 
 #### Limitations
 
-- The Kubernetes API endpoints cannot be made public after installation using some configuration in the cluster. The users will have to manually choose the public subnets from the VPC where the cluster is deployed, created public load balancer with control-plane instances as backend and also ensure the control-plane security groups allow traffic from Internet on 6443 (Kubernetes API port). Also the user will have to make sure they pick public subnets in each Availability Zone as detailed in [documentation][public-lb-to-private-instances].
+- The Kubernetes API endpoints cannot be made public after
+  installation using some configuration in the cluster. The users will
+  have to manually choose the public subnets from the VPC where the
+  cluster is deployed, created public load balancer with control-plane
+  instances as backend and also ensure the control-plane security
+  groups allow traffic from Internet on 6443 (Kubernetes API
+  port). Also the user will have to make sure they pick public subnets
+  in each Availability Zone as detailed in
+  [documentation][public-lb-to-private-instances].
 
 ### Risks and Mitigations
 

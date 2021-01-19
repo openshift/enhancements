@@ -118,7 +118,7 @@ volumes:
 
 #### Builds
 
-- `controller-manager` would mount pull credentials inside `build` pod as 
+- `controller-manager` would mount pull credentials inside `build` pod as
   `hostPath`(similar to what is done for Image Stream Import).
 - Builder image parses node's pull credentials and uses them during build,
   merging with other pull credentials that are linked to the `builder` service
@@ -198,7 +198,7 @@ never be exposed through any API endpoint.
 
 #### Pull secrets may be exposed through an ephemeral container
 
-Kubernetes implements a feature that allows users to temporary create 
+Kubernetes implements a feature that allows users to temporary create
 [ephemeral](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
 containers into a running pod. This could potentially allow users to copy
 mounted pull credentials from a build pod as the ephemeral pod may allow `rsh`.
@@ -220,7 +220,7 @@ default.
   `registry.redhat.io` without provide any other pull credential.
 - Pull OpenShift's `base image` during a build.
 - Attempt to use an image from `registry.redhat.io` as input/source during a
-  (build)[https://docs.openshift.com/container-platform/4.2/builds/creating-build-inputs.html#image-source_creating-build-inputs]
+  [build](https://docs.openshift.com/container-platform/4.2/builds/creating-build-inputs.html#image-source_creating-build-inputs)
 - Attempt, on build, to **push** images to a registry for which credentials
   only exist on node. This should fail as node's pull credentials are only used
   when pulling images.
@@ -241,7 +241,7 @@ Not applicable.
 
 ### Upgrade / Downgrade Strategy
 
-Does not apply. 
+Does not apply.
 
 ## Implementation History
 

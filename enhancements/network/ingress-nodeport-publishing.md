@@ -36,7 +36,14 @@ The NodePort strategy is positioned as a preferred alternative to most uses of t
 
 ## Summary
 
-When possible, OpenShift will expose IngressControllers using the [LoadBalancerService publishing strategy](https://github.com/openshift/api/blob/master/operator/v1/types_ingress.go). Some OpenShift administrators (even on cloud platforms) don't want OpenShift to manage a cloud load balancer and DNS for their IngressControllers. These administrators generally want IngressControllers to be exposed through node ports to enable custom integration with a front-end load balancing solution.
+When possible, OpenShift will expose IngressControllers using the
+[LoadBalancerService publishing
+strategy](https://github.com/openshift/api/blob/master/operator/v1/types_ingress.go). Some
+OpenShift administrators (even on cloud platforms) don't want
+OpenShift to manage a cloud load balancer and DNS for their
+IngressControllers. These administrators generally want
+IngressControllers to be exposed through node ports to enable custom
+integration with a front-end load balancing solution.
 
 ## Motivation
 
@@ -124,7 +131,14 @@ One critical architectural detail of this proposal which demands scrutiny is the
 
 * The Ingress Operator will ignore any updates to `.spec.ports[].nodePort` fields of the Service.
 
-By making explicit that users own the  `.spec.ports[].nodePort` field, no additional port configuration API should be required. By default, ports are allocated automatically and users can discover the actual port allocations for integrations. However, sometimes static port allocations are necessary to integrate with existing infrastructure which may not be easily reconfigured in response to dynamic ports. To achieve integrations with static node ports, users can update the managed `Service` resource directly.
+By making explicit that users own the `.spec.ports[].nodePort` field,
+no additional port configuration API should be required. By default,
+ports are allocated automatically and users can discover the actual
+port allocations for integrations. However, sometimes static port
+allocations are necessary to integrate with existing infrastructure
+which may not be easily reconfigured in response to dynamic ports. To
+achieve integrations with static node ports, users can update the
+managed `Service` resource directly.
 
 Because OpenShift isn't managing anything connected to the NodePort service, the ports used to expose the IngressController are irrelevant and can be left to the discretion of the administrator (constrained only by the cluster node port CIDR configuration).
 
@@ -157,8 +171,11 @@ The idea is to find the best form of an argument why this enhancement should _no
 
 ## Alternatives
 
-#### Add port configuration to HostNetwork API
+### Add port configuration to HostNetwork API
 
-One alternative to a NodePort strategy is to add user-defined port configuration to the `HostNetwork` publishing strategy. Configurable ports would enable co-location of `HostNetwork` shards, but would not resolve co-location during rollout. Additionally, end-users would be responsible for port conflict resolution barring the specification of some  port allocation strategy (which is already solved by `NodePort`).
-
-
+One alternative to a NodePort strategy is to add user-defined port
+configuration to the `HostNetwork` publishing strategy. Configurable
+ports would enable co-location of `HostNetwork` shards, but would not
+resolve co-location during rollout. Additionally, end-users would be
+responsible for port conflict resolution barring the specification of
+some port allocation strategy (which is already solved by `NodePort`).

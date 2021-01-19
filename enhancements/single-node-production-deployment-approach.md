@@ -418,19 +418,19 @@ uses AWS to test single-node deployments with a bootstrap VM.
 
 ### Graduation Criteria
 
-##### Dev Preview
+#### Dev Preview
 
 - Ability to deploy an instance of OpenShift on a single host
 - Single-node deployments pass the identified conformance test suite(s)
 
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Gather feedback from users rather than just developers
 - Multi-cluster management support for creating single-node
   deployments. The work for that is well outside of the scope of this
   enhancement.
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 - Additional time for customer feedback
 - Available by default

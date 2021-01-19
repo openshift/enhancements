@@ -64,7 +64,7 @@ and other network endpoints as Kubernetes NetworkPolicy does.
 
 ### Multus
 
-No additional change is required because multi-networkpolicy only consumes 
+No additional change is required because multi-networkpolicy only consumes
 network-attachment-definition CRD and it does not change net-attach-def CRD.
 
 ### How user enables multi-networkpolicy?
@@ -88,7 +88,7 @@ MultiNetworkPolicy CRD has pretty similar schema to Kubernetes NetworkPolicy. Th
 as Kubernetes other than target interface annotation, `k8s.v1.cni.cncf.io/policy-for`. Target interface
 is specified annotation, `k8s.v1.cni.cncf.io/policy-for`, as net-attach-def name.
 
-```
+```yaml
 apiVersion: k8s.cni.cncf.io/v1beta1
 kind: MultiNetworkPolicy
 metadata:
@@ -139,21 +139,21 @@ Initially, multi-networkpolicy testing will be done via the upstream repo e2e te
 using `kind` (in progress). Additionally we are going to use baremetal CI job.
 
 Upstream repositories are:
- - https://github.com/k8snetworkplumbingwg/multi-networkpolicy (for scheme)
- - https://github.com/k8snetworkplumbingwg/multi-networkpolicy-iptables (implementation)
+- https://github.com/k8snetworkplumbingwg/multi-networkpolicy (for scheme)
+- https://github.com/k8snetworkplumbingwg/multi-networkpolicy-iptables (implementation)
 
 ### Graduation Criteria
 
-##### Dev Preview
+#### Dev Preview
 
 - We have a mostly-passing periodic CI job at upstream
 
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Gather feedback from users rather than just developers
 - TBD
 
-##### Tech Preview -> GA 
+#### Tech Preview -> GA
 
 - More testing (upgrade, scale)
 - Add CI job at baremetal OCP CI

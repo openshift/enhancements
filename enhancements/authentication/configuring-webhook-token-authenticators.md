@@ -102,15 +102,18 @@ secret's contents to files and specify these in the kube-apiserver configuration
   secret and adds it to the `webhookTokenAuthenticator` field of the `authentication.config/cluster`
   resource. If the `type` field is set to any other value, the operator will perform no action to the
   `webhookTokenAuthenticator` field.
-  - the above secret contains details that point kube-apiserver to the oauth-apiserver for token reviews
+
+   - the above secret contains details that point kube-apiserver to the oauth-apiserver for token reviews
+
 3. during an authentication flow, kube-apiserver sends `tokenreviews.authentication.k8s.io` object to the
   oauth-apiserver for review
 4. oauth-apiserver sends a response accordingly to Kubernetes requirements, on success it adds the
   `system:authenticated:oauth` group to the returned details about the groups of the authenticated user
-  - `system:authenticated:oauth` provides users with the ability to handle projects via the self-provisioner
-    cluster role
-  - similarly, if any integrator would like their users to have project privileges, they need to add this
-    specific group in their token review responses.
+
+   - `system:authenticated:oauth` provides users with the ability to handle projects via the self-provisioner
+     cluster role
+   - similarly, if any integrator would like their users to have project privileges, they need to add this
+     specific group in their token review responses.
 
 ### Common Gotchas When Providing Your Own Authentication Webhook
 
@@ -165,7 +168,7 @@ The idea is to find the best form of an argument why this enhancement should _no
 An alternative to having users create their own kubeconfigs is to have a CRD that takes
 care of any copy-pasting that would otherwise have to be done manually
 
-```
+```yaml
 apiVersion: config.openshift.io/v1
 kind: TokenAuthenticator
 spec:

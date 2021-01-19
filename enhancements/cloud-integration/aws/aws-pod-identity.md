@@ -1,5 +1,5 @@
 ---
-title: aws-pod-identity 
+title: aws-pod-identity
 authors:
   - "@sjenning"
 reviewers:
@@ -17,7 +17,7 @@ creation-date: 2020-03-26
 last-updated: 2020-03-26
 status: provisional
 see-also:
-  - ""  
+  - ""
 replaces:
   - ""
 superseded-by:
@@ -40,7 +40,7 @@ superseded-by:
 
 #### Question
 
-Should we enable the [`ServiceAccountIssuerDiscovery` feature gate](https://github.com/kubernetes/enhancements/issues/1393) (disabled by default, alpha 1.18)? 
+Should we enable the [`ServiceAccountIssuerDiscovery` feature gate](https://github.com/kubernetes/enhancements/issues/1393) (disabled by default, alpha 1.18)?
 
 Pros:
 - Eliminates the need for external hosting of the OIDC discovery and keys documents
@@ -96,15 +96,13 @@ in AWS SDK client creation.  The AWS SDK searches for this token automatically.
 
 This will be implemented in two phases.
 
-#### Phase 1
+### Phases
 
 Phase 1 will achieve parity with the present-day EKS experience.  This includes
 automatic configuration and deployment of the `aws-pod-identity-webhook` and the
 creation of an OIDC discovery endpoint that AWS STS can use to validate cluster
 created bound service account tokens.  Role creation in IAM and `ServiceAccount`
 annotation will be left as an exercise to the user (as it is in EKS)
-
-#### Phase 2
 
 Phase 2 will make the Role creation and `ServiceAccount` annotation
 automatic, just as the User creation and `Secret` injection are today.  This will
@@ -505,7 +503,7 @@ These are generalized examples to consider, in addition to the aforementioned
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
 
-##### Tech Preview -> GA 
+##### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback

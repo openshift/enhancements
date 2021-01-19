@@ -52,7 +52,7 @@ Extend the existing `operator.openshift.io/v1` / `Console` CRD. It provides alre
 
 Each category could have a list of subcategories which enables the Developer Catalog to build a 2 level tree based on this data:
 
-```
+```text
 ├── Customer Name
 │   ├── Project/Team A
 │   ├── Project/Team B

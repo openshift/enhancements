@@ -101,7 +101,7 @@ command:
 This command shows whether a MAC supports hardware time stamping. Only devices
 that contain below flags are listed as PTP capable device.
 
-```
+```text
 SOF_TIMESTAMPING_TX_HARDWARE
 SOF_TIMESTAMPING_RX_HARDWARE
 SOF_TIMESTAMPING_RAW_HARDWARE

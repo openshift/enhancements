@@ -68,7 +68,7 @@ validate the assumptions about the networking setup.
   can be created by the installer. So resources like load balancers, service
 accounts, etc stay under the management of the cluster. All resources created by
 the installer should not be modified and will be removed when the cluster is
-destroyed in the same fashion as installer owned infrastructure. 
+destroyed in the same fashion as installer owned infrastructure.
 - Any changes required to the shared resources like Tags that do not affect the
   behavior for other tenants can be made.
 - Resources owned by the cluster and resources must be clearly identifiable.
@@ -84,9 +84,9 @@ deleting non-cluster resource.
 
 #### Resources provided to the installer
 
-- NetworkResourceGroup: The network resource group used by the VNet/subnet(s). 
+- NetworkResourceGroup: The network resource group used by the VNet/subnet(s).
 - VirtualNetwork: The VNet the cluster will be installed in. This has to be part
-  of and will be retrieved from the provided NetworkResourceGroup. 
+  of and will be retrieved from the provided NetworkResourceGroup.
 - Control-plane subnet: The subnet where the control plane should be deployed.
   Any static IP addresses here need to be replaced with Azure assigned DHCP IP
 addresses.
@@ -158,9 +158,9 @@ No known assumptions.
   works does not allow us to use it in an existing VNet.
 - New clusters will use the new Azure Preview Refresh API for private DNS. This
   will allow the installer to use private DNS zones in an existing virtual
-network and under and installer owned resource group. 
+network and under and installer owned resource group.
 - Private DNS can be auto registered or created manually. Currently, records are
-  created manually. More information can be found here. 
+  created manually. More information can be found here.
 - It will be necessary to update to the new Azure Preview Refresh SDK to use the
   new API.
 - The Azure terraform resource provider will need to be updated.
@@ -169,7 +169,7 @@ network and under and installer owned resource group.
 
 #### Resources created by the installer
 
-#### The installer will no longer create (vs. the fully-IPI flow):
+#### The installer will no longer create (vs. the fully-IPI flow)
 - Subnets (azurerm_subnet)
 - Route tables (azurerm_route_table)
 - VNets (azurerm_virtual_network)
@@ -179,7 +179,7 @@ network and under and installer owned resource group.
 - Storage (azurerm_storage_blob, azurerm_storage_container)
 - Load balancers (azurerm_lb)
 - Private DNS Zones (azurerm_dns_zone) - This uses the current Azure private DNS
-  zone. We’ll have to look at updating this to use new API. 
+  zone. We’ll have to look at updating this to use new API.
 - Network security groups (azurerm_network_security_group)
 - Resource Groups (azurerm_resource_group)
 
@@ -190,7 +190,7 @@ structure
 - NetworkResourceGroup
 - VirtualNetwork
 - ControlPlaneSubnet
-- ComputeSubnet #### The install-config wizard will add three prompts: 
+- ComputeSubnet #### The install-config wizard will add three prompts:
 - A Select prompt:
   - Message: VNet
   - Help: The VNet to be used for installation.
@@ -210,7 +210,7 @@ structure
 #### Isolation between clusters
 
 Since we can’t create or modify network security groups on an existing subnet,
-there is no real way to isolate between clusters. 
+there is no real way to isolate between clusters.
 
 #### Known limitations
 
@@ -218,7 +218,7 @@ there is no real way to isolate between clusters.
   since it’s not in our control. This means we can’t isolate between clusters
 also.
 - We can’t attach DNS records to the existing VNet, so we will need to use the
-  new Azure private DNS zones. 
+  new Azure private DNS zones.
 
 #### Destroy
 
@@ -228,13 +228,13 @@ result, destroy should only delete things that are in the resource group.
 #### CI
 
 CI jobs should set up a VNet, subnets, routing, and NAT and then run the
-installer using this configuration. 
+installer using this configuration.
 
 #### Work dependent on other teams
 
 CI infrastructure - A new CI job will need to be configured that sets up an
 Azure virtual network. It would be a good idea for it to persist if possible so
-that we can make use of it without having to create and tear down for every job. 
+that we can make use of it without having to create and tear down for every job.
 
 #### Alternate solutions considered
 
@@ -244,4 +244,4 @@ into an existing virtual network, we can’t create or modify a network security
 group and keep it under our control. An alternative solution to this problem is
 to attach a network security group to each network interface. This would work
 somewhat similar to how it would work being attached to a subnet, only the rules
-would be duplicated for every network interface. 
+would be duplicated for every network interface.
