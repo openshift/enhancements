@@ -94,7 +94,8 @@ other people's token object names.
 #### Roles modifications
 
 The `basic-user` clusterrole should now additionally receive the following rule:
-```
+
+```yaml
 apiGroups:
 - oauth.openshift.io
 resources:
@@ -171,7 +172,8 @@ New e2e tests:
 #### Examples
 
 Without changes to the CLI code, the following will be possible:
-```
+
+```console
 $ oc get useroauthaccesstokens
 $ oc get -w useroauthaccesstokens
 $ oc get useroauthaccesstokens <token-name> [output options]

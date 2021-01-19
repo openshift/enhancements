@@ -5,3 +5,9 @@ single-title: false
 
 # hard tabs are used when pasting go example code into files
 no-hard-tabs: false
+
+# we commonly paste bare urls in the middle of paragraphs
+no-bare-urls: false
+
+# really, this is a rule?
+commands-show-output: false
