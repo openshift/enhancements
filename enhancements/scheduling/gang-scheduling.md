@@ -63,7 +63,7 @@ Vulcano stack consists of (among other bits):
 To deploy the stack, edit and apply https://raw.githubusercontent.com/volcano-sh/volcano/master/installer/volcano-development.yaml:
 - change port 443 to 6443
 - `volcano-controllers` cluster role to extend RBAC rule for `jobs` with `jobs/finalizers`:
-  ```
+  ```yaml
   - apiGroups:
     - batch.volcano.sh
     resources:
@@ -78,7 +78,7 @@ To deploy the stack, edit and apply https://raw.githubusercontent.com/volcano-sh
   ```
 
 Also notice the scheduler configuration:
-```
+```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -110,7 +110,7 @@ Each job (`jobs.batch.volcano.sh` CRD) has a list of task categories, each task 
 
 You can use the following CR to see how the scheduler behaves (manifest borrowed from https://github.com/volcano-sh/volcano/blob/master/example/job.yaml):
 
-```
+```yaml
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
@@ -146,7 +146,7 @@ the job will not change it's state to `Running` (due to gang scheduling minimal 
 
 With sufficient cpu resource (e.g. setting cpu request to `150m`) you get:
 
-```
+```console
 $ oc get pods
 NAME                       READY     STATUS     RESTARTS   AGE
 test-job-default-nginx-0   0/1       OutOfcpu   0          6m3s
@@ -159,7 +159,7 @@ test-job-default-nginx-5   1/1       Running    0          6m4s
 
 With insufficient cpu resource none of the pods gets to run:
 
-```
+```console
 $ oc get pods
 NAME                       READY     STATUS    RESTARTS   AGE
 test-job-default-nginx-0   0/1       Pending   0          9m38s
@@ -172,7 +172,7 @@ test-job-default-nginx-5   0/1       Pending   0          9m38s
 
 ### Scheduling cycle logs snippet
 
-```
+```text
 I0124 13:06:29.087366       1 cache.go:775] There are <1> Jobs, <1> Queues and <6> Nodes in total for scheduling.
 I0124 13:06:29.087401       1 session.go:135] Open Session 55ab3cf8-3eaa-11ea-a61c-0a580a81020a with <1> Job and <1> Queues
 I0124 13:06:29.088161       1 enqueue.go:55] Enter Enqueue ...
