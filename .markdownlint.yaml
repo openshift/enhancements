@@ -1,0 +1,4 @@
+# See https://github.com/DavidAnson/markdownlint#optionsconfig
+
+# forematter metadata seems to trigger this
+single-title: false
