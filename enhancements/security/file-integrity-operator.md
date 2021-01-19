@@ -27,11 +27,30 @@ status: provisional
 
 ## Summary
 
-This enhancement describes an optional security and compliance feature for OpenShift. Many security-conscious customers want to be informed when files on a host's filesystem are modified in a way that is unexpected, as this may indicate an attack or compromise.  It proposes a "file-integrity-operator" that provides file integrity monitoring of select files on the host filesystems of the cluster nodes. It periodically runs a verification check on the watched files and provides logs of any changes.
+This enhancement describes an optional security and compliance feature
+for OpenShift. Many security-conscious customers want to be informed
+when files on a host's filesystem are modified in a way that is
+unexpected, as this may indicate an attack or compromise.  It proposes
+a "file-integrity-operator" that provides file integrity monitoring of
+select files on the host filesystems of the cluster nodes. It
+periodically runs a verification check on the watched files and
+provides logs of any changes.
 
 ## Motivation
 
-In addition to the reasons stated in the Summary section, as part of the FedRAMP gap assessment of OpenShift/RHCOS, it has been identified that to fulfill several NIST SP800-53 security controls we need to constantly do integrity checks on configuration files (CM-3 & CM-6), as well as critical system paths and binaries (boot configuration, drivers, firmware, libraries) (SI-7). Besides verifying the files, we need to be able to report which files changed and in what manner, in order for the organization to better determine if the change has been authorized or not. In order to fulfull the controls the file integrity checks need to be done using a state-of-the-practice integrity checking mechanism (e.g., parity checks, cyclical redundancy checks, cryptographic hashes). If using cryptographic hashes for integrity checks, such algorithms need to be FIPS-approved.
+In addition to the reasons stated in the Summary section, as part of
+the FedRAMP gap assessment of OpenShift/RHCOS, it has been identified
+that to fulfill several NIST SP800-53 security controls we need to
+constantly do integrity checks on configuration files (CM-3 & CM-6),
+as well as critical system paths and binaries (boot configuration,
+drivers, firmware, libraries) (SI-7). Besides verifying the files, we
+need to be able to report which files changed and in what manner, in
+order for the organization to better determine if the change has been
+authorized or not. In order to fulfull the controls the file integrity
+checks need to be done using a state-of-the-practice integrity
+checking mechanism (e.g., parity checks, cyclical redundancy checks,
+cryptographic hashes). If using cryptographic hashes for integrity
+checks, such algorithms need to be FIPS-approved.
 
 ## Goals
 
@@ -45,22 +64,28 @@ The proposed design and current [Proof-of-concept operator](https://github.com/o
 * Running scans - With the AIDE database created, the AIDE process runs in a loop in the pod, periodically running integrity checks and writing the results to a log file.
 * Viewing scan results - The AIDE log files are exposed to the admin via configMap.
   * A "logcollector" container is included in the DaemonSet pods. This process watches for the status of the AIDE checks, placing the AIDE log into a temporary configMap. The logs are compressed if they run over the 1MB limit. (See Drawbacks section for more regarding this limit).
-  * The file-integrity-operator reconciles on the new configMap and does some validation of the data (checks for a logcollector error vs. a scan result), and adds a condition entry to status.nodeStatus. If the AIDE check failed, a new configMap is created with the log, and the "Failed" condition includes the name and namespace of the configMap. The temporary configMap created by the logcollector process is deleted.
+  * The file-integrity-operator reconciles on the new configMap and
+    does some validation of the data (checks for a logcollector error
+    vs. a scan result), and adds a condition entry to
+    status.nodeStatus. If the AIDE check failed, a new configMap is
+    created with the log, and the "Failed" condition includes the name
+    and namespace of the configMap. The temporary configMap created by
+    the logcollector process is deleted.
 * AIDE Configuration - Optionally, a user-provided AIDE configuration can be provided in order to allow customers to modify the integrity check policy.
-    * The admin first creates a configMap containing their aide.conf.
-    * A FileIntegrity CR is posted that defines the Spec.Config items.
-        * Spec.Config.Name: The name of a configMap that contains the admin-provided aide.conf
-        * Spec.Config.Namespace: The namespace of the configMap
-        * Spec.Config.Key: The data key in the configMap that holds the aide.conf
-    * In most cases the provided aide.conf will be specific to standalone host and not tailored for the operator. On reconcile the operator reads the configuration from the configMap and applies a few conversions allowing it to work with the pod configuration.
-      * Prefix /hostroot/ to each file selection line.
-      * Change database and log path parameters.
-      * Change allowed checksum types to FIPS-approved variants.
-    * After conversion the operator's AIDE configuration configMap is updated with the new config, and the daemonSet's pods are restarted.
+  * The admin first creates a configMap containing their aide.conf.
+  * A FileIntegrity CR is posted that defines the Spec.Config items.
+    * Spec.Config.Name: The name of a configMap that contains the admin-provided aide.conf
+    * Spec.Config.Namespace: The namespace of the configMap
+    * Spec.Config.Key: The data key in the configMap that holds the aide.conf
+  * In most cases the provided aide.conf will be specific to standalone host and not tailored for the operator. On reconcile the operator reads the configuration from the configMap and applies a few conversions allowing it to work with the pod configuration.
+    * Prefix /hostroot/ to each file selection line.
+    * Change database and log path parameters.
+    * Change allowed checksum types to FIPS-approved variants.
+  * After conversion the operator's AIDE configuration configMap is updated with the new config, and the daemonSet's pods are restarted.
 
 ### API Specification
 
-```
+```yaml
 apiVersion: file-integrity.openshift.io/v1alpha1
 kind: FileIntegrity
 metadata:
@@ -126,7 +151,14 @@ The operator is intended to be the sole controller of its operand resources (con
 * Enable the use of object storage for exposing the AIDE logs instead of configMaps. See the Drawbacks section for more regarding AIDE log storage.
 * Add a "Provider" field to the API and enable other integrity checking mechanisms.
   * Enable non-userspace and strongly attested integrity checking mechanism(s). Some suggested candidates include fs-verity and IMA. Note: Both IMA/fs-verity methods provide more integrity assurance over AIDE _only_ when backed by a TPM.
-    * fs-verity: According to https://www.kernel.org/doc/html/latest/filesystems/fsverity.html, fs-verity works only on read-only files. Requires ext4 formatting options and block size to be == PAGE_SIZE. Files need to be ioctl'ed as verity files and have signature verification performed in userspace. Unless fs-verity is backed by attested dm-verity volumes (not feasible for nodes) or tied into IMA somehow, this provider seems insufficient for our use.
+    * fs-verity: According to
+      https://www.kernel.org/doc/html/latest/filesystems/fsverity.html,
+      fs-verity works only on read-only files. Requires ext4
+      formatting options and block size to be == PAGE_SIZE. Files need
+      to be ioctl'ed as verity files and have signature verification
+      performed in userspace. Unless fs-verity is backed by attested
+      dm-verity volumes (not feasible for nodes) or tied into IMA
+      somehow, this provider seems insufficient for our use.
     * IMA-measurement; requires setup of kernel params, filesystem options, TPM keys, and possibly require some userspace tools for setup. The file-integrity-operator would handle this setup by creating MachineConfigs, etc. As a bonus, IMA can log file hashes through auditd. At a glance, this would be a preferred method over fs-verity.
   * Note: Enabling stronger integrity checking mechanisms does not obsolete the use of the file-integrity-operator. The FedRAMP Moderate baseline is still satisfied by the weak assurance of AIDE;  It is important that customers can choose to meet this baseline without requiring a TPM, so the AIDE provider will not go away.
 
