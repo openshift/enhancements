@@ -66,35 +66,35 @@ and we can use that information to sort devices into storage classes based on th
   - has no FS signature.
   - state (as outputted by `lsblk`) is not `suspended`
 - There is a risk that LSO will detect just attached device as empty, before kubelet formats it, we mitigate this risk
-    - by re-checking the device after ~1 minute.
+  - by re-checking the device after ~1 minute.
 - There is a risk that the path of the disk changes after reboot and disk can be re-detected as new, we mitigate this risk by
-    - Using disk id for symlink.
+  - Using disk id for symlink.
 - There is a risk that LSO will match all local disks that already have PVs, but these PVs are not bound / used yet.`
-    - Skip the devices that already have PVs provisioned on them.
+  - Skip the devices that already have PVs provisioned on them.
 - There is a risk that multiple `LocalVolumeSet` and `LocalVolume` CRs will use the same device.
-    - Skip the devices that already have PVs provisioned on them.
+  - Skip the devices that already have PVs provisioned on them.
 - There is a risk that LSO may create PV for a device/disk that's already used as another PV.
-    - We can solve this by updating local-storage-static-provisioner to hash localPVs using hostname and disk name and remove the storageclass.
+  - We can solve this by updating local-storage-static-provisioner to hash localPVs using hostname and disk name and remove the storageclass.
 
 ## Proposal
 
 The `local-storage-operator` is already capable of consuming local disks from the nodes and provisioning PVs out of them, but the disk/device paths needs to explicitly specified in the `LocalVolume` CR.
 The idea is to introduce two new features in LSO
-  - Auto discovery of local devices
-    - This will introduce two new CRs `LocalVolumeDiscovery` and `LocalVolumeDiscoveryResult`.
-    - The purpose of this will be to expose local devices available in a node via the `LocalVolumeDiscoveryResult` CR.
-    - The device discovery will be continuous process so that newly added and removed devices can be detected.
-  - Auto provisioning of localDevices
-    - This will introduce a new CR called `LocalVolumeSet`.
-    - The purpose of this will be to auto discover and provision PVs on devices which match the inclusion filter present in the CR.
-    - This will involve a continous process of discovery of devices via the diskmaker daemons. Any discovered devices which matches the inclusion filter will be considered for provisioning of PVs.
+- Auto discovery of local devices
+  - This will introduce two new CRs `LocalVolumeDiscovery` and `LocalVolumeDiscoveryResult`.
+  - The purpose of this will be to expose local devices available in a node via the `LocalVolumeDiscoveryResult` CR.
+  - The device discovery will be continuous process so that newly added and removed devices can be detected.
+- Auto provisioning of localDevices
+  - This will introduce a new CR called `LocalVolumeSet`.
+  - The purpose of this will be to auto discover and provision PVs on devices which match the inclusion filter present in the CR.
+  - This will involve a continous process of discovery of devices via the diskmaker daemons. Any discovered devices which matches the inclusion filter will be considered for provisioning of PVs.
 
 Once we have the detected devices the administrator can create the localPVs by explicitly selecting the disks. This can be done by the `localVolume` CR. The other option would be to create localPVs via the `LocalVolumeSet` CR and passing the inclusion filters in it.
 
-#### Workflow of LocalPV creation via LocalVolume CR
+### Workflow of LocalPV creation via LocalVolume CR
 
 1. Discovery: The user can choose to run discovery if they want to understand what devices are available across the nodes in the cluster.
-    - ##### NOTE: This step is optional for users directly creating CRs. They might already know what CRs they need for step 2.
+    - NOTE: This step is optional for users directly creating CRs. They might already know what CRs they need for step 2.
 2. PV Creation: After the user has decided how to create PVs, they can choose to create PVs with either the `LocalVolume` CR or the `LocalVolumeSet` CR.
 
 ## Design Details for `Auto discovery of local devices`
@@ -561,7 +561,7 @@ status:
 - Documentation exists for the behaviour of each configuration item.
 - Unit and End to End tests coverage is sufficient.
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 - None of the features are getting deprecated
 
