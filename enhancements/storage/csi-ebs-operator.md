@@ -128,11 +128,11 @@ The manages one Deployment that runs the driver controller and one DaemonSet tha
 
 There is no dev-preview phase.
 
-##### Tech Preview
+#### Tech Preview
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 

@@ -57,21 +57,21 @@ Upstream has chosen [addon](https://github.com/kubernetes/kubernetes/tree/master
 ## Proposal
 
 1. OCP ships a new operator for csi-snapshot-controller, say csi-snapshot-controller-operator.
-  * This operator will be installed by CVO in all clusters.
-    * We do not know in advance what CSI drivers will a cluster admin install and we want the cluster ready for snapshots.
-  * This operator will create / update VolumeSnapshot, VolumeSnapshotContent and VolumeSnapshotClass CRDs.
-    * Vanilla copy of [upstream CRDs](https://github.com/kubernetes/kubernetes/tree/master/cluster/addons/volumesnapshots/crd) is used.
-  * This operator will create Deployment with csi-snapshot-controller
-    * Using Deployment with 3 replicas + leader election instead of upstream StatefulSet - leader election is significantly faster to run a new leader when a node with the current leader gets unavailable.
-    * Optionally, run the Deployment on masters using proper node selector + tolerations.
-  * This operator will report its status and status of the operand (Deployment) via standard `ClusterOperator` object.
-    * With RelatedObjects = the Deployment with the controller + `openshift-csi-snapshot-controller` namespace.
-  * Everything (the operator + the operand) runs in namespace `openshift-csi-snapshot-controller`.
-  * Requires new github repo, openshift/csi-snapshot-controller-operator.
-  * Requires new image.
+   * This operator will be installed by CVO in all clusters.
+     * We do not know in advance what CSI drivers will a cluster admin install and we want the cluster ready for snapshots.
+   * This operator will create / update VolumeSnapshot, VolumeSnapshotContent and VolumeSnapshotClass CRDs.
+     * Vanilla copy of [upstream CRDs](https://github.com/kubernetes/kubernetes/tree/master/cluster/addons/volumesnapshots/crd) is used.
+   * This operator will create Deployment with csi-snapshot-controller
+     * Using Deployment with 3 replicas + leader election instead of upstream StatefulSet - leader election is significantly faster to run a new leader when a node with the current leader gets unavailable.
+     * Optionally, run the Deployment on masters using proper node selector + tolerations.
+   * This operator will report its status and status of the operand (Deployment) via standard `ClusterOperator` object.
+     * With RelatedObjects = the Deployment with the controller + `openshift-csi-snapshot-controller` namespace.
+   * Everything (the operator + the operand) runs in namespace `openshift-csi-snapshot-controller`.
+   * Requires new github repo, openshift/csi-snapshot-controller-operator.
+   * Requires new image.
 
 2. OCP ships new image csi-snapshot-controller. Its source code is already available in github.com/openshift/csi-external-snapshotter, we only need an image.
-  * The component / image is called kubernetes-csi/snapshot-controller upstream, we add csi- prefix to repository and image names, as we do with other repos / images from github.com/kubernetes-csi
+   * The component / image is called kubernetes-csi/snapshot-controller upstream, we add csi- prefix to repository and image names, as we do with other repos / images from github.com/kubernetes-csi
 
 ### API
 While the operator does not need any special cluster-specific configuration, following API is provided in `github.com/openshift/api/operator/v1` to be a good OpenShift operator. Explicitly, the operator uses `status.observedGeneration` and `status.generations` to track changes in dependent objects.
@@ -146,7 +146,7 @@ The operator is fairly straightforward, it manages just one Deployment that runs
 
 * Upstream RBAC from [upstream](https://github.com/kubernetes/kubernetes/blob/master/cluster/addons/volumesnapshots/volume-snapshot-controller/rbac-volume-snapshot-controller.yaml)
 * Upstream [StatefulSet](https://github.com/kubernetes/kubernetes/blob/master/cluster/addons/volumesnapshots/volume-snapshot-controller/volume-snapshot-controller-deployment.yaml)
-  * We will use Deployment with leader election, it recovers faster from leader being on an unavailable node 
+  * We will use Deployment with leader election, it recovers faster from leader being on an unavailable node
   * We may consider DaemonSet on masters, as the controller can read all PVs / PVCs / VolumeSnapshot / VolumeSnapshotContent objects in the cluster and write to most of them (everything except PVC).
 
 ### Test Plan
@@ -163,7 +163,7 @@ Tests for this sidecar are currently defined upstream at https://github.com/kube
 
 There is no dev-preview phase.
 
-##### Tech Preview
+#### Tech Preview
 
 * Unit and e2e tests implemented.
 * Update snapshot CRDs to v1beta1 and enable VolumeSnapshotDataSource feature gate by default. The feature must also be at least v1beta1 upstream, and have a strong indication that it will be made GA in a reasonable time frame with a compatible API.
@@ -171,12 +171,12 @@ There is no dev-preview phase.
 * csi-snapshot-controller-operator has e2e test(s).
 * csi-external-snapshotter is available to CSI drivers shipped by Red Hat (OCS, Ember, ...).
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 * Feature deployed in production and have gone through at least one K8s upgrade.
 * Feature must be GA in Kubernetes.
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 
