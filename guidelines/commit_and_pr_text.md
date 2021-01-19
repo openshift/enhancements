@@ -12,17 +12,17 @@ __PR title:__ Bug NNNN: A short sentence with capitalization and no period or th
 
 * Try to describe the problem the user sees, rather than the code change you are doing
   * I.e. “Console does not work when user clicks X” instead of “Fix drawer notification integration with underlying controller”
-* Prefix bug fixes with the bug number, “Bug XXXXX:” 
+* Prefix bug fixes with the bug number, “Bug XXXXX:”
   * (capitalize bug, space, number, then colon)
 * Do not let your PR title get truncated/wrapped into the description
-* Additional prefixes like what release the PR applies to are allowed, but they will be stripped from the changelog (the changelog for 4.4 doesn’t need to say “release-4.4” 
+* Additional prefixes like what release the PR applies to are allowed, but they will be stripped from the changelog (the changelog for 4.4 doesn’t need to say “release-4.4”
   * Changelog strips anything between square brackets that has no spaces - i.e. [release-4.4] is stripped but [release 4.4] would not be
-    
+
 
 __PR description:__  Additional context reviewers need to understand your PR
 
 * Why was this change needed?
-* What changes are being made?  
+* What changes are being made?
 * Reference to any prior work(other PRs) or follow up work that will be needed.
 
 [Canonical PR text example](https://github.com/openshift/openshift-apiserver/pull/69)
@@ -31,7 +31,13 @@ __PR description:__  Additional context reviewers need to understand your PR
 
 ## Number of Commits
 
-Give careful consideration to the commits in your PR.  Multiple commits may make sense, but should each have a clear, logical, independent function.  Careful commit structure within a PR makes it easier to review the PR, easier to revert the PR if necessary, easier for someone doing “git blame” to follow the set of involved changes, and encourage smaller “chunks of work” (if it’s multiple commits, think about whether it should also be multiple PRs)
+Give careful consideration to the commits in your PR.  Multiple
+commits may make sense, but should each have a clear, logical,
+independent function.  Careful commit structure within a PR makes it
+easier to review the PR, easier to revert the PR if necessary, easier
+for someone doing “git blame” to follow the set of involved changes,
+and encourage smaller “chunks of work” (if it’s multiple commits,
+think about whether it should also be multiple PRs)
 
 Valid reasons to have separate commits:
 
@@ -59,4 +65,3 @@ __Additional information:__  Why was this change needed?  What is the gist of th
 * Consider including a tl;dr summary at the end of the commit text
 
 [Canonical commit text example](https://github.com/openshift/origin/commit/d7a7ff790f87ae14ad106f2256ebafc1e7c91949)
-

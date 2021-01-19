@@ -12,7 +12,7 @@ creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
 see-also:
-  - "/enhancements/this-other-neat-thing.md"  
+  - "/enhancements/this-other-neat-thing.md"
 replaces:
   - "/enhancements/that-less-than-great-idea.md"
 superseded-by:
@@ -81,7 +81,7 @@ The `Summary` section is incredibly important for producing high quality
 user-focused documentation such as release notes or a development roadmap. It
 should be possible to collect this information before implementation begins in
 order to avoid requiring implementors to split their attention between writing
-release notes and implementing the feature itself. 
+release notes and implementing the feature itself.
 
 A good summary is probably at least a paragraph in length.
 
@@ -137,9 +137,9 @@ Consider including folks that also work outside your immediate sub-project.
 ### Open Questions [optional]
 
 This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance, 
+to implement the design.  For instance,
  > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this? 
+  information.  Can we do this?
 
 ### Test Plan
 
@@ -171,8 +171,8 @@ Consider the following in developing the graduation criteria for this
 enhancement:
 
 - Maturity levels
-    - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-    - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
+  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
+  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
 - [Deprecation policy][deprecation-policy]
 
 Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
@@ -183,11 +183,10 @@ In general, we try to use the same stages (alpha, beta, GA), regardless how the 
 [maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
 [deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
 
-#### Examples
+**Examples**: These are generalized examples to consider, in addition
+to the aforementioned [maturity levels][maturity-levels].
 
-These are generalized examples to consider, in addition to the aforementioned [maturity levels][maturity-levels].
-
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
@@ -196,7 +195,7 @@ These are generalized examples to consider, in addition to the aforementioned [m
 - Enumerate service level indicators (SLIs), expose SLIs as metrics
 - Write symptoms-based alerts for the component(s)
 
-##### Tech Preview -> GA 
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -208,7 +207,7 @@ These are generalized examples to consider, in addition to the aforementioned [m
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
 - Deprecate the feature
