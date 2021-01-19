@@ -17,7 +17,7 @@ There is no standard way to associate and transmit operator manifests and metada
 Existing non-standard methods include:
 
 * git repositories
-    * see also, kustomize
+  * see also, kustomize
 * operator-registry directory “bundles”
 * helm charts
 * appregistry
@@ -39,11 +39,11 @@ By standardizing on a container format for this data, we get many other features
 ## Proposal
 We delineate the operator metadata from the operator manifests. The operator manifests refers to a set of kubernetes manifest(s) the defines the deployment and RBAC model of the operator. The operator metadata on the other hand are, but not limited to:
 * Information that identifies the operator, it's name, version etc.
-* Additional information that drives the UI: 
-    * Icon
-    * Example CR(s)
+* Additional information that drives the UI:
+  * Icon
+  * Example CR(s)
 * Channel(s)
-* API(s) provided and required. 
+* API(s) provided and required.
 * Related images.
 
 
@@ -64,7 +64,7 @@ As an operator author, I would like to associate operator manifests and metadata
 The focus of this user story is to define a standard to store, transmit, inspect and retrieve operator manifests and metadata. The exact format of the metadata is outside of the scope of this story.
 
 *Constraints*:
-* An operator bundle (including both manifests and metadata) should be identifiable using a single versioned identifier. 
+* An operator bundle (including both manifests and metadata) should be identifiable using a single versioned identifier.
 * For an operator The metadata can be downloaded independently of the manifest.
 
 ### Implementation Details/Notes/Constraints
@@ -100,7 +100,7 @@ annotations:
 * The potential use case for the `LABELS` is - an external off-cluster tool can inspect the image to check the type of a given bundle image without downloading the content.
 
 ###### Format
-We can use the following values for `mediatype`: 
+We can use the following values for `mediatype`:
 * `registry`: Format used by [Operator Registry](https://github.com/operator-framework/operator-registry#manifest-format) to package an operator.
 * `helm`: Can be used to package a helm chart inside an operator bundle.
 * `plain`: Can be used to package plain k8s manifests inside an operator bundle.
@@ -111,7 +111,16 @@ operators.operatorframework.io.bundle.mediatype: "registry+v1"
 ```
 
 ###### Graph Metadata
-An additional point of concern is the fact that the current [operator-registry manifest format](https://github.com/operator-framework/operator-registry#manifest-format) also has a multi-version aggregation file `package.yaml` that describes data about the entire set of releases. Given that we are splitting up these manifests into separate objects, we now need a way to denormalize this data so that it applies only to an individual release. In order to do this, we will create labels on the image and include them in the `annotations.yaml` file. Previously the `package.yaml` file was defined like this:
+An additional point of concern is the fact that the current
+[operator-registry manifest
+format](https://github.com/operator-framework/operator-registry#manifest-format)
+also has a multi-version aggregation file `package.yaml` that
+describes data about the entire set of releases. Given that we are
+splitting up these manifests into separate objects, we now need a way
+to denormalize this data so that it applies only to an individual
+release. In order to do this, we will create labels on the image and
+include them in the `annotations.yaml` file. Previously the
+`package.yaml` file was defined like this:
 
 *package.yaml*
 ```yaml
@@ -148,7 +157,7 @@ operators.operatorframework.io.bundle.channel.default.v1: "stable"
 
 ###### Example of an Operator Bundle that uses Operator Registry Format
 This example uses [Operator Registry Manifests](https://github.com/operator-framework/operator-registry#manifest-format) format to build an operator bundle image. The source directory of an operator registry bundle has the following layout.
-```
+```console
 $ tree test
 test
 ├── testbackup.crd.yaml
@@ -160,10 +169,10 @@ test
 ```
 
 `Dockerfile` for operator bundle
-```
+```dockerfile
 FROM scratch
 
-# We are pushing an operator-registry bundle 
+# We are pushing an operator-registry bundle
 # that has both metadata and manifests.
 LABEL operators.operatorframework.io.bundle.mediatype.v1=registry+v1
 LABEL operators.operatorframework.io.bundle.manifests.v1=manifests/
@@ -195,9 +204,9 @@ $ tree
 * The image is not runnable, it is built from `scratch`.
 
 
-###### UX:
+###### UX
 Build, Push and Pull an operator bundle image.
-```
+```bash
 docker build -f Dockerfile -t quay.io/test/test-operator:v1 .
 docker push quay.io/test/test-operator:v1
 docker pull quay.io/test/test-operator:v1
@@ -255,7 +264,7 @@ $ operator-framework bundle validate --image=quay.io/test/test-operator:v1
 ```
 
 The validate command will do the following:
-* Make sure the image `label` and `annotations.yaml` are appropriately configured. If there is any mismatch, the tool should generate appropriate error message. 
+* Make sure the image `label` and `annotations.yaml` are appropriately configured. If there is any mismatch, the tool should generate appropriate error message.
 * Verify that the format of the bundle is valid. If the bundle is of `registry` format, we should verify that the bundle conforms to operator-registry standards.
 
 #### Run the Operator from the Bundle Image
@@ -278,7 +287,7 @@ Below is an example of how an operator bundle image can be unpacked to apply the
 $ docker save quay.io/test/test-operator:v1 -o bundle.tar
 $ tar -xvf bundle.tar
 
-$ tar -tf bundle.tar 
+$ tar -tf bundle.tar
 39d24aee3ad2e8720c12042d5b9ba52ce14a12ed72815a759b41b01b9a8dbc03/
 39d24aee3ad2e8720c12042d5b9ba52ce14a12ed72815a759b41b01b9a8dbc03/VERSION
 39d24aee3ad2e8720c12042d5b9ba52ce14a12ed72815a759b41b01b9a8dbc03/json

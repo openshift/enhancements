@@ -57,7 +57,13 @@ Note: this relies on [this feature of CVO](https://github.com/openshift/cluster-
 
 1. Remove the OperatorSource and CatalogSourceConfig CRDs. This will remove all CR instances.
 
-2. Update the default CatalogSources (that are no longer updated by OperatorSources) from `address` type CatalogSources to `image` type CatalogSources, with appropriate poll intervals, pointing the the released catalog images instead of to appregistry repositories. To perform the migration, the OperatorHub Config API will be changed to reconcile `image` CatalogSource defaults instead of OperatorSource defaults.
+2. Update the default CatalogSources (that are no longer updated by
+   OperatorSources) from `address` type CatalogSources to `image` type
+   CatalogSources, with appropriate poll intervals, pointing the the
+   released catalog images instead of to appregistry repositories. To
+   perform the migration, the OperatorHub Config API will be changed
+   to reconcile `image` CatalogSource defaults instead of
+   OperatorSource defaults.
 
 3. Remove the reconcilation of the OperatorSource and CatalogSourceConfig APIs either by removing the marketplace operator entirely or by removing the relevant portions of it (if it is being retained to manage the OperatorHub API, see below).
 
@@ -117,9 +123,9 @@ If OpenShift is downgraded, there are two cases that can occur
 
 ## Implementation History
 
- - Proposal 01/06/20
- - Updated based on Y-upgrade blocking 01/09/20
- - Added a section on downgrades 01/21/20
+- Proposal 01/06/20
+- Updated based on Y-upgrade blocking 01/09/20
+- Added a section on downgrades 01/21/20
 
 ## Drawbacks
 

@@ -78,7 +78,14 @@ bundle
         └── annotations.yaml
 ```
 
-OLM would then need to be updated to identify the `ServiceMonitors` and `PrometheusRules` resources and deploy them as part of an `InstallPlan`. There is no way for OLM to identify which Prometheus Operator ServiceAccount should be granted the appropriate RBAC privileges to view the `ServiceMonitor` and `PrometheusRule` resource events in the namespace that the operator is being deployed to. As such, the cluster admin will need to configure the Prometheus Operator to watch for events in the correct namespace.
+OLM would then need to be updated to identify the `ServiceMonitors`
+and `PrometheusRules` resources and deploy them as part of an
+`InstallPlan`. There is no way for OLM to identify which Prometheus
+Operator ServiceAccount should be granted the appropriate RBAC
+privileges to view the `ServiceMonitor` and `PrometheusRule` resource
+events in the namespace that the operator is being deployed to. As
+such, the cluster admin will need to configure the Prometheus Operator
+to watch for events in the correct namespace.
 
 ### OpenShift Monitoring Prometheus Operator Support
 
@@ -113,13 +120,26 @@ OLM [building-your-csv](https://github.com/operator-framework/operator-lifecycle
 
 - The `operatorframework.io/suggested-namespace` annotation. When the `operatorframework.io/suggested-namespace` annotation is present the UI will highlight the suggested namespace when installing the operator. OLM itself will not require that the operator is deployed in the namespace defined by the `operatorframework.io/suggested-namespace` annotation.
 
-- The `operatorframework.io/cluster-monitoring=true` annotation. When this annotation is set to `true`, the OpenShift Console will update the namespace that the operator is being deployed to with the `openshift.io/cluster-monitoring=true` label. When this annotation is present, the UI will update the OpenShift Monitoring Prometheus Operator ServiceAccount with the appropriate RBAC privileges for the given namespace as well, allowing operators to be scraped by the OpenShift Monitoring Prometheus Operator.
+- The `operatorframework.io/cluster-monitoring=true` annotation. When
+  this annotation is set to `true`, the OpenShift Console will update
+  the namespace that the operator is being deployed to with the
+  `openshift.io/cluster-monitoring=true` label. When this annotation
+  is present, the UI will update the OpenShift Monitoring Prometheus
+  Operator ServiceAccount with the appropriate RBAC privileges for the
+  given namespace as well, allowing operators to be scraped by the
+  OpenShift Monitoring Prometheus Operator.
 
 >Note: There is no work required by the OLM team to implement this support.
 
 #### Risks and Mitigations
 
-If OLM allows any operator to report metrics to the OpenShift Monitoring Prometheus Instance, there is a chance that the prometheus instance could be overloaded or the integrity of the data it scraps could be jeopardized. In an effort to minimize this risk, the number of operators that are granted permission to include metrics will be highly regulated. Operators must not be added to officially supported CatalogSources without first being reviewed.
+If OLM allows any operator to report metrics to the OpenShift
+Monitoring Prometheus Instance, there is a chance that the prometheus
+instance could be overloaded or the integrity of the data it scraps
+could be jeopardized. In an effort to minimize this risk, the number
+of operators that are granted permission to include metrics will be
+highly regulated. Operators must not be added to officially supported
+CatalogSources without first being reviewed.
 
 Additionally, operators that introduce metrics must be added to an e2e test that ensures the metrics cardinality are under appropriate limits.
 
