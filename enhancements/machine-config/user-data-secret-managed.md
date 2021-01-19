@@ -16,7 +16,7 @@ creation-date: 2020-06-09
 last-updated: yyyy-mm-dd
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced
 see-also:
-  - "/enhancements/this-other-neat-thing.md"  
+  - "/enhancements/this-other-neat-thing.md"
 replaces:
   - "/enhancements/that-less-than-great-idea.md"
 superseded-by:
@@ -48,7 +48,14 @@ The goal for this enhancement is to have the Secret that contains the stub ignit
 
 ### Goals
 
-MCO will adopt the pointer ignition created by the installer and manage it's lifecycle inside the cluster. The installer is still responsible to create the initial version of the Secret as that is required to support UPI installation by generating the initial ignition configs until the installer provisions the control plane via MAO and not TF. The MCO takes ownership of the Secret containing the stub ignition once the cluster is up and running. When we'll update to the new Ignition version, the MCO can update the Secret.
+MCO will adopt the pointer ignition created by the installer and
+manage it's lifecycle inside the cluster. The installer is still
+responsible to create the initial version of the Secret as that is
+required to support UPI installation by generating the initial
+ignition configs until the installer provisions the control plane via
+MAO and not TF. The MCO takes ownership of the Secret containing the
+stub ignition once the cluster is up and running. When we'll update to
+the new Ignition version, the MCO can update the Secret.
 
 The final goal for this enhancement is to be able to manage that Secret from the MCO during the ignition migration to the new spec.
 
@@ -84,25 +91,31 @@ The installer PR is just a rename of the old user-data secret to something new t
 The whole implementation, related to the ignition upgrade will go as follows:
 
 - installation (no impact)
-    - everything starts with the new ignition version
-    - installer creates the user-data with ignition v3
-    - MCO is ignition v3 as well
-    - scale up works as the new bootimages understand ignition v3
+  - everything starts with the new ignition version
+  - installer creates the user-data with ignition v3
+  - MCO is ignition v3 as well
+  - scale up works as the new bootimages understand ignition v3
 
 - upgrade (impacted)
-    - everything is ignition v2, including bootimages
-    - the user-data secret is also an ignition v2 snippet
-    - the upgrade starts bringing the new MCO which understands ignition v3
-    - the MCO creates the new managed secret containing an ignition v3 snippet and leaving around the old, unmanaged secret which is v2
-    - scale up continues working as the Machine(Sets) still reference the unmanaged, v2 snippet
-    - when we'll grow the ability to update bootimages, the new bootimages will understand v3 and they'll grab the managed secret which is v3
+  - everything is ignition v2, including bootimages
+  - the user-data secret is also an ignition v2 snippet
+  - the upgrade starts bringing the new MCO which understands ignition v3
+  - the MCO creates the new managed secret containing an ignition v3 snippet and leaving around the old, unmanaged secret which is v2
+  - scale up continues working as the Machine(Sets) still reference the unmanaged, v2 snippet
+  - when we'll grow the ability to update bootimages, the new bootimages will understand v3 and they'll grab the managed secret which is v3
 
 The last point above in the upgrade scenario is captured in https://github.com/openshift/enhancements/pull/201 - that enhancement is our long term solution to that problem. If there'd be a source of truth available for the cluster version bootimage the mao could use that by default and the mco could generate a userData secret with the right ign by machine creation request.
 
 
 ### Risks and Mitigations
 
-This enhancement isn't about the migration to Ignition v3. Any risks and mitigations related to that won't be captured here. This is going to be a straightforward implementation during the development cycle leading to the final migration (which will obviously require more coordinations and/or ratcheting strategy). The only thing to note related to this enhacement is the need to coordinate 2 code changes in both MCO and installer, with the MCO one needed first.
+This enhancement isn't about the migration to Ignition v3. Any risks
+and mitigations related to that won't be captured here. This is going
+to be a straightforward implementation during the development cycle
+leading to the final migration (which will obviously require more
+coordinations and/or ratcheting strategy). The only thing to note
+related to this enhacement is the need to coordinate 2 code changes in
+both MCO and installer, with the MCO one needed first.
 
 
 ## Drawbacks
@@ -112,4 +125,3 @@ We're not at a point where we can fully manage that Secret from the MCO as we do
 ## Alternatives
 
 Most notable alternative is https://github.com/openshift/machine-config-operator/issues/683#issuecomment-493193902 but it's far from being something we could implement during one release as it requires changing how the MAO work.
-

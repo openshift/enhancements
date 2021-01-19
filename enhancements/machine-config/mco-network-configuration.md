@@ -23,7 +23,14 @@ status: provisional
 
 ## Summary
 
-The ability to configure additional host networking parameters is paramount on some platforms, especially baremetal. Baremetal nodes usually have many interfaces that need to be dynamically configured to access other, critical datacenter resources. Doing so with MachineConfig would incur reboots that are expensive in time on the baremetal platform. The ability to configure host networking parameters without rebooting is desirable. It is also desirable to rollback automatically on failure, as opposed to failing on reboot.
+The ability to configure additional host networking parameters is
+paramount on some platforms, especially baremetal. Baremetal nodes
+usually have many interfaces that need to be dynamically configured to
+access other, critical datacenter resources. Doing so with
+MachineConfig would incur reboots that are expensive in time on the
+baremetal platform. The ability to configure host networking
+parameters without rebooting is desirable. It is also desirable to
+rollback automatically on failure, as opposed to failing on reboot.
 
 ## Motivation
 
@@ -32,7 +39,14 @@ Different payloads have different networking requirements, and not everything
 can be satisfied as overlays on top of the main interface of the node (e.g.
 SR-IOV, L2, other L2).
 
-The [Container Network Interface](https://github.com/containernetworking/cni) (CNI) standard enables different solutions for connecting networks on the node with pods. Some of them are [part of the standard](https://github.com/containernetworking/plugins), and there are others that extend support for [Open vSwitch bridges](https://github.com/kubevirt/ovs-cni), [SR-IOV](https://github.com/hustcat/sriov-cni), and more...
+The [Container Network
+Interface](https://github.com/containernetworking/cni) (CNI) standard
+enables different solutions for connecting networks on the node with
+pods. Some of them are [part of the
+standard](https://github.com/containernetworking/plugins), and there
+are others that extend support for [Open vSwitch
+bridges](https://github.com/kubevirt/ovs-cni),
+[SR-IOV](https://github.com/hustcat/sriov-cni), and more...
 
 However, in all of these cases, the node must have the networks setup before the pod is scheduled. Setting up the networks in a dynamic and heterogenous cluster, with dynamic networking requirements, is a challenge by itself - and this is what this project is addressing.
 
@@ -54,7 +68,7 @@ The node network configuration shall remain in the MachineConfigOperator workflo
 
 ## Proposal
 
-#### Option A
+### Option A
 
 The node networking configuration shall be driven by MCO (and by extension kubernetes-nmstate) and executed by
 [nmstate](https://nmstate.github.io/).
@@ -72,14 +86,14 @@ Do a KubeletConfig like integration:
 2. KNMStateController takes the **NNCP** desiredConfig and puts it as a **MachineConfig** (MC) for the desired pool
 3. MachineConfigController renders a new config and its update subcontroller starts updating desiredState of the Nodes
 4. MachineConfigDaemon sees the diff between currentState and desiredState
-5. In the case all the new rendered MC is equal except the **networkState** section, instead of reboot 
+5. In the case all the new rendered MC is equal except the **networkState** section, instead of reboot
     * MCD writes networkState as is (nmstate valid yaml) and writes it to /tmp
     * MCD calls nmstatectl set --no-commit /tmp/uuid-of-the-desiredState.yaml
     * If no connectivity loss, MCD calls nmstatectl commit [PREVIOUS CHECKPOINT]
     * Otherwise, MCD calls nmstatectl rollback
 * MCD sets the currentState to match the desiredState.
 
-#### Option B
+### Option B
 
 Interact with kubernetes-nmstate handler through MCD. Prepare hooks in MCD for that. User would create MCs, those would be propagated to MCD, MCD would delegate to kubernetes-nmstate handler.
 
@@ -104,7 +118,7 @@ As an OpenShift administrator working in Telco, I need to add and remove VLANs o
 
 #### L2 networking for VMs (CNV)
 
-As an OpenShift administrator using Container Native Virtualization, I need to configure ad-hoc VLANs and Linux bridges on day-2. These bridges are used to provide L2 connectivity to VMs. 
+As an OpenShift administrator using Container Native Virtualization, I need to configure ad-hoc VLANs and Linux bridges on day-2. These bridges are used to provide L2 connectivity to VMs.
 
 #### L2 networking for Pods (Telco, CNF)
 
@@ -124,7 +138,13 @@ be a good place to talk about core concepts and how they relate.
 
 #### Not rebooting could hide errors in network configuration
 
-A NetworkManager profile is configured with certain settings (like connection.autoconnect=yes). See those settings (the content of the profiles) with `nmcli connection show "$PROFILE"`. The profile is persisted to disk (in the file you see in `nmcli -f all connection`). When NM starts, it loads the profiles from disk. NetworkManager will try to automatically connect/activate profiles that are configured to autoconnect.
+A NetworkManager profile is configured with certain settings (like
+connection.autoconnect=yes). See those settings (the content of the
+profiles) with `nmcli connection show "$PROFILE"`. The profile is
+persisted to disk (in the file you see in `nmcli -f all
+connection`). When NM starts, it loads the profiles from
+disk. NetworkManager will try to automatically connect/activate
+profiles that are configured to autoconnect.
 
 There is no guarantee that a reboot will succeed to connect to the network. e.g. the DHCP might simply not reply. But in general, if you have a profile (persisted to disk), and the profile is set to autoconnect, and you reboot, there is a reasonable expectation that it should work.
 
@@ -132,7 +152,7 @@ If it doesn't come up on reboot, it's likely an environment issue (e.g. cable un
 
 ## Design Details
 
-#### Option C
+### Option C Design
 
 These configuration files would be handled via MCO, for the Baremetal platform only.
 
@@ -158,20 +178,20 @@ Kubernetes-nmstate will only affect post-kubelet so we comply with the "MC owns 
 
 [Link](https://asciinema.org/a/uMqwIpvfhuI67ShT12csYXm3h) to an asciicast showing this option.
 
-#### Option A
+### Option A Design
 
 1. User Creates **NNCP**
 2. KNMStateController takes the **NNCP** desiredConfig and puts it as a **MachineConfig** (MC) for the desired pool
 3. MachineConfigController renders a new config and its update subcontroller starts updating desiredState of the Nodes
 4. MachineConfigDaemon sees the diff between currentState and desiredState
-5. In the case all the new rendered MC is equal except the **networkState** section, instead of reboot 
+5. In the case all the new rendered MC is equal except the **networkState** section, instead of reboot
     * MCD writes networkState as is (nmstate valid yaml) and writes it to /tmp
     * MCD calls nmstatectl set --no-commit /tmp/uuid-of-the-desiredState.yaml
     * If no connectivity loss, MCD calls nmstatectl commit [PREVIOUS CHECKPOINT]
     * Otherwise, MCD calls nmstatectl rollback
 * MCD sets the currentState to match the desiredState.
 
-```
+```dot
     digraph {
         subgraph cluster_node {
             MachineConfigDaemon -> NMState [label="nmstatectl set/commit/rollback/show", dir=both];
@@ -187,7 +207,7 @@ Kubernetes-nmstate will only affect post-kubelet so we comply with the "MC owns 
     }
 ```
 
-```
+```text
 
 
                                            rendered MachineConfig, Node
@@ -226,9 +246,9 @@ Kubernetes-nmstate will only affect post-kubelet so we comply with the "MC owns 
 
 ### Disadvantages
 * Deviates from upstream kubevirt knmstate usage. [midstream](https://github.com/openshift/kubernetes-nmstate) needs to develop:
-    * A very thin controller that creates MC objects
-    * Expose an interface for MCD to keep **NNS** up to date with the OpenShift API.
-    * Since /usr/libexec/platform-python is on the way out, we must run **NMState with podman**.
+  * A very thin controller that creates MC objects
+  * Expose an interface for MCD to keep **NNS** up to date with the OpenShift API.
+  * Since /usr/libexec/platform-python is on the way out, we must run **NMState with podman**.
 * MCD needs to make a change in its [update](https://github.com/openshift/machine-config-operator/blob/15edac1b5613b135973b071cf96535c3a376419f/pkg/daemon/update.go#L152) logic to detect if only networkState changed and in such case, use the vendored Kubernetes NMState functionality instead of *updateOSAndReboot*.
 * While the API can be deemed Tech Preview, it would effectively be baked-in, so it can't be made optional to deploy without it.
 * NodeNetworkState and NodeNetworkConfigPolicy probably need to go into [openshift/api](https://github.com/openshift/api).
@@ -254,7 +274,7 @@ Kubernetes-nmstate will only affect post-kubelet so we comply with the "MC owns 
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
 
-##### Tech Preview -> GA 
+##### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -282,7 +302,7 @@ The MCO integration should be able to operate independently of the kubernetes-nm
 
 ## Alternatives
 
-### Option A
+### Option A Alternative
 
 Include kubernetes-nmstate as a standalone component within OpenShift
 
