@@ -17,7 +17,7 @@ superseded-by:
 
 # ClusterResourceOverrides Enablement
 
-The `autoscaling.openshift.io/ClusterResourceOverride` cannot be enabled in 4.x.  The plugin already exists, this design 
+The `autoscaling.openshift.io/ClusterResourceOverride` cannot be enabled in 4.x.  The plugin already exists, this design
 is about how we make it possible for a customer to enable the feature.
 
 ## Release Signoff Checklist
@@ -40,14 +40,14 @@ and install it via OLM.
 
 The `autoscaling.openshift.io/ClusterResourceOverride` admission plugin is used for over-commit, let's stipulate that it is
 important enough to enable.  The kube-apiserver is designed to be extended using mutating admission webhooks, we have the
-technology to easily build one, and we have the ability to create a simple operator to manage it.  We want to enable the 
+technology to easily build one, and we have the ability to create a simple operator to manage it.  We want to enable the
 feature using a pattern that we can extend to other admission plugins that can scale beyond the small team that maintains
 the kube-apiserver.
 
 ### Goals
 
 1. Enable the `autoscaling.openshift.io/ClusterResourceOverride` admission plugin that is used for overcommit.
-2. Use existing extension points, libraries, and installation mechanisms in the manner we would recommend to 
+2. Use existing extension points, libraries, and installation mechanisms in the manner we would recommend to
  external teams.
 3. Have a fairly straightforward way to install and enable this admission plugin.
 4. Rebootstrapping must be possible.
@@ -106,7 +106,7 @@ None
 
 ### Upgrade / Downgrade Strategy
 
-See open questions.  
+See open questions.
 
 ### Version Skew Strategy
 
