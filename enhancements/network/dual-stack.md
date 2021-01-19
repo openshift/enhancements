@@ -207,14 +207,14 @@ release-informing, and we can add it as a blocking job to
 
 ### Graduation Criteria
 
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - You can successfully bring up a dual-stack OVN-Kubernetes bare metal
   cluster. (In particular, you can do this via cluster-bot.)
 
 - We have a mostly-passing periodic CI job
 
-##### Tech Preview -> GA 
+#### Tech Preview -> GA
 
 - TBD
 

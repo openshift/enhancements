@@ -8,7 +8,7 @@ reviewers:
   - "@wking"
 approvers:
   - "@russelb"
-creation-date: 2020-08-26 
+creation-date: 2020-08-26
 last-updated: 2020-08-26
 status: informational
 ---
@@ -47,8 +47,8 @@ coordination is also required in this case.
 All processes that wish to listen on a host port MUST
 
 - Have an entry in the table below
-- be in a [documented range](https://github.com/openshift/openshift-docs/blob/master/modules/installation-network-user-infra.adoc), 
-  if they are intended to be reachable 
+- be in a [documented range](https://github.com/openshift/openshift-docs/blob/master/modules/installation-network-user-infra.adoc),
+  if they are intended to be reachable
 - declare that port in their `Pod.Spec`
 
 Localhost-only ports SHOULD be outside of this range, to leave room.
@@ -140,7 +140,7 @@ If a feature is completely removed, (not just deprecated), then any now-free
 ports should be noted here, along with the version in which they were removed.
 
 
-## Future 
+## Future
 
 We can enforce this in an automated fashion in the future. We should write tests
 that ensure
