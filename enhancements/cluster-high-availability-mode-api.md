@@ -219,8 +219,8 @@ Consider the following in developing the graduation criteria for this
 enhancement:
 
 - Maturity levels
-    - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-    - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
+  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
+  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
 - [Deprecation policy][deprecation-policy]
 
 Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
