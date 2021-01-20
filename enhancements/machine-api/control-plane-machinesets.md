@@ -159,7 +159,7 @@ and users may scale down the cluster as they see fit.
 ## Design Details
 
 ### machine-api API modifications
-We'll need to implement lifecycle hooks to coordinate replacement of an
+We'll need to implement lifecycle hooks to coordinate replacement of a
 given control plane machine.  This consists of a small amount of common
 controller logic and annotations, no API fields.
 
@@ -193,7 +193,7 @@ We'll need to account for the fact that users might have created or will
 create machinesets that appear to the webhook controller to be control plane
 webhook hooks.  The users might desire to remove these newly created machinesets
 after some time.  We should allow functionality, such as an override annotation
-to allow any particular machineset to be delete.  This might also be necessary
+to allow any particular machineset to be deleted.  This might also be necessary
 in an extreme case (unforeseen bug) to remediate a problem with a machineset
 we created automatically.
 
@@ -205,7 +205,7 @@ machinesets and adopt the machines created by the installer, or should we
 modify the installer to create the desired machinesets for new clusters and
 perform adoptions as a 1-time operation for a given release.
 
-This question is not a blocker, we can decide the update the installer or not
+This question is not a blocker, we can decide to update the installer or not
 later as the adoption code will work in all scenarios.
 
 ### Test Plan
