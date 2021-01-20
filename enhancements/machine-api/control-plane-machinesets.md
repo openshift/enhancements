@@ -112,7 +112,7 @@ We'll implement machine deletion lifecycle hooks https://github.com/kubernetes-s
 to prevent a machine from being deleted in the cloud prior to its replacement
 coming online.
 
-Additionally, we are still have etcd-quroum-guard in place, which utilizes PBDs
+Additionally, we still have etcd-quroum-guard in place, which utilizes PBDs
 to prevent removal of more than one control plane machine at a time.
 
 #### Risk: Conflicts with user-created operators or automation
