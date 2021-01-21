@@ -89,12 +89,14 @@ Log groups can be named after:
 
 New API fields in the `output.cloudwatch` section:
 
-- `region`: (string) AWS region name, required to connect.
+- `region`: (string, required) AWS region name, required to connect.
 - `groupBy`: (string, default "logType") Take group name from logging meta-data. Values:
   - `logType`: one of "application", "infrastructure", or "audit"\
     Note that *infrastructure* and  *audit* logs are always grouped by `logType`.
   - `namespaceName`: *application* logs are grouped by namespace name.
   - `namespaceUUID`: *application* logs are grouped by namespace UUID.
+- `groupPrefix`: (string, default "") Add this prefix to all group names.
+  Useful to avoid group name clashes if an AWS account is used for multiple clusters.
 
 Existing fields:
 
