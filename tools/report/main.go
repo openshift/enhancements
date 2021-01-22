@@ -238,7 +238,7 @@ func main() {
 	sortByActivityCountDesc(theStats.Active)
 
 	year, month, day := time.Now().Date()
-	fmt.Printf("# This Week in Enhancements - %d-%d-%d\n", year, month, day)
+	fmt.Printf("# This Week in Enhancements - %d-%.2d-%.2d\n", year, month, day)
 
 	showPRs("Merged", filterPRDs(theStats.Merged), true)
 	showPRs("Closed", filterPRDs(theStats.Closed), false)
