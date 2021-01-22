@@ -1,0 +1,5 @@
+FROM centos
+WORKDIR /workdir
+RUN dnf -y module enable nodejs:12 && dnf -y install nodejs
+RUN npm install -g markdownlint markdownlint-cli2
+ENTRYPOINT /workdir/hack/markdownlint.sh
