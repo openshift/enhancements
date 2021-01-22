@@ -75,7 +75,7 @@ resource. Linuxptp services are configured via `profile` section in `NodePTPCfg`
 and apply rules are configured via `recommend` section in `NodePTPCfg`.
 Multiple `NodePTPCfg` custom resources can be created, PTP DaemonSet will merge
 all the `NodePTPCfg` custom resources according to recommend definition and
-apply all the profiles with the same priority that matches with the node 
+apply all the profiles with the same priority that matches with the node
 using the node name or node label rules.
 
 Upon receiving a notification event of `NodePTPCfg` creation or update,

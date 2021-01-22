@@ -15,7 +15,7 @@ replaces:
 superseded-by:
 ---
 
-# Third Pod Priority Class 
+# Third Pod Priority Class
 
 ## Release Signoff Checklist
 
@@ -37,7 +37,7 @@ scheduling priority than any user workloads.
 Currently OpenShift monitoring ships with two workloads, user and cluster monitoring. These include Prometheus pods,
 they both have the same priority classes set. What can and actually did happen, is that with not enough resources, user
 workload Prometheus pods were scheduled in favour of the cluster monitoring Prometheus pods. This should not happen, as
-cluster monitoring is system critical component, whereas user monitoring has less priority. 
+cluster monitoring is system critical component, whereas user monitoring has less priority.
 
 ### Goals
 
@@ -65,7 +65,7 @@ By default OpenShift has two reserved priority classes for critical system pods 
 
 As mentioned before these two are not enough and this proposal wants to introduce a third priority class:
 `user-critical`. This would be used by any pods that are important for user facing OpenShift features but are not deemed
-system critical. Example of pods include user workload monitoring and the OpenShift Serverless control and data planes 
+system critical. Example of pods include user workload monitoring and the OpenShift Serverless control and data planes
 
 ### Risks and Mitigations
 
@@ -78,9 +78,9 @@ New priority class would be created by the component that creates the two existi
 
 Adding a prefix of `openshift-` to the `user-critical` class name would make it clear to users that this is reserved for
 user workloads that are managed by OpenShift, but it goes against the current pattern as no one of our existing classes
-have a reserved prefix. To change this would require to change approx 170+ instances of the existing class names. 
+have a reserved prefix. To change this would require to change approx 170+ instances of the existing class names.
 
-After new priority class exists, user workload monitoring pods would set this class for its pods. 
+After new priority class exists, user workload monitoring pods would set this class for its pods.
 
 ## Implementation History
 
