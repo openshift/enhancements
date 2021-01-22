@@ -71,3 +71,11 @@ Please comment on the enhancement issue to:
 Please do not comment on the enhancement issue to:
 - discuss a detail of the design, code or docs. Use a linked-to-issue or design PR
   for that
+
+## Using Labels
+
+The following labels may be applied to enhancements to help categorize them:
+
+- `priority/important-soon` indicates that the enhancement is related to a
+top level release priority. These will be highlighted in the
+[this-week](this-week/) newsletters.
