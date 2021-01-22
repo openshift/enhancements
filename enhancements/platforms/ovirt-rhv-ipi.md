@@ -31,7 +31,7 @@ status: implementable
 This document describes how `oVirt` becomes a platform provider for Openshift. \
 `oVirt` is a virtualization platform and is similar to the `baremetal` platform \
  provider it is lacking DNS and Load-Balancing services, but it has the advantage \
-if software-defining your data-center, utilizing existing hardware and making \ 
+if software-defining your data-center, utilizing existing hardware and making \
 that pain free and fast.
 Like `baremetal` platform it uses the [OpenShift-Metal³ kni-installer](https://github.com/openshift-metal3/kni-installer) method \
 - essentially providing an internal cluster-level DNS service using mDNS and
@@ -53,12 +53,12 @@ Components involved:
 ## Motivation
 
 - It has been defined as a key initiative for 4.3
-- The feedback RHV team got is that there is a lot of demand for this 
+- The feedback RHV team got is that there is a lot of demand for this
   kind of installation
 
 ### Goals
 
-- provide a way to install Openshift on oVirt infrastructure using 
+- provide a way to install Openshift on oVirt infrastructure using
   the installer - an IPI installation.
 - implementing a cluster-api provider to provide scaling and managing the cluster
   nodes (used by IPI, and useful for UPI, and also node management/fencing)
@@ -120,11 +120,11 @@ starting few static pods that will allow:
 3. The rest of the openshift cluster pods
 
 For the following subjects please refer to ['baremetal IPI networking infrastructure'][baremetal-ipi-networking]:\
- - Load-balanced control plane access
- - API Virtual IP
- - DNS Resolution During Bootstrapping
- - DNS Resolution Post-Install
- - Ingress High Availability
+- Load-balanced control plane access
+- API Virtual IP
+- DNS Resolution During Bootstrapping
+- DNS Resolution Post-Install
+- Ingress High Availability
 
 ### Risks and Mitigations
 
@@ -134,8 +134,8 @@ For the following subjects please refer to ['baremetal IPI networking infrastruc
     All disks that are created using this storage class will be created \
     under the same storage domain of the VM Template disks. \
     The installconfig can figure this out from the template creation output \
-    and save it under oVirt 'Platform' 
-        
+    and save it under oVirt 'Platform'
+
 
 - Small setups and VM affinity
 
@@ -192,7 +192,7 @@ TODO
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
 
-##### Tech Preview -> GA 
+##### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -204,17 +204,16 @@ end to end tests.**
 ##### Removing a deprecated feature
 
 TODO
-  - Announce deprecation and support policy of the existing feature
-  - Deprecate the feature
+- Announce deprecation and support policy of the existing feature
+- Deprecate the feature
 
 ### Upgrade / Downgrade Strategy
 
 TODO
-  If applicable, how will the component be upgraded and downgraded? Make sure this
+- If applicable, how will the component be upgraded and downgraded? Make sure this
   is in the test plan.
 
-
-  Consider the following in developing an upgrade/downgrade strategy for this
+- Consider the following in developing an upgrade/downgrade strategy for this
   enhancement:
   - What changes (in invocations, configurations, API use, etc.) is an existing
     cluster required to make on upgrade in order to keep previous behavior?
@@ -224,9 +223,9 @@ TODO
 ### Version Skew Strategy
 
 TODO
-  What are the guarantees? Make sure this is in the test plan.
+- What are the guarantees? Make sure this is in the test plan.
 
-  Consider the following in developing a version skew strategy for this
+- Consider the following in developing a version skew strategy for this
   enhancement:
   - During an upgrade, we will always have skew among components, how will this impact your work?
   - Does this enhancement involve coordinating behavior in the control plane and
@@ -263,7 +262,7 @@ work because we control the dnsmasq inside VMs network.
 
 What could go wrong?
 - we may not be able to make the CI play nicely on time and we need as much help\
-  and guidance here. 
+  and guidance here.
 - multi ci jobs running in parallel will deploy 4 VMs on the infra, and I don't \
 know how will it handle the traffic and disk pressure. My guess is that we should\
 minimize the load by not supporting parallel job invocations. Not sure its viable.\
