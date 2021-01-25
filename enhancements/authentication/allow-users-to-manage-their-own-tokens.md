@@ -107,15 +107,6 @@ verbs:
 - delete
 ```
 
-Since the new API allows to remove user-owned access tokens, it should no longer
-be necessary to keep the `system:oauth-token-deleter` clusterrole bound to the
-`system:authenticated` group. On the contrary, the currently existing clusterrole
-binding means a remaining, small security hole where a user can delete tokens
-that he only knows the sha256 hash of (but it cannot be used to login). To address
-this security hole, the clusterrolebinding `system:oauth-token-deleters` will
-therefore get deprecated as described in
-[Graduation Criteria - Removing a Deprecated Feature](#graduation-criteria---removing-a-deprecated-feature).
-
 #### Default table view in CLI
 
 By default, the following fields will be displayed when listing tokens in the
@@ -147,19 +138,6 @@ The above risks should be considered during implementation reviews and when
 setting up testing for this feature.
 
 ## Design Details
-
-### Graduation Criteria - Removing a Deprecated Feature
-
-Versions: 4.n is the version where the feature gets released, 4.n+1 is the major version succeeding 4.n
-
-In 4.n, the release notes must mention the deprecation of the `system:oauth-token-deleters`
-clusterrolebinding and its removal in 4.n+1. This is going to happen in favour of having to
-specifically bind the `system:oauth-token-deleter` clusterrole to the subject that needs to
-be able to remove oauthaccesstokens directly. Any other self-management of tokens (even
-when impersonated) should happen by using the new `useroauthaccesstoken` API.
-
-In 4.n+1, the `system:oauth-token-deleters` clusterrolebinding will be deleted
-from the platform.
 
 ### Test Plan
 
