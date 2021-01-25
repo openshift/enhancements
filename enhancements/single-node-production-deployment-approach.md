@@ -343,9 +343,11 @@ provides adequate warning.
 Auto-approval of certificate signing requests requires 2 sources of
 truth to avoid security attacks like
 [kubeletmein](https://github.com/openshift/machine-config-operator/issues/731). In
-single-node deployments we do not have a second source of truth, and
-need to disable the machine-approver-operator. An outside tool can be
-used to approve any certificate signing requests instead.
+single-node deployments we do not have a second source of truth (there
+is no Machine and no other way to confirm the Node), so certificate
+signing requests cannot be automatically approved from within the
+cluster. We can disable the machine-approver-operator. An outside tool
+must be used to approve any certificate signing requests instead.
 
 #### Lack of high-availability
 
