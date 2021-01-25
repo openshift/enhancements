@@ -82,10 +82,17 @@ cluster through "topology" values for the control plane and
 infrastructure, separately.
 
 The `controlPlaneTopology` field will express the expectations for
-operands that normally run on control nodes.
+operands that normally run on control plane nodes.
 
 The `infrastructureTopology` field will use an enum to express the
-expectations for operands that normally run on infrastructure nodes.
+expectations for infrastructure services that do not run on control
+plane nodes, usually indicated by a node selector for a `role` value
+other than `master`. This includes, but is not necessarily limited to,
+the registry, logging, monitoring, and router services. In the future,
+it also could be used by additional add-on features such as kubevirt,
+serverless, mesh, pipelines, or any other supporting infrastructure
+service as a hint to understand what availability posture they should
+provide by default.
 
 Possible values are `HighlyAvailable` and `SingleReplica`. The default is
 `HighlyAvailable`, which represents the behavior operators have today
