@@ -108,8 +108,8 @@ special-purpose image for performing the installation.
 We propose the following steps for deploying single-node instances of
 OpenShift:
 
-1. Add a new create single-node-ignition-config command to openshift-installer
-   which generate a single node Ignition config for a single-node deployment.
+1. Add a new `create single-node-ignition-config` command to `openshift-installer`
+   which generates an Ignition config for a single-node deployment.
 2. Combine that Ignition config with an RHCOS live ISO image to build
    an image for deploying OpenShift on a single node.
 3. Boot the new image on the host.
@@ -150,7 +150,7 @@ kubernetes operations run during bootstrapping.
 
 #### OpenShift-installer
 
-Add new `create single-node-ignition-config` command to the installer to create
+We will add a new `create single-node-ignition-config` command to the installer to create
  `bootstrap-in-place-for-live-iso.ign` Ignition config.
 This new target will not output master.ign and worker.ign.
 Allow the user to specify the target disk drive for coreos-installer using environment
