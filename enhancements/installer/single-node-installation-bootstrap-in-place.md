@@ -342,16 +342,44 @@ and then remotely running /usr/local/bin/installer-masters-gather.sh on all mast
 
 ### Test Plan
 
-In order to claim full support for this configuration, we must have
-CI coverage informing the release.
-An end-to-end job using the bootstrap-in-place installation flow,
-based on the [installer UPI CI](https://github.com/openshift/release/blob/master/ci-operator/templates/openshift/installer/cluster-launch-installer-metal-e2e.yaml#L507),
- running an appropriate subset of the standard OpenShift tests
-will be created and configured to block accepting release images unless it passes.
-This job is a different CI from the Single node production edge CI that will run with a bootstrap vm on cloud environment.
+In order to claim full support for this configuration, we must have CI
+coverage informing the release.  An end-to-end job using the
+bootstrap-in-place installation flow, based on the [installer UPI
+CI](https://github.com/openshift/release/blob/master/ci-operator/templates/openshift/installer/cluster-launch-installer-metal-e2e.yaml#L507)
+and running an appropriate subset of the standard OpenShift tests will
+be created. This job is a different CI from the Single node production
+edge CI that will run with a bootstrap vm on cloud environment.
 
-That end-to-end job should also be run against pull requests for
-the  control plane repos, installer and cluster-bootstrap.
+The new end-to-end job will be configured to block accepting release
+images, and be run against pull requests for the control plane
+repositories, installer and cluster-bootstrap.
+
+Although the feature is primarily targeted at bare metal use cases, we
+have to balance the desire to test in 100% accurate configurations
+with the effort and cost of running CI on bare metal.
+
+Our bare metal CI environment runs on Packet. The hosts are not
+necessarily similar to those used by edge or telco customers, and the
+API for managing the host is completely different than the APIs
+supported by the provisioning tools that will be used to deploy
+single-node instances in production environments. Given these
+differences, we would derive little benefit from running CI jobs
+directly on the hardware.
+
+Each CI job will need to create the test ISO configured to create the
+cluster, then boot it on a host. This cannot be done from within a
+single host, because the ISO must be served up to the host during the
+bootstrap process, while the installer is overwriting the internal
+storage of the host. So either the code to create and serve the ISO
+needs to run in the CI cluster, or on another host.
+
+Both of these constraints make it simpler, more economical, and faster
+to implement the CI job using VMs on a Packet host. Gaps introduced by
+using VMs in CI will be covered through other testing performed by the
+QE team using hardware more similar to what customers are expected to
+have in their production environments. Over time, we may be able to
+move some of those tests to more automated systems, including Packet,
+if it makes sense.
 
 ### Graduation Criteria
 
