@@ -26,6 +26,7 @@ type PullRequestDetails struct {
 	AllActivityCount    int
 	State               string
 	LGTM                bool
+	Prioritized         bool
 }
 
 // New creates a new Stats implementation
@@ -197,18 +198,23 @@ func (s *Stats) makeDetails(pr *github.PullRequest) (*PullRequestDetails, error)
 	}
 
 	lgtm := false
+	prioritized := false
 	for _, label := range pr.Labels {
 		if *label.Name == "lgtm" {
 			lgtm = true
 		}
+		if *label.Name == "priority/important-soon" || *label.Name == "priority/critical-urgent" {
+			prioritized = true
+		}
 	}
 
 	details := &PullRequestDetails{
-		Pull:     pr,
-		State:    *pr.State,
-		Comments: comments,
-		Reviews:  reviews,
-		LGTM:     lgtm,
+		Pull:        pr,
+		State:       *pr.State,
+		Comments:    comments,
+		Reviews:     reviews,
+		LGTM:        lgtm,
+		Prioritized: prioritized,
 	}
 	if isMerged {
 		details.State = "merged"
