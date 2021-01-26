@@ -150,11 +150,16 @@ kubernetes operations run during bootstrapping.
 
 #### OpenShift-installer
 
-We will add a new `create single-node-ignition-config` command to the installer to create
- `bootstrap-in-place-for-live-iso.ign` Ignition config.
-This new target will not output master.ign and worker.ign.
-Allow the user to specify the target disk drive for coreos-installer using environment
- variable `OPENSHIFT_INSTALL_EXPERIMENTAL_BOOTSTRAP_IN_PLACE_COREOS_INSTALLER_ARGS`.
+We will add a new `create single-node-ignition-config` command to the
+installer to create the `bootstrap-in-place-for-live-iso.ign` Ignition
+config.  This new target will not output `master.ign` and `worker.ign`
+files.
+
+Users will specify the target disk drive for `coreos-installer` using
+the environment variable
+`OPENSHIFT_INSTALL_EXPERIMENTAL_BOOTSTRAP_IN_PLACE_COREOS_INSTALLER_ARGS`.
+Before the feature graduates from preview, the environment variable
+will be replaced with a field in the `install-config.yaml` schema.
 
 This Ignition config will have a different `bootkube.sh` from the
 default bootstrap Ignition. In addition to the standard rendering
@@ -421,6 +426,9 @@ In general, we try to use the same stages (alpha, beta, GA), regardless how the 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 - Available by default
+- Update the installer to replace
+  `OPENSHIFT_INSTALL_EXPERIMENTAL_BOOTSTRAP_IN_PLACE_COREOS_INSTALLER_ARGS`
+  with a field in the `install-config.yaml` schema.
 
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
