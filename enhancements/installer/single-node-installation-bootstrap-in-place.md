@@ -250,15 +250,23 @@ the node Certificate Signing Requests. This service will also cleanup
 the bootstrap static pods resources when the OpenShift control plane
 is ready.
 
-Since we start with a liveCD, the bootstrap services (`bootkube`, `approve-csr`, etc.), `/etc` and `/opt/openshift` temporary files are written to the ephemeral filesystem of the live image, and not to the node's real filesystem.
+Since we start with a liveCD, the bootstrap services (`bootkube`,
+`approve-csr`, etc.), `/etc` and `/opt/openshift` temporary files are
+written to the ephemeral filesystem of the live image, and not to the
+node's real filesystem.
 
 The files that we need to delete are under:
 
 * `/etc/kubernetes/bootstrap-secrets`
 * `/etc/kubernetes/bootstrap-configs`
 
-These files are required for the bootstrap control plane to start before it is replaced by the control plane operators.
-Once the OCP control plane static pods are deployed we can delete the files as they are no longer required.
+These files are required for the bootstrap control plane to start
+before it is replaced by the control plane operators.  Once the OCP
+control plane static pods are deployed we can delete the files as they
+are no longer required.
+
+When the `post-reboot` service has completed its work, it removes
+itself so it is not run the next time the host reboots.
 
 #### Prerequisites for a Single Node deployment with bootstrap-in-place
 The requirements are a subset of the requirements for user-provisioned infrastructure installation.
