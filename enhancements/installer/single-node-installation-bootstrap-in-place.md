@@ -371,7 +371,11 @@ and then remotely running /usr/local/bin/installer-masters-gather.sh on all mast
 ### Open Questions
 
 1. How will the user specify custom configurations, such as static IPs?
-2. Number of revisions for the control plane - do we want to make changes to the bootstrap static pods to make them closer to the final ones?
+2. Number of revisions for the control plane - do we want to make
+   changes to the bootstrap static pods to make them closer to the
+   final ones? This would also benefit multi-node deployments, but is
+   especially helpful for single-node deployments where updating those
+   static pod definitions may be more disruptive.
 
 ### Test Plan
 
