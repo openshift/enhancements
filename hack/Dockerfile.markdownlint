@@ -1,5 +1,5 @@
 FROM fedora
 WORKDIR /workdir
-RUN dnf -y module enable nodejs:12 && dnf -y install nodejs
-RUN npm install -g markdownlint markdownlint-cli2
+COPY install-markdownlint.sh /tmp
+RUN /tmp/install-markdownlint.sh
 ENTRYPOINT /workdir/hack/markdownlint.sh

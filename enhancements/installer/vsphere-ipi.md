@@ -102,7 +102,7 @@ These ip variables are used for VIPs the api server, ingress and DNS.
 - Add additional required parameters to vSphere platform
   - `pkg/types/vsphere/platform.go`
 
-```
+```go
 type Platform struct {
 	VCenter string `json:"vCenter"`
 	Username string `json:"username"`
