@@ -193,13 +193,20 @@ return an error.
 
 #### Bootstrap / Control plane static pods
 
-We will review the list of revisions for apiserver/etcd and see if we
-can reduce them by reducing revisions caused by observations of known
-conditions.  For example in a single node we know what the etcd
-endpoints will be in advance, We can avoid a revision by observing
-this post install.  This work will go a long way to reducing
-disruption during install and improve mean time to recovery for upgrade re-deployments
-and failures.
+We will review the list of revisions for apiserver and etcd to see if
+we can reduce them by eliminating changes caused by observations of
+known conditions.  For example, in a single node we know what the etcd
+endpoints will be in advance, so we can avoid a revision by observing
+this after installation.  This work will go a long way to reducing
+disruption during install and improve mean time to recovery for
+upgrade re-deployments and failures.
+
+While there is a goal to ensure that the final node state does not
+include bootstrapping files, it is necessary to copy some of the files
+into the host temporarily to allow bootstrapping to complete. These
+files are copied by embedding them in the combined Ignition config,
+and after OpenShift is running on the host the files are deleted by
+the `post-reboot` service.
 
 The control plane components we will copy from
 `/etc/kubernetes/manifests` into the master Ignition are:
@@ -216,7 +223,20 @@ These components also require other files generated during bootstrapping:
 3. `/opt/openshift/tls/*` (`/etc/kubernetes/bootstrap-secrets`)
 4. `/opt/openshift/auth/kubeconfig-loopback` (`/etc/kubernetes/bootstrap-secrets/kubeconfig`)
 
-**Note**: `/etc/kubernetes/bootstrap-secrets` and `/etc/kubernetes/bootstrap-configs` will be deleted by the `post-reboot` service, after the node reboots (see below).
+The bootstrap logs are also copied from `/var/log` to aid in
+debugging.
+
+See [installer PR
+#4482](https://github.com/openshift/installer/pull/4482/files#diff-d09d8f9e83a054002d5344223d496781ea603da7c52706dfcf33debf8ceb1df3)
+for a detailed list of the files added to the Ignition config.
+
+After the node reboots, the temporary copies of the bootstrapping
+files are deleted by the `post-reboot` service, including:
+
+1. `/etc/kubernetes/bootstrap-configs`
+2. `/opt/openshift/tls/*` (`/etc/kubernetes/bootstrap-secrets`)
+3. `/opt/openshift/auth/kubeconfig-loopback` (`/etc/kubernetes/bootstrap-secrets/kubeconfig`)
+4. bootstrap logs
 
 The bootstrap static pods will be generated in a way that the control
 plane operators will be able to identify them and either continue in a
@@ -347,6 +367,8 @@ and then remotely running /usr/local/bin/installer-masters-gather.sh on all mast
 
 ### Test Plan
 
+#### End-to-end testing
+
 In order to claim full support for this configuration, we must have CI
 coverage informing the release.  An end-to-end job using the
 bootstrap-in-place installation flow, based on the [installer UPI
@@ -385,6 +407,16 @@ QE team using hardware more similar to what customers are expected to
 have in their production environments. Over time, we may be able to
 move some of those tests to more automated systems, including Packet,
 if it makes sense.
+
+#### Bootstrap cleanup tests
+
+A goal of this enhancement is to ensure that the host does not contain
+any of the temporary bootstrapping files after OpenShift is
+running. During bootstrapping, it is necessary to copy some of the
+unwanted files into the host temporarily. A test will be created to
+verify that the host does not retain those files after the cluster is
+successfully launched. The test will run either as part of the
+end-to-end job described above, or as part of a separate job.
 
 ### Graduation Criteria
 
