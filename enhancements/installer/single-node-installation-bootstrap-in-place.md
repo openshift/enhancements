@@ -306,20 +306,20 @@ mitigate this, we can add documentation to the troubleshooting guide
 to explain the service and its role in the cluster.
 
 #### Bootstrap logs retention
- 
+
  Due to the bootstrap-in-place behavior all bootstrap artifacts
  will be lost once the bootstrap the node reboots.
 In a regular installation flow the bootstrap node goes down only once
  the control plane is running, and the bootstrap node served its purpose.
 In case of bootstrap in place things can go wrong after the reboot.
-The bootstrap logs can aid in troubleshooting a subsequently failed install. 
+The bootstrap logs can aid in troubleshooting a subsequently failed install.
 
 Mitigation by gathering the bootstrap logs before reboot.
  bootstrap will gather logs from itself using /usr/local/bin/installer-gather.sh.
  Once gathering is complete, the bundle will be added to the master ignition,
  thus making the bootstrap logs available from the master after reboot.
  The log bundle will be deleted once the installation completes.
- 
+
 The installer `gather` command works as usual before the reboot.
 We will add a new script called installer-master-bootstrap-in-place-gather.sh.
  This script will be delivered to the master using via Ignition to the same
@@ -481,7 +481,7 @@ CoreOS and this Ignition configuration, the Ignition config would lay
 down the control plane operator static pods and create a static pod
 that functions as `cluster-bootstrap` This pod should delete itself
 after it is done applying the OCP assets to the control plane.
-The disadvantage in this approach is that it's very different than 
+The disadvantage in this approach is that it's very different than
 the regular installation flow which involve a bootstrap node.
 It also adds more challenges such as:
 1. The installer machine (usually the Admin laptop) will need to pull
