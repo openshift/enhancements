@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -10,12 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v32/github"
-	"golang.org/x/oauth2"
-
 	"github.com/openshift/enhancements/tools/config"
 	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/stats"
+	"github.com/openshift/enhancements/tools/util"
 )
 
 // fileExists checks if a file exists and is not a directory before we
@@ -202,14 +199,7 @@ func main() {
 	}
 
 	// todo: add flags for days back and stale months
-	theStats, err := stats.New(*daysBack, *staleMonths, *org, *repo, *devMode, func() *github.Client {
-		ctx := context.Background()
-		tokenSource := oauth2.StaticTokenSource(
-			&oauth2.Token{AccessToken: settings.Github.Token},
-		)
-		oauthClient := oauth2.NewClient(ctx, tokenSource)
-		return github.NewClient(oauthClient)
-	})
+	theStats, err := stats.New(*daysBack, *staleMonths, *org, *repo, *devMode, util.NewGithubClientSource(settings.Github.Token))
 	if err != nil {
 		handleError(fmt.Sprintf("Could not create stats: %v", err))
 	}

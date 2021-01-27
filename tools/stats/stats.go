@@ -8,11 +8,9 @@ import (
 
 	"github.com/google/go-github/v32/github"
 	"github.com/pkg/errors"
-)
 
-// GithubClientSource describes a function that can create a
-// github.Client without any other inputs.
-type GithubClientSource func() *github.Client
+	"github.com/openshift/enhancements/tools/util"
+)
 
 // PullRequestDetails includes the PullRequest and some supplementary
 // data
@@ -40,7 +38,7 @@ type PullRequestDetails struct {
 }
 
 // New creates a new Stats implementation
-func New(daysBack int, staleMonths int, orgName, repoName string, devMode bool, clientSource GithubClientSource) (*Stats, error) {
+func New(daysBack int, staleMonths int, orgName, repoName string, devMode bool, clientSource util.GithubClientSource) (*Stats, error) {
 	result := &Stats{
 		org:          orgName,
 		repo:         repoName,
@@ -59,7 +57,7 @@ type Stats struct {
 	earliestDate time.Time
 	staleDate    time.Time
 	devMode      bool
-	clientSource GithubClientSource
+	clientSource util.GithubClientSource
 
 	All     []*PullRequestDetails
 	New     []*PullRequestDetails
