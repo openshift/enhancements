@@ -1,0 +1,178 @@
+package util
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/google/go-github/v32/github"
+	"github.com/pkg/errors"
+)
+
+// New creates a new PullRequestQuery
+func NewPullRequestQuery(daysBack int, staleMonths int, orgName, repoName string, devMode bool, clientSource GithubClientSource) *PullRequestQuery {
+	result := &PullRequestQuery{
+		EarliestDate: time.Now().AddDate(0, 0, daysBack*-1),
+		StaleDate:    time.Now().AddDate(0, staleMonths*-1, 0),
+
+		org:          orgName,
+		repo:         repoName,
+		devMode:      devMode,
+		clientSource: clientSource,
+	}
+	return result
+}
+
+// PullRequestQuery holds the parameters for iterating over pull requests
+type PullRequestQuery struct {
+	EarliestDate time.Time
+	StaleDate    time.Time
+
+	org          string
+	repo         string
+	devMode      bool
+	clientSource GithubClientSource
+}
+
+const pageSize int = 50
+
+// PRCallback is a type for callbacks for processing pull requests
+type PRCallback func(*github.PullRequest) error
+
+// IteratePullRequests queries for all pull requests and invokes the
+// callback with each PR individually
+func (q *PullRequestQuery) IteratePullRequests(callback PRCallback) error {
+	fmt.Printf("finding pull requests for %s/%s\n", q.org, q.repo)
+	fmt.Printf("ignoring items closed before %s\n", q.EarliestDate)
+
+	client := q.clientSource()
+	ctx := context.Background()
+	opts := &github.PullRequestListOptions{
+		State: "all",
+		ListOptions: github.ListOptions{
+			PerPage: pageSize,
+		},
+	}
+
+	// Fetch the details of the pull requests in batches. We want some
+	// parallelization, but also want to limit the number of
+	// simultaneous requests we make to the API to avoid rate
+	// limiting.
+	for {
+		prs, response, err := client.PullRequests.List(ctx, q.org, q.repo, opts)
+		if err != nil {
+			return errors.Wrap(err,
+				fmt.Sprintf(
+					"could not get pull requests for %s/%s", q.org, q.repo))
+		}
+		for _, pr := range prs {
+			err := callback(pr)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "\ncould not process pull request %s: %s\n",
+					*pr.HTMLURL, err)
+				continue
+			}
+			fmt.Fprintf(os.Stderr, ".")
+		}
+
+		if q.devMode {
+			fmt.Fprintf(os.Stderr, "shortcutting for dev mode\n")
+			break
+		}
+
+		if response.NextPage == 0 {
+			break
+		}
+		opts.Page = response.NextPage
+	}
+
+	fmt.Fprintf(os.Stderr, "\n")
+
+	return nil
+}
+
+func (q *PullRequestQuery) GetIssueComments(pr *github.PullRequest) ([]*github.IssueComment, error) {
+	c := q.clientSource()
+	ctx := context.Background()
+	opts := &github.IssueListCommentsOptions{
+		Since: &q.EarliestDate,
+		ListOptions: github.ListOptions{
+			PerPage: pageSize,
+		},
+	}
+	results := []*github.IssueComment{}
+
+	for {
+		comments, response, err := c.Issues.ListComments(
+			ctx, q.org, q.repo, *pr.Number, opts)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, comments...)
+		if response.NextPage == 0 {
+			break
+		}
+		opts.Page = response.NextPage
+	}
+
+	return results, nil
+}
+
+func (q *PullRequestQuery) GetPRComments(pr *github.PullRequest) ([]*github.PullRequestComment, error) {
+	c := q.clientSource()
+	ctx := context.Background()
+	opts := &github.PullRequestListCommentsOptions{
+		Since: q.EarliestDate,
+		ListOptions: github.ListOptions{
+			PerPage: pageSize,
+		},
+	}
+	results := []*github.PullRequestComment{}
+
+	for {
+		comments, response, err := c.PullRequests.ListComments(
+			ctx, q.org, q.repo, *pr.Number, opts)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, comments...)
+		if response.NextPage == 0 {
+			break
+		}
+		opts.Page = response.NextPage
+	}
+
+	return results, nil
+}
+
+func (q *PullRequestQuery) GetReviews(pr *github.PullRequest) ([]*github.PullRequestReview, error) {
+	c := q.clientSource()
+	ctx := context.Background()
+	opts := &github.ListOptions{
+		PerPage: pageSize,
+	}
+	results := []*github.PullRequestReview{}
+
+	for {
+		comments, response, err := c.PullRequests.ListReviews(
+			ctx, q.org, q.repo, *pr.Number, opts)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, comments...)
+		if response.NextPage == 0 {
+			break
+		}
+		opts.Page = response.NextPage
+	}
+
+	return results, nil
+}
+
+func (q *PullRequestQuery) IsMerged(pr *github.PullRequest) (bool, error) {
+	c := q.clientSource()
+	ctx := context.Background()
+	isMerged, _, err := c.PullRequests.IsMerged(ctx, q.org, q.repo, *pr.Number)
+	return isMerged, err
+}

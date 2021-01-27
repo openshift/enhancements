@@ -19,13 +19,12 @@ func newReportCommand() *cobra.Command {
 		Use:   "report",
 		Short: "Generate the weekly activity report",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			theStats, err := stats.New(daysBack, staleMonths, orgName, repoName, devMode,
+			query := util.NewPullRequestQuery(
+				daysBack, staleMonths, orgName, repoName, devMode,
 				util.NewGithubClientSource(configSettings.Github.Token))
-			if err != nil {
-				return errors.Wrap(err, "Could not create stats")
-			}
 
-			err = theStats.IteratePullRequests()
+			theStats := stats.New(query)
+			err := query.IteratePullRequests(theStats.Process)
 			if err != nil {
 				return errors.Wrap(err, "could not process pull requests")
 			}
