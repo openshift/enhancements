@@ -1,34 +1,15 @@
-package main
+package report
 
 import (
-	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/openshift/enhancements/tools/config"
 	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/stats"
-	"github.com/openshift/enhancements/tools/util"
 )
-
-// fileExists checks if a file exists and is not a directory before we
-// try using it to prevent further errors.
-func fileExists(filename string) bool {
-	info, err := os.Stat(filename)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return !info.IsDir()
-}
-
-func handleError(msg string) {
-	fmt.Fprintf(os.Stderr, "%s\n", msg)
-	os.Exit(1)
-}
 
 func formatDescription(text string, indent string) string {
 	paras := strings.SplitN(strings.ReplaceAll(text, "\r", ""), "\n\n", -1)
@@ -155,60 +136,7 @@ func sortByActivityCountDesc(prds []*stats.PullRequestDetails) {
 	})
 }
 
-func main() {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		handleError(fmt.Sprintf("Could not get default for config file name: %v", err))
-	}
-	configFilenameDefault := filepath.Join(configDir, "ocp-enhancements", "config.yml")
-
-	configFilename := flag.String("config", configFilenameDefault,
-		"the configuration file name")
-
-	daysBack := flag.Int("days-back", 7, "how many days back to query")
-	staleMonths := flag.Int("stale-months", 3,
-		"how many months before a pull request is considered stale")
-	org := flag.String("org", "openshift", "github organization")
-	repo := flag.String("repo", "enhancements", "github repository")
-	devMode := flag.Bool("dev", false, "dev mode, stop after first page of PRs")
-	full := flag.Bool("full", false, "full report, not just summary")
-
-	flag.Parse()
-
-	if *configFilename == "" {
-		handleError(fmt.Sprintf("Please specify the -config file name"))
-	}
-
-	if !fileExists(*configFilename) {
-		template := config.GetTemplate()
-		handleError(fmt.Sprintf("Please create %s containing\n\n%s\n",
-			*configFilename,
-			string(template),
-		))
-	}
-
-	settings, err := config.LoadFromFile(*configFilename)
-	if err != nil {
-		handleError(fmt.Sprintf("Could not load config file %s: %v", *configFilename, err))
-	}
-
-	// Set up git before talking to github so we don't use up our API
-	// quota and then fail for something that happens locally.
-	if err := enhancements.UpdateGitRepo(); err != nil {
-		handleError(fmt.Sprintf("Could not update local git repository: %v", err))
-	}
-
-	// todo: add flags for days back and stale months
-	theStats, err := stats.New(*daysBack, *staleMonths, *org, *repo, *devMode, util.NewGithubClientSource(settings.Github.Token))
-	if err != nil {
-		handleError(fmt.Sprintf("Could not create stats: %v", err))
-	}
-
-	err = theStats.IteratePullRequests()
-	if err != nil {
-		handleError(fmt.Sprintf("could not process pull requests: %v", err))
-	}
-
+func ShowReport(theStats *stats.Stats, daysBack, staleMonths int, full bool) {
 	// NOTE: for manual testing
 	// n := 260
 	// url := "fake://url"
@@ -230,7 +158,7 @@ func main() {
 	sortByID(theStats.New)
 	sortByActivityCountDesc(theStats.Active)
 
-	if *full {
+	if full {
 		sortByID(theStats.Old)
 		sortByID(theStats.Idle)
 		sortByID(theStats.Stale)
@@ -247,15 +175,15 @@ func main() {
 	showPRs("Prioritized New", filterPRDs(theStats.New, true), true)
 	showPRs("Prioritized Active", filterPRDs(theStats.Active, true), false)
 
-	if *full {
-		showPRs(fmt.Sprintf("Prioritized Revived (closed more than %d days ago, but with new comments)", *daysBack),
+	if full {
+		showPRs(fmt.Sprintf("Prioritized Revived (closed more than %d days ago, but with new comments)", daysBack),
 			filterPRDs(theStats.Revived, true), false)
-		showPRs(fmt.Sprintf("Prioritized Idle (no comments for at least %d days)", *daysBack),
+		showPRs(fmt.Sprintf("Prioritized Idle (no comments for at least %d days)", daysBack),
 			filterPRDs(theStats.Idle, true), false)
 		showPRs(fmt.Sprintf("Prioritized Old (older than %d months, but discussion in last %d days)",
-			*staleMonths, *daysBack), filterPRDs(theStats.Old, true), false)
+			staleMonths, daysBack), filterPRDs(theStats.Old, true), false)
 		showPRs(fmt.Sprintf("Prioritized Stale (older than %d months, not discussed in last %d days)",
-			*staleMonths, *daysBack), filterPRDs(theStats.Stale, true), false)
+			staleMonths, daysBack), filterPRDs(theStats.Stale, true), false)
 	}
 
 	fmt.Printf("\n## Other Enhancements\n")
@@ -265,14 +193,14 @@ func main() {
 	showPRs("Other New", filterPRDs(theStats.New, false), true)
 	showPRs("Other Active", filterPRDs(theStats.Active, false), false)
 
-	if *full {
-		showPRs(fmt.Sprintf("Other Revived (closed more than %d days ago, but with new comments)", *daysBack),
+	if full {
+		showPRs(fmt.Sprintf("Other Revived (closed more than %d days ago, but with new comments)", daysBack),
 			filterPRDs(theStats.Revived, false), false)
-		showPRs(fmt.Sprintf("Other Idle (no comments for at least %d days)", *daysBack),
+		showPRs(fmt.Sprintf("Other Idle (no comments for at least %d days)", daysBack),
 			filterPRDs(theStats.Idle, false), false)
 		showPRs(fmt.Sprintf("Other Old (older than %d months, but discussion in last %d days)",
-			*staleMonths, *daysBack), filterPRDs(theStats.Old, false), false)
+			staleMonths, daysBack), filterPRDs(theStats.Old, false), false)
 		showPRs(fmt.Sprintf("Other Stale (older than %d months, not discussed in last %d days)",
-			*staleMonths, *daysBack), filterPRDs(theStats.Stale, false), false)
+			staleMonths, daysBack), filterPRDs(theStats.Stale, false), false)
 	}
 }
