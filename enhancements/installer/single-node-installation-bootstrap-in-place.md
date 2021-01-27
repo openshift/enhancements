@@ -226,8 +226,7 @@ These components also require other files generated during bootstrapping:
 The bootstrap logs are also copied from `/var/log` to aid in
 debugging.
 
-See [installer PR
-#4482](https://github.com/openshift/installer/pull/4482/files#diff-d09d8f9e83a054002d5344223d496781ea603da7c52706dfcf33debf8ceb1df3)
+See [installer PR#4482](https://github.com/openshift/installer/pull/4482/files#diff-d09d8f9e83a054002d5344223d496781ea603da7c52706dfcf33debf8ceb1df3)
 for a detailed list of the files added to the Ignition config.
 
 After the node reboots, the temporary copies of the bootstrapping
@@ -340,7 +339,7 @@ to explain the service and its role in the cluster.
 
 #### Bootstrap logs retention
 
- Due to the bootstrap-in-place behavior all bootstrap artifacts
+Due to the bootstrap-in-place behavior all bootstrap artifacts
  will be lost once the bootstrap the node reboots.
 In a regular installation flow the bootstrap node goes down only once
  the control plane is running, and the bootstrap node served its purpose.
@@ -444,8 +443,8 @@ Consider the following in developing the graduation criteria for this
 enhancement:
 
 - Maturity levels
-    - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-    - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
+  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
+  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
 - [Deprecation policy][deprecation-policy]
 
 Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
@@ -588,7 +587,7 @@ by adding logic to the installer that check the number of replicas for the contr
  plane (in the `install-config.yaml`) is `1`.
 This approach might conflict with CRC/SNC which also run openshift-install with a 1-replica control plane.
 
-### Use `create ignition-configs` with environment variable to generate the `bootstrap-in-place-for-live-iso.ign`.
+### Use `create ignition-configs` with environment variable to generate the `bootstrap-in-place-for-live-iso.ign`
 
 We also considered adding a new environment variable `OPENSHIFT_INSTALL_EXPERIMENTAL_BOOTSTRAP_IN_PLACE`
 for marking the new path under the `ignition-configs` target.
