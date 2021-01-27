@@ -11,6 +11,5 @@ lint:  ## run the markdown linter
 		--rm=true \
 		--env RUN_LOCAL=true \
 		--env VALIDATE_MARKDOWN=true \
-		-v \
-		$$(pwd):/workdir \
+		-v $$(pwd):/workdir:Z \
 		enhancements-markdownlint:latest
