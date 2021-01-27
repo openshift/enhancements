@@ -17,16 +17,26 @@ type GithubClientSource func() *github.Client
 // PullRequestDetails includes the PullRequest and some supplementary
 // data
 type PullRequestDetails struct {
-	Pull                *github.PullRequest
-	Reviews             []*github.PullRequestReview
-	RecentReviewCount   int
-	Comments            []*github.PullRequestComment
-	RecentCommentCount  int
+	Pull *github.PullRequest
+
+	// These are groups of comments, submited with a review action
+	Reviews           []*github.PullRequestReview
+	RecentReviewCount int
+
+	// These are "review comments", associated with a diff
+	PullRequestComments  []*github.PullRequestComment
+	RecentPRCommentCount int
+
+	// PRs are also issues, so these are the standard comments
+	IssueComments           []*github.IssueComment
+	RecentIssueCommentCount int
+
 	RecentActivityCount int
 	AllActivityCount    int
-	State               string
-	LGTM                bool
-	Prioritized         bool
+
+	State       string
+	LGTM        bool
+	Prioritized bool
 }
 
 // New creates a new Stats implementation
@@ -120,7 +130,34 @@ func (s *Stats) IteratePullRequests() error {
 	return nil
 }
 
-func (s *Stats) getComments(pr *github.PullRequest) ([]*github.PullRequestComment, error) {
+func (s *Stats) getIssueComments(pr *github.PullRequest) ([]*github.IssueComment, error) {
+	c := s.clientSource()
+	ctx := context.Background()
+	opts := &github.IssueListCommentsOptions{
+		Since: &s.earliestDate,
+		ListOptions: github.ListOptions{
+			PerPage: pageSize,
+		},
+	}
+	results := []*github.IssueComment{}
+
+	for {
+		comments, response, err := c.Issues.ListComments(
+			ctx, s.org, s.repo, *pr.Number, opts)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, comments...)
+		if response.NextPage == 0 {
+			break
+		}
+		opts.Page = response.NextPage
+	}
+
+	return results, nil
+}
+
+func (s *Stats) getPRComments(pr *github.PullRequest) ([]*github.PullRequestComment, error) {
 	c := s.clientSource()
 	ctx := context.Background()
 	opts := &github.PullRequestListCommentsOptions{
@@ -185,10 +222,16 @@ func (s *Stats) makeDetails(pr *github.PullRequest) (*PullRequestDetails, error)
 			fmt.Sprintf("could not determine merged status of %s", *pr.HTMLURL))
 	}
 
-	comments, err := s.getComments(pr)
+	issueComments, err := s.getIssueComments(pr)
 	if err != nil {
 		return nil, errors.Wrap(err,
-			fmt.Sprintf("could not fetch comments on %s", *pr.HTMLURL))
+			fmt.Sprintf("could not fetch issue comments on %s", *pr.HTMLURL))
+	}
+
+	prComments, err := s.getPRComments(pr)
+	if err != nil {
+		return nil, errors.Wrap(err,
+			fmt.Sprintf("could not fetch PR comments on %s", *pr.HTMLURL))
 	}
 
 	reviews, err := s.getReviews(pr)
@@ -209,12 +252,13 @@ func (s *Stats) makeDetails(pr *github.PullRequest) (*PullRequestDetails, error)
 	}
 
 	details := &PullRequestDetails{
-		Pull:        pr,
-		State:       *pr.State,
-		Comments:    comments,
-		Reviews:     reviews,
-		LGTM:        lgtm,
-		Prioritized: prioritized,
+		Pull:                pr,
+		State:               *pr.State,
+		IssueComments:       issueComments,
+		PullRequestComments: prComments,
+		Reviews:             reviews,
+		LGTM:                lgtm,
+		Prioritized:         prioritized,
 	}
 	if isMerged {
 		details.State = "merged"
@@ -224,13 +268,18 @@ func (s *Stats) makeDetails(pr *github.PullRequest) (*PullRequestDetails, error)
 			details.RecentReviewCount++
 		}
 	}
-	for _, c := range comments {
+	for _, c := range issueComments {
 		if c.CreatedAt.After(s.earliestDate) {
-			details.RecentCommentCount++
+			details.RecentIssueCommentCount++
 		}
 	}
-	details.RecentActivityCount = details.RecentCommentCount + details.RecentReviewCount
-	details.AllActivityCount = len(details.Comments) + len(details.Reviews)
+	for _, c := range prComments {
+		if c.CreatedAt.After(s.earliestDate) {
+			details.RecentPRCommentCount++
+		}
+	}
+	details.RecentActivityCount = details.RecentIssueCommentCount + details.RecentPRCommentCount + details.RecentReviewCount
+	details.AllActivityCount = len(details.IssueComments) + len(details.PullRequestComments) + len(details.Reviews)
 	return details, nil
 }
 
