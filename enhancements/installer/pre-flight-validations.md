@@ -1,13 +1,19 @@
 ---
 title: pre-flight-validations
 authors:
-  - "@mandre"
+  - @mandre
+  - @pierreprinetti
 reviewers:
-  - TBD
+  - EmilienM
+  - Fedosin
+  - LalatenduMohanty
+  - abhinavdahiya
+  - iamemilio
+  - stbenjam
 approvers:
   - TBD
 creation-date: 2020-05-18
-last-updated: 2020-12-01
+last-updated: 2020-12-17
 status: implementable
 ---
 
