@@ -73,29 +73,28 @@ In OCP, *FeatureSets* can be used to aggregate one or more feature gates. Then, 
 With that in mind, we propose to:
 
 1. Create two [new FeatureSets](https://github.com/openshift/api/blob/master/config/v1/types_feature.go#L25-L43) to support CSI migration: `CSIMigrationNode` and `CSIMigrationControlPlane`.
-  1.1 Both *FeatureSets* contain the same feature gates: `CSIMigration`, `CSIMIgrationAWS`, `CSIMigrationGCE`, `CSIMigrationAzureDisk`, `CSIMigrationAzureFile`, `CSIMigrationvSphere`, `CSIMigrationOpenStack`.
-  1.2 However, only control-plane operators will reacto to the `CSIMigrationControlPlane` *FeatureSet*. The machine-config-operator (MCO) will **ignore** it.
-  1.3 On the other hand, only MCO will react to the `CSIMigrationNode` *FeatureSet*. Control-plane operators will ignore it.
+   * Both *FeatureSets* contain the same feature gates: `CSIMigration`, `CSIMIgrationAWS`, `CSIMigrationGCE`, `CSIMigrationAzureDisk`, `CSIMigrationAzureFile`, `CSIMigrationvSphere`, `CSIMigrationOpenStack`.
+   * However, only control-plane operators will reacto to the `CSIMigrationControlPlane` *FeatureSet*. The machine-config-operator (MCO) will **ignore** it.
+   * On the other hand, only MCO will react to the `CSIMigrationNode` *FeatureSet*. Control-plane operators will ignore it.
 2. To enable CSI Migration for any in-tree plugin, the cluster administrator should:
-  2.1 Add the `CSIMigrationControlPlane` *FeatureSet* to the `featuregates/cluster` object:
-  ```shell
-  $ oc edit featuregates/cluster
-
-  (...)
-  spec:
-    featureSet: CSIMigrationControlPlane
-  ```
-  2.2 Once all control-plane components have restart, add the `CSIMigrationNode` *FeatureSet* to the `featuresgates/cluster` object:
-  ```shell
-  $ oc edit featuregates/cluster
-  (...)
-  spec:
-    featureSet: CSIMigrationControlPlane, CSIMigrationNode
-  ```
+   * Add the `CSIMigrationControlPlane` *FeatureSet* to the `featuregates/cluster` object:
+   ```shell
+   $ oc edit featuregates/cluster
+   (...)
+   spec:
+     featureSet: CSIMigrationControlPlane
+   ```
+   * Once all control-plane components have restart, add the `CSIMigrationNode` *FeatureSet* to the `featuresgates/cluster` object:
+   ```shell
+   $ oc edit featuregates/cluster
+   (...)
+   spec:
+     featureSet: CSIMigrationControlPlane, CSIMigrationNode
+   ```
 3. To disable CSI migration, the cluster administrator should perform the same steps in the opposite order:
-  3.1 Add the `CSIMigrationNode` *FeatureSet* to the `featuregates/cluster` object.
-  3.2 Wait for all Nodes to be drained and restarted.
-  3.3 Add the `CSIMigrationControlPlane` *FeatureSet* to the `featuregates/cluster` object.
+   * Add the `CSIMigrationNode` *FeatureSet* to the `featuregates/cluster` object.
+   * Wait for all Nodes to be drained and restarted.
+   * Add the `CSIMigrationControlPlane` *FeatureSet* to the `featuregates/cluster` object.
 4. It is the **responsability of the cluster administrator** to guarante the ordering described above is respected.
 
 ### GA
