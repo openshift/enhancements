@@ -155,12 +155,6 @@ installer to create the `bootstrap-in-place-for-live-iso.ign` Ignition
 config.  This new target will not output `master.ign` and `worker.ign`
 files.
 
-Users will specify the target disk drive for `coreos-installer` using
-the environment variable
-`OPENSHIFT_INSTALL_EXPERIMENTAL_BOOTSTRAP_IN_PLACE_COREOS_INSTALLER_ARGS`.
-Before the feature graduates from preview, the environment variable
-will be replaced with a field in the `install-config.yaml` schema.
-
 This Ignition config will have a different `bootkube.sh` from the
 default bootstrap Ignition. In addition to the standard rendering
 logic, the modified script will:
@@ -171,8 +165,27 @@ logic, the modified script will:
    config, the control plane static pod manifests, the required
    kubernetes resources, and the bootstrap etcd database snapshot to
    create a new Ignition config for the host.
-3. Write the RHCOS image and the combined Ignition config to disk.
-4. Reboot the node.
+
+In order to successfully complete the installation, the user must tell
+`coreos-install` where to write the operating system image on the
+host's local storage. It may be necessary to provide other inputs to
+`coreos-install` at the same time (network addresses, etc.), and we
+have not yet completed the investigation and experimentation work
+required to design a supportable API for the complex details that may
+be needed. Therefore, to unblock progress on the bootstrap-in-place
+feature, we will temporarily treat installing the operating system as
+a manual step. Users running the OpenShift installer by hand will need
+to login to the host via `ssh` and run `coreos-install`, passing the
+appropriate arguments. Users relying on integration with Hive and the
+assisted installer for multi-cluster management will not need to
+perform this step by hand, since the agent driven by the assisted
+installer service runs `coreos-install` already. The installer and
+edge teams will work on this area further during this next release
+cycle, and use another enhancement proposal to describe the
+implementation of an API to replace the manual step.
+
+After the user runs the `coreos-install` and the RHCOS image is
+written to disk, they also need to reboot the host.
 
 #### Cluster-bootstrap
 
@@ -469,9 +482,12 @@ In general, we try to use the same stages (alpha, beta, GA), regardless how the 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 - Available by default
-- Update the installer to replace
-  `OPENSHIFT_INSTALL_EXPERIMENTAL_BOOTSTRAP_IN_PLACE_COREOS_INSTALLER_ARGS`
-  with a field in the `install-config.yaml` schema.
+- Either define a maintainable API for passing arguments to
+  `coreos-install` in the OpenShift installer so that the
+  bootstrapping services can install the operating system on the host,
+  or definitively decide that installing the operating system should
+  always be a manual step when the user is running the OpenShift
+  installer outside of our multi-cluster management integration.
 
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
@@ -595,3 +611,59 @@ We decided to add `single-node-ignition-config` target to in order to gain:
 1. Allow us to easily add different set of validations (e.g. ensure that the number of replicas for the control plane is 1).
 2. We can avoid creating unnecessary assets (master.ign and worker.ign).
 3. Less prune to user errors than environment variable.
+
+### Alternatives for managing the operating system installation step
+
+Before settling on using a manual process, we identified several
+options for installing the operating system during deployment.
+
+1. We could give the user instructions to ssh to the host and run a
+   command.
+
+   This is the option we selected. It requires additional work for
+   users running the installer by hand, and will require some changes
+   to the CI jobs for single-node deployments, but is the most
+   flexible and does not commit us to maintaining and API we have
+   rushed to design.
+
+2. We could add an unsupported experimental environment variable to
+   all installer builds, so that the user could pass information
+   through the OpenShift installer to the CoreOS installer.
+
+   The risk of using an environment variable is that it would become a
+   de facto API that we must support over a long period of time. This
+   is especially likely since we are collaborating closely with users
+   and cannot guarantee that they will not build automation of their
+   own around the installer.
+
+3. We could add an experimental environment variable to a special
+   installer build, so that it is not in all builds.
+
+   Using a custom build would make it easier to control who has access
+   to the feature, but we would still need to share the binary with
+   our customers so this approach does not actually eliminate the risk
+   of having the feature implemented at all.
+
+4. We could pause now and spend time to design the install-config
+   fields needed.
+
+   Because of the aggressive deadline for the project, we do not feel
+   we can afford to pause all implementation work until this API
+   design is finalized.
+
+5. We could assume that all single-node deployments would rely on the
+   assisted-installer, and not support manual installation.
+
+   This assumption would put us at risk for delivering the single-node
+   feature to users on the timeline that has been promised.
+
+6. We could give the user instructions to edit the Ignition config
+   file produced by the OpenShift installer to add a service to run
+   `coreos-install`.
+
+   While still a manual step, and still technically possible, editing
+   the Ignition config is more complicated to explain that having the
+   user run the installer by hand. Some users may still choose to use
+   this approach, but we should be careful that supporting it does not
+   cause problems with future work to make the OpenShift installer add
+   similar configuration to the same file.
