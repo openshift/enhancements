@@ -21,7 +21,7 @@ func newReportCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query := util.NewPullRequestQuery(
 				daysBack, staleMonths, orgName, repoName, devMode,
-				util.NewGithubClientSource(configSettings.Github.Token))
+				util.NewGithubClient(configSettings.Github.Token))
 
 			theStats, err := stats.Generate(query)
 			if err != nil {

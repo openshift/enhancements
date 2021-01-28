@@ -11,15 +11,15 @@ import (
 )
 
 // New creates a new PullRequestQuery
-func NewPullRequestQuery(daysBack int, staleMonths int, orgName, repoName string, devMode bool, clientSource GithubClientSource) *PullRequestQuery {
+func NewPullRequestQuery(daysBack int, staleMonths int, orgName, repoName string, devMode bool, client *github.Client) *PullRequestQuery {
 	result := &PullRequestQuery{
 		EarliestDate: time.Now().AddDate(0, 0, daysBack*-1),
 		StaleDate:    time.Now().AddDate(0, staleMonths*-1, 0),
 
-		org:          orgName,
-		repo:         repoName,
-		devMode:      devMode,
-		clientSource: clientSource,
+		org:     orgName,
+		repo:    repoName,
+		devMode: devMode,
+		client:  client,
 	}
 	return result
 }
@@ -29,10 +29,10 @@ type PullRequestQuery struct {
 	EarliestDate time.Time
 	StaleDate    time.Time
 
-	org          string
-	repo         string
-	devMode      bool
-	clientSource GithubClientSource
+	org     string
+	repo    string
+	devMode bool
+	client  *github.Client
 }
 
 const pageSize int = 50
@@ -46,7 +46,6 @@ func (q *PullRequestQuery) IteratePullRequests(callback PRCallback) error {
 	fmt.Printf("finding pull requests for %s/%s\n", q.org, q.repo)
 	fmt.Printf("ignoring items closed before %s\n", q.EarliestDate)
 
-	client := q.clientSource()
 	ctx := context.Background()
 	opts := &github.PullRequestListOptions{
 		State: "all",
@@ -60,7 +59,7 @@ func (q *PullRequestQuery) IteratePullRequests(callback PRCallback) error {
 	// simultaneous requests we make to the API to avoid rate
 	// limiting.
 	for {
-		prs, response, err := client.PullRequests.List(ctx, q.org, q.repo, opts)
+		prs, response, err := q.client.PullRequests.List(ctx, q.org, q.repo, opts)
 		if err != nil {
 			return errors.Wrap(err,
 				fmt.Sprintf(
@@ -93,7 +92,6 @@ func (q *PullRequestQuery) IteratePullRequests(callback PRCallback) error {
 }
 
 func (q *PullRequestQuery) GetIssueComments(pr *github.PullRequest) ([]*github.IssueComment, error) {
-	c := q.clientSource()
 	ctx := context.Background()
 	opts := &github.IssueListCommentsOptions{
 		Since: &q.EarliestDate,
@@ -104,7 +102,7 @@ func (q *PullRequestQuery) GetIssueComments(pr *github.PullRequest) ([]*github.I
 	results := []*github.IssueComment{}
 
 	for {
-		comments, response, err := c.Issues.ListComments(
+		comments, response, err := q.client.Issues.ListComments(
 			ctx, q.org, q.repo, *pr.Number, opts)
 		if err != nil {
 			return nil, err
@@ -120,7 +118,6 @@ func (q *PullRequestQuery) GetIssueComments(pr *github.PullRequest) ([]*github.I
 }
 
 func (q *PullRequestQuery) GetPRComments(pr *github.PullRequest) ([]*github.PullRequestComment, error) {
-	c := q.clientSource()
 	ctx := context.Background()
 	opts := &github.PullRequestListCommentsOptions{
 		Since: q.EarliestDate,
@@ -131,7 +128,7 @@ func (q *PullRequestQuery) GetPRComments(pr *github.PullRequest) ([]*github.Pull
 	results := []*github.PullRequestComment{}
 
 	for {
-		comments, response, err := c.PullRequests.ListComments(
+		comments, response, err := q.client.PullRequests.ListComments(
 			ctx, q.org, q.repo, *pr.Number, opts)
 		if err != nil {
 			return nil, err
@@ -147,7 +144,6 @@ func (q *PullRequestQuery) GetPRComments(pr *github.PullRequest) ([]*github.Pull
 }
 
 func (q *PullRequestQuery) GetReviews(pr *github.PullRequest) ([]*github.PullRequestReview, error) {
-	c := q.clientSource()
 	ctx := context.Background()
 	opts := &github.ListOptions{
 		PerPage: pageSize,
@@ -155,7 +151,7 @@ func (q *PullRequestQuery) GetReviews(pr *github.PullRequest) ([]*github.PullReq
 	results := []*github.PullRequestReview{}
 
 	for {
-		comments, response, err := c.PullRequests.ListReviews(
+		comments, response, err := q.client.PullRequests.ListReviews(
 			ctx, q.org, q.repo, *pr.Number, opts)
 		if err != nil {
 			return nil, err
@@ -171,8 +167,7 @@ func (q *PullRequestQuery) GetReviews(pr *github.PullRequest) ([]*github.PullReq
 }
 
 func (q *PullRequestQuery) IsMerged(pr *github.PullRequest) (bool, error) {
-	c := q.clientSource()
 	ctx := context.Background()
-	isMerged, _, err := c.PullRequests.IsMerged(ctx, q.org, q.repo, *pr.Number)
+	isMerged, _, err := q.client.PullRequests.IsMerged(ctx, q.org, q.repo, *pr.Number)
 	return isMerged, err
 }
