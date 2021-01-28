@@ -127,3 +127,20 @@ Although this approach does what we need, it has some drawbacks:
 
 1. Having operators ignoring certain *FeatureSets* is not common and error-prone.
 1. We need to patch many operators in order to ignore *FeatureSets*.
+
+## Design Details
+
+### Test Plan
+
+#### E2E jobs
+
+We want to create E2E jobs for all migrated plugins.
+
+For each E2E job:
+
+1. Install an OCP cluster.
+1. Enable the feature gate. Don't worry about the order in which components will apply the feature flags because at this point there are no volumes created.
+1. Wait until MCO and control-plane operators restart.
+1. Run E2E tests for in-tree volume plugins.
+1. Disable the feature gate. Again, don't worry about the ordering.
+1. Run E2E tests again.
