@@ -7,7 +7,7 @@ reviewers:
 approvers:
   - "@openshift/openshift-architects"
 creation-date: 2020-07-01
-last-updated: 2020-07-01
+last-updated: 2021-01-28
 status: provisional
 see-also:
 replaces:
