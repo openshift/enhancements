@@ -34,9 +34,16 @@ type PullRequestDetails struct {
 	Prioritized bool
 }
 
-// New creates a new Stats implementation
-func New(query *util.PullRequestQuery) *Stats {
-	return &Stats{PullRequestQuery: query}
+// Generate creates a new Stats instance populated using the query
+func Generate(query *util.PullRequestQuery) (*Stats, error) {
+	s := &Stats{PullRequestQuery: query}
+
+	err := query.IteratePullRequests(s.process)
+	if err != nil {
+		return nil, err
+	}
+
+	return s, err
 }
 
 // Stats holds the overall stats gathered from the repo
@@ -55,7 +62,7 @@ type Stats struct {
 }
 
 // Process extracts the required information from a single PR
-func (s *Stats) Process(pr *github.PullRequest) error {
+func (s *Stats) process(pr *github.PullRequest) error {
 	// Ignore old closed items
 	if *pr.State == "closed" && pr.UpdatedAt.Before(s.EarliestDate) {
 		return nil

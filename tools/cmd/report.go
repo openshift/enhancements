@@ -23,10 +23,9 @@ func newReportCommand() *cobra.Command {
 				daysBack, staleMonths, orgName, repoName, devMode,
 				util.NewGithubClientSource(configSettings.Github.Token))
 
-			theStats := stats.New(query)
-			err := query.IteratePullRequests(theStats.Process)
+			theStats, err := stats.Generate(query)
 			if err != nil {
-				return errors.Wrap(err, "could not process pull requests")
+				return errors.Wrap(err, "could not generate stats")
 			}
 
 			report.ShowReport(theStats, daysBack, staleMonths, full)
