@@ -34,21 +34,30 @@ type PullRequestDetails struct {
 	Prioritized bool
 }
 
-// Generate creates a new Stats instance populated using the query
-func Generate(query *util.PullRequestQuery) (*Stats, error) {
-	s := &Stats{PullRequestQuery: query}
+// RuleFilter refers to a function that selects pull requests. A
+// RuleFilter returns true when the request matches, false when it
+// does not.
+type RuleFilter func(*PullRequestDetails) bool
 
-	err := query.IteratePullRequests(s.process)
-	if err != nil {
-		return nil, err
-	}
-
-	return s, err
+// Bucket describes a rule for selecting pull requests to group them
+// into a category
+type Bucket struct {
+	// Rule tells us which pull requests belong in the bucket
+	Rule RuleFilter
+	// Requests is the set of pull requests in the bucket
+	Requests []*PullRequestDetails
+	// Cascade tells us whether to keep looking for other buckets. The
+	// default, false, means stop when Rule matches. Setting Cascade =
+	// true means requests added to the bucket may be added to other
+	// buckets.
+	Cascade bool
 }
 
 // Stats holds the overall stats gathered from the repo
 type Stats struct {
-	*util.PullRequestQuery
+	Query *util.PullRequestQuery
+
+	Buckets []*Bucket
 
 	All     []*PullRequestDetails
 	New     []*PullRequestDetails
@@ -61,32 +70,38 @@ type Stats struct {
 	Revived []*PullRequestDetails
 }
 
+// Populate runs the query and filters requests into the appropriate
+// buckets
+func (s *Stats) Populate() error {
+	return s.Query.IteratePullRequests(s.process)
+}
+
 // Process extracts the required information from a single PR
 func (s *Stats) process(pr *github.PullRequest) error {
 	// Ignore old closed items
-	if *pr.State == "closed" && pr.UpdatedAt.Before(s.EarliestDate) {
+	if *pr.State == "closed" && pr.UpdatedAt.Before(s.Query.EarliestDate) {
 		return nil
 	}
 
-	isMerged, err := s.IsMerged(pr)
+	isMerged, err := s.Query.IsMerged(pr)
 	if err != nil {
 		return errors.Wrap(err,
 			fmt.Sprintf("could not determine merged status of %s", *pr.HTMLURL))
 	}
 
-	issueComments, err := s.GetIssueComments(pr)
+	issueComments, err := s.Query.GetIssueComments(pr)
 	if err != nil {
 		return errors.Wrap(err,
 			fmt.Sprintf("could not fetch issue comments on %s", *pr.HTMLURL))
 	}
 
-	prComments, err := s.GetPRComments(pr)
+	prComments, err := s.Query.GetPRComments(pr)
 	if err != nil {
 		return errors.Wrap(err,
 			fmt.Sprintf("could not fetch PR comments on %s", *pr.HTMLURL))
 	}
 
-	reviews, err := s.GetReviews(pr)
+	reviews, err := s.Query.GetReviews(pr)
 	if err != nil {
 		return errors.Wrap(err,
 			fmt.Sprintf("could not fetch reviews on %s", *pr.HTMLURL))
@@ -116,17 +131,17 @@ func (s *Stats) process(pr *github.PullRequest) error {
 		details.State = "merged"
 	}
 	for _, r := range reviews {
-		if r.SubmittedAt.After(s.EarliestDate) {
+		if r.SubmittedAt.After(s.Query.EarliestDate) {
 			details.RecentReviewCount++
 		}
 	}
 	for _, c := range issueComments {
-		if c.CreatedAt.After(s.EarliestDate) {
+		if c.CreatedAt.After(s.Query.EarliestDate) {
 			details.RecentIssueCommentCount++
 		}
 	}
 	for _, c := range prComments {
-		if c.CreatedAt.After(s.EarliestDate) {
+		if c.CreatedAt.After(s.Query.EarliestDate) {
 			details.RecentPRCommentCount++
 		}
 	}
@@ -137,45 +152,14 @@ func (s *Stats) process(pr *github.PullRequest) error {
 }
 
 func (s *Stats) add(details *PullRequestDetails) {
-	s.All = append(s.All, details)
-
-	if details.State == "merged" || details.State == "closed" {
-		if details.Pull.ClosedAt.After(s.EarliestDate) {
-			// The PR closed this period.
-			if details.State == "merged" {
-				s.Merged = append(s.Merged, details)
-				return
-			}
-			if details.State == "closed" {
-				s.Closed = append(s.Closed, details)
-				return
-			}
+	for _, bucket := range s.Buckets {
+		match := bucket.Rule(details)
+		if !match {
+			continue
 		}
-		// The PR has had commentary this period but was closed
-		// earlier.
-		s.Revived = append(s.Revived, details)
-		return
+		bucket.Requests = append(bucket.Requests, details)
+		if !bucket.Cascade {
+			break
+		}
 	}
-
-	if details.Pull.CreatedAt.After(s.EarliestDate) {
-		s.New = append(s.New, details)
-		return
-	}
-
-	if details.Pull.UpdatedAt.Before(s.StaleDate) && details.RecentActivityCount > 0 {
-		s.Old = append(s.Old, details)
-		return
-	}
-
-	if details.Pull.UpdatedAt.Before(s.StaleDate) {
-		s.Stale = append(s.Stale, details)
-		return
-	}
-
-	if details.RecentActivityCount > 0 {
-		s.Active = append(s.Active, details)
-		return
-	}
-
-	s.Idle = append(s.Idle, details)
 }
