@@ -5,7 +5,7 @@
 From the `tools` directory, run:
 
 ```console
-go run ./report/main.go
+go run ./main.go report
 ```
 
 There are command line options to control the range of time
