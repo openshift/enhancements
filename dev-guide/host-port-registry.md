@@ -23,35 +23,85 @@ This document serves as the authoritative list of port assignments.
 
 ## Background
 
-Ports 9000-9999 are available for general use by system services. We require that
-customers open this range [and several others](https://github.com/openshift/openshift-docs/blob/master/modules/installation-network-user-infra.adoc)
-between nodes.
+Host-network ports are a shared resource in an OCP cluster, and pods
+running on the host network must coordinate their use to avoid
+conflicts.
 
-The user-facing documentation, informed by the installer's
-terraform templates, is the authoritative source for usable port ranges.
+OCP reserves host ports 9000-9999 (both TCP and UDP) for use by system
+services that communicate between nodes. Ports 29000-29999 (both TCP
+and UDP) are reserved for use by system services that listen on
+(host-network) localhost only. (OCP does not reserve any SCTP ports.)
 
-These ports are used by certain services that, for whatever reason, must run
-in the host network (or use host-port forwarding).
+Additionally, some services that have standard port assignments run on
+ports outside this range, either for historical reasons, or to allow
+them to be more easily recognized by network debugging and monitoring
+tools.
 
-The Kubernetes scheduler is aware of host ports, and will fail to schedule pods
-on a node where there would be a port conflict.
+Other than the reserved ranges and the other ports listed below, host
+ports on worker nodes are available for use by customers. (But all
+host ports on masters are reserved for OCP use.)
 
-### Localhost
+The Kubernetes scheduler is aware of host ports, and will fail to
+schedule pods on a node where there would be a port conflict.
 
-Separately, it is a common pattern for a pod to have one or more processes only
-listening on localhost. Since all HostNetwork pods share a network namespace,
-coordination is also required in this case.
+## Configuration
 
-## Requirements
+The installer's terraform templates open the 9000-9999 range [and
+several
+others](https://github.com/openshift/openshift-docs/blob/master/modules/installation-network-user-infra.adoc)
+between nodes in IPI clusters. Customers are required to ensure these
+ranges are open in UPI clusters. The user-facing documentation,
+informed by the installer's terraform templates, is the authoritative
+source for reserved port ranges.
+
+## Requirements for OCP Components
 
 All processes that wish to listen on a host port MUST
 
-- Have an entry in the table below
+- have an entry in the table below
 - be in a [documented range](https://github.com/openshift/openshift-docs/blob/master/modules/installation-network-user-infra.adoc),
-  if they are intended to be reachable
+  if they are intended to be reachable from other nodes
 - declare that port in their `Pod.Spec`
 
-Localhost-only ports SHOULD be outside of this range, to leave room.
+Starting with OCP 4.10, all new worker-node host port allocations
+SHOULD be in the reserved 9000-9999 port range, and all new
+worker-node localhost-only port allocation SHOULD be in the
+29000-29999 range, to avoid conflicting with ports claimed by customer
+pods created in earlier releases.
+
+If there is a strong argument for using a port outside these ranges by
+default (eg, integration with other tooling), then the relevant
+operator MUST also reserve a port in the 9000-9999 (or 29000-29999)
+range, and provide a configuration option to allow a customer to make
+the service use that alternate port instead. An operator that has an
+operand which claims a new non-reserved-range port in a release SHOULD
+recognize when an upgrade to that release is failing due to the new
+port conflicting with a customer pod, and SHOULD set itself `Degraded`
+with an explanation of how to configure the operand to use the
+alternate port.
+
+(In general, it is not possible for an operator started by the CVO to
+claim a new non-reserved-range port _for itself_ (as opposed to for
+one of its operands), since a pod deployed by the CVO would not be
+able to comply with both the "must declare the port in its `Pod.Spec`"
+rule and the "must allow switching to an alternate port" rule).
+
+## Requirements for Customers
+
+Customers should not claim host ports in the reserved ranges
+(9000-9999 and 29000-29999), or any of the ports listed below.
+Additionally, customers may not claim any host ports on the OCP
+masters. (Doing so may result in a cluster that cannot be upgraded,
+due to port conflicts.)
+
+Any customer pod that claims a host port must declare that port in its
+`Pod.Spec` so that future conflicts can be detected. Customers should
+not run non-containerized services that claim host ports on OCP nodes.
+
+In cases where there is some application that customers are likely to
+deploy on OCP, which uses a port in the 9000-9999 or 29000-29999 range
+by default, we can consider reserving that port for customer use on a
+case-by-base basis. (At the present time, no such ports are reserved.)
 
 # Port Registry
 
