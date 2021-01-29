@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
+	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/report"
 	"github.com/openshift/enhancements/tools/stats"
 	"github.com/openshift/enhancements/tools/util"
@@ -24,6 +28,20 @@ func newReportCommand() *cobra.Command {
 				daysBack, staleMonths, orgName, repoName, devMode,
 				util.NewGithubClient(configSettings.Github.Token))
 
+			ignore := stats.Bucket{
+				Rule: func(prd *stats.PullRequestDetails) bool {
+					group, _, err := enhancements.GetGroup(*prd.Pull.Number)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "WARNING: failed to get group of PR %d: %s\n",
+							*prd.Pull.Number, err)
+						group = "uncategorized"
+					}
+
+					// ignore pull requests with only changes in the tools
+					// directory or this-week posts
+					return group == "tools" || group == "this-week"
+				},
+			}
 			all := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
 					return true
@@ -76,6 +94,7 @@ func newReportCommand() *cobra.Command {
 			}
 
 			reportBuckets := []*stats.Bucket{
+				&ignore,
 				&all,
 				&merged,
 				&closed,
