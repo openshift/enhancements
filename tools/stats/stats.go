@@ -55,19 +55,8 @@ type Bucket struct {
 
 // Stats holds the overall stats gathered from the repo
 type Stats struct {
-	Query *util.PullRequestQuery
-
+	Query   *util.PullRequestQuery
 	Buckets []*Bucket
-
-	All     []*PullRequestDetails
-	New     []*PullRequestDetails
-	Merged  []*PullRequestDetails
-	Closed  []*PullRequestDetails
-	Stale   []*PullRequestDetails
-	Idle    []*PullRequestDetails
-	Active  []*PullRequestDetails
-	Old     []*PullRequestDetails
-	Revived []*PullRequestDetails
 }
 
 // Populate runs the query and filters requests into the appropriate
@@ -151,6 +140,7 @@ func (s *Stats) process(pr *github.PullRequest) error {
 	return nil
 }
 
+// add records a given pr in the correct bucket(s)
 func (s *Stats) add(details *PullRequestDetails) {
 	for _, bucket := range s.Buckets {
 		match := bucket.Rule(details)

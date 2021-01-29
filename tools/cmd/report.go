@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -28,6 +29,18 @@ func newReportCommand() *cobra.Command {
 				daysBack, staleMonths, orgName, repoName, devMode,
 				util.NewGithubClient(configSettings.Github.Token))
 
+			// Define a bucket to include all pull requests as a way
+			// to give us a count of the total number we've seen while
+			// building the report.
+			all := stats.Bucket{
+				Rule: func(prd *stats.PullRequestDetails) bool {
+					return true
+				},
+				Cascade: true,
+			}
+
+			// Define a bucket to capture anything we want to ignore
+			// in the report, so the other rules aren't even applied.
 			ignore := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
 					group, _, err := enhancements.GetGroup(*prd.Pull.Number)
@@ -42,22 +55,54 @@ func newReportCommand() *cobra.Command {
 					return group == "tools" || group == "this-week"
 				},
 			}
-			all := stats.Bucket{
+
+			// Define a few buckets for pull requests related to work
+			// prioritized for the current or next release.
+			prioritizedMerged := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
-					return true
+					return prd.Prioritized && prd.State == "merged" && prd.Pull.ClosedAt.After(query.EarliestDate)
 				},
-				Cascade: true,
 			}
-			merged := stats.Bucket{
+			prioritizedClosed := stats.Bucket{
+				Rule: func(prd *stats.PullRequestDetails) bool {
+					return prd.Prioritized && prd.State == "closed" && prd.Pull.ClosedAt.After(query.EarliestDate)
+				},
+			}
+			prioritizedNew := stats.Bucket{
+				Rule: func(prd *stats.PullRequestDetails) bool {
+					return prd.Prioritized && prd.Pull.CreatedAt.After(query.EarliestDate)
+				},
+			}
+			prioritizedActive := stats.Bucket{
+				Rule: func(prd *stats.PullRequestDetails) bool {
+					return prd.Prioritized && prd.RecentActivityCount > 0
+				},
+			}
+
+			// Define basic groups for all of the non-prioritized pull
+			// requests.
+			otherMerged := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
 					return prd.State == "merged" && prd.Pull.ClosedAt.After(query.EarliestDate)
 				},
 			}
-			closed := stats.Bucket{
+			otherClosed := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
 					return prd.State == "closed" && prd.Pull.ClosedAt.After(query.EarliestDate)
 				},
 			}
+			otherNew := stats.Bucket{
+				Rule: func(prd *stats.PullRequestDetails) bool {
+					return prd.Pull.CreatedAt.After(query.EarliestDate)
+				},
+			}
+			otherOld := stats.Bucket{
+				Rule: func(prd *stats.PullRequestDetails) bool {
+					return prd.Pull.UpdatedAt.Before(query.StaleDate) && prd.RecentActivityCount > 0
+				},
+			}
+
+			// Define some extra buckets for the "full" report format.
 			revived := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
 					// Anything in either of these states from
@@ -67,22 +112,12 @@ func newReportCommand() *cobra.Command {
 					return prd.State == "closed" || prd.State == "merged"
 				},
 			}
-			newPRs := stats.Bucket{
-				Rule: func(prd *stats.PullRequestDetails) bool {
-					return prd.Pull.CreatedAt.After(query.EarliestDate)
-				},
-			}
-			oldPRs := stats.Bucket{
-				Rule: func(prd *stats.PullRequestDetails) bool {
-					return prd.Pull.UpdatedAt.Before(query.StaleDate) && prd.RecentActivityCount > 0
-				},
-			}
 			stale := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
 					return prd.Pull.UpdatedAt.Before(query.StaleDate)
 				},
 			}
-			active := stats.Bucket{
+			otherActive := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
 					return prd.RecentActivityCount > 0
 				},
@@ -94,15 +129,22 @@ func newReportCommand() *cobra.Command {
 			}
 
 			reportBuckets := []*stats.Bucket{
-				&ignore,
 				&all,
-				&merged,
-				&closed,
+				&ignore,
+
+				&prioritizedMerged,
+				&prioritizedClosed,
+				&prioritizedNew,
+				&prioritizedActive,
+
+				&otherMerged,
+				&otherClosed,
 				&revived,
-				&newPRs,
-				&oldPRs,
+				&otherNew,
+				&otherOld,
+
 				&stale,
-				&active,
+				&otherActive,
 				&idle,
 			}
 
@@ -116,17 +158,77 @@ func newReportCommand() *cobra.Command {
 				return errors.Wrap(err, "could not generate stats")
 			}
 
-			// FIXME: temporary hack to make the report printing work
-			theStats.All = all.Requests
-			theStats.Merged = merged.Requests
-			theStats.Revived = revived.Requests
-			theStats.New = newPRs.Requests
-			theStats.Old = oldPRs.Requests
-			theStats.Stale = stale.Requests
-			theStats.Active = active.Requests
-			theStats.Idle = idle.Requests
+			fmt.Fprintf(os.Stderr, "Processed %d pull requests\n", len(all.Requests))
+			fmt.Fprintf(os.Stderr, "Ignored %d pull requests\n", len(ignore.Requests))
 
-			report.ShowReport(theStats, daysBack, staleMonths, full)
+			year, month, day := time.Now().Date()
+			fmt.Printf("\n# This Week in Enhancements - %d-%.2d-%.2d\n", year, month, day)
+
+			// Only print the priority section if there are prioritized pull requests
+			if anyRequests(prioritizedMerged, prioritizedClosed, prioritizedNew, prioritizedActive) {
+				fmt.Printf("\n## Enhancements for Release Priorities\n")
+
+				report.SortByID(prioritizedMerged.Requests)
+				report.ShowPRs("Prioritized Merged", prioritizedMerged.Requests, true)
+
+				report.SortByID(prioritizedClosed.Requests)
+				report.ShowPRs("Prioritized Closed", prioritizedClosed.Requests, false)
+
+				report.SortByID(prioritizedNew.Requests)
+				report.ShowPRs("Prioritized New", prioritizedNew.Requests, true)
+
+				report.SortByActivityCountDesc(prioritizedActive.Requests)
+				report.ShowPRs("Prioritized Active", prioritizedActive.Requests, true)
+			}
+
+			fmt.Printf("\n## Other Enhancements\n")
+
+			report.SortByID(otherMerged.Requests)
+			report.ShowPRs("Other Merged", otherMerged.Requests, true)
+
+			report.SortByID(otherClosed.Requests)
+			report.ShowPRs("Other Closed", otherClosed.Requests, false)
+
+			report.SortByID(otherNew.Requests)
+			report.ShowPRs("Other New", otherNew.Requests, true)
+
+			report.SortByActivityCountDesc(otherActive.Requests)
+			report.ShowPRs("Other Active", otherActive.Requests, true)
+
+			// Only print the closing sections if asked to with the --full flag
+			if !full {
+				return nil
+			}
+
+			report.SortByID(revived.Requests)
+			report.ShowPRs(
+				fmt.Sprintf("Revived (closed more than %d days ago, but with new comments)", daysBack),
+				revived.Requests,
+				false,
+			)
+
+			report.SortByID(idle.Requests)
+			report.ShowPRs(
+				fmt.Sprintf("Idle (no comments for at least %d days)", daysBack),
+				idle.Requests,
+				false,
+			)
+
+			report.SortByID(otherOld.Requests)
+			report.ShowPRs(
+				fmt.Sprintf("Other Old (older than %d months, but discussion in last %d days)",
+					staleMonths, daysBack),
+				otherOld.Requests,
+				false,
+			)
+
+			report.SortByID(stale.Requests)
+			report.ShowPRs(
+				fmt.Sprintf("Other Stale (older than %d months, not discussed in last %d days)",
+					staleMonths, daysBack),
+				stale.Requests,
+				false,
+			)
 
 			return nil
 		},
@@ -143,4 +245,13 @@ func newReportCommand() *cobra.Command {
 
 func init() {
 	rootCmd.AddCommand(newReportCommand())
+}
+
+func anyRequests(buckets ...stats.Bucket) bool {
+	for _, b := range buckets {
+		if len(b.Requests) > 0 {
+			return true
+		}
+	}
+	return false
 }
