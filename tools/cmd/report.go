@@ -50,9 +50,9 @@ func newReportCommand() *cobra.Command {
 						group = "uncategorized"
 					}
 
-					// ignore pull requests with only changes in the tools
-					// directory or this-week posts
-					return group == "tools" || group == "this-week"
+					// ignore pull requests with only changes in the
+					// hack, tools, or this-week directories
+					return group == "hack" || group == "tools" || group == "this-week"
 				},
 			}
 
