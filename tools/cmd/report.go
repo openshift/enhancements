@@ -17,7 +17,7 @@ import (
 func newReportCommand() *cobra.Command {
 	var (
 		daysBack, staleMonths int
-		devMode, full         bool
+		devMode               bool
 	)
 
 	cmd := &cobra.Command{
@@ -102,7 +102,7 @@ func newReportCommand() *cobra.Command {
 				},
 			}
 
-			// Define some extra buckets for the "full" report format.
+			// Define some extra buckets for older or lingering items
 			revived := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
 					// Anything in either of these states from
@@ -195,6 +195,13 @@ func newReportCommand() *cobra.Command {
 			report.SortByActivityCountDesc(otherActive.Requests)
 			report.ShowPRs("Other Active", otherActive.Requests, true)
 
+			report.SortByID(revived.Requests)
+			report.ShowPRs(
+				fmt.Sprintf("Revived (closed more than %d days ago, but with new comments)", daysBack),
+				revived.Requests,
+				false,
+			)
+
 			report.SortByID(otherOld.Requests)
 			report.ShowPRs(
 				fmt.Sprintf("Old (older than %d months, but discussion in last %d days)",
@@ -208,18 +215,6 @@ func newReportCommand() *cobra.Command {
 				fmt.Sprintf("Stale (older than %d months, no discussion in last %d days)",
 					staleMonths, daysBack),
 				stale.Requests,
-				false,
-			)
-
-			// Only print the closing sections if asked to with the --full flag
-			if !full {
-				return nil
-			}
-
-			report.SortByID(revived.Requests)
-			report.ShowPRs(
-				fmt.Sprintf("Revived (closed more than %d days ago, but with new comments)", daysBack),
-				revived.Requests,
 				false,
 			)
 
@@ -238,7 +233,6 @@ func newReportCommand() *cobra.Command {
 	cmd.Flags().IntVar(&staleMonths, "stale-months", 3,
 		"how many months before a pull request is considered stale")
 	cmd.Flags().BoolVar(&devMode, "dev", false, "dev mode, stop after first page of PRs")
-	cmd.Flags().BoolVar(&full, "full", false, "full report, not just summary")
 
 	return cmd
 }
