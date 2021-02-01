@@ -195,6 +195,22 @@ func newReportCommand() *cobra.Command {
 			report.SortByActivityCountDesc(otherActive.Requests)
 			report.ShowPRs("Other Active", otherActive.Requests, true)
 
+			report.SortByID(otherOld.Requests)
+			report.ShowPRs(
+				fmt.Sprintf("Old (older than %d months, but discussion in last %d days)",
+					staleMonths, daysBack),
+				otherOld.Requests,
+				false,
+			)
+
+			report.SortByID(stale.Requests)
+			report.ShowPRs(
+				fmt.Sprintf("Stale (older than %d months, no discussion in last %d days)",
+					staleMonths, daysBack),
+				stale.Requests,
+				false,
+			)
+
 			// Only print the closing sections if asked to with the --full flag
 			if !full {
 				return nil
@@ -211,22 +227,6 @@ func newReportCommand() *cobra.Command {
 			report.ShowPRs(
 				fmt.Sprintf("Idle (no comments for at least %d days)", daysBack),
 				idle.Requests,
-				false,
-			)
-
-			report.SortByID(otherOld.Requests)
-			report.ShowPRs(
-				fmt.Sprintf("Other Old (older than %d months, but discussion in last %d days)",
-					staleMonths, daysBack),
-				otherOld.Requests,
-				false,
-			)
-
-			report.SortByID(stale.Requests)
-			report.ShowPRs(
-				fmt.Sprintf("Other Stale (older than %d months, not discussed in last %d days)",
-					staleMonths, daysBack),
-				stale.Requests,
 				false,
 			)
 
