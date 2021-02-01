@@ -5,7 +5,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/stats"
@@ -29,12 +28,13 @@ func formatDescription(text string, indent string) string {
 
 const descriptionIndent = "  "
 
-func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool) {
-	fmt.Printf("\n### %s Enhancements\n", name)
+// ShowPRs prints a section of the report by formatting the
+// PullRequestDetails as a list.
+func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool) {
 	if len(prds) == 0 {
-		fmt.Printf("\nThere were 0 %s pull requests.\n\n", name)
 		return
 	}
+	fmt.Printf("\n### %s Enhancements\n", name)
 
 	fmt.Printf("\n*&lt;PR ID&gt;: (activity this week / total activity) summary*\n")
 
@@ -98,109 +98,18 @@ func showPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 	}
 }
 
-func filterPRDs(prds []*stats.PullRequestDetails, prioritized bool) []*stats.PullRequestDetails {
-	results := []*stats.PullRequestDetails{}
-
-	for _, prd := range prds {
-		if prd.Prioritized != prioritized {
-			continue
-		}
-
-		group, _, err := enhancements.GetGroup(*prd.Pull.Number)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARNING: failed to get group of PR %d: %s\n",
-				*prd.Pull.Number, err)
-			group = "uncategorized"
-		}
-
-		// ignore pull requests with only changes in the tools
-		// directory or this-week posts
-		if group == "tools" || group == "this-week" {
-			continue
-		}
-
-		results = append(results, prd)
-	}
-	return results
-}
-
-func sortByID(prds []*stats.PullRequestDetails) {
+// SortByID reorders the slice of PullRequestDetails by the pull
+// request number in ascending order.
+func SortByID(prds []*stats.PullRequestDetails) {
 	sort.Slice(prds, func(i, j int) bool {
 		return *prds[i].Pull.Number < *prds[j].Pull.Number
 	})
 }
 
-func sortByActivityCountDesc(prds []*stats.PullRequestDetails) {
+// SortByActivityCountDesc reorders the slice of PullRequestDetails by
+// the recent activity count in descending order.
+func SortByActivityCountDesc(prds []*stats.PullRequestDetails) {
 	sort.Slice(prds, func(i, j int) bool {
 		return prds[i].RecentActivityCount > prds[j].RecentActivityCount
 	})
-}
-
-func ShowReport(theStats *stats.Stats, daysBack, staleMonths int, full bool) {
-	// NOTE: for manual testing
-	// n := 260
-	// url := "fake://url"
-	// theStats.Merged = append(
-	// 	theStats.Merged,
-	// 	&stats.PullRequestDetails{
-	// 		Pull: &github.PullRequest{
-	// 			Number:  &n,
-	// 			HTMLURL: &url,
-	// 			Title:   &url,
-	// 		},
-	// 	},
-	// )
-
-	fmt.Fprintf(os.Stderr, "Processed %d pull requests\n", len(theStats.All))
-
-	sortByID(theStats.Merged)
-	sortByID(theStats.Closed)
-	sortByID(theStats.New)
-	sortByActivityCountDesc(theStats.Active)
-
-	if full {
-		sortByID(theStats.Old)
-		sortByID(theStats.Idle)
-		sortByID(theStats.Stale)
-		sortByID(theStats.Revived)
-	}
-
-	year, month, day := time.Now().Date()
-	fmt.Printf("# This Week in Enhancements - %d-%.2d-%.2d\n", year, month, day)
-
-	fmt.Printf("\n## Enhancements for Release Priorities\n")
-
-	showPRs("Prioritized Merged", filterPRDs(theStats.Merged, true), true)
-	showPRs("Prioritized Closed", filterPRDs(theStats.Closed, true), false)
-	showPRs("Prioritized New", filterPRDs(theStats.New, true), true)
-	showPRs("Prioritized Active", filterPRDs(theStats.Active, true), false)
-
-	if full {
-		showPRs(fmt.Sprintf("Prioritized Revived (closed more than %d days ago, but with new comments)", daysBack),
-			filterPRDs(theStats.Revived, true), false)
-		showPRs(fmt.Sprintf("Prioritized Idle (no comments for at least %d days)", daysBack),
-			filterPRDs(theStats.Idle, true), false)
-		showPRs(fmt.Sprintf("Prioritized Old (older than %d months, but discussion in last %d days)",
-			staleMonths, daysBack), filterPRDs(theStats.Old, true), false)
-		showPRs(fmt.Sprintf("Prioritized Stale (older than %d months, not discussed in last %d days)",
-			staleMonths, daysBack), filterPRDs(theStats.Stale, true), false)
-	}
-
-	fmt.Printf("\n## Other Enhancements\n")
-
-	showPRs("Other Merged", filterPRDs(theStats.Merged, false), true)
-	showPRs("Other Closed", filterPRDs(theStats.Closed, false), false)
-	showPRs("Other New", filterPRDs(theStats.New, false), true)
-	showPRs("Other Active", filterPRDs(theStats.Active, false), false)
-
-	if full {
-		showPRs(fmt.Sprintf("Other Revived (closed more than %d days ago, but with new comments)", daysBack),
-			filterPRDs(theStats.Revived, false), false)
-		showPRs(fmt.Sprintf("Other Idle (no comments for at least %d days)", daysBack),
-			filterPRDs(theStats.Idle, false), false)
-		showPRs(fmt.Sprintf("Other Old (older than %d months, but discussion in last %d days)",
-			staleMonths, daysBack), filterPRDs(theStats.Old, false), false)
-		showPRs(fmt.Sprintf("Other Stale (older than %d months, not discussed in last %d days)",
-			staleMonths, daysBack), filterPRDs(theStats.Stale, false), false)
-	}
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -64,10 +63,6 @@ func getModifiedFiles(pr int) (filenames []string, err error) {
 	for _, name := range strings.Split(string(out), "\n") {
 		trimmed := strings.TrimSpace(name)
 		if trimmed != "" {
-			// Ignore anything that doesn't look like a markdown file.
-			if filepath.Ext(trimmed) != ".md" {
-				continue
-			}
 			filenames = append(filenames, trimmed)
 		}
 	}
@@ -124,6 +119,18 @@ func GetGroup(pr int) (filename string, isEnhancement bool, err error) {
 			return "general", true, nil
 		}
 	}
+	// Now look for some known housekeeping files...
+	for _, name := range filenames {
+		if strings.HasPrefix(name, "OWNERS") {
+			return "housekeeping", false, nil
+		}
+		if strings.HasPrefix(name, ".markdownlint-cli2.yaml") {
+			return "tools", false, nil
+		}
+		if strings.HasPrefix(name, "hack/") {
+			return "tools", false, nil
+		}
+	}
 	// If there was no enhancement, take the root directory of the
 	// first file that has a directory.
 	for _, name := range filenames {
@@ -133,7 +140,6 @@ func GetGroup(pr int) (filename string, isEnhancement bool, err error) {
 		}
 	}
 	// If there was no directory, assume a "general" change like
-	// OWNERS file.
 	return "general", false, nil
 }
 
