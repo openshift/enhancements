@@ -30,8 +30,9 @@ type PullRequestDetails struct {
 	AllActivityCount    int
 
 	State       string
-	LGTM        bool
-	Prioritized bool
+	LGTM        bool // lgtm
+	Prioritized bool // priority-important/soon or priority/critical-urgent
+	Stale       bool // lifecycle/stake
 }
 
 // RuleFilter refers to a function that selects pull requests. A
@@ -98,12 +99,16 @@ func (s *Stats) process(pr *github.PullRequest) error {
 
 	lgtm := false
 	prioritized := false
+	stale := false
 	for _, label := range pr.Labels {
 		if *label.Name == "lgtm" {
 			lgtm = true
 		}
 		if *label.Name == "priority/important-soon" || *label.Name == "priority/critical-urgent" {
 			prioritized = true
+		}
+		if *label.Name == "lifecycle/stale" {
+			stale = true
 		}
 	}
 
@@ -115,6 +120,7 @@ func (s *Stats) process(pr *github.PullRequest) error {
 		Reviews:             reviews,
 		LGTM:                lgtm,
 		Prioritized:         prioritized,
+		Stale:               stale,
 	}
 	if isMerged {
 		details.State = "merged"

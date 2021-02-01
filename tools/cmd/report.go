@@ -114,7 +114,7 @@ func newReportCommand() *cobra.Command {
 			}
 			stale := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
-					return prd.Pull.UpdatedAt.Before(query.StaleDate)
+					return prd.Stale
 				},
 			}
 			otherActive := stats.Bucket{
@@ -212,8 +212,7 @@ func newReportCommand() *cobra.Command {
 
 			report.SortByID(stale.Requests)
 			report.ShowPRs(
-				fmt.Sprintf("Stale (older than %d months, no discussion in last %d days)",
-					staleMonths, daysBack),
+				"Other lifecycle/stale",
 				stale.Requests,
 				false,
 			)
