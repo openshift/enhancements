@@ -30,9 +30,11 @@ We want to allow cluster administrators to seamlessly migrate in-tree volumes to
 
 ## Motivation
 
-CSI migration is going to tentatively be enabled by default in Kubernetes 1.22 (OCP 4.9). As a result, volumes from in-tree plugins will be migrated to their counterpart CSI driver by default.
+CSI migration is going to be enabled by default as a beta feature in Kubernetes 1.21 (OCP 4.8). In Kubenertes 1.22 (OCP 4.9) the feature may become GA.
 
-In order to avoid surprises once the migration is enabled by default, we want to allow cluster administrators to optionally enable the feature earlier, preferably in OCP 4.8.
+In OCP we can optionally disable beta features, however, that will no longer be an option once CSI migration becomes GA.
+
+In order to avoid surprises once the migration is enabled by default in OCP, we want to allow cluster administrators to optionally enable the feature earlier, preferably in OCP 4.8.
 
 ## Goals
 
@@ -54,7 +56,9 @@ The CSI migration feature is hidden behind feature gates in Kubernetes. For inst
 * CSIMigration
 * CSIMigrationAWS
 
-Nevertheless, what makes things more complicated is the strict order in which those flags need to be enabled across components. In other words, CSI Migration requires that feature flags are enabled or disabled in a [specific order](https://github.com/kubernetes/community/blob/master/contributors/design-proposals/storage/csi-migration.md#upgradedowngrade-migrateunmigrate-scenarios). In summary:
+Nevertheless, what makes things more complicated is the strict order in which those flags need to be switched across components. In other words, CSI Migration requires that feature flags are enabled or disabled in a [specific order](https://github.com/kubernetes/community/blob/master/contributors/design-proposals/storage/csi-migration.md#upgradedowngrade-migrateunmigrate-scenarios). When enabling the feature, volumes attached to nodes by the in-tree volume plugin cannot be detached by the CSI driver and will stay attached forever. When disabling the feature, volumes attached by the CSI driver cannot be detached by the in-tree volume plugin and will stay attached forever.
+
+In summary:
 
 * When the CSI migration is **enabled**, events should happen in this order:
   1. Enable the feature gate in all control-plane components.
@@ -75,28 +79,40 @@ In OCP, *FeatureSets* can be used to aggregate one or more feature gates. Then, 
 With that in mind, we propose to:
 
 1. Create two [new FeatureSets](https://github.com/openshift/api/blob/master/config/v1/types_feature.go#L25-L43) to support CSI migration: `CSIMigrationNode` and `CSIMigrationControlPlane`.
-   * Both *FeatureSets* contain the same feature gates: `CSIMigration`, `CSIMIgrationAWS`, `CSIMigrationGCE`, `CSIMigrationAzureDisk`, `CSIMigrationAzureFile`, `CSIMigrationvSphere`, `CSIMigrationOpenStack`.
-   * However, only control-plane operators will react to the `CSIMigrationControlPlane` *FeatureSet*. The machine-config-operator (MCO) will **ignore** it.
-   * On the other hand, only MCO will react to the `CSIMigrationNode` *FeatureSet*. Control-plane operators will ignore it.
+   * Both *FeatureSets* will contain the same feature gates:
+     * `CSIMigration`
+	 * `CSIMIgrationAWS`
+	 * `CSIMigrationGCE`
+	 * `CSIMigrationAzureDisk`
+	 * `CSIMigrationAzureFile`
+	 * `CSIMigrationvSphere`
+	 * `CSIMigrationOpenStack`
+   * The machine-config-operator (MCO) will **ignore** the `CSIMigrationControlPlane` **FeatureSet**.
+   * On the other hand, all operators will react to the `CSIMigrationNode` *FeatureSet*, including control-plane operators.
 2. To enable CSI Migration for any in-tree plugin, the cluster administrator should:
-   * Add the `CSIMigrationControlPlane` *FeatureSet* to the `featuregates/cluster` object:
-   ```shell
-   $ oc edit featuregates/cluster
-   (...)
-   spec:
-     featureSet: CSIMigrationControlPlane
-   ```
-   * Once all control-plane components have restart, add the `CSIMigrationNode` *FeatureSet* to the `featuresgates/cluster` object:
-   ```shell
-   $ oc edit featuregates/cluster
-   (...)
-   spec:
-     featureSet: CSIMigrationControlPlane, CSIMigrationNode
-   ```
+   * First, enable the CSI migration feature flags in all control-plane components:
+     * Add the `CSIMigrationControlPlane` *FeatureSet* to the `featuregates/cluster` object:
+       ```shell
+       $ oc edit featuregates/cluster
+       (...)
+       spec:
+         featureSet: CSIMigrationControlPlane
+       ```
+     * With the exception of MCO, all operators will recognize this *FeatureSet* and will apply that associated feature gates to their operands.
+  * Second, once all control-plane components have restarted, enable the CSI migration feature flags in all kubelets:
+    * Add the `CSIMigrationNode` *FeatureSet* to the `featuresgates/cluster` object, replacing the previous value (i.e., `CSIMigrationControlPlane`):
+      ```shell
+      $ oc edit featuregates/cluster
+      (...)
+      spec:
+        featureSet: CSIMigrationNode
+      ```
+    * All operators will recognize the `CSIMigrationNode` *FeatureSet*, however, control-plane operators already applied the associated feature gates in the step above, so in practice only MCO will have work to do.
+  * At this point, CSI migration is fully enabled in the cluster.
 3. To disable CSI migration, the cluster administrator should perform the same steps in the opposite order:
-   * Add the `CSIMigrationNode` *FeatureSet* to the `featuregates/cluster` object.
-   * Wait for all Nodes to be drained and restarted.
-   * Add the `CSIMigrationControlPlane` *FeatureSet* to the `featuregates/cluster` object.
+   * In `featuregates/cluster` object, replace the `CSIMigrationNode` *FeatureSet* by `CSIMigrationControlPlane`.
+   * Wait for all `CSINode` objects to have the annotation `storage.alpha.kubernetes.io/migrated-plugins` cleared. No storage plugins should be listed in this annotation.
+   * Remove the `CSIMigrationControlPlane` *FeatureSet* from the `featuregates/cluster` object.
 4. It is the **responsability of the cluster administrator** to guarante the ordering described above is respected.
 
 ### GA
@@ -109,13 +125,11 @@ As for the required ordering described above, the [upgrade order](https://github
 
 #### Limitations
 
-The limitations of this approach lies on the downgrade process.
+The limitations of this approach lies on the downgrade process. In OCP, a downgrade is fundamentally a regular upgrade to an older version. That means that CVO downgrades components in the same order as it upgrades them: control-plane first, nodes later. However, as stated above, this ordering is **not** desired when **disabling** CSI migration, which is what is going to happen when the previous OCP version had CSI migration disabled.
 
-In OCP, a downgrade is fundamentally a regular upgrade to an older version. That means that CVO downgrades components in the same order as it upgrades them: control-plane first, nodes later.
+It is important to note that the order in which operators are downgraded in OCP violates upstream version skew policy. A new kubelet must never run with an older API server or Controller Manager. A direct consequence of this violation is the need to introduce a workaround for CSI migration.
 
-However, as stated above, this ordering is **not** desired when **disabling** CSI migration, which is what is going to happen when the previous OCP version had CSI migration disabled.
-
-To address this issue we propose to document a simple workaround:
+That being said, to address this issue we propose to document a simple workaround:
 
 1. Enable both `CSIMigrationNode`and `CSIMigrationControlplane` *FeatureSets*.
 1. Downgrade.
@@ -131,6 +145,18 @@ Although this approach does what we need, it has some drawbacks:
 
 ## Design Details
 
+* openshift/api
+  * Introduce two new *FeatureSets*: `CSIMigrationNode` and `CSIMigrationControlPlane`
+* Machine Config Operator
+  * Bump openshift/api in order to get the *FeatureSets* above.
+  * Ignore the `CSIMigrationControlPlane` *FeatureSet*
+* Kubernetes Scheduler Operator
+  * Bump openshift/api in order to get the *FeatureSets* above.
+* Kubernetes Controller Manager Operator
+  * Bump openshift/api in order to get the *FeatureSets* above.
+
+Other operators, like the Kubernetes API Server Operator, may have their openshift/api library bumped. However, that is not strictly necessary as their operands don't need to enable the CSI migration feature flags.
+
 ### Test Plan
 
 #### E2E jobs
@@ -145,3 +171,12 @@ For each E2E job:
 1. Run E2E tests for in-tree volume plugins.
 1. Disable the feature gate. Again, don't worry about the ordering.
 1. Run E2E tests again.
+
+In addition to that, as a strech goal we want a separate job that:
+
+1. Runs a StatefulSet.
+1. Enables the migration *FeatureSets* in the right order.
+1. Wait for all components to have the right feature flags.
+1. Checks if the StatefulSet survives.
+
+Once CSI migration is GA, we expect the regular upgrade jobs will cover upgrades from an OCP version with migration disabled to a version with migration enabled.
