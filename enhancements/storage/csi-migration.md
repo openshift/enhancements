@@ -58,7 +58,7 @@ The CSI migration feature is hidden behind feature gates in Kubernetes. For inst
 
 Nevertheless, what makes things more complicated is the strict order in which those flags need to be switched across components. In other words, CSI Migration requires that feature flags are enabled or disabled in a [specific order](https://github.com/kubernetes/community/blob/master/contributors/design-proposals/storage/csi-migration.md#upgradedowngrade-migrateunmigrate-scenarios).
 
-It is important to respect this ordering to avoid an undesired state of the components of volumes. For instance, when enabling the feature, volumes attached to nodes by the in-tree volume plugin cannot be detached by the CSI driver and will stay attached forever.
+It is important to respect this ordering to avoid an undesired state of the components of volumes. For instance, when enabling the feature in the wrong order, volumes attached to nodes by the in-tree volume plugin cannot be detached by the CSI driver and will stay attached forever.
 
 In the same vein, when disabling the feature, volumes attached by the CSI driver cannot be detached by the in-tree volume plugin and will stay attached forever.
 
@@ -121,7 +121,7 @@ With that in mind, we propose to:
 
 ### GA
 
-Once CSI migration reaches GA in upstream, the associated feature gates will be enabled by default and the features will not be optional anymore. As a result, CSI migration will be enabled by default in OCP as wel, and there will not be an option to disable it.
+Once CSI migration reaches GA in upstream, the associated feature gates will be enabled by default and the features will not be optional anymore. As a result, CSI migration will be enabled by default in OCP as well, and there will not be an option to disable it.
 
 In addition that, the *FeatureSets* created to handle the Tech Preview feature will no longer be operational because the feature flags they enable will already be enabled in the cluster.
 
@@ -194,13 +194,12 @@ We want E2E jobs for all migrated plugins ready at **Tech Preview** time.
 For each E2E job:
 
 1. Install an OCP cluster.
-1. Enable the feature gate. Don't worry about the order in which components will apply the feature flags because at this point there are no volumes created.
-1. Wait until MCO and control-plane operators restart.
+1. Enable the feature gate in the right order. Even though it is a fresh cluster, we need to respect the order because [volumes might be created in CI](https://github.com/openshift/release/blob/master/ci-operator/step-registry/ipi/install/monitoringpvc/ipi-install-monitoringpvc-ref.yaml).
 1. Run E2E tests for in-tree volume plugins.
-1. Disable the feature gate. Again, don't worry about the ordering.
-1. Run E2E tests again.
+1. Disable the feature gate in the right order.
+1. Once again, run E2E tests for in-tree volume plugins.
 
-In addition to that, as a strech goal, we want a separate job that:
+In addition to that, as a stretch goal, we want a separate job that:
 
 1. Runs a StatefulSet.
 1. Enables the migration *FeatureSets* in the right order.
