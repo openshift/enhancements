@@ -34,52 +34,46 @@ see-also:
 
 ## Summary
 
-When applications write structured JSON logs, consumers want to access fields of JSON log entries for indexing and other purposes.
+This enhancement will allow structured JSON log entries to be forwarded as JSON objects in JSON output records.
+
 The current logging [data model][data_model] stores the log entry as a JSON *string*, not a JSON *object*.
 Consumers can't access the log entry fields without a second JSON parse of this string.
 
 The current implementation also 'flattens' labels to work around Elasticsearch limitations.
 
-To illustrate, given a log entry `{"name":"fred","home":"bedrock"}` from a container with the label `app.kubernetes.io/name="flintstones"`. The current output record is:
+To illustrate, given a log entry `{"name":"fred","home":"bedrock"}` from a container with the label `app.kubernetes.io/name="flintstones"`.
+The current output record looks like:
 
 ```json
 {
   "message":"{\"name\":\"fred\",\"home\":\"bedrock\"}",
-  "kubernetes":{"labels":["app_kubernetes_io/name=flintstones", ...}},
+  "kubernetes":{"flat_labels":["app_kubernetes_io/name=flintstones", ...]},
   ... other metadata
 }
 ```
 
-This proposal will allow alternate structured forms of output record:
+This proposal enables an alternate form of output record including a `structured` object field for JSON log entries and user-defined `schema` name to identify the format of the entry.
 
-1. Enhanced record, compliant with the logging [data model][data_model]
 ```json
 {
   "structured":{
     "name":"fred",
     "home":"bedrock",
   }",
+  "schema": "flintstones-schema",
   "kubernetes":{"labels":{"app.kubernetes.io/name": "flintstones", ...}},
-  ... other metadata
-}
-```
-
-2. Original record with no meta-data:
-```json
-{
-  "name":"fred",
-  "home":"bedrock",
+  ...
 }
 ```
 
 This proposal describes
 
-* extensions to the [data model][data_model]
+* extensions to the logging [data model][data_model] - `structured` and `schema` fields.
 * extensions to the `ClusterLogForwarder` API to configure JSON parsing and forwarding.
-* how existing and future Elasticsearch stores can index structured records.
-* a replacement for the [defunct MERGE_JSON_LOG][defunct_merge] feature.
+* indexing structured records in current and future Elasticsearch stores.
+* replacing the [defunct MERGE_JSON_LOG][defunct_merge] feature.
 
-**Note**: This proposal focuses on JSON, but the data model and API changes can also apply to structured encodings supported in future.
+**Note**: This proposal focuses on JSON, but the data model and API changes can apply to other structured formats that may be supported in future.
 
 ## Terminology
 
@@ -90,18 +84,16 @@ Logging terminology can have overlapping meanings, this document uses the follow
 - *Entry*: a single log entry, usually a single line of text. May be JSON or other format.
 - *Structured Log*: a log where each *entry* is formatted as a *JSON object*.
 - *Record*: A key-value record including the *entry* and meta-data collected by the logging system.
-  - *Internal record*: abstract record manipulated inside the forwarder.
-  - *Output record*: concrete record encoded by an `ouput` for a consumer. Encodings include JSON and Rsyslog.
 - *Schema*: Defines key names and value types in a structured entry.
    The forwarder associates *schema names* with logs, it does not store or process user schema.
-- *Data Model*: The [schema][data_model] for the forwarder's own *record*.
+- *Data Model*: The [schema][data_model] for the forwarder's own *record* format.
 
 ## Motivation
 
 ### Goals
 
-* Direct access to JSON log entries as JSON objects in log records for `fluentdForward`, `Elasticsearch` or any other JSON-parsing consumer.
-* User can associate schema names with logs by category, namespace, application label, or any future forwarder `input` selection criteria.
+* Direct access to JSON log entries as JSON objects for `fluentdForward`, `Elasticsearch` or any other JSON-aware consumer.
+* User can associate schema names with log records by category, namespace, k8s label, or any future forwarder `input` selection criteria.
 * Elasticsearch indexing of JSON logs with multiple schema without index explosions.
 * Upgrade path from today's implementation.
 
@@ -123,131 +115,128 @@ Two new top-level fields added to the record [data model][data_model]:
 Relationship between `structured` and `message` fields:
 
 * EXACTLY ONE of `message` or `structured` MUST be present.
-* `schema` is OPTIONAL, defined and interpreted by the user.
-* The presence or absence of the `structured` and `message` fields can be used to detect structured/unstructured records.
+* The presence of `structured` or `message` fields identifies structured/unstructured records.
+* The `schema` field is optional.
+  It is provided to represent the schema of a structured record, but its use is up to the consumer.
 
-With an *Elasticsearch* store, `schema` is copied to the existing `viaq_index_name` field to set the index.
-`viaq_index_name` will continue to be used for compatibility and upgrade, but will eventually be removed.
+For the default *Elasticsearch* store, `schema` is used to generate the index name.
+
+For the initial implementation the forwarder will use the `schema` name to generate the `viaq_index_name` field.
+Future versions of the Elasticsearch store may use `schema` directly.
 
 #### ClusterLogForwarder configuration
 
-The elements of the CLF API are:
+New *pipeline* fields:
 
-- *Input*: Selects logs, adds meta-data, creates _internal_ records.
-- *Pipeline*: Transforms, filters and routes internal records.
-- *Output*: Connects to consumers, encodes and sends _output_ records.
+* `stuctured`: (string, optional) Legal values are "JSON" or "json" (there may be others in future).
+   If set, attempt to parse log entries as JSON objects.
+* `schemaKey`: (string, optional) Use meta-data key as `schema` value if present.
+  Only keys these are allowed:
+  - `kubernetes.namespaceName`: Use the namespace name as the schema name.
+  - `kubernetes.labels.<key>`: Use the string value of kubernetes label with key `<key>`.
+  - *other keys may be added in future*
+* `schemaName`: (string, optional)
+  * Without `schemaKey`: set the `schema` field on every record to this value.
+  * With `schemaKey`: only use `schemaName` as the default value when the key is missing.
 
-New fields:
+A pipeline with `structured: json` will fall-back to unstructured `message` records if any of the following are true:
 
-`input.stuctured`: (string, default "JSON") Attempt to parse structured entries.
-The only legal value is "JSON", others may be added in future.
+* A log entry is not valid JSON.
+* `schemaKey` is set, `schemaName` is missing, and the *key is missing* (e.g. no matching kubernetes.label on the source pod).
+  This treats unrecognized JSON entries as unstructured.
+  If you want to treat all valid JSON entries as structured, specify a default `schemaName`.
 
-An input record contains:
+Unstructured `message` records are indexed as if `structured` was not specified on the pipeline.
 
-* `structured` field if `structured=JSON` *and* JSON parse succeeds.
-* `message` field if `input.structured` is absent *or* JSON parse fails.
-
-`input.schema`: (string, optional) User-defined schema name.
-Adds a `schema` field to the internal record with a user-defined value.
-Not used by the forwarder, included in output record for the consumer.
-
-`pipeline.content`: (enum, default="Enhanced") Content type for messages
-
-* "Enhanced":
-  - if log entry parsed as JSON: meta-data + `strutured` object field.
-  - else: meta-data + `message` string field.
-* "Original": Original message string, no meta-data
-  - if log entry parsed as JSON: use original log entry as output record, no meta-data.
-  - else: `message` string field only, no meta-data
-* "Unstructured": meta-data + `message` string field, regardless of JSON parse.
+**Note**: Treating unrecognized entries as unstructured is important for consumers like Elasticsearch, which don't handle mixed schemas in a single index well.
 
 ### User Stories
 
-#### I want a replacement for the defunct MERGE_JSON_LOG feature
+#### I want Elasticsearch to index structured logs with an index-per-schema
 
-The "Structured" content format provides all the information formerly available via
-[MERGE_JSON_LOG][defunct_merge]. Log entry field `x` is available as `.structured.x`,
-instead of just `.x`
+Setting the `schema` field in outgoing JSON records will send them to different
+Elasticsearch indices. See the [Elasticsearch notes](#es-notes) for more details.
 
-**NOTE**: We could provide a "Merge" content format to exactly reproduce the [MERGE_JSON_LOG][defunct_merge] feature.
-We didn't do so because mixing [logging data-model][data-model] fields with user-defined fields can cause name clashes and invalid messages.
-We could revisit this if there is sufficient user demand, but it would be at the user's risk.
+The following stories show different ways to set the schema
+
+#### My log schema is indicated by a k8s label on the source pod
 
 ```yaml
-inputs:
-- name: InputJSON
-  application: {}
-  structured: JSON
-outputs:
-- name: Output
-  type: fluentdForward
 pipelines:
-- inputRefs: [ InputJSON ]
-  outputRefs: [ Output ]
+- inputRefs: [ application ]
+  outputRefs: default
+  structured: JSON
+  schemaKey: kubernetes.labels.myAppSchema
 ```
 
-#### I want to index logs from applications with different schema in Elasticsearch
+All logs from pods with label key "myAppSchema" will be marked with the label value as the `schema` field.
+Logs from pods with no such label will be indexed as unstructured `message` logs.
 
-Imagine there are two web server implementations named "patchy" and "bulldog".
-Each type of web server produces structured logs in a consistent format, but each uses a different format.
-A hypothetical admin deploys both patchy and bulldog servers.
+#### My log schema is indicated by the namespace of the source pod
 
-In both examples below, Elasticsearch will create separate indices for each schema "patchy and "bulldog".
-See the [Elasticsearch notes](#es-notes) for more details.
+```yaml
+pipelines:
+- inputRefs: [ application ]
+  outputRefs: default
+  structured: JSON
+  schemaKey: kubernetes.namespaceName
+```
 
-**Note**: If there is only one JSON schema, the `schema` field is not necessary.
-
-##### Example 1: Identify applications by namespace
-
-Pods in namespaces "fred" and "bob" use the "patchy" schema, pods in namespaces "jill" and "jane" use the "bulldog" schema.
+#### My log schema is indicated forwarder input selectors
 
 **Note**: the `namespaces` selector below is already implemented by the CLF.
+Any existing or future input selector features could be used here.
 
 ```yaml
 inputs:
-- name: InputPatchy
+- name: InputItchy
   application:
     namespaces: [ fred, bob ]
-  structured: JSON
-  schema: patchy
-- name: InputBulldog
+- name: InputScratchy
   application:
     namespaces: [ jill, jane ]
-  structured: JSON
-  schema: bulldog
 pipeline:
-- inputRefs: [ InputPatchy, InputBulldog ]
-  outputRefs: default
+- inputRefs: [ InputItchy ]
+  outputRefs: [ default ]
+  structured: JSON
+  schema: itchy
+- inputRefs: [ InputScratc ]
+  outputRefs: [ default ]
+  structured: JSON
+  schema: scratchy
 ```
 
-##### Example 2: Identify applications by labels
+#### I want a replacement for the defunct MERGE_JSON_LOG feature
 
-The applications using each schema must be identified by k8s labels.
-Note this is often _already done_ as part of a Deployment.
-Deployments usually label pods by the application they run, which determines their log format.
-
-**Note**: the label `selector` below is defined by the [forwarder label selectors proposal][clf-labels]
+The pipeline field `structured: JSON` provides all the information formerly available via [MERGE_JSON_LOG][defunct_merge].
 
 ```yaml
-inputs:
-- name: InputPatchy
-  applications:
-    selector:
-      matchLabels: { app: patchy }
-  structured: JSON
-  schema: patchy
-- name: InputBulldog
-  applications:
-    selector:
-      matchLabels: { app: bulldog }
-  structured: JSON
-  schema: bulldog
+outputs:
+- name: OutputJSON
+  type: fluentdForward
 pipelines:
-- inputRefs: [ InputPatchy, InputBulldog ]
-  outputRefs: default
+- inputRefs: [ application ]
+  outputRefs: [ OutputJSON ]
+  structured: JSON
 ```
 
+**Note**:
+
+* *Not a drop-in replacement* - log entry field `x` is available in the output record as `structured.x`, not just `x`
+* With the Elasticsearch store you should not forward all JSON logs to the same index, see the other use cases.
+
+
 ### Implementation Details
+
+#### Fluentd parse rules
+
+The `structured` attribute on a pipeline implies that each fluentd source feeding that pipeline must have JSON parsing enabled.
+The attribute is not directly on the forwarder `input` because
+
+* It makes it easier to apply JSON parsing to the default input types.
+* It separates the logical roles of input (selecting log sources) and pipeline (processing logs records).
+
+If a single input feeds structured and non-structured pipelines, use duplicate inputs or intermediate labels to get the correct behaviour on eacy.
 
 #### Elasticsearch version-specific workarounds
 
@@ -255,26 +244,30 @@ The existing Elasticsearch logging store requires "flattening" of the `kubernete
 
 * Transform key:value object into array of "NAME=VALUE" strings.
 * Replace '.' with '_' in label names.
+* Use field name `flat_labels` instead of `labels`
 
 This makes label keys difficult to use for a consumer.
 There is no automatic way to reverse the process since '.' and '_' are both legal characters in label names.
 
 The new forwarder will check the version of the Elasticsearch Operator (via labels or annotations, TBD).
-Flattening labels will be enabled if the ELO is identified as a 'legacy' version.
-Other output types, and future ELO versions based on the [pipeline proposal][es-pipeline] will receive labels unmodified.
+Flattening to `flat_labels` will be enabled if the ELO is identified as a 'legacy' version.
+Other output types, and future ELO versions based on the [pipeline proposal][es-pipeline] will receive a field named `labels` with the unmodified labels.
 
 #### Elasticsearch Indexing <a name="es-notes"></a>
 
-To be efficient, Elasticsearch dynamic indexing needs records to contain a bounded set of key names with consistent value types.
-Inconsistent types for the same key cause type mismatch errors.
-Too many key names (including recursive keys in sub-objects) cause an "index explosion" and performance problems.
-This leads to problems when inconsistent JSON records are stored in the same index.
+The current implementation relies on a fixed set of rollover indices and aliases being set up on Elasticsearch.
 
-The current data model uses `viaq_index_name` to select the ES index.
-If `schema` is set, it is copied to `viaq_index_name` instead of a default index name.
-Elasticsearch will then create a separate index for each schema.
+This proposal requires we dynamically create rollover aliases and indices on-demand.
 
-Provided log entries are consistent with some fixed schema, it will be possible to search/index custom JSON messages in the *existing* Elasticsearch store implementation.
+This can be done from fluentd using the viaq plug-in, or in an Elsaticsearch pipeline.
+We should implement this in fluetnd as part of implementing this proposal:
+
+- Creating from fluentd is more robust to upgrades, it will work with existing Elasticsearch deployments.
+- Longer term Elasticsearch should take this on, but that depends on the future plans for Elasticsearch.
+
+This decision may be reviewed based on changes to Elasticsearch capabilities and timing of releases.
+
+If index creation is handled by the forwarder, then this proposal should work with the *existing* Elasticsearch store aimplementation.
 
 **Note**: It is up to the user to ensure that logs identified with a schema actually are consistent, otherwise index explosion and type confusion are still possible.
 
@@ -284,7 +277,7 @@ With the *new* [Elasticsearch pipeline proposal][es-pipeline] the store will pre
 * Other possible optimizations and checks, outlined in [Elasticsearch pipeline proposal][es-pipeline]
 * Eventually remove `viaq_index_name` and use `schema` directly.
 
-The CLO will check the version of ELO that is deployed automatically configure the `default` output appropriately.
+The CLO should check the version of ELO that is deployed and automatically configure the `default` output appropriately.
 
 ### Risks and Mitigation
 
@@ -302,7 +295,10 @@ Mitigation:
 
 * Need sync the [Elasticsearch pipeline proposal][es-pipeline] with this document, update both if needed.
 * Exact requirements for flattening and de-dottting with existing ES. See [this PR comment](https://github.com/openshift/enhancements/pull/518#issuecomment-749564743)
-* Should we provide a "Merge" content format to exactly reproduce the [MERGE_JSON_LOG][defunct_merge] feature?
+* Sidecar injection: multi-container pods, especially those with injected sidecar images,
+  may have different log formats for each container.
+  Do we need to allow schemas to be determined by container `name` and/or `image` name?
+* Future enhancement proposals may add more capabilities to edit/filter a structured record for output.
 
 #### Examples
 
