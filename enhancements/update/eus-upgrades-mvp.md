@@ -207,12 +207,13 @@ rescheduled in an optimal manner. Optimal rescheduling should be closer to (1 /
 node_count_per_failure_domain) percentage of pods being rescheduled more than
 once during a rolling restart of a given failure domain.
 
-We should make the MCO topology aware so that it upgrades all of the host in one
-failure domain because anti-affinity scheduling is used in most scenarios. We
-should provide some mechanism to rank upgraded nodes as slightly higher priority
-in scheduler configuration. Perhaps a timestamp of configuration generation that
-the scheduler then biases toward nodes with the greatest timestamps as a last in
-chain priority.
+We should study this more deeply to understand what improvements could be made
+to reduce pod rescheduling during the rolling reboot of a cluster associated with
+upgrades. This may require coordination between MCO and the scheduler such that
+the scheduler can bias slightly towards hosts which were more recently updated.
+
+We should consider whether or not we're only concerned with rolling reboots due
+to machineConfig updates or if we're attempting to optimize all roling reboots.
 
 We should consider enabling the descheduler as well to ensure that when the
 upgrade completes we rebalance so that the last node ends up with proportionate
