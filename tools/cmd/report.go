@@ -193,7 +193,7 @@ func newReportCommand() *cobra.Command {
 			report.ShowPRs("Other New", otherNew.Requests, true)
 
 			report.SortByActivityCountDesc(otherActive.Requests)
-			report.ShowPRs("Other Active", otherActive.Requests, true)
+			report.ShowPRs("Other Active", otherActive.Requests, false)
 
 			report.SortByID(revived.Requests)
 			report.ShowPRs(
