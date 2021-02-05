@@ -10,20 +10,21 @@ import (
 	"github.com/openshift/enhancements/tools/stats"
 )
 
+// Indent the summary and prefix it each line to make it format as a
+// block quote.
 func formatDescription(text string, indent string) string {
-	paras := strings.SplitN(strings.ReplaceAll(text, "\r", ""), "\n\n", -1)
+	withoutCarriageReturns := strings.ReplaceAll(text, "\r", "")
+	withoutWhitespace := strings.TrimSpace(withoutCarriageReturns)
+	lines := strings.SplitN(withoutWhitespace, "\n", -1)
 
-	unwrappedParas := []string{}
+	indentedLines := []string{}
+	prefix := fmt.Sprintf("%s> ", indent)
 
-	for _, p := range paras {
-		unwrapped := strings.ReplaceAll(p, "\n", " ")
-		quoted := fmt.Sprintf("%s> %s", indent, unwrapped)
-		unwrappedParas = append(unwrappedParas, quoted)
+	for _, line := range lines {
+		indentedLines = append(indentedLines, strings.TrimRight(prefix+line, " "))
 	}
 
-	joinOn := fmt.Sprintf("\n%s>\n", indent)
-
-	return strings.Join(unwrappedParas, joinOn)
+	return strings.Join(indentedLines, "\n")
 }
 
 const descriptionIndent = "  "
