@@ -35,7 +35,7 @@ Fourth line
 `,
 			Expected: `  > First line
   > Second line
-  > 
+  >
   > Third line
   > Fourth line`,
 		},
@@ -52,10 +52,10 @@ Fourth line
 `,
 			Expected: `  > First line
   > Second line
-  > 
+  >
   > - list a
   > - list b
-  > 
+  >
   > Third line
   > Fourth line`,
 		},
