@@ -171,14 +171,14 @@ func newReportCommand() *cobra.Command {
 				report.SortByID(prioritizedMerged.Requests)
 				report.ShowPRs("Prioritized Merged", prioritizedMerged.Requests, true)
 
-				report.SortByID(prioritizedClosed.Requests)
-				report.ShowPRs("Prioritized Closed", prioritizedClosed.Requests, false)
-
 				report.SortByID(prioritizedNew.Requests)
 				report.ShowPRs("Prioritized New", prioritizedNew.Requests, true)
 
 				report.SortByActivityCountDesc(prioritizedActive.Requests)
 				report.ShowPRs("Prioritized Active", prioritizedActive.Requests, true)
+
+				report.SortByID(prioritizedClosed.Requests)
+				report.ShowPRs("Prioritized Closed", prioritizedClosed.Requests, false)
 			}
 
 			fmt.Printf("\n## Other Enhancements\n")
@@ -186,14 +186,14 @@ func newReportCommand() *cobra.Command {
 			report.SortByID(otherMerged.Requests)
 			report.ShowPRs("Other Merged", otherMerged.Requests, true)
 
-			report.SortByID(otherClosed.Requests)
-			report.ShowPRs("Other Closed", otherClosed.Requests, false)
-
 			report.SortByID(otherNew.Requests)
 			report.ShowPRs("Other New", otherNew.Requests, true)
 
 			report.SortByActivityCountDesc(otherActive.Requests)
 			report.ShowPRs("Other Active", otherActive.Requests, false)
+
+			report.SortByID(otherClosed.Requests)
+			report.ShowPRs("Other Closed", otherClosed.Requests, false)
 
 			report.SortByID(revived.Requests)
 			report.ShowPRs(
