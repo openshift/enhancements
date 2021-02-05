@@ -162,7 +162,7 @@ func newReportCommand() *cobra.Command {
 			fmt.Fprintf(os.Stderr, "Ignored %d pull requests\n", len(ignore.Requests))
 
 			year, month, day := time.Now().Date()
-			fmt.Printf("\n# This Week in Enhancements - %d-%.2d-%.2d\n", year, month, day)
+			fmt.Printf("# This Week in Enhancements - %d-%.2d-%.2d\n", year, month, day)
 
 			// Only print the priority section if there are prioritized pull requests
 			if anyRequests(prioritizedMerged, prioritizedClosed, prioritizedNew, prioritizedActive) {

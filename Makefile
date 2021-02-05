@@ -13,3 +13,10 @@ lint:  ## run the markdown linter
 		--env VALIDATE_MARKDOWN=true \
 		-v $$(pwd):/workdir:Z \
 		enhancements-markdownlint:latest
+
+REPORT_FILE=this-week/$(shell date +%F).md
+.PHONY: report report-gen
+report: report-gen lint  ## run weekly newsletter report tool
+
+report-gen:
+	(cd ./tools; go run ./main.go report > ../$(REPORT_FILE))
