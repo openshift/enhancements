@@ -9,7 +9,7 @@ approvers:
   - "@michaelgugino"
   - "@enxebre"
 creation-date: 2020-12-15
-last-updated: 2020-12-15
+last-updated: 2021-02-08
 status: implementable
 ---
 
@@ -26,7 +26,7 @@ status: implementable
 
 ## Summary
 
-Record and show limited remediation history in baremetal environments.
+Record and show limited remediation history.
 
 ## Motivation
 
@@ -38,7 +38,6 @@ reboots at 2am on Wednesdays.
 ### Goals
 
 - Record a limited remediation history.
-
 - Show remediation history in the UI.
 
 ### Non-Goals
@@ -53,8 +52,7 @@ machine health checks to contain the last x remediation events, with information
 condition triggered the remediation, and the timestamps of
 - when the triggering condition was detected
 - when remediation was started
-- when the node was succesfully fenced (deleted / powered off)
-- when the node is healthy again.
+- when the node was successfully fenced (deleted / powered off)
 
 This information can be displayed in the UI in a table on a machine healthcheck details page.
 
@@ -73,13 +71,9 @@ type MachineHealthCheckStatus struct {
 
 // Remediation tracks a remediation triggered by this machine health check
 type Remediation struct {
-	// the kind of the remediation target, usually node or machine
+	// a reference to the target machine or node
 	// +kubebuilder:validation:Type=string
-	TargetKind string `json:"targetKind"`
-
-	// the name of the machine or node which is remediated
-	// +kubebuilder:validation:Type=string
-	TargetName string `json:"targetName"`
+	Target *corev1.ObjectReference `json:"target"`
 
 	// the condition type which triggered this remediation
 	// +kubebuilder:validation:Type=string
@@ -99,13 +93,11 @@ type Remediation struct {
 	// the time when remediation started
 	Started *metav1.Time `json:"started,omitempty"`
 
-	// the time when the node is fenced
-	Fenced *metav1.Time `json:"fenced,omitempty"`
+	// the time when the node is remediated
+	Remediated *metav1.Time `json:"remediated,omitempty"`
 
-	// the time when the machine or node is healthy again
-	Finished *metav1.Time `json:"finished,omitempty"`
-
-	// the type of remediation, e.g. "machineDeletion" or "external"
+	// the type of remediation, e.g. "internal" or "machineDeletion", and "external" or the
+	// name of the external remediation template in future
 	// +kubebuilder:validation:Type=string
 	Type string `json:"remediationType,omitempty"`
 }
@@ -145,8 +137,7 @@ status:
   - conditionStatus: Unknown
     conditionType: Ready
     detected: "2020-11-24T17:33:43Z"
-    fenced: "2020-11-24T17:34:35Z"
-    finished: "2020-11-24T17:35:09Z"
+    remediated: "2020-11-24T17:34:35Z"
     remediationType: external
     started: "2020-11-24T17:34:04Z"
     targetKind: Node
@@ -222,4 +213,4 @@ TBD
 
   - Metrics are a good tool for recording e.g. how often remediations are triggered and how long they take in average, but
   not so much for tracking single remediations in the desired detail.
-  - Parsing getting and parsing metrics, and composing a remediation overview from them, is harder on the UI than to just display the MHC status.
+  - Getting and parsing metrics, and composing a remediation overview from them, is harder on the UI than to just display the MHC status.
