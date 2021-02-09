@@ -1,0 +1,6 @@
+FROM fedora
+WORKDIR /workdir
+RUN dnf -y module enable nodejs:12 && dnf -y install nodejs
+RUN npm install -g @hackmd/hackmd-cli
+ENV HOME=/home
+ENTRYPOINT /workdir/hack/hackmd-cli.sh
