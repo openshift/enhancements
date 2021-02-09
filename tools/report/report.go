@@ -10,6 +10,48 @@ import (
 	"github.com/openshift/enhancements/tools/stats"
 )
 
+// This value needs to match the setting in .markdownlint-cli2.yaml at
+// the root of the repository.
+const maxLineLength int = 400
+
+func findSplit(input string, start int) int {
+	if start > len(input) {
+		return 0
+	}
+	for {
+		if start <= 0 {
+			break
+		}
+		if input[start:start+1] == " " {
+			break
+		}
+		start--
+	}
+	return start
+}
+
+// TODO: Handle bulleted lists.
+func wrapLine(input string, length int) []string {
+	text := input
+	results := []string{}
+	for {
+		if len(text) <= length {
+			results = append(results, text)
+			break
+		}
+		split := findSplit(text, length)
+		if split == 0 {
+			// There was no space in the string, so we can't split
+			// it. The linter accepts this, too.
+			results = append(results, text)
+			break
+		}
+		results = append(results, text[:split])
+		text = text[split+1:]
+	}
+	return results
+}
+
 // Indent the summary and prefix it each line to make it format as a
 // block quote.
 func formatDescription(text string, indent string) string {
@@ -21,7 +63,9 @@ func formatDescription(text string, indent string) string {
 	prefix := fmt.Sprintf("%s> ", indent)
 
 	for _, line := range lines {
-		indentedLines = append(indentedLines, strings.TrimRight(prefix+line, " "))
+		for _, wrappedLine := range wrapLine(line, maxLineLength-len(prefix)) {
+			indentedLines = append(indentedLines, strings.TrimRight(prefix+wrappedLine, " "))
+		}
 	}
 
 	return strings.Join(indentedLines, "\n")
