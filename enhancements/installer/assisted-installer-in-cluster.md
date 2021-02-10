@@ -560,9 +560,16 @@ The idea is to find the best form of an argument why this enhancement should _no
 
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement.
+### Expose a non-k8s-native REST API
+
+The assisted installer service runs as a SaaS where it has a traditional
+non-k8s-native REST API. This proposal includes exposing that same
+functionality as a CRD-based API.
+
+As an alternative, the SaaS's existing non-k8s-native REST API could be exposed
+directly for use by hive, RHACM, the openshift console, and other management
+tooling. However that would not match the OpenShift 4 pattern of exposing
+management capabilities only as k8s-native APIs.
 
 ## Infrastructure Needed [optional]
 
