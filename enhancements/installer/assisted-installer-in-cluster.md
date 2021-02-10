@@ -13,11 +13,11 @@ reviewers:
 approvers:
   - TBD
 creation-date: 2020-12-22
-last-updated: 2021-02-09
-status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
+last-updated: 2021-02-10
+status: implementable
 see-also:
-replaces:
-superseded-by:
+  - enhancements/installer/connected-assisted-installer.md
+  - enhancements/installer/assisted-installer-bare-metal-validations.md
 ---
 
 # Assisted Installer in-cluster
@@ -44,6 +44,18 @@ in end-user clusters to meet the purpose above.
 
 ## Motivation
 
+The Assisted Installer running as a SaaS has demonstrated a new and valuable
+way to install OpenShift clusters through an agent-based flow. The [Assisted
+Installer for Connected Environments](connected-assisted-installer.md)
+enhancement proposal elaborates on the value of the agent-based installations.
+
+However many customers do not want a third party service running outside of
+their network to be able to provision hosts inside their network. Reasons
+include trust, control, and reproducibility. Those users will prefer to run the
+service on-premises. There are also many customers whose network environments
+have limited or no connectivity to the internet. Finally, it is desirable to
+integrate this new installation method into RHACM, which runs on-premesis.
+
 ### Goals
 
 * Expose the Assisted Installer's capabilities as a kubernetes-native API. Some
@@ -58,9 +70,11 @@ portion may be exposed through [Hive](https://github.com/openshift/hive)'s API.
 
 * Remote Worker Node support requires solving specific problems that will be
 addressed in a separate proposal.
-* Solve central machine management. That can be done with this effort, or after
-this effort, but it is not strictly a requirement in order to deliver the
-goals stated above.
+* Solve central machine management. ("central machine management" involves
+running machine-api-providers on a hub cluster in order to manage Machines on
+the hub which represent Nodes in spoke clusters.) That can be done with this
+effort, or after this effort, but it is not strictly a requirement in order to
+deliver the goals stated above.
 * Run metal3 components on a non-baremetal cluster.
 
 ## Proposal
@@ -76,9 +90,21 @@ inventory.
 #### Add Worker Node from Hub
 
 After deploying a cluster with Assisted Installer, I can add workers from bare
-metal hardware on day two using a similar workflow and tool set. I can either
-obtain the discovery live ISO and use my own methods to boot it, or I can use
-the baremetal-operator to boot the live ISO automatically.
+metal hardware on day two using a similar agent-based workflow and tool set.
+
+#### Run Agent via Boot It Yourself
+
+Whether you are creating a new cluster or adding nodes to an existing cluster,
+the workflow starts by booting a discovery ISO on a host so that it runs the
+Agent. Many users have their own methods for booting ISOs on hardware. The
+Assisted Service must be able to create a discovery ISO that users can take and
+boot on hardware with their own methods.
+
+#### Run Agent via Automation
+
+Many users will want an integrated end-to-end experience where they describe
+hardware and expect it to automatically boot an appropriate discovery ISO
+without needing to provide their own mechanism for booting ISOs.
 
 ### Implementation Details/Notes/Constraints
 
@@ -252,7 +278,8 @@ cluster as a Node.
 
 The Agent CRD will have a field in which to designate that it is approved. If
 the host was booted via the baremetal-operator, approval will be granted
-automatically.
+automatically. The same automation that caused the host to boot would have the
+ability to recognize the resulting Agent and mark it as approved.
 
 #### Day 2 Add Node Boot-it-Yourself
 
@@ -268,10 +295,17 @@ the discovery ISO that runs the Agent.
 This scenario takes place on a hub cluster where hive and possibly RHACM are
 present. This scenario does not include centralized machine management.
 
-1. Infra Owner creates an InstallEnv resource. It can include fields such as egress proxy, NTP server, SSH public key, ... In particular it includes an Agent label selector, and a separate field of labels that should be applied to Agents.
-1. Infra Owner creates BareMetalHost resources that include BMC credentials. They are labeled so that they match the selctor on the InstallEnv.
+This scenario is an end-to-end flow that enables the user to specify everything
+up-front and then have an automated process create a cluster. Because the
+user's primary frame of reference is hardware-oriented, this flow enables them
+to specify Node attributes such as "role" with their BareMetalHost definition.
+Specifying those attributes together is particularly useful in a gitops
+approach.
+
+1. Infra Owner creates an InstallEnv resource. It can include fields such as egress proxy, NTP server, SSH public key, ... In particular it includes an Agent label selector, and a separate field of labels that will be automatically applied to Agents.
+1. Infra Owner creates BareMetalHost resources with corresponding BMC credentials. They must be labeled so that they match the selctor on the InstallEnv and must be in the same namespace as the InstallEnv.
 1. A new controller, the Baremetal Agent Controller, sees the matching BareMetalHosts and boots them using the discovery ISO URL found in the InstallEnv's status.
-1. The Agent starts up on each host and reports back to the assisted service, which creates an Agent resource in the cluster. The Agent is labeled with the labels that were specified in the InstallEnv's Spec.
+1. The Agent starts up on each host and reports back to the assisted service, which creates an Agent resource in the cluster. The Agent is automatically labeled with the labels that were specified in the InstallEnv's Spec.
 1. The Baremetal Agent Controller sets the Agent's Role field in its spec to "master" or "worker" if a corresponding label was present on its BareMetalHost.
 1. The Agent is automatically marked as Approved via a field in its Spec based on being recognized as running on the known BareMetalHost.
 1. The Agent runs through the validation and inspection phases. The results are shown on the Agent's Status, and eventually a condition marks the Agent as "ready".
