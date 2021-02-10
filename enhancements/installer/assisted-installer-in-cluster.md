@@ -13,7 +13,7 @@ reviewers:
 approvers:
   - TBD
 creation-date: 2020-12-22
-last-updated: 2021-02-03
+last-updated: 2021-02-09
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
 see-also:
 replaces:
@@ -36,29 +36,28 @@ superseded-by:
 The Assisted Installer currently runs as a SaaS on cloud.redhat.com, enabling
 users to deploy OpenShift clusters with certain customizations, particularly on
 bare metal hardware. It is necessary to bring those capabilities on-premise in
-users' clusters for two purposes:
-
-1. A cluster created by the Assisted Installer needs the ability to add workers
-on day 2.
-2. Multi-cluster management, such as through hive and RHACM, should be
-able to utilize the capabilities of the Assisted Installer.
+users' "Hub" clusters by installing clusters via Multi-cluster management, such
+as through Hive and RHACM.
 
 This enhancement proposes the first iteration of running the Assisted Installer
-in end-user clusters to meet the purposes above.
+in end-user clusters to meet the purpose above.
 
 ## Motivation
 
 ### Goals
 
 * Expose the Assisted Installer's capabilities as a kubernetes-native API. Some
-portion may be exposed through [hive](https://github.com/openshift/hive)'s API.
-* Enable any OpenShift cluster deployed by the Assisted Installer to add worker nodes on day 2.
+portion may be exposed through [Hive](https://github.com/openshift/hive)'s API.
 * Enable multi-cluster management tooling to create new clusters using Assisted Installer.
-* Enable automated creation and booting of the assisted discovery ISO for bare-metal deployments.
+* Enable adding workers to any OpenShift cluster deployed by the Assisted Installer via
+  the same multi-cluster management tooling.
+* Enable automated creation and booting of the Assisted discovery ISO for bare-metal deployments.
 * Ensure the design is extensible for installing on other platforms.
 
 ### Non-Goals
 
+* Remote Worker Node support requires solving specific problems that will be
+addressed in a separate proposal.
 * Solve central machine management. That can be done with this effort, or after
 this effort, but it is not strictly a requirement in order to deliver the
 goals stated above.
@@ -68,27 +67,27 @@ goals stated above.
 
 ### User Stories
 
-#### Day 2 Add Worker
+#### Install cluster from hub
+
+As a user of Red Hat's multi-cluster mangement tools, I can use the assisted
+installation agent-based workflow to create clusters from a pool of bare metal
+inventory.
+
+#### Add Worker Node from Hub
 
 After deploying a cluster with Assisted Installer, I can add workers from bare
 metal hardware on day two using a similar workflow and tool set. I can either
 obtain the discovery live ISO and use my own methods to boot it, or I can use
 the baremetal-operator to boot the live ISO automatically.
 
-#### Multi-cluster
-
-As a user of Red Hat's multi-cluster mangement tools, I can use the assisted
-installation agent-based workflow to create clusters from a pool of bare metal
-inventory.
-
 ### Implementation Details/Notes/Constraints
 
 #### Concurrent development with SaaS
 
-The assisted service is currently deployed as a SaaS on cloud.redhat.com with a
+The Assisted Service is currently deployed as a SaaS on cloud.redhat.com with a
 non-k8s REST API and a SQL database. The software implementing that needs to
 continue to exist with those design choices in order to meet the scale needs of
-a service that runs on the internet.
+a service that runs on the Internet.
 
 Those design choices are not the best fit for an in-cluster service. Based on
 OpenShift's approach to infrastructure management of using kubernetes-native
@@ -119,7 +118,7 @@ that is available at cloud.redhat.com. The service is implemented with a
 traditional relational database. In order to integrate with OpenShift
 infrastructure management tooling, it is necessary to additionally expose its
 capabilities as Kubernetes-native APIs. They will be implemented as Custom
-Resource Definitions and a controller with the assisted service's capabilities.
+Resource Definitions and controllers with the Assisted Service's capabilities.
 
 For the first deliverable, a local deployment of the backing service will
 include new controllers that will operate to achieve the desired state as
@@ -137,16 +136,9 @@ service will include a database; sqlite if possible, or else postgresql.
       SQL DB        File System
                       storage
 
-For modest clusters that do not have persistent storage available but need
-day-2 ability to add nodes, the database will need to be reconstructable in
-case its current state is lost. Thus the CRs will be the source of truth for
-the specs, and the controller will upon startup first ensure that the DB
-reflects the desired state in CRs. The source of truth for the status, however,
-is the actual state of the agents running on the hosts being installed and not
-necessarily what was previously recorded.
-
 For hub clusters that are used for multi-cluster creation and management,
-persistent storage will be a requirement.
+persistent storage will be a requirement for the database and file system
+storage.
 
 Agents that are running on hardware and waiting for installation-related
 instructions will continue to communicate with the assisted service using the
@@ -157,16 +149,16 @@ an agent reports relevant information.
 **InstallEnv**
 This new resource, part of the assisted intaller's new operator, represents an
 environment in which a group of hosts share settings related to networking,
-local services, disk layout, etc. This resource is used to create a discovery
-image that should be used for booting hosts. In the REST API this corresponds
-to the "image" resource that is embedded in the "cluster" resource, but for
+local services, etc. This resource is used to create a discovery image that
+should be used for booting hosts. In the REST API this corresponds to the
+"image" resource that is embedded in the "cluster" resource, but for
 kubernetes-native it is more natural for it to be separate.
 
 The discovery ISO can be downloaded from a URL that is available in the
 resource's Status.
 
 The details of this resource definition are being discussed [in a
-pull request](https://github.com/openshift/assisted-service/pull/969/files).
+pull request](https://github.com/openshift/assisted-service/pull/969).
 
 **ClusterDeployment**
 Hive's ClusterDeployment CRD will be extended to include all cluster details
@@ -174,8 +166,8 @@ that the agent-based install needs. There will not be a new cluster resource.
 The contents of this API correlate to the "cluster" resource in the assisted
 installer's current REST API.
 
-The details of this are being discussed on [a hive
-pull request](https://github.com/openshift/hive/pull/1247).
+The details of this are being discussed on a Hive
+[pull request](https://github.com/openshift/hive/pull/1247).
 
 
 **Agent**
@@ -195,8 +187,8 @@ Some REST APIs need to be exposed in addition to the Kubernetes-native APIs
 described below.
 * Download ISO and PXE artifacts: These files must be available for download
 via HTTP, either directly by users or by a BMC.  Because BMCs do not pass
-authentication headers, the Assisted Service must generate some random URL or
-query parameter so that the ISO’s location isn’t easily guessable.
+authentication headers, the Assisted Service must generate some URL or query
+parameter so that the ISO’s location isn’t easily guessable.
 * Agent APIs (near-term): Until a point where the agent creates and modifies
 Agent CRs itself, the agent will continue communicating with the service via
 REST APIs. Currently the service embeds the user’s pull secret in the discovery
@@ -216,11 +208,11 @@ contains such fields as:
 * API VIP
 * API VIP DNS name
 * IngressVIP
-* VIPDHCPAllocation
 
 A new `InstallStrategy` section of the Spec enables the API to describe a way
 of installing a cluster other than the default of using `openshift-install`.
-The new field has an "agent" option that includes such fields as:
+The new field has an "agent" option that would be common to any Agent-driven
+installation, regardless of platform. Fields include:
 
 * AgentSelector, a label selector for identifying which Agent resources should
 be included in the cluster.
@@ -232,7 +224,7 @@ roles.
 
 [metal3](https://metal3.io/) will be used to boot the assisted discovery ISO
 for bare-metal deployments. Specifically, the BareMetalHost API will be used
-from a hub cluster to boot the discovery ISO on hosts that will be used to
+from a Hub cluster to boot the discovery ISO on hosts that will be used to
 form new clusters.
 
 For this first iteration, it is assumed that the hub cluster itself is using
@@ -243,100 +235,44 @@ platform.
 
 #### BareMetalHost can boot live ISOs
 
-A [separate enhancement to
+A separate [enhancement to
 metal3](https://github.com/metal3-io/metal3-docs/pull/150) proposes a new
-capability in the BareMetalHost API enabling it to boot live ISOs. That feature
-is required so that automation in a cluster can boot the discovery ISO on known
-hardware as the first step toward provisioning that hardware.
-
-#### CAPBM
-
-[Cluster-API Provider Bare
-Metal](https://github.com/openshift/cluster-api-provider-baremetal/) will need
-to gain the ability to interact with the new assisted installer APIs for day 2
-"add worker" use cases. Specifically it will need to match a Machine with an
-available assisted Agent that is ready to be provisioned. This will be in
-addition to matching a Machine with a BareMetalHost, which it already does
-today.
-
-Other platforms may benefit from similar capability, such as on-premise virtualization
-platforms. Ideally the ability to match a Machine with an Agent will be delivered
-so that it can be integrated into multiple machine-api providers. Each platform would
-perform this workflow:
-
-1. A Machine gets created, usually as a result of a MachineSet scaling up.
-1. The platform does whatever is necessary to boot the discovery live ISO on a host.
-1. The platform waits for a corresponding Agent resource to appear.
-1. The Agent gets associated with the Machine.
-1. The agent-based provisioning workflow is initiated by the machine-api provider.
+capability in the BareMetalHost API enabling it to boot live ISOs other than
+the Ironic Python Agent. That feature is required so that automation in a
+cluster can boot the discovery ISO on known hardware as the first step toward
+provisioning that hardware.
 
 #### Host Approval
 
 It is important that when an agent checks in, it not be allowed to join a
 cluster until an actor has approved it. From a security standpoint, it is not
-ok for anyone who can access a copy of a discovery ISO and/or access the API
+OK for anyone who can access a copy of a discovery ISO and/or access the API
 where agents report themselves to implicitly have the capability to join a
 cluster as a Node.
 
-The Agent CRD will have a field in which to designate that it is approved.
+The Agent CRD will have a field in which to designate that it is approved. If
+the host was booted via the baremetal-operator, approval will be granted
+automatically.
 
 #### Day 2 Add Node Boot-it-Yourself
 
-This scenario takes place within a stand-alone bare metal OpenShift cluster.
-
-1. The user downloads a discovery ISO from the cluster. The download is implemented by the assisted installer as a URL on a InstallEnv resource.
-resource.
-1. A host boots the live ISO, the assisted agent starts running, and the agent contacts the assisted service to register its existence. Communication utilizes the existing non-k8s REST API. The agent walks through the validation and inspection workflow as it exists today.
-1. The assisted service creates a new Agent resource to be the k8s-native API for the agent.
-1. A new Baremetal Agent Controller (eventually part of OpenShift's baremetal machine API provider) creates a BareMetalHost resource, setting the status annotation based on inspection information from the prior step.
-1. The user approves the Agent for installation by setting a field in its Spec.
-1. The user or an orchestrator scales up a MachineSet, causing a new Machine resource to be created.
-1. CAPBM binds the Machine to the BareMetalHost, as it does today. It additionally finds the Agent CR and uses it to begin installation.
-1. The assisted service initiates installation of the host.
-1. CAPBM updates the status on the BareMetalHost to reflect that it has been provisioned.
-
-#### Day 2 Add Node Virtualmedia Stand-alone
-
-This scenario takes place within a stand-alone bare metal OpenShift cluster.
-
-1. The user creates a BareMetalHost that includes BMC credentials and a label indicating it is associated with an InstallEnv.
-1. The Baremetal Agent Controller gets a URL to the live ISO and adds it to the BareMetalHost, causing it to boot the host.
-1. baremetal-operator uses redfish virtualmedia to boot the live ISO.
-1. The assisted agent starts running on the new hardware and runs through its usual validation and inspection workflow. The assisted service creates a new Agent resource to be the k8s-native API for the agent.
-1. The user or an orchestrator scales up a MachineSet, resulting in a new Machine being created.
-1. CAPBM does its usual workflow of matching the Machine to an available BareMetalHost. Additionally it uses the Agent CR to initiate provisioning of the host.
-1. The assisted service provisions the host.
-
 #### Personas for multi-cluster management
 
-**Infra Owner** Manages physical infrastructure and configures hosts to boot the discovery ISO that runs the Agent.
+**Infra Owner** Manages physical infrastructure and configures hosts to boot
+the discovery ISO that runs the Agent.
 
 **Cluster Creator** Uses running Agents to create and grow clusters.
-
-#### Day 2 Add Node Virtualmedia Multicluster (add Remote Worker Node)
-
-This scenario takes place from a hub cluster, adding a worker node to a spoke cluster.
-
-1. Infra Owner creates a BareMetalHost resource with a label that matches an InstallEnv selector.
-1. The Baremetal Agent Controller adds the discovery ISO URL to the BareMetalHost.
-1. baremetal-operator uses redfish virtualmedia to boot the live ISO on the BareMetalHost.
-1. The Agent starts up and reports back to the assisted service, which creates an Agent resource in the cluster. The Agent is labeled with the labels that were specified in the InstallEnv's Spec.
-1. The Agent's Role field in its spec is assigned a value if a corresponding label and value were present on its BareMetalHost. (only "worker" is supported for now on day 2)
-1. The Agent is marked as Approved via a field in its Spec based on being recognized as running on the known BareMetalHost.
-1. The Agent runs through the validation and inspection phases. The results are shown on the Agent's Status, and eventually a condition marks the Agent as "ready".
-1. The Baremetal Agent Controller adds inspection data found on the Agent's Status to the BareMetalHost.
-1. When the agent is in a ready state, installation of that host begins.
 
 #### Create Cluster
 
 This scenario takes place on a hub cluster where hive and possibly RHACM are
 present. This scenario does not include centralized machine management.
 
-1. Infra Owner creates an InstallEnv resource. It can include fields such as egress proxy, NTP server, ssh public key, ... In particular it includes an Agent label selector, and a separate field of labels that should be applied to Agents.
+1. Infra Owner creates an InstallEnv resource. It can include fields such as egress proxy, NTP server, SSH public key, ... In particular it includes an Agent label selector, and a separate field of labels that should be applied to Agents.
 1. Infra Owner creates BareMetalHost resources that include BMC credentials. They are labeled so that they match the selctor on the InstallEnv.
 1. A new controller, the Baremetal Agent Controller, sees the matching BareMetalHosts and boots them using the discovery ISO URL found in the InstallEnv's status.
 1. The Agent starts up on each host and reports back to the assisted service, which creates an Agent resource in the cluster. The Agent is labeled with the labels that were specified in the InstallEnv's Spec.
-1. The Agent's Role field in its spec is assigned a value if a corresponding label and value were present on its BareMetalHost.
+1. The Baremetal Agent Controller sets the Agent's Role field in its spec to "master" or "worker" if a corresponding label was present on its BareMetalHost.
 1. The Agent is automatically marked as Approved via a field in its Spec based on being recognized as running on the known BareMetalHost.
 1. The Agent runs through the validation and inspection phases. The results are shown on the Agent's Status, and eventually a condition marks the Agent as "ready".
 1. Cluster Creator creates a ClusterDeployment describing a new cluster. It describes how many control-plane and worker agents to expect. It also includes a label selector to match Agent resources that should be part of the cluster.
@@ -349,7 +285,7 @@ Some customers have asked for the ability to provide static network details
 up-front for each host instead of using DHCP. They want to define this
 configuration at the same time they define the corresponding BareMetalHost.
 
-A net resource called NMStateConfig will have a Spec with the following
+A new resource called NMStateConfig will have a Spec with the following
 fields:
 
 * MACAddress: a MAC address for any network device on the host to which this config should be applied. This value is only used to ensure that the config is applied to the intended host.
@@ -357,18 +293,19 @@ fields:
 
 nmstate is already in use within OpenShift for applying network configuration
 to nodes via the [kubernetes-nmstate
-operator](https://github.com/nmstate/kubernetes-nmstate).
+operator](https://github.com/nmstate/kubernetes-nmstate). It uses a similar
+pattern of embedding a raw nmstate yaml structure as a byte array in the Spec.
 
 Each NMStateConfig resource will have a label that corresponds to a InstallEnv.
 The raw YAML configs for each matching resource will be rendered to a network
-config by the assisted service and then embedded into the discovery ISO for
+config by the Assisted Service and then embedded into the discovery ISO for
 that InstallEnv. At runtime, the discovery ISO will find the config that
 matches a MAC address on the current host and then apply the config. It does
 not matter which interface has the matching MAC address; the matching is merely
 used to identify that the current host corresponds to a given config.
 
 The NMStateConfig resource design is being discussed [in a
-pull request](https://github.com/openshift/assisted-service/pull/969/files).
+pull request](https://github.com/openshift/assisted-service/pull/969).
 
 #### Install Device
 
@@ -381,6 +318,20 @@ RootDeviceHints section that will be utilized. The new Baremetal Agent
 Controller (previously described in the "Create Cluster" scenario) will use the
 BareMetalHost's RootDeviceHints and the Agent's discovery data to populate this
 field on the Agent.
+
+#### Day 2 Add Node Virtualmedia Multicluster
+
+This scenario takes place from a hub cluster, adding a worker node to a spoke cluster.
+
+1. Infra Owner creates a BareMetalHost resource with a label that matches an InstallEnv selector.
+1. The Baremetal Agent Controller adds the discovery ISO URL to the BareMetalHost.
+1. baremetal-operator uses redfish virtualmedia to boot the live ISO on the BareMetalHost.
+1. The Agent starts up and reports back to the assisted service, which creates an Agent resource in the cluster. The Agent is labeled with the labels that were specified in the InstallEnv's Spec.
+1. The Agent's Role field in its spec is assigned a value if a corresponding label and value were present on its BareMetalHost. (only "worker" is supported for now on day 2)
+1. The Agent is marked as Approved via a field in its Spec based on being recognized as running on the known BareMetalHost.
+1. The Agent runs through the validation and inspection phases. The results are shown on the Agent's Status, and eventually a condition marks the Agent as "ready".
+1. The Baremetal Agent Controller adds inspection data found on the Agent's Status to the BareMetalHost.
+1. When the agent is in a ready state, installation of that host begins.
 
 ### Risks and Mitigations
 
@@ -406,7 +357,7 @@ of FOR
 UPDATE](https://github.com/openshift/assisted-service/blob/e70af7dcf59763ee6c697fb409887f00ab5540f5/pkg/transaction/transaction.go#L8)
 might be problematic.
 
-For hub clusters doing multi-cluster creation and management, there is an
+For Hub clusters doing multi-cluster creation and management, there is an
 expectation that persistent storage availability and scale concerns will be a
 better fit for running a full RDBMS.
 
@@ -416,9 +367,9 @@ database. Further analysis is required.
 
 #### baremetal-operator watching multiple namespaces?
 
-When utilizing baremetal-operator on a hub cluster to boot the discovery ISO on
+When utilizing baremetal-operator on a Hub cluster to boot the discovery ISO on
 hosts, should we be creating those BareMetalHost resources in a separate
-namespace from those that are associated with the hub cluster itself?
+namespace from those that are associated with the Hub cluster itself?
 
 What work is involved in having BMO watch additional namespaces?
 
