@@ -65,13 +65,13 @@ type Stats struct {
 // Populate runs the query and filters requests into the appropriate
 // buckets
 func (s *Stats) Populate() error {
-	return s.Query.IteratePullRequests(s.process)
+	return s.Query.IteratePullRequests(s.ProcessOne)
 }
 
 // Process extracts the required information from a single PR
-func (s *Stats) process(pr *github.PullRequest) error {
+func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 	// Ignore old closed items
-	if *pr.State == "closed" && pr.UpdatedAt.Before(s.EarliestDate) {
+	if !s.EarliestDate.IsZero() && *pr.State == "closed" && pr.UpdatedAt.Before(s.EarliestDate) {
 		return nil
 	}
 
