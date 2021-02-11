@@ -94,7 +94,6 @@ func (q *PullRequestQuery) IteratePullRequests(callback PRCallback) error {
 func (q *PullRequestQuery) GetIssueComments(pr *github.PullRequest) ([]*github.IssueComment, error) {
 	ctx := context.Background()
 	opts := &github.IssueListCommentsOptions{
-		Since: &q.EarliestDate,
 		ListOptions: github.ListOptions{
 			PerPage: pageSize,
 		},
@@ -120,7 +119,6 @@ func (q *PullRequestQuery) GetIssueComments(pr *github.PullRequest) ([]*github.I
 func (q *PullRequestQuery) GetPRComments(pr *github.PullRequest) ([]*github.PullRequestComment, error) {
 	ctx := context.Background()
 	opts := &github.PullRequestListCommentsOptions{
-		Since: q.EarliestDate,
 		ListOptions: github.ListOptions{
 			PerPage: pageSize,
 		},
