@@ -2,6 +2,7 @@ package stats
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/google/go-github/v32/github"
 	"github.com/pkg/errors"
@@ -56,8 +57,9 @@ type Bucket struct {
 
 // Stats holds the overall stats gathered from the repo
 type Stats struct {
-	Query   *util.PullRequestQuery
-	Buckets []*Bucket
+	Query        *util.PullRequestQuery
+	EarliestDate time.Time
+	Buckets      []*Bucket
 }
 
 // Populate runs the query and filters requests into the appropriate
@@ -69,7 +71,7 @@ func (s *Stats) Populate() error {
 // Process extracts the required information from a single PR
 func (s *Stats) process(pr *github.PullRequest) error {
 	// Ignore old closed items
-	if *pr.State == "closed" && pr.UpdatedAt.Before(s.Query.EarliestDate) {
+	if *pr.State == "closed" && pr.UpdatedAt.Before(s.EarliestDate) {
 		return nil
 	}
 
@@ -126,17 +128,17 @@ func (s *Stats) process(pr *github.PullRequest) error {
 		details.State = "merged"
 	}
 	for _, r := range reviews {
-		if r.SubmittedAt.After(s.Query.EarliestDate) {
+		if r.SubmittedAt.After(s.EarliestDate) {
 			details.RecentReviewCount++
 		}
 	}
 	for _, c := range issueComments {
-		if c.CreatedAt.After(s.Query.EarliestDate) {
+		if c.CreatedAt.After(s.EarliestDate) {
 			details.RecentIssueCommentCount++
 		}
 	}
 	for _, c := range prComments {
-		if c.CreatedAt.After(s.Query.EarliestDate) {
+		if c.CreatedAt.After(s.EarliestDate) {
 			details.RecentPRCommentCount++
 		}
 	}
