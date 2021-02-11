@@ -122,7 +122,20 @@ version away and *block* upgrades for removals which are imminent.
 The MCO, will set Upgradeable=False whenever any MachineConfigPool has one more
 more nodes present which fall outside of a defined list of constraints. For
 instance, if OpenShift has a defined Kubelet Version Skew of N-1, the node
-constraints enforced by the MCO defined in OCP 4.7 could be as follows:
+constraints enforced by the MCO defined in OCP 4.7 (Kube 1.20) would be as follows:
+
+```yaml
+node.status.nodeInfo.kubeletVersion:
+- v1.20
+```
+
+If the policy were to change allowing for a version skew of N-2, v1.19 would be
+added to the list of acceptable matches. As a result a cluster which had been
+upgraded from 4.6 to 4.7 would allow a subsequent upgrade to 4.8 as long as all
+kubelets were either v1.19 or v1.20. The 4.8 MCO would then evaluate the Upgradeable
+condition based on its constraints, if v1.19 weren't allowed it would then
+inhibit upgrades to 4.9. This means the MCO must set Upgradeable=False until it
+has confirmed constraints have been met.
 
 ```yaml
 node.status.nodeInfo.kubeletVersion:
@@ -130,10 +143,8 @@ node.status.nodeInfo.kubeletVersion:
 - v1.19
 ```
 
-If the policy were to change to allow for a version skew of N-2, v1.18 would be
-added to the list of acceptable matches. The MCO is not responsible for defining
-these constrains and constraints are only widened whenever we have CI testing
-proves them to be safe.
+The MCO is not responsible for defining these constraints and constraints are
+only widened whenever we have CI testing proves them to be safe.
 
 These changes will need to be backported to 4.7 prior to 4.7 EOL.
 
