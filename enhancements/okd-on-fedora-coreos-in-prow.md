@@ -17,7 +17,7 @@ reviewers:
 approvers:
 creation-date: 2019-10-21
 last-updated: 2021-02-11
-status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced
+status: implementable
 see-also:  
 replaces:
 superseded-by:
@@ -27,7 +27,7 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
+- [x] Enhancement is `implementable`
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
@@ -35,13 +35,17 @@ superseded-by:
 
 ## Summary
 
-OKD is the OpenShift community distribution of Kubernetes.
-
+The OKD project is the OpenShift community distribution of Kubernetes.
 As part of the version 4 effort, the OKD working group has decided to target Fedora CoreOS (FCOS) as the primary base operating system for OKD control plane and worker nodes.
+This aligns OpenShift with Red Hat's Open Source promise, facilitates community outreach and contributions, and allows for strategic development on top of the Fedora ecosystem.
 
 This document contains a proposal to add missing FCOS support to key components,
 create OKD artifacts in OpenShift's Prow instance from the canonical OpenShift master and release branches alongside OCP CI artifacts,
 and regularily create OKD release payloads from there.
+
+The intended purpose of this document is to describe the state and track the progress of the OKD project and its goal to deliver the OpenShift community distribution of Kubernetes.
+Implementing and maintaining support for OKD in individual components shall not require new levels of commitment by engineers and shall not be considered blocking
+when working on OCP-related items.
 
 ## Motivation
 
