@@ -12,6 +12,8 @@ reviewers:
   - @mrunalp
   - @zvonkok
   - @pweil-
+  - @wking
+  - @vrutkovs
 approvers:
   - @derekwaynecarr
   - @crawford
