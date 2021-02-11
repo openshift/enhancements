@@ -9,23 +9,12 @@ import (
 	"github.com/pkg/errors"
 )
 
-// New creates a new PullRequestQuery
-func NewPullRequestQuery(orgName, repoName string, devMode bool, client *github.Client) *PullRequestQuery {
-	result := &PullRequestQuery{
-		org:     orgName,
-		repo:    repoName,
-		devMode: devMode,
-		client:  client,
-	}
-	return result
-}
-
 // PullRequestQuery holds the parameters for iterating over pull requests
 type PullRequestQuery struct {
-	org     string
-	repo    string
-	devMode bool
-	client  *github.Client
+	Org     string
+	Repo    string
+	DevMode bool
+	Client  *github.Client
 }
 
 const pageSize int = 50
@@ -50,11 +39,11 @@ func (q *PullRequestQuery) IteratePullRequests(callback PRCallback) error {
 	// simultaneous requests we make to the API to avoid rate
 	// limiting.
 	for {
-		prs, response, err := q.client.PullRequests.List(ctx, q.org, q.repo, opts)
+		prs, response, err := q.Client.PullRequests.List(ctx, q.Org, q.Repo, opts)
 		if err != nil {
 			return errors.Wrap(err,
 				fmt.Sprintf(
-					"could not get pull requests for %s/%s", q.org, q.repo))
+					"could not get pull requests for %s/%s", q.Org, q.Repo))
 		}
 		for _, pr := range prs {
 			err := callback(pr)
@@ -66,7 +55,7 @@ func (q *PullRequestQuery) IteratePullRequests(callback PRCallback) error {
 			fmt.Fprintf(os.Stderr, ".")
 		}
 
-		if q.devMode {
+		if q.DevMode {
 			fmt.Fprintf(os.Stderr, "shortcutting for dev mode\n")
 			break
 		}
@@ -92,8 +81,8 @@ func (q *PullRequestQuery) GetIssueComments(pr *github.PullRequest) ([]*github.I
 	results := []*github.IssueComment{}
 
 	for {
-		comments, response, err := q.client.Issues.ListComments(
-			ctx, q.org, q.repo, *pr.Number, opts)
+		comments, response, err := q.Client.Issues.ListComments(
+			ctx, q.Org, q.Repo, *pr.Number, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -117,8 +106,8 @@ func (q *PullRequestQuery) GetPRComments(pr *github.PullRequest) ([]*github.Pull
 	results := []*github.PullRequestComment{}
 
 	for {
-		comments, response, err := q.client.PullRequests.ListComments(
-			ctx, q.org, q.repo, *pr.Number, opts)
+		comments, response, err := q.Client.PullRequests.ListComments(
+			ctx, q.Org, q.Repo, *pr.Number, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -140,8 +129,8 @@ func (q *PullRequestQuery) GetReviews(pr *github.PullRequest) ([]*github.PullReq
 	results := []*github.PullRequestReview{}
 
 	for {
-		comments, response, err := q.client.PullRequests.ListReviews(
-			ctx, q.org, q.repo, *pr.Number, opts)
+		comments, response, err := q.Client.PullRequests.ListReviews(
+			ctx, q.Org, q.Repo, *pr.Number, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -157,6 +146,6 @@ func (q *PullRequestQuery) GetReviews(pr *github.PullRequest) ([]*github.PullReq
 
 func (q *PullRequestQuery) IsMerged(pr *github.PullRequest) (bool, error) {
 	ctx := context.Background()
-	isMerged, _, err := q.client.PullRequests.IsMerged(ctx, q.org, q.repo, *pr.Number)
+	isMerged, _, err := q.Client.PullRequests.IsMerged(ctx, q.Org, q.Repo, *pr.Number)
 	return isMerged, err
 }

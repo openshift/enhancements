@@ -27,9 +27,12 @@ func newReportCommand() *cobra.Command {
 
 			earliestDate := time.Now().AddDate(0, 0, daysBack*-1)
 
-			query := util.NewPullRequestQuery(
-				orgName, repoName, devMode,
-				util.NewGithubClient(configSettings.Github.Token))
+			query := &util.PullRequestQuery{
+				Org:     orgName,
+				Repo:    repoName,
+				DevMode: devMode,
+				Client:  util.NewGithubClient(configSettings.Github.Token),
+			}
 
 			// Define a bucket to include all pull requests as a way
 			// to give us a count of the total number we've seen while
