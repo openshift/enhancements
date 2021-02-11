@@ -16,8 +16,8 @@ import (
 
 func newReportCommand() *cobra.Command {
 	var (
-		daysBack, staleMonths int
-		devMode               bool
+		daysBack int
+		devMode  bool
 	)
 
 	cmd := &cobra.Command{
@@ -28,7 +28,7 @@ func newReportCommand() *cobra.Command {
 			earliestDate := time.Now().AddDate(0, 0, daysBack*-1)
 
 			query := util.NewPullRequestQuery(
-				daysBack, staleMonths, orgName, repoName, devMode,
+				orgName, repoName, devMode,
 				util.NewGithubClient(configSettings.Github.Token))
 
 			// Define a bucket to include all pull requests as a way
@@ -100,7 +100,7 @@ func newReportCommand() *cobra.Command {
 			}
 			otherOld := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
-					return prd.Pull.UpdatedAt.Before(query.StaleDate) && prd.RecentActivityCount > 0
+					return prd.Stale && prd.RecentActivityCount > 0
 				},
 			}
 
@@ -209,8 +209,8 @@ func newReportCommand() *cobra.Command {
 
 			report.SortByID(otherOld.Requests)
 			report.ShowPRs(
-				fmt.Sprintf("Old (older than %d months, but discussion in last %d days)",
-					staleMonths, daysBack),
+				fmt.Sprintf("Old (labeled as stale, but discussion in last %d days)",
+					daysBack),
 				otherOld.Requests,
 				false,
 			)
@@ -234,8 +234,6 @@ func newReportCommand() *cobra.Command {
 	}
 
 	cmd.Flags().IntVar(&daysBack, "days-back", 7, "how many days back to query")
-	cmd.Flags().IntVar(&staleMonths, "stale-months", 3,
-		"how many months before a pull request is considered stale")
 	cmd.Flags().BoolVar(&devMode, "dev", false, "dev mode, stop after first page of PRs")
 
 	return cmd

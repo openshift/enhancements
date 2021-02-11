@@ -4,18 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/google/go-github/v32/github"
 	"github.com/pkg/errors"
 )
 
 // New creates a new PullRequestQuery
-func NewPullRequestQuery(daysBack int, staleMonths int, orgName, repoName string, devMode bool, client *github.Client) *PullRequestQuery {
+func NewPullRequestQuery(orgName, repoName string, devMode bool, client *github.Client) *PullRequestQuery {
 	result := &PullRequestQuery{
-		EarliestDate: time.Now().AddDate(0, 0, daysBack*-1),
-		StaleDate:    time.Now().AddDate(0, staleMonths*-1, 0),
-
 		org:     orgName,
 		repo:    repoName,
 		devMode: devMode,
@@ -26,9 +22,6 @@ func NewPullRequestQuery(daysBack int, staleMonths int, orgName, repoName string
 
 // PullRequestQuery holds the parameters for iterating over pull requests
 type PullRequestQuery struct {
-	EarliestDate time.Time
-	StaleDate    time.Time
-
 	org     string
 	repo    string
 	devMode bool
