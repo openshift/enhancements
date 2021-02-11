@@ -31,7 +31,9 @@ status: provisional
 
 ## Summary
 
-The bootstrapping process for new cluster nodes is a tricky problem, primarily due to the fact that a new nodes start from a position of almost zero knowledge. These nodes need to fetch their machine configuration and authenticate themselves with the cluster before they can access most resources and have workloads scheduled. At the same time, a malicious actor pretending to be a new node cannot be allowed to join the cluster. Otherwise, they would be able to get access to sensitive resources and could have workloads and their secrets scheduled to them. Today, we protect against this by preventing cluster workloads from accessing the Machine Config Server, the component of the Machine Config Operator which is responsible for serving Ignition configs, derived from a set of Machine Configs, to new machines. This approach presents a problem though: workloads on OpenShift are not allowed to make use of TCP ports 22623 and 22624, the ports used by the Machine Config Server.
+The bootstrapping process for new cluster nodes is a tricky problem, primarily due to the fact that a new nodes start from a position of almost zero knowledge. These nodes need to fetch their machine configuration and authenticate themselves with the cluster before they can access most resources and have workloads scheduled. At the same time, a malicious actor pretending to be a new node cannot be allowed to join the cluster. Otherwise, they would be able to get access to sensitive resources and could have workloads and their secrets scheduled to them. Today, we protect against this by preventing cluster workloads from accessing the Machine Config Server, the component of the Machine Config Operator which is responsible for serving Ignition configs, derived from a set of Machine Configs, to new machines. This approach presents a problem though: workloads on OpenShift are not allowed to make use of TCP ports 22623 and 22624, the ports used by the Machine Config Server [^1].
+
+[^1]: "This is specifically because the blocking rules were done as a quick hack. In theory, we could block every pod from accessing only the MCS without blocking anything else, but that would require noticing when masters were added/moved and updating the rules for every pod when that happened. Since this was supposed to have been a temporary hack, we didn't bother, and instead just blocked access to ports 22623 and 22624 on all IPs." -@danwinship
 
 ## Motivation
 
@@ -47,6 +49,12 @@ This blanket network policy prevents traffic destined for ports 22623 and 22624,
 - Allow customers to use Machine Configs to provide pre-bootstrap configuration
 
 ## Proposal
+
+Security assumptions:
+
+  - The CSR bootstrap token is not considered sensitive and being accessible to all applications in the cluster is acceptable.
+  - The pull secret is not considered sensitive and being accessible to all applications in the cluster is acceptable.
+  - The contents of Machine Configs are potentially sensitive, especially if the Machine Configs are customer-provided.
 
 If it can be ensured that no one is able to access sensitive data through the Machine Config Server, the port restrictions can be safely removed. In order to achieve this, Machine Configs can be split into two groups: pre-node-approved configs and post-node-approved configs. The pre-node-approved configs are ones which do not contain sensitive information and contain just enough to configure new nodes to submit a certificate signing request (CSR) to the API server. The post-node-approved configs contain everything else, including the overwhelming majority of customer-provided Machine Configs. When a new machine is created, it fetches its Ignition config from the Machine Config Server, which only serves the pre-node-approved configs. At this point, the machine has enough information to submit a CSR, but nothing sensitive (note that for the purposes of this proposal, the CSR bootstrap token and pull secret are not considered sensitive). Once the CSR has been approved and a kubeconfig returned, the Machine Config Daemon is able to directly enumerate Machine Configs, including the post-node-approved ones, so it then applies any remaining configuration to the machine and reboots if necessary. At this point, the machine is fully configured.
 
@@ -75,6 +83,7 @@ The Machine Config Operator will begin rendering two sets of Machine Configs: pr
 ### Open Questions
 
 1. Can we avoid the extra reboot when post-node-approved Machine Configs are used?
+2. Should we opt all customers into this new model through an upgrade, or should we only make this change to new clusters?
 
 ### Test Plan
 
