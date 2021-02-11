@@ -43,8 +43,6 @@ type PRCallback func(*github.PullRequest) error
 // IteratePullRequests queries for all pull requests and invokes the
 // callback with each PR individually
 func (q *PullRequestQuery) IteratePullRequests(callback PRCallback) error {
-	fmt.Fprintf(os.Stderr, "finding pull requests for %s/%s\n", q.org, q.repo)
-	fmt.Fprintf(os.Stderr, "ignoring items closed before %s\n", q.EarliestDate)
 
 	ctx := context.Background()
 	opts := &github.PullRequestListOptions{

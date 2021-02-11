@@ -153,6 +153,9 @@ func newReportCommand() *cobra.Command {
 				Buckets: reportBuckets,
 			}
 
+			fmt.Fprintf(os.Stderr, "finding pull requests for %s/%s\n", orgName, repoName)
+			fmt.Fprintf(os.Stderr, "ignoring items closed before %s\n", earliestDate)
+
 			err := theStats.Populate()
 			if err != nil {
 				return errors.Wrap(err, "could not generate stats")
