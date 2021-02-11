@@ -25,6 +25,8 @@ func newReportCommand() *cobra.Command {
 		Short: "Generate the weekly activity report",
 		RunE: func(cmd *cobra.Command, args []string) error {
 
+			earliestDate := time.Now().AddDate(0, 0, daysBack*-1)
+
 			query := util.NewPullRequestQuery(
 				daysBack, staleMonths, orgName, repoName, devMode,
 				util.NewGithubClient(configSettings.Github.Token))
@@ -60,17 +62,17 @@ func newReportCommand() *cobra.Command {
 			// prioritized for the current or next release.
 			prioritizedMerged := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
-					return prd.Prioritized && prd.State == "merged" && prd.Pull.ClosedAt.After(query.EarliestDate)
+					return prd.Prioritized && prd.State == "merged" && prd.Pull.ClosedAt.After(earliestDate)
 				},
 			}
 			prioritizedClosed := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
-					return prd.Prioritized && prd.State == "closed" && prd.Pull.ClosedAt.After(query.EarliestDate)
+					return prd.Prioritized && prd.State == "closed" && prd.Pull.ClosedAt.After(earliestDate)
 				},
 			}
 			prioritizedNew := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
-					return prd.Prioritized && prd.Pull.CreatedAt.After(query.EarliestDate)
+					return prd.Prioritized && prd.Pull.CreatedAt.After(earliestDate)
 				},
 			}
 			prioritizedActive := stats.Bucket{
@@ -83,17 +85,17 @@ func newReportCommand() *cobra.Command {
 			// requests.
 			otherMerged := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
-					return prd.State == "merged" && prd.Pull.ClosedAt.After(query.EarliestDate)
+					return prd.State == "merged" && prd.Pull.ClosedAt.After(earliestDate)
 				},
 			}
 			otherClosed := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
-					return prd.State == "closed" && prd.Pull.ClosedAt.After(query.EarliestDate)
+					return prd.State == "closed" && prd.Pull.ClosedAt.After(earliestDate)
 				},
 			}
 			otherNew := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
-					return prd.Pull.CreatedAt.After(query.EarliestDate)
+					return prd.Pull.CreatedAt.After(earliestDate)
 				},
 			}
 			otherOld := stats.Bucket{
