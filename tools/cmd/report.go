@@ -154,8 +154,9 @@ func newReportCommand() *cobra.Command {
 			}
 
 			theStats := &stats.Stats{
-				Query:   query,
-				Buckets: reportBuckets,
+				Query:        query,
+				EarliestDate: earliestDate,
+				Buckets:      reportBuckets,
 			}
 
 			fmt.Fprintf(os.Stderr, "finding pull requests for %s/%s\n", orgName, repoName)

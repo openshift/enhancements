@@ -130,19 +130,21 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 	if isMerged {
 		details.State = "merged"
 	}
-	for _, r := range reviews {
-		if r.SubmittedAt.After(s.EarliestDate) {
-			details.RecentReviewCount++
+	if !s.EarliestDate.IsZero() {
+		for _, r := range reviews {
+			if r.SubmittedAt.After(s.EarliestDate) {
+				details.RecentReviewCount++
+			}
 		}
-	}
-	for _, c := range issueComments {
-		if c.CreatedAt.After(s.EarliestDate) {
-			details.RecentIssueCommentCount++
+		for _, c := range issueComments {
+			if c.CreatedAt.After(s.EarliestDate) {
+				details.RecentIssueCommentCount++
+			}
 		}
-	}
-	for _, c := range prComments {
-		if c.CreatedAt.After(s.EarliestDate) {
-			details.RecentPRCommentCount++
+		for _, c := range prComments {
+			if c.CreatedAt.After(s.EarliestDate) {
+				details.RecentPRCommentCount++
+			}
 		}
 	}
 	details.RecentActivityCount = details.RecentIssueCommentCount + details.RecentPRCommentCount + details.RecentReviewCount
