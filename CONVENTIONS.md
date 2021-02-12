@@ -141,20 +141,154 @@ it is used to manage all elements of the cluster.
 
 #### Resources and Limits
 
-All cluster components must declare resource requests for CPU and memory, and should not describe limits.
+Kubernetes allows Pods to declare their CPU and memory resource
+requirements in advance using [requests and
+limits](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/). Requests
+are used to ensure minimum resources are provided and to influence
+scheduling, while limits prevent Pods from consuming resources
+excessively.
 
-The CPU request of components scheduled onto the control plane should
-be proportional to existing etcd limits for a 6 node cluster running
-the standard e2e suite (if etcd on a control plane component uses 600m
-during an e2e run, and requests 100m, and the component uses 350m,
-then the component should request `100m/600m * 350m`).  Components
-scheduled to all nodes should be proportional to the SDN CPU request
-during the standard e2e suite.
+Unlike with user workloads, setting limits for cluster components is
+problematic for several reasons:
 
-The memory request of cluster components should be set at 10% higher than their p90 memory usage over a standard e2e suite execution.
+* Components cannot anticipate how they scale in usage in all customer
+  environments, so setting one-size-fits-all limits is not possible.
+* Setting static limits prevents administrators from responding to
+  changes in their clusters’ needs, such as by resizing control plane
+  nodes to provide more resources.
+* We do not want cluster components to be restarted based on their
+  resource consumption (for example, being killed due to an
+  out-of-memory condition). We need to detect and handle those cases
+  more gracefully, without degrading cluster performance.
 
-Limits should be not set because components cannot anticipate how they scale in usage in all customer environments and a crashlooping OOM component is something we must detect and handle gracefully regardless. Setting memory limits leaves administrators with no option to react to valid changes usage dynamically.
+Therefore, cluster components *SHOULD NOT* be configured with resource
+limits.
 
+However, cluster components *MUST* declare resource requests for both
+CPU and memory.
+
+Specifying requests without limits allows us to ensure that all
+components receive their required minimum resources and that they are
+able to burst to use more resources as needed. When setting the
+resource requests, we need to balance the size between values that
+ensure the component has the resources it needs to keep running with
+the requirement to be efficient and support small-footprint
+deployments. If the request settings for a component are too low, it
+could be starved for resources in a very busy cluster, resulting in
+degraded performance and lower quality of service. If the request
+settings for a component are too high, it could mean that the
+scheduler cannot find a place to run it, leading to crash looping or
+preventing a cluster from deploying. If the combined resource requests
+for the cluster components are too high, users may not have enough
+resources available to use OpenShift at all, resulting in inability to
+run in reasonable footprints for end users (see especially the
+[single-node](enhancements/single-node) use cases).
+
+We divide resource types into [two
+categories](https://en.wikipedia.org/wiki/System_resource#Categories)
+and treat them differently because they have different runtime
+characteristics based on the ability of the component to run with less
+than a desired minimal resources.  Resources like CPU time or network
+bandwidth are considered *compressible*, because if a component has
+too little it will run, but be restricted and perform less well.
+Resources like memory or storage are considered *incompressible*,
+because if a component does not have enough it will fail rather than
+being able to run with less.
+
+For incompressible resources, we need to request an amount based on
+the minimum that the component will use. For compressible resources,
+we are more concerned about balancing between proportional users --
+ensuring system or user workloads are not unfairly preferred. If
+system compressible requests are too low, user workloads will take
+priority and lead to impact to the user workload. If system
+compressible requests are too high, some user workloads will not
+schedule. We also need to set compressible resource requests to ensure
+that in resource constrained situations there is enough proportional
+CPU for the overall system to make progress.
+
+Kubernetes resource requests for CPU time are measured in fractional
+"[Kubernetes
+CPUs](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-cpu)"
+expressed using the unit "millicpu" or "millicore", which is 1/1000th
+of a CPU. For example, 250m is one quarter of a CPU. For cloud
+instances, 1 Kubernetes CPU is equivalent to 1 virtual CPU in the
+VM. For bare metal hosts, 1 Kubernetes CPU is equivalent to 1
+hyperthread (or 1 real core, if hyperthreading is disabled). In all
+cases, the clock speed and other performance metrics for the CPU are
+ignored.
+
+Our heuristic for setting CPU resource requests reaches the necessary
+balance by prioritizing critical components and allocating resources
+to other components based on their actual consumption. There are two
+classes of cluster components to consider, those deployed only to the
+control plane nodes and those deployed to all nodes.
+
+The etcd database is the backbone of the entire cluster. If etcd
+becomes starved for CPU resources, other components like the API
+server and controllers that use the API server will suffer cascading
+issues that will eventually cause the cluster to fail. Therefore, we
+use etcd's requirements as the baseline for a formula for compressible
+resources for other components running on the control plane.
+
+The software defined networking (SDN) components run on every node and
+represent a high-value, high-resource component. We use the SDN
+system’s requirements as the baseline for a formula for other
+components running on all nodes.
+
+CPU requests for other components should start by computing a value
+proportional to the appropriate baseline, etcd or SDN, using the
+formula
+
+```text
+floor(baseline_request / baseline_actual * component_actual)
+```
+
+Then, these rules for lower and upper bounds should be applied:
+
+* The CPU request should never be lower than 5m. Setting a 5m limit
+  avoids extreme ratio calculations when the node is stressed, while
+  still representing the noise of a mostly idle workload.
+* If the computed value is more than 100m, use the lower of the
+  computed value and 200% of the usage of the component in an idle
+  cluster. This cap means components that require bursts of CPU time
+  may be throttled on busy hosts, but they are more likely to be
+  schedulable in the first place.
+
+For example, if etcd requests 100m CPU and uses 600m during an
+end-to-end job run and the component being tuned uses 350m on the same
+run, the request for the component being tuned should be set to
+100m/600m * 350m ~= 58m.
+
+Kubernetes resource requests for memory are [measured in
+bytes](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-memory).
+
+Our heuristic for setting memory requests is based on the typical use
+of the component being tuned instead of a ratio of the resources used
+by a baseline component, because the memory consumption patterns for
+components vary so much and tend to spike. The memory request of
+cluster components should be set to a value 10% higher than their 90th
+percentile actual consumption over a standard end-to-end suite
+run. This gives components enough space to avoid being evicted when a
+node starts running out of memory, without requesting so much that
+some memory is permanently idle because the scheduler sees it as
+reserved even though a component is not using it.
+
+Both CPU and memory request formulas use numbers based on the
+end-to-end parallel conformance test job. After running the tests, use
+the Prometheus instance in the cluster to query the
+`kube_pod_resource_request` and `kube_pod_resource_limit` metrics and
+find numbers for the Pod(s) for the component being tuned.
+
+Resource requests should be reviewed regularly. Ideally we will build
+tools to help us recognize when the requests are far out of line with
+the actual resource use of components in CI.
+
+Resource request review history:
+
+* [BZ 1812583](https://bugzilla.redhat.com/show_bug.cgi?id=1812583) --
+  to address over-provisioning issues in 4.4
+* [BZ 1920159](https://bugzilla.redhat.com/show_bug.cgi?id=1920159) --
+  for tracking changes in 4.7/4.8 for single-node RAN
 
 #### Taints and Tolerations
 
