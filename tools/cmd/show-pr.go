@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -39,9 +40,6 @@ func newShowPRCommand() *cobra.Command {
 			if err != nil {
 				return errors.Wrap(err, fmt.Sprintf("failed to determine group for PR %d", prID))
 			}
-
-			fmt.Printf("Group: %s\n", group)
-			fmt.Printf("Enhancement: %v\n", isEnhancement)
 
 			ghClient := util.NewGithubClient(configSettings.Github.Token)
 			ctx := context.Background()
@@ -86,6 +84,21 @@ func newShowPRCommand() *cobra.Command {
 			)
 
 			prd := all.Requests[0]
+
+			var sinceUpdated float64
+			var sinceClosed float64
+
+			if !prd.Pull.UpdatedAt.IsZero() {
+				sinceUpdated = time.Since(*prd.Pull.UpdatedAt).Hours() / 24
+			}
+			if !prd.Pull.ClosedAt.IsZero() {
+				sinceClosed = time.Since(*prd.Pull.ClosedAt).Hours() / 24
+			}
+
+			fmt.Printf("Last updated: %s (%.02f days)\n", prd.Pull.UpdatedAt, sinceUpdated)
+			fmt.Printf("Closed:       %s (%.02f days)\n", prd.Pull.ClosedAt, sinceClosed)
+			fmt.Printf("Group:       %s\n", group)
+			fmt.Printf("Enhancement: %v\n", isEnhancement)
 			fmt.Printf("State:       %q\n", prd.State)
 			fmt.Printf("LGTM:        %v\n", prd.LGTM)
 			fmt.Printf("Prioritized: %v\n", prd.Prioritized)
