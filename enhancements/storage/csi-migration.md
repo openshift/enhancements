@@ -31,9 +31,11 @@ We want to allow cluster administrators to seamlessly migrate in-tree volumes to
 
 ## Motivation
 
-CSI migration is going to be enabled by default as a beta feature in Kubernetes 1.21 (OCP 4.8). In Kubenertes 1.22 (OCP 4.9) the feature may become GA.
+[CSI migration](https://github.com/kubernetes/enhancements/tree/master/keps/sig-storage/625-csi-migration) is an upstream effort to migrate in-tree volume plugins to their counterpart CSI drivers. The feature is beta since Kubernetes 1.17, however, as of Kubernetes 1.20 it is still disabled by default.
 
-In OCP we can optionally disable beta features, however, that will no longer be an option once CSI migration becomes GA.
+That is going to change in Kubernetes 1.21 (OCP 4.8), where the feature will remain beta, but enabled by default. In Kubernetes 1.22 (OCP 4.9) the feature may become GA.
+
+In OCP we can optionally disable CSI migration feature while the it is still beta, however, that will no longer be an option once CSI migration becomes GA.
 
 In order to avoid surprises once the migration is enabled by default in OCP, we want to allow cluster administrators to optionally enable the feature earlier, preferably in OCP 4.8.
 
@@ -41,13 +43,13 @@ In order to avoid surprises once the migration is enabled by default in OCP, we 
 
 For Tech Preview, we want to introduce a mechanism to allow switching CSI migration feature flags on and off accross OCP components.
 
-Due to upstream requirements, it is important that this mechanism allows for enabling the feature flags on control-plane components **before** the kubelet, and vice-versa.
+Due to upstream requirements, it is important that this mechanism allows for enabling the feature flags on control-plane components **before** the kubelet, and vice versa.
 
 Once CSI migration is enabled by default in upstream, it will not be possible to disable it again. Therefore, such mechanism shall be disabled in OCP once CSI migration becomes GA in upstream.
 
 ## Non-Goals
 
-* Control the ordering in which OCP components will be upgraded or downgraded. We will leave this responsability to the user.
+* Control the ordering in which OCP components will be upgraded or downgraded.
 * Install or remove the CSI driver as the migration is enabled or disabled.
 
 ## Proposal
@@ -118,7 +120,7 @@ With that in mind, we propose to:
    * In `featuregates/cluster` object, replace the `CSIMigrationNode` *FeatureSet* by `CSIMigrationControlPlane`.
    * Wait for all `CSINode` objects to have the annotation `storage.alpha.kubernetes.io/migrated-plugins` cleared. No storage plugins should be listed in this annotation.
    * Remove the `CSIMigrationControlPlane` *FeatureSet* from the `featuregates/cluster` object.
-4. It is the **responsability of the cluster administrator** to guarante the ordering described above is respected.
+4. It is the **responsibility of the cluster administrator** to guarante the ordering described above is respected.
 
 ### GA
 
@@ -126,7 +128,9 @@ Once CSI migration reaches GA in upstream, the associated feature gates will be 
 
 In addition that, the *FeatureSets* created to handle the Tech Preview feature will no longer be operational because the feature flags they enable will already be enabled in the cluster.
 
-As for the required ordering described above, the [upgrade order](https://github.com/openshift/cluster-version-operator/blob/master/docs/dev/upgrades.md#generalized-ordering) performed by CVO during a cluster upgrade will take care of applying the feature gates in the correct order.
+As for the required ordering described above, the [upgrade order](https://github.com/openshift/cluster-version-operator/blob/master/docs/dev/upgrades.md#generalized-ordering) performed by CVO during a cluster upgrade will take care of starting components in the desired order.
+
+In this phase, CSI migration feature gates are enabled by default in all components, so restarting control-plane components before the kubelet is enough to guarantee a smooth feature enablement.
 
 #### Limitations
 
@@ -152,7 +156,7 @@ CSI migration *FeatureSets* can be removed from OCP API **one** release after CS
 
 Although this three-phased approach does what we need, it has some drawbacks:
 
-1. Having operators ignoring certain *FeatureSets* is not usual and is error-prone. Fortunately we only need to introduce the skipping in MCO.
+1. For Tech Preview, users might enable or disable *FeatureSets* in the wrong order, causing issues with attaching or detaching existing volumes. We plan to address this through documentation.
 
 ## Design Details
 
