@@ -3,18 +3,20 @@ title: allow-mtu-and-overlay-port-changes
 authors:
   - "@juanluisvaladas"
 reviewers:
-  - TBD
+  - "@danwinship"
+  - "@mccv1r0"
+  - "@russellb"
 approvers:
   - TBD
 creation-date: 2021-01-25
-last-updated: 2021-01-25
+last-updated: 2022-02-012
 status: provisional
 ---
 
 # Allow MTU and overlay port changes
 
 This covers adding the capability to the cluster network operator of changing
-the MTU, and the vxlan and geneve ports post installation.
+the MTU, and the VXLAN and Geneve ports post installation.
 
 ## Release Signoff Checklist
 
@@ -27,32 +29,35 @@ the MTU, and the vxlan and geneve ports post installation.
 
 ## Summary
 
-Customers may need to change the MTU, or the ports used for vxlan or geneve
+Customers may need to change the MTU, or the ports used for VXLAN or Geneve
 tunnels post-installation. However these changes aren't trivial and may cause
 downtime, hence the CNO forbids currently them.
 
-We propose a brand new daemonset that will run on every node of the cluster and
-will make the necessary changes in an ordered, and coordinated manner with a
-service disruption within the TCP timeout.
+We propose a brand new daemonset that will be launched on demand and will
+run on every node of the cluster. This daemonset will make the necessary
+changes in an ordered, and coordinated manner with a service disruption
+within the TCP timeout (best effort).
 
 ## Motivation
 
-While customers usually set the MTU, and the overlay ports some times they
-need to change them afterwards for unpredictable reasons such as performance,
-or changes in the underlay.
+While cluster administrators usually set the MTU, and the overlay ports
+correctly during the installation sometimes they need to change them
+afterwards for reasons such as changes in the underlay, or because they were
+set incorrectly at install time.
 
 ## Goals
 
-* Allow to change MTU post install on both OpenShift SDN and OVN Kubernetes.
+* Allow to change MTU of the tunnels post install on both OpenShift SDN and
+  OVN Kubernetes.
 
 * Allow to change the overlay network ports on the underlay in both OpenShift
   SDN and OVN Kubernetes.
 
-* Allow to change both vxlan and geneve ports in a single operation.
+* Allow to change both VXLAN and Geneve ports porst install.
 
 ## Non goals
 
-* Allow to change MTU configuration in te underlay interfaces.
+* Allow to change MTU configuration in the underlay interfaces.
 
 * Allow to change MTU, and either port in a single operation.
 
@@ -60,68 +65,67 @@ or changes in the underlay.
 
 ## Proposal
 
-When the cluster network operator detects the change it will deploy a new
-deaemonset with restartPolicy Mever which is responsible for doing the changes.
-
 Even though both changing the MTU, and changing the port have a lot in common,
 there are some key differences and therefore the daemonset will be slightly
 different.
 
-When decreasing the MTU each of the deamonset will:
+When the cluster network operator detects the change it will:
+1. Set the `clusteroperator/network` conditions:
+   - Progressing: true
+   - Upgradeable: false
+2. Deploy a deaemonset with `restartPolicy: Mever` which is responsible for
+   validating the preconditions. If the preconditions are met the pod will
+   exit with code 0. Some of the preconditions that we will check are:
+   - Chrony is synchronized
+   - For MTU changes, the new MTU is valid to apply on that node.
+   - For Port changes, the new port is not being used by other process
+3. Once all the pods in the daemonset are finished, if any of the pods has
+   exited with a code different than 0, the CNO will set the
+   `clusteroperator/network` conditions to:
+   - Progressing: false
+   - Degraded: true
+   At this point we require manual intervention.
 
-1. Verify that the new MTU is valid for that node. If it is valid add to
-   itself the annotation `openshift.io/cno-able-to-change-mtu`.
-2. Wait until the timestamp defined in `CHANGE_MTU_INIT_TS`
-3. Verify that every pod of that daemonset is running and has the annotation
-   `openshift.io/cno-able-to-change-mtu` if any of the pods is not running, or
-   is missing that annotation the pod will abort the procedure.
-4. Cordon the node where its running.
-5. Wait a grace period. This grace period is based on
+Once the preconditions are met the steps to change the MTU and the ports are
+different, for MTU changes the CNO will:
+1. Cordon every node, we don't want pods created during the process.
+2. Deploy a new daemonset that will run on every node which will apply the
+   changes that must be done manually in that node in particular.
+3. So that we don't have nodes doing things a t different times and we have
+   everything synchronized, the pods will wait until a timestamp defined in
+   the environment variable `CHANGE_MTU_INIT_TS`, which is defined by the CNO.
+4. The pod deployed by the daemonset, will enter the network namespace of
+   every pod in the pod network and change the MTU of `eth0`.
+5. The pod will wait a grace period. This grace period is based on
    `CHANGE_MTU_INIT_TS` rather than the time of finalization of the
    previous step.
-6. Proceed to change the MTU of `eth0` on each one of the pods netnamespace.
-7. Wait a grace period. This grace period is based on
+6. The pod will change the MTU of the end of the veth pair in the virtual
+   switch.
+7. The pod will wait a grace period. This grace period is based on
    `CHANGE_MTU_INIT_TS` rather than the time of finalization of the
    previous step.
-8. Proceed to change the MTU of each pod in the virtual switch.
-9. Wait a grace period. This grace period is based on
-   `CHANGE_MTU_INIT_TS` rather than the time of finalization of the
-   previous step.
-10. In the case of OVN Kubernetes proceed to change the MTU of the interfaces
+8. For OVN Kubernetes the pod will change the MTU of the interfaces
    ovn-k8s-mp0, br-local, and ovn-k8s-gw0 sequentially without any delay in
    between.
+   For OpenShift SDN the pod will change the MTU of the interface tun0.
+9. If all these steps failed, the pod will exit with code 1, if all were
+   successful it will exit with code 0.
 
-   In the case of OpenShiftSDN proceed to change the MTU of the interfaces
-   vxlansys.
-
-13. Uncordon the node
-
-14. Annotate itself with `openshift.io/cno-succesuflly-changed-mtu` and exit
-    with code 0.
-
-When increasing the MTU the same process applies, except steps 10, 8, and 6 are done in reverse order.
-
-Changing the overlay ports is a similar procedure, we will depoy a daemonset
-where each pod will:
-
-1. Verify that the port is not being used at the moment by anything else and
-   add to itself the annotation `openshift.io/cno-able-to-change-port`
-2. Wait until the timestamp defined in `CHANGE_PORT_INIT_TS`
-3. Verify that every pod of that daemonset is running and has the annotation
-   `openshift.io/cno-able-to-change-port` if any of the pods is not running, or
-   is missing that annotation the pod will abort the procedure.
-4. Cordon the node where its running.
-5. Wait a grace period. This grace period is based on
-   `CHANGE_PORT_INIT_TS` rather than the time of finalization of the
-   previous step.
-6. Actually change the port:
+For port changes the CNO will:
+1. Cordon every node, we don't want pods created during the process.
+2. Deploy a new daemonset that will run on every node which will apply the
+   changes that must be done manually in that node in particular.
+3. So that we don't have nodes doing things a t different times and we have
+   everything synchronized, the pods will wait until a timestamp defined in
+   the environment variable `CHANGE_PORT_INIT_TS`, which is defined by the CNO.
+4. Actually change the port:
    For OpenShift SDN we'll delete the port:
 
    `ovs-vsctl --if-exists del-port br0 vxlan0`
 
    And create it again with no delay at all:
 
-   ```
+   ```sh
    ovs-vsctl add-port br0 vxlan0 \
      -- set Interface vxlan0 ofport_request=1 \
      type=vxlan options:remote_ip="flow" \
@@ -130,33 +134,60 @@ where each pod will:
    ```
 
    In the case of OVN Kubernetes we'll do the same procedure. If we need to
-   change the vxlan port we'll gather its configuration from ovs-vsctl, delete
+   change the VXLAN port we'll gather its configuration from ovs-vsctl, delete
    it, and recreate it with the same parameters.
+   And if we need to change the Geneve port we'll do the same thing with it.
+5. If all these steps failed, the pod will exit with code 1, if all were
+   successful it will exit with code 0.
 
-   And if we need to change the geneve port we'll do the same thing with it.
+Once the deamonset that actually makes the changes in the nodes is finished the
+CNO will:
+1. For OVN Kubernetes the CNO verify that the configmap ovnkube-config is
+   synchronized, and will force a rollout of the ovnkube-master daemonset.
+   Once the rollout is finished and all the pods are ready, it will also
+   force a rollout of the ovnkube-node daemonset.
 
-7. In the case of OpenShift SDN each node will uncordon iself.
-8. EAch pod will annotate the node where it's running with
-   `openshift.io/cno-succesuflly-changed-mtu` and exit
+   For OpenShift SDN we'll make sure the ClusterNetwork object is synchronized
+   and we'll force a rollout of the sdn daemonset.
 
-Once the daemonsets are finished, for OVN Kubernetes the CNO will verify that
-the configmap ovnkube-config is synchronized, and will force a rollout of the
-ovnkube-master daemonset. After that it will also force a rollout of the
-ovnkube-node daemonset.
-
-If any of the nodes fails during the procedure we expect the administrator to
-manually reboot the nodes. We could reboot automatically, but given the risks
-involved, and that this change is a very uncommon intervention, we consider
-safer making the human responsible for it.
+2. Once this is finished, check the exit codes of the daemonset that actually
+   makes the changes, if the exit code is 0 uncordon the node, otherwise
+   reboot the node, wait for the kubelet to be reporting as Ready again
+   and uncordon it.
+3. Set the `clusteroperator/network` conditions:
+   - Progressing: false
+   - Upgradeable: true
 
 ### Test Plan
-For MTU changes start a TCP server and client in two different nodes
-communicating continuosuly. Decrease the MTU and increase it once its finished.
-The TCP connection must be alive after both changes.
+For both MTU, and VXLAN or Geneve port changes we will create the following
+tests:
+1. A TCP server, and a client in two different nodes communicating
+   continuously. The acceptance criteria is the connection has to be kept
+   alive.
+2. We will also create in parallel another TCP server, and multiple clients
+   in different nodes which will establish a lot of very short lived TCP
+   connections. The acceptance criteria is that the connections must be
+   established.
+3. An HTTPS server with a very large certificate, and multiple clients
+   doing a single HTTPS request. The acceptance criteria is TLS negotiation
+   suceeds and HTTPS request returns 200.
 
-For vxlan or geneve start a TCP server and client in two different nodes
-communicating continuously. Change both ports in OVN kuberentes and vxlan
-on OpenShift SDN. The TCP connection must be alive after the change.
+The acceptance criteria for this test is that the long lived TCP connection is
+kept alive, and the short lived connections get established.
+
+Packet loss, TCP retransmissions, increased latency, and reduced bandwidth are
+considered acceptable while the chane is happening.
+
+For MTU changes, while previous test is running, we will decrease the MTU, and
+once it's finished we'll increase it to it's previous value.
+
+For port changes, while previous test is running, we will change both ports in
+OVN Kuberentes, and VXLAN on OpenShift SDN. The TCP connection must be alive
+after the change.
+
+This test will be two new jobs in CI (one for OVN, and one for OpenShift
+SDN), but given that this won't be changed often they will be launched on
+demand.
 
 ## Alternatives
 
