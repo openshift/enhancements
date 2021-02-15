@@ -65,16 +65,19 @@ type Stats struct {
 // Populate runs the query and filters requests into the appropriate
 // buckets
 func (s *Stats) Populate() error {
-	return s.Query.IteratePullRequests(s.ProcessOne)
+	return s.Query.IteratePullRequests(s.process)
 }
 
 // Process extracts the required information from a single PR
-func (s *Stats) ProcessOne(pr *github.PullRequest) error {
+func (s *Stats) process(pr *github.PullRequest) error {
 	// Ignore old closed items
 	if !s.EarliestDate.IsZero() && *pr.State == "closed" && pr.UpdatedAt.Before(s.EarliestDate) {
 		return nil
 	}
+	return s.ProcessOne(pr)
+}
 
+func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 	isMerged, err := s.Query.IsMerged(pr)
 	if err != nil {
 		return errors.Wrap(err,
@@ -127,19 +130,21 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 	if isMerged {
 		details.State = "merged"
 	}
-	for _, r := range reviews {
-		if r.SubmittedAt.After(s.EarliestDate) {
-			details.RecentReviewCount++
+	if !s.EarliestDate.IsZero() {
+		for _, r := range reviews {
+			if r.SubmittedAt.After(s.EarliestDate) {
+				details.RecentReviewCount++
+			}
 		}
-	}
-	for _, c := range issueComments {
-		if c.CreatedAt.After(s.EarliestDate) {
-			details.RecentIssueCommentCount++
+		for _, c := range issueComments {
+			if c.CreatedAt.After(s.EarliestDate) {
+				details.RecentIssueCommentCount++
+			}
 		}
-	}
-	for _, c := range prComments {
-		if c.CreatedAt.After(s.EarliestDate) {
-			details.RecentPRCommentCount++
+		for _, c := range prComments {
+			if c.CreatedAt.After(s.EarliestDate) {
+				details.RecentPRCommentCount++
+			}
 		}
 	}
 	details.RecentActivityCount = details.RecentIssueCommentCount + details.RecentPRCommentCount + details.RecentReviewCount

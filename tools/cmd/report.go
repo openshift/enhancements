@@ -78,6 +78,11 @@ func newReportCommand() *cobra.Command {
 					return prd.Prioritized && prd.Pull.CreatedAt.After(earliestDate)
 				},
 			}
+			prioritizedRevived := stats.Bucket{
+				Rule: func(prd *stats.PullRequestDetails) bool {
+					return prd.Prioritized && prd.State == "merged" && prd.RecentActivityCount > 0
+				},
+			}
 			prioritizedActive := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
 					return prd.Prioritized && prd.RecentActivityCount > 0
@@ -140,6 +145,7 @@ func newReportCommand() *cobra.Command {
 				&prioritizedMerged,
 				&prioritizedClosed,
 				&prioritizedNew,
+				&prioritizedRevived,
 				&prioritizedActive,
 
 				&otherMerged,
@@ -154,8 +160,9 @@ func newReportCommand() *cobra.Command {
 			}
 
 			theStats := &stats.Stats{
-				Query:   query,
-				Buckets: reportBuckets,
+				Query:        query,
+				EarliestDate: earliestDate,
+				Buckets:      reportBuckets,
 			}
 
 			fmt.Fprintf(os.Stderr, "finding pull requests for %s/%s\n", orgName, repoName)
@@ -173,7 +180,7 @@ func newReportCommand() *cobra.Command {
 			fmt.Printf("# This Week in Enhancements - %d-%.2d-%.2d\n", year, month, day)
 
 			// Only print the priority section if there are prioritized pull requests
-			if anyRequests(prioritizedMerged, prioritizedClosed, prioritizedNew, prioritizedActive) {
+			if anyRequests(prioritizedMerged, prioritizedClosed, prioritizedNew, prioritizedRevived, prioritizedActive) {
 				fmt.Printf("\n## Enhancements for Release Priorities\n")
 
 				report.SortByID(prioritizedMerged.Requests)
@@ -181,6 +188,13 @@ func newReportCommand() *cobra.Command {
 
 				report.SortByID(prioritizedNew.Requests)
 				report.ShowPRs("Prioritized New", prioritizedNew.Requests, true)
+
+				report.SortByID(prioritizedRevived.Requests)
+				report.ShowPRs(
+					"Prioritized Revived (discussion after PR was merged)",
+					prioritizedRevived.Requests,
+					false,
+				)
 
 				report.SortByActivityCountDesc(prioritizedActive.Requests)
 				report.ShowPRs("Prioritized Active", prioritizedActive.Requests, true)
