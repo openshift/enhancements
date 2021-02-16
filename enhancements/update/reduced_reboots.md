@@ -78,11 +78,22 @@ define and implement upstream testing changes which give us an appropriate level
 of confidence that N-2 version skew issues would be identified in the community
 whenever possible.
 
-#### Node - Implement Downstream Kubelet Version Skew Testing
+#### OTA - Implement Downstream Paused Worker Pool Upgrade Tests
 
-In addition to upstream version skew testing is in place we must also implement
-downstream version skew testing which includes any additional tests required for
-OpenShift specific implementation details.
+In parallel with efforts to revamp upstream version skew testing we must also
+implement downstream version skew testing which includes any additional tests
+required for OpenShift specific implementation details.
+
+We will achieve this by delivering upgrade jobs which pause the Worker MachineConfigPool
+then upgrade from 4.x to 4.x+1 to 4.x+2. We will run conformance tests from 4.x
+after upgrading to 4.x+1 in order to ensure that we continue to provide a baseline
+feature set, then again after upgrading to 4.x+2, finally after unpausing the
+Worker MCP we will run 4.x+2 tests.
+
+Given the complexity of these test jobs we should expect that they may take
+longer than the current four hour limit for test jobs. Rather than compromising
+on test completeness we will seek to extend test duration limits or find other
+ways to meet these testing demands.
 
 #### Teams with Host Components - Allow N-2 Host Component Version Skew
 
@@ -139,12 +150,18 @@ be a good place to talk about core concepts and how they relate.
 
 This imposes significant risk due to a number of factors:
 - We're currently not confident in upstream's testing matrix and our specific
-feature sets
-- We're never before expected teams to offer broader than N-1 compatibility.
-Teams have always assumed at most N-1 and even then, especially early after a
-GA release, it's not uncommon to find problems in N-1 compatibility.
+  feature sets
+- We've never before expected teams to offer broader than N-1 compatibility.
+  Teams have always assumed at most N-1 and even then, especially early after a
+  GA release, it's not uncommon to find problems in N-1 compatibility.
 - While N-1 is tested in the context of upgrades it's not been tested in long
-term use.
+  term use.
+- If external integrations depend on host components of all nodes having been
+  updated then we'll run into problems. For instance, if there's an upgrade
+  scenario where RHV cloud provider integration needs to be upgraded between 4.6
+  and 4.10 in order to ensure compatibility and the components which interface
+  with RHV are components of RHCOS then we may not upgrade those components at
+  the same minor version expected previously.
 
 We may mitigate some of this by further delaying EUS-to-EUS upgades after normal
 minor version upgrades have been promoted to stable and allocating significantly
