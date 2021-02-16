@@ -63,7 +63,7 @@ For details on the kata architecture see https://github.com/kata-containers/docu
 ### Overview
 Kubernetes provides support for RuntimeClasses. RuntimeClass is a feature for selecting the container runtime configuration. The container runtime configuration is used to run a Pod’s containers.
 
-CRI-O today comes out of the box with a runc as the default runtime. CRI-O also supports RUntimeClasses and using this configuration, it will support a KataContainers runtime as well.
+CRI-O today comes out of the box with a runc as the default runtime. CRI-O also supports RuntimeClasses and using this configuration, it will support a KataContainers runtime as well.
 
 The 2 fundamental problems we need to address for getting kata to work with Openshift are:
 
@@ -87,25 +87,27 @@ In this option we build a container image containing RHEL AV RPMs (such as QEMU)
 4. No additional work with regarding to re-packaging those in another form other than the RPMs which is the way they are consumed by other Layered Products
 
 **Cons:**
-1. ~200 mb extra, installed in the host, for those who'd be using kata runtime
+1. 20 MB extra, installed in the host, for those who'd be using kata runtime
 2. Updates / Removal may be more complicated than having the RPMs as part of machine-os-content
 
 #### Long term: Use RHCOS extensions (qemu-kiwi and dependencies only)
 In this option we build upon the RHCOS extension approach planned for OCP4.6.
 
-**What is the RHCOS extension?**
+**What is the qemu-kiwi RHCOS extension?**
 
 This will add additional software onto the host - but this software will still be versioned with the host (included as part of the OpenShift release payload) and upgraded with the cluster.
 
-We have requests to ship things like `usbguard` that are needed to meet compliance in some scenarios (and `usbguard` is very useful on bare metal), but `usbguard` also makes no sense to ship in an OS for the public cloud.
+The additional RPMs required for qemu-kiwi and its dependencies are: 
+* qemu-kiwi
+* qemu-kvm-common
+* pxe-roms-qemu
+* libpmem
+* pixman
+* seabios-bin
+* seavgabions-bin
+* sgabios-bin
 
-The `rpm-ostree` project has had as its goal from the start to re-cast RPMs as "operating system extensions" - much like how e.g. Firefox and its extensions work.  By default it operates as a pure image system, but packages can be layered on (and overridden) client side.
-
-OpenShift is already making use of this today for the [realtime kernel](https://github.com/openshift/enhancements/blob/master/enhancements/support-for-realtime-kernel.md).
-
-We propose continuing the trail blazed with the RT kernel by adding additional RPMs to `machine-os-content` that aren't part of the base OS "image", but can be installed later.  This is how `kernel-rt` works today; we added a `kernel-rt.rpm` that is committed to the container.  In the future though, we may instead ship a separate `machine-os-extensions` container, or something else.  The only API stable piece here is the `MachineConfig` field (same as for the `kernelType: realtime`).
-
-See additional details in: https://github.com/openshift/enhancements/pull/317
+See additional details about RHCOS extensions in general in: https://github.com/openshift/enhancements/pull/317
 
 **So What do we want to do with this?**
 
@@ -122,7 +124,6 @@ We start by creating a container image with only the kata upstream components as
 1. ~20 mb extra, installed in the host, for those who'd be using kata runtime
 2. machine-os-content would still carry this until there is a separate machine-os-content- extensions container
 
-This approach has a dependency on the extensions framework being delivered into Openshift.
 
 
 ### KataContainer Operator development
