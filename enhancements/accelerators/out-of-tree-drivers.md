@@ -32,7 +32,7 @@ superseded-by:
 
 ## Open Questions [optional]
 
-1. Are users willing to provide precompiled DriverContainers (We have already some commitments)?  This helps immensely in disconnected environments and only validated combinations of driver + kernel would be e.g. provided. Source instal should be the fallback solution
+1. Are users willing to provide precompiled DriverContainers (We have already some commitments)?  This helps immensely in disconnected environments and only validated combinations of driver + kernel would be e.g. provided. Source install should be the fallback solution
 
 ## Summary
 
@@ -53,7 +53,7 @@ DriverContainers are used more and more in cloud-native environments, especially
  
 DriverContainers work on various container capable Linux distributions.
  
-With DriverContainers the host stays always "clean", and does not classh with different library versions or binaries on the host. Prototyping is far more easier, updates are done by pulling a new container with the loading and unloading done by the DriverContainer with checks on /proc and /sys and other files to make sure that all traces are removed).
+With DriverContainers the host stays always "clean", and does not clash with different library versions or binaries on the host. Prototyping is easier, updates are done by pulling a new container with the loading and unloading done by the DriverContainer with checks on /proc and /sys and other files to make sure that all traces are removed).
 
 ## Current Solutions
 
@@ -121,7 +121,7 @@ We want to come up with a unified solution that works for our customers across R
  
 #### Day-2 DriverContainer Management OpenShift
  
-More and more customers/partners want to enable hardware and or software on OpenShift that need kernel drivers, which are currently not (and may never be) upstream and out-of-tree. 
+More and more customers/partners want to enable hardware and or software on OpenShift that need kernel drivers, which are currently (and maybe forever) out-of-tree and not upstream aka in-tree. 
 
 We want to provide a unified way to support out-of-tree kernel drivers (multiple) on OpenShift day-2. It has to work for classical (RHEL7, 8, Fedora) and container based operating systems (RHCOS, FCOS) in the same way. 
 
