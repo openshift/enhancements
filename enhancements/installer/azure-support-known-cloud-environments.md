@@ -26,7 +26,14 @@ superseded-by:
 
 ## Summary
 
-As an administrator, I would like to deploy OpenShift 4 clusters to non-public Azure clouds. There are various known Azure clouds in addition to the `AzurePublicCloud` available to users, including but not limited to `AzureUSGovernmentCloud` etc. and requires the cluster to use different Azure API endpoints. The user should be allowed to provide the name of the Azure cloud and the installer and the cluster operators should use the correct API endpoints for that provided cloud.
+As an administrator, I would like to deploy OpenShift 4 clusters to
+non-public Azure clouds. There are various known Azure clouds in
+addition to the `AzurePublicCloud` available to users, including but
+not limited to `AzureUSGovernmentCloud` etc. and requires the cluster
+to use different Azure API endpoints. The user should be allowed to
+provide the name of the Azure cloud and the installer and the cluster
+operators should use the correct API endpoints for that provided
+cloud.
 
 ## Motivation
 
@@ -41,7 +48,15 @@ As an administrator, I would like to deploy OpenShift 4 clusters to non-public A
 
 ## Proposal
 
-The installer will allow the users to specify the name of the Azure cloud using the install-config.yaml. The value will be restricted to one of the known [names](https://github.com/Azure/go-autorest/blob/9132adfc9db3007653dccb091b6a6c8e09b74ef5/autorest/azure/environments.go#L34-L39). When no cloud is specified the installer will default to `AzurePublicCloud`. The installer will use the endpoints pre-defined in the Azure SDK for the specified clouds to communicate with Azure APIs to perform validations, create machineset objects, and configuring the terraform `azurerm` provider.
+The installer will allow the users to specify the name of the Azure
+cloud using the install-config.yaml. The value will be restricted to
+one of the known
+[names](https://github.com/Azure/go-autorest/blob/9132adfc9db3007653dccb091b6a6c8e09b74ef5/autorest/azure/environments.go#L34-L39). When
+no cloud is specified the installer will default to
+`AzurePublicCloud`. The installer will use the endpoints pre-defined
+in the Azure SDK for the specified clouds to communicate with Azure
+APIs to perform validations, create machineset objects, and
+configuring the terraform `azurerm` provider.
 
 When using different Azure cloud, the cluster operators also need the discover the information, therefore, the installer will make these available using the config.openshift.io/v1 Infrastructure object. The cluster operators can then use Azure cloud name from the object to configure the Azure SDK to use the corresponding endpoints for communications.
 
@@ -71,7 +86,7 @@ type AzurePlatformStatus struct {
 	// If empty, the value is same as ResourceGroupName.
 	// +optional
 	NetworkResourceGroupName string `json:"networkResourceGroupName,omitempty"`
-    
+
 	// cloudName is the name of the Azure cloud environment which can be used to configure the Azure SDK
 	// with the appropriate Azure API endpoints.
 	// If empty, consumers should default to AzurePublicCloud`.
@@ -92,7 +107,15 @@ const (
 
 #### Kube Cloud Config Controller
 
-Since various kubernetes components like the kube-apiserver, kubelet (machine-config-operator), kube-controller-manager, cloud-controller-managers use the `.spec.cloudConfig` Config Map reference for cloud provider specific configurations, a new controller kube-cloud-config was introduced previously. The controller will perform the task of stitching configuration from Infrastructure object with the rest of the cloud config, such that all the kubernetes components can continue to directly consume a Config Map for configuration.
+Since various kubernetes components like the kube-apiserver, kubelet
+(machine-config-operator), kube-controller-manager,
+cloud-controller-managers use the `.spec.cloudConfig` Config Map
+reference for cloud provider specific configurations, a new controller
+kube-cloud-config was introduced previously. The controller will
+perform the task of stitching configuration from Infrastructure object
+with the rest of the cloud config, such that all the kubernetes
+components can continue to directly consume a Config Map for
+configuration.
 
 The controller will use the `cloudName` from the Infrastructure object to set the [`cloud`](https://github.com/kubernetes/kubernetes/blob/89ba90573f163ee3452b526f30348a035d54e870/staging/src/k8s.io/legacy-cloud-providers/azure/auth/azure_auth.go#L45-L46) field for the Azure cloud config.
 

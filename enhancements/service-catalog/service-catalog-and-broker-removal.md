@@ -199,21 +199,21 @@ N/A
 ### Test Plan
 
 #### cluster-svcat-apiserver-operator
- - add tests to verify apiservice and associated objects are removed
+- add tests to verify apiservice and associated objects are removed
 
 #### cluster-svcat-controller-manager-operator
- - add tests to verify controller-manager and associated objects are removed
+- add tests to verify controller-manager and associated objects are removed
 
 #### Upgrades
- - upgrade testing will be crucial for this feature
- - if there are tests written for upgrades, we will want to add to them
+- upgrade testing will be crucial for this feature
+- if there are tests written for upgrades, we will want to add to them
 
 ### Graduation Criteria
 
 The Service Catalog and Brokers have reached the removal stage of the graduation
 criteria.
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 - In 4.1, the Service Catalog and Brokers were marked as deprecated in the
   documentation, see the [release notes](https://docs.openshift.com/container-platform/4.1/release_notes/ocp-4-1-release-notes.html).

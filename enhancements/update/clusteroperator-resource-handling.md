@@ -42,7 +42,7 @@ of the data required to resolve the issue via must-gather.
 
 ### Goals
 
-1. allow collection of debugging data for failed installs using normal tools. 
+1. allow collection of debugging data for failed installs using normal tools.
 
 ### Non-Goals
 
@@ -56,9 +56,9 @@ of the data required to resolve the issue via must-gather.
    degraded) set to `Unknown`.
 2. `clusteroperator` creation by the CVO needs to honor or update `.status.relatedResources`.  This requires updating
     status after the creation.
-3.  `clusteroperator` resources in the payload should all be created immediately regardless of where in the payload ordering
-    they are located.  This ensures that they are always present during collection.
-4.  The CVO waiting logic on `clusteroperator` remains the same.
+3. `clusteroperator` resources in the payload should all be created immediately regardless of where in the payload ordering
+   they are located.  This ensures that they are always present during collection.
+4. The CVO waiting logic on `clusteroperator` remains the same.
 
 ### Specific Implementation Option
 
@@ -73,7 +73,7 @@ This isn't a required mechanism for implementation, but it demonstrates how narr
 There is no need to modify the existing CVO logic because it's all valid.
 The individual operators are controllers so the presence of an unknown state doesn't matter.
 The new control loop doesn't fight with any individual operators because it's a create-only call with a one time status priming.
-If anything goes wrong with this control loop, the rest of the system continues to function as it does today. 
+If anything goes wrong with this control loop, the rest of the system continues to function as it does today.
 
 ### Risks and Mitigations
 
@@ -93,7 +93,7 @@ GA. When it works, we ship it.
 
 ### Upgrade / Downgrade Strategy
 
-No special handling is needed because the condition meaning remains the same.  The upgrade will simply have new 
+No special handling is needed because the condition meaning remains the same.  The upgrade will simply have new
 `clusteroperators` created at the start of the upgrade.
 
 ### Version Skew Strategy
@@ -116,4 +116,3 @@ The idea is to find the best form of an argument why this enhancement should _no
 Similar to the `Drawbacks` section the `Alternatives` section is used to
 highlight and record other possible approaches to delivering the value proposed
 by an enhancement.
-

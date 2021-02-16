@@ -105,7 +105,7 @@ reboot.
 
 This is an example of a registry-scoped ICSP:
 
-```
+```yaml
 apiVersion: operator.openshift.io/v1alpha1
 kind: ImageContentSourcePolicy
 metadata:
@@ -122,7 +122,7 @@ below in
 [`/etc/containers/registries.conf`](https://github.com/containers/image/blob/8051f86/docs/containers-registries.conf.5.md)
 on each Node:
 
-```
+```toml
 [[registry]]
   prefix = ""
   location = "registry.redhat.io"

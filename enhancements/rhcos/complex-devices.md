@@ -45,32 +45,32 @@ filesystem.
 
 ### Goals
 
- - LUKS volumes can be configured via Ignition
- - RAID (0, 1, 5, 10) volumes can be configured via Ignition
- - Custom root devices can be configured via Ignition
+- LUKS volumes can be configured via Ignition
+- RAID (0, 1, 5, 10) volumes can be configured via Ignition
+- Custom root devices can be configured via Ignition
 
 ### Non-Goals
 
- - Re-encryption of previously encrypted volumes.
- - Non-first boot operations (e.x. encryption of previously provisioned nodes
-   that were not encrypted)
- - Nested configurations
+- Re-encryption of previously encrypted volumes.
+- Non-first boot operations (e.x. encryption of previously provisioned nodes
+  that were not encrypted)
+- Nested configurations
 
 ## Proposal
 
 There are multiple different areas that will require changes to support this
 proposal.
- - FCCT gains sugar that writes a file to `/boot` specifying how to mount root
-   devices
- - Ignition gains support for LUKS devices (RAID already supported)
- - ostree work to allow re-laying the ostree on new root devices from inside the
-   initrd
- - New initrd module that runs very early in the boot process which can process
-   a file in `/boot` and determine how to mount the root device
-    * Could be as simple as passing through to Clevis for LUKS devices
-    * Or, use kernel arguments
- - New initrd module that runs in between the Ignition Disks & Files stages that
-   lays down the ostree on new root devices (`ostree-redeploy-rootfs.service`)
+- FCCT gains sugar that writes a file to `/boot` specifying how to mount root
+  devices
+- Ignition gains support for LUKS devices (RAID already supported)
+- ostree work to allow re-laying the ostree on new root devices from inside the
+  initrd
+- New initrd module that runs very early in the boot process which can process
+  a file in `/boot` and determine how to mount the root device
+  * Could be as simple as passing through to Clevis for LUKS devices
+  * Or, use kernel arguments
+- New initrd module that runs in between the Ignition Disks & Files stages that
+  lays down the ostree on new root devices (`ostree-redeploy-rootfs.service`)
 
 ### Implementation Details/Notes/Constraints
 
@@ -124,7 +124,7 @@ LUKS RHCOS currently has `rhcos.rootfs=luks`, use this to detect the upgrade cas
 All examples are in FCC format (https://github.com/coreos/fcct).
 
 How to specify a new root device:
-```
+```yaml
 variant: rhcos
 version: 1.2.0
 storage:
@@ -144,7 +144,7 @@ storage:
 ```
 
 Creating a LUKS (KeyFile) device:
-```
+```yaml
 variant: rhcos
 version: 1.2.0
 storage:
@@ -167,7 +167,7 @@ storage:
 ```
 
 Creating a Clevis (TPM2 + Tang) device:
-```
+```yaml
 variant: rhcos
 version: 1.2.0
 storage:
@@ -197,20 +197,20 @@ storage:
 ----
 
 LUKS section options:
- - luks (list of objects): the list of LUKS volumes to be configured. Every LUKS volume must have a unique device.
-   - device (string): the devices for the volume.
-   - name (string): the name to use for the resulting luks volume.
-   - label (string): the label to use for the resulting luks volume.
-   - uuid (string): the uuid to use for the resulting luks volume.
-   - cipher (string): the cipher to use for the resulting luks volume.
-   - key_file (string): the path to the key file for the resulting luks volume.
-   - hash (string): the hash to use for the resulting luks volume.
-   - clevis (list of objects):
-       - tpm2 (flag): whether to use tpm2
-       - tang (list of objects):
-           - url (string): url to the tang device
-           - thumbprint (string): the thumbprint of the tang device
-   - options (list of strings): any additional options to be passed to luksFormat.
+- luks (list of objects): the list of LUKS volumes to be configured. Every LUKS volume must have a unique device.
+  - device (string): the devices for the volume.
+  - name (string): the name to use for the resulting luks volume.
+  - label (string): the label to use for the resulting luks volume.
+  - uuid (string): the uuid to use for the resulting luks volume.
+  - cipher (string): the cipher to use for the resulting luks volume.
+  - key_file (string): the path to the key file for the resulting luks volume.
+  - hash (string): the hash to use for the resulting luks volume.
+  - clevis (list of objects):
+    - tpm2 (flag): whether to use tpm2
+    - tang (list of objects):
+      - url (string): url to the tang device
+      - thumbprint (string): the thumbprint of the tang device
+  - options (list of strings): any additional options to be passed to luksFormat.
 
 ### Risks and Mitigations
 
@@ -229,45 +229,45 @@ Consider including folks that also work outside your immediate sub-project.
 TBD
 
 High level:
- - New E2E jobs:
-   - Non-complex, non-standard root device (XFS -> EXT4)
-   - RAID root device
-   - LUKS root device w/ Clevis TPM2 + Tang bindings
- - Upgrade test:
-     - Old LUKS `rhcos.rootfs=luks`
- - New kola tests:
-    - Creating a LUKS device
-    - Creating a RAID device
-    - Mock Tang
-    - Upgrade test
-    - Seperate LUKS for root and /var/lib/container
-        - Clevis LUKS root and TPM /var/lib/container
-        - Clevis LUKS root and KEY file /var/lib/container
-    - Creating non-standard root filesystems
+- New E2E jobs:
+  - Non-complex, non-standard root device (XFS -> EXT4)
+  - RAID root device
+  - LUKS root device w/ Clevis TPM2 + Tang bindings
+- Upgrade test:
+  - Old LUKS `rhcos.rootfs=luks`
+- New kola tests:
+  - Creating a LUKS device
+  - Creating a RAID device
+  - Mock Tang
+  - Upgrade test
+  - Seperate LUKS for root and /var/lib/container
+    - Clevis LUKS root and TPM /var/lib/container
+    - Clevis LUKS root and KEY file /var/lib/container
+  - Creating non-standard root filesystems
 
 ### Graduation Criteria
 
 In order to be considered stable, RHCOS must:
 
-  - Boot & reboot completely
-  - Support custom Ignition defined root devices
-     - Setup the disks/partitioning, RAID/LUKS and file systems
-     - Support OSTree, user-data and then /var/lib/containers on different blocks
-  - Support configuring LUKS & RAID volumes via Ignition
-  - Not require user-intervention
-  - Full KOLA and E2E testing
+- Boot & reboot completely
+- Support custom Ignition defined root devices
+  - Setup the disks/partitioning, RAID/LUKS and file systems
+  - Support OSTree, user-data and then /var/lib/containers on different blocks
+- Support configuring LUKS & RAID volumes via Ignition
+- Not require user-intervention
+- Full KOLA and E2E testing
 
 ### Upgrade / Downgrade Strategy
 
-There is no downgrade. 
+There is no downgrade.
 
 Upgrade will require new boot image since this is Ignition bounded.
 
 ## Drawbacks
 
- - Pushes more users to use custom Ignition configurations
- - Greater customizability of the underlying OS exponentially expands the amount
-   of potential test cases
+- Pushes more users to use custom Ignition configurations
+- Greater customizability of the underlying OS exponentially expands the amount
+  of potential test cases
 
 ## Alternatives
 
@@ -285,4 +285,3 @@ Upgrade will require new boot image since this is Ignition bounded.
         * Initramfs content can now be difficult; makes debugging harder
         * Harder to use signed initramfs
         * Requires new bootloader entries
-

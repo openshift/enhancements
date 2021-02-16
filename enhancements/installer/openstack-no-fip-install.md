@@ -39,7 +39,13 @@ is set up, the use of floating IPs may be impossible.
 
 ### Non-Goals
 
-This enhancement does not intend to provide any guidance or features that go further than allowing customers to deploy without Floating IPs. Operations like attaching loadbalancers to the entrypoints, or any day 2 operations are beyond the scope of this enhancement. It is important to note that while we aim to support installs without external connectivity, we are not supporting installs on networks that are unable to reach the host cluster's OpenStack APIs and services.
+This enhancement does not intend to provide any guidance or features
+that go further than allowing customers to deploy without Floating
+IPs. Operations like attaching loadbalancers to the entrypoints, or
+any day 2 operations are beyond the scope of this enhancement. It is
+important to note that while we aim to support installs without
+external connectivity, we are not supporting installs on networks that
+are unable to reach the host cluster's OpenStack APIs and services.
 
 ## Proposal
 
@@ -55,7 +61,13 @@ Implementing this can be done by changing the validations and the defaults so th
 
 #### Disable `lbFloatingIP` when no external network is passed
 
-In the installer, the external network is used to provision floating IPs as well as the router. The router no longer gets created when using `machinesSubnet`, so the only changes that would need to be made are changes in the installers defaults and validations that allow the a blank `lbFloatingIP` to be pased. Then we will have to make a conditional block that does not attach the floating IP when `lbFloatingIP` is blank.
+In the installer, the external network is used to provision floating
+IPs as well as the router. The router no longer gets created when
+using `machinesSubnet`, so the only changes that would need to be made
+are changes in the installers defaults and validations that allow the
+a blank `lbFloatingIP` to be pased. Then we will have to make a
+conditional block that does not attach the floating IP when
+`lbFloatingIP` is blank.
 
 ### User Stories
 
@@ -65,7 +77,13 @@ As an enterprise OpenStack cluster administrator, I want to use the IPI installe
 
 ##### Example Usage
 
-Using the proposed feature, the user would not set `externalNetwork` or `lbFloatingIP`. Then, they will set`machinesSubnet` to the ID of an existing subnet on a provider network that they want to install the cluster onto, and set the `networking.machineNetwork` to the CIDR of that subnet. They will also set custom ports IPs for the `apiVP` and `ingressVIP` to ensure the IP they take is available. Here is an example install config:
+Using the proposed feature, the user would not set `externalNetwork`
+or `lbFloatingIP`. Then, they will set`machinesSubnet` to the ID of an
+existing subnet on a provider network that they want to install the
+cluster onto, and set the `networking.machineNetwork` to the CIDR of
+that subnet. They will also set custom ports IPs for the `apiVP` and
+`ingressVIP` to ensure the IP they take is available. Here is an
+example install config:
 
 ```yaml
 apiVersion: v1
@@ -91,9 +109,15 @@ sshKey: ssh-ed25519 AAAA...
 As an administrator with an on-prem OpenStack cluster, I want to install OpenShift in a way that does not expose API and Ingress endpoints to an external network. Instead, I would prefer to attach my own loadbalancers to the cluster entrypoints post install.
 
 
-### Test Plan   
+### Test Plan
 
-Unit tests and validations for this feature will be added to the installer to make sure that correct usage is enforced and that this feature does not hinder the usage of other features. To ensure GA readiness, it will be vetted by the QE team as well to make sure that it works with the followin use cases: self-signed certs, customer-provided networks, baremetal workers, scale-out, upgrades, and a restricted-network install.
+Unit tests and validations for this feature will be added to the
+installer to make sure that correct usage is enforced and that this
+feature does not hinder the usage of other features. To ensure GA
+readiness, it will be vetted by the QE team as well to make sure that
+it works with the followin use cases: self-signed certs,
+customer-provided networks, baremetal workers, scale-out, upgrades,
+and a restricted-network install.
 
 ### Graduation Criteria
 

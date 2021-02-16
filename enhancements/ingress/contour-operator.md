@@ -49,7 +49,7 @@ status: implementable
 
 ## Summary
 
-This enhancement proposal is for adding an operator to manage [Contour](https://projectcontour.io/). 
+This enhancement proposal is for adding an operator to manage [Contour](https://projectcontour.io/).
 Contour has been chosen for implementing [Service APIs](https://kubernetes-sigs.github.io/service-apis/).
 Refer to the [OpenShift Service APIs Project Plan](https://tinyurl.com/y3jwjcp2) for additional background
 on why Contour has been selected. The operator will have its own CRD, that will initially expose limited
@@ -69,8 +69,8 @@ an operator to provide lifecycle management of the component.
 * Explore the use of an operator for managing Contour.
 * Create patterns, libraries and tooling so that Contour is of high quality, consistent in its API
 surface (common fields on CRDs, consistent labeling of created resources, etc.), yet is easy to build.
-* Build an operator that is suitable for production use of Contour. 
-  
+* Build an operator that is suitable for production use of Contour.
+
 ### Non-Goals
 
 * Replace the functionality of existing operators, i.e.
@@ -174,20 +174,20 @@ with the Contour developer community.
 
 ### Graduation Criteria
 
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
 
-##### Tech Preview -> GA 
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 - Available by default
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 N/A
 

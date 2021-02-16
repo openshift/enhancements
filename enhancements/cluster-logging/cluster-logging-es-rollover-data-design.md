@@ -31,15 +31,15 @@ status: implementable
 
 This proposal alters the data design for storing logs in Elasticsearch to co-locate logs
 to fewer indices.  It additionally leverages the [Elasticsearch rollover api](https://www.elastic.co/guide/en/elasticsearch/reference/6.8/indices-rollover-index.html) to
-help maintain the number of indices and shards in order to align with Elastic's 
-[performance](https://www.elastic.co/guide/en/elasticsearch/guide/2.x/scale.html) 
+help maintain the number of indices and shards in order to align with Elastic's
+[performance](https://www.elastic.co/guide/en/elasticsearch/guide/2.x/scale.html)
 and scaling [recommendations](https://www.elastic.co/blog/how-many-shards-should-i-have-in-my-elasticsearch-cluster).
 
 ## Motivation
 
 The initial data design for Cluster Logging segments logs by OpenShift namespace in order to facilitate multi-tenant support and data curation.  This choice was made because
 index level security was the only feature available from an open source library.  It additionally facilitated curation as full indicies could be removed when the retention period
-expired.  This means, however, at any one time, there are at least "**$noOfNamespaces * $daysRetained**" number 
+expired.  This means, however, at any one time, there are at least "**$noOfNamespaces * $daysRetained**" number
 of indices maintained by the Elasticsearch server.  Each index can additionally be sharded to spread the load across the Elasticsearch nodes.  The end
 result of this shard explosion is the Elasticsearch cluster performance is not optimized and is not capable of efficiently processing and storing logs.
 
@@ -65,8 +65,8 @@ This proposal introduces two specific changes to achieve its goals:
 * Co-located data in a few opinionated indices
 * Index management using [rollover index API](https://www.elastic.co/guide/en/elasticsearch/reference/6.3/indices-rollover-index.html)
 
-Logs of a given type (e.g. app container, infra) are separated by index.  The Cluster Logging collector writes logs to a well-known alias established by the `cluster-logging-operator`.  The ClusterLogging CR instance specifies the management policy for each log type index.  This controls: 
-* the maximum age (e.g. 7 days).  
+Logs of a given type (e.g. app container, infra) are separated by index.  The Cluster Logging collector writes logs to a well-known alias established by the `cluster-logging-operator`.  The ClusterLogging CR instance specifies the management policy for each log type index.  This controls:
+* the maximum age (e.g. 7 days).
 
 This policy is passed to the Elasticsearch CR for the `elasticsearch-operator` to manage the rollover policy.  The details of the policy are specified by the `cluster-logging-operator` and are based on the guidelines suggested by Elasticsearch.
 
@@ -91,14 +91,14 @@ Logs of a given type are co-located to the following indices:
 **Note:** Log types are further defined in [LogForwarding](./cluster-logging-log-forwarding.md).
 
 #### ClusterLogging API
-```
+```yaml
 apiVersion: "logging.openshift.io/v1"
 kind: "ClusterLogging"
 metadata:
   name: "instance"
 spec:
   logStore:
-    retentionPolicy: 
+    retentionPolicy:
       application:
         maxAge: 7d
       infra
@@ -109,7 +109,7 @@ spec:
 The `cluster-logging-operator` will utilize the ClusterLogging CR retention policy to spec
 the desired aforementioned Elasticsearch CR indexManagement.
 #### Elasticsearch API
-```
+```yaml
 apiVersion: "logging.openshift.io/v1"
 kind: "Elasticsearch"
 metadata:
@@ -130,7 +130,7 @@ spec:
     - name:  infra               #creates infra-00001 aliased infra-write
       policyRef: infra-policy         #policy applies to index patterns infra*
       aliases:
-      - infra  
+      - infra
 ```
 #### Elasticsearch Operator
 The `elasticsearch-operator` will be modified to:
@@ -140,15 +140,15 @@ The `elasticsearch-operator` will be modified to:
 * Block data ingestion if needed until initial index is seeded
 * Deploy curation CronJob for each mapping to rollover using the defined policy
 
-#### Collector 
+#### Collector
 * Update the [`fluent-plugin-viaq-data-model`](https://github.com/ViaQ/fluent-plugin-viaq_data_model) to allow defining a static index to write logs
 
 Example configuration:
-```    
+```text
   ....
    <elasticsearch_index_name>
      tag "**"
-     name_type static 
+     name_type static
      static_index_name 'app-write'
    </elasticsearch_index_name>
 ```
@@ -156,7 +156,7 @@ Example configuration:
 * The Curator Cronjob deployed by the `cluster-logging-operator` will be deprecated and eventually removed. The responsibilities for curation will be subsumed by
  implementation of Elasticsearch rollover management.
 * Curation configuration by namespace is no longer configurable and is restricted to cluster
-wide settings associated with log type 
+wide settings associated with log type
 
 ## Design Details
 
@@ -202,9 +202,9 @@ There are no current alternatives
 
 ### Commands
 #### Create Template
-```
+```console
 curl http://localhost:9200/_template/app_logs?pretty -HContent-Type:application/json -XPUT -d '{
-  "index_patterns": ["app*"], 
+  "index_patterns": ["app*"],
   "settings": {
     "number_of_shards": 1,
     "number_of_replicas": 1
@@ -215,7 +215,7 @@ curl http://localhost:9200/_template/app_logs?pretty -HContent-Type:application/
 }'
 ```
 #### Initialize Index
-```
+```console
 curl http://localhost:9200/app.container-000001?pretty -HContent-Type:application/json -XPUT -d '{
   "aliases": {
     "app-write": {"is_write_index": true},
@@ -224,18 +224,18 @@ curl http://localhost:9200/app.container-000001?pretty -HContent-Type:applicatio
 }'
 ```
 #### Insert Data
-```
+```console
 curl http://localhost:9200/app-write/_doc/0?pretty \
   -HContent-Type:application/json -XPOST -d '{"value":"1"}'
 
 ```
 #### Retrieve Data
-```
+```console
 curl http://localhost:9200/logs-app/_search?pretty \
   -HContent-Type:application/json
 ```
 #### Rollover Index
-```
+```console
 curl http://localhost:9200/app-write/_rollover?pretty \
   -HContent-Type:application/json -XPOST -d '{"conditions": {"max_docs": 1}}'
 ```

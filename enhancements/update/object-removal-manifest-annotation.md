@@ -50,7 +50,7 @@ There should be a straightforward way to remove CVO managed objects.
 When the following annotation appears in a CVO supported manifest and is set to "true" the associated object will be removed from the cluster by the CVO.
 Values other than `true` will result in a CVO failure.
 However this should never occur in a release since any value other than `true` will result in CVO CI failure.
-```
+```yaml
 apiVersion: apps/v1
 ...
 metadata:
@@ -100,7 +100,7 @@ In all cases, and as general guidance, an operator should never allow itself to 
 
 Remove the cluster-autoscaler-operator deployment.
 The existing cluster-autoscaler-operator deployment manifest 0000_50_cluster-autoscaler-operator_07_deployment.yaml is modified to contain the delete annotation:
-```
+```yaml
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -219,7 +219,7 @@ GA. When it works, we ship it.
 
 ### Upgrade / Downgrade Strategy
 
-Special consideration must be given to subsequent updates which may still contain manifests with the delete annotation. 
+Special consideration must be given to subsequent updates which may still contain manifests with the delete annotation.
 These manifests will result in `object no longer exists` errors assuming the current release had properly and fully removed the given objects.
 This enhancement proposes that it is acceptable for subsequent z-level updates to still contain the delete manifests but minor level updates should not and therefore the handling of the delete error will differ between these update levels.
 A z-level update will be allowed to proceed while a minor level update will be blocked.

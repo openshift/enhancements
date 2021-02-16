@@ -240,30 +240,30 @@ will need to be exposed through telemetry. These metrics are:
 **These metrics exist today**
 
 * MachineSet resource count
-    * This metric can be acquired from the cluster telemetry via `cluster:usage:resources:sum{resource="machinesets.machine.openshift.io"}`.
+  * This metric can be acquired from the cluster telemetry via `cluster:usage:resources:sum{resource="machinesets.machine.openshift.io"}`.
 * Cluster Autoscaler scale down count
-    * `cluster_autoscaler_scaled_down_nodes_total` - This metric has one label `reason`,
+  * `cluster_autoscaler_scaled_down_nodes_total` - This metric has one label `reason`,
     with a cardinality of 3.
 * Cluster Autoscaler scale up count
-    * `cluster_autoscaler_scaled_up_nodes_total` - This metric has no labels.
+  * `cluster_autoscaler_scaled_up_nodes_total` - This metric has no labels.
 
 **These metrics will need to be created**
 
 * Machine resource count
-    * This should be exported through the `cluster:usage:resources:sum` series with
+  * This should be exported through the `cluster:usage:resources:sum` series with
     a resource type of `machines.machine.openshift.io`.
 * MachineAutoscaler resource count
-    * This should be exported through the `cluster:usage:resources:sum` series with
+  * This should be exported through the `cluster:usage:resources:sum` series with
     a resource type of `machineautoscalers.autoscaling.openshift.io`.
 * MachineHealthCheck resource count
-    * This should be exported through the `cluster:usage:resources:sum` series with
+  * This should be exported through the `cluster:usage:resources:sum` series with
     a resource type of `machinehealthchecks.machine.openshift.io`.
 * MachineHealthCheck total nodes covered count
-    * `mapi_machinehealthcheck_nodes_covered` - This metric has no labels.
+  * `mapi_machinehealthcheck_nodes_covered` - This metric has no labels.
 * MachineHealthCheck successful remediations count
-    * `mapi_machinehealthcheck_remediation_success_total` - This metric has no labels.
+  * `mapi_machinehealthcheck_remediation_success_total` - This metric has no labels.
 * MachineHealthCheck short circuit state
-    * `mapi_machinehealthcheck_short_circuit` - This metric has no labels.
+  * `mapi_machinehealthcheck_short_circuit` - This metric has no labels.
 
 **Metric series to be exported**
 
@@ -286,26 +286,26 @@ above.
 **These alerts exist today**
 
 * machine-api-operator
-    * MachineWithoutValidNode
-    * MachineWithNoRunningPhase
+  * MachineWithoutValidNode
+  * MachineWithNoRunningPhase
 
 **These alerts will need to be created**
 
 * machine-api-operator
-    * MachineWithOldDeletionTimestamp - This alert will fire when a Machine resource
+  * MachineWithOldDeletionTimestamp - This alert will fire when a Machine resource
     is detected that has deletion timestamp that is older than 6 hours.
 * machine health check controller
-    * MachineHealthCheckUnterminatedShortCircuit - This alert will fire when the
+  * MachineHealthCheckUnterminatedShortCircuit - This alert will fire when the
     Machine Health Check has been short circuited for an extended period
     of time (initial setting would be 24 hours).
 * cluster autoscaler
-    * ClusterAutoscalerExcessiveSilentNodeCleanup - This alert will fire when the
+  * ClusterAutoscalerExcessiveSilentNodeCleanup - This alert will fire when the
     Cluster Autoscaler has silently cleaned up too many nodes in a short period
     of time (TBD on initial settings).
-    * ClusterAutoscalerUnableToScaleCPULimitReached - This alert will fire when
+  * ClusterAutoscalerUnableToScaleCPULimitReached - This alert will fire when
     the Cluster Autoscaler is unable to add more nodes due to reaching the
     maximum CPU resource threshold.
-    * ClusterAutoscalerUnableToScaleMemoryLimitReached - This alert will fire when
+  * ClusterAutoscalerUnableToScaleMemoryLimitReached - This alert will fire when
     the Cluster Autoscaler is unable to add more nodes due to reaching the
     maximum memory resource threshold.
 

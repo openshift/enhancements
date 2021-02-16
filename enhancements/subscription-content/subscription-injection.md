@@ -78,7 +78,7 @@ So that I can install RHEL content within my container via `yum install`
 
 #### Access RHEL content from a Satellite instance
 
-As a developer using OpenShift 
+As a developer using OpenShift
 I want to be able to access RHEL content from my Satellite instance
 So that I download RHEL content from my Satellite instances instead of the Red Hat CDN.
 
@@ -101,7 +101,7 @@ spec:
     apiVersion: subscription.openshift.io/v1
     kind: ClusterBundle
   title: Cluster-wide subscription bundle example
-  description: | 
+  description: |
     An example of a subscription bundle that can be injected into any workload that has the
     `subscription.openshift.io/inject-cluster-bundle: cluster` annotation in its pod spec, and
     whose service account has the `edit` or `admin` role.
@@ -175,7 +175,7 @@ receive the updated mounts for `entitlements` and `yumRepositories`.
 
 When a `ClusterBundle` object is deleted, the owner references above will ensure deletion of the
 associated objects. Non-terminated pods which inject the deleted `ClusterBundle` are not impacted.
-New pods which inject the deleted `ClusterBundle` will be rejected by an admission webhook (see 
+New pods which inject the deleted `ClusterBundle` will be rejected by an admission webhook (see
 below).
 
 #### Subscription Bundle Controller
@@ -290,7 +290,7 @@ webhook will do the following:
 4. Conduct a subject access review for the referenced `ClusterBundles` against the pod service
    account. Return an error if the pod service account does not have `get` access to the
    `ClusterBundle`.
-5. Verify that the `Secrets` referenced in `entitlements` across eligible `ClusterBundles` do not 
+5. Verify that the `Secrets` referenced in `entitlements` across eligible `ClusterBundles` do not
    contain overlapping keys. Reject admission if the secrets contain overlapping keys.
 6. Add `Volumes` in the pod for the `entitlements` referenced in the bundle which sources data via
    the projected resource CSI driver.
@@ -542,7 +542,7 @@ This feature set can be tested as follows:
 
 1. Download an OpenShift entitlement key set from the customer portal, and add it to the
    `openshift-config` namespace as the `etc-pki-entitlement` `Secret`.
-2. Create a `ClusterBundle` object 
+2. Create a `ClusterBundle` object
 2. Run a pod with the `"subscription.openshift.io/inject-cluster-bundle": cluster` annotation, and
    a UBI8 container which performs a `yum install` of a RHEL package that requires a subscription.
 
@@ -561,7 +561,7 @@ This feature will likely require Dev Preview, Tech Preview, and GA maturity leve
    secret and one yum.repo configuration.
 6. `ClusterBundle` supporting multiple `entitlements` and `yumRepositories`.
 7. Allow multiple `ClusterBundles` to be injected into a workload.
-8. Allow auto-injection of `ClusterBundles` into all workloads. 
+8. Allow auto-injection of `ClusterBundles` into all workloads.
 
 #### Dev Preview
 

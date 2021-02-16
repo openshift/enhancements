@@ -28,7 +28,7 @@ superseded-by:
 
 ## Summary
 
-We want to include the upstream CSI Cloning feature in OpenShift. 
+We want to include the upstream CSI Cloning feature in OpenShift.
 
 ## Motivation
 
@@ -69,7 +69,7 @@ This feature is described upstream at:
 This enhancement requires both of the following:
 
 * Kubernetes 1.16 rebase
-* Upstream release of `csi-external-provisioner`. 
+* Upstream release of `csi-external-provisioner`.
 
 The external provisioner is not yet released, and current estimates place it near the beginning of October.
 
@@ -102,4 +102,3 @@ Additional references:
 ## Infrastructure Needed
 
 None. The csi-external-provisioner repository will be updated to include this feature.
-

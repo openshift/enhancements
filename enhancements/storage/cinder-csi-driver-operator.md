@@ -124,7 +124,12 @@ Starting from OpenShift 4.7 the installation will include next steps:
 
 - `openshift-cluster-storage-operator` checks if it runs on OpenStack, installs OpenStack Cinder CSI driver operator, starts it and monitors its status (i.e. monitors existence of the OpenStack Cinder CSI driver operator ClusterOperator CR and reports its own `openshift-cluster-storage-operator` status based on it).
 
-- OpenStack Cinder CSI driver operator starts, populates [configuration](https://github.com/kubernetes/cloud-provider-openstack/tree/master/manifests/cinder-csi-plugin) and secrets for OpenStack Cinder CSI driver and runs the CSI driver (i.e. starts Deployment with the controller parts and DaemonSet with the node parts). Additionally it creates at least one non-default StorageClass that users can use in their PVCs.
+- OpenStack Cinder CSI driver operator starts, populates
+  [configuration](https://github.com/kubernetes/cloud-provider-openstack/tree/master/manifests/cinder-csi-plugin)
+  and secrets for OpenStack Cinder CSI driver and runs the CSI driver
+  (i.e. starts Deployment with the controller parts and DaemonSet with
+  the node parts). Additionally it creates at least one non-default
+  StorageClass that users can use in their PVCs.
 
 - OpenStack Cinder CSI driver operator reports status of the driver in the ClusterOperator CR.
 

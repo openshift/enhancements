@@ -266,7 +266,7 @@ spec:
           port: 10514
 ```
 
-#### Validation
+### Validation
 
 Omitting `spec.logging` and omitting `spec.logging.access` have well defined
 semantics.
@@ -287,7 +287,7 @@ value is a valid port number.
 
 ### User Stories
 
-#### As a cluster administrator, I do not want access logs.
+#### As a cluster administrator, I do not want access logs
 
 Access logs are disabled by default, so no action is needed.
 

@@ -12,7 +12,7 @@ creation-date: 2019-10-12
 last-updated: 2019-10-12
 status: implemented
 see-also:
-  - "/enhancements/aws-internal-clusters.md"  
+  - "/enhancements/aws-internal-clusters.md"
 superseded-by:
   - "https://docs.google.com/document/d/1N_lbagHiuJCiOFFVpqVkenvZQESm0FWi0H3fw60Q77M"
 ---
@@ -29,7 +29,14 @@ superseded-by:
 
 ## Summary
 
-Many customer environments don't require external connectivity from the outside world and as such, they would prefer not to expose the cluster endpoints to public. Currently the OpenShift installer exposes endpoints of the cluster like Kubernetes API, or OpenShift Ingress to the Internet, although most of these endpoints can be made Internal after installation with varying degree of ease individually, creating OpenShift clusters which are Internal by default is highly desirable for users.
+Many customer environments don't require external connectivity from
+the outside world and as such, they would prefer not to expose the
+cluster endpoints to public. Currently the OpenShift installer exposes
+endpoints of the cluster like Kubernetes API, or OpenShift Ingress to
+the Internet, although most of these endpoints can be made Internal
+after installation with varying degree of ease individually, creating
+OpenShift clusters which are Internal by default is highly desirable
+for users.
 
 Specifically for GCP, this enhancement requires implementation of internal load balancers, which were not an initial feature on the GCP platform.
 
@@ -45,7 +52,12 @@ There is no day-two operation for making an existing cluster private. No additio
 
 ## Proposal
 
-Installer allow users to provide a list of subnets that should be used for the cluster. Since there is an expectation that networking is being shared, the installer cannot modify the networking setup (i.e. the route tables for the subnets or the VPC options like DHCP etc.) but, changes required to the shared resources like Tags that do not affect the behavior for other tenants of the network will be made.
+Installer allow users to provide a list of subnets that should be used
+for the cluster. Since there is an expectation that networking is
+being shared, the installer cannot modify the networking setup
+(i.e. the route tables for the subnets or the VPC options like DHCP
+etc.) but, changes required to the shared resources like Tags that do
+not affect the behavior for other tenants of the network will be made.
 
 The installer validates the assumptions about the networking setup.
 
@@ -95,13 +107,13 @@ The cluster still requires access to the Internet.
 
 ##### Internal Load Balancers and Instance Groups
 
-The GCP platform was originally setup to use only network load balancers (NLBs) in order to ensure necessary health checks, but it is not possible to limit access to external load balancers based on source tags[(see GCP firewall docs)][gcp-firewall-sources]. Therefore, it is necessary to implement internal load balancers to allow access to internal instances. 
+The GCP platform was originally setup to use only network load balancers (NLBs) in order to ensure necessary health checks, but it is not possible to limit access to external load balancers based on source tags[(see GCP firewall docs)][gcp-firewall-sources]. Therefore, it is necessary to implement internal load balancers to allow access to internal instances.
 
-The Internal Load Balancer relies on Instance Groups rather than the Target Pools used by the NLB. The installer will create instance groups for each zone, even if there is no instance in that group. This difference will need to be taken into account by the [cluster-api-provider-gcp][gcp-provider]. 
+The Internal Load Balancer relies on Instance Groups rather than the Target Pools used by the NLB. The installer will create instance groups for each zone, even if there is no instance in that group. This difference will need to be taken into account by the [cluster-api-provider-gcp][gcp-provider].
 
 ###### Other Resources to Be Created Differently
 
-* Cluster IP - The cluster IP address will be internal only. 
+* Cluster IP - The cluster IP address will be internal only.
 * Forwarding rule - One forwarding rule will handle both the Kubernetes API & machine config server ports.
 * Backend service - Comprised of each zone’s instance group & (temporarily) bootstrap instance group
 * Health check- api only (see limitations)
@@ -156,7 +168,7 @@ A limitation of this design is that no health check for the machine config serve
 
 ## Alternatives
 
-Other alternatives were considered but this is the only known feasible design. As mentioned above, using external network load balancers and limiting public access with firewalls is not possible, because tagged VM instances can not be granted access through source tags. 
+Other alternatives were considered but this is the only known feasible design. As mentioned above, using external network load balancers and limiting public access with firewalls is not possible, because tagged VM instances can not be granted access through source tags.
 
 ## Infrastructure Needed
 

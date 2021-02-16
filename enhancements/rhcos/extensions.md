@@ -30,7 +30,7 @@ superseded-by:
 ## Summary
 
 This enhancement proposes a MachineConfig fragment like:
-```
+```yaml
 extensions:
   - usbguard
 ```
@@ -47,7 +47,14 @@ The `rpm-ostree` project has had as its goal from the start to re-cast RPMs as "
 
 OpenShift is already making use of this today for the [realtime kernel](https://github.com/openshift/enhancements/blob/master/enhancements/support-for-realtime-kernel.md).
 
-We propose continuing the trail blazed with the RT kernel by adding additional RPMs to `machine-os-content` that aren't part of the base OS "image", but can be installed later.  This is how `kernel-rt` works today; we added a `kernel-rt.rpm` that is committed to the container.  In the future though, we may instead ship a separate `machine-os-extensions` container, or something else.  The only API stable piece here is the `MachineConfig` field (same as for the `kernelType: realtime`).
+We propose continuing the trail blazed with the RT kernel by adding
+additional RPMs to `machine-os-content` that aren't part of the base
+OS "image", but can be installed later.  This is how `kernel-rt` works
+today; we added a `kernel-rt.rpm` that is committed to the container.
+In the future though, we may instead ship a separate
+`machine-os-extensions` container, or something else.  The only API
+stable piece here is the `MachineConfig` field (same as for the
+`kernelType: realtime`).
 
 An important way to think about this is that we can still ascribe a *single version number* to this set of content - all content is still versioned with and tested with the OS (and hence the main OpenShift 4 release image).
 
@@ -63,8 +70,8 @@ An important way to think about this is that we can still ascribe a *single vers
 
 ## Proposal
 
-1.  RHCOS build system is updated to inject `usbguard` (and other software) into `machine-os-content` as an RPM
-2.  MachineConfig gains support for `extensions` that are layered on in the same way it applies OS updates and manages `kernel-rt`
+1. RHCOS build system is updated to inject `usbguard` (and other software) into `machine-os-content` as an RPM
+2. MachineConfig gains support for `extensions` that are layered on in the same way it applies OS updates and manages `kernel-rt`
 
 ### Implementation Details/Notes/Constraints
 

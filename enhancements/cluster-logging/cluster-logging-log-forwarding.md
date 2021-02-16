@@ -39,7 +39,15 @@ This document describes the initial release goals for log forwarding. "Future pl
 
 ## Motivation
 
-Organizations desire to reuse their existing enterprise log solutions to store container logs.  Providing a declarative mechanism by which administrators define a log destination simplifies their operational burden.  They are able to take advantage of log collection infrastructure with minimal configuration changes. The cluster logging stack is able to deploy a collector to each OKD node that is configured with the necessary permissions to collect the logs, add container metadata (e.g. labels) and ship them to the specified endpoint.
+Organizations desire to reuse their existing enterprise log solutions
+to store container logs.  Providing a declarative mechanism by which
+administrators define a log destination simplifies their operational
+burden.  They are able to take advantage of log collection
+infrastructure with minimal configuration changes. The cluster logging
+stack is able to deploy a collector to each OKD node that is
+configured with the necessary permissions to collect the logs, add
+container metadata (e.g. labels) and ship them to the specified
+endpoint.
 
 ### Goals
 The specific goals of this proposal are:
@@ -63,9 +71,9 @@ The specific goals of this proposal are:
 We will be successful when:
 
 * an administrator is able to deploy their own log aggregation service
- - specifies this service as an output in the `ClusterLogForwarder` spec.
- - specifies the inputs (categories) to forward
- - the service receives the expected logs
+  - specifies this service as an output in the `ClusterLogForwarder` spec.
+  - specifies the inputs (categories) to forward
+  - the service receives the expected logs
 
 ### Non-Goals
 
@@ -181,13 +189,13 @@ The `cluster-logging-operator` will use the `ClusterLogForwarder` configuration 
 
 ### Examples CRs for some use cases
 
-#### As a cluster administrator, I want to forward to a remote service and also store logs locally.
+#### As a cluster administrator, I want to forward to a remote service and also store logs locally
 
 I want a remote copy of logs, but also I want to continue using the default elasticsearch log store:
 - I don't lose logs while the remote service is down.
 - My local users can continue to view and query the logs locally.
 
-```
+```yaml
 apiVersion: "logging.openshift.io/v1"
 kind: "ClusterLogForwarder"
 spec:
@@ -203,9 +211,9 @@ spec:
      outputs: [ SecureRemote, Default ]
 ```
 
-#### As a cluster administrator, I want to use a local syslog instance only, with no elasticsearch.
+#### As a cluster administrator, I want to use a local syslog instance only, with no elasticsearch
 
-```
+```yaml
 apiVersion: "logging.openshift.io/v1"
 kind: "ClusterLogForwarder"
 spec:
@@ -220,9 +228,9 @@ spec:
      outputs: [MyLogs]
 ```
 
-#### As a cluster administrator, I want to clearly separate where the logging stack forwards infrastructure and/or audit related logs.
+#### As a cluster administrator, I want to clearly separate where the logging stack forwards infrastructure and/or audit related logs
 
-```
+```yaml
 apiVersion: "logging.openshift.io/v1"
 kind: "ClusterLogForwarder"
 spec:
@@ -238,7 +246,7 @@ spec:
    - inputs: [audit]
      outputs: [MyAudit]
 ```
-### As a Red Hat SRE who operates OSD clusters, I want a mechanism to protect my configuration (e.g. audit log forwarding, infra logs) from non SRE administrators  of OSD but at the same time give them the opportunity to configure their own log forwarding for applications. ###
+### As a Red Hat SRE who operates OSD clusters, I want a mechanism to protect my configuration (e.g. audit log forwarding, infra logs) from non SRE administrators  of OSD but at the same time give them the opportunity to configure their own log forwarding for applications
 
 This use case will be resolved by an admissions webhook, outside of the forwarder. Such a webhook will
 * refuse requests to create/modify pipelines with `infrastructure` or `audit` inputs except for a special role/user representing the SRC
@@ -290,7 +298,7 @@ Note: by driving functional tests from `go test` we can get coverage stats integ
 
 ### Graduation Criteria
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 Essential:
 - Refactor existing TP implementation to implement new API.
@@ -325,7 +333,7 @@ In future upgrades where operator+operand versions may be temporarily mismatched
 
 | release|Description|
 |---|---|
-|4.3| **Tech Preview** - Initial release supporting `Elasticsearch` and Fluentd `forward` 
+|4.3| **Tech Preview** - Initial release supporting `Elasticsearch` and Fluentd `forward`
 
 ## Drawbacks
 Drawbacks to providing this enhancement are:
@@ -344,11 +352,11 @@ Provide a recipe for customer's to deploy their own log collector to move the re
 ## Future plans
 As well as serving the current GA requirements, the log forwarding API has been designed with the following future requirements in mind.
 
-### Stand-alone log forwarding. ###
+### Stand-alone log forwarding
 
 Deploy log forwarding without deploying the entirety of the cluster logging infrastructure (e.g. Kibana, Elasticsearch) Forwarding will be a stand-alone system independent of any log store. This decoupling will let us test forwarding separately, and let customers to switch off our managed store entirely while still using a managed and supported forwarder.
 
-### As a team lead (tenant), I’d like to configure secure log forwarding to the tool of my team's choice, separate from global config. ###
+### As a team lead (tenant), I’d like to configure secure log forwarding to the tool of my team's choice, separate from global config
 
 Introduce a namespace-scoped LogForwarder. The API is a restricted version of the ClusterLogForwarder API:
 - can't use infrastructure or audit inputs
@@ -356,7 +364,7 @@ Introduce a namespace-scoped LogForwarder. The API is a restricted version of th
 
 Although there could be many `LogForwarder` objects, there is still only one collector. The operator would join all the configurations and compile them to a single collector configuration. It would also enforce the limitations of namespace-scoped forwarders.
 
-### I want to configure log forwarding to include/exclude logs on k8s labels. ###
+### I want to configure log forwarding to include/exclude logs on k8s labels
 
 Allow user-defined named inputs in addition to the built in application, infrastructure, audit.
 User inputs can select logs based on:
@@ -365,7 +373,7 @@ User inputs can select logs based on:
 
 User defined inputs could also be extended to allow per-record filtering and transformations (e.g. using regular expressions), but we haven't though much about that yet.
 
-### I want many namespace-scoped forwarders to share the same remote logging connection ###
+### I want many namespace-scoped forwarders to share the same remote logging connection
 Having every namespace define it's own log forwarding outputs may create a large number of connections from the underlying collector. In many cases you would like to define a single Output destination (e.g. for "ImportantApplications"), but allow each namespace to define for itself which applications are "Important" by creating pipelines to a shared ImportantApplications output.
 
 The solution is to define a "shared output" API. This has the same configuration as an `output` entry in the ClusterLogForwarder API, but can be deployed as a separate object. Any forwarder configuration can refer to the output as "<namespace>/<name>", the cluster logging controller will collect all pipelines referring to that name, and generate collector configuration

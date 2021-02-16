@@ -19,11 +19,11 @@ creation-date: 2019-11-14
 last-updated: 2019-11-26
 status: not implemented
 see-also:
-  - 
+  -
 replaces:
   - https://github.com/openshift/enhancements/pull/90
 superseded-by:
-  - 
+  -
 ---
 
 # Config required for Baremetal IPI deployments
@@ -53,7 +53,7 @@ this CR would be read by the MAO and used to generate some other configuration
 parameters. All of these values (user provided and MAO derived) need to be
 passed in as env vars to the containers that are part of the metal3 cluster
 before starting the containers. In most cases, the containers will not start
-without these init configs available as env vars. 
+without these init configs available as env vars.
 
 For a background on the work being done for BareMetal IPI installs please refer
 to [2] for the necessary context for the enhancements proposed here.
@@ -75,7 +75,7 @@ This enhancement request proposes to add a new CR for configs required only for
 the provisioning service to PXE boot a baremetal server and make it available as a
 BareMetal host. The configurations in this baremetal provisioning CR, are seperate
 from the configuration in the BareMetalHost CR. This new CR will allow for setting
-some sane defaults for these configurations with the ability to overrride them if 
+some sane defaults for these configurations with the ability to overrride them if
 required. After the baremetal server is provisioned, the configurations in the
 BareMetalHost CR contain information to connect to the controller and also to
 fulfill a Machine.
@@ -138,7 +138,7 @@ hardware and network requirements.
 
 2. As an OpenShift Administrator, I want Baremetal IPI deployments to take place without
 manual workarounds like creating a ConfigMap for the config (which is the current approach
-being used in 4.2 and 4.3.) 
+being used in 4.2 and 4.3.)
 
 ## Design Details
 
@@ -161,7 +161,7 @@ which are not values that should be configured by the end user via BareMetalHost
 The configs described in this enhancement doc would be part of the Spec field of the CR.
 Only the ProvisioningDHCPRange field can change after installtion, so this will be
 marked as editable. All other config items will be marked as not editable.
- 
+
 ### Test Plan
 
 The test plan should involve making sure the openshift/installer generates
@@ -192,7 +192,7 @@ To ensure a hitless upgrade from 4.3 to 4.4, the implementation in 4.4 would try
 read the configuration from the new CR and the ConfigMap. If MAO is unable to find the
 provsioning configuration in the new CR, it will fallback to reading it from the ConfigMap.
 And, this decision will be made per config item and not based just on the presence of the
-new CR. 
+new CR.
 
 [1] - https://github.com/openshift/enhancements/pull/90
 [2] - https://github.com/openshift/enhancements/pull/102

@@ -67,9 +67,9 @@ clusters and MachineConfigPools will need to be configurable to run either kerne
 
 ## Proposal
 
-1.  Include the `kernel-rt` packages in the `machine-os-content` image
-2.  Provide tunable in MachineConfig that selects the type of kernel to use
-3.  Do initial tuning of RHCOS node via `tuned` profiles after real-time kernel is applied
+1. Include the `kernel-rt` packages in the `machine-os-content` image
+2. Provide tunable in MachineConfig that selects the type of kernel to use
+3. Do initial tuning of RHCOS node via `tuned` profiles after real-time kernel is applied
 
 ### User Stories
 
@@ -144,7 +144,7 @@ The proposal is to include the `kernel-rt` packages in the standard `machine-os-
 image.  They **WILL NOT** be included as part of the ostree commit, but rather
 as separate files within the image.  Example:
 
-```
+```console
 $ sudo podman pull quay.io/openshift-release-dev/ocp-v4.0-art-dev:realtime
 Trying to pull quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:realtime...
 Getting image source signatures
@@ -179,7 +179,7 @@ kernel to be used.
 
 Example MachineConfig:
 
-```
+```yaml
 apiVersion: machineconfiguration.openshift.io/v1
 kind: MachineConfig
 metadata:
@@ -235,7 +235,7 @@ For this feature to be considered stable:
 
 - Nodes using `kernel-rt` packages should continue to use `kernel-rt` packages through upgrades
 - Nodes using `kernel-rt` packages should continue to use `kernel-rt` packages after a downgrade.
-    - **WARNING**: downgrading a cluster to a previous version that does not have real-time kernel support is unsupported.
+  - **WARNING**: downgrading a cluster to a previous version that does not have real-time kernel support is unsupported.
 
 ### Version Skew Strategy
 

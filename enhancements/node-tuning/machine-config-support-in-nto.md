@@ -51,28 +51,28 @@ to achieve requested tuning.
 
 These tuned profiles are written with RHEL rather than RHCOS in mind, therefore
 host modifications such as kernel boot parameters becomes problematic on RHCOS.
-Support for MachineConfigPools/MachineConfigs in the Node Tuning Operator can 
+Support for MachineConfigPools/MachineConfigs in the Node Tuning Operator can
 overcome these issues on RHCOS.
 
 ### Goals
 
-- [ ] The ability to target MachineConfigPools from the 
+- [ ] The ability to target MachineConfigPools from the
   [Tuned API](https://github.com/openshift/cluster-node-tuning-operator/blob/master/pkg/apis/tuned/v1/tuned_types.go)
   the appropriate MachineConfigs based on the calculated kernel boot parameters.
-- [ ] The ability to roll-back the previous kernel settings on the removal of 
+- [ ] The ability to roll-back the previous kernel settings on the removal of
   rules that target a MachineConfigPool.
 - [ ] Minimize the reboots of the cluster nodes to the necessary minimum.  The
   necessary minimum depends on the underlying Machine Config Operator handling
   of new MachineConfigs and should be a single reboot.
-- [ ] In clusters installed using the 4.5 installer or higher, this new 
+- [ ] In clusters installed using the 4.5 installer or higher, this new
   functionality must not cause extra node reboots on the Node Tuning Operator
   upgrades.
 
 ### Non-Goals
 
 - Does not support targetting MachineConfigPools on non-RHCOS machines.
-- Does not protect the admins from the issues that might results using this 
-  functionality when grouping machines of different hardware specifications 
+- Does not protect the admins from the issues that might results using this
+  functionality when grouping machines of different hardware specifications
   into the same MachineConfigPool.
 
 ## Proposal

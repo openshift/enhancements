@@ -8,7 +8,7 @@ reviewers:
   - "@wking"
 approvers:
   - "@russelb"
-creation-date: 2020-08-26 
+creation-date: 2020-08-26
 last-updated: 2020-08-26
 status: informational
 ---
@@ -47,8 +47,8 @@ coordination is also required in this case.
 All processes that wish to listen on a host port MUST
 
 - Have an entry in the table below
-- be in a [documented range](https://github.com/openshift/openshift-docs/blob/master/modules/installation-network-user-infra.adoc), 
-  if they are intended to be reachable 
+- be in a [documented range](https://github.com/openshift/openshift-docs/blob/master/modules/installation-network-user-infra.adoc),
+  if they are intended to be reachable
 - declare that port in their `Pod.Spec`
 
 Localhost-only ports SHOULD be outside of this range, to leave room.
@@ -64,9 +64,19 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 
 | Port  | Process   | Owning Team | Since | Notes |
 |-------|-----------|-------------|-------|-------|
+| 80    | haproxy   | net edge    | 3.0 | HTTP routes; baremetal only; only on nodes running router pod replicas |
+| 443   | haproxy   | net edge    | 3.0 | HTTPS routes; baremetal only; only on nodes running router pod replicas |
+| 1936  | openshift-router | net edge | 3.0 | healthz/stats; baremetal only; only on nodes running router pod replicas |
 | 2379  | etcd      | etcd || control plane only |
 | 2380  | etcd      | etcd || control plane only |
+| 3306  | mariadb   | kni | 4.4 | baremetal ironic DB, control plane only |
+| 5050  | ironic-inspector | kni | 4.4 | baremetal provisioning, control plane only |
+| 6080  | cluster-kube-apiserver-operator | apiserver || control plane only |
+| 6180  | httpd     | kni | 4.4 | baremetal provisioning server, control plane only |
+| 6181  | httpd     | kni | 4.7 | baremetal image cache, control plane only |
+| 6385  | ironic-api   | kni | 4.4 | baremetal provisioning, control plane only |
 | 6443  | kube-apiserver | apiserver || control plane only |
+| 8089  | ironic-conductor | kni | 4.4 | baremetal provisioning, control plane only |
 | 9001  | machine-config-daemon oauth proxy | node || metrics |
 | 9100  | node-exporter | monitoring || metrics |
 | 9101  | openshift-sdn kube-rbac-proxy | sdn || metrics, openshift-sdn only |
@@ -90,6 +100,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 10257 | kube-controller-manager | apiserver || metrics, healthz, control plane only |
 | 10259 | kube-scheduler | apiserver || metrics, control plane only |
 | 10357 | cluster-policy-controller | apiserver || healthz, control plane only |
+| 10443 | haproxy   | net edge    | 3.0 | HAProxy internal `fe_no_sni` frontend; localhost only; baremetal only; only on nodes running router pod replicas |
+| 10444 | haproxy   | net edge    | 3.0 | HAProxy internal `fe_sni` frontend; localhost only; baremetal only; only on nodes running router pod replicas |
 | 17697 | kube-apiserver | apiserver || ?, control plane only |
 | 22623 | machine-config-server | node || control plane only |
 | 22624 | machine-config-server | node || control plane only |
@@ -101,6 +113,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 
 | Port  | Process   | Owning Team | Since | Notes |
 |-------|-----------|-------|-------|-------|
+| 500   | ovn-kubernetes IPsec | sdn | 4.7 | ovn-kubernetes only |
+| 4500  | ovn-kubernetes IPsec | sdn | 4.7 | ovn-kubernetes only |
 | 4789  | openshift-sdn vxlan | sdn | 3.0 | openshift-sdn only |
 | 6081  | ovn-kubernetes geneve | sdn | 4.3 | ovn-kubernetes only |
 
@@ -110,10 +124,12 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 |-------|-----------|-------------|-------|-------|
 | 4180  | machine-config-daemon oauth-proxy | node ||
 | 8797  | machine-config-daemon | node |4.0| metrics |
+| 9443 | kube-controller-manager | workloads || recovery-controller|
 | 9977  | etcd | etcd || ? |
 | 10248 | kubelet | node || healthz |
 | 10300 | various CSI drivers | storage | 4.6 | healthz |
 | 10301 | various CSI drivers | storage | 4.6 | healthz |
+| 11443 | kube-scheduler | workloads || recovery-controller|
 | 29102 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
 | 29103 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
 
@@ -124,7 +140,7 @@ If a feature is completely removed, (not just deprecated), then any now-free
 ports should be noted here, along with the version in which they were removed.
 
 
-## Future 
+## Future
 
 We can enforce this in an automated fashion in the future. We should write tests
 that ensure

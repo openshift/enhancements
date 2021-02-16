@@ -52,15 +52,40 @@ As an administrator, I would like to deploy OpenShift 4 clusters to AWS GovCloud
 
 ## Proposal
 
-To support custom endpoints for AWS APIs, the install-config would allow the users to provide a list of endpoints for various services. When the custom endpoints are set, the installer will validate that the endpoints are reachable. The endpoints will be used by the installer to call AWS APIs for performing various actions like validations, creating the MachineSet objects, and also configuring the terraform AWS provider.
+To support custom endpoints for AWS APIs, the install-config would
+allow the users to provide a list of endpoints for various
+services. When the custom endpoints are set, the installer will
+validate that the endpoints are reachable. The endpoints will be used
+by the installer to call AWS APIs for performing various actions like
+validations, creating the MachineSet objects, and also configuring the
+terraform AWS provider.
 
 When custom endpoints are provided for AWS APIs, the cluster operators also need the discover the information, therefore, the installer will make these available using the `config.openshift.io/v1` `Infrastructure` object. The cluster operators can then use the custom endpoints from the object to configure the AWS SDK to use the corresponding endpoints for communications.
 
-Since various kubernetes components like the kube-apiserver, kubelet (machine-config-operator), kube-controller-manager, cloud-controller-managers use the `.spec.cloudConfig` Config Map reference for cloud provider specific configurations, a new controller `cluster-kube-cloud-config-operator` will be introduced. The controller will perform the task of stitching the custom endpoints with the rest of the cloud config, such that all the kubernetes components can continue to directly consume a Config Map for configuration. This controller will also perform the specialized stitching on the bootstrap host for control-plane kubelet and also actively reconcile the state in the cluster.
+Since various kubernetes components like the kube-apiserver, kubelet
+(machine-config-operator), kube-controller-manager,
+cloud-controller-managers use the `.spec.cloudConfig` Config Map
+reference for cloud provider specific configurations, a new controller
+`cluster-kube-cloud-config-operator` will be introduced. The
+controller will perform the task of stitching the custom endpoints
+with the rest of the cloud config, such that all the kubernetes
+components can continue to directly consume a Config Map for
+configuration. This controller will also perform the specialized
+stitching on the bootstrap host for control-plane kubelet and also
+actively reconcile the state in the cluster.
 
 Currently the installer only allows users to specify the regions that has RHCOS published AMIs, and therefore to support custom regions, the installer will allow users to specify any region string as long as the users also provide the custom endpoints for some predetermined list of services that are necessary for successful installs.
 
-To support booting machines in custom regions, the installer will always copying AMIs from `us-east-1` to the region where the user is installing, encrypting the AMI using the user's default account KMS key. This is has known limitations for increased AMI copy times and also increased cost of transfer across regions. If the target region doesn't support copying AMI from `us-east-1` region, the users are expected to provide the source AMI in the install-config using the platform [configuration][install-config-aws-ami]. The installer will use the AMI provided and copy-encrypt to an AMI for the cluster, keeping the behavior consistent with other workflows.
+To support booting machines in custom regions, the installer will
+always copying AMIs from `us-east-1` to the region where the user is
+installing, encrypting the AMI using the user's default account KMS
+key. This is has known limitations for increased AMI copy times and
+also increased cost of transfer across regions. If the target region
+doesn't support copying AMI from `us-east-1` region, the users are
+expected to provide the source AMI in the install-config using the
+platform [configuration][install-config-aws-ami]. The installer will
+use the AMI provided and copy-encrypt to an AMI for the cluster,
+keeping the behavior consistent with other workflows.
 
 ### User Stories
 
@@ -207,18 +232,55 @@ type AWSPlatformStatus struct {
 #### Global configuration Alternatives
 
 1. Create another global configuration for Cloud API endpoints that stores information like the endpoints themselves, trusted bundles etc.
-Infrastructure global configuration already performs the function of tracking infrastructure related configuration and another global configuration that stores a part of the information doesn't seem like a great option. But it might allow validations and status observation by an independent controller.
+
+   Infrastructure global configuration already performs the function
+   of tracking infrastructure related configuration and another global
+   configuration that stores a part of the information doesn't seem
+   like a great option. But it might allow validations and status
+   observation by an independent controller.
 
 2. Configure each individual cluster operator
-There are five cluster operators that would need to be configured namely, cluster-kube-controller-manager, cluster-ingress-operator, cluster-machine-api-operator, cluster-image-registry-operator, cluster-credential-operator. There might be more operators like cluster-network-operator that might require access to the AWS APIs in the future to control the security group rules. Also various OLM operators that interact with AWS APIs will need their own configuration. Configuring all these separately is not a great UX for installer and a user who wants to modify the cluster to use API endpoints as day-2 operation.
 
-3. AWS has a `cloud.conf` file as mentioned in [upstream docs][k8s-cloud-conf] which is logically already an API supported and the file format already represents the canonical representation of this information.
-The cloud configuration doesn't translate well to what most of the OpenShift operators need to configure the clients for cloud APIs. The cloud config includes a lot more information than just configuring the clients like instance prefixes for LBs, information about the vpc, subnets etc. which the operators operators don't need. These values in the configuration makes it very difficult to abstract away information which most of the operators do not need.
-Secondly, if there ends up an special configuration required to configure the OpenShift operators for a cloud, we will end up conflicting with kube-cloud-controller code to make the ask valid as since it's purpose upstream is to configure k8s-cloud-controllers only.
+   There are five cluster operators that would need to be configured
+   namely, cluster-kube-controller-manager, cluster-ingress-operator,
+   cluster-machine-api-operator, cluster-image-registry-operator,
+   cluster-credential-operator. There might be more operators like
+   cluster-network-operator that might require access to the AWS APIs
+   in the future to control the security group rules. Also various OLM
+   operators that interact with AWS APIs will need their own
+   configuration. Configuring all these separately is not a great UX
+   for installer and a user who wants to modify the cluster to use API
+   endpoints as day-2 operation.
+
+3. AWS has a `cloud.conf` file as mentioned in [upstream
+   docs][k8s-cloud-conf] which is logically already an API supported
+   and the file format already represents the canonical representation
+   of this information.
+
+   The cloud configuration doesn't translate well to what most of the
+   OpenShift operators need to configure the clients for cloud
+   APIs. The cloud config includes a lot more information than just
+   configuring the clients like instance prefixes for LBs, information
+   about the vpc, subnets etc. which the operators operators don't
+   need. These values in the configuration makes it very difficult to
+   abstract away information which most of the operators do not need.
+   Secondly, if there ends up an special configuration required to
+   configure the OpenShift operators for a cloud, we will end up
+   conflicting with kube-cloud-controller code to make the ask valid
+   as since it's purpose upstream is to configure
+   k8s-cloud-controllers only.
 
 ### Cluster Kube Cloud Config Operator
 
-Since various kubernetes components like the kube-apiserver, kubelet (machine-config-operator), kube-controller-manager, cloud-controller-managers use the `.spec.cloudConfig` Config Map reference from the global `Infrastructure` configuration for cloud provider specific configurations. Introduction of new controller `cluster-kube-cloud-config-operator` allows performing the task of stitching the custom endpoints with the rest of the cloud config, such that all the kubernetes components can continue to directly consume a Config Map for configuration.
+Since various kubernetes components like the kube-apiserver, kubelet
+(machine-config-operator), kube-controller-manager,
+cloud-controller-managers use the `.spec.cloudConfig` Config Map
+reference from the global `Infrastructure` configuration for cloud
+provider specific configurations. Introduction of new controller
+`cluster-kube-cloud-config-operator` allows performing the task of
+stitching the custom endpoints with the rest of the cloud config, such
+that all the kubernetes components can continue to directly consume a
+Config Map for configuration.
 
 #### Boostrap host control flow
 
