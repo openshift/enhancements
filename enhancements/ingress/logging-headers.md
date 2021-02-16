@@ -162,18 +162,19 @@ spec:
 
 This format string produces log messages of the following form:
 
-```
+```text
 2020-06-10T17:48:38.013139+00:00 router-default-cd9c9d6c7-xrp5l router-default-cd9c9d6c7-xrp5l haproxy[70]: {"time":"10/Jun/2020:17:48:37.874","clientAddress":"174.19.21.82","clientPort":"33862","frontend":"fe_sni","backend":"be_secure:openshift-console:console","server":"pod:console-64ff858c-ghp2k:console:10.128.0.47:8443","request":"GET /auth/login HTTP/1.1","response":"303","requestLength":"845","responseLength":"975","requestHost":"console-openshift-console.apps.ci-ln-8cjiqnb-d5d6b.origin-ci-int-aws.dev.rhcloud.com","requestReferer":"https:\/\/console-openshift-console.apps.ci-ln-8cjiqnb-d5d6b.origin-ci-int-aws.dev.rhcloud.c","responseContentLength":"341","responseLocation":"https:\/\/oauth-openshift.apps.ci-ln-8cjiqnb-d5d6b.origin-ci-int-aws.dev.rhcloud.com\/oauth\/a"}
 ```
 
 Omitting the `spec.logging.access.httpLogFormat` field to use the default format
 string would produce log messages of the following form:
 
-```
-2020-06-10T17:43:59.327608+00:00 router-default-65dccc49cc-2cshx router-default-65dccc49cc-2cshx haproxy[71]: 174.19.21.82:33634 [10/Jun/2020:17:43:59.323] fe_sni~ be_secure:openshift-console:console/pod:console-64ff858c-ghp2k:console:10.128.0.47:8443 0/0/0/3/3 303 975 - - --VN 23/5/0/0/0 0/0 {console-openshift-console.apps.ci-ln-8cjiqnb-d5d6b.origin-ci-int-aws.dev.rhcloud.com|https://console-openshift-console.apps.ci-ln-8cjiqnb-d5d6b.origin-ci-int-aws.dev.rhcloud.c} {341|https://oauth-openshift.apps.ci-ln-8cjiqnb-d5d6b.origin-ci-int-aws.dev.rhcloud.com/oauth/a} "GET /auth/login HTTP/1.1"
+```text
+2020-06-10T17:43:59.327608+00:00 router-default-65dccc49cc-2cshx router-default-65dccc49cc-2cshx haproxy[71]: 174.19.21.82:33634 [10/Jun/2020:17:43:59.323] fe_sni~ be_secure:openshift-console:console/pod:console-64ff858c-ghp2k:console:10.128.0.47:8443 0/0/0/3/3 303 975 - - --VN 23/5/0/0/0 0/0 \
+{console-openshift-console.apps.ci-ln-8cjiqnb-d5d6b.origin-ci-int-aws.dev.rhcloud.com|https://console-openshift-console.apps.ci-ln-8cjiqnb-d5d6b.origin-ci-int-aws.dev.rhcloud.c} {341|https://oauth-openshift.apps.ci-ln-8cjiqnb-d5d6b.origin-ci-int-aws.dev.rhcloud.com/oauth/a} "GET /auth/login HTTP/1.1"
 ```
 
-#### Validation
+### Validation
 
 Omitting either `spec.logging.access.httpCaptureHeaders.request` or
 `spec.logging.access.httpCaptureHeaders.response` is valid and means no request
@@ -191,7 +192,7 @@ positive integers.
 
 ### User Stories
 
-#### As a cluster administrator, I need to configure an IngressController to capture certain HTTP request and response headers, in order to satisfy compliance requirements.
+#### As a cluster administrator, I need to configure an IngressController to capture certain HTTP request and response headers, in order to satisfy compliance requirements
 
 To satisfy this use-case, the cluster administrator can set the
 IngressController's `spec.logging.access.httpCaptureHeaders` field to capture
@@ -272,4 +273,3 @@ N/A.
 ## Implementation History
 
 ## Alternatives
-

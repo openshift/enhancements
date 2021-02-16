@@ -7,7 +7,7 @@ reviewers:
 approvers:
   - "@derekwaynecarr"
 creation-date: 2019-10-16
-last-updated: 2019-10-16
+last-updated: 2020-08-07
 status: implementable
 see-also:
 replaces:
@@ -53,14 +53,14 @@ This narrowing of scope expands the deployment options for the OpenShift OAuth s
    1. oauth - core oauth types
    2. user - core types used by oauth and authentication
 3. Update the authentication operator to install the new `oauth-apiserver`, but not wire the apiservice.
+4. Add a new `ManagingOAuthAPIServer` field to authentication's operator status field. Setting this field to true will cause `cluster-openshift-apiserver-operator` to step down.
 4. Add the code to the `cluster-openshift-apiserver-operator` tolerate apiservice management by the `cluster-authentication-operator`
-(indicated by annotation written on the apiservice) if the `cluster-authentication-operator` is available at the 4.n version.  This code will need to be 
-backported to 4.n-1.
+(indicated by an annotation written on the apiservice) if the `cluster-authentication-operator`'s `ManagingOAuthAPIServer` field is set to true.
 5. Update the `cluster-authentication-operator` to wire the apiservices.
 6. Remove the registration from the `cluster-openshift-apiserver-operator`.
 7. Remove the serving code from the `openshift-apiserver`.
 
-If we stop at any any intermediate step, we are still safe to ship.
+If we stop at any intermediate step, we are still safe to ship.
 
 ### User Stories
 
@@ -78,7 +78,7 @@ The proposal is safe to ship at any point with clearly working upgrade/downgrade
 
 If the system works, we did it.
 
-##### Removing a deprecated feature
+### Removing a deprecated feature
 
 See upgrade/downgrade.
 
@@ -87,13 +87,18 @@ See upgrade/downgrade.
 This is an interesting situation.  We want to hand control of the API over to a new process.  This is possible to do,
 however, to do it in a single release requires coordination.
 
-1. Add code in 4.(n-1) to the `cluster-openshift-apiserver-operator` that prevents it from managing an apiservice if it is "claimed"
-by the `cluster-authentication-operator` via an annotation and if the `cluster-authentication-operator` is at least at 4.n.
-2. Remove that code in 4.n.
-3. Add code to `cluster-authentication-operator` to manage the apiservices.
-4. In 4.n, the `openshift-apiserver` can remove the code serving.
+1. Add code in 4.5 to the `cluster-openshift-apiserver-operator` that prevents it from managing an apiservice if it is "claimed"
+by the `cluster-authentication-operator` via an annotation and if the `cluster-authentication-operator`'s `ManagingOAuthAPIServer` field is set to true.
+2. Remove that code in 4.7.
+3. Add code to `cluster-authentication-operator` to manage the apiservices in 4.6.
+4. In 4.7, the `openshift-apiserver` can remove the code serving.
 
-In an upgrade case, the `cluster-openshift-apiserver-operator` will yield once the `cluster-authentication-operator` picks up the serving.
+In an upgrade (from 4.5 to 4.6) case, the `cluster-openshift-apiserver-operator` will yield once the `cluster-authentication-operator` picks up the serving.
+Because the apiservice never goes unavailable, and the old `openshift-apiserver` continues serving until the new server
+starts, clients should not see any disruption.
+
+
+In a downgrade (from 4.6 to 4.5) case, the `cluster-openshift-apiserver-operator` will take over once the `cluster-authentication-operator`s `ManagingOAuthAPIServer` field is set to false.
 Because the apiservice never goes unavailable, and the old `openshift-apiserver` continues serving until the new server
 starts, clients should not see any disruption.
 

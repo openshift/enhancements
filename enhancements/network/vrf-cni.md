@@ -146,13 +146,13 @@ Basic tests can be added under openshift/origin test suite too.
 
 ### Graduation Criteria
 
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end (at least, with bare `Network Attachment Definition`)
 - End user documentation, relative API stability
 - Sufficient test coverage
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 - More testing (e2e)
 - Sufficient time for feedback

@@ -22,7 +22,7 @@ status: implementable
 
 ## Summary
 
-This enhancement proposes the procedure to collect metrics regarding the usage of Operator SDK among RedHat operators with the help of [SDK annotations][sdk_annotations] added to the operator image bundles. 
+This enhancement proposes the procedure to collect metrics regarding the usage of Operator SDK among RedHat operators with the help of [SDK annotations][sdk_annotations] added to the operator image bundles.
 
 ## Motivation
 
@@ -38,12 +38,12 @@ This proposal does not discuss:
 
 ## Proposal
 
-The [proposal][sdk_metrics_proposal] lists the bundle resources in which stamps are added indicating the use of SDK to build an operator bundle image. 
+The [proposal][sdk_metrics_proposal] lists the bundle resources in which stamps are added indicating the use of SDK to build an operator bundle image.
 
 The proposed stamps have the following format in `bundle.dockerfile` and `annotations.yaml`:
 1. operators.operatorframework.io.metrics.mediatype.v1 = “metrics+v1”
 2. operators.operatorframework.io.metrics.builder = “operator-sdk-sdkversion”
-3. operators.operatorframework.io.metrics.project_layout = “sdk_project_layout/layout_version” 
+3. operators.operatorframework.io.metrics.project_layout = “sdk_project_layout/layout_version”
 
 In CSV and CRDs, they would have the following annotations in Object Metadata:
 1. operators.operatorframework.io/builder = “operator-sdk-sdkversion”
@@ -51,7 +51,7 @@ In CSV and CRDs, they would have the following annotations in Object Metadata:
 
 For example, in case of memcached-operator having Kubebuilder layout, the labels can be written as:
 
-```
+```text
 LABEL operators.operatorframework.io.metrics.mediatype.v1 = “metrics+v1”
 LABEL operators.operatorframework.io.metrics.builder = “operator-sdk-v0.17.0”
 LABEL operators.operatorframework.io.metrics.project_layout = “go.kubebuilder.io/v2.0.0”
@@ -68,12 +68,18 @@ As OLM would be moving towards CSV-less bundles, `bundle.dockerfile` and `annota
 
 As the metrics we intend to collect on the operators are static, monitoring the operators in cluster and reporting it through the RedHat telemetry will not be required. Instead, in order to obtain this data, we could have a tool which periodically pulls the published catalog images from the image registry, extracts the bundle contents, parses the manifests and reports the data.
 
-The logic to pull the bundle image from the image registry has already been implemented by the [bundle validation library][validate_bundle_image]. After the contents of the image bundle have been extracted, we could parse the manifests (`CSV`/`bundle.dockerfile`/`annotations.yaml`) to obtain the relevant metadata before the bundle is deployed on cluster. 
+The logic to pull the bundle image from the image registry has already been implemented by the [bundle validation library][validate_bundle_image]. After the contents of the image bundle have been extracted, we could parse the manifests (`CSV`/`bundle.dockerfile`/`annotations.yaml`) to obtain the relevant metadata before the bundle is deployed on cluster.
 
-### Use of opm tooling:
+### Use of opm tooling
 With the help of `opm` tooling, the operator bundles can be extracted from bundle images.
 
-`opm index export` takes in an index image and unpacks the bundle specified by the `--package` flag. As mentioned in the [proposal][extend_bundle_validation_pr] regrading the extension of static bundle validation, with the implementation of making `--package` flag optional, all the bundle images could be unpacked and downloaded. This would enable us to parse the annotations from the manifests present in the bundle and obtain relevant statistics.
+`opm index export` takes in an index image and unpacks the bundle
+specified by the `--package` flag. As mentioned in the
+[proposal][extend_bundle_validation_pr] regrading the extension of
+static bundle validation, with the implementation of making
+`--package` flag optional, all the bundle images could be unpacked and
+downloaded. This would enable us to parse the annotations from the
+manifests present in the bundle and obtain relevant statistics.
 
 **Notes**
 1. Though most of the logic is implemented in the validation library, this process is not necessary an extension/additional feature to the existing tools as its use-case is not relevant to the users of OLM or SDK.

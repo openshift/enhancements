@@ -84,8 +84,15 @@ Implementation of this enhancement requires changes in the following repositorie
 * openshift/api
 * openshift/cluster-openshift-apiserver-operator
 
-In [config/v1/types_ingress.go](https://github.com/openshift/api/blob/master/config/v1/types_ingress.go) of [openshift/api](https://github.com/openshift/api), add new field: `appsDomain`.
-In [observe_ingresses.go](https://github.com/openshift/cluster-openshift-apiserver-operator/blob/master/pkg/operator/configobservation/ingresses/observe_ingresses.go) of [openshift/cluster-openshift-apiserver-operator](https://github.com/openshift/cluster-openshift-apiserver-operator), add logic to check if `appsDomain` is set. If that field is set, use it instead of `spec.Domain` for the value of `routingDomain`.
+In
+[config/v1/types_ingress.go](https://github.com/openshift/api/blob/master/config/v1/types_ingress.go)
+of [openshift/api](https://github.com/openshift/api), add new field:
+`appsDomain`.  In
+[observe_ingresses.go](https://github.com/openshift/cluster-openshift-apiserver-operator/blob/master/pkg/operator/configobservation/ingresses/observe_ingresses.go)
+of
+[openshift/cluster-openshift-apiserver-operator](https://github.com/openshift/cluster-openshift-apiserver-operator),
+add logic to check if `appsDomain` is set. If that field is set, use
+it instead of `spec.Domain` for the value of `routingDomain`.
 
 ### Risks and Mitigations
 

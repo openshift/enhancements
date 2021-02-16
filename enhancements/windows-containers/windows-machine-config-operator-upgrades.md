@@ -116,9 +116,9 @@ configure this new machine and apply the new version annotation. The max amount
 of unavailable nodes at a time will be dependent on the maxUnhealthy field defined
 internally by the WMCO. This field ensures that we only have maxUnhealthy number of
 nodes that are not ready during upgrades. A Windows node is not ready if it
-is missing the version annotation set by WMCO. Having limited number of unavailable 
+is missing the version annotation set by WMCO. Having limited number of unavailable
 nodes avoids the downtime of the workloads running on the Windows nodes. The maxUnhealthy
-value defaults to 1 per MachineSet minimizing the number of unavailable nodes and will 
+value defaults to 1 per MachineSet minimizing the number of unavailable nodes and will
 be configurable by the users in future releases. WMCO will not render more than the specified
 amount of Windows nodes unavailable.
 

@@ -75,18 +75,18 @@ cluster version.
 
 ## Proposal
 
-#### Part 1
+### Part 1
 Users supply kernel args to custom `MachineConfig` supplied to the install as
 currently [supported by the installer](https://github.com/openshift/installer/blob/master/docs/user/customization.md#install-time-customization-for-machine-configuration).
 Based on user needs and feedback, we can add a specific field for kernel args to
 the install-config at a later time. This would be a straight-forward translation
 from the install-config into MachineConfig resources.
 
-#### Part 2
+### Part 2
 For the nuts and bolts, there are a couple ways we could achieve no-extra-reboot
 kernel args support.
 
-##### Method 1 - append to `etc/pivot/kernel-args`
+#### Method 1 - append to `etc/pivot/kernel-args`
 
 - Update the MachineConfigServer to parse kernel args in the MachineConfigs and
   append them in the `/etc/pivot/kernel-args` file within the ignition it
@@ -110,7 +110,7 @@ Cons:
   See https://github.com/openshift/machine-config-operator/pull/245
 
 
-##### Method 2 - MCD-as-pivot packaged in RHCOS
+#### Method 2 - MCD-as-pivot packaged in RHCOS
 
 - Installer in 4.2 ships machine-config-daemon package in RHCOS host which handles [early pivot](https://github.com/openshift/machine-config-operator/pull/859).
 - [MCS inverts MachineConfig](https://github.com/openshift/machine-config-operator/pull/868) containing non-ignition part (like osImageURL,kernelArguments) during first boot in /etc/ignition-machine-config-encapsulated.json on hosts
@@ -133,7 +133,7 @@ Cons:
 - Running the MCD as a binary removes all the advantages we get from containers.
 
 
-##### Method 3 - MCD-as-pivot fed in through ignition
+#### Method 3 - MCD-as-pivot fed in through ignition
 
 - Same as method 2 except rather than packaging the MCD in RHCOS, feed it to the
   hosts via their ignition file.

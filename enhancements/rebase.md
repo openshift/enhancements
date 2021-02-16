@@ -45,25 +45,25 @@ Before the rebase you may:
 
 Clone from a personal fork of kubernetes:
 
-```
+```console
 git clone https://github.com/<user id>/kubernetes
 ```
 
 Enable push for personal fork:
 
-```
+```console
 git remote set-url --push origin git@github.com:<user id>/kubernetes.git
 ```
 
 Add a remote for upstream and fetch its branches:
 
-```
+```console
 git remote add --fetch upstream https://github.com/kubernetes/kubernetes
 ```
 
 Add a remote for the openshift fork and fetch its branches:
 
-```
+```console
 git remote add --fetch openshift https://github.com/openshift/kubernetes
 ```
 
@@ -71,7 +71,7 @@ git remote add --fetch openshift https://github.com/openshift/kubernetes
 
 The openshift branch name should have the form:
 
-```
+```text
 origin-<openshift version>-kubernetes-<kubernetes tag minus 'v' prefix>
 ```
 
@@ -80,7 +80,7 @@ name would be `origin-4.5-kubernetes-1.18.2`.
 
 Create a new branch from the upstream tag:
 
-```
+```console
 git checkout -b <name of new rebase branch> <upstream tag>
 ```
 
@@ -89,7 +89,7 @@ git checkout -b <name of new rebase branch> <upstream tag>
 To simplify access to commits made to the previous rebase branch,
 create a local tracking branch:
 
-```
+```console
 git checkout --track openshift/<name of previous rebase branch>
 ```
 
@@ -98,14 +98,14 @@ git checkout --track openshift/<name of previous rebase branch>
 Find the hash of the upstream tag (e.g. `v1.18.0-rc.1`) that the
 previous rebase branch was based on:
 
-```
+```console
 git rev-list -1 <upstream tag>
 ```
 
 The first commit in the previous rebase branch will be the one immediately following
 the commit identified by the hash of the upstream tag:
 
-```
+```console
 git log --reverse --pretty=%H --ancestry-path <hash of upstream tag>..<name of previous rebase branch> | head -n 1
 ```
 
@@ -113,7 +113,7 @@ Using the hash of the first commit of the previous rebase branch,
 generate a csv file containing the commits from the previous rebase
 branch:
 
-```
+```console
 git log <first commit hash>..<name of previous rebase branch> \
  --pretty=format:'%H,https://github.com/openshift/kubernetes/commit/%H,,%s' | \
  sed 's#,UPSTREAM: \([0-9]*\):#https://github.com/kubernetes/kubernetes/pull/\1,UPSTREAM \1:#' > \
@@ -131,7 +131,7 @@ rebase](https://docs.google.com/spreadsheets/d/10KYptJkDB1z8_RYCQVBYDjdTlRfyoXIL
 
 Assuming the local repo has the new rebase branch checked out:
 
-```
+```console
 go run k8s.io/publishing-bot/cmd/godeps-gen <(go list -m -json all | jq 'select(.Version!="v0.0.0")') > Godeps/Godeps.json
 ```
 
@@ -196,11 +196,11 @@ Make sure to commit the result of a vendoring update with `UPSTREAM: <drop>: bum
 
 Once the dependencies have been cleaned up, it's time to prepare the branch for a PR:
 
- - Clean up gofmt by running `hack/update-gofmt.sh`
-   - Where possible, apply gofmt changes to carry commits.
- - Update generated files by running `make update`
-   - This step depends on etcd being installed in the path, which can be accomplished
-     by running `hack/install-etcd.sh`.
+- Clean up gofmt by running `hack/update-gofmt.sh`
+  - Where possible, apply gofmt changes to carry commits.
+- Update generated files by running `make update`
+  - This step depends on etcd being installed in the path, which can be accomplished
+    by running `hack/install-etcd.sh`.
 
 Make sure to commit these steps separately with prefixes of `UPSTREAM: <drop>:`.
 

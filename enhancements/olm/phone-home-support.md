@@ -61,7 +61,7 @@ This enhancement proposes that OLM's [metrics package](https://github.com/operat
 
 Currently, information about `subscription syncs` are provided to OLM in the following format:
 
-```
+```text
 # HELP subscription_sync_total Monotonic count of subscription syncs
 # TYPE subscription_sync_total counter
 subscription_sync_total{installed="",name="akka-cluster-operator"} 10.0
@@ -70,7 +70,7 @@ subscription_sync_total{installed="akka-cluster-operator.v0.0.1",name="akka-clus
 
 A similar metric could be created for CSVs:
 
-```
+```text
 # HELP csv_sync_total Monotonic count of csv syncs
 # TYPE csv_sync_total counter
 csv_sync_total{name="akka", phase="Succeeded", version="0.0.1", reason="InstallSucceeded"} 1.0
@@ -93,7 +93,7 @@ In order to complete this work, an engineer will need to:
 
 - Configure Telemeter to collect metrics about Operator Health. This task involves whitelisting the metrics exposed by OLM in Telemeter.
 
- 
+
 _**Telemeter Dashboard that displays operator health**_
 
 As a OpenShift administrator, I want to be able to:
@@ -110,7 +110,7 @@ so that I can:
 
 In order to complete this work, an engineer will need to:
 - Review the existing Telemeter documentation available at https://gitlab.cee.redhat.com/service/dev-guidelines/blob/master/monitoring.md
-- Create a new dashboard that allows users to view failing operators in a single cluster or across all cluster by following the steps outlined at https://telemeter-lts-dashboards.datahub.redhat.com/d/playground/playground 
+- Create a new dashboard that allows users to view failing operators in a single cluster or across all cluster by following the steps outlined at https://telemeter-lts-dashboards.datahub.redhat.com/d/playground/playground
 
 
 _**Telemeter Alerts for failing OLM operators**_

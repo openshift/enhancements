@@ -27,7 +27,7 @@ A rough heuristic for an enhancement is anything that:
 
 - impacts how a cluster is operated including addition or removal of significant
   capabilities
-- impacts upgrade/downgrade 
+- impacts upgrade/downgrade
 - needs significant effort to complete
 - requires consensus/code across multiple domains/repositories
 - has phases of maturity (Dev Preview, Tech Preview, GA)
@@ -51,7 +51,7 @@ Create an enhancement here once you:
 - have circulated your idea to see if there is interest
 - (optionally) have done a prototype in your own fork
 - have identified people who agree to work on and maintain the enhancement
-  - many enhancements will take several releases to complete  
+  - many enhancements will take several releases to complete
 
 ## Why are Enhancements Tracked
 
@@ -71,3 +71,11 @@ Please comment on the enhancement issue to:
 Please do not comment on the enhancement issue to:
 - discuss a detail of the design, code or docs. Use a linked-to-issue or design PR
   for that
+
+## Using Labels
+
+The following labels may be applied to enhancements to help categorize them:
+
+- `priority/important-soon` indicates that the enhancement is related to a
+top level release priority. These will be highlighted in the
+[this-week](this-week/) newsletters.

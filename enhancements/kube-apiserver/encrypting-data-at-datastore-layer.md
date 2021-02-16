@@ -130,17 +130,17 @@ The encryption key rotation logic will be implemented using a distributed state 
 
 #### Fundamentals
 
-- there are 
+- there are
   - **non-encrypted** resources
   - **to-be-encrypted** resource: those which should be encrypted, but aren't yet
   - and **encrypted** resources: those which are already configured for encryption, but maybe not fully migrated.
 - keys are actually pairs of `<encryption-function>` and `<encryption-key>`, where the encryption-function will be one of the supported encryption functions from upstream, e.g. `identity`, `aescbc`, and the encryption-key is a corresponding base64 key string (null key in case of `identity`).
 - keys are eventually the same for all encrypted resources.
 - keys are numbered with a strictly increasing, unsigned integer.
-- keys can be 
-  - unused, 
+- keys can be
+  - unused,
   - read-key,
-  - write-key, 
+  - write-key,
   - migrated-key
   for a set of group resources in an [`apiserver.config.k8s.io/v1.EncryptionConfig`](https://github.com/kubernetes/kubernetes/blob/49891cc270019245a3d4796e84b33bf36d0bae08/staging/src/k8s.io/apiserver/pkg/apis/config/v1/types.go#L24).
 
@@ -175,17 +175,17 @@ The encryption configuration maintains the following invariants
 
 #### Transitions
 
-The life-cycle of a key implemented by the controllers is: 1, 2, 3, 4, 5. 
+The life-cycle of a key implemented by the controllers is: 1, 2, 3, 4, 5.
 
 A transition only takes place when all API servers have converged to the same revision, are running, and hence use the same encryption configuration.
 
 - ->1: a new key secret is created if
-  
+
   - encryption is being enabled via the API or
   - a new **to-be-encrypted** resource shows up or
   - the `EncryptionType` in the API does not match with the newest existing key or
   - based on time (once a **week** is the proposed rotation interval).
-  
+
   We wait until migrations are finished before a new key is created.
 - 1->2: when a new **created** key is found.
 - 2->3: when all API servers have **observed the read-key for resource GR**.
@@ -201,7 +201,7 @@ The transitions are implemented by a series of controllers which each perform a 
 A new, desired encryption config is computed from the **created** keys and the old revision-config `<operand-target-namespace>/encryption-config-<revision>` by
 
 - **gets** all API server pods by the matching `apiserver=true` label in the target namespace in order
-  - to check whether they converged 
+  - to check whether they converged
   - and to know to which revision (by extracting the `revision` label).
 - **gets** the `<operand-target-namespace>/encryption-config-<revision>` secret.
 - **gets** the keys in `openshift-config-managed` by matching `encryption.apiserver.operator.openshift.io/component` label.
@@ -218,7 +218,7 @@ and then following:
 The `encryptionKeyController` implements the `->1` transition. It
 
 - **watches** pods and secrets in `<operand-target-namespace>` (and is triggered by changes)
-- **computes** a new, desired encryption config from `encryption-config-<revision>` and the existing keys in `openshift-config-managed`. 
+- **computes** a new, desired encryption config from `encryption-config-<revision>` and the existing keys in `openshift-config-managed`.
 - **derives** from the desired encryption config whether a new key is needed (as described in `->1` above). It then creates it.
 
 Note: the `based on time` reason for a new key is based on `encryption.operator.openshift.io/migrated-timestamp` instead of the key secret's `creationTimestamp` because the clock is supposed to start when a migration has been finished, not when it begins.
@@ -228,7 +228,7 @@ Note: the `based on time` reason for a new key is based on `encryption.operator.
 The `encryptionStateController` controller implements transitions `1->2`, `2-3`, and part of `4-5`. It
 
 - **watches** pods and secrets in `<operand-target-namespace>` (and is triggered by changes)
-- **computes** a new, desired encryption config from `encryption-config-<revision>` and the existing keys in `openshift-config-managed`. 
+- **computes** a new, desired encryption config from `encryption-config-<revision>` and the existing keys in `openshift-config-managed`.
 - **applies** the new, desired encryption config to `<operand-target-namespace>/encryption-config` if it differs.
 
 Note: by the shared code to compute the desired configuration, the applied config drops old, unused read-keys after migration has finished (part of transition `4-5`).
@@ -272,31 +272,30 @@ Note: configmaps don't seem to be security-sensitive, but we know that large use
 
 #### Backup/Restore
 
-A backup consists of the steps 
+A backup consists of the steps
 
 1. backup the etcd snapshot
-2. backup the master file `/etc/kubernetes/static-pod-resources/kube-apiserver-pod-<REVISION>/secrets/encryption-config/encryption-config
-` and mounted via host mount as `/etc/kubernetes/static-pod-resources/secrets/encryption-config/encryption-config` in the kube-apiserver pod.
+2. backup the master file `/etc/kubernetes/static-pod-resources/kube-apiserver-pod-<REVISION>/secrets/encryption-config/encryption-config` and mounted via host mount as `/etc/kubernetes/static-pod-resources/secrets/encryption-config/encryption-config` in the kube-apiserver pod.
 
-A restore must put both parts of the backup in place in master file-system before starting up kube-apiserver. 
+A restore must put both parts of the backup in place in master file-system before starting up kube-apiserver.
 
 Note: the restore of the openshift-apiserver encryption config will be automatic if both (1) and (2) match.
 
 The backup of (2) must happen shortly after (1) (before another write-key is set, which happens once per week): assume (1) happens
 
-a. outside of migration: then (2) can happen
-   
+1. outside of migration: then (2) can happen
+
    - before migration too (`-1-2-(migration)-`)
    - during a just started migration (`-1-(-2-migration)-`)
    - after a started migration (`-1-(migration)-2-`).
-   
+
    In the first case, config and etcd snapshot perfectly match. In the second and third case, a new write-key is part of the config and the last read-key is preserved in the config as well allowing to read newly written data and untouched data.
-   
-b. during a migration: then (2) can happen
-   
+
+2. during a migration: then (2) can happen
+
    - during the same migration (`-(-1-2-migration)-`)
    - after the migration (`-(-1-migration)-2-`).
-   
+
    In the first case, config and etcd snapshot perfectly match. In the second case, the current write-key and the previous read-key is preserved in the config, allowing to read migrated data and untouched data.
 
 ### Risks and Mitigations
@@ -324,7 +323,7 @@ b. during a migration: then (2) can happen
 
 ### Graduation Criteria
 
-##### This feature will GA in 4.3 as long as:
+#### This feature will GA in 4.3 as long as
 
 1. Thorough end to end tests, especially around key rotation
 1. Thorough unit tests around various invariants required to keep rotation working

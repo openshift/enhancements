@@ -81,7 +81,7 @@ The cluster-storage-operator will deploy all the resources necessary for creatin
 5. A instance of `ClusterCSIDriver` will be created to faciliate managment of driver operator.  `ClusterCSIDriver` is already defined in - https://github.com/openshift/api/blob/master/operator/v1/types_csi_cluster_driver.go but needs to be expanded to include vSphere CSI driver.
 6. cluster-storage-operator will request CVO to create required cloud-credentials for talking with vCenter API.
 
-#### Driver deployment via vmware-vsphere-csi-driver-operator.
+#### Driver deployment via vmware-vsphere-csi-driver-operator
 
 The operator itself will be responsible for running the driver and all the required sidecars (attacher, provisioner etc).
 
@@ -101,7 +101,7 @@ There are certain aspects of driver which require special handling:
 
 ##### StoragePolicy configuration
 
-Currently while deploying Openshift a user can configure datastore used by OCP via install-config.yaml. vSphere CSI driver however can't use datastore directly and must be configured with vSphere storage policy. 
+Currently while deploying Openshift a user can configure datastore used by OCP via install-config.yaml. vSphere CSI driver however can't use datastore directly and must be configured with vSphere storage policy.
 
 To solve this problem vsphere CSI operator is going to create a storagePolicy by tagging selected datastore in the installer. This will require OCP to have expanded permissions of creating storagePolicies. After creating the storagePolicy, the vSphere CSI operator will also create corresponding storageclass.
 
@@ -155,11 +155,11 @@ The operator will use https://github.com/openshift/api/blob/master/operator/v1/t
 
 There is no dev-preview phase.
 
-##### Tech Preview
+#### Tech Preview
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 

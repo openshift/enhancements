@@ -31,7 +31,7 @@ Managing Helm charts using the Developer perspective from DevConsole
 
 ## Motivation
 
-Helm is a Kubernetes package manager.  Helm 3.0 is a major release of helm which brings in a rich set of features and addresses major security concerns around tiller.  
+Helm is a Kubernetes package manager.  Helm 3.0 is a major release of helm which brings in a rich set of features and addresses major security concerns around tiller.
 
 Red hat Openshift wants to bring Helm based content support to Openshift 4.4 Developer Catalog along with Operators to strengthen the helm based ecosystem.
 
@@ -42,14 +42,14 @@ Red hat Openshift wants to bring Helm based content support to Openshift 4.4 Dev
 * Provide RESTful API for managing Helm charts and releases
 * Support disconnected installs
 * Support easy management of available charts, aggregation from multiple sources and filtering
-  
+
 ### Non-Goals
 
 * Infrastructure for serving the default chart repository
 * Process for curating charts within the default chart repository
-  
+
 ## Proposal
-  
+
 ### Charts in the Developer Catalog
 
 The charts that would show up in the Developer Catalog will be powered by a [standard](https://helm.sh/docs/topics/chart_repository) Helm chart repository instance.
@@ -60,36 +60,44 @@ New charts will be added and/or existing curated by submitting PRs against the a
 
 ### How would the UI discover the charts
 
-1. The UI would invoke `/api/helm/charts/index.yaml` endpoint to get [the repository index file](https://helm.sh/docs/topics/chart_repository/#the-index-file) so that the available charts can be rendered in the developer catalog. 
+1. The UI would invoke `/api/helm/charts/index.yaml` endpoint to get [the repository index file](https://helm.sh/docs/topics/chart_repository/#the-index-file) so that the available charts can be rendered in the developer catalog.
 
 2. The above endpoint would proxy requests to the configured chart repository
 
 
 ![Helm Charts Repo Service](../helm3/assets/charts-repo.png)
 
-### How would disconnected installs work 
+### How would disconnected installs work
 
 1. The user would need to 'clone' the content of the chart repository over the fence
 
    * The public GitHub repository could be cloned into inside-the-network GitHub or Gitlab instance and configured to serve static content ( "Pages" ).
    * The content of the chart repository could be crawled and served using a (containerized or external) HTTP server, e.g. nginx
 
-2. The URL serving the above static content would need to be passed to chart repository proxy running inside the cluster. 
+2. The URL serving the above static content would need to be passed to chart repository proxy running inside the cluster.
 
 ### Configuring Helm Chart Repository location
 
 Since the experience we are building needs a representation of the chart repository in-cluster, there needs to be a standard way to define a Kubernetes resource for the same.
 
-Configuring Helm repository location could be modeled similar to [`OperatorSource`](https://github.com/operator-framework/operator-marketplace/blob/7d230952a1045624b7601b4d6e1d45b3def4cf76/deploy/crds/operators_v1_operatorsource_crd.yaml). 
+Configuring Helm repository location could be modeled similar to [`OperatorSource`](https://github.com/operator-framework/operator-marketplace/blob/7d230952a1045624b7601b4d6e1d45b3def4cf76/deploy/crds/operators_v1_operatorsource_crd.yaml).
 Due to future planned federated usecases ([ODC-2994](https://issues.redhat.com/browse/ODC-2994)), a cluster admin should be able to declare multiple chart repositories.
 
 #### Existing/Known In-Cluster Representations of Helm Chart Repositories
 
-[Open Cluster Management project](https://github.com/open-cluster-management/multicloud-operators-subscription) introduced a notion of subscription for [a Helm chart](https://github.com/open-cluster-management/multicloud-operators-subscription/tree/master/examples/helmrepo-channel). A subscription is defined on the top of a channel of [type `HelmRepo`](https://github.com/open-cluster-management/multicloud-operators-subscription/blob/master/examples/helmrepo-channel/01-channel.yaml). Currently, chart repo configuration is provided in a separate `ConfigMap`, but the model could be extended to use the configuration provided in referred `HelmChartRepository` instance.
+[Open Cluster Management
+project](https://github.com/open-cluster-management/multicloud-operators-subscription)
+introduced a notion of subscription for [a Helm
+chart](https://github.com/open-cluster-management/multicloud-operators-subscription/tree/master/examples/helmrepo-channel). A
+subscription is defined on the top of a channel of [type
+`HelmRepo`](https://github.com/open-cluster-management/multicloud-operators-subscription/blob/master/examples/helmrepo-channel/01-channel.yaml). Currently,
+chart repo configuration is provided in a separate `ConfigMap`, but
+the model could be extended to use the configuration provided in
+referred `HelmChartRepository` instance.
 
 #### Introducing the HelmChartRepository API
 
-The `HelmChartRepository` is a simple cluster-scoped API for letting users/admins define Helm Chart Repository configurations in a cluster. 
+The `HelmChartRepository` is a simple cluster-scoped API for letting users/admins define Helm Chart Repository configurations in a cluster.
 
 ```yaml
 apiVersion: helm.openshift.io/v1beta1
@@ -106,9 +114,9 @@ spec:
   description: my private chart repo
 ```
 
-An operator would watch for changes on them and reconfigure the chart repository proxy which is used to power the UI experience in OpenShift today.. 
+An operator would watch for changes on them and reconfigure the chart repository proxy which is used to power the UI experience in OpenShift today..
 
-Please note, the console backend already implements a few helm endpoints (including the chart proxy). In future, we plan  extract them into a separate service to make the functionality more modular, thereby decoupling the API contract from the scenario-specific implementations. 
+Please note, the console backend already implements a few helm endpoints (including the chart proxy). In future, we plan  extract them into a separate service to make the functionality more modular, thereby decoupling the API contract from the scenario-specific implementations.
 
 Cluster admins would be able to easily manage `HelmChartRepositories` using the UI:
 
@@ -150,7 +158,7 @@ spec:
   url: https://kubernetes-charts-incubator.storage.googleapis.com
 
   displayName: Public Helm charts in incubator state
-EOF 
+EOF
 
 $ kubectl get helmchartrepositories
 NAME          AGE
@@ -188,7 +196,7 @@ incubator     1m
 $ helm repo list
 NAME     	URL
 cluster   http://my.chart-repo.org/stable
-stable   	https://kubernetes-charts.storage.googleapis.com           
+stable   	https://kubernetes-charts.storage.googleapis.com
 incubator	https://kubernetes-charts-incubator.storage.googleapis.com
 
 # install a chart from the "stable" repo defined in the cluster
@@ -209,15 +217,15 @@ Admins wouldn't be able to intuitively discover the operator config as a way to 
 Conceptually, the Helm repository URL isn't really an operator configuration, hence this doesn't feel like the right place.
 This approach would have similar issues with the previous alternative - admins wouldn't be able to intuitively discover the operator config as a way to configure the Helm repository URLs.
 
-#### 3. OLM operator for Helm Configuration. 
+#### 3. OLM operator for Helm Configuration
 
-Note, the Helm chart repository configuration today exists as a console configuration, which enables Console to proxy to the Helm chart repository URL. Moving it out of Console is outside the scope of this section. 
+Note, the Helm chart repository configuration today exists as a console configuration, which enables Console to proxy to the Helm chart repository URL. Moving it out of Console is outside the scope of this section.
 
-   * The default helm chart repository URL remains unchanged in the Console configuration.
-   * Admin installs an OLM operator which only provides a `HelmChartRepository` cluster-scoped CRD
-   * Admin creates a cluster-scoped CR. Note, this isn't very intuitive for the Admin.
-   * Console-operator watches the new `HelmChartRepository` CR and reconciles.
-   
+* The default helm chart repository URL remains unchanged in the Console configuration.
+* Admin installs an OLM operator which only provides a `HelmChartRepository` cluster-scoped CRD
+* Admin creates a cluster-scoped CR. Note, this isn't very intuitive for the Admin.
+* Console-operator watches the new `HelmChartRepository` CR and reconciles.
+
 Reflections on this approach:
 * We get to avoid changes to `openshift/api`.
 * However, Console operator would have to watch the `HelmChartRepository` CRD which it doesn't own.
@@ -230,7 +238,7 @@ An endpoint that leverages the same Helm Golang APIs which the `helm install` co
 
 Here's how the control flow would look like:
 
-1. The Console UI will create `POST` request containing appropriate JSON payload against `/api/helm/release` endpoint. 
+1. The Console UI will create `POST` request containing appropriate JSON payload against `/api/helm/release` endpoint.
 2. The API handler for the given endpoint will, in turn talk to the API server (no Tiller in Helm3) using the user's authentication, while leveraging the Helm Golang API.
 
 This is in-line with the "Console is a pretty kubectl" philosophy since Helm itself is a thin layer on top of kubectl.

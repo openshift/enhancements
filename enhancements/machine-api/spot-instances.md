@@ -91,7 +91,7 @@ To enable graceful termination of workloads running on non-guaranteed instances,
 
 ##### AWS
 
-###### Launching instances
+###### Launching AWS instances
 
 To launch an instance as a Spot instance on AWS, a [SpotMarketOptions](https://docs.aws.amazon.com/sdk-for-go/api/service/ec2/#SpotMarketOptions)
 needs to be added to the `RunInstancesInput`. Within this there are 3 options that matter:
@@ -106,7 +106,7 @@ needs to be added to the `RunInstancesInput`. Within this there are 3 options th
 The only option from this that needs exposing to the user from this is the `MaxPrice`, this option should be in an optional struct, if the struct is not nil,
 then spot instances should be used, if the MaxPrice is set, this should be used instead of the default On-Demand price.
 
-```
+```go
 type SpotMarketOptions struct {
   MaxPrice *string `json:”maxPrice,omitempty”`
 }
@@ -131,11 +131,11 @@ it will close the channel allowing the [Termination Pod](#termination-pod) logic
 
 ##### GCP
 
-###### Launching instances
+###### Launching GCP instances
 
 To launch an instance as Preemptible on GCP, the `Preemptible` field must be set:
 
-```
+```go
 &compute.Instance{
   ...
   Scheduling: &comput.Scheduling{
@@ -147,7 +147,7 @@ To launch an instance as Preemptible on GCP, the `Preemptible` field must be set
 
 Therefore, to make the choice up to the user, this field should be added to the `GCPMachineProviderSpec`:
 
-```
+```go
 type GCPMachineProviderSpec struct {
   ...
   Preemptible bool `json:”preemptible”`
@@ -176,7 +176,7 @@ when the instance is created:
 The only option that a user needs to interact with is the `MaxPrice` field within the `BillingProfile`, other fields only have 1 valid choice and as such can be inferred.
 Similar to AWS, we can make an optional struct for SpotVMOptions, which, if present, implies the priority is `Spot`.
 
-```
+```go
 type SpotVMOptions struct {
   MaxPrice *float64 `json:”maxPrice,omitempty”`
 }
@@ -308,7 +308,7 @@ Amazon’s Spot instances are available to customers via three different mechani
 Each mechanism requires the user to set a maximum price (a bid) they are willing to pay for the instances and,
 until either no-capacity is left, or the market price exceeds their bid, the user will retain access to the machine.
 
-###### Spot backed Autoscaling Groups
+##### Spot backed Autoscaling Groups
 
 Spot backed Autoscaling groups are identical to other Autoscaling groups, other than that they use Spot instances instead of On-Demand instances.
 
@@ -316,7 +316,7 @@ Since Autoscaling Groups are not currently support within the Machine API,
 adding support for Spot backed Autoscaling Groups would require larger changes to the API and possibly the introduction of a new type
 (eg. [MachinePool](https://github.com/kubernetes-sigs/cluster-api/pull/1703)).
 
-###### Spot Fleet
+##### Spot Fleet
 
 Spot Fleets are similar to Spot backed Autoscaling Groups, but they differ in that there is no dedicated instance type for the group.
 They can launch both On-Demand and Spot instances from a range of instance types available based on the market prices and the bid put forward by the user.
@@ -324,7 +324,7 @@ They can launch both On-Demand and Spot instances from a range of instance types
 Similarly to Spot Back Autoscaling groups, there is currently no analogous type within the Machine API and as such,
 implementing support for Spot Fleets would require something akin to a [MachinePool](https://github.com/kubernetes-sigs/cluster-api/pull/1703).
 
-###### Singular Spot Instances
+##### Singular Spot Instances
 Singular Spot instances are created using the same API as singular On-Demand instances.
 By providing a single additional parameter, the API will instead launch a Spot Instance.
 
@@ -342,7 +342,7 @@ Using this feature would contradict the functionality of the Machine Health Chec
 In cloud environments, it is expected that if a node is being switched off or taken away, a new one will replace it.
 This option should not be made available to users to avoid conflicts with other systems within OCP.
 
-###### Termination Notices
+###### Termination Notices for AWS Spot
 
 Amazon provides a 2 minute notice of termination for Spot instances via it’s instance metadata service.
 Each instance can poll the metadata service to see if it has been marked for termination.
@@ -362,13 +362,13 @@ The usage of this feature should be explicitly forbidden so that we do not break
 GCP’s Preemptible instances are available to customers via two mechanisms.
 For each, the instances are available at a fixed price and will be made available to users whenever there is capacity.
 
-###### Instance Groups
+##### Instance Groups
 
 GCP Instance Groups can leverage Preemptible instances by modifying the instance template and setting preemptible option.
 
 There currently is no analogous type to Instance Groups within the Machine API, however they could be modelled by something like a [MachinePool](https://github.com/kubernetes-sigs/cluster-api/pull/1703).
 
-###### Single Instance
+##### Single Instance
 
 GCP Single Instances can run on Preemptible instances given the launch request specifies the preemptible option.
 
@@ -402,7 +402,7 @@ the instance will be given to you and you will be charged the market rate. Shoul
 
 Spot VMs are available in two forms in Azure.
 
-###### Scale Sets
+##### Scale Sets
 
 Scale sets include support for Spot VMs by indicating when created, that they should be backed by Spot VMs.
 At this point, a eviction policy should be set and a maximum price you wish to pay.
@@ -411,7 +411,7 @@ in which case, you will pay whatever the market rate is, but will be preempted l
 
 There currently is no analogous type to Scale Sets within the Machine API, however they could be modelled by something like a [MachinePool](https://github.com/kubernetes-sigs/cluster-api/pull/1703).
 
-###### Single Instances
+##### Single Instances
 Azure supports Spot VMs on single VM instances by indicating when created, that the VM should be a Spot VM.
 At this point, a eviction policy should be set and a maximum price you wish to pay.
 Alternatively, you can also choose to only be preempted in the case that there are capacity constraints,
@@ -421,7 +421,7 @@ Given that the Machine API currently implements Machine’s by using single inst
 
 ##### Important Spot VM notes
 
-###### Termination Notices
+###### Termination Notices for Azure Spot
 
 Azure uses their Scheduled Events API to notify Spot VMs that they are due to be preempted.
 This is a similar service to the AWS metadata service that each machine can poll to see events for itself.

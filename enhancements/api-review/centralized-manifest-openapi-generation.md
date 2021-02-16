@@ -56,7 +56,8 @@ This provides the benefit of allowing these types to be imported with Go modules
 files for those packages.
 
 Example, for config manifests:
-```
+
+```text
 config/
 ├── install.go
 └── v1

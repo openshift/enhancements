@@ -12,7 +12,7 @@ approvers:
 creation-date: 2019-09-27
 last-updated: 2019-10-10
 status: implementable
-see-also: 
+see-also:
 replaces:
 superseded-by:
 ---
@@ -303,7 +303,7 @@ TODO
 
 Upgrades will continue to use the existing `forward . /etc/resolv.conf` forwarding configuration. Edit
  `dnses.operator.openshift.io` to modify the default forwarding behavior by adding `Servers`. For example:
- 
+
 ```yaml
 apiVersion: operator.openshift.io/v1
 kind: DNS

@@ -12,7 +12,7 @@ creation-date: 2020-02-19
 last-updated: 2020-02-19
 status: provisional
 see-also:
-  - "https://github.com/kubernetes/enhancements/blob/master/etcd/cluster-etcd-operator.md"  
+  - "https://github.com/kubernetes/enhancements/blob/master/etcd/cluster-etcd-operator.md"
 ---
 
 # disaster-recovery-using-cluster-etcd-operator
@@ -30,7 +30,7 @@ see-also:
 The Disaster Recovery (DR) scripts were created prior to OCP 4.4 before the introduction of `cluster-etcd-operator`
 (CEO). Cluster-etcd-operator (CEO) is an operator that handles the scaling of etcd and provisioning etcd dependencies
 such as TLS certificates. The introduction of CEO obviated the need for some of the disaster recovery scripts such as
-scaling and TLS certificate generation. This enhancement describes how a cluster-admin responds to exceptional 
+scaling and TLS certificate generation. This enhancement describes how a cluster-admin responds to exceptional
 circumstances in his cluster, such as loss of quorum, unhealthy member or need to restore to a previous state.
 
 ## Motivation
@@ -47,7 +47,7 @@ to have manual action on the part of a cluster-admin to get back to a running co
 1. Recovering a single unhealthy control-plane
     1. create a new master that joins the cluster
     1. removal of the old master from the cluster
-1. Restoring the cluster state from backup 
+1. Restoring the cluster state from backup
 1. Recovering from a loss of quorum
 1. Removal of a member from the etcd cluster
 1. Recovery of a member with a bad data-dir.
@@ -56,51 +56,51 @@ to have manual action on the part of a cluster-admin to get back to a running co
 
 ## Non-Goals
 
-*  Recover from expired certificates (not considered for 4.4)
+* Recover from expired certificates (not considered for 4.4)
 
 ## Proposal
-The proposal is to transfer the ownership of the DR scripts from MCO, remove all the deprecated DR scripts, and to 
-simplify other existing scripts for backing up and restoring the cluster state. 
+The proposal is to transfer the ownership of the DR scripts from MCO, remove all the deprecated DR scripts, and to
+simplify other existing scripts for backing up and restoring the cluster state.
 
 With the simplification of the scripts, different disaster recovery scenarios are documented properly to utilize the
-simplified scripts along with other OpenShift utility commands to achieve the recovery of the cluster. 
+simplified scripts along with other OpenShift utility commands to achieve the recovery of the cluster.
 
 ## Implementation Plan
-###  Transfer the ownership of the DR files from the MCO to CEO
-All etcd-scripts should be removed from MCO, and be generated along with the static-pod-resources as configmaps. The 
+### Transfer the ownership of the DR files from the MCO to CEO
+All etcd-scripts should be removed from MCO, and be generated along with the static-pod-resources as configmaps. The
 scripts should be copied to /usr/local/bin in the init container for a convenient access to the admin user.
-    
-###  Remove the deprecated DR scripts
+
+### Remove the deprecated DR scripts
 The scripts for adding a new etcd member; removing an etcd member; and recovering an etcd-member are no longer needed,
 and should be deleted from the repository.
-    
+
 ### Backing up the cluster state
-The script for backing up the cluster state should back up static-pod-resources for etcd, kube-apiserver, 
+The script for backing up the cluster state should back up static-pod-resources for etcd, kube-apiserver,
 kubecontrollermanager and kube-scheduler, along with a copy of the etcd snapshot database. The reason for backing up
 the static pod resources is to match the static pods state on disk with what is in etcd,  when we restore. Furthermore,
 when etcd data is encrypted, the encryption keys are stored in static pod resources, and restoring the etcd data without
 restoring the corresponding key will make the etcd data unusable.
-    
-### Restoring the cluster state from backup 
+
+### Restoring the cluster state from backup
 This solution handles situations where you want to restore your cluster to a previous state, for example, if something
 critical got deleted accidentally. This process is also used for recovering from a loss of quorum.
-    
+
 The script for restoring to a previous cluster state using a backup file will restore the etcd database from the backup
 along with the static pod resources for the entire control plane (etcd, kube-apiserver, kubecontrollermanager and
 kube-scheduler). See the implementation details for more information.
-    
+
 ### Removal of a member from the etcd cluster
 In the past, we used a script to remove a member from the etcd cluster. In this release, the remove operation will be
 documented to invoke the `etcdctl member remove` command directly on the newly created `etcdctl` container.
-    
-### Recovering a single unhealthy member
+
+### Recovering a single unhealthy member plan
 See the implementation details below.
-    
+
 ### Recovering from a loss of quorum
 Recovering from a loss of quorum requires restoring from a previous backup. See the implementation details for
 `Restoring the cluster from backup`.
-   
-### Recovery of a member with a bad data-dir.
+
+### Recovery of a member with a bad data-dir
 If you have a majority of your masters still available and have an etcd quorum, then the following procedure should
 restore the data-dir:
 1. Stop etcd static pod by moving the etcd pod yaml out of kubelet manifest directory.
@@ -110,10 +110,10 @@ restore the data-dir:
 If you have lost the majority of your master hosts, leading to etcd quorum loss, then, it requires restoring from a
 previous backup. See the section `Recovering from a loss of quorum.`
 
-###  All nodes being shut off at the same time and restarted.
+### All nodes being shut off at the same time and restarted
 Fix the initialization process to detect lights-out scenario to restart the etcd without requiring any manual
 intervention.
-    
+
 ### Upgrade, downgrade, re-upgrade
 Upgrade to 4.4, downgrade to 4.3, and re-upgrading to 4.4 should work, although downgrade is not officially supported.
 
@@ -140,18 +140,18 @@ This new approach involves two steps:
     need to match the revision that the operator was on while taking the backup.
     1. Copy the restore-etcd-pod.yaml from backed up resources to /etc/kubernetes/manifests/etcd-pod.yaml. This will
     restore a single member control plane using the backed up snapshot.db and then start the etcd pod bringing the
-    control plane up. 
+    control plane up.
     1. These steps are achieved through a script `cluster-restore.sh`. See the "Outline of the scripts" section to learn
     more details of the script.
 
 2. Get the operator to deploy static pods on the other master nodes.
     If the member has been added to the cluster and has never been started before, but a data directory exists, it
     means that we have dirty data which must be removed (or archived).
-    1. Fix the initialization process to detect an unstarted member with existing data-dir. 
+    1. Fix the initialization process to detect an unstarted member with existing data-dir.
     1. Force etcd redeployment via `oc patch etcd forceredpeloymment=reason-time`
     1. CEO will redeploy the modified pod resources with the next revision.
     1. The existing nodes will restart the static pods in rolling fashion with new spec.
-    
+
     Note that when we force redeployment, the recovery node will also restart with the newly generated normal spec and
     obtain data-dir from the started members.
 
@@ -160,21 +160,21 @@ This new approach involves two steps:
 If the cluster-etcd-operator status shows `Degraded` condition as `true` with the status of a single `unhealthy` member,
 then the etcd member could be in one of the three scenarios:
 
-1. The master node in question is down and expected to come back up. 
+1. The master node in question is down and expected to come back up.
 
     In this case, admin doesn't need to do anything.
-    
+
 1. The master node is up and generally healthy, but etcd is unhealthy. If the `endpoint status` and `endpoint health`
 also indicate that the member is not healthy or unreachable and if the `etcd` logs on the pod indicate that it has
-experienced catastrophic failure, or if the pod is crash looping and resolution is not possible. 
+experienced catastrophic failure, or if the pod is crash looping and resolution is not possible.
 
     In that event, admin needs to force the member to rejoin by removing and redeploying. Go to the "forcing an existing
     member to rejoin" section.
-    
+
 1. The master node is down and not expected to come back.
 
     In this case, "remove the etcd member that will never return" followed by "adding a new master node"
-    
+
 ### Forcing an existing member to rejoin
 
 If the node is healthy, but the etcd pod experienced a catastrophic failure, then, we suggest to stop the pod, remove
@@ -183,12 +183,12 @@ pod. Force an existing member to rejoin by the sequence of commands listed below
 1. oc debug node/affected-node
 1. mv /etc/kubernetes/manifests/etcd-pod.yaml backup-location
 1. rm -rf /var/lib/etcd/*
-1. oc -n openshift-etcd rsh some-etcd-pod 
+1. oc -n openshift-etcd rsh some-etcd-pod
 1. etcdctl member remove the-bad-one
 1. oc patch forceredpeloymment=reason-time
 
 ### Removing an etcd member that will never return
-1. oc -n openshift-etcd rsh some-etcd-pod 
+1. oc -n openshift-etcd rsh some-etcd-pod
 1. etcdctl member remove the-bad-one
 
 ## Outline of the scripts
@@ -198,7 +198,7 @@ After removing the deprecated scripts, the OCP 4.4 release will only include two
 ### cluster-backup.sh ([link](https://github.com/openshift/cluster-etcd-operator/blob/master/bindata/etcd/cluster-backup.sh))
 The cluster backup script takes a snapshot of the etcd data along with the static pod resources. This backup can be
 saved and used at a later time if you need to restore etcd.
-                                                                                                                       
+
 If etcd encryption is enabled, it is recommended to store the static pod resources separately from the etcd snapshot
 for security reasons. However, both will be required in order to restore it to the previous state.
 
@@ -240,8 +240,7 @@ The series of actions performed on the recovery node by `cluster-restore.sh` can
 
 ## Infrastructure Needed
 
-### New github projects:
+### New github projects
 
 
-### New images built:
-
+### New images built

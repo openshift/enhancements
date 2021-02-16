@@ -111,7 +111,14 @@ Starting from OpenShift 4.5 the installation will include next steps:
 
 - `openshift-cluster-storage-operator` checks if it runs on OpenStack, installs Manila CSI driver operator via OLM, starts it and monitors its status (i.e. monitors existence of Manila CSI driver operator ClusterOperator CR and reports its own `openshift-cluster-storage-operator` status based on it).
 
-- Manila CSI driver operator checks if Manila service is available. If it's true then it starts, populates [configuration](https://github.com/kubernetes/cloud-provider-openstack/tree/master/manifests/manila-csi-plugin) and secrets for Manila CSI driver and runs the CSI driver (i.e. starts Deployment with the controller parts and DaemonSet with the node parts). Additionally it creates at least one non-default StorageClass that users can use in their RWX PVCs. If Manila service is not available, the operator does nothing.
+- Manila CSI driver operator checks if Manila service is available. If
+  it's true then it starts, populates
+  [configuration](https://github.com/kubernetes/cloud-provider-openstack/tree/master/manifests/manila-csi-plugin)
+  and secrets for Manila CSI driver and runs the CSI driver
+  (i.e. starts Deployment with the controller parts and DaemonSet with
+  the node parts). Additionally it creates at least one non-default
+  StorageClass that users can use in their RWX PVCs. If Manila service
+  is not available, the operator does nothing.
 
 - Manila CSI driver operator reports status of the driver in ClusterOperator CR.
 

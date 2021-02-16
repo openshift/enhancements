@@ -82,26 +82,30 @@ A user might want to mirror all content which is required by Cincinnati.
 #### Plugin implementation
 A new Cincinnati plugin will be implemented to fetch the container image from a configured container image repository.
 The plugin will have the following configuration options:
-  * registry
-  * repository
-  * a tag or a digest. If a tag is specified, the plugin will check if the specified tag changed on each plugin execution, and download the content if that check is positive.
-  * (optional) An OpenGPG keyring in ASCII-armor representation to, which is used to validate the image signatures
-  * (optional) Credentials for authentication towards the container image registry
-  * ()
+* registry
+* repository
+* a tag or a digest. If a tag is specified, the plugin will check if the specified tag changed on each plugin execution, and download the content if that check is positive.
+* (optional) An OpenGPG keyring in ASCII-armor representation to, which is used to validate the image signatures
+* (optional) Credentials for authentication towards the container image registry
+* ()
 
 #### Deprecation of the Git(Hub) scraper plugin
 The Git(Hub) scraper plugin will be deprecated in favor of the new plugin. Note that Cincinnati has support to use no cincinnati-graph-data scraper plugin at all, and can be provided the content to the filesystem directly by its operator.
 
 #### Continous Release
-The aim is to release the container images continuously as changes come in to the repository.
-Currently there is no support for incoming webhooks or other means to detect changes on upstream repositories in CPaaS. It [does support manually triggering the upsptream poll](https://gitlab.sat.engineering.redhat.com/cpaas/documentation/-/blob/e95073a9d49c49b30dca0d3644889a714e2efe7b/users/midstream/index.adoc#user-content-poll-upstream-sources) which makes it possible to create a post-submit job on the repository's CI to trigger a rebuild in CPaaS.
+The aim is to release the container images continuously as changes
+come in to the repository.  Currently there is no support for incoming
+webhooks or other means to detect changes on upstream repositories in
+CPaaS. It [does support manually triggering the upsptream
+poll](https://gitlab.sat.engineering.redhat.com/cpaas/documentation/-/blob/e95073a9d49c49b30dca0d3644889a714e2efe7b/users/midstream/index.adoc#user-content-poll-upstream-sources)
+which makes it possible to create a post-submit job on the
+repository's CI to trigger a rebuild in CPaaS.
 
 ### Risks and Mitigations
 
 ### Container image content integrity
 The content of the cincinnati-graph-data repository may be altered by the process of being packaged by CPaaS and distributed via the container image registry.
 
-#### Mitigation
 A mitigation strategy is to sign the resulting image in the CPaaS pipeline, publish the signatures, and have Cincinnati verify the image after download.
 This is described throughout the [implementation section](#implementation-detailsnotesconstraints).
 
@@ -109,7 +113,6 @@ This is described throughout the [implementation section](#implementation-detail
 Not strictly related to this enhancement, is the fact that we are not signing the commits in the source repository in the first place.
 By this we effectively trust GitHub not to change the content.
 
-#### Mitigation
 OpenShift architects are aware of this risk and currently do not consider it sufficiently serious to want mitigation.
 If we decide to mitigate in the future, having build tooling require commits to be signed by a hard-coded list of authorized maintainers would be one possible approach.
 
@@ -135,24 +138,24 @@ expectations).
 
 - Maturity levels - `Developer Preview`, `Red Hat Staging`, `Red Hat Production`, `GA`
 
-##### `Developer Preview`
+#### `Developer Preview`
 - New Cincinnati plugin
 - Container image registry managed by and dedicated to prow CI
 - Integration tests using an image (to-be-determined: verifying against mocked signatures)
 - CPaaS pipeline is setup up to automatically build and publish a container image for changes to the master branch of the graph-data repository
 
-##### `Developer Preview` -> `Red Hat Staging`
+#### `Developer Preview` -> `Red Hat Staging`
 - Update the Cincinnati deployment template to use the new plugin.
 
-##### Red Hat Staging -> Red Hat Production
+#### Red Hat Staging -> Red Hat Production
 - New plugin is successfully deployed to production
 - Adjust the Cincinnati Operator to use the new plugin
 
-##### Red Hat Production -> GA
+#### Red Hat Production -> GA
 - Document the mirroring process for end-users
 - Definitive positive feedback from the ACM team and their use-case
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 *Not applicable*
 
 ### Upgrade / Downgrade Strategy

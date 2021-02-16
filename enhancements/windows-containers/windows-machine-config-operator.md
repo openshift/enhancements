@@ -117,9 +117,9 @@ field in the Windows Machine Set spec.
 ### User Stories
 
 The user stories are collected using the links below:
-* (Windows Containers Productization Epic) https://issues.redhat.com/browse/WINC-182
-* (Machine API migration)[https://issues.redhat.com/issues/?filter=12347681]
-* (Filter out "worker" windows node from being tagged by the MCC)[https://issues.redhat.com/browse/GRPA-2213]
+* [Windows Containers Productization Epic](https://issues.redhat.com/browse/WINC-182)
+* [Machine API migration](https://issues.redhat.com/issues/?filter=12347681)
+* [Filter out "worker" windows node from being tagged by the MCC](https://issues.redhat.com/browse/GRPA-2213)
 
 ### Risks and Mitigations
 

@@ -230,7 +230,7 @@ In the initial phase, the following annotation will be added to the
 manifest files for all CVO-managed components (operators, deployments,
 etc.) that are to be included in single node developer clusters:
 
-```
+```text
 include.release.openshift.io/single-node-developer: "true"
 ```
 
@@ -264,7 +264,7 @@ require the annotation. Possibilities include:
 As an example, the current default manifest for the console downloads
 deployment begins with:
 
-```
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -277,11 +277,11 @@ spec:
   selector:
     # ...
 ```
- 
+
 After phase one, the same manifest will also apply to the
 'single-node-developer' profile:
 
-```
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -301,7 +301,7 @@ profile, the following annotation, which is ignored by the CVO, will
 be added to any manifests not included in the profile if other
 manifests in the same repository are included:
 
-```
+```text
 include.release.openshift.io/single-node-developer: "false"
 ```
 
@@ -362,7 +362,7 @@ Continuing the example from phase one, we want to specialize the
 console downloads deployment to use a single replica, so the original
 manifest will become:
 
-```
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -380,7 +380,7 @@ spec:
 and a new specialized manifest will be added to reduce the number of
 replicas from 2 to 1:
 
-```
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:

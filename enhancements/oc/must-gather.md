@@ -41,20 +41,20 @@ customer once.
 
 It must be simple.  You're gathering because your software is buggy and hard to use.  The more complex your gathering software, the more likely
 it is that the gathering software fails too.  Simplify your gathering software by only using a matching version of the gathering tool.
-This simplifies code and test matrices so that your tool always works.  For instance, OpenShift payloads include the exact 
+This simplifies code and test matrices so that your tool always works.  For instance, OpenShift payloads include the exact
 level of gathering used to debug that payload.
 
 Own your destiny.  You own shipping your own software.  If you can be trusted to ship your software, you can be trusted
 to ship your gathering tool to match it, don't let your gathering be gated by another product.  It may seems easier to start,
 but ultimately you'll end up constrained by different motivations, styles, and cadences.  If you can ship one image, you can
-ship a second one.   
+ship a second one.
 
 ### Goals
 
 1. Gathering should exactly match a single version of the product it is inspecting.
 2. Different products should be responsible for gathering for their own components.
 3. Introspection for clusteroperators should be largely automatic, covering a broad range of generic use-cases.
-4. A single, low-arg client command for users. 
+4. A single, low-arg client command for users.
 5. In a failing cluster, gathering should be maximized to collect everything it can even when part of it fails.
 6. CEE should own the gather script itself, since they are the first consumers.
 
@@ -68,8 +68,8 @@ ship a second one.
    links to get interesting information beyond the current.  Pods in namespaces and logs for those pods as a for instance.
    Currently this is `openshift-must-gather inspect`, but we are porting this to `oc adm` as experiemental in 4.3.  We may
    change and extend arguments over time, but the intent of the command will remain.
-2. The openshift-must-gather image, produced from https://github.com/openshift/must-gather.  The entry point is a 
-   [/gather bash script](https://github.com/openshift/must-gather/blob/master/collection-scripts/gather) owned by CEE 
+2. The openshift-must-gather image, produced from https://github.com/openshift/must-gather.  The entry point is a
+   [/gather bash script](https://github.com/openshift/must-gather/blob/master/collection-scripts/gather) owned by CEE
    (not the developers) that describes what to gather.  It is tightly coupled to the openshift payload
    and only contains logic to gather information from that payload.  We have e2e tests that make sure this functions.
 3. `oc adm must-gather --image` which is a client-side tool that runs any must-gather compatible image by creating a pod,
@@ -77,7 +77,7 @@ ship a second one.
 
 ### `inspect`
 
-See the [inspect enhancement](inspect.md) for details on the `inspect` command. 
+See the [inspect enhancement](inspect.md) for details on the `inspect` command.
 
 ### must-gather Images
 
@@ -90,7 +90,7 @@ To provide your own must-gather image, it must....
 
 ### local fall-back
 
-If the `oc adm must-gather` tool's pod cannot be scheduled or run on the cluster, the `oc adm must-gather` tool will, after a timeout, fall-back to running `oc adm inspect clusteroperators` locally. 
+If the `oc adm must-gather` tool's pod cannot be scheduled or run on the cluster, the `oc adm must-gather` tool will, after a timeout, fall-back to running `oc adm inspect clusteroperators` locally.
 
 ### User Stories
 
@@ -121,10 +121,10 @@ a container that sleeps forever.  We download the result and then delete the nam
 
 ### Output Format
 
-The output of a must-gather image is up the component producing the image, but this is how the openshift/must-gather is 
+The output of a must-gather image is up the component producing the image, but this is how the openshift/must-gather is
 currently organized.
 
-```
+```text
 ├── audit_logs
 │   ├── kube-apiserver
 │   │   ├── zipped audit files from each master here
@@ -141,7 +141,7 @@ currently organized.
 ### Test Plan
 
 There is an e2e test that makes sure the command always exits successfully and that certain apsects of the content
-are always present. 
+are always present.
 
 ### Graduation Criteria
 
@@ -151,7 +151,7 @@ The image is included in the payload, but has no content running in a cluster to
 
 ### Version Skew Strategy
 
-The `oc` command must skew +/- one like normal commands. 
+The `oc` command must skew +/- one like normal commands.
 
 ## Implementation History
 

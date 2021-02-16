@@ -39,15 +39,15 @@ That means the resources previously managed by a different component now will be
 That also means that `oauth-apiserver` needs to be given the encryption keys in order to decrypt previously encrypted resources, like the aforementioned tokens.
 
 
-Additionally, we would like to provide a smooth transition for our customers. 
-Without any manual interaction and with fully tested and working upgrade and downgrade paths. 
+Additionally, we would like to provide a smooth transition for our customers.
+Without any manual interaction and with fully tested and working upgrade and downgrade paths.
 This document describes how we are going to achieve that.
 
 ### Goals
 1. Make it possible to run the OpenShift OAuth API Server on an encrypted cluster. That includes:
- - a cluster upgraded from an encrypted `4.5`
- - a cluster downgraded from an encrypted `4.6`
- - a new `4.6` cluster on which encryption was enabled
+   - a cluster upgraded from an encrypted `4.5`
+   - a cluster downgraded from an encrypted `4.6`
+   - a new `4.6` cluster on which encryption was enabled
 
 ### Non-Goals
 
@@ -76,7 +76,7 @@ On the next release `n+1` we will copy over the keys to avoid creating new ones.
      - use `encryptionconfig.FromSecret` function that returns `EncryptionConfiguration`
      - use `reflect.DeepEqual` function to compare `EncryptionConfigurration.Resources` for example `reflect.DeepEqual(openshiftAPIServerEncryptionCfg.Resources, oauthAPIServerEncryptionCfg.Resources)`
    - returns "success" otherwise
-6. Change `NewRevisionLabelPodDeployer` to conditionally keep the secrets in synchronization. 
+6. Change `NewRevisionLabelPodDeployer` to conditionally keep the secrets in synchronization.
 7. Update `OAS-O` to use `UnionRevisionLabelPodDeployer` passing two `RevisionLabelPodDeployer`. The first one for `openshift-apiserver` (already existing) and the second one for `oauth-apiserver`.
    - it will report whether all instances of `oauth-apiserver` converged to the same revision
    - make sure that `oauth-apiserver` deployer won't synchronize the secrets
@@ -95,64 +95,64 @@ On the next release `n+1` we will copy over the keys to avoid creating new ones.
 ### Test Plan
 
 To validate if `CAO` is capable of managing its own `encryption-config` we are going to create the following E2E tests:
- - scenario 1: turn on encryption
- - scenario 2: turn encryption on and off
- - scenario 3: turn on encryption and force key rotation
- - scenario 4: measure migration performance
-  
+- scenario 1: turn on encryption
+- scenario 2: turn encryption on and off
+- scenario 3: turn on encryption and force key rotation
+- scenario 4: measure migration performance
+
 Note: the above tests will be created based on the common test library that drives the same set of tests for `OAS-O` and `KAS-O`.
 
 To validate upgrade / downgrade path for `4.6` and `4.5` we are going to manually check the following E2E cases:
 
-Scenario 1: 
+Scenario 1:
  1. install a `4.5` cluster, turn the encryption on and upgrade to `4.6`
  2. validate that the cluster is encrypted and that OAuth related APIs can be decrypted, for example read a `oauthaccesstokens`
- 3. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OAuth API server. 
-    For example run `kubeclt get apiservice v1.oauth.openshift.io v1.user.openshift.io -owide` and check they point to `openshift-oauth-apiserver/api` service  
- 4. downgrade back to the previous version 
+ 3. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OAuth API server.
+    For example run `kubeclt get apiservice v1.oauth.openshift.io v1.user.openshift.io -owide` and check they point to `openshift-oauth-apiserver/api` service
+ 4. downgrade back to the previous version
  5. validate that the cluster is encrypted and that OAuth related APIs can be decrypted, for example read a `oauthaccesstokens`
- 6. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OpenShift API server. 
-    For example run `kubeclt get apiservice v1.oauth.openshift.io v1.user.openshift.io -owide` and check they point to `openshift-apiserver/api` service  
- 7. validate that the `openshift-oauth-apiserver` namespace was removed 
+ 6. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OpenShift API server.
+    For example run `kubeclt get apiservice v1.oauth.openshift.io v1.user.openshift.io -owide` and check they point to `openshift-apiserver/api` service
+ 7. validate that the `openshift-oauth-apiserver` namespace was removed
  8. upgrade again to `4.6` and validate the steps `2` and `3`
- 
-Scenario 2: 
+
+Scenario 2:
  1. install a `4.5` cluster, turn the encryption on and upgrade to `4.6`
  2. validate that the cluster is encrypted and that OAuth related APIs can be decrypted, for example read a `oauthaccesstokens`
- 3. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OAuth API server. 
+ 3. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OAuth API server.
  4. force the key rotation
  5. downgrade back to the previous version
  6. validate that the cluster is encrypted and that OAuth related APIs can be decrypted, for example read a `oauthaccesstokens`
- 7. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OpenShift API server. 
- 8. validate that the `openshift-oauth-apiserver` namespace was removed 
- 9. force the key rotation 
+ 7. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OpenShift API server.
+ 8. validate that the `openshift-oauth-apiserver` namespace was removed
+ 9. force the key rotation
  10. upgrade again to `4.6` and validate the steps `2` and `3`
- 
+
 Note: At the moment we don't have tests like that so creating them will be significantly harder.
 
 To validate upgrade / downgrade path for future release `4.7` we are going to manually check the following E2E tests:
 
-Scenario 1: 
+Scenario 1:
  1. install a `4.6` cluster, turn the encryption on and upgrade to `4.7`. In this version `CAO` will take over the encryption config
  2. validate that the cluster is encrypted and that OAuth related APIs can be decrypted, for example read a `oauthaccesstokens`
- 3. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OAuth API server. 
- 4. downgrade back to the previous version 
+ 3. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OAuth API server.
+ 4. downgrade back to the previous version
  5. validate that the cluster is encrypted and that OAuth related APIs can be decrypted, for example read a `oauthaccesstokens`
- 6. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OAuth API server. 
+ 6. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OAuth API server.
  7. upgrade again to `4.7` and validate the steps `2` and `3`
- 
-Scenario 2: 
+
+Scenario 2:
  1. install a `4.6` cluster, turn the encryption on and upgrade to `4.7`
  2. validate that the cluster is encrypted and that OAuth related APIs can be decrypted, for example read a `oauthaccesstokens`
- 3. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OAuth API server. 
+ 3. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OAuth API server.
  4. force the key rotation
  5. downgrade back to the previous version
  6. validate that the cluster is encrypted and that OAuth related APIs can be decrypted, for example read a `oauthaccesstokens`
- 7. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OAuth API server. 
+ 7. validate that `oauth.openshift.io` and `user.openshift.io` are being served by the OAuth API server.
  8. force the key rotation
  9. upgrade again to `4.7` and validate the steps `2` and `3`
- 
-##### Removing a deprecated feature
+
+#### Removing a deprecated feature
 
 See upgrade/downgrade.
 
@@ -161,11 +161,11 @@ See upgrade/downgrade.
 In an upgrade case, `OAS-O` in version `4.6` will be responsible for synchronizing and maintaining encryption state for both `openshift-apiserver` and `oauth-apiserver`.
 Since both will share exactly the same `encryption-config`, the new component will be able to read (decrypt) already encrypted data.
 
-During an upgrade, the new `UnionRevisionLabelPodDeployer` will create back pressure in the system and will make the encryption controllers wait for the new component to synchronize. 
+During an upgrade, the new `UnionRevisionLabelPodDeployer` will create back pressure in the system and will make the encryption controllers wait for the new component to synchronize.
 In that state, the status of `OAS-O` won't change and we won't roll out any new encryption keys.
 
 In a downgrade scenario, `OAS-O` in version `4.5` is responsible for synchronizing and maintaining encryption state only for `openshift-apiserver`.
-Since in version `4.6` exactly the same `encryption-config` was used the `openshift-apiserver` will be able to read (decrypt) data. 
+Since in version `4.6` exactly the same `encryption-config` was used the `openshift-apiserver` will be able to read (decrypt) data.
 
 
 ### Upgrade / Downgrade Strategy for `4.7` and `4.6`
@@ -173,7 +173,7 @@ Since in version `4.6` exactly the same `encryption-config` was used the `opensh
 In an upgrade case, `CAO` in version `4.7` takes over `encryption-config-openshift-ouath` by removing the annotation and copying the encryption keys (`encryption-key-openshift-apiserver-{0,1, ...}`).
 From that point it will manage its own configuration.
 
-In a downgrade scenario nothing changes because `OAS-O` in version `4.6` will not manage `encryption-config-openshift-ouath` as it doesn't have the annotation. 
+In a downgrade scenario nothing changes because `OAS-O` in version `4.6` will not manage `encryption-config-openshift-ouath` as it doesn't have the annotation.
 Additionally `CAO` in version `4.6` was prepared to take care of its own configuration.
 
 ### Version Skew Strategy
@@ -187,6 +187,6 @@ History`.
 
 ## Alternatives
 
-1. Turn off encryption before upgrading to new version and turn it on right after. It would be simple but not desirable by the end users. 
+1. Turn off encryption before upgrading to new version and turn it on right after. It would be simple but not desirable by the end users.
 
 ## Infrastructure Needed

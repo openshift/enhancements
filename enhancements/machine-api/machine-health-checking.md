@@ -76,7 +76,7 @@ It provides a short-circuit mechanism and limits remediation when `maxUnhealthy`
 
 The machine health checker is an integration point between node problem detection tooling expresed as node conditions and remediation to achieve a node auto repairing feature.
 
-### Unhealthy criteria:
+### Unhealthy criteria
 A machine/node target is unhealthy when:
 
 - The node meets the unhealthy node conditions criteria defined.
@@ -89,7 +89,7 @@ For the node conditions the time outs are defined by the admin. For the other ca
 For a machine with no nodeRef an opinionated value could be assumed e.g 10 min.
 For a node notFound or a failed machine, the machine is considerable unrecoverable, remediation can be triggered right away.
 
-### Remediation:
+### Remediation
 - The machine is requested for deletion.
 - The controller owning that machine, e.g machineSet reconciles towards the expected number of replicas and start the process to bring up a new machine/node tuple.
 - The machine controller drains the node.
@@ -98,7 +98,7 @@ For a node notFound or a failed machine, the machine is considerable unrecoverab
 
 ### Implementation Details
 
-#### MachineHealthCheck CRD:
+#### MachineHealthCheck CRD
 - Enable watching a pool of machines (based on a label selector).
 - Enable defining an unhealthy node criteria (based on a list of node conditions).
 - Enable setting a threshold of unhealthy nodes. If the current number is at or above this threshold no further remediation will take place. This can be expressed as an int or as a percentage of the total targets in the pool.
@@ -131,14 +131,14 @@ status:
   expectedMachines: 5
 ```
 
-#### MachineHealthCheck controller:
+#### MachineHealthCheck controller
 Watch:
 - Watch machineHealthCheck resources
 - Watch machines and nodes with an event handler e.g controller runtime `EnqueueRequestsFromMapFunc` which returns machineHealthCheck resources.
 
 Reconcile:
 - Fetch all the machines in the pool and operate over machine/node targets. E.g:
-```
+```go
 type target struct {
   Machine capi.Machine
   Node    *corev1.Node
@@ -158,7 +158,7 @@ Out of band:
 
 ![Machine health check](./mhc.svg)
 
-#### Out of tree experimental remediation controller, e.g baremetal reboot:
+#### Out of tree experimental remediation controller, e.g baremetal reboot
 - An external remediation can plug in by setting the `machine.openshift.io/remediation-strategy` on the MHC resource.
 - An external remediation controller remediation could then watch machines annotated with `machine.openshift.io/remediation-strategy: external-baremetal` and react as it sees fit.
 
@@ -220,10 +220,26 @@ https://gist.github.com/bison/403bb921e1d5ed72f7edec2ccb47471c#remediationstrate
 
 Considered to bake this functionality into machineSets. This was discarded as different controllers than a machineSet could be owning the targeted machines. For those cases as a user you still want to benefit from automated node remediation.
 
-Considered allowing to target machineSets instead of using a label selector. This was discarded because of the reason above. Also there might be upper level controllers doing things that the MHC does not need to account for, e.g machineDeployment flipping machineSets for a rolling update. Therefore considering machines and label selectors as the fundamental operational entity results in a good and convenient level of flexibility and decoupling from other controllers.
+Considered allowing to target machineSets instead of using a label
+selector. This was discarded because of the reason above. Also there
+might be upper level controllers doing things that the MHC does not
+need to account for, e.g machineDeployment flipping machineSets for a
+rolling update. Therefore considering machines and label selectors as
+the fundamental operational entity results in a good and convenient
+level of flexibility and decoupling from other controllers.
 
-Considered a more strict short-circuiting mechanisim (currently feature gated) decoupled from the machine health checker i.e machine disruption budget analogous to pod disruption budget. This was discarded because it added an non justified level of complexity and additional API CRDs. Instead we opt for a simpler approach and will consider more concrete feature requests that requires additional complexity based on real use feedback.
-This would introduce a MachineDisruptionBudget resource. This resource simply targets a set of machines with a label selector and continuously records status information on the readiness of the targets. It includes thresholds similar to the maxUnavailable option above, and provides an at-a-glance view of whether the targets are at that limit or not.
+Considered a more strict short-circuiting mechanisim (currently
+feature gated) decoupled from the machine health checker i.e machine
+disruption budget analogous to pod disruption budget. This was
+discarded because it added an non justified level of complexity and
+additional API CRDs. Instead we opt for a simpler approach and will
+consider more concrete feature requests that requires additional
+complexity based on real use feedback.  This would introduce a
+MachineDisruptionBudget resource. This resource simply targets a set
+of machines with a label selector and continuously records status
+information on the readiness of the targets. It includes thresholds
+similar to the maxUnavailable option above, and provides an
+at-a-glance view of whether the targets are at that limit or not.
 
 Example:
 
@@ -238,9 +254,9 @@ spec:
     role: worker
     zone: us-east-1a
   maxUnavailable: 5
-```  
+```
 
-### Pros:
+### Pros
 
 More expressive, i.e. the decision on whether to perform remediation can take into account the status of an arbitrary set of machines, including machines that may not qualify for automated remediation.
 Could potentially be used by controllers other than health-checker.
@@ -248,11 +264,11 @@ Separates this bit of bookkeeping logic from the health-checker.
 
 There's a feature gated version already.
 
-### Cons:
+### Cons
 
 Introduces a new type and controller.
 
-### MachineDisruptionBudget use-cases:
+### MachineDisruptionBudget use-cases
 
 I have a cluster spanning 3 zones in my data center. I want health-checking with remediation on all nodes. I want to skip remediation if a large number of nodes in a single zone are down because it's most likely a networking issue.
 
@@ -364,7 +380,7 @@ Steps to reproduce:
 3. Deploy MachineHealthCheck to cluster
 4. Disable CVO
 5. Remove the following section from the `openshift-machine-api-aws` credentials request
-  - `kubectl edit credentialsrequests -n openshift-cloud-credential-operator openshift-machine-api-aws`
+   - `kubectl edit credentialsrequests -n openshift-cloud-credential-operator openshift-machine-api-aws`
  ```yaml
   - action:
     - kms:Decrypt

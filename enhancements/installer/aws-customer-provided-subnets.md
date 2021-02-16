@@ -27,9 +27,26 @@ superseded-by:
 
 ## Summary
 
-In many large organizations, IT groups are separated into teams. A common separation of duties lies between networking/WAN and application or enabling technology deployments. One group will provision or assign AWS accounts with core management technology. A second group will be responsible for provisioning VPC networks complete with subnets & zone selection, routing, VPN connections, and ingress/egress rules from the company. Lastly, an applications team (or individual business units) are permitted into the account to provision application-specific items (instances, buckets, databases, pipelines, load balancers, etc.)
+In many large organizations, IT groups are separated into teams. A
+common separation of duties lies between networking/WAN and
+application or enabling technology deployments. One group will
+provision or assign AWS accounts with core management technology. A
+second group will be responsible for provisioning VPC networks
+complete with subnets & zone selection, routing, VPN connections, and
+ingress/egress rules from the company. Lastly, an applications team
+(or individual business units) are permitted into the account to
+provision application-specific items (instances, buckets, databases,
+pipelines, load balancers, etc.)
 
-To accomplish this and our infrastructure needs, AWS account access can be separated into "infrastructure" versus "application". Infrastructure includes elements related to the VPC and the networking core components within the VPC (VPC, subnets, routing tables, internet gateways, NAT, VPN). Application items include things directly touching nodes within the cluster (ELBs, security groups, S3 buckets, nodes). This is a typical separation of responsibilities among IT groups and deployment/provisioning pipelines within large companies.
+To accomplish this and our infrastructure needs, AWS account access
+can be separated into "infrastructure" versus
+"application". Infrastructure includes elements related to the VPC and
+the networking core components within the VPC (VPC, subnets, routing
+tables, internet gateways, NAT, VPN). Application items include things
+directly touching nodes within the cluster (ELBs, security groups, S3
+buckets, nodes). This is a typical separation of responsibilities
+among IT groups and deployment/provisioning pipelines within large
+companies.
 
 The Application teams will be enabled to specify the subnets that can be used to deploy OpenShift clusters.
 
@@ -45,7 +62,13 @@ There are no changes in expectations regarding publicly addressable parts of the
 
 ## Proposal
 
-Installer allow users to provide a list of subnets that should be used for the cluster. Since there is an expectation that networking is being shared, the installer cannot modify the networking setup (i.e. the route tables for the subnets or the VPC options like DHCP etc.) but, changes required to the shared resources like `Tags` that do not affect the behavior for other tenants of the network will be made.
+Installer allow users to provide a list of subnets that should be used
+for the cluster. Since there is an expectation that networking is
+being shared, the installer cannot modify the networking setup
+(i.e. the route tables for the subnets or the VPC options like DHCP
+etc.) but, changes required to the shared resources like `Tags` that
+do not affect the behavior for other tenants of the network will be
+made.
 
 The installer validates the assumptions about the networking setup.
 
@@ -136,7 +159,13 @@ The installer will continue to create (vs. the fully-IPI flow):
 
 #### Limitations
 
-- Subnets must provide networking (NAT gateways, internet gateways, route tables, etc.).  At least for the initial implementation, we will not validate this assumption, will attempt to install the cluster regardless, and will fail after having created cluster-owned resources if the assumption is violated.  Future work can iterate on pre-create validation for the networking assumptions, if they turn out to be a common tripping point.
+- Subnets must provide networking (NAT gateways, internet gateways,
+  route tables, etc.).  At least for the initial implementation, we
+  will not validate this assumption, will attempt to install the
+  cluster regardless, and will fail after having created cluster-owned
+  resources if the assumption is violated.  Future work can iterate on
+  pre-create validation for the networking assumptions, if they turn
+  out to be a common tripping point.
 
 - Also there might be subnet level Network ACLs that block or hinder with inbound/outbound traffic for the cluster and those cannot be sanely validated by the installer and at least for the initial implementation, we will not validate this assumption, will attempt to install the cluster regardless.
 

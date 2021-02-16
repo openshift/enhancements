@@ -12,7 +12,7 @@ creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
 see-also:
-  - "/enhancements/this-other-neat-thing.md"  
+  - "/enhancements/this-other-neat-thing.md"
 replaces:
   - "/enhancements/that-less-than-great-idea.md"
 superseded-by:
@@ -71,6 +71,7 @@ around the enhancement process.
 - [ ] Enhancement is `implementable`
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
+- [ ] Operational readiness criteria is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
@@ -80,7 +81,7 @@ The `Summary` section is incredibly important for producing high quality
 user-focused documentation such as release notes or a development roadmap. It
 should be possible to collect this information before implementation begins in
 order to avoid requiring implementors to split their attention between writing
-release notes and implementing the feature itself. 
+release notes and implementing the feature itself.
 
 A good summary is probably at least a paragraph in length.
 
@@ -102,12 +103,14 @@ and make progress.
 
 This is where we get down to the nitty gritty of what the proposal actually is.
 
-### User Stories [optional]
+### User Stories
 
 Detail the things that people will be able to do if this is implemented.
 Include as much detail as possible so that people can understand the "how" of
 the system. The goal here is to make this feel real for users without getting
 bogged down.
+
+Include a story on how this proposal will be operationalized:  lifecycled, monitored and remediated at scale.
 
 #### Story 1
 
@@ -134,9 +137,9 @@ Consider including folks that also work outside your immediate sub-project.
 ### Open Questions [optional]
 
 This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance, 
+to implement the design.  For instance,
  > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this? 
+  information.  Can we do this?
 
 ### Test Plan
 
@@ -145,6 +148,7 @@ to implement the design.  For instance,
 Consider the following in developing a test plan for this enhancement:
 - Will there be e2e and integration tests, in addition to unit tests?
 - How will it be tested in isolation vs with other components?
+- What additional testing is necessary to support managed OpenShift service-based offerings?
 
 No need to outline all of the test cases, just the general strategy. Anything
 that would count as tricky in the implementation and anything particularly
@@ -167,8 +171,8 @@ Consider the following in developing the graduation criteria for this
 enhancement:
 
 - Maturity levels
-    - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-    - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
+  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
+  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
 - [Deprecation policy][deprecation-policy]
 
 Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
@@ -179,27 +183,31 @@ In general, we try to use the same stages (alpha, beta, GA), regardless how the 
 [maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
 [deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
 
-#### Examples
+**Examples**: These are generalized examples to consider, in addition
+to the aforementioned [maturity levels][maturity-levels].
 
-These are generalized examples to consider, in addition to the aforementioned [maturity levels][maturity-levels].
-
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
+- Enumerate service level indicators (SLIs), expose SLIs as metrics
+- Write symptoms-based alerts for the component(s)
 
-##### Tech Preview -> GA 
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 - Available by default
+- Backhaul SLI telemetry
+- Document SLOs for the component
+- Conduct load testing
 
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
 - Deprecate the feature
@@ -218,7 +226,7 @@ enhancement:
 
 Upgrade expectations:
 - Each component should remain available for user requests and
-  workloads during upgrades. Any exception to this should be
+  workloads during upgrades. Ensure the components leverage best practices in handling [voluntary disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to this should be
   identified and discussed here.
 - Micro version upgrades - users should be able to skip forward versions within a
   minor release stream without being required to pass through intermediate

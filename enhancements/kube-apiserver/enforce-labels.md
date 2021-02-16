@@ -88,20 +88,34 @@ Two planned gatekeeper features will be used for this enhancement:
 
 #### Gatekeeper operator
 
-Gatekeeper would be installed using an operator. The operator would not only take care of the installation, but also perform some additional configuration to ensure gatekeeper does not interere with control-plane resources. 
+Gatekeeper would be installed using an operator. The operator would not only take care of the installation, but also perform some additional configuration to ensure gatekeeper does not interere with control-plane resources.
 
 There is currently an effort to provide a gatekeeper operator [here](https://github.com/font/gatekeeper-operator). It is planned that the operator will be accepted as part of the open-policy-agent repo.
 
-Gatekeeper inspects resources based on a validating webhook (we assume the mutation feature will similarly use a mutating webhook). A sample webhook definition can be found [here](https://github.com/open-policy-agent/gatekeeper/blob/1de87b6d3c2ed3609e69b789d722e28285873861/charts/gatekeeper/templates/gatekeeper-validating-webhook-configuration-validatingwebhookconfiguration.yaml). The operator would modify the webhook namespace selector to exclude all control-plane components. The operator would keep track of the namespaces and only allow the gatekeeper webhooks access to non control-plane namespaces. The operator configuration could allow to configure the namespaces accessible by gatekeeper.
+Gatekeeper inspects resources based on a validating webhook (we assume
+the mutation feature will similarly use a mutating webhook). A sample
+webhook definition can be found
+[here](https://github.com/open-policy-agent/gatekeeper/blob/1de87b6d3c2ed3609e69b789d722e28285873861/charts/gatekeeper/templates/gatekeeper-validating-webhook-configuration-validatingwebhookconfiguration.yaml). The
+operator would modify the webhook namespace selector to exclude all
+control-plane components. The operator would keep track of the
+namespaces and only allow the gatekeeper webhooks access to non
+control-plane namespaces. The operator configuration could allow to
+configure the namespaces accessible by gatekeeper.
 
 #### Safeguaring control-plane components
 
 Gatekeeper uses a single admission webhook to for constraints enforcement. We assume the same solution will be used for the mutation feature. The control-plane resources can be excluded from gatekeeper interference by specifying an appropriate namespace selector on the webhook.
-Gatekeeper would be installed/configured by an operator, which would adjust the webhook namespace selector (based on some GatekeeperInstallConfig CRD). 
+Gatekeeper would be installed/configured by an operator, which would adjust the webhook namespace selector (based on some GatekeeperInstallConfig CRD).
 
 The webhook namespaceselector allows to filter the included namespaces based on the namespace labels (details available: [here](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/) [here](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/)) .
 
-Also the default gatekeeper webhook configuration is using "failurePolicy​: ​Ignore", we assume this would be extended to the mutation feature (more on this: [here](https://github.com/open-policy-agent/gatekeeper#admission-webhook-fail-open-status)). Any resources which would slip into the system unmodified would later be corrected using the additional relabeling feature (implemented in the second phase).
+Also the default gatekeeper webhook configuration is using
+"failurePolicy​: ​Ignore", we assume this would be extended to the
+mutation feature (more on this:
+[here](https://github.com/open-policy-agent/gatekeeper#admission-webhook-fail-open-status)). Any
+resources which would slip into the system unmodified would later be
+corrected using the additional relabeling feature (implemented in the
+second phase).
 
 
 #### Performance
@@ -132,17 +146,16 @@ Kyverno (https://github.com/nirmata/kyverno) was also looked at but was mostly r
 
 ## Graduation Criteria
 
-#### Dev Preview -> Tech Preview
+### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
 - Sufficient test coverage
 - At least v1beta1 API level
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 
 - More testing (e2e)
 - Sufficient time for feedback
 - Available by default
-- At least v1beta1 API level 
-
+- At least v1beta1 API level

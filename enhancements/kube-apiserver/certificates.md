@@ -34,7 +34,7 @@ for the kube-apiserver in particular are managed.
 
 ## Motivation
 
-We face many questions about 
+We face many questions about
 1. What a specific certificate/flag is for.
 2. How a specific certificate is created.
 3. What breaks when certificate fails.
@@ -95,12 +95,12 @@ This document attempts to answer these questions.
 
 
 ### What is exposed by operators?
-Resources in `openshift-config` and `openshift-config-managed` are soft API contracts to operators and 
-`openshift-config-managed` is a soft API contract from operators.  
-We’ll try not to break anything, but the guarantee isn’t strong.  
+Resources in `openshift-config` and `openshift-config-managed` are soft API contracts to operators and
+`openshift-config-managed` is a soft API contract from operators.
+We’ll try not to break anything, but the guarantee isn’t strong.
 These are for coordinating our operators, not apps in a cluster.
 
-Resources in other `openshift-*-operator` namespaces of `openshift-*` namespaces have no guarantees at all.  
+Resources in other `openshift-*-operator` namespaces of `openshift-*` namespaces have no guarantees at all.
 They can change at any time, for any reason, without any notice.
 
 #### openshift-config-managed
@@ -141,4 +141,3 @@ They can change at any time, for any reason, without any notice.
 ## Drawbacks
 
 ## Alternatives
-

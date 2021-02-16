@@ -68,18 +68,18 @@ but instead they will need to be IP's available in the external network.
 A new `ProvisioningNetwork` option will be added to the baremetal
 installer platform, that features an enum of possible values:
 
-  - `managed` (default): Fully managed provisioning networking including
-     DHCP, TFTP, etc.
+- `managed` (default): Fully managed provisioning networking including
+  DHCP, TFTP, etc.
 
-  - `unmanaged`: Provisioning network is still present and used, but
-     user is responsible for managing DHCP. Virtual media provisioning
-     is reccomended, but PXE is still available if required.
+- `unmanaged`: Provisioning network is still present and used, but
+  user is responsible for managing DHCP. Virtual media provisioning
+  is reccomended, but PXE is still available if required.
 
-  - `disabled`: Provisioning network is fully disabled. User may only do
-     virtual media based provisioning, or bring up the cluster using
-     assisted installation. If using power management, BMC's must be
-     accessible from the machine networks. User must provide 2 IP's on
-     the external network that are used for the provisioning services.
+- `disabled`: Provisioning network is fully disabled. User may only do
+  virtual media based provisioning, or bring up the cluster using
+  assisted installation. If using power management, BMC's must be
+  accessible from the machine networks. User must provide 2 IP's on
+  the external network that are used for the provisioning services.
 
 The same field will be added to the [Provisioning CRD](https://github.com/openshift/machine-api-operator/blob/0b8cc8c965174e9de65a7f2f4021a74c487cafb6/install/0000_30_machine-api-operator_04_metal3provisioning.crd.yaml),
 which is created by the installer and used to configure the day 2
@@ -140,14 +140,14 @@ the third control plane member is online.
 
 **Note:** *Section not required until targeted at a release.*
 
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -156,7 +156,7 @@ the third control plane member is online.
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
 - Deprecate the feature

@@ -110,54 +110,54 @@ the operator itself is installed. If not installed, the gauge will have a 0
 value.
 
 #### cluster-svcat-apiserver-operator
-  - already has a ServiceMonitor
-  - need to create a new Gauge
-    - name: "service_catalog_apiserver_installed"
-    - help: "Indicates whether the service catalog apiserver is installed"
-  - need to create a new Gauge
-    - name: "service_catalog_apiserver_operator_installed"
-    - help: "Indicates whether the service catalog apiserver operator is
-      installed"
+- already has a ServiceMonitor
+- need to create a new Gauge
+  - name: "service_catalog_apiserver_installed"
+  - help: "Indicates whether the service catalog apiserver is installed"
+- need to create a new Gauge
+  - name: "service_catalog_apiserver_operator_installed"
+  - help: "Indicates whether the service catalog apiserver operator is
+    installed"
 
 #### cluster-svcat-controller-manager-operator
-  - already has a ServiceMonitor
-  - need to create a new Gauge
-    - name: "service_catalog_installed"
-    - help: "Indicates whether the service catalog is installed"
-  - need to create a new Gauge
-    - name: "service_catalog_controller_manager_operator_installed"
-    - help: "Indicates whether the service catalog controller manager operator
-      is installed"
+- already has a ServiceMonitor
+- need to create a new Gauge
+  - name: "service_catalog_installed"
+  - help: "Indicates whether the service catalog is installed"
+- need to create a new Gauge
+  - name: "service_catalog_controller_manager_operator_installed"
+  - help: "Indicates whether the service catalog controller manager operator
+    is installed"
 
 #### ansible-service-broker-operator
-  - has a ServiceMonitor configured for the broker
-    - can the operator use it? if not, need to create its own monitor
-  - need to create a new Gauge
-    - name: "ansible_service_broker_installed"
-    - help: "Indicates whether the ansible service broker is installed"
-  - need to create a new Gauge
-    - name: "ansible_service_broker_operator_installed"
-    - help: "Indicates whether the ansible service broker operator is installed"
+- has a ServiceMonitor configured for the broker
+  - can the operator use it? if not, need to create its own monitor
+- need to create a new Gauge
+  - name: "ansible_service_broker_installed"
+  - help: "Indicates whether the ansible service broker is installed"
+- need to create a new Gauge
+  - name: "ansible_service_broker_operator_installed"
+  - help: "Indicates whether the ansible service broker operator is installed"
 
 #### template-service-broker-operator
-  - could not determine if this operator has a ServiceMonitor configured.
-    If not, need to create its own monitor
-  - need to create a new Gauge
-    - name: "template_service_broker_installed"
-    - help: "Indicates whether the template service broker is installed"
-  - need to create a new Gauge
-    - name: "template_service_broker_operator_installed"
-    - help: "Indicates whether the template service broker operator is installed"
+- could not determine if this operator has a ServiceMonitor configured.
+  If not, need to create its own monitor
+- need to create a new Gauge
+  - name: "template_service_broker_installed"
+  - help: "Indicates whether the template service broker is installed"
+- need to create a new Gauge
+  - name: "template_service_broker_operator_installed"
+  - help: "Indicates whether the template service broker operator is installed"
 
 #### other resources
-  - [alerting client](https://github.com/prometheus/alertmanager/blob/master/client/client.go)
-  - [Alerting rules](https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/)
-  - [Alertmanager](https://prometheus.io/docs/alerting/alertmanager/)
-  - [Metric types](https://prometheus.io/docs/concepts/metric_types/)
-  - [cluster-svcat-controller-manager-operator](https://github.com/openshift/cluster-svcat-controller-manager-operator/)
-  - [cluster-svcat-apiserver-operator](https://github.com/openshift/cluster-svcat-apiserver-operator)
-  - [template-service-broker-operator](https://github.com/openshift/template-service-broker-operator/)
-  - [ansible-service-broker-operator](https://github.com/openshift/ansible-service-broker/tree/master/operator)
+- [alerting client](https://github.com/prometheus/alertmanager/blob/master/client/client.go)
+- [Alerting rules](https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/)
+- [Alertmanager](https://prometheus.io/docs/alerting/alertmanager/)
+- [Metric types](https://prometheus.io/docs/concepts/metric_types/)
+- [cluster-svcat-controller-manager-operator](https://github.com/openshift/cluster-svcat-controller-manager-operator/)
+- [cluster-svcat-apiserver-operator](https://github.com/openshift/cluster-svcat-apiserver-operator)
+- [template-service-broker-operator](https://github.com/openshift/template-service-broker-operator/)
+- [ansible-service-broker-operator](https://github.com/openshift/ansible-service-broker/tree/master/operator)
 
 ### Risks and Mitigations
 
@@ -167,37 +167,37 @@ TBD
 
 ### Test Plan
 
-#### cluster-svcat-apiserver-operator
-  - already has unit tests
-  - add e2e test to test observing cluster config
-  - add e2e test to test alert is sent when operator is enabled
-  - add e2e test to test alert is sent when apiserver is enabled
-  - add e2e test to test apiservice is removed when state changed to Removed
+#### cluster-svcat-apiserver-operator tests
+- already has unit tests
+- add e2e test to test observing cluster config
+- add e2e test to test alert is sent when operator is enabled
+- add e2e test to test alert is sent when apiserver is enabled
+- add e2e test to test apiservice is removed when state changed to Removed
 
-#### cluster-svcat-controller-manager-operator
-  - already has unit tests
-  - add e2e test to test observing cluster config
-  - add e2e test to test alert is sent when operator is enabled
-  - add e2e test to test controller-manager is removed when state changed
-    to Removed
+#### cluster-svcat-controller-manager-operator tests
+- already has unit tests
+- add e2e test to test observing cluster config
+- add e2e test to test alert is sent when operator is enabled
+- add e2e test to test controller-manager is removed when state changed
+  to Removed
 
-#### ansible-service-broker-operator
-  - already has unit tests
-  - seems to have e2e tests already
-  - update e2e tests to test alert is sent when operator is enabled
-  - update e2e tests to test alert is sent when broker is enabled
+#### ansible-service-broker-operator tests
+- already has unit tests
+- seems to have e2e tests already
+- update e2e tests to test alert is sent when operator is enabled
+- update e2e tests to test alert is sent when broker is enabled
 
-#### template-service-broker-operator
-  - TBD, it will have some tests just not sure what is already there.
-  - add/update e2e tests to test alert is sent when operator is enabled
-  - add/update e2e tests to test alert is sent when broker is enabled
+#### template-service-broker-operator tests
+- TBD, it will have some tests just not sure what is already there.
+- add/update e2e tests to test alert is sent when operator is enabled
+- add/update e2e tests to test alert is sent when broker is enabled
 
 ### Graduation Criteria
 
 The Service Catalog and Brokers have reached their deprecation stage of the
 graduation criteria.
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 - In 4.2, the Service Catalog and Brokers APIs were marked as deprecated in the
   documentation:

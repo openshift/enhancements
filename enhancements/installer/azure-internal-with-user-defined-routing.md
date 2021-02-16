@@ -29,11 +29,27 @@ superseded-by:
 
 ## Summary
 
-Currently for internal clusters on Azure, OpenShift clusters always use Public Standard Loadbalancers for Internet egress. This configuration requires public IPs, public loadbalancers etc. which some customers do not want for their internal clusters. This proposal allows the users to choose their own outbound routing for Internet allowing them to use any pre-existing setups instead of the per-cluster OpenShift recommended way.
+Currently for internal clusters on Azure, OpenShift clusters always
+use Public Standard Loadbalancers for Internet egress. This
+configuration requires public IPs, public loadbalancers etc. which
+some customers do not want for their internal clusters. This proposal
+allows the users to choose their own outbound routing for Internet
+allowing them to use any pre-existing setups instead of the
+per-cluster OpenShift recommended way.
 
 ## Motivation
 
-Internal clusters on Azure require explicit setup to allow outbound routing or egress to Internet to pull container images, updates, access cloud APIs etc. Currently the cluster uses a public standard loadbalancer, with a dummy inbound_rule, to provide the outbound routing to Internet. But this setup forces customers that either have pre-existing setups like PROXY for egress or do not require any egress to Internet at all i.e. air-gapped into the above prescribed setup without allowing them to change it. Often these customers have policies that disallow creation resources like public IP addresses, which causes the installations to fail and forces the customers to use user-provided workflow.
+Internal clusters on Azure require explicit setup to allow outbound
+routing or egress to Internet to pull container images, updates,
+access cloud APIs etc. Currently the cluster uses a public standard
+loadbalancer, with a dummy inbound_rule, to provide the outbound
+routing to Internet. But this setup forces customers that either have
+pre-existing setups like PROXY for egress or do not require any egress
+to Internet at all i.e. air-gapped into the above prescribed setup
+without allowing them to change it. Often these customers have
+policies that disallow creation resources like public IP addresses,
+which causes the installations to fail and forces the customers to use
+user-provided workflow.
 
 Allowing the customer to take over the responsibility of routing allows the user flexibility of using the installer-provisioned workflow.
 
@@ -53,7 +69,19 @@ The user should only be allowed to change the outbound type when using pre-exiti
 
 ### Public loadbalancers
 
-For outbound type `Loadbalancer` the installer creates a public loadbalancer with no inbound_rules but one outbound_rule per IPFamily to provide egress for bootstrap, control-plane and compute nodes. To manage the membership of the nodes to the backend of the public load balancer, the installer creates a Kubernetes service type `Loadbalancer`. In addition to the service object, the installer also makes sure the `Machine(set)` objects have the `publicLoadBalancer` field set to the public loadbalancer. Adding the  `publicLoadBalancer` field ensures that virtual machines use the public loadbalancer for egress from creation and do not have to switch the egress strategy at later time when nodes are added to the backend by the kube-cloud-controller, which can be quite a bit after the virtual machine has booted and pulled content from Internet.
+For outbound type `Loadbalancer` the installer creates a public
+loadbalancer with no inbound_rules but one outbound_rule per IPFamily
+to provide egress for bootstrap, control-plane and compute nodes. To
+manage the membership of the nodes to the backend of the public load
+balancer, the installer creates a Kubernetes service type
+`Loadbalancer`. In addition to the service object, the installer also
+makes sure the `Machine(set)` objects have the `publicLoadBalancer`
+field set to the public loadbalancer. Adding the `publicLoadBalancer`
+field ensures that virtual machines use the public loadbalancer for
+egress from creation and do not have to switch the egress strategy at
+later time when nodes are added to the backend by the
+kube-cloud-controller, which can be quite a bit after the virtual
+machine has booted and pulled content from Internet.
 
 For outbound type `UserDefined` the installer does not create the outbound_rule or the Kubernetes service type Loadbalancer or set the `Machine(set)s` object's `publicLoadBalancer` field to the public loadbalancer.
 
@@ -71,7 +99,13 @@ Here are some of the expectations from the outbound routing setup by users,
 
 The user will be using proxy configuration with user defined routing to allow egress to internet. Users must be careful that cluster operators currently do not access the Azure APIs using proxy and therefore access to Azure APIs should be available outside of proxy.
 
-When using the default route table for subnets with 0.0.0.0/0 populated automatically by Azure, all Azure APIs requests are routed over Azure's internal network even though the IP addresses are public. So in this scenario as long as the Network Security Group rules allow egress to Azure API endpoints, proxy with user defined routing configuration in install-config.yaml will allow users to create internal clusters with no public endpoints.
+When using the default route table for subnets with 0.0.0.0/0
+populated automatically by Azure, all Azure APIs requests are routed
+over Azure's internal network even though the IP addresses are
+public. So in this scenario as long as the Network Security Group
+rules allow egress to Azure API endpoints, proxy with user defined
+routing configuration in install-config.yaml will allow users to
+create internal clusters with no public endpoints.
 
 #### Internal cluster with Azure Firewall for Internet access
 
@@ -85,7 +119,14 @@ Users that have virtual networks with no access to Internet depend on internal r
 
 ### Risks and Mitigations
 
-1. There are no great ways to validate if the user's outbound routing setup is configured correctly for the OpenShift cluster and therefore it will result in not easy to debug failure modes and will probably require a lot more back and forth to understand the setup to triage the issue. The bootstrap failure log bundle is based on SSH access to bootstrap machines and therefore those logs should help uncover the symptoms to at least narrow down the failures.
+1. There are no great ways to validate if the user's outbound routing
+   setup is configured correctly for the OpenShift cluster and
+   therefore it will result in not easy to debug failure modes and
+   will probably require a lot more back and forth to understand the
+   setup to triage the issue. The bootstrap failure log bundle is
+   based on SSH access to bootstrap machines and therefore those logs
+   should help uncover the symptoms to at least narrow down the
+   failures.
 
 2. User Defined Routing setup is not easy for customers esp. wrt to ensuring access to Azure APIs from the cluster as Azure does not provide AWS private link like capabilities for all the Azure API endpoints making access to these endpoints difficult when using air-gapped virtual networks. There are plans to provide such a capability and that should make it easy to configure.
 

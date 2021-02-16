@@ -101,7 +101,7 @@ OpenShift egress-router feature, but may have other uses as well.
 
 #### Network Attachment Definition
 
-```
+```yaml
 apiVersion: "k8s.cni.cncf.io/v1"
 kind: NetworkAttachmentDefinition
 metadata:
@@ -118,7 +118,7 @@ spec:
 
 #### ConfigMap
 
-```
+```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -135,7 +135,7 @@ data:
 
 #### Pod with annotation
 
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -162,13 +162,28 @@ The whole set of options can be found at https://github.com/openshift/egress-rou
 
 ### Interface Types and Platform Support
 
-On bare-metal nodes, `macvlan` and `ipvlan` are supported for `interfaceType`, with `macvlan` being the default. For `macvlan`, `interfaceArgs` can include `mode` and `master`, and for `ipvlan` it can include `master`. However, you do not need to specify `master` if it can be inferred from the IP address. (That is, if there is exactly 1 network interface on the node whose configured IP is in the same CIDR range as the pod's configured IP, then that interface will automatically be used as the `master`, and the associated gateway will automatically be used as the `gateway`.)
+On bare-metal nodes, `macvlan` and `ipvlan` are supported for
+`interfaceType`, with `macvlan` being the default. For `macvlan`,
+`interfaceArgs` can include `mode` and `master`, and for `ipvlan` it
+can include `master`. However, you do not need to specify `master` if
+it can be inferred from the IP address. (That is, if there is exactly
+1 network interface on the node whose configured IP is in the same
+CIDR range as the pod's configured IP, then that interface will
+automatically be used as the `master`, and the associated gateway will
+automatically be used as the `gateway`.)
 
 ### IP Configuration
 
 The configuration must specify exactly one of `ip`, `podIP`, or `ipConfig`. The first two forms configure IP addresses staticly in the network definition, while `ipConfig` allows dynamic configuration.
 
-The value of `ipConfig` must include at least the name (and optionally the namespace) of a `ConfigMap` whose `data` must include either an `ip` entry or a `podIP` entry, in the same format as used by the CNI configuration. (If there are other fields set in the `ConfigMap` they will be ignored.) By default, the `ip`/`podIP` value in the `ConfigMap` will be interpreted just as it would be if it had been in the CNI config directly. However, if the `ipConfig` specifies `overrides`, then:
+The value of `ipConfig` must include at least the name (and optionally
+the namespace) of a `ConfigMap` whose `data` must include either an
+`ip` entry or a `podIP` entry, in the same format as used by the CNI
+configuration. (If there are other fields set in the `ConfigMap` they
+will be ignored.) By default, the `ip`/`podIP` value in the
+`ConfigMap` will be interpreted just as it would be if it had been in
+the CNI config directly. However, if the `ipConfig` specifies
+`overrides`, then:
 
   1. If `overrides.addresses` is set, then the `ConfigMap` is only allowed to assign `addresses` values that are present in `overrides.addresses`.
   2. If `overrides.gateway` is set, then it is used as the default `gateway` value and the `ConfigMap` is not allowed to specify any other value.
@@ -176,7 +191,13 @@ The value of `ipConfig` must include at least the name (and optionally the names
 
 ### Routing
 
-The newly-created interface will be made the default route for the pod (with the existing default route being removed). However, the previously-default interface will still be used as the route to the cluster and service networks. Additional routes may also be added as needed. For instance, when using `macvlan`, a route will be added to the master's IP via the pod network, since it would not be accessible via the macvlan interface.
+The newly-created interface will be made the default route for the pod
+(with the existing default route being removed). However, the
+previously-default interface will still be used as the route to the
+cluster and service networks. Additional routes may also be added as
+needed. For instance, when using `macvlan`, a route will be added to
+the master's IP via the pod network, since it would not be accessible
+via the macvlan interface.
 
 ### Test Plan
 
@@ -187,7 +208,7 @@ The newly-created interface will be made the default route for the pod (with the
 
 From Tech Preview to GA
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 - Ensure feature parity with OpenShift SDN egress router
 
