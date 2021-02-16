@@ -86,6 +86,122 @@ the following requirements for integration will work for each of AWS, Azure and 
 #### Termination handler design
 
 To enable graceful termination of workloads running on non-guaranteed instances,
+a termination handler pod will need to be deployed on each spot instance.
+
+The termination pod will be developed to poll the metadata service for the Node
+that it is running on.
+We will implement request/response handlers for each of the three cloud providers
+that will enable the handler to determine if the cloud provider instance is due
+for termination.
+
+Should the instance be marked for termination, the handler will add a condition
+to the Node object that it is running on to signal that the instance will be
+terminating imminently.
+
+```yaml
+- type:     Terminating
+  status:   True
+  Reason:   TerminationRequested
+  Message:  The cloud provider has marked this instance for termination
+```
+
+Once the Node has been marked with the `Terminating` condition, it will be
+the MachineHealthCheck controller's responsibility to ensure that the Machine
+is deleted, triggering it to be drained and removed from the cluster.
+
+To enable this, the following MachineHealthCheck will be deployed by default
+to all OpenShift clusters going forward:
+
+```yaml
+---
+apiVersion: machine.openshift.io/v1beta1
+kind: MachineHealthCheck
+metadata:
+  name: machine-api-termination-handler
+  namespace: openshift-machine-api
+  labels:
+    api: clusterapi
+    k8s-app: termination-handler
+spec:
+  selector:
+    matchLabels:
+      machine.openshift.io/interruptible-instance: "" # This label is automatically applied to all spot instances
+  maxUnhealthy: 100% # No reason to block the interruption, it's inevitable
+  unhealthyConditions:
+  - type: Terminating
+    status: "True"
+    timeout: 0s # Immediately terminate the instance
+```
+
+##### Running the termination handler
+
+The Termination Pod will be part of a DaemonSet, which will be deployed by the Machine API Operator.
+It will select Nodes which are labelled as spot instances to ensure the Termination Pod only runs on
+instances that require termination handlers.
+
+The spot label will be added by the cloud provider actuators as they create instances,
+provided they support spot instances and the instance is a spot instance.
+
+##### Termination handler security
+
+To be able to perform the actions required by the termination handler, the pod will need to be
+relatively privileged.
+
+The metadata services that are hosted by the cloud providers are only accessible from the hosts
+themselves, so the pod will need to run within the host network.
+
+To restrict the possible effects of the termination handler, it should re-use the Kubelet credentials
+which pass through the [NodeRestriction](https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#noderestriction)
+admission controller.
+This limits the termination handler to only be able to modify the Node on which it is running.
+Eg, it would not be able to set the conditions on a different Node.
+
+To be able to mount and read the Kubelet credentials, the pod must be able to mount host paths and,
+since the credentials have to be mounted as read-only just for the root account,
+the termination handler must be able to run as root.
+
+The only standard SecurityContextConstraint (SCC) that would allow these permissions is the `privileged` SCC.
+This SCC however provides a lot of extra permissions that the termination handler does not require.
+For this reason, we should add another standard SCC that provides precisely the permissions required
+for the termination handler, as set out below:
+
+```yaml
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  annotations:
+    kubernetes.io/description: 'machine-api-termination-handler allows the
+      machine-api-termination-handler service account to run as root, access host
+      paths and access the host network. This SCC is limited and should not be used
+      for any other service.'
+  name: machine-api-termination-handler
+allowHostDirVolumePlugin: true
+allowHostNetwork: true
+allowHostIPC: false
+allowHostPorts: false
+allowHostPID: false
+allowPrivilegedContainer: false
+readOnlyRootFilesystem: false
+requiredDropCapabilities:
+- KILL
+- MKNOD
+- SETUID
+- SETGID
+fsGroup:
+  type: MustRunAs
+runAsUser:
+  type: RunAsAny
+seLinuxContext:
+  type: MustRunAs
+supplementalGroups:
+  type: MustRunAs
+users:
+- system:serviceaccount:openshift-machine-api:machine-api-termination-handler
+groups: []
+volumes:
+- downwardAPI
+- hostPath
+```
 
 #### Cloud Provider Implementation Specifics
 
