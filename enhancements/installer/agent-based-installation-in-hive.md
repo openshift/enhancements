@@ -13,7 +13,7 @@ reviewers:
 approvers:
   - "@markmc"
 creation-date: 2020-12-22
-last-updated: 2021-02-15
+last-updated: 2021-02-16
 status: implementable
 see-also:
   - enhancements/installer/connected-assisted-installer.md
@@ -62,7 +62,6 @@ capability for agent-based cluster installation.
 
 * Expose agent-based installation capabilities as a kubernetes-native API
 through [Hive](https://github.com/openshift/hive).
-* Enable multi-cluster management tooling to create new clusters using Assisted Installer.
 * Enable adding workers to any OpenShift cluster deployed by the Assisted Installer via
 the same multi-cluster management tooling.
 * Enable automated creation and booting of the Assisted discovery ISO for bare-metal deployments.
@@ -113,7 +112,7 @@ without needing to provide their own mechanism for booting ISOs.
 *As an Infra Owner, I can maintain an inventory of available hardware and use
 provided automation to run the Agent on that hardware.*
 
-#### Install cluster from hub
+#### Install cluster from Hub
 
 *As a Cluster Creator, I can select a group of Agents and use them to create a
 new OpenShift cluster.*
@@ -162,6 +161,10 @@ traditional relational database. In order to integrate with OpenShift
 infrastructure management tooling, it is necessary to additionally expose its
 capabilities as Kubernetes-native APIs. They will be implemented as Custom
 Resource Definitions and controllers with the Assisted Service's capabilities.
+
+Hive's ClusterDeployment resource will be extended to serve as the cluster
+definition for agent-based installations. Additional CRDs described below will
+be used by other controllers and actors to perform agent-based provisioning.
 
 For the first deliverable, a local deployment of the backing service will
 include new controllers that will operate to achieve the desired state as
@@ -240,7 +243,9 @@ Spec
 * Role that the Node will have
 * Hostname
 * Approved
-* Install device
+* Install device, set automatically when there is platform-integrated
+automation booting the discovery ISO, or otherwise set by the user in a
+boot-it-yourself scenario.
 
 Status
 * Comprehensive inspection and validation data
@@ -318,8 +323,6 @@ The Agent CRD will have a field in which to designate that it is approved. If
 the host was booted via the baremetal-operator, approval will be granted
 automatically. The same automation that caused the host to boot would have the
 ability to recognize the resulting Agent and mark it as approved.
-
-#### Day 2 Add Node Boot-it-Yourself
 
 #### Create Cluster
 
@@ -469,113 +472,41 @@ expectations).
 
 ### Graduation Criteria
 
-**Note:** *Section not required until targeted at a release.*
+New APIs will start at alpha versions with all of the functionality described
+in this proposal. Releases will be made available to key stakeholders for
+evaluation and testing in order to gather feedback. APIs may change during this
+time, but disruption will be minimized so as to encourage and facilitate
+testing.
 
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-
-- Maturity levels
-  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
-- [Deprecation policy][deprecation-policy]
-
-Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
-or by redefining what graduation means.
-
-In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
-
-[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
-[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
-
-#### Examples
-
-These are generalized examples to consider, in addition to the aforementioned [maturity levels][maturity-levels].
-
-##### Dev Preview -> Tech Preview
-
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-- Enumerate service level indicators (SLIs), expose SLIs as metrics
-- Write symptoms-based alerts for the component(s)
-
-##### Tech Preview -> GA
-
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-- Backhaul SLI telemetry
-- Document SLOs for the component
-- Conduct load testing
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
-
-##### Removing a deprecated feature
-
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
+Once sufficient feedback has been collected from users (including lessons
+learned from ongoing formal testing), and a set of changes have been agreed
+upon, beta versions of APIs will be implemented and released alongside a future
+OpenShift version.
 
 ### Upgrade / Downgrade Strategy
 
-If applicable, how will the component be upgraded and downgraded? Make sure this
-is in the test plan.
+The assisted service, its new controllers, and its CRDs will be distributed
+with Hive as part of one operator installed by Operator Lifecycle Manager. They
+will continue to follow the upgrade approach that Hive already follows.
 
-Consider the following in developing an upgrade/downgrade strategy for this
-enhancement:
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to keep previous behavior?
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to make use of the enhancement?
-
-Upgrade expectations:
-- Each component should remain available for user requests and
-  workloads during upgrades. Ensure the components leverage best practices in handling [voluntary disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to this should be
-  identified and discussed here.
-- Micro version upgrades - users should be able to skip forward versions within a
-  minor release stream without being required to pass through intermediate
-  versions - i.e. `x.y.N->x.y.N+2` should work without requiring `x.y.N->x.y.N+1`
-  as an intermediate step.
-- Minor version upgrades - you only need to support `x.N->x.N+1` upgrade
-  steps. So, for example, it is acceptable to require a user running 4.3 to
-  upgrade to 4.5 with a `4.3->4.4` step followed by a `4.4->4.5` step.
-- While an upgrade is in progress, new component versions should
-  continue to operate correctly in concert with older component
-  versions (aka "version skew"). For example, if a node is down, and
-  an operator is rolling out a daemonset, the old and new daemonset
-  pods must continue to work correctly even while the cluster remains
-  in this partially upgraded state for some time.
-
-Downgrade expectations:
-- If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
-  misbehaving, it should be possible for the user to rollback to `N`. It is
-  acceptable to require some documented manual steps in order to fully restore
-  the downgraded cluster to its previous state. Examples of acceptable steps
-  include:
-  - Deleting any CVO-managed resources added by the new version. The
-    CVO does not currently delete resources that no longer exist in
-    the target version.
+If the backend service is unavailable for a short time during an upgrade, any
+agents trying to connect to the REST API will continuously re-try.
 
 ### Version Skew Strategy
 
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
+Distributing the new components together with Hive, as described above, will
+prevent skew from being a problem between these components.
 
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
+The SaaS already is maintaining backward-compatibility for the REST API to
+which agents make requests, so that when the service gets upgraded,
+previously-generated discovery ISOs can continue to work. That backward
+compatibility will likewise be important in this scenario when Hive and the
+agent-based components get upgraded.
+
+For situations where backward compatibility cannot be maintained, the agent
+REST API is able to identify the version of an agent and instruct it to upgrade
+or downgrade itself by running a different container image. That feature will
+likewise be valuable when running the backend service alongside Hive.
 
 ## Implementation History
 
