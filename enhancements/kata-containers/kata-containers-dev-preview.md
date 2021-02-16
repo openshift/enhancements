@@ -21,15 +21,15 @@ superseded-by:
 
 ## Summary
 
-Kata containers is an open source project developing a container runtime using virtual machines and providing the same look and feel as with vanilla containers.
-By leveraging hardware virtualization technologies kata containers provides powerful workload isolation compared to existing container solutions.
+[Kata Containers](https://katacontainers.io/) is an open source project developing a container runtime using virtual machines and providing the same look and feel as vanilla containers.
+By leveraging hardware virtualization technologies, Kata Containers provides powerful workload isolation compared to existing container solutions.
 
-We will be integrating kata containers into Openshift to provide the ability to run kernel isolated containers for any workload which requires custom kernel tuning (sysctl, scheduler changes, cache tuning, etc), custom kernel modules (out of tree, special arguments, etc), exclusive access to hardware, root privileges, or other administrative privileges above and beyond what is secure in a shared kernel environment (regular runc).
+We will be integrating Kata Containers into Openshift to provide the ability to run kernel isolated containers for any workload which requires custom kernel tuning (sysctl, scheduler changes, cache tuning, etc), custom kernel modules (out of tree, special arguments, etc), exclusive access to hardware, root privileges, or other administrative privileges above and beyond what is secure in a shared kernel environment (regular runc).
 
-It should be noted that kata containers differ from Kubevirt:
+It should be noted that Kata Containers differ from Kubevirt:
 
 - Kubevirt aims to run **VM images** on Openshift providing the VM with the look and feel of a virtual machine running as a legacy VM (CRD defining a Virtual Machine in Kubernetes)
-- Kata containers aim to run **container images** on Openshift in an isolated manner using virtualization tools (uses Runtime Class resource to choose Kata only for specific workloads which require kernel level isolation)
+- Kata Containers aim to run **container images** on Openshift in an isolated manner using virtualization tools (uses Runtime Class resource to choose Kata only for specific workloads which require kernel level isolation)
 
 ## Motivation
 If we take telcos for example, there are a number of reasons they require isolated workloads:
