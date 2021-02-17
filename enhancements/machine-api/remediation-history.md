@@ -90,10 +90,10 @@ type Remediation struct {
 	// the time when the unhealthy condition was detected
 	Detected *metav1.Time `json:"detected"`
 
-	// the time when remediation started
+	// the time when remediation started, will be around "detected" plus the "timeout" configured on the condition
 	Started *metav1.Time `json:"started,omitempty"`
 
-	// the time when the node is remediated
+	// the time when the node is remediated and in a safe state, so that workloads can be rescheduled.
 	Remediated *metav1.Time `json:"remediated,omitempty"`
 
 	// the type of remediation, e.g. "internal" or "machineDeletion", and "external" or the
@@ -140,8 +140,10 @@ status:
     remediated: "2020-11-24T17:34:35Z"
     remediationType: external
     started: "2020-11-24T17:34:04Z"
-    targetKind: Node
-    targetName: worker-1
+    target:
+      kind: node
+      name: worker-1
+      uid: [...]
   remediationsAllowed: 2
 ```
 
