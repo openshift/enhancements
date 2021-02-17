@@ -165,7 +165,7 @@ conditions. This will also be the place to track remediations:
   - for failed machines and unhealthy node conditions: track detection
   - for missing nodes after remdiation start: track successful fencing
   - for healthy nodes: track finished remdiation
-    
+
 - in the `remediate` and `remediationStrategyExternal` funcs: track remediation start
 
 [0] https://github.com/openshift/machine-api-operator/blob/master/pkg/controller/machinehealthcheck/machinehealthcheck_controller.go
