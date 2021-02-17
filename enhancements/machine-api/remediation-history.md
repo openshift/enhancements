@@ -163,8 +163,7 @@ conditions. This will also be the place to track remediations:
 
 - in the `needsRemediation` func:
   - for failed machines and unhealthy node conditions: track detection
-  - for missing nodes after remdiation start: track successful fencing
-  - for healthy nodes: track finished remdiation
+  - for missing nodes after remediation start: track successful fencing
 
 - in the `remediate` and `remediationStrategyExternal` funcs: track remediation start
 
