@@ -68,12 +68,12 @@ an entire Kubernetes cluster that has been configured with OVN Kubernetes.
   - Assume that all nodes will be provisioned with certificates that have been
   signed by a OpenShift Container Platform internal certificate authority
   (CA).
-- This option will only be available at cluster installation time.
 - All components used to implement this must be FIPS-compliant cryptographic
 components.
 - Provide an implementation that will be deployable on both Public and Private
 Cloud infrastructure. This may require an option to enable IPsec NAT traversal
 techniques.
+- Runtime enabling/disabling of IPsec feature.
 
 ### Non-Goals
 
@@ -84,7 +84,6 @@ a self-signed certificate as the authenticating certificate. However,
 authentication by certificates signed by a self-signed CA will be supported.
 - Will not provide an option to enable tunnels that have been configured with
 pre-shared keys.
-- Will not provide an option to enable encryption after cluster installation.
 - Will not do any explicit performance optimization of the datapath. As the
 implementation of this enhancement will primarily require changes to the control
 and management path, it is expected that this will not alter the performance of
@@ -171,7 +170,8 @@ enable this enhancement:
   components are configured to use host private key, host certificate and CA
   certificate.
 - Modify OVNKubernetes operator configuration object in order to allow
-  enablement of IPsec for the cluster.
+  enabling and disabling (at runtime and cluster installation time) of IPsec for
+  the cluster.
 - Certificate rotation will be handled in the same as it is with the current
   OVN TLS implementation.
 
@@ -209,6 +209,8 @@ It will expected to add a number of Continuous Integration jobs for IPsec:
   respect to a cluster that has not been enabled with IPsec.
 - In order to test any issues with version skew, an IPsec-enabled cluster should
   be upgraded while active.
+- IPsec should be enabled and disabled at runtime to ensure continued correct
+  functioning of the cluster.
 
 Additional CI jobs could potentially be added at a later stage.
 
@@ -245,9 +247,6 @@ N/A
 
 ### Upgrade / Downgrade Strategy
 
-Currently, it is proposed that this feature can only be enabled at cluster
-installation time.
-
 ### Version Skew Strategy
 
 
@@ -271,7 +270,10 @@ will be containerized but some considerations are noted below:
 
 ## Implementation History
 
-TBD
+* OCP 4.7
+- Initial implementation with IPv4-only support.
+* OCP 4.8
+- Add support for runtime enabling/disabling of IPsec feature.
 
 ## Drawbacks
 
