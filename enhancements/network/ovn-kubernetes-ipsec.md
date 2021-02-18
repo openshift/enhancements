@@ -8,8 +8,8 @@ reviewers:
 approvers:
   - TBD
 creation-date: 2020-09-08
-last-updated: 2020-09-80
-status: provisional
+last-updated: 2021-02-18
+status: implemented
 see-also:
   - "/enhancements/network/20190919-OVN-Kubernetes.md"
 replaces:
@@ -22,11 +22,11 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [X] Enhancement is `implementable`
+- [X] Design details are appropriately documented from clear requirements
+- [X] Test plan is defined
+- [X] Graduation criteria for dev preview, tech preview, GA
+- [X] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
@@ -66,16 +66,14 @@ reasons (e.g. FIPS compliance).
 - Provide an option to enable IPsec encryption of all inter-node traffic across
 an entire Kubernetes cluster that has been configured with OVN Kubernetes.
   - Assume that all nodes will be provisioned with certificates that have been
-  signed by the OpenShift Container Platform internal certificate authority
+  signed by a OpenShift Container Platform internal certificate authority
   (CA).
 - This option will only be available at cluster installation time.
 - All components used to implement this must be FIPS-compliant cryptographic
 components.
 - Provide an implementation that will be deployable on both Public and Private
-Cloud infrastructure. This may require an option to enable IPsec Ntraversal
+Cloud infrastructure. This may require an option to enable IPsec NAT traversal
 techniques.
-- Reuse the same mechanism to generate certificate and keys that is used by the
-Cluster Management TLS implementation.
 
 ### Non-Goals
 
@@ -198,14 +196,9 @@ in parallel to improve performance.
 
 #### Security Review
 
-See "Open Questions" below.
-
 ## Design Details
 
 ### Open Questions
-
-- Will this need to go through some kind of Security Review? In particular, how
-can we ensure FIPS compliance.
 
 ### Test Plan
 
@@ -231,10 +224,6 @@ It should also be noted that, some upstream OVS/OVN unit and integration tests
 will also need to be developed.
 
 ### Graduation Criteria
-
-TBD
-
-#### Examples
 
 ##### Dev Preview -> Tech Preview
 
@@ -276,7 +265,7 @@ will be containerized but some considerations are noted below:
 - ovs-monitor-ipsec/ovsdb compatibility
   - ovs-monitor-ipsec reads ovsdb tables. Therefore, ovs-monitor-ipsec will need
     to track OVN/OVS versions.
-- libreswan/kernel  compatibility
+- libreswan/kernel compatibility
   - libreswan will need to be compatible with the underlying Kernel IPsec
     implementation.
 
