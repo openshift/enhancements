@@ -74,6 +74,7 @@ components.
 Cloud infrastructure. This may require an option to enable IPsec NAT traversal
 techniques.
 - Runtime enabling/disabling of IPsec feature.
+- Support for single-stack IPv4, single-stack IPv6 and dual-stack.
 
 ### Non-Goals
 
@@ -174,6 +175,9 @@ enable this enhancement:
   the cluster.
 - Certificate rotation will be handled in the same as it is with the current
   OVN TLS implementation.
+- IPv6 will not need any explicit changes to OpenShift code as this will be
+  provided by OVS and Libreswan components. However, it may require a later
+  version of OVS and/or Libreswan.
 
 ### Risks and Mitigations
 
@@ -209,6 +213,10 @@ It will expected to add a number of Continuous Integration jobs for IPsec:
   respect to a cluster that has not been enabled with IPsec.
 - In order to test any issues with version skew, an IPsec-enabled cluster should
   be upgraded while active.
+- Tests should be carried out on single-stack IPv4, single-stack IPv6 and
+  dual-stack clusters
+- Tests should be carried out on all variants of OpenShift clusters. (e.g.
+  UPI, IPI, AWS, Azure, GCP, Bare metal)
 - IPsec should be enabled and disabled at runtime to ensure continued correct
   functioning of the cluster.
 
@@ -227,7 +235,9 @@ will also need to be developed.
 
 ### Graduation Criteria
 
-##### Dev Preview -> Tech Preview
+Graduation criteria follows:
+
+#### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
@@ -235,13 +245,13 @@ will also need to be developed.
 - Gather feedback from users rather than just developers
 - Performance measurement
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 - Available by default
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 N/A
 
@@ -274,6 +284,7 @@ will be containerized but some considerations are noted below:
 - Initial implementation with IPv4-only support.
 * OCP 4.8
 - Add support for runtime enabling/disabling of IPsec feature.
+- Add support for single-stack IPv6 and dual-stack.
 
 ## Drawbacks
 
