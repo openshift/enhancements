@@ -8,8 +8,8 @@ reviewers:
 approvers:
   - TBD
 creation-date: 2020-09-08
-last-updated: 2020-09-80
-status: provisional
+last-updated: 2021-02-18
+status: implemented
 see-also:
   - "/enhancements/network/20190919-OVN-Kubernetes.md"
 replaces:
@@ -22,11 +22,11 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [X] Enhancement is `implementable`
+- [X] Design details are appropriately documented from clear requirements
+- [X] Test plan is defined
+- [X] Graduation criteria for dev preview, tech preview, GA
+- [X] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
@@ -66,16 +66,15 @@ reasons (e.g. FIPS compliance).
 - Provide an option to enable IPsec encryption of all inter-node traffic across
 an entire Kubernetes cluster that has been configured with OVN Kubernetes.
   - Assume that all nodes will be provisioned with certificates that have been
-  signed by the OpenShift Container Platform internal certificate authority
+  signed by a OpenShift Container Platform internal certificate authority
   (CA).
-- This option will only be available at cluster installation time.
 - All components used to implement this must be FIPS-compliant cryptographic
 components.
 - Provide an implementation that will be deployable on both Public and Private
-Cloud infrastructure. This may require an option to enable IPsec Ntraversal
+Cloud infrastructure. This may require an option to enable IPsec NAT traversal
 techniques.
-- Reuse the same mechanism to generate certificate and keys that is used by the
-Cluster Management TLS implementation.
+- Runtime enabling/disabling of IPsec feature.
+- Support for single-stack IPv4, single-stack IPv6 and dual-stack.
 
 ### Non-Goals
 
@@ -86,7 +85,6 @@ a self-signed certificate as the authenticating certificate. However,
 authentication by certificates signed by a self-signed CA will be supported.
 - Will not provide an option to enable tunnels that have been configured with
 pre-shared keys.
-- Will not provide an option to enable encryption after cluster installation.
 - Will not do any explicit performance optimization of the datapath. As the
 implementation of this enhancement will primarily require changes to the control
 and management path, it is expected that this will not alter the performance of
@@ -173,9 +171,13 @@ enable this enhancement:
   components are configured to use host private key, host certificate and CA
   certificate.
 - Modify OVNKubernetes operator configuration object in order to allow
-  enablement of IPsec for the cluster.
+  enabling and disabling (at runtime and cluster installation time) of IPsec for
+  the cluster.
 - Certificate rotation will be handled in the same as it is with the current
   OVN TLS implementation.
+- IPv6 will not need any explicit changes to OpenShift code as this will be
+  provided by OVS and Libreswan components. However, it may require a later
+  version of OVS and/or Libreswan.
 
 ### Risks and Mitigations
 
@@ -198,14 +200,9 @@ in parallel to improve performance.
 
 #### Security Review
 
-See "Open Questions" below.
-
 ## Design Details
 
 ### Open Questions
-
-- Will this need to go through some kind of Security Review? In particular, how
-can we ensure FIPS compliance.
 
 ### Test Plan
 
@@ -216,6 +213,12 @@ It will expected to add a number of Continuous Integration jobs for IPsec:
   respect to a cluster that has not been enabled with IPsec.
 - In order to test any issues with version skew, an IPsec-enabled cluster should
   be upgraded while active.
+- Tests should be carried out on single-stack IPv4, single-stack IPv6 and
+  dual-stack clusters
+- Tests should be carried out on all variants of OpenShift clusters. (e.g.
+  UPI, IPI, AWS, Azure, GCP, Bare metal)
+- IPsec should be enabled and disabled at runtime to ensure continued correct
+  functioning of the cluster.
 
 Additional CI jobs could potentially be added at a later stage.
 
@@ -232,11 +235,9 @@ will also need to be developed.
 
 ### Graduation Criteria
 
-TBD
+Graduation criteria follows:
 
-#### Examples
-
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
@@ -244,20 +245,17 @@ TBD
 - Gather feedback from users rather than just developers
 - Performance measurement
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 - Available by default
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 N/A
 
 ### Upgrade / Downgrade Strategy
-
-Currently, it is proposed that this feature can only be enabled at cluster
-installation time.
 
 ### Version Skew Strategy
 
@@ -276,13 +274,17 @@ will be containerized but some considerations are noted below:
 - ovs-monitor-ipsec/ovsdb compatibility
   - ovs-monitor-ipsec reads ovsdb tables. Therefore, ovs-monitor-ipsec will need
     to track OVN/OVS versions.
-- libreswan/kernel  compatibility
+- libreswan/kernel compatibility
   - libreswan will need to be compatible with the underlying Kernel IPsec
     implementation.
 
 ## Implementation History
 
-TBD
+* OCP 4.7
+- Initial implementation with IPv4-only support.
+* OCP 4.8
+- Add support for runtime enabling/disabling of IPsec feature.
+- Add support for single-stack IPv6 and dual-stack.
 
 ## Drawbacks
 
