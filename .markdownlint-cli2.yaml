@@ -16,7 +16,7 @@ config:
 
   # We like to use really long lines
   line-length:
-    line_length: 400
+    line_length: 800
 
   # Sometimes we repeat headings, and it's easier to just turn those
   # into emphasis
