@@ -66,11 +66,11 @@ type MachineHealthCheckStatus struct {
 	[...]
 
 	// History of remediations triggered by this machine health check
-	RemediationHistory []Remediation `json:"remediationHistory,omitempty"`
+	RemediationHistory []RemediationEvent `json:"remediationHistory,omitempty"`
 }
 
 // Remediation tracks a remediation triggered by this machine health check
-type Remediation struct {
+type RemediationEvent struct {
 	// a reference to the target machine or node
 	// +kubebuilder:validation:Type=string
 	Target *corev1.ObjectReference `json:"target"`
@@ -96,8 +96,10 @@ type Remediation struct {
 	// the time when the node is remediated and in a safe state, so that workloads can be rescheduled.
 	Remediated *metav1.Time `json:"remediated,omitempty"`
 
-	// the type of remediation, e.g. "internal" or "machineDeletion", and "external" or the
-	// name of the external remediation template in future
+	// the type of remediation, can be either "machineDeletion" for the built in remediation strategy, or "external".
+	// In future it could be set to the name of the external remediation template.
+	// In case a node recovers after the remedaiation condition was detected but before the remediation started
+	// (according to the timeout declared on the MHC) the type will be set to `aborted`.
 	// +kubebuilder:validation:Type=string
 	Type string `json:"remediationType,omitempty"`
 }
