@@ -136,7 +136,7 @@ The `RuntimeClass` and payload image names will be visible in the CR status.
 #### Goals
 - Create an API which supports installation of Kata Runtime on all or selected worker nodes
 - Configure CRI-O to use Kata Runtime on those worker nodes
-- Installation of the runtimeClass on the cluster
+- Installation of the runtimeClass on the cluster, as well as of the required components for the runtime to be controlled by the orchestration layer.
 - Updates the Kata runtime
 - Uninstall Kata Runtime and reconfigure CRI-O to not use it.
 
