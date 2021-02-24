@@ -13,7 +13,7 @@ reviewers:
 approvers:
   - "@markmc"
 creation-date: 2020-12-22
-last-updated: 2021-02-16
+last-updated: 2021-02-23
 status: implementable
 see-also:
   - enhancements/installer/connected-assisted-installer.md
@@ -37,7 +37,8 @@ The Assisted Installer currently runs as a SaaS on cloud.redhat.com, enabling
 users to deploy OpenShift clusters with certain customizations, particularly on
 bare metal hardware. It is necessary to bring those capabilities on-premise in
 users' "Hub" clusters by installing clusters via Multi-cluster management, such
-as through [Hive](https://github.com/openshift/hive/) and RHACM.
+as through [Hive](https://github.com/openshift/hive/) and RHACM (Red Hat
+Advanced Cluster Management).
 
 This enhancement proposes to add the agent-based installation workflow to Hive.
 
@@ -62,15 +63,17 @@ capability for agent-based cluster installation.
 
 * Expose agent-based installation capabilities as a kubernetes-native API
 through [Hive](https://github.com/openshift/hive).
-* Enable adding workers to any OpenShift cluster deployed by the Assisted Installer via
-the same multi-cluster management tooling.
+* Enable using agent-based installation capabilities to add workers to clusters
+that have been installed using - or adopted by - Hive"
 * Enable automated creation and booting of the Assisted discovery ISO for bare-metal deployments.
 * Ensure the design is extensible for installing on other platforms.
 
 ### Non-Goals
 
 * Remote Worker Node support requires solving specific problems that will be
-addressed in a separate proposal.
+addressed in a separate proposal. For example, it requires the ability to
+ensure that the Node joins with an appropriate role such that it will not be
+schedulable for specific workloads, such as the ingress controller.
 * Solve central machine management. ("central machine management" involves
 running machine-api-providers on a hub cluster in order to manage Machines on
 the hub which represent Nodes in spoke clusters.) While this is a foundational
@@ -80,6 +83,8 @@ to address the topic in its totality.
 assume that the baremetal-operator is present on the hub cluster. Today that is
 only possible when the hub cluster itself is on the bare metal platform. Future
 work may propose running baremetal-operator on non-baremetal hub clusters.
+* Applying static network configuration to hosts. This is a desired feature
+but will be addressed in a future proposal.
 
 ## Proposal
 
@@ -119,8 +124,9 @@ new OpenShift cluster.*
 
 #### Add Worker Node from Hub
 
-*As a Cluster Creator, after deploying a cluster with an agent-based workflow,
-I can add workers by selecting available Agents.*
+*As a Cluster Creator, I can add workers by associating Agents either with a
+cluster installed by Hiva via an agent-based workflow, or an existing cluster
+adopted by Hive.*
 
 ### Implementation Details/Notes/Constraints
 
@@ -362,7 +368,8 @@ field on the Agent.
 #### Day 2 Add Node Virtualmedia Multicluster
 
 This scenario takes place from a hub cluster, adding a worker node to a spoke
-cluster. This assumes that a ClusterDeployment exists in the hub cluster.
+cluster. This assumes that a ClusterDeployment exists in the hub cluster and
+has a platform of "baremetal".
 
 1. Infra Owner creates a BareMetalHost resource with a label that matches an InstallEnv selector.
 1. The Baremetal Agent Controller adds the discovery ISO URL to the BareMetalHost.
@@ -406,6 +413,19 @@ the agent. As long as the user protects the contents of the discovery ISO
 itself, they can be confident that any client interacting with the backend
 service's REST API is the expected Agent running as part of the live discovery
 ISO. Details of the artifact are still being decided.
+
+#### Other REST API Access
+
+Where the assisted service has capabilities which are not (yet) expressed
+through kubernetes APIs, users may be tempted to access those capabilities
+directly via the assisted servuce REST API, thereby taking a dependency on the
+capability and its REST API. This would limit our ability to evolve those APIs
+in future.
+
+To mitigate this, the assisted service's REST API, except for the Agent API as
+described above, will limited to internal use only. It may be limited through
+authorization mechanisms or by blocking entire URL path space from external
+access.
 
 ## Design Details
 
@@ -486,8 +506,8 @@ OpenShift version.
 ### Upgrade / Downgrade Strategy
 
 The assisted service, its new controllers, and its CRDs will be distributed
-with Hive as part of one operator installed by Operator Lifecycle Manager. They
-will continue to follow the upgrade approach that Hive already follows.
+with Hive as part of RHACM's operator installed by Operator Lifecycle Manager.
+They will continue to follow the upgrade approach that Hive already follows.
 
 If the backend service is unavailable for a short time during an upgrade, any
 agents trying to connect to the REST API will continuously re-try.
