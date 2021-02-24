@@ -24,8 +24,8 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
+- [x] Enhancement is `implementable`
+- [x] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Operational readiness criteria is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
@@ -51,7 +51,6 @@ A stock installation has the following routes which may need customization of bo
 6. openshift-monitoring       prometheus-k8s
 7. openshift-monitoring       thanos-querier
 8. image-registry (this isn't appearing in my installation, but @Miciah says it's there)
-9. openshfit-logging (this would be natural, though I think it comes via OLM, so we may have to definitively answer that)
 
 It is just as easy to create a generic solution that provides one stop shopping for cluster-admins as it is to produce
 a series of one-off solutions.
@@ -72,7 +71,7 @@ slightly different documentation.
 
 ## Proposal
 
-```
+```go
 type IngressSpec struct {
     // other fields
 
@@ -112,8 +111,7 @@ type ComponentRouteSpec struct{
     // That means it could be embedded into the route or used by the operand directly.
     // Operands should take care to ensure that if they use passthrough termination, they properly use SNI to allow service
     // DNS access to continue to function correctly.
-    // SANs in the certificate are ignored, but SNI can be used to make operator managed certificates (like internal load balancers
-    // and service serving certificates) serve correctly.
+    // Operators are not required to inspect SANs in the certificate to set up SNI.
     ServingCertKeyPairSecret SecretNameReference
 
     // possible future, we could add a set of SNI mappings.  I suspect most operators would not properly handle it today.
@@ -164,10 +162,10 @@ Validation rules to be specified in the openshift/api PR, but basic restrictions
 
 #### Cluster-admin wants to customize a route
 To use this, a cluster-admin would
-1.  Either read docs to find the namespace,name tuples or look at an existing cluster and read ingresses.config.openshift.io.
-2.  Create the serving cert/key pair secret in ns/openshift-config
-3.  Create an entry in `ingresses.config.openshift.io.spec.componentRouteSpec` for their customization
-4.  Wait to see the corresponding change in status.
+1. Either read docs to find the namespace, name tuples or look at an existing cluster and read ingresses.config.openshift.io.
+2. Create the serving cert/key pair secret in ns/openshift-config
+3. Create an entry in `ingresses.config.openshift.io.spec.componentRouteSpec` for their customization
+4. Wait to see the corresponding change in status.
 
 
 #### Story 2
@@ -216,7 +214,7 @@ The helpers suggested above can ease that transition, but it still exists.
 1. an operator test should be written for this
 2. QE testing on configuration changes.
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
 - Deprecate the feature
@@ -226,7 +224,6 @@ The helpers suggested above can ease that transition, but it still exists.
 For components that did not try to solve this in a one-off way, the upgrade is easy, the new feature becomes available.
 
 For components that created a one-off solution, the upgrade will vary depending on the steps they used.
-I seem to recall that monitoring allowed direct route manipulation and the console created its own fields.
 
 On downgrade, the customizations will be removed by the old versions of the operators.
 While this is annoying, it is consistent with our general downgrade story of new features require the new product.
@@ -247,7 +244,7 @@ The idea is to find the best form of an argument why this enhancement should _no
 ## Alternatives
 
 ### cluster-admin created roles and rolebindings
-This avoids the transitive privilege escalation to read secrets based on update rights to ingresses.config.openshift.io 
+This avoids the transitive privilege escalation to read secrets based on update rights to ingresses.config.openshift.io
 and ingresses.config.openshift.io/status.
 However, those permissions are closely held.
 
