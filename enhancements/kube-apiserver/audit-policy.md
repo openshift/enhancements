@@ -78,7 +78,7 @@ resources right). Hence, this enhancement is about
 
 - a high-level API
 - which will satisfy the needs of most customers with strong regulatory or security requirement,
-  i.e. it allows them to increase audit verbosity
+  i.e. it allows them to increase audit verbosity and provides the specific policy required by a  customer for a `UserRequests` policy for logging of the `system:authenticated:oauth` group.
 - without risking to log security-sensitive resources
 - and it is feasible to maintain the feature in the future when the dynamic audit API takes over.
 
@@ -333,6 +333,16 @@ challenging to test should be called out.
 All code is expected to have adequate tests (eventually with coverage
 expectations).
 
+One test suite that will be added are unit tests to ensure that any existing policies are not capable of exposing any of the following in the Audit Logs:
+
+- `secrets`
+- `routes.route.openshift.io`
+- `oauthclients.oauth.openshift.io`
+- `oauthaccesstokens.oauth.openshift.io`
+- `oauthauthorizetokens.oauth.openshift.io`.
+
+These items are invariants that should not be logged in all responses above `Metadata` level.
+
 ### Graduation Criteria
 
 None
@@ -362,6 +372,7 @@ enhancement:
   when this feature is used?
 - Will any other components on the node change? For example, changes to CSI, CRI
   or CNI may require updating that component before the kubelet.
+- How can Audit Policies made to be made more dynamic in the future?
 
 ## Implementation History
 
