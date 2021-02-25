@@ -64,12 +64,17 @@ If a request for a runtime class comes in that doesn't match the required runtim
 If a request comes in that doesn't specify a runtime class, but the default runtime class (`""`) is not specified in `RequiredRuntimeClasses`
 the request will also be denied.
 
-However, instead of a customized type,
-or using a type from the Kubernetes API like [the Runtime Class structure](#runtime-class-structure),
-`RequiredRuntimeClasses` will be a slice of strings.
-One can think of it as a list of [Handlers](#handlers) of the runtime classes that are allowed.
+A new customized type will be created, called `RuntimeClass` that will hold the name of the runtime class.
+This name can be thought of as the [Handler](#handlers) of the runtime classes that are allowed.
 
 ```
+// RuntimeClass is the name of a runtime class (also called a runtime handler).
+type RuntimeClass struct {
+	// Name is the name of the runtime class. It should correspond to an entry in the runtimes table of the CRI implementation.
+	Name string `json:"name" protobuf:"bytes,1,opt,name=name"`
+}
+
+// +kubebuilder:printcolumn:name="RequiredRuntimeClasses",type=string,JSONPath=`.requiredRuntimeClasses.type`,description="Which runtime classes a user is allowed to specify."
 type SecurityContextConstraints struct {
     ...
 	// RequiredRuntimeClasses is a list of names of runtime classes (also called runtime handlers).
@@ -78,23 +83,25 @@ type SecurityContextConstraints struct {
 	// To ensure the default runtime class may be used, an empty string (`""`) can be specified.
 	// +listType=set
 	// +kubebuilder:validation:MinItems=1
-	RequiredRuntimeClasses []string `json:"requiredRuntimeClasses" protobuf:"bytes,26,rep,name=requiredRuntimeClasses"`
+	RequiredRuntimeClasses []RequiredRuntimeClass `json:"requiredRuntimeClasses" protobuf:"bytes,26,rep,name=requiredRuntimeClasses"`
     ...
 }
 ```
+
 Fields in this slice will be logically OR'd.
 A user must specify an item that only matches one field to be permitted to use that runtime class.
 This allows an admin to specify a set of runtime classes that a user is allowed to use.
 
 This gives the admin four options for configuration:
-1. Specifying an empty string (`[""]`) requires pods in the SCC to not request a custom runtime class (meaning it is given the default runtime class).
-2. Specifying a set of items (`["foo"]`) requires pods in the SCC must request a runtime class that matches an item in the list, and cannot use the default.
-3. Specifying a set of items and an empty string (`["", "foo"]`) requires pods in the SCC must request a runtime class that matches an item in the list,
+1. Specifying an empty RuntimeClass (`[""]`) requires pods in the SCC to not request a custom runtime class (meaning it is given the default runtime class).
+2. Specifying a set of items (`["foo"]`) requires pods in the SCC must request a RuntimeClass that matches an item in the list, and cannot use the default.
+3. Specifying a set of items and an empty string (`["", "foo"]`) requires pods in the SCC must request a RuntimeClass that matches an item in the list,
 or specify the default
-4. Specifying `["*"]` means pods in the SCC can request any runtime class, or omit requesting a custom one.
+4. Specifying `["*"]` means pods in the SCC can request any RuntimeClass,  or omit requesting a custom one.
 Note, specifying `["*", "foo"]` is equivalent to specifying `["*"]`.
 
-The default value will be `[""]`, or a list with a single empty string, signifying users may not request any runtime class, and are required to use the default.
+The default value for RequiredRuntimeClasses name will be `[""]`, or a list with a single RuntimeClass whose name field is empty,
+signifying users may not request any runtime class, and are required to use the default.
 
 This addition will break existing users of runtime classes. Luckily, Openshift does not yet ship any other runtime classes, other than the default.
 To be able to access different runtime classes, admins would have to add a custom MachineConfig to configure CRI-O to add a runtime class,
@@ -105,18 +112,10 @@ However, if admins happened to have added them, they will also have to allow the
 Openshift SCCs need to be ordered by relative point value of "how restrictive" they are (a system described [here](#byrestrictions)).
 This section describes how points will be assigned for `RequiredRuntimeClasses`.
 
-In general, a smaller set of RequiredRuntimeClasses is more restricted. For instance, a list that is shorter than another is more restrictive, and thus should have
-a lower score. A set that specifies `"*"` will have the maximum score added for `RequiredRuntimeClasses`.
+Properly specifying comparative point values for RuntimeClasses involves special knowledge about how each supported runtime class interacts
+with the other fields in the SCC. While this increases the complexity of the SCC (it must have special knowledge of every supported runtime class),
+it is the only way to properly sort SCC by restrictions.
 
-Thus, the following rules will apply:
-`points(X) = max(len(X), 3*p)`
-`points(["*"]) = 4*p`
-Where X is the `RequiredRuntimeClasses` field, and p is the relative weight against the weight of the other SCC fields.
-
-In other words, fields with length < 4 will be ordered by length. After 4 (including the special `"*"`), the set will have equal value, as it is unlikely sets
-will grow much larger than 3, and ordering them after that is less useful (only one runtime class in the set will be used anyway).
-
-`RequiredRuntimeClasses` relative weight to the other fields partially depends on the runtime classes that Openshift opts to support.
 To start, we will consider the case where Openshift supports `""`, `openshift-builder` and `openshift-sandboxed-containers` (notes on supporting
 `openshift-low-latency` in the [open questions](#open-questions) section).
 
@@ -124,8 +123,98 @@ To start, we will consider the case where Openshift supports `""`, `openshift-bu
 security risks of `runAsAnyUser`, and `capAddAll`, as neither will have the UID/capability in the host namespace (see [this](#usernamespace) article for more details).
 Thus, they should be considered lower weight than all the fields (see [open questions](#open-questions) for a point about this).
 
-Implementors of this enhancement must be wary about ensuring if `""` is included in the `RequiredRuntimeClasses` field, then the SCC should be considered
-to have no other `RequiredRuntimeClasses` (as a user can request the default runtime, and thus should be treated as requests were before this field was added).
+Implementors of this enhancement must be wary about ensuring multiple fields in `RequiredRuntimeClasses` results in the proper weight.
+The weight of the whole SCC is no lower than the least restrictive allowed field. Below is a concrete example:
+An admin specifies `["", "openshift-builder"]` as the set of RequiredRuntimeClasses for an SCC, as well as allows them to use AnyUID.
+This SCC is effectively as secure as an admin specifying `[""]` and AnyUID, and should be treated as such (as a user in that SCC will have access to both
+the default runtime class and `openshift-builder`.
+
+Specifics on how each `RuntimeClass` will affect each other memeber of SCC is out of scope for this enhancement,
+but an example of the customizing of point calculation based on runtime class can be seen below:
+
+```
+// pointValue places a value on the SCC based on the settings of the SCC that can be used
+// to determine how restrictive it is.  The lower the number, the more restrictive it is.
+func pointValue(constraint *securityv1.SecurityContextConstraints) points {
+	pointValueGivenRuntimeClass := map[string]func(*securityv1.SecurityContextConstraints)points {
+		string(securityv1.RuntimeClassBuilder): runtimeClassBuilderPointValue,
+		string(securityv1.RuntimeClassDefault): runtimeClassDefaultPointValue,
+	}
+	minPoints := math.MaxInt32
+	for _, runtimeClass := range constraint.RequiredRuntimeClasses {
+		pointValueFunc, found := pointValueGivenRuntimeClass[string(runtimeClass)]
+		if !found {
+			// ignore invalid enries
+			klog.Warningf("RequiredRuntimeClass type %q has no point value, this may cause issues in sorting SCCs by restriction", runtimeClass)
+		}
+		if points := pointValueFunc(constraint); points < minPoints {
+			minPoints = points
+		}
+	}
+	return minPoints
+}
+
+// the map contains points for both RunAsUser and SELinuxContext
+// strategies by taking advantage that they have identical strategy names
+var strategiesPoints = map[string]points{
+	string(securityv1.RunAsUserStrategyRunAsAny):         runAsAnyUserPoints,
+	string(securityv1.RunAsUserStrategyMustRunAsNonRoot): runAsNonRootPoints,
+	string(securityv1.RunAsUserStrategyMustRunAsRange):   runAsRangePoints,
+	string(securityv1.RunAsUserStrategyMustRunAs):        runAsUserPoints,
+}
+
+func runtimeClassBuilderPointValue(constraint *securityv1.SecurityContextConstraints) points {
+	totalPoints := commonPointValues(constraint)
+	// Note the ignoring of runAsUser field. The builder runtime mitigates the risk of this field.
+	return totalPoints
+}
+
+func runtimeClassDefaultPointValue(constraint *securityv1.SecurityContextConstraints) points {
+	totalPoints := commonPointValues(constraint)
+
+	strategyType = string(constraint.RunAsUser.Type)
+	points, found = strategiesPoints[strategyType]
+	if found {
+		totalPoints += points
+	} else {
+		klog.Warningf("RunAsUser type %q has no point value, this may cause issues in sorting SCCs by restriction", strategyType)
+	}
+
+	return totalPoints
+}
+
+func commonPointValues(constraint *securityv1.SecurityContextConstraints) points {
+	totalPoints := noPoints
+
+	if constraint.AllowPrivilegedContainer {
+		totalPoints += privilegedPoints
+	}
+
+	// add points based on volume requests
+	totalPoints += volumePointValue(constraint)
+
+	if constraint.AllowHostNetwork {
+		totalPoints += hostNetworkPoints
+	}
+	if constraint.AllowHostPorts {
+		totalPoints += hostPortsPoints
+	}
+
+	// add points based on capabilities
+	totalPoints += capabilitiesPointValue(constraint)
+
+	strategyType := string(constraint.SELinuxContext.Type)
+	points, found := strategiesPoints[strategyType]
+	if found {
+		totalPoints += points
+	} else {
+		klog.Warningf("SELinuxContext type %q has no point value, this may cause issues in sorting SCCs by restriction", strategyType)
+	}
+	return totalPoints
+}
+```
+
+This code was based off of the [current point value calculation code](#point-value)
 
 [runtime-classes]: https://kubernetes.io/docs/concepts/containers/runtime-class/
 [required-drop-capabilities]: https://github.com/openshift/api/blob/0ba2c3658da6cade27a5066575cd8446eb03914c/security/v1/types.go#L53..L55
@@ -133,6 +222,7 @@ to have no other `RequiredRuntimeClasses` (as a user can request the default run
 [handlers]: https://github.com/kubernetes/api/blob/03aa42fe49ac2fa37646cc09e9a84fd825b88117/node/v1beta1/types.go#L53
 [cap-min-points]: https://github.com/openshift/apiserver-library-go/blob/master/pkg/securitycontextconstraints/util/sort/byrestrictions.go#L53
 [usernamespace]: https://man7.org/linux/man-pages/man7/user_namespaces.7.html
+[point-value]: https://github.com/openshift/apiserver-library-go/blob/6f1013f42f98d74a6b368d670215493f8425194f/pkg/securitycontextconstraints/util/sort/byrestrictions.go#L107
 
 ### Some Examples
 Below are some RuntimeClasses that will be useful for Openshift to support, as well as reasonining behind not allowing everyone to use them.
@@ -188,12 +278,7 @@ but that will also be addressed in a follow up and is out of scope.
 
 ### Open Questions
 
-- How can we ensure each new runtime class is ascribed a correct point value?
-- Do we ensure only known runtime classes are approved by entities verifying the SCC?
-- As it stands, the proposal includes `openshift-low-latency` which allows a container to request special access to host resources.
-How can this be evaluated for relative restriction points if it veers so much from the other fields in relative secureness?
-- currently, [capMinPoints](#capMinPoints) is 0. How can we show that specifying a runtime class is more secure than a point value of 0?
-How would we add up the points of a negative point value (more fields in RequiredRuntimeClasses is *less* secure, not more, but adding negative points together implies more fields is *more* secure).
+- We will need to set [capMinPoints](#capMinPoints) to be something other than 0 to allow runtime classes to be less secure than the default.
 
 [capMinPoints]: https://github.com/openshift/apiserver-library-go/blob/master/pkg/securitycontextconstraints/util/sort/byrestrictions.go#L53
 
