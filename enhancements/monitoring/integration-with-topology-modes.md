@@ -28,7 +28,7 @@ see-also:
 
 ## Summary
 
-Monitoring stack needs to react based on the newly added single replica topology mode. Plan is to detect whenever
+The monitoring stack needs to react based on the `infrastructureTopology` field newly added to `infrastructures.config.openshift.io` CRD. Plan is to detect whenever
 cluster is in single replica topology mode and reduce the monitoring stack footprint by adjusting platform Prometheus
 instance to be non Highly Available.
 
