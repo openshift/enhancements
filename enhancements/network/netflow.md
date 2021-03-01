@@ -58,11 +58,11 @@ As such, we would support the three protocols and an arbitrary list of collector
 
 The Cluster Network Operator (CNO) would expose:
 * `exportNetworkFlows` optional dict to contain the options to export the network flows
-  * `netflow` optional dict to specify that netflow protocol will be used.
+  * `netFlow` optional array of strings to specify that netFlow protocol will be used.
     * list of strings specifying the IP and port (separated by colon)  of the collectors that will consume the flow data
-  * `sflow` optional dict to specify that sflow protocol will be used.
+  * `sFlow` optional array of strings to specify that sFlow protocol will be used.
     * list of strings specifying the IP and port (separated by colon)  of the collectors that will consume the flow data
-  * `ipfix` optional dict to specify that ipfix protocol will be used.
+  * `ipfix` optional array of strings to specify that ipfix protocol will be used.
     * list of strings specifying the IP and port (separated by colon)  of the collectors that will consume the flow data
 
 This is an example of a *networks.operator.openshift.io* spec exporting flows on all protocols to two collectors on different ports:
@@ -87,10 +87,10 @@ spec:
   serviceNetwork:
   - 172.30.0.0/16
   exportNetworkFlows:
-    netflow:
+    netFlow:
     - 172.30.158.150:2056
     - 172.30.54.103:2056
-    sflow:
+    sFlow:
     - 172.30.158.150:6343
     - 172.30.54.103:6343
     ipfix:
