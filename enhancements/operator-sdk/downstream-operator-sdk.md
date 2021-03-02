@@ -15,7 +15,7 @@ approvers:
   - "@asmacdo"
   - "@fabianvf"
 creation-date: 2020-09-10
-last-updated: 2020-09-10
+last-updated: 2020-03-02
 status: implementable
 see-also:
 replaces:
@@ -407,10 +407,10 @@ the repos:
 * [Adding CI Configuration for New Repositories][new-repos]
 * [Red Hat Developer page][rh-dev-page]
 
-[gendiff](https://linux.die.net/man/1/gendiff)
-[overlay-files](#overlay-branch-directory-structures)
-[upstream-merge](https://github.com/jmrodri/scripts/blob/master/UPSTREAM-MERGE.sh),
-[new-repos](https://steps.ci.openshift.org/help/release#new-repos)
-[rh-dev-page](https://developers.redhat.com/topics/kubernetes/operators)
-[auto-config](https://github.com/fabianvf/ocp-osdk-downstream-automation/blob/master/deploy/cronjob.yaml#L40-L69)
-[kind](https://kind.sigs.k8s.io/)
+[gendiff]: <https://linux.die.net/man/1/gendiff>
+[overlay-files]: <#overlay-branch-directory-structures>
+[upstream-merge]: <https://github.com/jmrodri/scripts/blob/master/UPSTREAM-MERGE.sh>
+[new-repos]: <https://steps.ci.openshift.org/help/release#new-repos>
+[rh-dev-page]: <https://developers.redhat.com/topics/kubernetes/operators>
+[auto-config]: <https://github.com/fabianvf/ocp-osdk-downstream-automation/blob/master/deploy/cronjob.yaml#L40-L69>
+[kind]: <https://kind.sigs.k8s.io/>
