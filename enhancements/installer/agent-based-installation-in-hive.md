@@ -13,7 +13,7 @@ reviewers:
 approvers:
   - "@markmc"
 creation-date: 2020-12-22
-last-updated: 2021-02-23
+last-updated: 2021-03-01
 status: implementable
 see-also:
   - enhancements/installer/connected-assisted-installer.md
@@ -64,7 +64,7 @@ capability for agent-based cluster installation.
 * Expose agent-based installation capabilities as a kubernetes-native API
 through [Hive](https://github.com/openshift/hive).
 * Enable using agent-based installation capabilities to add workers to clusters
-that have been installed using - or adopted by - Hive"
+that have been installed using - or adopted by - Hive.
 * Enable automated creation and booting of the Assisted discovery ISO for bare-metal deployments.
 * Ensure the design is extensible for installing on other platforms.
 
@@ -125,7 +125,7 @@ new OpenShift cluster.*
 #### Add Worker Node from Hub
 
 *As a Cluster Creator, I can add workers by associating Agents either with a
-cluster installed by Hiva via an agent-based workflow, or an existing cluster
+cluster installed by Hive via an agent-based workflow, or an existing cluster
 adopted by Hive.*
 
 ### Implementation Details/Notes/Constraints
@@ -225,10 +225,9 @@ means.
 belonging to a particular InstallEnv.
 * labels to add to Agent resources upon creation. These labels should match
 the label selector above.
-* ClusterDeployment reference. This is a temporary field that associated an
-InstallEnv with a single cluster definition. This is required because the
-backend assisted service is not capable of producing a discovery ISO unless it
-is scoped to a cluster. That limitation will be removed in future releases.
+* Array of ClusterDeployment references. This is a whitelist of ClusterDeployments
+that are authorized to consume Agents from this InstallEnv. See the section below
+on [Namespaces and Multi-tenancy](#namespaces-and-multi-tenancy) for details.
 
 Status
 * a URL to download the discovery ISO produced for this InstallEnv.
@@ -330,6 +329,40 @@ the host was booted via the baremetal-operator, approval will be granted
 automatically. The same automation that caused the host to boot would have the
 ability to recognize the resulting Agent and mark it as approved.
 
+#### Namespaces and Multi-tenancy
+
+While we expect a ClusterDeployment to have its own namespace (which will be
+increasingly valuable once we have central machine management and need to run
+different machine-api components per cluster), Agents will be created in a
+separate namespace where their InstallEnv exists. "Late binding" in particular
+is a scenario where Agents will exist prior to a cluster. And of course a
+collection of Agents may be created in advance of allocating them to various
+clusters.
+
+Thus when a Cluster Creator creates a namespace and a new ClusterDeployment,
+that ClusterDeployment will need to consume Agents from a different namespace.
+But the Infra Owner may not want them to have the ability to consume any Agent
+from any namespace.
+
+To designate that a ClusterDeployment is authorized to consume Agents from a
+particular InstallEnv, a reference to that ClusterDeployment must be present
+in an array on the InstallEnv. The reference proves that someone with write
+access to the InstallEnv approves of associating it with the cluster.
+
+The restriction will be enforced by the agent-related controllers at the time
+of matching Agents to a particular ClusterDeployment. The controllers will
+still have access to all namespaces.
+
+InstallEnv and Agent resources are both namespaced. Agents will be created in
+the same namespace as the InstallEnv from which they were created.
+
+In the 4.8 timeframe, because "late binding" does not exist and thus each
+InstallEnv must be associated to a single cluster, this array of references
+will be required to have exactly one member. Once late binding is supported,
+that restriction will be removed. ("late binding" refers to the ability to
+create a discovery ISO and boot Agents with it prior to associating them with a
+cluster.)
+
 #### Create Cluster
 
 This scenario takes place on a hub cluster where hive and possibly RHACM are
@@ -345,11 +378,12 @@ approach.
 1. Infra Owner creates an InstallEnv resource. It can include fields such as egress proxy, NTP server, SSH public key, ... In particular it includes an Agent label selector, and a separate field of labels that will be automatically applied to Agents.
 1. Infra Owner creates BareMetalHost resources with corresponding BMC credentials. They must be labeled so that they match the selctor on the InstallEnv and must be in the same namespace as the InstallEnv.
 1. A new controller, the Baremetal Agent Controller, sees the matching BareMetalHosts and boots them using the discovery ISO URL found in the InstallEnv's status.
-1. The Agent starts up on each host and reports back to the assisted service, which creates an Agent resource in the cluster. The Agent is automatically labeled with the labels that were specified in the InstallEnv's Spec.
+1. The Agent starts up on each host and reports back to the assisted service, which creates an Agent resource in the same namespace as the InstallEnv. The Agent is automatically labeled with the labels that were specified in the InstallEnv's Spec.
 1. The Baremetal Agent Controller sets the Agent's Role field in its spec to "master" or "worker" if a corresponding label was present on its BareMetalHost.
 1. The Agent is automatically marked as Approved via a field in its Spec based on being recognized as running on the known BareMetalHost.
 1. The Agent runs through the validation and inspection phases. The results are shown on the Agent's Status, and eventually a condition marks the Agent as "ready".
 1. Cluster Creator creates a ClusterDeployment describing a new cluster. It describes how many control-plane and worker agents to expect. It also includes a label selector to match Agent resources that should be part of the cluster.
+1. Cluster Creator or Infra Owner adds a reference to the ClusterDeployment onto the InstallEnv. This reference confirms that the ClusterDeployment, which resides in a different namespace, is authorized to consume Agents from this InstallEnv.
 1. Cluster Creator applies a label to Agents if necessary so that they match the ClusterDeployment's selector.
 1. Once there are enough ready Agents of each role to fulfill the expected number as expressed on the ClusterDeployment, installation begins.
 
@@ -369,18 +403,65 @@ field on the Agent.
 
 This scenario takes place from a hub cluster, adding a worker node to a spoke
 cluster. This assumes that a ClusterDeployment exists in the hub cluster and
-has a platform of "baremetal".
+has the baremetal-operator component installed (which currently requires
+setting the infrastructure platform to "baremetal").
 
 1. Infra Owner creates a BareMetalHost resource with a label that matches an InstallEnv selector.
 1. The Baremetal Agent Controller adds the discovery ISO URL to the BareMetalHost.
 1. baremetal-operator uses redfish virtualmedia to boot the live ISO on the BareMetalHost.
 1. The Agent starts up and reports back to the assisted service, which creates an Agent resource in the hub cluster. The Agent is labeled with the labels that were specified in the InstallEnv's Spec, optionally including a label to match the AgentSelector field on the ClusterDeployment.
 1. If the Agent does not get a default label matching a ClusterDeployment, a user or other automation must add a label to match the AgentSelector field on the appropriate ClusterDeployment.
+1. Cluster Creator or Infra Owner adds a reference to the ClusterDeployment onto the InstallEnv if it is not already present. This reference confirms that the ClusterDeployment, which resides in a different namespace, is authorized to consume Agents from this InstallEnv.
 1. The Agent's Role field in its spec is assigned a value if a corresponding label and value were present on its BareMetalHost. (only "worker" is supported for now on day 2)
 1. The Agent is marked as Approved via a field in its Spec based on being recognized as running on the known BareMetalHost.
 1. The Agent runs through the validation and inspection phases. The results are shown on the Agent's Status, and eventually a condition marks the Agent as "ready".
 1. The Baremetal Agent Controller adds inspection data found on the Agent's Status to the BareMetalHost.
 1. When the agent is in a ready state, installation of that host begins.
+
+#### Future Use of MachinePools and Machine API
+
+This section discusses potential future use of hive's MachinePool and the
+Machine API as a preview of how the proposed agent-based installation can later
+fit a Machine-driven provisioning workflow.
+
+Hive has a MachinePool resource type that exists on a hub cluster and offers a
+way to manage MachineSets on spoke clusters. This proposal does not utilize
+any part of the Machine API because it does not (yet) add agent-based
+provisioning support to Machine API providers.
+
+A separate effort is underway to implement Centralized Machine Management,
+where Machine API providers and related resources would all be implemented on
+the hub cluster instead of the spoke cluster. Rather than use a MachinePool on
+the hub as a proxy for a remote MachineSet resource, the entire Machine API
+affecting a spoke cluster would be available for use on the Hub. That will be
+the starting point for integrating agent-based installation with Machines.
+
+Typically with the Machine API, a MachineSet gets scaled up, one or more
+Machines get created, and then a controller (part of a particular platform's
+machine-api-provider) interacts with a provider API (such as a public cloud
+API) to create or obtain a host per Machine that can be provisioned as Nodes in
+the cluster.
+
+Integrating agent-based provisioning into that flow will involve matching each
+Machine resource with an Agent resource in a similar way to how the bare metal
+provider currently matches a Machine with an availbale BareMetalHost. On a bare
+metal platform, Agents will likely continue to be created in advance,
+independently of a Machine. It is possible that other platforms may create
+Agents on-demand when a Machine appears.
+
+#### Hive Cluster Adoption
+
+Hive is able to adopt existing clusters that it did not create. This is done by
+creating a ClusterDeployment where `spec.installed == true` and providing a
+kubeconfig.
+
+In order to adopt a cluster and then add workers using an agent-based approach,
+the user must additionally:
+* specify the agent label selector on the ClusterDeployment's Spec
+* add a reference to the ClusterDeployment on one or more InstallEnvs
+
+Otherwise there are no differences in the InstallEnv or the workflow as
+described above.
 
 ### Risks and Mitigations
 
@@ -468,6 +549,10 @@ management pattern, as an addition to the current approach where Machines only
 exist in the same cluster as their associated Node. This proposal should be
 compatible with centralized Machine management, but it would be useful to play
 through those workflows in detail to be certain.
+
+There is some discussion in the
+[Future Use of MachinePools and Machine API](#future-use-of-machinepools-and-machine-api)
+section.
 
 #### Garbage Collection
 
