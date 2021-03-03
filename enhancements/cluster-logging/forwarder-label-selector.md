@@ -22,7 +22,7 @@ status: provisional
 
 ## Summary
 
-Add an input selector to the ClusterLogForwarder (CLF) to forward application
+Add an input selector to the ClusterLogForwarder (CLF) to collect application
 logs only from pods identified by labels.
 
 Kubernetes has two ways to identify pods: namespaces and labels.  The CLF
@@ -42,7 +42,7 @@ logs to be selected by label.
 ### Goals
 
 * Support [equality and set based selectors](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors)
-* Use the standard k8s [LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.18/#labelselector-v1-meta) type to be consistent with existing k8s types.
+* Use the same field names as the standard k8s [LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.18/#labelselector-v1-meta) type.
 
 ## Proposal
 
@@ -81,6 +81,14 @@ type LabelSelector struct {
 	MatchExpressions []LabelSelectorRequirement `json:"matchExpressions,omitempty" protobuf:"bytes,2,rep,name=matchExpressions"`
 }
 ```
+### Implementation phases
+
+May be implemented in 2 phases:
+
+1. Implement only `MatchLabels`, intsead of `meta.LabelSelector` use this struct:\
+   `type LabelSelector struct { MatchLabels map[string]string }`
+
+2. Add implementation of Matchexpressions, using the original `meta.LabelSelector`
 
 ### User Stories
 
@@ -154,35 +162,27 @@ spec:
         selector:
           matchLabels:
             environment: production
-        namespaces: 
+        namespaces:
         - app1
         - app2
 ```
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details
 
-There are two possible implementation approaches:
+The implementation will use a fluentd plug-in to filter based on namespace and labels.
+The existing namespace selector logic will be replaced to also use this plugin.
+A single filter point is simpler and should perform better.
 
-1. Collect all logs, filter by pod label for selected inputs.
-2. Collect only logs selected by some input.
+This proposal can be implemented in two parts:
 
-In practice 2. has a number of drawbacks:
-
-* Need to collect the _union_ of all logs needed by all inputs, therefore we *must implement 1 anyway* to ensure each input gets only selected logs.
-* Code to query API and construct filter expressions is additional complexity since we need to implement 1. anyway.
-* Pod labels change over time so we need to query the k8s API regularly to update the set of selected logs. The resulting churn caused by restarting fluentd with new configuration is a performance problem.
-
-Therefore 1. is the best implementation initially, and probably for the long term. 2. could be considered as a possible minimization *if* we can prove that it helps more than it hurts.
-
-Note this differs from the existing implementation for namespace selectors because:
-* Membership of a namespace does not change over time.
-* It's possible to efficiently select all logs from a namespace using log file-name wild-cards.
+1. Implement only the `MatchLabels` equality based selector.
+   Focus on matching with simple logic.
+2. Add `MatchExpressions` support with the more complex parsing and matching logic.
 
 ### Risks and Mitigation
 
-No particular risks other than additional implementable complexity.
-
-This feature restricts the data exposed by the forwarder, so no new security concerns.
+* Performance of new filter plugin must be acceptable.
+* This feature restricts the data exposed by the forwarder, so no new security concerns.
 
 ## Design Details
 
