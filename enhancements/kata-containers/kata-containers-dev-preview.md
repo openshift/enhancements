@@ -24,7 +24,12 @@ superseded-by:
 [Kata Containers](https://katacontainers.io/) is an open source project developing a container runtime using virtual machines and providing the same look and feel as vanilla containers.
 By leveraging hardware virtualization technologies, Kata Containers provides powerful workload isolation compared to existing container solutions.
 
-We will be integrating Kata Containers into OpenShift to provide the ability to run kernel isolated containers for any workload which requires custom kernel tuning (sysctl, scheduler changes, cache tuning, etc), custom kernel modules (out of tree, special arguments, etc), exclusive access to hardware, root privileges, or other administrative privileges above and beyond what is secure in a shared kernel environment (regular runc).
+We will be integrating Kata Containers into OpenShift to provide the ability to run kernel isolated containers for any workload which requires:
+- custom kernel tuning (sysctl, scheduler changes, cache tuning, etc);
+- custom kernel modules (out of tree, special arguments, etc);
+- exclusive access to hardware;
+- root privileges;
+- any other administrative privileges above and beyond what is secure in a shared kernel environment (regular runc).
 
 It should be noted that Kata Containers differ from Kubevirt:
 
@@ -35,7 +40,8 @@ It should be noted that Kata Containers differ from Kubevirt:
 If we take telcos for example, there are a number of reasons they require isolated workloads:
 
 1. **Telco CNF deployments** - As part of 5G/NFV telco deployments there is a gradual migration from physical networking boxes to CNFs (container network functions). Some of these CNFs require root access while others could potentially create a threat on the operators cloud bypassing existing container isolation mechanisms. For addressing those issues a hardened isolated container solution is required
-2. **Devops deployments** - Telcos are working hard to increase the rate of adding new capabilities to their clouds for competing with OTTs (over the top companies such as Netflix, Apple, Facebook etc…). This involves huge investments in devops tools and processes. In order for devops to deploy new features on production environments there is a need for high isolation of the deployed workloads in order to control and revert such changes.
+2. **Devops deployments** - Telcos are working hard to increase the rate of adding new capabilities to their clouds for competing with OTTs (over the top companies such as Netflix, Apple, Facebook etc…).
+                            This involves huge investments in devops tools and processes. In order for devops to deploy new features on production environments there is a need for high isolation of the deployed workloads in order to control and revert such changes.
 3. **Hardware Vendors** - many hardware vendors require custom kernel parameters at boot, custom sysctl variables, etc. They want to use containers as a convenient packaging format for their entire application, but still need access to lower level tuning for portions of their applications
 
 
@@ -129,7 +135,17 @@ We start by creating a container image with only the kata upstream components as
 ### KataContainers Operator development
 The goal is to develop a kata operator that can be used to manage the entire lifecycle of kata components in an OpenShift cluster. We will have a controller that watches for a kata **custom resource (CR)** and a daemon-set that acts upon changes to the (CR) and do the required work on the worker nodes (install, uninstall update,...).
 
-Via the CR it will be possible to select a subset of worker nodes. For deploying binaries on the host the current idea is to use a container image that can be mounted on the host level.  The goal is to be able to install the operator via OperatorHub. The Operator will also create a crio drop-in config file via machine config objects. The Operator will automatically select the payload image that contains correct version of the kata binaries for the given version of the OpenShift. The Operator will also configure a `RuntimeClass` called `kata` which can be used to deploy workload that uses kata runtime. The Operator will create a machine-config object to enable the `qemu-kiwi` RHCOS extension.
+Via the CR it will be possible to select a subset of worker nodes.
+
+For deploying binaries on the host the current idea is to use a container image that can be mounted on the host level.  
+
+The goal is to be able to install the operator via OperatorHub.
+
+The Operator will:
+- Create a crio drop-in config file via machine config objects;
+- Automatically select the payload image that contains correct version of the kata binaries for the given version of the OpenShift;
+- Configure a `RuntimeClass` called `kata` which can be used to deploy workload that uses kata runtime;
+- Create a machine-config object to enable the `qemu-kiwi` RHCOS extension.
 
 The `RuntimeClass` and payload image names will be visible in the CR status.
 
