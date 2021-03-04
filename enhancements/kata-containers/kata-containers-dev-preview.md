@@ -44,13 +44,13 @@ If we take telcos for example, there are a number of reasons they require isolat
 - **RuntimeClass** - see https://kubernetes.io/docs/concepts/containers/runtime-class/
 
 
-## Goals
+## Enhancement Goals
 - Provide a way to enable running user workloads on kata containers on an OpenShift cluster.
 - Clusters with kata container workloads should support upgrades.
 - Add security policy to control which users can run what workloads on kata in an OpenShift cluster.
 
 
-## Non-goals
+## Enhancement Non-Goals
 - Although kata containers are capable of supporting running a different kernel then the one used on the OpenShift node, such features will not be supported. This is in order to simplify the development cycles and testing efforts of this project.
 - Running OpenShift control plane and core operators on kata. These will continue to run on runc.
 
@@ -133,14 +133,14 @@ Via the CR it will be possible to select a subset of worker nodes. For deploying
 
 The `RuntimeClass` and payload image names will be visible in the CR status.
 
-#### Goals
+#### KataContainer Operator Goals
 - Create an API which supports installation of Kata Runtime on all or selected worker nodes
 - Configure CRI-O to use Kata Runtime on those worker nodes
 - Installation of the runtimeClass on the cluster, as well as of the required components for the runtime to be controlled by the orchestration layer.
 - Updates the Kata runtime
 - Uninstall Kata Runtime and reconfigure CRI-O to not use it.
 
-#### Non-Goals
+#### KataContainer Operator Non-Goals
 To keep the Kata Operator's goal to the lifecycle management of the Kata Runtime, it will only support installation configuration of the Kata Runtime. This operator will not interact with any runtime configuration, such as Pod Annoations supported by Kata.
 
 #### Proposal
