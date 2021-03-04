@@ -24,12 +24,12 @@ superseded-by:
 [Kata Containers](https://katacontainers.io/) is an open source project developing a container runtime using virtual machines and providing the same look and feel as vanilla containers.
 By leveraging hardware virtualization technologies, Kata Containers provides powerful workload isolation compared to existing container solutions.
 
-We will be integrating Kata Containers into Openshift to provide the ability to run kernel isolated containers for any workload which requires custom kernel tuning (sysctl, scheduler changes, cache tuning, etc), custom kernel modules (out of tree, special arguments, etc), exclusive access to hardware, root privileges, or other administrative privileges above and beyond what is secure in a shared kernel environment (regular runc).
+We will be integrating Kata Containers into OpenShift to provide the ability to run kernel isolated containers for any workload which requires custom kernel tuning (sysctl, scheduler changes, cache tuning, etc), custom kernel modules (out of tree, special arguments, etc), exclusive access to hardware, root privileges, or other administrative privileges above and beyond what is secure in a shared kernel environment (regular runc).
 
 It should be noted that Kata Containers differ from Kubevirt:
 
-- Kubevirt aims to run **VM images** on Openshift providing the VM with the look and feel of a virtual machine running as a legacy VM (CRD defining a Virtual Machine in Kubernetes)
-- Kata Containers aim to run **container images** on Openshift in an isolated manner using virtualization tools (uses Runtime Class resource to choose Kata only for specific workloads which require kernel level isolation)
+- Kubevirt aims to run **VM images** on OpenShift providing the VM with the look and feel of a virtual machine running as a legacy VM (CRD defining a Virtual Machine in Kubernetes)
+- Kata Containers aim to run **container images** on OpenShift in an isolated manner using virtualization tools (uses Runtime Class resource to choose Kata only for specific workloads which require kernel level isolation)
 
 ## Motivation
 If we take telcos for example, there are a number of reasons they require isolated workloads:
@@ -51,7 +51,7 @@ If we take telcos for example, there are a number of reasons they require isolat
 
 
 ## Non-goals
-- Although kata containers are capable of supporting running a different kernel then the one used on the Openshift node, such features will not be supported. This is in order to simplify the development cycles and testing efforts of this project.
+- Although kata containers are capable of supporting running a different kernel then the one used on the OpenShift node, such features will not be supported. This is in order to simplify the development cycles and testing efforts of this project.
 - Running OpenShift control plane and core operators on kata. These will continue to run on runc.
 
 
@@ -65,7 +65,7 @@ Kubernetes provides support for RuntimeClasses. RuntimeClass is a feature for se
 
 CRI-O today comes out of the box with a runc as the default runtime. CRI-O also supports RuntimeClasses and using this configuration, it will support a KataContainers runtime as well.
 
-The 2 fundamental problems we need to address for getting kata to work with Openshift are:
+The 2 fundamental problems we need to address for getting kata to work with OpenShift are:
 
 1. Getting the kata artifacts on to an RHCOS node
 2. Deploying kata and configuring CRI-O to use it as the runtime
@@ -238,14 +238,14 @@ spec:
       install-kata: kata-1.0
 ```
 
-### Openshift kata testing
+### OpenShift kata testing
 
 - Kubernetes E2E tests, matching the ones ran by CRI-O:
 https://github.com/cri-o/cri-o/blob/master/contrib/test/integration/e2e.yml#L14
 - OpenShift "conformance/parallel" tests
 - Get sample workloads from customers and add tests to CI if we are missing coverage for those workloads to ensure we support the workloads and don’t regress.
 
-### Openshift kata CI
+### OpenShift kata CI
 
 - Leverage existing openshift CI infrastructure for e2e tests on kata-containers upstream
 
