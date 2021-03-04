@@ -76,7 +76,7 @@ For addressing the second issue of deploying and configuring CRI-O we will use a
 
 The next sections detailed the 2 solutions.
 
-### KataContainer Packaging
+### KataContainers Packaging
 #### Short term (preview release): Use container images to deliver RPMs and install using rpm-ostree
 In this option we build a container image containing RHEL AV RPMs (such as QEMU) and kata RPMs. The kata operator will create a pod based on this image and then mount the host filesystem and install the RPMs on the filesystem (kata operators will be described in a later section).
 
@@ -126,21 +126,21 @@ We start by creating a container image with only the kata upstream components as
 
 
 
-### KataContainer Operator development
+### KataContainers Operator development
 The goal is to develop a kata operator that can be used to manage the entire lifecycle of kata components in an OpenShift cluster. We will have a controller that watches for a kata **custom resource (CR)** and a daemon-set that acts upon changes to the (CR) and do the required work on the worker nodes (install, uninstall update,...).
 
 Via the CR it will be possible to select a subset of worker nodes. For deploying binaries on the host the current idea is to use a container image that can be mounted on the host level.  The goal is to be able to install the operator via OperatorHub. The operator will also create a crio drop-in config file via machine config objects. The Operator will automatically select the payload image that contains correct version of the kata binaries for the given version of the OpenShift. The Operator will also configure a `RuntimeClass` called `kata` which can be used to deploy workload that uses kata runtime. The operator will create a machine-config object to enable the `qemu-kiwi` RHCOS extension.
 
 The `RuntimeClass` and payload image names will be visible in the CR status.
 
-#### KataContainer Operator Goals
+#### KataContainers Operator Goals
 - Create an API which supports installation of Kata Runtime on all or selected worker nodes
 - Configure CRI-O to use Kata Runtime on those worker nodes
 - Installation of the runtimeClass on the cluster, as well as of the required components for the runtime to be controlled by the orchestration layer.
 - Updates the Kata runtime
 - Uninstall Kata Runtime and reconfigure CRI-O to not use it.
 
-#### KataContainer Operator Non-Goals
+#### KataContainers Operator Non-Goals
 To keep the Kata Operator's goal to the lifecycle management of the Kata Runtime, it will only support installation configuration of the Kata Runtime. This operator will not interact with any runtime configuration, such as Pod Annoations supported by Kata.
 
 #### Proposal
