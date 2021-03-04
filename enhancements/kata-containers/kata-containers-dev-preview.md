@@ -34,7 +34,7 @@ It should be noted that Kata Containers differ from Kubevirt:
 ## Motivation
 If we take telcos for example, there are a number of reasons they require isolated workloads:
 
-1. **Telco CNF deployments** - As part of 5G/NFV telco deployments there is a gradual migration from physical networking boxes to CNFs (container network functions). Some of these CNFs require root access while others could potentially create a threat on the operators cloud bypassing existing container isolation mechanisms. For addressing those issues a hardened isolated container solution is required 
+1. **Telco CNF deployments** - As part of 5G/NFV telco deployments there is a gradual migration from physical networking boxes to CNFs (container network functions). Some of these CNFs require root access while others could potentially create a threat on the operators cloud bypassing existing container isolation mechanisms. For addressing those issues a hardened isolated container solution is required
 2. **Devops deployments** - Telcos are working hard to increase the rate of adding new capabilities to their clouds for competing with OTTs (over the top companies such as Netflix, Apple, Facebook etc…). This involves huge investments in devops tools and processes. In order for devops to deploy new features on production environments there is a need for high isolation of the deployed workloads in order to control and revert such changes.
 3. **Hardware Vendors** - many hardware vendors require custom kernel parameters at boot, custom sysctl variables, etc. They want to use containers as a convenient packaging format for their entire application, but still need access to lower level tuning for portions of their applications
 
@@ -97,7 +97,7 @@ In this option we build upon the RHCOS extension approach planned for OCP4.6.
 
 This will add additional software onto the host - but this software will still be versioned with the host (included as part of the OpenShift release payload) and upgraded with the cluster.
 
-The additional RPMs required for qemu-kiwi and its dependencies are: 
+The additional RPMs required for qemu-kiwi and its dependencies are:
 * qemu-kiwi
 * qemu-kvm-common
 * pxe-roms-qemu
@@ -127,7 +127,7 @@ We start by creating a container image with only the kata upstream components as
 
 
 ### KataContainer Operator development
-The goal is to develop a kata operator that can be used to manage the entire lifecycle of kata components in an OpenShift cluster. We will have a controller that watches for a kata **custom resource (CR)** and a daemon-set that acts upon changes to the (CR) and do the required work on the worker nodes (install, uninstall update,...). 
+The goal is to develop a kata operator that can be used to manage the entire lifecycle of kata components in an OpenShift cluster. We will have a controller that watches for a kata **custom resource (CR)** and a daemon-set that acts upon changes to the (CR) and do the required work on the worker nodes (install, uninstall update,...).
 
 Via the CR it will be possible to select a subset of worker nodes. For deploying binaries on the host the current idea is to use a container image that can be mounted on the host level.  The goal is to be able to install the operator via OperatorHub. The operator will also create a crio drop-in config file via machine config objects. The Operator will automatically select the payload image that contains correct version of the kata binaries for the given version of the OpenShift. The Operator will also configure a `RuntimeClass` called `kata` which can be used to deploy workload that uses kata runtime. The operator will create a machine-config object to enable the `qemu-kiwi` RHCOS extension.
 
