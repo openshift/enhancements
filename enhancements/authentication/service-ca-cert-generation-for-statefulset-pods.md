@@ -33,9 +33,10 @@ to allow TLS-protected communication between StatefulSet pods.
 The user adds a `service.beta.openshift.io/serving-cert-secret-name: $secretName` annotation,
 and a `$secretName` secret is generated, which can be mounted in the StatefulSet’s pods.
 
-Creating a StatefulSet triggers both a Secret creation and creating the StatefulSet pods,
+Creating/scaling up a StatefulSet triggers
+both creating the StatefulSet pods and a secret creation/update,
 which race against each other.
-So, the pods **must** fail if a certificate for their identity is not found.
+So, the pods **must** fail, or wait, if a certificate for their identity is not found.
 
 ## Motivation
 
@@ -52,34 +53,9 @@ without having to manually generate certificates for these pods.
 
 ### Non-Goals
 
-- Provide certificates for `127.0.0.1`, `localhost`, or NodeIP service endpoints:
+- Provide certificates for `127.0.0.1`, `localhost`, or NodeIP service endpoints
 
-  Giving out certificates from widely-accepted CAs (like the service CA)
-  with these names makes no sense because they don’t specify any service identity,
-  e.g. any compromised serviceA would get a “localhost” certificate
-  that is acceptable for connections from a victim serviceB.
-
-  (Reportedly some OSes do actually query `localhost` on DNS on the net:
-  https://archive.cabforum.org/pipermail/public/2015-June/005673.html )
-
-  If a client wants to connect to _only_ a “true localhost” service,
-  a service CA-signed certificate does not provide that property.
-  The best way to do that is to do it directly inside the process,
-  without using TLS (and the associated cryptography overhead) at all.
-  Second best is to rely on known properties of the environment,
-  i.e. to assume that 127.0.0.1 is localhost-only
-  and to use a non-TLS connection on that address.
-
-  If a _pod_ had to use TLS for localhost for some reason, the closest to a right way to do that
-  (relying on TLS to verify that only loopback connections happen) is to:
-  - Create a temporary CA (specific to the individual pod for)
-  - Generate, and have that CA sign a localhost certificate (specific to the individual pod)
-  - Set up the CA certificate as a trusted root
-  - _Irreversibly erase_ the CA private key
-  - Set up the pod with the generated localhost certificate+private key.
-  - (This doesn’t benefit from service-ca involvement at all.)
-  
-  Similarly single-purpose CA could be set up for NodeIP services.
+  (See discussion in “Implementation Details/Notes/Constraints”)
 
 ## Proposal
 
@@ -92,10 +68,11 @@ the subject of `$podID.crt` is the pod’s unique DNS identity,
 `${statefulset.name}-${podID}.${service.name}.${service.namespace}.svc` .
 Each pod from a `StatefulSet` can then pick and use its own certificate.
 
-Creating a `StatefulSet` triggers both a `Secret` creation and creating the `StatefulSet` pods,
+Creating/scaling up a StatefulSet triggers
+both creating the StatefulSet pods and a secret creation/update,
 which race against each other.
 So, each individual pod (either the primary container, or an init container)
-**must** fail if a certificate for its individual identity is not found.
+**must** fail, or internally wait, if a certificate for its individual identity is not found.
 We also generate a few more certificate+key pairs than necessary,
 to allow scaling up without such pod failures.
 
@@ -113,7 +90,9 @@ to allow scaling up without such pod failures.
   ensures that the pod
   - Determines its identity `$podID` (already the case)
   - Loads `$podID.{crt,key}` on startup from the directory where `$secretName` is mounted.
-  - Exits with a failing status if those files are missing
+  - Alternatively:
+    - Exits with a failing status if those files are missing
+    - Waits until those files are available
     (this could happen either in the main application pod or in an init container).
   - Uses the certificate+private key for accepting intra-StatefulSet connections
     (this may require changes to support diferent certificates for different services).
@@ -122,18 +101,23 @@ to allow scaling up without such pod failures.
     (or the same with `….cluster.local`) host names.
 - The application administrator creates the StatefulSet object.
 - The StatefulSet controller starts creating pods for the StatefulSet.
-  They will initially fail because `$secretName` is missing or does not have the expected
-  `$podID.{crt,key}` files, causing the StatefulSet controller to wait and retry.
+  The pods’ containers will initially not be created if because `$secretName` is missing;
+  the Kubelet will only create them after `$secretName` is available.
+  If `$secretName` does already exist, but does not have the expected
+  `$podID.{crt,key}` files, the application will either fail,
+  causing the StatefulSet controller to wait and retry,
+  or the application will wait for the files to appear in the mounted secret.
   (It doesn’t matter
   whether the `statefulSet.spec.podManagementPolicy` is `OrderedReady` or `Parallel`;
   either way the secret will be updated in a single step to contain all necessary certificates,
-  and all pod creation attempts will fail until then.)
+  and the application will not succesfully initialize until then.)
 - Concurrently, the Service CA controller observes the creation of the StatefulSet,
   and creates a secret `$secretName` in the same namespace, with `{0,1,2,3,…}.{crt,key}` keys
   matching the hostnames of the StatefulSet pods; the number of certificate/key pairs may be
   larger than the requested number of replicas of the StatefulSet.
-- After the secret is created/updated, and the StatefulSet controller retries,
-  the pods start up succesfully.
+- After the secret is created/updated,
+  the StatefulSet controller retries or the pods’ internal logic notices,
+  and the pods start up succesfully.
 
 #### Scaling the StatefulSet Up
 
@@ -141,13 +125,15 @@ to allow scaling up without such pod failures.
 - The StatefulSet controller starts creating the new pods.
   If the certificate/key pairs already exist in the secret (e.g. if just adding one pod)
   the pods start up succesfully;
-  if not, the pods fail, and the StatefulSet controller will wait and retry.
+  if not, the pods will either fail, and the StatefulSet controller will wait and retry,
+  or they will wait for the files to appear in the mounted secret.
 - Concurrently, the Service CA controller observes the replica count increase;
   if the existing secret does not have enough certificate/key pairs (including a margin),
   it updates the secret so that it does.
   (It’s unspecified whether pre-existing certificate/key pairs are reused or replaced.)
-- After the secret is created/updated, and the StatefulSet controller retries,
-  the new pods start up succesfully.
+- After the secret is created/updated,
+  the StatefulSet controller retries or the pods’ intenral logic notices,
+  and the new pods start up succesfully.
 
 #### Scaling the StatefulSet Down
 
@@ -198,11 +184,22 @@ for StatefulSet certificates they are reported by an annotation on the StatefulS
 
 ### Implementation Details/Notes/Constraints
 
-#### The Pod Creation vs. Secret Creation Race
+#### The Pod Creation vs. Secret Update Race
 
 As described above,
-creating a StatefulSet triggers both pods and the secret to be created concurrently,
-and the application must be designed to support that by triggering the pod to be re-created.
+creating or scaling up a StatefulSet triggers both
+pods creation and secret creation/update concurrently,
+and the application must be designed to support that.
+
+The Kubelet will delay container creation if secrets are not available;
+so, this primarily affects scale-up, where new StatefulSet pods could be launched before
+their certificates are created.
+
+The simplest way to handle that is for the pod to fail if it can’t find a certificate,
+triggering the StatefulSet delay/retry logic.
+Alternatively, if the secret is mounted as a volume (which is live-updated by the Kubelet
+as the secret changes), the pod could internally wait until the certificate is
+available in the expected location.
 
 To avoid the race in predictable situations,
 the controller creates some _extra_ certificates on top of the StatefulSet.spec.replicas request,
@@ -266,14 +263,45 @@ in the Pod template
 If the secret grew so large that it would be rejected by the API server,
 the Service CA controller would record that error in an annotation on the requesting StatefulSet,
 and after a few attempts (10 in the current implementation)
-stop trying to generate the secret
-(TO FIX: until the built-in controller resync period,
-at which point the current implementation tries again).
+stop trying to generate the secret.
+
+#### Not Generating Certificates for `127.0.0.1`, `localhost`, or NodeIPs
+
+Giving out certificates from widely-accepted CAs (like the service CA)
+with these names makes no sense because they don’t specify any service identity,
+e.g. any compromised serviceA would get a “localhost” or nodeIP certificate
+that is acceptable for connections intended to connect to serviceB.
+
+(Reportedly some OSes do actually query `localhost` on DNS on the net:
+https://archive.cabforum.org/pipermail/public/2015-June/005673.html )
+
+If a client wants to connect to _only_ a “true localhost” service,
+a service CA-signed certificate does not provide that property.
+The best way to do that is to do it directly inside the process,
+without using TLS (and the associated cryptography overhead) at all.
+Second best is to rely on known properties of the environment,
+i.e. to assume that 127.0.0.1 is localhost-only
+and to use a non-TLS connection on that address.
+
+If a _pod_ had to use TLS for localhost for some reason, the closest to a right way to do that
+(relying on TLS to verify that only loopback connections happen) is to:
+- Create a temporary CA (specific to the individual pod for)
+- Generate, and have that CA sign a localhost certificate (specific to the individual pod)
+- Set up the CA certificate as a trusted root
+- _Irreversibly erase_ the CA private key
+- Set up the pod with the generated localhost certificate+private key.
+- (This doesn’t benefit from service-ca involvement at all.)
+
+Similarly single-purpose CA could be set up for NodeIP services
+(if it makes sense to connect to node IP addresses directly at all)
+so that the client connects to the desired NodeIP service
+instead of to any NodeIP service.
 
 ### Risks and Mitigations
 
-The service creation vs. pod creation race
-will introduce some ~unavoidable pod initialization failures,
+The pod creation vs. secret creation/update race,
+will introduce some ~unavoidable container startup delays waiting for missing secrets,
+and if handled by failing pod creation, some pod initialization failures on rapid scale-ups,
 perhaps causing alerts.
 Those should be limited to initial deployments, or rapid scale-ups, of StatefulSets,
 hopefully rare operations where the admins of the StatefulSet are aware of the
@@ -294,12 +322,28 @@ Unit and e2e tests similar to the existing service certificate tests, both in st
 
 ### Graduation Criteria
 
-FIXME: TBD?
+#### Dev Preview -> Tech Preview
 
-Given the close (but not 100%) correspondence
-with the existing service certificate generation feature,
-proposing to use `service.beta.openshift.io/serving-cert-secret-name` annotations
-that are already used for that feature.
+- Ability to utilize the enhancement end to end
+- End user documentation (TBD: where?), relative API stability
+- Sufficient test coverage
+- Gather feedback from users rather than just developers
+- Enumerate service level indicators (SLIs), expose SLIs as metrics
+  TBD?
+- Write symptoms-based alerts for the component(s)
+  TBD?
+
+#### Tech Preview -> GA
+
+- More testing (upgrade, downgrade, scale)
+- Sufficient time for feedback
+- Available by default
+- Backhaul SLI telemetry
+  TBD?
+- Document SLOs for the component
+  TBD?
+- Conduct load testing
+  TBD?
 
 ### Upgrade / Downgrade Strategy
 
@@ -334,7 +378,9 @@ WIP PR: https://github.com/openshift/service-ca-operator/pull/144
 
 ## Drawbacks
 
-- The pod vs. secret creation race is inelegeant, and causes expected pod initialization failures.
+- The pod creation vs. secret update race is inelegeant,
+  and may cause expected pod initialization failures if the application decides to rely on
+  the StatefulSet retry logic to handle it.
 
 ## Alternatives
 
@@ -360,7 +406,8 @@ So, we would need to add a more general templating mechanism to StatefulSet,
 either as something specific to secrets
 or some very general text/YAML substitution mechanism.
 
-There would still be a pod vs. secret creation race.
+The pod vs. secret creation race would not require application changes,
+because the Kubelet delays creation of containers if the corresponding secrets don’t exist.
 
 Setting up a StatefulSet so that pods can’t impersonate each other
 would no longer require admins to manually use init containers;
@@ -390,7 +437,7 @@ the StatefulSet.)
 This would certainly be simpler
 for generating the very generic wildcard certificates (`*.${service.name}…`):
 they could be generated with the service, i.e. before creating the StatefulSet,
-and the pod vs. secret creation race would not exist.
+and the pod creation vs. secret creation/update race would not exist.
 OTOH that only works well with such generic wildcards, which are undesirable.
 
 For generating individual pod certificates
