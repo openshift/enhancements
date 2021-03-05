@@ -469,15 +469,18 @@ described above.
 
 Agent-based installation is a significant feature set with significant API
 surface area. There is a strong potential for the need to change these new APIs
-after receiving feedback from users.
+after receiving feedback from users. However there is a competing desire to
+support these APIs when they are delivered in the OpenShift 4.8 timeframe,
+which rules out the use of an "alpha" API version due to its insufficient level
+of commitment.
 
-New CRDs will have alpha versions during the OpenShift 4.8 timeline (though
-they will be distributed as part of RHACM). This will enable them to be changed
-as needed prior to release as a beta API.
+New CRDs will have version "v1beta1" during the OpenShift 4.8 timeline (though
+they will be distributed as part of RHACM). This will enable them to be
+supported in production while allowing greater flexibility for changes than if
+they were released as "v1".
 
-The agent-specific portions of the hive ClusterDeployment will also have alpha
-versions during the same timeline; an admission webhook will prevent use of
-those portions of the ClusterDeployment unless a feature gate is enabled.
+The agent-specific portions of the hive ClusterDeployment will inherit the
+ClusterDeployment's current version of "v1".
 
 #### Agent REST API Auth
 
