@@ -157,10 +157,6 @@ Main events only, this is not a faithful history.
 2021-01-28: Re-worked proposal to use 2 _FeatureSets_ with manual application by the user.
 2021-03-05: Re-worked proposal to use carry-patch instead. Moved previous approach to "Alternatives" for reference.
 
-## Drawbacks
-
-The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
-
 ## Alternatives
 
 We have considered this alternative approach. It is NOT our preferable approach because it introduces many shortcomings:
