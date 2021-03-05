@@ -76,14 +76,15 @@ In order to keep the Attach Detach Controller and the Kubelet in sync regarding 
 
 As a result, the Attach Detach Controller knows if the in-tree plugin has been migrated on the node. If the feature flags are enabled in Kube Controller Manager **and** on the node, the Attach Detach Controller uses the CSI driver to attach volumes. Otherwise, it will falls back to the in-tree plugin.
 
-In OCP, we can easily set those feature gates by using the [FeatureGate] (https://docs.openshift.com/container-platform/4.7/nodes/clusters/nodes-cluster-enabling-features.html) Custom Resource. OCP operators read this resource and restart their operands with the appropriate features enabled.
-However, this approach alone is not acceptable for CSI migration because the feature flags might be switched across components in _any_ arbitrary order.
+#### Upstream and OCP patches
 
-That being said, we plan to submit an upstream patch that allows the Attach Detach Controller to have its own custom feature gates, independent from Kube Controller Manager.
+In OCP, we can easily set those feature gates by using the [FeatureGate] (https://docs.openshift.com/container-platform/4.7/nodes/clusters/nodes-cluster-enabling-features.html) Custom Resource. OCP operators read this resource and restart their operands with the appropriate features enabled.
+However, this approach alone is not acceptable for CSI migration because the feature flags might be switched across components in _any_ arbitrary order. That being said, our approach is intended to make the Attach Detach Controller resilient to this issue.
+
+We plan to submit an upstream patch that allows the Attach Detach Controller to have its own custom feature gates, independent from Kube Controller Manager.
 In addition to that, we propose to add a carry-patch to Attach Controller in OCP that enables CSI Migration of some storage plugins. Initially we would start with Cinder and GCP, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
 
-That way, when deciding about using either the CSI driver or the in-tree plugin, the AttachDetch Controller will **only** rely on the information propagated by the node.
-Other controllers from Kube Controller Manager, like the PV Controller, will still obey the flags passed to the Kube Controller Manager. In other words, Attach Detach Controller will start considering which plugin to use (in-tree or CSI) on a node basis only.
+That way, when deciding about using either the CSI driver or the in-tree plugin, the Attach Detch Controller will **only** rely on the information propagated by the node. In other words, Attach Detach Controller will start considering which plugin to use (in-tree or CSI) on a node basis only. Other controllers from Kube Controller Manager, like the PV Controller, will still obey the flags passed to the Kube Controller Manager.
 
 #### Benefits
 
