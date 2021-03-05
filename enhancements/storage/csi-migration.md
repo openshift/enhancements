@@ -79,7 +79,7 @@ As a result, the Attach Detach Controller knows if the in-tree plugin has been m
 #### Upstream and OCP patches
 
 In OCP, we can easily set those feature gates by using the [FeatureGate] (https://docs.openshift.com/container-platform/4.7/nodes/clusters/nodes-cluster-enabling-features.html) Custom Resource. OCP operators read this resource and restart their operands with the appropriate features enabled.
-However, this approach alone is not acceptable for CSI migration because the feature flags might be switched across components in _any_ arbitrary order. That being said, our approach is intended to make the Attach Detach Controller resilient to this issue.
+However, this approach alone is not acceptable for CSI migration because the feature flags might be switched across components in _any_ arbitrary order. Our solution is intended to make the Attach Detach Controller resilient to this issue.
 
 That being said, **we propose to carry a patch in OCP's Attach Controller to force-enable the CSI Migration feature gates there**.
 
@@ -91,6 +91,8 @@ Initially we would start with Cinder and GCP (_CSIMigrationGCE_ and _CSIMigratio
 In subsequent OCP releases we would proceed with EBS, vSphere and Azure (_CSIMigrationAWS_, _CSIMigrationvSphere_ and _CSIMigrationAzureFile_), without a predefined order.
 
 With this patch, when deciding about using either the CSI driver or the in-tree plugin, the Attach Detach Controller will **only** rely on the information propagated by the node. In other words, Attach Detach Controller will start considering which plugin to use (in-tree or CSI) on a node basis only.
+
+Note: one might wonder why upstream does not implement this behaviour already. The answer is that they do not have the same issues OCP has in regards to disabling feature flags in the wrong order across components.
 
 #### Benefits
 
