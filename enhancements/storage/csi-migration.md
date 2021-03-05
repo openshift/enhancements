@@ -59,7 +59,7 @@ Before getting to our proposal, we need to describe some of the upstream require
 
 The CSI migration feature is hidden behind feature gates in Kubernetes. For instance, to enable the migration of a in-tree AWS EBS volume to its counterpart CSI driver, the cluster administrator should turn on these two feature gates: *CSIMigration* and *CSIMigrationAWS*. However, these flags must be enabled or disabled in a [specific order](https://github.com/kubernetes/community/blob/master/contributors/design-proposals/storage/csi-migration.md#upgradedowngrade-migrateunmigrate-scenarios).
 
-It is important to respect this ordering to avoid an undesired state of volumes. For instance, if the feature is enabled in the Kubelet before it is enabled in the AttachDetach controller, volumes attached to nodes by the in-tree volume plugin cannot be detached by the CSI driver and will stay attached forever. In the same vein, if the feature is disabled in the AttachDetach controller before it is disabled in the Kubelet, volumes attached by the CSI driver cannot be detached by the in-tree volume plugin and will stay attached forever.
+It is important to respect this ordering to avoid an undesired state of volumes. For instance, if the feature is enabled in the Kubelet before it is enabled in the Attach Detach controller, volumes attached to nodes by the in-tree volume plugin cannot be detached by the CSI driver and will stay attached forever. In the same vein, if the feature is disabled in the Attach Detach controller before it is disabled in the Kubelet, volumes attached by the CSI driver cannot be detached by the in-tree volume plugin and will stay attached forever.
 
 In summary, this is what upstream recommends:
 
@@ -72,18 +72,16 @@ In summary, this is what upstream recommends:
   1. One-by-one, drain the nodes and start the Kubelet with the feature gate disabled.
   2. Once that's done, disable the feature gate in all control-plane components.
 
-In order to keep the Attach Detach Controller and the Kubelet in sync regarding using the CSI driver or the in-tree plugin, upstream has a mechanism to keep the AttachDetach Controller informed about the status of the migration on nodes. Roughly speaking, Kubelet propagates to an annotation the information for each migrated in-tree plugin on the node.
+In order to keep the Attach Detach Controller and the Kubelet in sync regarding using the CSI driver or the in-tree plugin, upstream has a mechanism to keep the Attach Detach Controller informed about the status of the migration on nodes. Roughly speaking, Kubelet propagates to an annotation the information for each migrated in-tree plugin on the node.
 
-As a result, the Attach Detach Controller knows if the in-tree plugin has been migrated on the node. If the feature flags are enabled in Kube Controller Manager and on the node, the AttachDetach Controller uses the CSI driver to attach volumes. Otherwise, it will falls back to the in-tree plugin.
+As a result, the Attach Detach Controller knows if the in-tree plugin has been migrated on the node. If the feature flags are enabled in Kube Controller Manager **and** on the node, the Attach Detach Controller uses the CSI driver to attach volumes. Otherwise, it will falls back to the in-tree plugin.
 
 In OCP, we can easily set those feature gates by using the [FeatureGate] (https://docs.openshift.com/container-platform/4.7/nodes/clusters/nodes-cluster-enabling-features.html) Custom Resource. OCP operators read this resource and restart their operands with the appropriate features enabled. However, this approach alone is not acceptable for CSI migration because the feature flags might be switched across components in _any_ arbitrary order.
 
-That being said, we plan to submit an upstream patch that allows the AttachDetach Controller to have its own custom feature gates, independent from Kube Controller Manager.
-
-In addition to that, we propose to add a carry-patch to Attacth Detach Controller in OCP enables CSI Migration of some storage plugins. Initially we would start with Cinder and GCP, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
+That being said, we plan to submit an upstream patch that allows the Attach Detach Controller to have its own custom feature gates, independent from Kube Controller Manager. In addition to that, we propose to add a carry-patch to Attacth Detach Controller in OCP that enables CSI Migration of some storage plugins. Initially we would start with Cinder and GCP, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
 
 That way, when deciding about using either the CSI driver or the in-tree plugin, the AttachDetch Controller will **only** rely on the information propagated by the node.
-Other controllers from Kube Controller Manager, like the PV Controller, will still obey the flags passed to the Kube Controller Manager. In other words, Attach Detach Controller will start considering which plugin to use (in-tree or CSI) on a node basis rather than relying on a global state.
+Other controllers from Kube Controller Manager, like the PV Controller, will still obey the flags passed to the Kube Controller Manager. In other words, Attach Detach Controller will start considering which plugin to use (in-tree or CSI) on a node basis only.
 
 #### Benefits
 
@@ -102,7 +100,7 @@ Once CSI migration reaches GA in upstream, the associated feature gates will be 
 
 ### Risks and Mitigations
 
-<!-- TODO -->
+A carry-patch means that OCP will be the only Kubernetes distribution exercising this code path, which can lead us to bugs that were not seen anywhere. However, we are confident that the patch is small and self-contained enough to be used.
 
 ## Design Details
 
