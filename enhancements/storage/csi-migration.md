@@ -6,7 +6,6 @@ reviewers:
   - "@openshift/storage”
 approvers:
   - "@openshift/openshift-architects"
-  - "@darkmuggle"
 creation-date: 2020-07-29
 last-updated: 2021-03-05
 status: provisional
