@@ -51,7 +51,7 @@ For GA, existing in-tree volumes will be migrated to CSI and users should not ha
 
 ## Proposal
 
-We propose to add a carry-patch to Attacth Detach Controller in OCP that enables the migration of some storage plugins. Initially we would start with Cinder and GCP, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
+We propose to add a carry-patch to Attach Detach Controller in OCP that enables the migration of some storage plugins. Initially we would start with Cinder and GCP, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
 
 ### Implementation Details/Notes/Constraints
 
@@ -84,7 +84,8 @@ However, this approach alone is not acceptable for CSI migration because the fea
 We plan to submit an upstream patch that allows the Attach Detach Controller to have its own custom feature gates, independent from Kube Controller Manager.
 In addition to that, we propose to add a carry-patch to Attach Controller in OCP that enables CSI Migration of some storage plugins. Initially we would start with Cinder and GCP, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
 
-That way, when deciding about using either the CSI driver or the in-tree plugin, the Attach Detch Controller will **only** rely on the information propagated by the node. In other words, Attach Detach Controller will start considering which plugin to use (in-tree or CSI) on a node basis only. Other controllers from Kube Controller Manager, like the PV Controller, will still obey the flags passed to the Kube Controller Manager.
+That way, when deciding about using either the CSI driver or the in-tree plugin, the Attach Detach Controller will **only** rely on the information propagated by the node. In other words, Attach Detach Controller will start considering which plugin to use (in-tree or CSI) on a node basis only.
+Other controllers from Kube Controller Manager, like the PersistentVolume Controller, will still obey the flags passed to the Kube Controller Manager.
 
 #### Benefits
 
@@ -137,7 +138,7 @@ This is what needs to be done across different support phases:
 1. Tech Preview in OCP 4.8:
 
 * Introduce a new *FeatureSet* in openshift/api called `CSIMigration`.
-* Make sure the *FeatureSet* used by [CCMO](https://github.com/openshift/enhancements/pull/463) contains the CSI migration feature flags enabled for the respective storage backened.
+* Make sure the *FeatureSet* used by [CCMO](https://github.com/openshift/enhancements/pull/463) contains the CSI migration feature flags enabled for the respective storage backend.
 * Introduce an upstream patch that allows Attach Detach Controller to have its own custom feature gates, independent from Kube Controller Manager.
 * Introduce a carry-patch in OCP that enables CSI Migration for Cinder and GCP PD in Attach Detach Controller.
 * A PoC of both upstream and OCP patches [are available](https://github.com/openshift/kubernetes/pull/601).
