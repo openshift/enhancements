@@ -26,7 +26,7 @@ superseded-by:
 
 ## Summary
 
-We want to allow cluster administrators to seamlessly migrate volumes created using the in-tree storage plugin to their counterparts CSI drivers. It is important to achieve this goal before CSI Migration feature becomes GA in upstream. Also, this is a requirement for supporting [out-of-tree cloud providers](https://github.com/openshift/enhancements/pull/463)
+We want to allow cluster administrators to seamlessly migrate volumes created using the in-tree storage plugin to their counterparts CSI drivers. It is important to achieve this goal before CSI Migration feature becomes GA in upstream. This also a requirement for supporting [out-of-tree cloud providers](https://github.com/openshift/enhancements/pull/463)
 
 ## Motivation
 
@@ -40,12 +40,9 @@ In OCP we can optionally disable the CSI migration feature while it is still bet
 
 Our goals are different throughout our support lifecycle.
 
-For Tech Preview, we want to introduce a mechanism to allow switching CSI migration feature flags on and off across OCP components. Due to upstream requirements described in (the design proposal)[https://github.com/kubernetes/community/blob/master/contributors/design-proposals/storage/csi-migration.md#upgradedowngrade-migrateun-migrate], it is important that this mechanism allows for switching the feature flags in the the correct order.
+For Tech Preview, we want to introduce a mechanism to allow switching CSI migration feature flags on and off across OCP components. It is important that this mechanism allows for a seameless migration path, without breaking existing volumes.
 
-<!-- TODO:  the goal is wrong -->
-In other words, when enabling CSI migration, control-plane components should have their feature flags enabled before the kubelet. The opposite order applies when disabling CSI migration.
-
-For GA, we will not support disabling CSI migration. Existing in-tree volumes will be migrated to CSI and users should not have to do any additional work. We do want to make sure we will not break downgrades should the user decide to do that.
+For GA, existing in-tree volumes will be migrated to CSI and users should not have to do any additional work. In this phase we will not support disabling CSI migration and we do want to make sure we will not break downgrades.
 
 ### Non-Goals
 
@@ -54,8 +51,7 @@ For GA, we will not support disabling CSI migration. Existing in-tree volumes wi
 
 ## Proposal
 
-We propose to add a carry-patch to Attacth Detach Controller in OCP thta enables CSI Migration of some storage plugins. Initially we would start with Cinder and GCP, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
-
+We propose to add a carry-patch to Attacth Detach Controller in OCP that enables the migration of some storage plugins. Initially we would start with Cinder and GCP, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
 
 ### Implementation Details/Notes/Constraints
 
@@ -63,22 +59,22 @@ Before getting to our proposal, we need to describe some of the upstream require
 
 The CSI migration feature is hidden behind feature gates in Kubernetes. For instance, to enable the migration of a in-tree AWS EBS volume to its counterpart CSI driver, the cluster administrator should turn on these two feature gates: *CSIMigration* and *CSIMigrationAWS*. However, these flags must be enabled or disabled in a [specific order](https://github.com/kubernetes/community/blob/master/contributors/design-proposals/storage/csi-migration.md#upgradedowngrade-migrateunmigrate-scenarios).
 
-It is important to respect this ordering to avoid an undesired state of volumes. For instance, if the feature is enabled in the kubelet before it is enabled in the AttachDetach controller, volumes attached to nodes by the in-tree volume plugin cannot be detached by the CSI driver and will stay attached forever. In the same vein, if the feature is disabled in the AttachDetach controller before it is disabled in the kubelet, volumes attached by the CSI driver cannot be detached by the in-tree volume plugin and will stay attached forever.
+It is important to respect this ordering to avoid an undesired state of volumes. For instance, if the feature is enabled in the Kubelet before it is enabled in the AttachDetach controller, volumes attached to nodes by the in-tree volume plugin cannot be detached by the CSI driver and will stay attached forever. In the same vein, if the feature is disabled in the AttachDetach controller before it is disabled in the Kubelet, volumes attached by the CSI driver cannot be detached by the in-tree volume plugin and will stay attached forever.
 
 In summary, this is what upstream recommends:
 
 * When the CSI migration is **enabled**, events should happen in this order:
   1. Enable the feature gate in all control-plane components.
-  2. Once that's done, drain nodes one-by-one and start the kubelet with the
+  2. Once that's done, drain nodes one-by-one and start the Kubelet with the
   feature gate enabled.
 
 * When the CSI migration is **disabled**, events should happen in this order:
-  1. One-by-one, drain the nodes and start the kubelet with the feature gate disabled.
+  1. One-by-one, drain the nodes and start the Kubelet with the feature gate disabled.
   2. Once that's done, disable the feature gate in all control-plane components.
 
 In order to keep the Attach Detach Controller and the Kubelet in sync regarding using the CSI driver or the in-tree plugin, upstream has a mechanism to keep the AttachDetach Controller informed about the status of the migration on nodes. Roughly speaking, Kubelet propagates to an annotation the information for each migrated in-tree plugin on the node.
 
-As a result, the AttachDetach Controller knows if the in-tree plugin has been migrated on the Node. If the feature flags are enabled in KCM and on the Node, the AttachDetach Controller uses the CSI driver to attach volumes. Otherwise, it will falls back to the in-tree plugin.
+As a result, the Attach Detach Controller knows if the in-tree plugin has been migrated on the node. If the feature flags are enabled in Kube Controller Manager and on the node, the AttachDetach Controller uses the CSI driver to attach volumes. Otherwise, it will falls back to the in-tree plugin.
 
 In OCP, we can easily set those feature gates by using the [FeatureGate] (https://docs.openshift.com/container-platform/4.7/nodes/clusters/nodes-cluster-enabling-features.html) Custom Resource. OCP operators read this resource and restart their operands with the appropriate features enabled. However, this approach alone is not acceptable for CSI migration because the feature flags might be switched across components in _any_ arbitrary order.
 
@@ -86,8 +82,8 @@ That being said, we plan to submit an upstream patch that allows the AttachDetac
 
 In addition to that, we propose to add a carry-patch to Attacth Detach Controller in OCP enables CSI Migration of some storage plugins. Initially we would start with Cinder and GCP, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
 
-That way, when deciding about using either the CSI driver or the in-tree plugin, the AttachDetch Controller will **only** rely on the information propagated by the Node.
-Other controllers from Kube Controller Manager, like the PV Controller, will still obey the flags passed to the Kube Controller Manager. In other words, Attach Detach Controller will start considering which plugin to use (in-tree or CSI) on a Node basis rather than relying on a global state.
+That way, when deciding about using either the CSI driver or the in-tree plugin, the AttachDetch Controller will **only** rely on the information propagated by the node.
+Other controllers from Kube Controller Manager, like the PV Controller, will still obey the flags passed to the Kube Controller Manager. In other words, Attach Detach Controller will start considering which plugin to use (in-tree or CSI) on a node basis rather than relying on a global state.
 
 #### Benefits
 
@@ -96,7 +92,7 @@ The biggest benefit of this approach is that we do not need to worry about the o
 Another benefit is that this approach should not break downgrades once CSI Migration becomes GA. In OCP, a downgrade is fundamentally a regular upgrade to an older version.
 That means that CVO downgrades components in the same order as it upgrades them: connntrol-plane first, nodes later. This would impose an issue if the user downgraded from a version with CSI Migration enabled to a version with CSI Migration disabled. With the above patch in the downgraded version, that would not be a problem.
 
-It is important to notice that, with this carry-patch in OCP, Attach Detach Controller will _not_ change its current behaviour as long as Nodes are not migrated to CSI, which is the default behaviour in OCP 4.8.
+It is important to notice that, with this carry-patch in OCP, Attach Detach Controller will _not_ change its current behaviour as long as nodes are not migrated to CSI, which is the default behaviour in OCP 4.8.
 
 #### Graduation
 
@@ -182,7 +178,7 @@ We have considered this alternative approach. It is NOT our preferable approach 
 2. To enable CSI Migration for any in-tree plugin, the cluster administrator should:
    * First, enable the CSI migration feature flags in all control-plane components by adding the `CSIMigrationControlPlane` *FeatureSet* to the `featuregates/cluster` object.
      - With the exception of MCO, all operators will recognize this *FeatureSet* and will initialize their operands with the associated feature gates.
-   * Second, once all control-plane components have restarted, enable the CSI migration feature flags in the kubelet:
+   * Second, once all control-plane components have restarted, enable the CSI migration feature flags in the Kubelet:
      - Add the `CSIMigrationNode` *FeatureSet* to the `featuresgates/cluster` object, replacing the previous value (i.e., `CSIMigrationControlPlane`).
      - All operators will recognize the `CSIMigrationNode` *FeatureSet*, however, control-plane operators already applied the associated feature gates in the step above, so in practice only MCO will have work to do.
    * At this point, CSI migration is fully enabled in the cluster.
@@ -198,7 +194,7 @@ Once CSI migration reaches GA in upstream, the associated feature gates will be 
 
 In addition that, the *FeatureSets* created to handle the Tech Preview feature will no longer be operational because the feature flags they enable will already be enabled in the cluster.
 
-It is important to note that the order in which operators are downgraded in OCP violates [upstream version skew policy](https://kubernetes.io/docs/setup/release/version-skew-policy). The policy states that a new kubelet must never run with an older API server or Controller Manager. A direct consequence of this violation is the need to introduce a workaround to downgrade a cluster with CSI migration enabled.
+It is important to note that the order in which operators are downgraded in OCP violates [upstream version skew policy](https://kubernetes.io/docs/setup/release/version-skew-policy). The policy states that a new Kubelet must never run with an older API server or Controller Manager. A direct consequence of this violation is the need to introduce a workaround to downgrade a cluster with CSI migration enabled.
 
 ### Post-GA
 
