@@ -3,14 +3,14 @@ title: csi-migration
 authors:
   - "@fbertina"
 reviewers:
-  - "@openshift/storage ”
+  - "@openshift/storage”
 approvers:
   - "@openshift/openshift-architects"
   - "@darkmuggle"
-creation-date: 2020-07-01
-last-updated: 2021-01-28
+creation-date: 2020-07-29
+last-updated: 2021-03-05
 status: provisional
-see-also:
+see-also: https://github.com/openshift/enhancements/pull/463
 replaces:
 superseded-by:
 ---
@@ -55,7 +55,10 @@ For GA, we will not support disabling CSI migration. Existing in-tree volumes wi
 
 ## Proposal
 
-### Requirements
+We propose to add a carry-patch to Attacth Detach Controller in OCP thta enables CSI Migration of some storage plugins. Initially we would start with Cinder and GCP, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
+
+
+### Implementation Details/Notes/Constraints
 
 Before getting to our proposal, we need to describe some of the upstream requirements for using CSI Migration.
 
@@ -78,8 +81,6 @@ In order to keep the Attach Detach Controller and the Kubelet in sync regarding 
 
 As a result, the AttachDetach Controller knows if the in-tree plugin has been migrated on the Node. If the feature flags are enabled in KCM and on the Node, the AttachDetach Controller uses the CSI driver to attach volumes. Otherwise, it will falls back to the in-tree plugin.
 
-### OCP
-
 In OCP, we can easily set those feature gates by using the [FeatureGate] (https://docs.openshift.com/container-platform/4.7/nodes/clusters/nodes-cluster-enabling-features.html) Custom Resource. OCP operators read this resource and restart their operands with the appropriate features enabled. However, this approach alone is not acceptable for CSI migration because the feature flags might be switched across components in _any_ arbitrary order.
 
 That being said, we plan to submit an upstream patch that allows the AttachDetach Controller to have its own custom feature gates, independent from Kube Controller Manager.
@@ -89,6 +90,8 @@ In addition to that, we propose to add a carry-patch to Attacth Detach Controlle
 That way, when deciding about using either the CSI driver or the in-tree plugin, the AttachDetch Controller will **only** rely on the information propagated by the Node.
 Other controllers from Kube Controller Manager, like the PV Controller, will still obey the flags passed to the Kube Controller Manager. In other words, Attach Detach Controller will start considering which plugin to use (in-tree or CSI) on a Node basis rather than relying on a global state.
 
+#### Benefits
+
 The biggest benefit of this approach is that we do not need to worry about the ordering in which components are restarted with the CSI migration flags switched on or off. Migration flags can be switched on or off across components in any order.
 
 Another benefit is that this approach should not break downgrades once CSI Migration becomes GA. In OCP, a downgrade is fundamentally a regular upgrade to an older version.
@@ -96,15 +99,46 @@ That means that CVO downgrades components in the same order as it upgrades them:
 
 It is important to notice that, with this carry-patch in OCP, Attach Detach Controller will _not_ change its current behaviour as long as Nodes are not migrated to CSI, which is the default behaviour in OCP 4.8.
 
-Once this patch is merged, during Tech Preview users can enable the CSI migration using a *FeatureSet*. It could be shared with [CCMO](https://github.com/openshift/enhancements/pull/463), but we may want to have a specific *FeatureSet* only for CSI Migration for users that want to enable CSI Migration without migrating to an external cloud provider.
+#### Graduation
+
+During Tech Preview in OCP 4.8, users can enable the CSI migration using a *FeatureSet*. It could be shared with [CCMO](https://github.com/openshift/enhancements/pull/463), but we may want to have a specific *FeatureSet* only for CSI Migration for users that want to enable CSI Migration without migrating to an external cloud provider.
 
 Once CSI migration reaches GA in upstream, the associated feature gates will be enabled by default. As a result, it will not be necessary to use *FeatureSets* anymore.
 
+### Risks and Mitigations
+
+<!-- TODO -->
+
 ## Design Details
+
+### Test Plan
+
+#### E2E jobs
+
+We want E2E jobs for all migrated plugins ready at **Tech Preview** time.
+
+For each E2E job:
+
+1. Install an OCP cluster.
+1. Enable the `CSIMigration` _FeatureSet_.
+1. Run E2E tests for in-tree volume plugins. This should use the CSI driver instead.
+1. Disable the `FeatureSet`.
+1. Once again, run E2E tests for in-tree volume plugins.
+
+In addition to that, as a stretch goal, we want a separate job that:
+
+1. Runs a `StatefulSet`.
+1. Enables the migration _FeatureSets_.
+1. Wait for all components to have the right feature flags.
+1. Checks if the StatefulSet survives.
+
+Once CSI migration is GA, we expect the regular upgrade jobs will cover upgrades from an OCP version with migration disabled to a version with migration enabled.
+
+### Graduation Criteria
 
 This is what needs to be done across different support phases:
 
-1. Tech Preview:
+1. Tech Preview in OCP 4.8:
 
 * Introduce a new *FeatureSet* in openshift/api called `CSIMigration`.
 * Make sure the *FeatureSet* used by [CCMO](https://github.com/openshift/enhancements/pull/463) contains the CSI migration feature flags enabled for the respective storage backened.
@@ -112,14 +146,25 @@ This is what needs to be done across different support phases:
 * Introduce a carry-patch in OCP that enables CSI Migration for Cinder and GCP PD in Attach Detach Controller.
 * A PoC of both upstream and OCP patches [are available](https://github.com/openshift/kubernetes/pull/601).
 
-2. GA
+2. GA in OCP 4.9
 
 Nothing needs to be done, migration flags are enabled by default and cannot be disabled.
 
-3. GA + 1 release
+3. Post-GA in OCP 4.10
 
 * Remove `CSIMigration` *FeatureSet* from openshift/api.
 
+## Implementation History
+
+Main events only, this is not a faithful history.
+
+2020-07-29: Initial enhancement draft.
+2021-01-28: Re-worked proposal to use 2 _FeatureSets_ with manual application by the user.
+2021-03-05: Re-worked proposal to use carry-patch instead. Moved previous approach to "Alternatives" for reference.
+
+## Drawbacks
+
+The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
 
 ## Alternatives
 
@@ -159,26 +204,3 @@ It is important to note that the order in which operators are downgraded in OCP 
 ### Post-GA
 
 CSI migration *FeatureSets* can be removed from OCP API **one** release after CSI migration becomes GA.
-
-### Test Plan
-
-#### E2E jobs
-
-We want E2E jobs for all migrated plugins ready at **Tech Preview** time.
-
-For each E2E job:
-
-1. Install an OCP cluster.
-1. Enable the feature gate in the right order. Even though it is a fresh cluster, we need to respect the order because [volumes might be created in CI] (https://github.com/openshift/release/blob/master/ci-operator/step-registry/ipi/install/monitoringpvc/ipi-install-monitoringpvc-ref.yaml).
-1. Run E2E tests for in-tree volume plugins.
-1. Disable the feature gate in the right order.
-1. Once again, run E2E tests for in-tree volume plugins.
-
-In addition to that, as a stretch goal, we want a separate job that:
-
-1. Runs a StatefulSet.
-1. Enables the migration *FeatureSets* in the right order.
-1. Wait for all components to have the right feature flags.
-1. Checks if the StatefulSet survives.
-
-Once CSI migration is GA, we expect the regular upgrade jobs will cover upgrades from an OCP version with migration disabled to a version with migration enabled.
