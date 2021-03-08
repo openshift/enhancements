@@ -459,7 +459,7 @@ two ways for these artifacts to be consumed. (1) Some vendors expose the build
 artifacts in a hostPath. The DriverContainer with KVC needs a hook for preparing
 the sources, which means it would copy from sourcePath on the host to the
 destinationDir in the DriverContainer. (2) The other way to get build artifacts
-is to use an DriverContainer image that is already built do get the needed
+is to use a DriverContainer image that is already built to get the needed
 artifacts (We are assuming here that the vendor is not exposing any artifacts
 to the host). We can leverage those images in a multi-stage build for the
 DriverContainer.
