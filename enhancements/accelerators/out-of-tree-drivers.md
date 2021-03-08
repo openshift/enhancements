@@ -401,7 +401,7 @@ KVC provides hooks to build, load, unload the kernel modules and a wrapper for
 userspace utilities. We might extend the number of hooks to have a similar
 interface as dkms.
 
-The environment section can be used to provide a arbitrary set of key value
+The environment section can be used to provide an arbitrary set of key value
 pairs that can be later templatized for any kind of information needed in the
 enablement stack.
 
