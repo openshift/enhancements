@@ -283,7 +283,7 @@ inside the container for managing the kernel module (dkms like functions).
 
 The following section will walk one through the enablement of the different
 use-case scenarios. After deploying the operator the first step is to create an
-instance of a special-resource. Following are some example CRs how to one would
+instance of a special-resource. Following are some example CRs for how one would
 instantiate SROv2 to manage a kernel module or hardware driver.
 
 #### Example CR for a single kernel module #1
