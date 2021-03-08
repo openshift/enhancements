@@ -831,7 +831,7 @@ the node again.
 
 A preferable workflow for updates could also be to be proactive on updates. When
 OpenShift is updated we would need a mechanism (notification, hook for updates)
-to provide the kernel version of the next update to before attempting the
+to provide the kernel version of the next update before attempting the
 upgrade and rebooting the nodes (needinfo installer/CVO team) .
 
 This way DriverContainers are prebuilt and potential problems can be examined
