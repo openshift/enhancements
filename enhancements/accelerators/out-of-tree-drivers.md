@@ -359,11 +359,11 @@ spec:
 ```
 
 Since SROv2 will manage several special resources in different namespaces, hence
-the CRD will have cluster scope. The SROv2 can take care of creating and
-deleting of the namespace for the specialresource. Otherwise one would have an
-manual step in creating the new namespace before creating the CR for a
-specialresource, which make cleanup of a special resource easy, just by deleting
-the namespace. If there is no spec.metadata.namespace supplied SROv2 will set
+the CRD will have cluster scope. The SROv2 can take care of creating and 
+deleting of the namespace for the specialresource, which makes cleanup of
+a special resource easy, just by deleting the namespace. Otherwise one would have a 
+manual step in creating the new namespace before creating the CR for a specialresource.  
+If there is no spec.metadata.namespace supplied SROv2 will set
 the namespace to the CR name per default to separate each resources.
 
 With the above information SROv2 is capable of deducing all needed information
