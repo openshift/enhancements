@@ -270,7 +270,7 @@ For any day-2 kernel module management or delivery we propose using SROv2 as the
 building block on OpenShift.
 
 We will run a single copy of the SROv2 as part of OpenShift that is able to
-andle multiple kernel module drivers using the following proposed CR below.
+handle multiple kernel module drivers using the following proposed CR below.
 
 The following section will cover three kernel module instantiations (1) A single
 kernel module (2) multiple kernel modules with build artifacts (3) full-stack
