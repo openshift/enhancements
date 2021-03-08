@@ -834,7 +834,7 @@ OpenShift is updated we would need a mechanism (notification, hook for updates)
 to provide the kernel version of the next update to before attempting the
 upgrade and rebooting the nodes (needinfo installer/CVO team) .
 
-This way DriverContainers are prebuild and potential problems can be examined
+This way DriverContainers are prebuilt and potential problems can be examined
 before the update completes (e.g. no drivers for newer kernels, build errors,
 etc).
 
