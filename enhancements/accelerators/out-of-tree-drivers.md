@@ -316,11 +316,11 @@ metadata:
 spec:
   metadata:
     namespace: <vendor>-<driver>
-  environment:
-  - key: "key_id"
-    value: "ACCESS_KEY_ID"
-  - key: "access_key"
-    value: "SECRET_ACCESS_KEY"
+  configuration:
+  - name: "key_id"
+    value: ["AWS_ACCESS_KEY_ID"]
+  - name: "access_key"
+    value: ["AWS_SECRET_ACCESS_KEY"]
   driverContainer:
     source:
       git:
