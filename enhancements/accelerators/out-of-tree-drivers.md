@@ -494,7 +494,7 @@ dependsOn tag. Multiple SROv2 CR names can be provided that have to be done
 (all states ready) first before the current CR can be kicked off. CRs with now
 dependsOn tag can be executed/created/handled simultaneously.
 
-Users should usually deploy only the top-level CR ans SROv2 will take care of
+Users should usually deploy only the top-level CR and SROv2 will take care of
 instantiating the dependencies. There is no need to create all the CRs in the
 dependency, SROv2 will take care of it.
 
