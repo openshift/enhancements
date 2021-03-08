@@ -27,14 +27,32 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
+- [X] Enhancement is `implementable`
 - [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
+- [X] Test plan is defined
 - [ ] Operational readiness criteria is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
+
+The current process for disabling the DNS operator is convoluted, requiring the
+cluster version operator (CVO) to be disabled as well. Several other operators
+also have this problem, and solve it by adding the field `managementState` to
+their API. `managementState` has 4 states, describing what is expected of the
+operator. The states are:
+- `Force`: The operator is actively managing its resources, but will not block
+  upgrades even if prerequisites are not met
+- `Managed`: The operator is actively managing its resources. This should be
+  considered the default state
+- `Unmanaged`: The operator is NOT managing its resources
+- `Removed`: The operator is actively removing all of its resources
+
+The DNS operator should support the `managementState` field, and specifically
+the `Managed` and `Unmanaged` states to allow the cluster admin to disable the
+DNS operator when necessary.
+
+## Motivation
 
 When diagnosing a DNS issue, sometimes it is helpful or even necessary to
 disable the DNS operator and patch the CoreDNS daemonset. Currently, this
@@ -44,8 +62,6 @@ doesn't re-enable the DNS operator.
 The DNS operator API should provide a `managementState` field, which will
 prevent the DNS operator from overwriting fields in managed deployments and
 daemonsets when the `managementState` field set to `Unmanaged`
-
-## Motivation
 
 ### Goals
 
