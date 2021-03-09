@@ -1,7 +1,7 @@
 ---
 title: Alerting as a feature
 authors:
-  - "@dofinn"
+  - @dofinn
 reviewers:
   - "@smarterclayton"
   - "@jeremyeder"
