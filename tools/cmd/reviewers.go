@@ -88,7 +88,7 @@ func newReviewersCommand() *cobra.Command {
 				})
 				for _, prWithCount := range prs {
 					pr := prWithCount.PR
-					fmt.Printf("\t%3d: %s %q\n", prWithCount.ReviewCount, *pr.URL, *pr.Title)
+					fmt.Printf("\t%3d: %s %q\n", prWithCount.ReviewCount, *pr.HTMLURL, *pr.Title)
 				}
 			}
 
