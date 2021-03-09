@@ -17,6 +17,7 @@ package cmd
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -41,8 +42,11 @@ func (m *multiStringArg) Set(value string) error {
 }
 
 func newReviewersCommand() *cobra.Command {
-	var devMode bool
-	var numReviewers int
+	var (
+		daysBack     int
+		devMode      bool
+		numReviewers int
+	)
 	ignoreReviewers := multiStringArg{}
 
 	cmd := &cobra.Command{
@@ -50,6 +54,7 @@ func newReviewersCommand() *cobra.Command {
 		Short: "List reviewers of PRs in a repo",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			earliestDate := time.Now().AddDate(0, 0, daysBack*-1)
 
 			query := &util.PullRequestQuery{
 				Org:     orgName,
@@ -59,7 +64,8 @@ func newReviewersCommand() *cobra.Command {
 			}
 
 			reviewerStats := &reviewers.Stats{
-				Query: query,
+				Query:        query,
+				EarliestDate: earliestDate,
 			}
 
 			err := query.IteratePullRequests(reviewerStats.ProcessOne)
@@ -89,6 +95,7 @@ func newReviewersCommand() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().IntVar(&daysBack, "days-back", 31, "how many days back to query, defaults to 31")
 	cmd.Flags().BoolVar(&devMode, "dev", false, "dev mode, stop after first page of PRs")
 	cmd.Flags().IntVar(&numReviewers, "num", 10, "number of reviewers to show, 0 is all")
 	cmd.Flags().Var(&ignoreReviewers, "ignore", "ignore a reviewer, can be repeated")

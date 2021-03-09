@@ -3,6 +3,7 @@ package reviewers
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/google/go-github/v32/github"
 	"github.com/pkg/errors"
@@ -12,6 +13,7 @@ import (
 
 type Stats struct {
 	Query        *util.PullRequestQuery
+	EarliestDate time.Time
 	ReviewCounts map[string]int32
 	byReviewer   map[string]map[int]*github.PullRequest
 }
@@ -92,9 +94,12 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		return errors.Wrap(err,
 			fmt.Sprintf("could not fetch issue comments on %s", *pr.HTMLURL))
 	}
-	for _, comment := range issueComments {
-		name := getName(comment.User)
-		s.ReviewCounts[name] += 1
+	for _, c := range issueComments {
+		if !c.CreatedAt.After(s.EarliestDate) {
+			continue
+		}
+		name := getName(c.User)
+		s.ReviewCounts[name]++
 		savePR(name)
 	}
 
@@ -103,9 +108,12 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		return errors.Wrap(err,
 			fmt.Sprintf("could not fetch PR comments on %s", *pr.HTMLURL))
 	}
-	for _, comment := range prComments {
-		name := getName(comment.User)
-		s.ReviewCounts[name] += 1
+	for _, c := range prComments {
+		if !c.CreatedAt.After(s.EarliestDate) {
+			continue
+		}
+		name := getName(c.User)
+		s.ReviewCounts[name]++
 		savePR(name)
 	}
 
@@ -114,9 +122,12 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		return errors.Wrap(err,
 			fmt.Sprintf("could not fetch reviews on %s", *pr.HTMLURL))
 	}
-	for _, review := range reviews {
-		name := getName(review.User)
-		s.ReviewCounts[name] += 1
+	for _, r := range reviews {
+		if !r.SubmittedAt.After(s.EarliestDate) {
+			continue
+		}
+		name := getName(r.User)
+		s.ReviewCounts[name]++
 		savePR(name)
 	}
 
