@@ -173,6 +173,30 @@ Any kind of further, deeper policy configuration, e.g. that filters by API group
 is explicitly not part of this proposal and requires work on the [upstream dynamic audit](https://github.com/kubernetes/enhancements/blob/f1a799d5f4658ed29797c1fb9ceb7a4d0f538e93/keps/sig-auth/0014-dynamic-audit-configuration.md)
 mechanism and its promotion to beta eventually, or a post-processing mechanism of the audit logs.
 
+### Logging of Token with Secure OAuth Storage
+
+Starting with OpenShift 4.6, new `oauthaccesstokens` and `oauthauthorizetokens` are not sensitive anymore because their names are hashed with sha256 (and prefixed with `sha256~`).
+Hence, starting from 4.6, new clusters audit log `authaccesstokens` and `oauthauthorizetokens` via the additional rule for the default policy:
+
+```yaml
+# Log the full Identity API resource object so that the audit trail
+# allows us to match the username with the IDP identity.
+- level: RequestResponse
+  verbs: ["create", "update", "patch"]
+  resources:
+  - group: "user.openshift.io"
+    resources: ["identities"]
+  - group: "oauth.openshift.io"
+    resources: ["oauthaccesstokens", "oauthauthorizetokens"]
+```
+
+and by removing the exception for these resources in the `WriteRequestBodies` and `AllRequestBodies` policies.
+New cluster deployed with 4.6 or later are identified through the `oauth-apiserver.openshift.io/secure-token-storage: true` annotation
+on the `apiservers.config.openshift.io/v1` resource. Old cluster upgraded from 4.5 or older, don't have this annotation and hence do not
+audit log `authaccesstokens` and `oauthauthorizetokens`, not even on metadata level as it is not known whether old, non-sha256 hashed tokens
+are in the system. In 4.8 or later, it is planned to remove old, non-sha256 tokens, forbid creation of new non-sha256 tokens, and add
+the annotation to switch over to the extended policies.
+
 ### User Stories
 
 #### Story 1
@@ -287,6 +311,11 @@ The profile translate like this:
         # catch-all rule to log all other requests with request and response payloads
         - level: RequestResponse
     ```
+  
+With secure OAuth storage in-place (see "Logging of Token with Secure OAuth Storage" section) and
+therefore the `oauth-apiserver.openshift.io/secure-token-storage: true` annotation on the `apiservers.config.openshift.io/v1` resource,
+these policies are extended by allowing logging of `oauthaccesstokens` and `oauthauthorizetokens`.
+
 ### Test Plan
 
 **Note:** *Section not required until targeted at a release.*
