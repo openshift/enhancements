@@ -12,10 +12,11 @@ import (
 )
 
 type Stats struct {
-	Query        *util.PullRequestQuery
-	EarliestDate time.Time
-	ReviewCounts map[string]int32
-	byReviewer   map[string]map[int]*github.PullRequest
+	Query            *util.PullRequestQuery
+	EarliestDate     time.Time
+	ReviewCounts     map[string]int32
+	allPRs           map[int]*github.PullRequest
+	ReviewCountsByPR map[string]map[int]int
 }
 
 func strInSlice(input string, slice []string) bool {
@@ -51,14 +52,19 @@ func (s *Stats) ReviewersInOrder(ignore []string) []string {
 	return result
 }
 
-func (s *Stats) PRsForReviewer(name string) []*github.PullRequest {
-	prMap := s.byReviewer[name]
+type PRWithCount struct {
+	PR          *github.PullRequest
+	ReviewCount int
+}
+
+func (s *Stats) PRsForReviewer(name string) []PRWithCount {
+	prMap := s.ReviewCountsByPR[name]
 	if prMap == nil {
 		return nil
 	}
-	prs := []*github.PullRequest{}
-	for _, v := range prMap {
-		prs = append(prs, v)
+	prs := []PRWithCount{}
+	for prNum, count := range prMap {
+		prs = append(prs, PRWithCount{PR: s.allPRs[prNum], ReviewCount: count})
 	}
 	return prs
 }
@@ -78,15 +84,20 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 	if s.ReviewCounts == nil {
 		s.ReviewCounts = make(map[string]int32)
 	}
-	if s.byReviewer == nil {
-		s.byReviewer = make(map[string]map[int]*github.PullRequest)
+	if s.ReviewCountsByPR == nil {
+		s.ReviewCountsByPR = make(map[string]map[int]int)
+	}
+	if s.allPRs == nil {
+		s.allPRs = make(map[int]*github.PullRequest)
 	}
 
-	savePR := func(name string) {
-		if s.byReviewer[name] == nil {
-			s.byReviewer[name] = make(map[int]*github.PullRequest)
+	s.allPRs[*pr.Number] = pr
+
+	incrementPR := func(name string) {
+		if s.ReviewCountsByPR[name] == nil {
+			s.ReviewCountsByPR[name] = make(map[int]int)
 		}
-		s.byReviewer[name][*pr.Number] = pr
+		s.ReviewCountsByPR[name][*pr.Number]++
 	}
 
 	issueComments, err := s.Query.GetIssueComments(pr)
@@ -100,7 +111,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		}
 		name := getName(c.User)
 		s.ReviewCounts[name]++
-		savePR(name)
+		incrementPR(name)
 	}
 
 	prComments, err := s.Query.GetPRComments(pr)
@@ -114,7 +125,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		}
 		name := getName(c.User)
 		s.ReviewCounts[name]++
-		savePR(name)
+		incrementPR(name)
 	}
 
 	reviews, err := s.Query.GetReviews(pr)
@@ -128,7 +139,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		}
 		name := getName(r.User)
 		s.ReviewCounts[name]++
-		savePR(name)
+		incrementPR(name)
 	}
 
 	return nil

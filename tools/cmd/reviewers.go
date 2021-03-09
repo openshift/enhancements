@@ -84,10 +84,11 @@ func newReviewersCommand() *cobra.Command {
 
 				prs := reviewerStats.PRsForReviewer(reviewer)
 				sort.Slice(prs, func(i, j int) bool {
-					return *prs[i].ID > *prs[j].ID
+					return prs[i].ReviewCount > prs[j].ReviewCount
 				})
-				for _, pr := range prs {
-					fmt.Printf("\t%4d: %s %q\n", *pr.Number, *pr.URL, *pr.Title)
+				for _, prWithCount := range prs {
+					pr := prWithCount.PR
+					fmt.Printf("\t%3d: %s %q\n", prWithCount.ReviewCount, *pr.URL, *pr.Title)
 				}
 			}
 
