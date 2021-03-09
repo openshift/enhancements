@@ -1,7 +1,7 @@
 ---
 title: Alerting as a feature
 authors:
-  - @dofinn
+  - "@dofinn"
 reviewers:
   - "@smarterclayton"
   - "@jeremyeder"
@@ -18,8 +18,6 @@ approvers:
 creation-date: 2021-03-08
 last-updated: 2021-03-08
 status: implementable
-consumes:
-  - [Add: Alerting Standards](https://github.com/openshift/enhancements/pull/637)
 ---
 
 # Alerting as a Feature
