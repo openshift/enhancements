@@ -2,11 +2,14 @@
 title: monitoring-topology-mode
 authors:
   - "@lilic"
+  - "@simonpasquier"
 reviewers:
-  - "monitoring-team"
-  - "???"
+  - "@openshift/openshift-team-monitoring"
+  - "@dhellmann"
+  - "@romfreiman"
+  - "@wking"
 approvers:
-  - "monitoring-team"
+  - "@openshift/openshift-team-monitoring"
 creation-date: 2021-03-01
 last-updated: 2021-03-01
 status: implementable
@@ -14,58 +17,128 @@ see-also:
   - "/enhancements/cluster-high-availability-mode-api.md"
 ---
 
-# Monitoring Stack on Single Replica Topology Mode
+# Monitoring Stack with Single Replica Topology Mode
 
 
 ## Release Signoff Checklist
 
 - [x] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
+- [X] Design details are appropriately documented from clear requirements
+- [X] Test plan is defined
 - [ ] Operational readiness criteria is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
-The monitoring stack needs to react based on the `infrastructureTopology` field newly added to `infrastructures.config.openshift.io` CRD. Plan is to detect whenever
-cluster is in single replica topology mode and reduce the monitoring stack footprint by adjusting platform monitoring
-instances to be non Highly Available.
+The Cluster Monitoring Operator (CMO) needs to respect the
+`infrastructureTopology` field newly added to the
+`infrastructures.config.openshift.io` CRD. Depending on the value, it should
+configure the monitoring operands for highly-available operations or not.
 
 ## Motivation
 
-In the 4.8 time frame, OpenShift will introduce a new capabilities field in the Infrastructure API that will inform
-operators about the deployment topology. The immediate goal is for operators to adjust the deployment of their operands
-depending on whether the infrastructure is HA (at least 3 nodes) or not (single node).
+As described in the [Cluster High-availability Mode API](https://github.com/openshift/enhancements/blob/master/enhancements/single-node/cluster-high-availability-mode-api.md)
+enhancement and implemened in [OpenShift API](https://github.com/openshift/api/pull/827),
+OpenShift 4.8 introduces 2 new status fields in the Infrastructure API that
+informs operators about the cluster deployment topology.
+
+Depending on whether an operand is deployed on the control nodes or not, the
+operator should look at either `controlPlaneTopology` and
+`infrastructureTopology`. If the field value is `HighlyAvailable`, the operator
+should configure the operand for high-avaible operation. If the field value is
+`SingleReplica`, it should *not* configure the operand for high-avaible
+operation.
 
 ### Goals
 
-- Reduce monitoring footprint by lowering number of replicas
+- Deploy the monitoring components with one replica for non-HA configuration.
+- Deploy the user-workload components with one replica for non-HA configuration.
+- Ensure that CMO passes the single-node tests from openshift/origin.
 
 ### Non-Goals
 
-- User workload stack or its Prometheus instance is not adjusted
-- Reduce memory footprint
-- Address CRC requirements (though it might help)
-- Tests from monitoring team
+- Implement additional enhancements to reduce CPU and memory footprints.
+- Allow cluster admins to control the number of replicas per operand.
+- Address CodeReady Containers requirements (though it might help).
+- Add tests for `SingleReplica` to the existing end-to-end test suite in the CMO repository.
 
 ## Proposal
 
-To adjust to the single replica mode, in cluster-monitoring-operator we detect the topology mode based on the "cluster"
-named instance of `Infrastructure`, if that mode is `SingleReplicaTopologyMode`, we only spin up one instance of
-platform Prometheus for that cluster.
+Whenever CMO needs to reconcile, it retrieves the
+`infrastructures.config.openshift.io/cluster` resource and reads the value of
+the `infrastructureTopology` status field. If the value is equal to
+`SingleReplica`, CMO adjusts the number of replicas to 1 for the following
+resources:
+
+* openshift-monitoring/prometheus-k8s (StatefulSet)
+* openshift-monitoring/alertmanager-main (StatefulSet)
+* openshift-monitoring/thanos-querier (Deployment)
+* openshift-monitoring/prometheus-adapter (Deployment)
+* openshift-user-workload-monitoring/prometheus-user-workload (StatefulSet)
+* openshift-user-workload-monitoring/thanos-ruler (StatefulSet)
+
+Otherwise CMO deploys the operands with their default number of replicas to
+ensure high-availability:
+
+* openshift-monitoring/prometheus-k8s (StatefulSet): 2 replicas
+* openshift-monitoring/alertmanager-main (StatefulSet): 3 replicas
+* openshift-monitoring/thanos-querier (Deployment): 2 replicas
+* openshift-monitoring/prometheus-adapter (Deployment): 2 replicas
+* openshift-user-workload-monitoring/prometheus-user-workload (StatefulSet): 2 replicas
+* openshift-user-workload-monitoring/thanos-ruler (StatefulSet): 2 replicas
+
+By default, CMO deploys no operand on control nodes thus it should not look at
+the `controlPlaneTopology` field.
 
 ### Risks and Mitigations
 
-There are risks that this is not enough to reduce the actual footprint of the monitoring stack. The other thing is that
-as a result of this monitoring is no longer highly available but there is no workaround for that as its a single node
-cluster.
+In HA mode, the Prometheus instances are spread on different nodes using
+anti-affinity and they work completely indepently one from another (there's no
+data replication between them). Services consuming the metrics (like the
+OpenShift console or Grafana) use the Thanos querier API which aggregates and
+deduplicates data from both Prometheus instances. This setup provides
+redundancy in term of metrics scraping, rule evaluations and querying as long
+as one of the Prometheus instances is still up.
+
+The Thanos ruler instances of user workload monitoring work the same as
+Prometheus except they only deal with rule evaluations.
+
+The 3 Alertmanager instances receive alerts from both Prometheus instances and
+as long as one instance is up and running, the notifications should flow to the
+receivers. Alertmanager instances also replicate silences and notification logs
+between themselves to prevent duplicate notifications.
+
+The other monitoring components running with multiple replicas in HA mode
+(thanos-querier and prometheus-adapter) are stateless. Running multiple
+replicas only ensures that their services remain available as long as 1
+instance is up.
+
+By definition, the monitoring stack wouldn't be highly-available in the
+`SingleReplica` mode. One recommendation would be that cluster admins configure
+Prometheus and Alertmanager with persistent storage to ensure that existing
+metrics, silences and notification logs are retained upon pod recreation.
 
 ## Design Details
 
 ### Test Plan
 
-N/A Its a non goal for monitoring team, apart from manual testing.
+We will setup a CI job that runs the `extended` end-to-end test suite from
+[OpenShift Origin](https://github.com/openshift/origin) in a single-node
+deployment mode. The test suite has already been extended to verify that
+operators honor the `SingleReplica` value (see
+[openshift/origin#25812](https://github.com/openshift/origin/pull/25812) and
+[openshift/origin/pull/25885](https://github.com/openshift/origin/pull/25885)).
+
+As soon as the implementation in CMO is merged, we will adjust the single-node
+topology
+[tests](https://github.com/openshift/origin/blob/master/test/extended/single_node/topology.go)
+to remove the exception in place for the monitoring components.
+
+Because the topology mode isn't exposed into the CMO configuration, we don't plan
+to add any test to the [end-to-end
+test suite](https://github.com/openshift/cluster-monitoring-operator/tree/master/test/e2e)
+that live in the cluster-monitoring-operator repository.
 
 ### Graduation Criteria
 
@@ -77,14 +150,20 @@ Upgrades are a non goal right now.
 
 ### Version Skew Strategy
 
-N/A
+If CMO reads a value that is neither equal to `HighAvailable` nor
+`SingleReplica`, it should consider that the topology is `HighAvailable`.
 
 ## Implementation History
 
 ## Drawbacks
 
+N/A
 
 ## Alternatives
 
-Skip installing monitoring stack is one alternative, but this is harder to do due to monitoring stack being a core
-component of OpenShift, and our CRDs being used by so many other components.
+* Do nothing. It means that the monitoring stack would use more resources than is actually needed.
+* Don't deploy CMO when `SingleReplica` is defined. It would be hard to
+  achieve since the monitoring stack is a core component of OpenShift and other
+  OpenShift components rely on the presence of the monitoring CRDs.
+* Not deploying the monitoring operands when `SingleReplica` is defined. It
+  isn't easier to implement than adjusting the number of replicas.
