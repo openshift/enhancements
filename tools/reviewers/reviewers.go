@@ -91,6 +91,10 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		s.allPRs = make(map[int]*github.PullRequest)
 	}
 
+	if pr.UpdatedAt.Before(s.EarliestDate) {
+		return nil
+	}
+
 	s.allPRs[*pr.Number] = pr
 
 	incrementPR := func(name string) {
@@ -106,7 +110,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 			fmt.Sprintf("could not fetch issue comments on %s", *pr.HTMLURL))
 	}
 	for _, c := range issueComments {
-		if !c.CreatedAt.After(s.EarliestDate) {
+		if c.CreatedAt.IsZero() || c.CreatedAt.Before(s.EarliestDate) {
 			continue
 		}
 		name := getName(c.User)
@@ -120,7 +124,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 			fmt.Sprintf("could not fetch PR comments on %s", *pr.HTMLURL))
 	}
 	for _, c := range prComments {
-		if !c.CreatedAt.After(s.EarliestDate) {
+		if c.CreatedAt.IsZero() || c.CreatedAt.Before(s.EarliestDate) {
 			continue
 		}
 		name := getName(c.User)
@@ -134,7 +138,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 			fmt.Sprintf("could not fetch reviews on %s", *pr.HTMLURL))
 	}
 	for _, r := range reviews {
-		if !r.SubmittedAt.After(s.EarliestDate) {
+		if r.SubmittedAt == nil || r.SubmittedAt.IsZero() || r.SubmittedAt.Before(s.EarliestDate) {
 			continue
 		}
 		name := getName(r.User)
