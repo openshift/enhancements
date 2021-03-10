@@ -80,9 +80,10 @@ func newReviewersCommand() *cobra.Command {
 
 			for _, reviewer := range orderedReviewers {
 				count := reviewerStats.ReviewCounts[reviewer]
-				fmt.Printf("%3d: %s\n", count, reviewer)
-
 				prs := reviewerStats.PRsForReviewer(reviewer)
+
+				fmt.Printf("%d/%d: %s\n", count, len(prs), reviewer)
+
 				sort.Slice(prs, func(i, j int) bool {
 					return prs[i].ReviewCount > prs[j].ReviewCount
 				})
