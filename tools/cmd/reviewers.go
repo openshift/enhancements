@@ -73,7 +73,14 @@ func newReviewersCommand() *cobra.Command {
 				return errors.Wrap(err, "failed to retrieve pull request details")
 			}
 
-			orderedReviewers := reviewerStats.ReviewersInOrder(ignoreReviewers)
+			// The command line ignore options override the config file.
+			var toIgnore []string
+			toIgnore = configSettings.Reviewers.Ignore
+			if len(ignoreReviewers) > 0 {
+				toIgnore = ignoreReviewers
+			}
+
+			orderedReviewers := reviewerStats.ReviewersInOrder(toIgnore)
 			if numReviewers > 0 {
 				orderedReviewers = orderedReviewers[:numReviewers]
 			}
