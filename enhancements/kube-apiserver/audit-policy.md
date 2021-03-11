@@ -182,7 +182,7 @@ Hence, starting from 4.6, new clusters audit log `authaccesstokens` and `oauthau
 # Log the full Identity API resource object so that the audit trail
 # allows us to match the username with the IDP identity.
 - level: RequestResponse
-  verbs: ["create", "update", "patch"]
+  verbs: ["create", "update", "patch", "delete"]
   resources:
   - group: "user.openshift.io"
     resources: ["identities"]
@@ -191,11 +191,12 @@ Hence, starting from 4.6, new clusters audit log `authaccesstokens` and `oauthau
 ```
 
 and by removing the exception for these resources in the `WriteRequestBodies` and `AllRequestBodies` policies.
+This will extend the existing audit policies to log the creation and deletion of oauthaccesstokens which corresponds to successful logins and logouts.
 New cluster deployed with 4.6 or later are identified through the `oauth-apiserver.openshift.io/secure-token-storage: true` annotation
 on the `apiservers.config.openshift.io/v1` resource. Old cluster upgraded from 4.5 or older, don't have this annotation and hence do not
 audit log `authaccesstokens` and `oauthauthorizetokens`, not even on metadata level as it is not known whether old, non-sha256 hashed tokens
 are in the system. In 4.8 or later, it is planned to remove old, non-sha256 tokens, forbid creation of new non-sha256 tokens, and add
-the annotation to switch over to the extended policies.
+the annotation to switch over to the extended policies.  
 
 ### User Stories
 
