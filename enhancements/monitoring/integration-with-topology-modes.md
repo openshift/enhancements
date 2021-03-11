@@ -94,7 +94,7 @@ the `controlPlaneTopology` field.
 ### Risks and Mitigations
 
 In HA mode, the Prometheus instances are spread on different nodes using
-anti-affinity and they work completely indepently one from another (there's no
+soft anti-affinity and they work completely indepently one from another (there's no
 data replication between them). Services consuming the metrics (like the
 OpenShift console or Grafana) use the Thanos querier API which aggregates and
 deduplicates data from both Prometheus instances. This setup provides
@@ -135,10 +135,15 @@ topology
 [tests](https://github.com/openshift/origin/blob/master/test/extended/single_node/topology.go)
 to remove the exception in place for the monitoring components.
 
-Because the topology mode isn't exposed into the CMO configuration, we don't plan
-to add any test to the [end-to-end
-test suite](https://github.com/openshift/cluster-monitoring-operator/tree/master/test/e2e)
-that live in the cluster-monitoring-operator repository.
+Cluster admins can use the `openshift-monitoring/cluster-monitoring-operator`
+configmap to tune the configuration of the operator and its operands (
+user-workload monitoring enablement, persistent storage, resource
+requests/limits, ...). We have [end-to-end tests](https://github.com/openshift/cluster-monitoring-operator/tree/master/test/e2e)
+in the cluster-monitoring-operator verifying that these configuration
+parameters work as expected. Because the CMO configuration doesn't allow to
+change the replica count and it doesn't expose the topology mode either, we
+don't plan to add any test specific to the single-node mode to the CMO test
+suite.
 
 ### Graduation Criteria
 
@@ -161,7 +166,9 @@ N/A
 
 ## Alternatives
 
-* Do nothing. It means that the monitoring stack would use more resources than is actually needed.
+* Do nothing. CMO would deploy multiple replicas for Prometheus Alertmanager,
+  Thanos querier, Thanos ruler and prometheus-adapter. As a result, the
+  monitoring stack would use more resources than is actually needed.
 * Don't deploy CMO when `SingleReplica` is defined. It would be hard to
   achieve since the monitoring stack is a core component of OpenShift and other
   OpenShift components rely on the presence of the monitoring CRDs.
