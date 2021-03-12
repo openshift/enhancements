@@ -95,123 +95,27 @@ single-node deployments.
 
 There are two aspects to manage scaling the control plane resource
 requests. Most of the cluster operators are deployed by the
-cluster-version-operator using static manifests that include the
+`cluster-version-operator` using static manifests that include the
 resource requests. Those operators then deploy other controllers or
-workloads dynamically. We need to account for both sets of components.
-
-### Deployments managed by the cluster-version-operator or operator-lifecycle-manager
+workloads dynamically. We need to account for both sets of components,
+ideally using a common solution.
 
 To start, we will [reduce the default
 requests](https://bugzilla.redhat.com/show_bug.cgi?id=1920159) for
 cluster operators deployed by the cluster-version-operator with static
-manifests. By re-tuning those settings by hand, we may be able to
-avoid implementing a more complex system to change them dynamically
-within the cluster.
+manifests.  A similar approach can be taken for operators installed
+via the operator-lifecycle-manager.  Those settings apply to all
+clusters, however, so we cannot adjust them down too far without
+negatively affecting normal clusters.
 
-A similar approach can be taken for operators installed via the
-operator-lifecycle-manager.
-
-### Deployments managed by cluster operators
-
-We are considering 2 approaches for operands of cluster operators.
-
-#### Kubelet over-subscription configuration option
-
-Today, kubelet subtracts reserved CPUs from the available resources
-that it reports, under the assumption that they will be entirely
-consumed by workloads. Sometimes workloads do not entirely consume
-those CPUs, however, and non-guaranteed pods can also use the reserved
-CPU pool. A change to kubelet to provide a static over-subscription
-configuration option would provide a global approach to allowing the
-CPU resources reported by kubelet to be adjusted by a factor defined
-by the user to account for this difference, based on the workloads
-planned for the cluster.
-
-The new configuration option needs to be added to kubelet upstream in
-order to be supported long-term in OpenShift. A KEP will be written
-and submitted independently of this enhancement document.
-
-In OpenShift, the option would be set during installation and would be
-added to the control plane `MachineConfig`.
-
-We would need to carefully consider how to document the use of this
-option. Users will need to understand the minimum CPU resource
-requests of a base OpenShift deployment and any additional add-on
-operators before they will be able to tune the over-subscription
-setting so that all the components will fit onto the number of CPUs
-they require. We will need to keep the documentation of minimum CPU
-resource requests for OpenShift up to date for each release, or
-provide a tool to calculate the value from a default cluster.
-
-Refer to the implementation history section below for details of a
-proof-of-concept implementation of this approach.
-
-#### Cluster-wide resource request limit API
-
-The kubelet change in option 1 requires work to ensure the option is
-accepted upstream. That requirement introduces risk, if the upstream
-community does not like the option or if it takes a long time to reach
-agreement. As an alternative approach, we are considering a new
-cluster-wide API.
-
-Tuning for operator-managed workloads should be controlled via an API,
-so that operators can adjust their settings correctly. We do not want
-users to change the setting after building the cluster (at least for
-now), so the API can be a status field. As with other
-infrastructure-related settings, the field will be added to the
-`infrastructure.config.openshift.io` [informational
-resource](https://docs.openshift.com/container-platform/4.6/installing/install_config/customizations.html#informational-resources_customizations).
-
-The new `controlPlaneCPULimit` field will be a positive integer
-representing the whole number of [Kubernetes
-CPUs](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-cpu)
-into which the control plane must fit. Expressing the API this way
-makes it easy for the user to declare the requirements up front when
-installing the cluster, without having to understand the basis for the
-default settings and without having to calculate a scaling factor
-themselves.
-
-In order for operators to know how to use `controlPlaneCPULimit` to
-compute a scaling factor, they need to know the default number of CPUs
-assumed for a control plane that produced the default resource
-limit. Rather than encoding that information separately in every
-operator implementation, we should put it in one place so it can be
-managed consistently. Using a `const` defined in the library with the
-Infrastructure type makes it easy to upgrade operators if the value
-changes across releases. So, a new `DefaultControlPlaneCPUCount`
-constant will be added to the module with the Infrastructure type.
-
-If `controlPlaneCPULimit == 0`, operators should use their
-default configuration for their operands.
-
-If `0 < controlPlaneCPULimit < DefaultControlPlaneCPUCount`, operators
-should scale their operands down by around `(controlPlaneCPULimit /
-DefaultControlPlaneCPUCount)` or more, if appropriate. When scaling,
-the operators should continue to follow the other guidelines for
-resources and limits in
-[CONVENTIONS.md](CONVENTIONS.md#resources-and-limits).
-
-If `controlPlaneCPULimit >= DefaultControlPlaneCPUCount`, operators
-should use their default configuration for their operands. We do not
-currently have a need to allow the control plane to scale up, although
-this may change later. If we do have a future requirement to support
-that, we could remove this restriction.
-
-The logic described in this section could also be captured in a
-library function. Something like
-
-```go
-cpuRequestValue, err := GetScaledCPURequest(kubeClientConfig, myDefaultValue)
-```
-
-where the function fetches the Infrastructure resource and applies the
-algorithm to a default value provided by the caller. That would make
-the code change to implement the approach in each operator smaller,
-since we could conceivably wrap the existing static values with the
-function call.
-
-Users will specify the `controlPlaneCPULimit` when building a cluster
-by passing the value to the installer in `install-config.yaml`.
+To complete the goal of resource request scaling, we propose updating
+the
+[ClusterResourceOverride](https://github.com/openshift/cluster-resource-override-admission)
+API and admission webhook to support scaling requests of Pods without
+limits set.  We could then, after initial deployment of the cluster,
+label all of the namespaces for the cluster operators to enable the
+admission webhook and create a `ClusterResourceOverride` with the
+settings needed for to scale the request sizes for a given instance.
 
 ### User Stories
 
@@ -247,10 +151,55 @@ their own workloads. OpenShift currently requires 7.
 
 ### Implementation Details/Notes/Constraints
 
-1. Add the new field to the `Infrastructure` API.
-2. Expose the `controlPlaneCPULimit` setting through the installer via
-   `install-config.yaml`.
-3. Update operators to respond to the API, as described above.
+The `ClusterResourceOverride` API currently scales CPU request value
+as a percentage of the limit value. Our cluster operators and their
+operands are [deployed without limits
+set](https://github.com/openshift/enhancements/blob/master/CONVENTIONS.md#resources-and-limits),
+so we will need to add a new field to `ClusterResourceOverride` to
+describe how to scale in a different way.
+
+Of the [options identified for expressing the scaling
+factor](#expressing-a-need-to-scale-using-an-api), a scaling ratio
+would be the most consistent with the other fields already in the
+`ClusterResourceOverride` API and used by the admission webhook. It
+has the downside that a user needs to understand the base value so
+they can compute an appropriate ratio, but by using a ratio we can
+avoid encoding knowledge of the base configuration of OpenShift into
+an add-on operator that is released independently of OpenShift.
+
+Because the admission webhook is added after the cluster components
+are already running and it does not change existing Pods, we need
+something to recognize the Pods that need to be recreated so the
+scaling factor can be applied. A controller in the
+`cluster-resource-overide-admission` component can do this. It can
+coordinate with the admission webhook by looking for an annotation or
+label on the Pod to indicate that it has been scaled. Any Pods without
+the annotation in a namespace where scaling is enabled can be killed
+so they are recreated and the admission webhook can modify their
+settings.
+
+An additional benefit of using the separate component is that it is
+not part of the OpenShift release payload, and therefore could be
+released independently of OpenShift releases. Since we are looking at
+a tight timeline for delivering the work described in this
+enhancement, that may help with scheduling.
+
+1. Add a new field to `ClusterResourceOverride` API with a name like
+   `cpuRequestPercent`.
+2. Update `cluster-resource-override-admission-operator` to configure
+   `cluster-resource-override-admission` with the value from the new
+   field.
+3. Update `cluster-resource-override-admission` to mutate Pods based
+   on the new input.
+4. Update `cluster-resource-override-admission` to add an annotation
+   to Pods that it modifies so they can be identified later.
+5. Add a controller to `cluster-resource-override-admission` to force
+   Pods that have not been scaled (those without the new annotation)
+   to be recreated.
+6. Ensure `cluster-resource-override-admission-operator` is in the
+   operator catalog to make distribution and installation easier.
+7. Document how Telco customers should set up the new scaling
+   parameter to shrink the resource requests of cluster components.
 
 ### Risks and Mitigations
 
@@ -281,18 +230,7 @@ include:
 
 ### Open Questions
 
-1. If manually re-tuning the settings for the static manifests managed
-   by the cluster-version-operator is not sufficient, what should we
-   do?
-2. How do we express to the cluster operators that they should scale
-   their operands?
-3. How dynamic do we actually want the setting to be? Should the user
-   be able to change it at will, or is it a deployment-time setting?
-4. How do we handle changes in the base request values for a cluster
-   operator over an upgrade?
-5. Are operators allowed to place a lower bound on the scaling? Is it
-   possible to request too few resources, over subscribe a CPU, and
-   cause performance problems for the cluster?
+N/A
 
 ### Test Plan
 
@@ -557,14 +495,15 @@ The idea is to find the best form of an argument why this enhancement should _no
 
 ## Alternatives
 
-The best approach to achieve the goals described above is not clear,
-so the alternatives section is a collection of candidates for
-discussion.
+We examined many alternative approaches in the course of discussing
+this enhancement. They are grouped here around themes to make review
+easier and to reduce repetition of common aspects.
 
 ### Expressing a need to scale using an API
 
-These alternatives discuss what the API would look like, without
-considering which CRD it would be on.
+These alternatives discuss what an API to describe how to scale
+resource requests would look like, without considering which CRD it
+would be on or what component(s) would respond to it.
 
 1. A CPU resource request size parameter
 
@@ -576,64 +515,60 @@ considering which CRD it would be on.
    sizes we could reasonably describe to users before it would become
    confusing (see Amazon EC2 flavors).
 
-2. A CPU resource "request limit" parameter
+2. A CPU resource "request limit" parameter <a name="request-limit-api"></a>
 
    We could define an API to give an absolute limit of the CPU resource
-   requests for the cluster services.
+   requests for combined cluster services.
 
-   Operators would need to scale the resource requests for their operands
-   based on an understanding of how their defaults were derived. For
-   example, today most values are a proportion of the resources needed
-   for etcd on a 3 node control plane where each node has 2 CPUs, for a
-   total of 6 CPUs. If the API indicates a limit of 2 CPUs, the operator
-   would need to configure its operands to request 1/3 of the default
+   Something would need to scale the resource requests for cluster
+   service Pods based on an understanding of how their defaults were
+   derived. For example, today most values are a proportion of the
+   resources needed for etcd on a 3 node control plane where each node
+   has 2 CPUs, for a total of 6 CPUs. If the API indicates a limit of
+   2 CPUs, the Pod requests would be changed to 1/3 of the original
    resources.
 
-3. A CPU resource scaling parameter
+3. A CPU resource scaling ratio
 
-   We could define an API to give a scaling parameter that operators
-   should use for their operands.
+   We could define an API to give a scaling ratio that should be
+   applied to requests on Pods.
 
-   The value would be applied globally based on understanding how the
-   defaults are set for 6 CPUs and how many CPUs are available in the
-   real system. We could document the 6 CPU starting point to allow users
-   to make this calculation themselves.
+   The value would be applied based on understanding how the defaults
+   are set for 6 CPUs and how many CPUs are available in the real
+   system. We could document the 6 CPU starting point to allow users
+   to make this calculation themselves and choose their own ratio.
 
-   Operators could read the setting and use it for their operands, but
-   not themselves.
+### Locations for scaling API settings
 
-Implementing any of these options would require modifying multiple
-operators. It is likely that we would need to update all of them,
-although we could prioritize the ones with the largest current resource
-requests.
-
-### Locations for API setting
-
-These alternatives could apply to any of the API forms discussed in
-the previous section.
+These are alternatives for the location of the API described in the
+previous section, and could apply to any of the those approaches.
 
 1. Use a cluster-wide API
 
    We could add a field to the Infrastructure configuration
-   resource. Many of our operators, including OLM-based operators,
-   already consume the Infrastructure API.
+   resource.
+
+   Many of our operators, including OLM-based operators, already
+   consume the Infrastructure API.
 
 2. Use an operator-specific API
 
    If we choose to implement a new operator to manage scaling for the
-   control plane operators (see below), it could define a new API in a
-   CRD it owns.
+   control plane Pods (see below), it could define a new API in a CRD
+   it owns.
 
    Updating existing operators to read the new field and scale their
    operands and documenting an entirely new API might be more work
-   than using the Infrastructure API that would only be useful if the
-   operator responding to the API was an add-on.
+   than using the Infrastructure API. It would be a more useful
+   approach if the operator responding to the API was an add-on that
+   applied the setting globally instead of having each operator
+   respond to it.
 
 ### Options for declaring the base value for the CPU limit API
 
 In order for an operator to use a cluster-wide CPU resource request
-limit API, it needs to know the number of CPUs used for the
-calculation of the default settings.
+limit API [option 2 above](#request-limit-api), it needs to know the
+number of CPUs used for the calculation of the default settings.
 
 1. Expose the value through the Infrastructure config API.
 
@@ -764,7 +699,10 @@ operators themselves, and not their operands.
    or more dynamically based on label selectors or namespaces.
 
    We may find race conditions using a webhook to change settings for
-   cluster operators.
+   cluster operators. We could mitigate those by having a controller
+   associated with the webhook look for Pods that need to be recreated
+   to have their settings adjusted, and then kill those Pods so they
+   are re-admitted.
 
 5. Have the cluster-version-operator perform the scaling for control
    plane operators
@@ -809,15 +747,20 @@ without the knowledge of the rest of the cluster components.
 1. Have a third-party, such as another operator, change the requests.
 
    We could investigate using the [vertical pod
-   autoscaler](https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler)
-   or write our own operator focused on scaling control plane
+   autoscaler](https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler),
+   the
+   [cluster-resource-override-admission](https://github.com/openshift/cluster-resource-override-admission)
+   webhook, or write our own operator focused on scaling control plane
    components.
 
-   If we have 2 controllers trying to manage the same resource (the
-   original operator that owns it and this new scaling operator),
-   there will be contention for the definition. We would need to have
-   all operators ignore the resource requests fields when comparing
-   Deployments of their operands for equality.
+   If we have 2 controllers trying to manage the same Deployment
+   resource (the original operator that owns it and this new scaling
+   operator), there will be contention for the definition. We would
+   need to have all operators ignore the resource requests fields when
+   comparing Deployments of their operands for equality, or we would
+   need to have the third-party modify only the Pod definition, since
+   the ReplicaSet controller ignores differences between the Pod and
+   ReplicaSet.
 
    If operators cooperated with the resource request settings, a
    third-party actor could modify them reliably. We could use an
@@ -825,8 +768,7 @@ without the knowledge of the rest of the cluster components.
    for each Deployment, so that during an upgrade if the base needs
    change they can be scaled appropriately.
 
-2. Have the scheduler and kubelet perform the scaling based on
-   priority class
+2. Have the scheduler and kubelet perform the scaling of certain Pods
 
    Changing kubelet by itself, or adding a plugin, would capture
    everything as it is launched, but only after a Pod is
@@ -839,17 +781,25 @@ without the knowledge of the rest of the cluster components.
 
 3. Have kubelet announce more capacity than is available
 
-   We could have kubelet support "over subscription" of a node by
-   reporting that the node has more capacity than it really does. This
-   could be implemented a few ways.
+   Today, kubelet subtracts reserved CPUs from the available resources
+   that it reports, under the assumption that they will be entirely
+   consumed by workloads. Sometimes workloads do not entirely consume
+   those CPUs, however, and non-guaranteed pods can also use the
+   reserved CPU pool.  We could have kubelet support "over
+   subscription" of a node by reporting that the node has more
+   capacity than it really does. This could be implemented a few ways.
 
-   1. Kubelet could accept an option to report a static amount of extra
-      capacity, for example always reporting 2 more CPUs than are present.
-   2. Kubelet could not subtract the requests from some workloads, or
-      only subtract part of the requests, leaving the capacity higher
-      than it would if the request was included fully in the
-      calculation. *See implementation history above for details about
-      a proof-of-concept implementation of this approach.*
+   1. Kubelet could accept an option to report a static amount of
+      extra capacity, for example always reporting 2 more CPUs than
+      are present.  In OpenShift, the option would be set during
+      installation and would be added to the control plane
+      `MachineConfig`.
+   2. Kubelet could be told to not subtract the requests from some
+      workloads, or only subtract part of the requests, leaving the
+      capacity higher than it would if the request was included fully
+      in the calculation. *See implementation history above for
+      details about a proof-of-concept implementation of this
+      approach.*
    3. Kubelet could add capacity to match the requests of some workloads,
       so that the apparent capacity of a node grows dynamically when
       system workloads are added.
@@ -865,10 +815,21 @@ without the knowledge of the rest of the cluster components.
    some way to expose the difference between the actual capacity and the
    capacity value being used for scheduling.
 
-   It's not clear if we could implement these behaviors in a plugin, or
-   if we could push the changes upstream. Carrying a fork of kubelet to
-   implement the feature would result in additional release management
-   work indefinitely.
+   We would need to carefully consider how to document the use of this
+   option. Users will need to understand the minimum CPU resource
+   requests of a base OpenShift deployment and any additional add-on
+   operators before they will be able to tune the over-subscription
+   setting so that all the components will fit onto the number of CPUs
+   they require. We will need to keep the documentation of minimum CPU
+   resource requests for OpenShift up to date for each release, or
+   provide a tool to calculate the value from a default cluster.
+
+   The changes need to be added to kubelet upstream in order to be
+   supported long-term in OpenShift. A KEP will need to be written and
+   submitted independently of this enhancement document.  Given the
+   history of this topic within the community, it seems unlikely that
+   that any such KEP would be approved, so we would end up carrying a
+   fork indefinitely.
 
 4. Have a scheduler plugin ignore critical Pods when calculating free
    CPU resources on a node
@@ -878,8 +839,100 @@ without the knowledge of the rest of the cluster components.
    scheduler configuration to disable the `NodeResourcesFit` filter
    and enable the new one.
 
-   More research is needed to understand how this scheduler plugin
-   might be enabled on only some clusters.
+   Further research showed that both the scheduler and kubelet would
+   need to be changed to make this approach work, because kubelet does
+   not trust the scheduler's calculations and manages its own. This
+   means a scheduler plugin would be extra work on top of a patch
+   similar to the previous option, which has been ruled out.
+
+### Vertical Pod Autoscaler
+
+There is some existing k8s work meant to address a similar issue: The
+[Vertical Pod
+autoscaler](https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler). However,
+the vertical pod autoscaler relies on runtime usage metrics to change
+the configuration of Pods, which means if the Pods request too many
+resources as a starting point they may not be schedulable at all. It
+also scales up and down, which may be undesirable if the utilization
+for a pod with low limits is high for a period of time.
+
+### Strip requests instead of scaling them
+
+We could use an approach similar to the
+`cluster-resource-override-admission` or vertical pod autoscaler, but
+instead of changing the requests we could remove them entirely and
+assume that a best-effort scheduling approach will work. This may lead
+to performance issues on critical components such as etcd or the API
+server.
+
+### Cluster-wide resource request limit API applied by each cluster operator
+
+Tuning for operator-managed workloads could be controlled via an API,
+so that all cluster operators can adjust the settings of their
+operands correctly.
+
+We do not want users to change the setting after building the cluster
+(at least for now), so the API can be a status field. As with other
+infrastructure-related settings, the field will be added to the
+`infrastructure.config.openshift.io` [informational
+resource](https://docs.openshift.com/container-platform/4.6/installing/install_config/customizations.html#informational-resources_customizations).
+
+The new `controlPlaneCPULimit` field will be a positive integer
+representing the whole number of [Kubernetes
+CPUs](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-cpu)
+into which the control plane must fit. Expressing the API this way
+makes it easy for the user to declare the requirements up front when
+installing the cluster, without having to understand the basis for the
+default settings and without having to calculate a scaling factor
+themselves.
+
+In order for operators to know how to use `controlPlaneCPULimit` to
+compute a scaling factor, they need to know the default number of CPUs
+assumed for a control plane that produced the default resource
+limit. Rather than encoding that information separately in every
+operator implementation, we should put it in one place so it can be
+managed consistently. Using a `const` defined in the library with the
+Infrastructure type makes it easy to upgrade operators if the value
+changes across releases. So, a new `DefaultControlPlaneCPUCount`
+constant will be added to the module with the Infrastructure type.
+
+If `controlPlaneCPULimit == 0`, operators should use their
+default configuration for their operands.
+
+If `0 < controlPlaneCPULimit < DefaultControlPlaneCPUCount`, operators
+should scale their operands down by around `(controlPlaneCPULimit /
+DefaultControlPlaneCPUCount)` or more, if appropriate. When scaling,
+the operators should continue to follow the other guidelines for
+resources and limits in
+[CONVENTIONS.md](CONVENTIONS.md#resources-and-limits).
+
+If `controlPlaneCPULimit >= DefaultControlPlaneCPUCount`, operators
+should use their default configuration for their operands. We do not
+currently have a need to allow the control plane to scale up, although
+this may change later. If we do have a future requirement to support
+that, we could remove this restriction.
+
+The logic described in this section could also be captured in a
+library function. Something like
+
+```go
+cpuRequestValue, err := GetScaledCPURequest(kubeClientConfig, myDefaultValue)
+```
+
+where the function fetches the Infrastructure resource and applies the
+algorithm to a default value provided by the caller. That would make
+the code change to implement the approach in each operator smaller,
+since we could conceivably wrap the existing static values with the
+function call.
+
+Users will specify the `controlPlaneCPULimit` when building a cluster
+by passing the value to the installer in `install-config.yaml`.
+
+Implementing this approach would require modifying multiple
+operators. It is likely that we would need to update all of them,
+although we could prioritize the ones with the largest current
+resource requests.
+
 
 ## Infrastructure Needed
 
