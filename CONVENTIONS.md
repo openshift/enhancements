@@ -290,6 +290,24 @@ Resource request review history:
 * [BZ 1920159](https://bugzilla.redhat.com/show_bug.cgi?id=1920159) --
   for tracking changes in 4.7/4.8 for single-node RAN
 
+##### Allowed use of limits
+
+There is an exception process for adding limits to payload workloads. In the following
+scenarios workloads may be given permission to set limits:
+
+* Workloads that are scale-invariant and have a fixed memory or CPU cost no matter what the scale of the cluster or workload
+  * The workload must be demonstrated to use fixed memory or CPU, and the component must have a plan to detect whether the limit causes impact to end user workloads
+  * Workloads that have a dynamic range of usage are not a good candidate for fixed limits.
+  * Memory limits must be set to 25-50% above the observed maximum in standard e2e runs to ensure additional headroom
+  * Examples:
+    * A health check sidecar container that performs a very simple request
+    * A controller that looks at a fixed set of objects that cannot vary based on cluster size, workload scale, or end user action
+
+In general, per-operator dynamic calculation of limits is discouraged, and instead workloads are expected to regulate their own consumption where possible. In cases where the workload has a very large dynamic range, dynamic sharding or scaling using standard (or per operator workload) is to be preferred over dynamic limit setting.
+
+To get approval for an exception, contact a release architect and an exception will be recorded via code in the standard e2e suite which will allow changes to merge. Non-payload operators are encouraged to seek approval as well to better document use cases - other solutions may be suggested or problems in the platform may be uncovered.
+
+
 #### Taints and Tolerations
 
 An operator deployed by the CVO should run on control plane nodes and therefore should
