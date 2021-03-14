@@ -40,10 +40,11 @@ By using `MachineHealthChecks` a cluster admin can configure automatic remediati
 The machine healthcheck controller's remediation strategy is deleting the machine, and letting the cloud provider
 create a new one. This isn't the best remediation strategy in all environments.
 
-Any Machine that enters the `Failed` state is remediated immediately, without waiting, by the MHC
-When this occurs, if the error which caused the failure is persistent (spot price too low, configuration error), replacement Machines will also be `Failed`
-As replacement machines start and fail, MHC causes a hot loop of Machine being deleted and recreated
-Hot loop makes it difficult for users to find out why their Machines are failing.
+Any Machine that enters the `Failed` state is remediated immediately, without waiting, by the MHC.
+When this occurs, if the error which caused the failure is persistent (spot price too low, configuration error), replacement Machines will also be `Failed`.
+As replacement machines start and fail, MHC causes a hot loop of Machine being deleted and recreated.
+This hot looping makes it difficult for users to find out why their Machines are failing.
+Another side effect of machines constantly failing, is the risk of hitting the benchmark of machine failures percentage - thus triggering the "short-circuit" mechanism which will prevent all remediations.
 
 With this enhancement we propose a better mechanism.
 In case a machine enters the `Failed` state and does not have a NodeRef or a ProviderID it'll be remediated after a certain time period has passed - thus allowing a manual intervention in order to break to hot loop.
@@ -54,11 +55,11 @@ In case a machine enters the `Failed` state and does not have a NodeRef or a Pro
 
 ### Goals
 
-- Create the ability to define customized remediation for Machine that enters the `Failed` state.
+- Create the opportunity for users to enact custom remediations for Machines that enter the `Failed` state.
 
 ### Non-Goals
 
-TBD
+- This enhancement does not seek to create a pluggable remediation system in the MHC.
 
 ## Proposal
 
@@ -68,15 +69,15 @@ We propose modifying the MachineHealthCheck CRD to support a FailedNodeStartupTi
 
 #### Story 1
 
-As an admin of a hardware based cluster, I would like failed machines to delay before automatically re-provisioning so I'll have a time frame in which to manually analyze and fix them .
+As an admin of a hardware based cluster, I would like failed machines to delay before automatically re-provisioning so I'll have a time frame in which to manually analyze and fix them.
 
 ### Implementation Details/Notes/Constraints
 
-If no value for failedNodeStartupTimeout is defined for the MachineHealthCheck CR, the existing remediation flow
+If no value for `FailedNodeStartupTimeout` is defined for the MachineHealthCheck CR, the existing remediation flow
 is preserved.
 
-In case a machine enters the `Failed` state and does not have a NodeRef or a ProviderID it's remediation will be requeued by failedNodeStartupTimeout.
-After that time has passed if the machine current state remains remediation will be performed.
+In case a machine enters the `Failed` state and does not have a NodeRef or a ProviderID it's remediation will be requeued by `FailedNodeStartupTimeout`.
+After that time has passed if the machine current state remains, remediation will be performed.
 
 
 #### MHC struct enhancement
@@ -86,7 +87,7 @@ After that time has passed if the machine current state remains remediation will
         ...
     
         // +optional
-		FailedNodeStartupTimeout metav1.Duration `json:"failedNodeStartupTimeout,omitempty"`
+        FailedNodeStartupTimeout metav1.Duration `json:"failedNodeStartupTimeout,omitempty"`
     }
 ```
 
@@ -108,13 +109,13 @@ MachineHealthCheck:
 
 ### Risks and Mitigations
 
-No known risks
+No known risks.
 
 ## Design Details
 
 ### Open Questions
 
-See deprecation and upgrade
+See deprecation and upgrade.
 
 ### Test Plan
 
