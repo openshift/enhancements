@@ -10,11 +10,14 @@ reviewers:
   - "@wking"
 approvers:
   - "@openshift/openshift-team-monitoring"
+  - "@bparees"
+  - "@dhellmann"
 creation-date: 2021-03-01
 last-updated: 2021-03-01
 status: implementable
 see-also:
-  - "/enhancements/cluster-high-availability-mode-api.md"
+  - "/enhancements/single-node/cluster-high-availability-mode-api.md"
+  - "/enhancements/single-node/production-deployment-approach.md"
 ---
 
 # Monitoring Stack with Single Replica Topology Mode
@@ -46,8 +49,8 @@ informs operators about the cluster deployment topology.
 Depending on whether an operand is deployed on the control nodes or not, the
 operator should look at either `controlPlaneTopology` and
 `infrastructureTopology`. If the field value is `HighlyAvailable`, the operator
-should configure the operand for high-avaible operation. If the field value is
-`SingleReplica`, it should *not* configure the operand for high-avaible
+should configure the operand for high-availability operation. If the field value is
+`SingleReplica`, it should *not* configure the operand for high-avaibability
 operation.
 
 ### Goals
@@ -65,11 +68,11 @@ operation.
 
 ## Proposal
 
-Whenever CMO needs to reconcile, it retrieves the
-`infrastructures.config.openshift.io/cluster` resource and reads the value of
-the `infrastructureTopology` status field. If the value is equal to
-`SingleReplica`, CMO adjusts the number of replicas to 1 for the following
-resources:
+CMO watches the `infrastructures.config.openshift.io/cluster` resource for
+updates and triggers a reconcialition whenever it detects a change. In the
+reconcialiation loop, CMO reads the value of the `infrastructureTopology`
+status field. If the value is equal to `SingleReplica`, CMO adjusts the number
+of replicas to 1 for the following resources:
 
 * openshift-monitoring/prometheus-k8s (StatefulSet)
 * openshift-monitoring/alertmanager-main (StatefulSet)
@@ -94,7 +97,7 @@ the `controlPlaneTopology` field.
 ### Risks and Mitigations
 
 In HA mode, the Prometheus instances are spread on different nodes using
-soft anti-affinity and they work completely indepently one from another (there's no
+soft anti-affinity and they work completely independently one from another (there's no
 data replication between them). Services consuming the metrics (like the
 OpenShift console or Grafana) use the Thanos querier API which aggregates and
 deduplicates data from both Prometheus instances. This setup provides
@@ -151,12 +154,15 @@ N/A
 
 ### Upgrade / Downgrade Strategy
 
-Upgrades are a non goal right now.
+As stated in the [Single-node Production Deployment Approach](https://github.com/openshift/enhancements/blob/master/enhancements/single-node/production-deployment-approach.md)
+proposal, in-place upgrades are a non-goal right now.
 
 ### Version Skew Strategy
 
 If CMO reads a value that is neither equal to `HighAvailable` nor
 `SingleReplica`, it should consider that the topology is `HighAvailable`.
+
+If CMO gets an error while reading the resource, it errors out and retries.
 
 ## Implementation History
 
