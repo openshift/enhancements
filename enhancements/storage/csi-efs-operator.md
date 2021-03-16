@@ -107,6 +107,8 @@ High level only, see design details below.
 
 2. Update (rewrite) current aws-efs-operator to watch `ClusterCSIDriver` CR named `efs.csi.aws.com`.
    * `ClusterCSIDriver` CRD is already provided by OCP and is used to install all other CSI drivers that OCP ships.
+     * Every CSI driver operator watches only its CR, with [a defined name](https://github.com/openshift/api/blob/4b79815405ec40f1d72c3a74bae0ae7da543e435/operator/v1/0000_90_cluster_csi_driver_01_config.crd.yaml#L39).
+       They don't act on or modify CRs of other CSI drivers.
    * Users must explicitly create the CR to install the CSI driver to allow users to uninstall the driver if they don't
      like it.
 
@@ -126,8 +128,10 @@ High level only, see design details below.
 
 6. Update installer to delete Access Points and EFS volumes that have `owner` tag when destroying a cluster.
    * Existence of EFS volume using a VPC / Subnets actively prevents installer to delete them.
-   * We should allow users to tag the volumes to be deleted when the cluster is deleted. At least CI should use this
-     approach to ensure there are no leftovers.
+     `openshift-install destroy cluster` gets stuck at VPC (or subnet?) deletion, because AWS does not allow to delete
+     a network that's used.
+   * This way, cluster admins can tag the volumes to be deleted when the cluster is deleted (this is opt in!).
+     At least CI should use this approach to ensure there are no leftovers.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -137,7 +141,9 @@ Currently, all cloud-based CSI drivers shipped by OCP are installed when a clust
 AWS EFS will not be installed by default. We will include a note about opt-in installation in docs.
 
 After installation of the new operators, either as a fresh install or upgrading the existing one, users must create the
-CR when the operator is installed on a new cluster. This is something that was not necessary in the previous releases of
+CR when the operator is installed on a new cluster
+([example of CR for AWS EBS](https://github.com/openshift/cluster-storage-operator/blob/master/assets/csidriveroperators/aws-ebs/10_cr.yaml),
+EFS will be very similar). This is something that was not necessary in the previous releases of
 the operator. We will add a release note and introduce an (info) alert to remind admins to create the CR.
 
 ## Design Details
@@ -150,6 +156,11 @@ EFS CSI driver operator should not be much more complicated.
 
 Library-go does not support un-installation of CSI driver (and static resources created by `StaticResourcesController`),
 this must be implemented there.
+
+Note: When the *operator* is un-installed, nothing happens to the CRD, CR, the installed CSI driver, existing PVs and
+PVCs. Everything is working, just not managed by the operator. When the *operand* is un-instaled by removing the
+operator CR, the driver will be removed. Existing PVs, PVCs and SharedVolumes will be still present in the API server,
+however, they won't be really usable. Nobody can mount / unmount EFS volumes without the driver.
 
 ### `SharedVolume` CRD
 
@@ -177,7 +188,8 @@ Expected workflow (confirmed with OLM team):
    and any apps that use it are still running.
 5. User reads release notes, documentation or alert and creates th CR.
 6. The "new" operator "adopts" the CSI driver objects. Namely, it updates DaemonSet of the CSI driver, which then does
-   rolling update of the driver pods, using supported images.
+   rolling update of the driver pods, using supported images. We won't move the driver across namespaces to
+   `openshift-cluster-csi-drivers` to have the "adoption" possible.
 
 To adopt the old objects, the new operator must use the same names for all objects created by the old operator.
 
@@ -211,22 +223,16 @@ the EFS operator. **We do not want to maintain it for everyone.**
 
 ### Code organization
 
-* Reuse existing `github.com/openshift/aws-efs-operator` for the operator.
-  * Move the controller-runtime based operator one to a separate branch (`release-4.7`, even though it contains all
-    previous releases?)
+* Reuse existing `github.com/openshift/aws-efs-operator` repository for the operator code.
+  * Move the controller-runtime based operator one to a separate branch (`release-community`?)
   * Continue with library-go based one in `master`.
 * Fork the CSI driver into `github.com/openshift/aws-efs-csi-driver`.
 * Fork `github.com/aws/efs-utils` into `github.com/openshift/aws-efs-utils`.
 
 ### Open Questions
 
-* How to graduate community operator into a supported one?
-  * The community one does not go through registry.redhat.io.
-    * The "community" team is willing to do anything that's necessary to help with the transition.
-  * The community one has only a single channel, `stable`.
-  * We want the community one working in 4.7 and older and the supported one in 4.8 and newer.
-  * It should be possible to ship new community updates in 4.7 channel/branch to fix potential bugs there and/or
-    make the transition as seamless as possible.
+**How to actually hide the community operator in 4.8 and newer operator catalogs?** We don't want to have two operators
+in the catalog there. We still want to offer the community operator in 4.7 and earlier though.
 
 ### Test Plan
 
