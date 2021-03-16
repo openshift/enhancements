@@ -2,6 +2,7 @@
 title: quick-starts
 authors:
   - "@jhadvig"
+  - "@rebeccaalpert"
 reviewers:
   - "@spadgett"
   - "@alimobrem"
@@ -9,12 +10,13 @@ reviewers:
 approvers:
   - "@spadgett"
 creation-date: 2020-06-02
-last-updated: 2020-09-14
+last-updated: 2021-03-10
 status: implementable
 see-also:
   - "https://issues.redhat.com/browse/CONSOLE-2255"
   - "https://issues.redhat.com/browse/CONSOLE-2232"
   - "https://issues.redhat.com/browse/SRVLS-262"
+  - "https://issues.redhat.com/browse/CONSOLE-2355"
 ---
 
 # Quick Starts
@@ -91,12 +93,15 @@ As a operator creator I want to provide operator consumers with a guide on how t
    ![help-menu](https://raw.githubusercontent.com/jhadvig/images/master/help-menu.png)
 
 
-QuickStarts CR for [Explore Serverless](https://marvelapp.com/236ge4ig/screen/69908905):
+Quick Starts CR for [Explore Serverless](https://marvelapp.com/236ge4ig/screen/69908905):
 ```yaml
 apiVersion: console.openshift.io/v1
 kind: QuickStart
 metadata:
   name: explore-serverless
+  labels:
+    console.openshift.io/lang: en
+    console.openshift.io/name: explore-serverless
 spec:
   displayName: Explore Serverless
   tags:
@@ -104,7 +109,7 @@ spec:
   duration: 10
   description: Install the Serverless Operator to enable containers, microservices and functions to run "serverless"
   prerequisites: Release requirements if any Install X number of resources.
-  introduction: Redhat OpenShift Serverless is a service based on the open source Knative project. It provides ...
+  introduction: Red Hat OpenShift® Serverless is a service based on the open source Knative project. It provides ...
   tasks:
     - title: Install Serverless Operator
       description: The OperatorHub is where you can find a catalog of available Operators to install on your cluster ...
@@ -150,6 +155,62 @@ tour. User's access to the Quick Start is reviewed based on array of
 resource actions. In order for the user to see the Quick Start and
 take its tour, his access review needs to pass all the listed
 resources actions.
+
+#### Quick Start Internationalization
+
+OpenShift can be toggled between multiple languages. The Quick Start
+CRD contains a series of labels to specify the Quick Start name and language:
+```yaml
+console.openshift.io/lang: en
+console.openshift.io/country: gb
+console.openshift.io/name: explore-serverless
+```
+
+The optional `console.openshift.io/lang` label specifies the two-letter
+[ISO 639-2 Language Code](https://www.loc.gov/standards/iso639-2/php/code_list.php))
+(i.e. "en" for English) for the Quick Start. Quick Starts without this label will be treated
+as English Quick Starts.
+
+The optional `console.openshift.io/country` label specifies the alpha-2
+[ISO-3166 Country Code](https://www.iso.org/iso-3166-country-codes.html)
+(i.e. "gb" for the United Kingdom of Great Britain and Northern Ireland).
+Quick Starts without this label will only rely on the `console.openshift.io/lang`
+behavior.
+
+The `console.openshift.io/name: explore-serverless` label specifies the name of the
+Quick Start. This should be consistent across all translations of a given Quick Start,
+as it allows us to avoid showing the same Quick Start content in multiple languages.
+If a Quick Start is not translated into a user's language, the English version will be shown.
+
+OpenShift can display the correct
+Quick Starts for each language by comparing the value of the
+`console.openshift.io/lang` and `console.openshift.io/country` labels to the currently displayed language in OpenShift.
+See the [internationalization enhancement proposal](https://github.com/openshift/enhancements/blob/master/enhancements/console/internationalization.md) for more information.
+This approach will not handle languages we don't offer support for. If Quick Starts
+in non-supported languages become a need, we will need to modify this approach.
+
+Example Explore Serverless Quick Starts CR snippet for Japanese:
+```yaml
+apiVersion: console.openshift.io/v1
+kind: QuickStart
+metadata:
+  name: explore-serverless
+  labels:
+    console.openshift.io/lang: ja
+    console.openshift.io/name: explore-serverless
+```
+
+Example Explore Serverless Quick Starts CR snippet for English (the United Kingdom of Great Britain and Northern Ireland):
+```yaml
+apiVersion: console.openshift.io/v1
+kind: QuickStart
+metadata:
+  name: explore-serverless
+  labels:
+    console.openshift.io/lang: en
+    console.openshift.io/country: gb
+    console.openshift.io/name: explore-serverless
+```
 
 #### Air Gapped Environments
 
