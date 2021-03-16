@@ -93,7 +93,7 @@ type IngressControllerHttpHeaderBuffer struct {
 	// (in bytes) for IngressController connection sessions.
 	//
 	// +kubebuilder:validation:required
-	// +kubebuilder:validation:minimum=<tbd>
+	// +kubebuilder:validation:minimum=16384
 	// +required
 	HeaderBufferSize int `json:"headerBufferSize"`
 
@@ -103,7 +103,7 @@ type IngressControllerHttpHeaderBuffer struct {
 	// (headerBufferSize - headerBufferMaxRewrite) bytes.
 	//
 	// +kubebuilder:validation:required
-	// +kubebuilder:validation:minimum=<tbd>
+	// +kubebuilder:validation:minimum=4096
 	// +required
 	HeaderBufferMaxRewrite int `json:"headerBufferMaxRewrite"`
 }
@@ -126,13 +126,14 @@ The necessary Router and API changes will be made to allow cluster administrator
 
 ### Implementation Details/Notes/Constraints
 
-Header buffer size values should be validated to make sure they are at least sane. For example, `HeaderBufferSize` values of `0` or `MAXINT` should most likely
-be rejected.
+Header buffer size values should be validated by the API server to make sure they are reasonable values. An Ingress Controller should have at least `16384` bytes for
+`tune.bufsize` and `4096` bytes for `tune.maxrewrite`. This is to ensure that HTTP/2 will work for an ingress controller (see https://tools.ietf.org/html/rfc7540).
+These bare minimum values will also ensure that HAProxy has ample resources to handle conections to critical cluster workloads, such as oauth and the console.
 
-In particular, `(headerBufferSize - headerBufferMaxRewrite)` must yield a reasonable value. This value could be calculated by the ingress operator,
-and the ingress operator could  set an appropriate status condition on an IngressController that specifies invalid values. Additionally, the ingress operator
-could determine whether or not any specified `HttpHeaderBuffer` values for the Default IngressController would break, for example, cluster OAuth routes.
-The ingress operator could reject `HttpHeaderBuffer` configurations for the default ingress controller that would break core cluster routes.
+In addition to API validation, the Ingress Operator should further validate user-specified router header buffer sizes.
+
+In particular, `(headerBufferSize - headerBufferMaxRewrite)` must be greater than `0`. The ingress operator should compute the difference between
+`headerBufferSize` and `headerBufferMaxRewrite`, and should set an appropriate status condition on an IngressController that specifies improper values.
 
 ### Risks and Mitigations
 
