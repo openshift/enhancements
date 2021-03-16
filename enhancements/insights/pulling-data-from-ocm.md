@@ -70,13 +70,21 @@ Risk: OCM API is down or doesn't provide up to date data.
 
 Risk: Insights Operator is unable to expose/update the data in the OpenShift API
 
-Mitigation: We can introduce a new state in the Insights Operator (e.g "ObsoleteSubscriptionData"), but a new alert would be probably better.  
+Mitigation: Introduce a new state in the Insights Operator (e.g "SCADataDegraded") and
+create a new alert based on this new state.
 
 ## Design Details
 
+### Authorization
+
+Insights Operator is able to pull the data from the OCM API using the existing `cloud.openshift.com` token
+available in the `pull-secret` (in the `openshift-config` namespace)
+
+### Data in API
+
+The SCA certificate is available via the `simple-content-access-cert` secret in the `openshift-config-managed` namespace
+
 ### Open questions
-- OCM API authentication - can we use existing "pull-secret" token to access the OCM API as well? If not, what are the alternatives?
-- Where to expose the new data? New secret in the "openshift-config" namespace? Are there some naming conventions for the secret?
 - How often should the Insights Operator query the OCM API? Every 4 hours? Do we always need to download the full SCA cert data?
 - Where to verify that the SCA certs are valid (user can use it to consume RHEL content) ? Insights Operator integration tests?
 
