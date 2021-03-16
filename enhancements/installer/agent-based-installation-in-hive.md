@@ -13,7 +13,7 @@ reviewers:
 approvers:
   - "@markmc"
 creation-date: 2020-12-22
-last-updated: 2021-03-01
+last-updated: 2021-03-15
 status: implementable
 see-also:
   - enhancements/installer/connected-assisted-installer.md
@@ -83,7 +83,7 @@ to address the topic in its totality.
 assume that the baremetal-operator is present on the hub cluster. Today that is
 only possible when the hub cluster itself is on the bare metal platform. Future
 work may propose running baremetal-operator on non-baremetal hub clusters.
-* Applying static network configuration to hosts. This is a desired feature
+* Applying network configuration to hosts. This is a desired feature
 but will be addressed in a future proposal.
 
 ## Proposal
@@ -111,8 +111,9 @@ discovery ISO and using my own tooling to boot it on hosts.*
 #### Run Agent via Automation
 
 Many users will want an integrated end-to-end experience where they describe
-hardware and expect it to automatically boot an appropriate discovery ISO
-without needing to provide their own mechanism for booting ISOs.
+hardware (including coordinates and credentials) and configuration and expect
+it to automatically boot an appropriate discovery ISO without needing to
+provide their own mechanism for booting ISOs.
 
 *As an Infra Owner, I can maintain an inventory of available hardware and use
 provided automation to run the Agent on that hardware.*
@@ -219,7 +220,7 @@ Spec
 * a list of NTP sources (hostname or IP) to be added to all cluster
 hosts. They are added to any NTP sources that were configured through other
 means.
-* a list of SSH public keys that will be added to all agents for use in debugging.
+* an SSH public key that will be added to all agents for use in debugging.
 * pull secret reference
 * a label selector for Agents. This is how Agent resources are identified as
 belonging to a particular InstallEnv.
@@ -287,7 +288,7 @@ The details of this were discussed on a Hive
 Some REST APIs need to be exposed in addition to the Kubernetes-native APIs
 described below.
 * Download discovery ISO and rootfs: These files must be available for download
-via HTTP, either directly by users or by a BMC.  Because BMCs do not pass
+via HTTPS, either directly by users or by a BMC.  Because BMCs do not pass
 authentication headers, the Assisted Service must generate some URL or query
 parameter so that the ISO’s location isn’t easily guessable.
 * Agent APIs (near-term): Until a point where the agent creates and modifies
@@ -380,7 +381,7 @@ approach.
 1. A new controller, the Baremetal Agent Controller, sees the matching BareMetalHosts and boots them using the discovery ISO URL found in the InstallEnv's status.
 1. The Agent starts up on each host and reports back to the assisted service, which creates an Agent resource in the same namespace as the InstallEnv. The Agent is automatically labeled with the labels that were specified in the InstallEnv's Spec.
 1. The Baremetal Agent Controller sets the Agent's Role field in its spec to "master" or "worker" if a corresponding label was present on its BareMetalHost.
-1. The Agent is automatically marked as Approved via a field in its Spec based on being recognized as running on the known BareMetalHost.
+1. The Baremetal Agent Controller marks the Agent as Approved via a field in its Spec based on being recognized as running on the known BareMetalHost. As an implementation detail, that recognition is currently based on matching a MAC address.
 1. The Agent runs through the validation and inspection phases. The results are shown on the Agent's Status, and eventually a condition marks the Agent as "ready".
 1. Cluster Creator creates a ClusterDeployment describing a new cluster. It describes how many control-plane and worker agents to expect. It also includes a label selector to match Agent resources that should be part of the cluster.
 1. Cluster Creator or Infra Owner adds a reference to the ClusterDeployment onto the InstallEnv. This reference confirms that the ClusterDeployment, which resides in a different namespace, is authorized to consume Agents from this InstallEnv.
@@ -408,7 +409,7 @@ setting the infrastructure platform to "baremetal").
 
 1. Infra Owner creates a BareMetalHost resource with a label that matches an InstallEnv selector.
 1. The Baremetal Agent Controller adds the discovery ISO URL to the BareMetalHost.
-1. baremetal-operator uses redfish virtualmedia to boot the live ISO on the BareMetalHost.
+1. baremetal-operator boots the live ISO on the BareMetalHost.
 1. The Agent starts up and reports back to the assisted service, which creates an Agent resource in the hub cluster. The Agent is labeled with the labels that were specified in the InstallEnv's Spec, optionally including a label to match the AgentSelector field on the ClusterDeployment.
 1. If the Agent does not get a default label matching a ClusterDeployment, a user or other automation must add a label to match the AgentSelector field on the appropriate ClusterDeployment.
 1. Cluster Creator or Infra Owner adds a reference to the ClusterDeployment onto the InstallEnv if it is not already present. This reference confirms that the ClusterDeployment, which resides in a different namespace, is authorized to consume Agents from this InstallEnv.
@@ -543,7 +544,10 @@ namespace from those that are associated with the Hub cluster itself?
 What work is involved in having BMO watch additional namespaces?
 
 Upstream, the metal3 project is already running baremetal-operator watching
-multiple namespaces, so there should not be software changes required.
+multiple namespaces, so there should not be software changes required to it.
+
+cluster-baremetal-operator needs to be updated to configure baremetal-operator
+differently for this use case.
 
 #### Centralized Machine Management
 
