@@ -105,7 +105,7 @@ management and normal workloads there.
 
 ## Proposal
 
-[Previous attempts](https://github.com/openshift/enhancements/pull/62)
+[Previous attempts](https://github.com/openshift/enhancements/pull/628)
 to solve this problem focused on reducing or scaling requests so that
 the normal scheduling criteria could be used to safely place them on
 CPUs in the shared pool. This proposal reframes the problem, so that
