@@ -36,6 +36,8 @@ superseded-by:
 2. Should the driver-toolkit container be part of the payload? It should be accessible through registry.
 redhat.io/openshift4 without a cluster for out-of-tree driver development, testing on prereleases, ... If
 a customer has a pull-secret for OCP he should be able to pull without "login"
+3. Should SRO be build by ART or by CPaaS? We already have NFD ART builds which
+is a prerequisite for SRO
 
 ## Summary
 
