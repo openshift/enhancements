@@ -32,10 +32,9 @@ superseded-by:
 
 ## Open Questions [optional]
 
-1. Are users willing to provide precompiled DriverContainers (We have already
-some commitments)?  This helps immensely in disconnected environments and only
-validated combinations of driver + kernel would be e.g. provided. Source install
-should be the fallback solution
+1. Should SRO be CVO or OLM managed, SRO creates an ClusterOperator object for must-gather and better status reporting to customers/developers/users
+2. Should the driver-toolkit container be part of the payload? It should be accessible through registry.redhat.io/openshift4 without a cluster for out-of-tree driver development, testing on prereleases, ... If a customer has a pull-secret for OCP he should be able to pull without "login"
+3. 
 
 ## Summary
 
@@ -248,28 +247,24 @@ accelerator stack on OpenShift. The heavy-lifting was the management of the
 DriverContainer. Approximately 5% of the logic behind SRO was used for deploying
 the remaining parts aka stack.
 
-Based on SRO we are going to create a new operator that will solely be used for
-DriverContainer management providing out of tree drivers on OpenShift.
+Based on the current SROv1alpha1 we're going to build a new version SROv1beta1 that
+has more functionality focusing on the out-of-tree driver aspect. 
 
-SRO can be seen as the upstream project where we test new features and enable
-more hardware accelerators where this new operator will be the downstream
-operator shipped by OpenShift for out-of-tree drivers.
-
-The new version of SRO will have an API update and hence called SROv2.
-
+The new version of SRO will have an API update and hence called SROv1beta1 for 
+Tech Preview and will be SROv1 for GA.
 
 ### Combining both approaches
 
 For managing the module in a container we are going to use KVC as the framework
 of choice. Targeting RHCOS solves the problem also for RHEL7 and RHEL8. The
-management of those KVC containers aka DriverContainers are managed by SROv2.
+management of those KVC containers aka DriverContainers are managed by SRO,
 
 ### Day-2 DriverContainer Management OpenShift
 
-For any day-2 kernel module management or delivery we propose using SROv2 as the
+For any day-2 kernel module management or delivery we propose using SRO as the
 building block on OpenShift.
 
-We will run a single copy of the SROv2 as part of OpenShift that is able to
+We will run a single copy of the SRO as part of OpenShift that is able to
 handle multiple kernel module drivers using the following proposed CR below.
 
 The following section will cover three kernel module instantiations (1) A single
@@ -278,13 +273,22 @@ enablement.
 
 There are three main parts involved in the enablement of a kernel module. We
 have a specific (1) set of meta information needed for each kernel module, a (2)
-set of manifests to deploy a DriverContainer and lastly (3) a framework running
-inside the container for managing the kernel module (dkms like functions).
+set of manifests to deploy a DriverContainer plus enablement stack and lastly
+(3) a framework running inside the container for managing the kernel module 
+(dkms like functions).
+
+*(1) The metadata are encoded in the CR for a special resource*
+
+*(2) The manifests with templating functions to inject runtime information
+are the so called recipes*
+
+*(3) This will be done by KVC and some enhancements that will be discussed later*
+
 
 The following section will walk one through the enablement of the different
 use-case scenarios. After deploying the operator the first step is to create an
 instance of a special-resource. Following are some example CRs for how one would
-instantiate SROv2 to manage a kernel module or hardware driver.
+instantiate SRO to manage a kernel module or hardware driver.
 
 #### Example CR for a single kernel module #1
 
@@ -294,14 +298,16 @@ kind: SpecialResource
 metadata:
   name: <vendor>-<kmod>
 spec:
+  metadata:
+    version: <semver>
   driverContainer:
   - git:
       ref: "release-4.3"
       uri: "https://gitlab.com/<vendor>/<kmod>.git"
 ```
 
-The second example shows the combined capabilities of SROv2 for dealing with
-multiple driver containers and artifacts. On the other side SROv2 can also be
+The second example shows the combined capabilities of SRO for dealing with
+multiple driver containers and artifacts. On the other side SRO can also be
 used in a minimalistic form where we only deploy a simple kmod. The example CR
 above would create only one DriverContainer from the git repository provided.
 For each kernel module one would provide one CR with the needed information.
@@ -315,7 +321,11 @@ metadata:
   name: <vendor>-<hardware>
 spec:
   metadata:
+    version: <semver>
     namespace: <vendor>-<driver>
+  machineConfigPool: <vendor>-<mcp>
+    matchLabels:
+      <vendor>-<label>: "true"
   configuration:
   - name: "key_id"
     value: ["AWS_ACCESS_KEY_ID"]
@@ -351,24 +361,47 @@ spec:
       claims:
       - name: "<vendor>-pvc"
       mountPath: "/usr/src/<vendor>-<internal>"
-  node:
-    selector: "feature.../pci-<VENDOR_ID>.present"
+  nodeSelector:
+    key: "deployment-cluster"
+    values: ["frontend", "backend"]
   dependsOn:
     - name: <CR_NAME_VENDOR_ID_SRO>
     - name: <CR_NAME_VENDOR_ID_KJI>
 ```
 
-Since SROv2 will manage several special resources in different namespaces, hence
-the CRD will have cluster scope. The SROv2 can take care of creating and 
+Since SRO will manage several special resources in different namespaces, hence
+the CRD will have cluster scope. The SRO can take care of creating and 
 deleting of the namespace for the specialresource, which makes cleanup of
 a special resource easy, just by deleting the namespace. Otherwise one would have a 
-manual step in creating the new namespace before creating the CR for a specialresource.  
-If there is no spec.metadata.namespace supplied SROv2 will set
+manual step in creating the new namespace before creating the CR for a specialresource.
+If there is no spec.metadata.namespace supplied SRO will set
 the namespace to the CR name per default to separate each resources.
 
-With the above information SROv2 is capable of deducing all needed information
-to build and manage a DriverContainer. All manifests in SROv2 are templates that
+With the above information SRO is capable of deducing all needed information
+to build and manage a DriverContainer. All manifests in SRO are templates that
 are templatized during reconciliation with runtime and meta information.
+
+Recipes will have a version field to distinguish them between operator upgrades. 
+An operator upgrade will not create an updated version of the recipe. This can be done by
+editing the CR and updating the version field. 
+
+
+##### MachineConfigPools 
+
+There is also an optional field to set a MachineConfigPool per special resource.
+A paused MCP will not be upgraded but all other workers, masters and operators will be.
+
+An upgrade could introduce an incompatibility with the special resource and the kernel.
+The production workload can stay in the paused MCP and an updated special resource
+nodeSelector can be used to deploy the special resource to the upgraded nodes. 
+
+SRO can handle different kernel versions in a cluster see [OpenShift Rolling Updates](#OpenShift-Rolling-Updates)
+
+This can reduce application downtime where we would have always a working version running 
+in the cluster. If the new upgraded Node can handle the special resoure the MPC can be unpaused
+an the rolling upgrade can be finished. 
+
+
 
 ```yaml
 metadata:
@@ -376,7 +409,7 @@ metadata:
 spec:
   metadata:
     namespace: <vendor>-<hardware>
-  environment:
+  configuration:
   - key: "key_id"
     value: "ACCESS_KEY_ID"
   - key: "access_key"
@@ -401,7 +434,7 @@ KVC provides hooks to build, load, unload the kernel modules and a wrapper for
 userspace utilities. We might extend the number of hooks to have a similar
 interface as dkms.
 
-The environment section can be used to provide an arbitrary set of key value
+The configuration section can be used to provide an arbitrary set of key value
 pairs that can be later templatized for any kind of information needed in the
 enablement stack.
 
@@ -452,7 +485,7 @@ only available after the DriverContainer is executed.
       mountPath: "/usr/src/<vendor>-<internal>"
 
 ```
-The next section is used to tell SROv2 where to find build artifacts from other
+The next section is used to tell SRO where to find build artifacts from other
 drivers. Some drivers need e.g. symbol information from kernel modules, header
 files or the complete driver sources to be built successfully. We are providing
 two ways for these artifacts to be consumed. (1) Some vendors expose the build
@@ -464,8 +497,9 @@ artifacts (We are assuming here that the vendor is not exposing any artifacts
 to the host). We can leverage those images in a multi-stage build for the
 DriverContainer.
 ```yaml
-  node:
-    selector: "feature.../pci-<VENDOR_ID>.present"
+  nodeSelector:
+    key: "feature.../pci-<VENDOR_ID>.present"
+    values: ["val1", "val2"]
 ```
 
 The next section is used to filter the nodes on which a kernel module or driver
@@ -474,13 +508,13 @@ hardware is not available. Furthermore this can also be used to target even
 subsets of special nodes either by creating labels manually or leveraging NFDs
 hook functionality.
 
-To retrieve the correct image we are using SROv2s templating to inject the
+To retrieve the correct image we are using SRO templating to inject the
 correct runtime information, here we are using **{{.KernelVersion}}** as a
 unique identifier for DriverContainer images.
 
 For the case when no external or internal repository is available or in a
-disconnected environment, SROv2 can consume also sources from a PVC. This makes
-it easy to provide SROv2 with packages or artifacts that are only available
+disconnected environment, SRO can consume also sources from a PVC. This makes
+it easy to provide SRO with packages or artifacts that are only available
 offline.
 ```yaml
   dependsOn:
@@ -489,17 +523,17 @@ offline.
     - name: <CR_NAME_VENDOR_ID_KJI>
 ```
 There are kernel-modules that are relying on symbols that another kernel-module
-exports which is also handled by SROv2. We can model this dependency by the
-dependsOn tag. Multiple SROv2 CR names can be provided that have to be done
+exports which is also handled by SRO. We can model this dependency by the
+dependsOn tag. Multiple SRO CR names can be provided that have to be done
 (all states ready) first before the current CR can be kicked off. CRs with now
 dependsOn tag can be executed/created/handled simultaneously.
 
-Users should usually deploy only the top-level CR and SROv2 will take care of
+Users should usually deploy only the top-level CR and SRO will take care of
 instantiating the dependencies. There is no need to create all the CRs in the
-dependency, SROv2 will take care of it.
+dependency, SRO will take care of it.
 
 If special resource *A* uses a container image from another special resource *B*
-e.g using it as a base container for a build, SROv2 will setup the correct RBAC
+e.g using it as a base container for a build, SRO will setup the correct RBAC
 rules to make this work.
 
 
@@ -512,22 +546,22 @@ rules to make this work.
 ```
 
 One can also use template variables in the CR that are correctly templatized by
-SROv2 in the final manifest. DKOM does a 2 pass templatizing, 1st pass is to
-inject the variable intot the manifest and the second pass it templatize this
+SROv2 in the final manifest. SRO does a 2 pass templatizing, 1st pass is to
+inject the variable into the manifest and the second pass it templatize this
 given variable. Even if we do not know the runtime information beforehand of an
 cluster we can use it in a CR.
 
-#### DriverContainer Manifests
+#### DriverContainer Manifests (recipes)
 
-The third part of enablement are the manifests for the DriverContainer. SROv2
-provides a set of predefined manifests that are completely templatized and SROv2
+The third part of enablement are the manifests for the DriverContainer. SRO
+provides a set of predefined manifests that are completely templatized and SRO
 updates each tag with runtime and meta information. They can be used for any
 kernel module. Each Pod has a ConfigMap as an entrypoint, this way custom
 commands or modification can be easily added to any container running with
-SROv2. See [https://red.ht/34ubzq3](https://red.ht/34ubzq3) for a complete list
+SRO. See [https://red.ht/34ubzq3](https://red.ht/34ubzq3) for a complete list
 of annotations and template parameters.
 
-To ensure that a DriverContainer is successfully running SROv2 provides several
+To ensure that a DriverContainer is successfully running SRO provides several
 annotations to steer the behaviour of deployment. We can enforce an ordered
 startup of different stages. If the drivers are not loaded it makes no sense to
 startup e.g. a DevicePlugin it will simply fail and all other dependent
@@ -543,7 +577,7 @@ drivers are loaded and subsequent resources are running successfully.
 
 #### Supporting Disconnected Environments
 
-SROv2 will first try to pull a DriverContainer. If the DriverContainer does not
+SRO will first try to pull a DriverContainer. If the DriverContainer does not
 exist, SROv2 will kick off a BuildConfig to build the DriverContainer on the
 cluster. Administrators could build a DriverContainer upfront and push it to an
 internal registry. If is able to pull it, it will ignore the BuildConfig and try
@@ -556,6 +590,11 @@ status of the DriverContainers. Alerts could be used for update, installation or
 runtime problems. Metrics could expose resource consumption, because some of the
 DriverContainers are also shipping daemons and helper tools that are needed to
 enable the hardware.
+
+
+
+
+
 
 ### User Stories [optional]
 
@@ -637,30 +676,82 @@ For prebuilt containers pullable from a vendor's repository we're going to use a
 ImageContentSourcePolicy, currently only pulling by digest works, we cannot pull
 by label now. We need to accommodate this in the naming scheme of a
 DriverContainer.
-If a DriverContainer needs additional RPM packages in a proxy environment we
-need to update the configuration for dnf and rhsm.
 
-Steps to enable proxy setting for yum, dnf, rhsm in a container
 
-```bash
-$ sudo vim /etc/dnf/dnf.conf
-# Add
-proxy=http://proxyserver:port
+#### The driver-toolkit container
 
-$ sudo vim /etc/yum.conf
-# Add
-proxy=http://proxyserver:port
+The handling of repositories and extracting RPMs from the the machine-os-content
+can be a complex task. To make this easier SRO builds a driver-toolkit base container
+for easier out-of-tree driver building. This base container has the right kernel versions
+that are needed for a specific OpenShift release. 
 
-$ sudo vi /etc/rhsm/rhsm.conf
-# Configure
-proxy_hostname = proxy.example.com
-proxy_port = 8080
-# user name for authenticating to an http proxy, if needed
-proxy_user =
+This container should be preferrably being build by ART and pushed to the 
+registry.redhat.io/openshift4 registry. The build should be done on all z-stream releases
+and nightlies to cover pre-release testing of customers and to catch any changes of 
+the kernel between releases. 
 
-# password for basic http proxy auth, if needed
-proxy_password =
+Customers that want to build out-of-tree drivers would not need entitlements per se and would
+have all needed RPMs at hand. This container should be externally accessible to be used 
+in customer CI/CD pipelines that do not need a full cluster installation. 
+
+This base container could also be used as the base for developers as a prototyping and testing
+tool in the pre-release phase. Tested drivers with a pre-release would make sure that when a
+OpenShift version goes GA the customer has already tested several version before the date. 
+
+There could be several z-stream releases with the very same kernel but there wouldn't be a 
+single z-stream with different kernels. 
+
+Currently the driver-toolkit by ART can only be tagged with the OpenShift "full" version (x.y.z).
+Meaning currently it is not easy to relate a specific driver-toolkit:vX.Y.Z to a specific node
+that could be in different versions in the cluster depending on the state of MCPs. 
+
+For building the driver-toolkit on the cluster as a fallback solution, if we do not have a recent
+build, the other problematic is that we cannot easily relate the correct m-o-c of the nodes. 
+
+The proposal is to create an annotation on the release-paylod to the machine-os-content. 
+The machine-os-content has already the kernel version annotation. 
+
+```json
+release-payload:4.7.2 -> moc:8.3 -> kernel-4.20
+release-payload:4.7.0 -> moc:8.2 -> kernel-4.19
+
+mcp0: node -> kernel-4.20 
+mcp1: node -> kernel-4.19
 ```
+
+The *primary key* of those two datasets would be the kernel. This would also solve the issue of
+finding the right m-o-c for a specific release. The extensions are used to build on cluster as a
+fallback solution if the driver-toolkit container is not available, e.g. for an early nightly build. 
+
+Otherwise I would need to do the following, I am aware of the oc adm ... command but this literally
+pulls the container, mounts it and reads the manifest to print out the osImage URL.
+
+
+```yaml
+$ CNT=`buildah from registry.ci.openshift.org/ocp/release:4.8.0-0.ci-2021-03-17-153948`
+$ MNT=`buildah mount $CNT`
+$ yq  '.data.osImageURL' $MNT/release-manifests/0000_80_machine-config-operator_05_osimageurl.yaml: 
+"registry.ci.openshift.org/ocp/4.8-2021-0 ... "
+```
+
+A simple inspect of the image should work in this case (https://issues.redhat.com/browse/ART-2763), 
+see also `Can we update os-release to reflect the "full" version of OpenShift?` on cores-devel.
+
+```yaml
+$ skopeo inspect docker://registry.ci.openshift.org/ocp/release:4.8.0-0.ci-2021-03-17-153948 | grep os-image-url
+     "io.openshift.release.os-image-url": "registry.ci.openshift.org/ocp/4.8-2021-03-17-153948@sha256:cb00332da7d29f98990058cbe4376615905cf05857ff81c0cb408ca6365b4196"
+```
+
+From here we can use the annotations without pulling the image:
+
+```yaml
+$ skopeo inspect docker://registry.ci.openshift.org/ocp/4.8-2021-03-17-153948@sha256:cb00332da7d29f98990058cbe4376615905cf05857ff81c0cb408ca6365b4196 | grep kernel
+        "com.coreos.os-extensions": "kernel-rt;kernel-devel;qemu-kiwi;usbguard",
+        "com.coreos.rpm.kernel": "4.18.0-240.15.1.el8_3.x86_64",
+        "com.coreos.rpm.kernel-rt-core": "4.18.0-240.15.1.rt7.69.el8_3.x86_64",
+```
+
+
 
 ### Risks and Mitigations
 
@@ -692,20 +783,21 @@ expectations).
 
 ### Upgrade / Downgrade Strategy
 
-#### Special Resource Driver Updates
+#### Red Hat Kernel ABI
+Red Hat kernels guarantee an stable kernel application binary interface. If modules
+are only using whitelisted symbols then they can leverage weak-updates in the 
+case of an upgrade. An kmod that is build on 8.0 can be easily loaded on all
+subsequent y-stream releases. The weak-update is nothing more than a symlink in
+`lib/modules/..../weak-updates` for the driver. 
 
-Initially, the NFD operator labels the host with the kernel version
-(e.g. 4.1.2). The SRO reads this kernel version and creates a DaemonSet with a
-NodeSelector targeting this kernel version and a corresponding image to pull.
-With the pci-10de label, the DriverContainer will only land on GPU nodes.
+We will extend KVC to check if an out-of-tree driver is able to do weak-updates and
+leverage the weak-modules script (part of RHEL) to create the correct symlinks.
 
-This way we ensure that an image is pulled and placed only on the node where the
-kernel matches. It is the responsibility of the DriverContainer image builder to
-name the image the correct way.
+If the driver is not kABI compatible SRO will create an alert on the console for 
+awareness. 
 
-If an administrator updates the CR with a new driver version will taint the node
-rebuild the DriverContainer and un-taint the node with the new drivers running
-on a node.
+In some rare occassions the kABI can change (CVE, bugs, etc) and hence as a preflight
+check SRO is going to comparte the curent kABI with the kABI coming with the update. 
 
 #### Updates in OpenShift
 
