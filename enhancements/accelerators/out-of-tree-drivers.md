@@ -33,8 +33,9 @@ superseded-by:
 ## Open Questions [optional]
 
 1. Should SRO be CVO or OLM managed, SRO creates an ClusterOperator object for must-gather and better status reporting to customers/developers/users
-2. Should the driver-toolkit container be part of the payload? It should be accessible through registry.redhat.io/openshift4 without a cluster for out-of-tree driver development, testing on prereleases, ... If a customer has a pull-secret for OCP he should be able to pull without "login"
-3. 
+2. Should the driver-toolkit container be part of the payload? It should be accessible through registry.
+redhat.io/openshift4 without a cluster for out-of-tree driver development, testing on prereleases, ... If
+a customer has a pull-secret for OCP he should be able to pull without "login"
 
 ## Summary
 
@@ -120,13 +121,13 @@ for this framework was inspired by the work done by Joe Doss on
 [atomic-wireguard](https://github.com/jdoss/atomic-wireguard). This framework
 relies on 3 independently developed pieces.
 
-1. [The kmods-via-containers code/config](https://github.com/kmods-via-containers/kmods-via-containers)
+(1) [The kmods-via-containers code/config](https://github.com/kmods-via-containers/kmods-via-containers)
 
 Delivers the stencil code and configuration files for building and delivering
 kmods via containers. It also delivers a service `kmods-via-containers@.service`
 that can be instantiated for each instance of the KVC framework.
 
-2. The kernel module code that needs to be compiled
+(2) The kernel module code that needs to be compiled
 
 This repo represents the kernel module code that contains the source code for
 building the kernel module. This repo can be delivered by vendors and generally
@@ -135,7 +136,7 @@ this kernel module via the KVC framework, the owners of the code don't need to
 be consulted. The project provides an
 [example kmod repo](https://github.com/kmods-via-containers/simple-kmod).
 
-3. A KVC framework repo for the kernel module to be delivered
+(3) A KVC framework repo for the kernel module to be delivered
 
 This repo defines a container build configuration as well as a library,
 userspace tools, and config files that need to be created on the host system.
@@ -216,7 +217,6 @@ to the mainline kernel.
 
 ### Goals
 
-
 - A unified way to deploy out-of-tree drivers on OpenShift 4.x on all supported
 Red Hat Operating Systems
 - The solution should avoid rebuilds on every node and allow for distribution of
@@ -248,9 +248,9 @@ DriverContainer. Approximately 5% of the logic behind SRO was used for deploying
 the remaining parts aka stack.
 
 Based on the current SROv1alpha1 we're going to build a new version SROv1beta1 that
-has more functionality focusing on the out-of-tree driver aspect. 
+has more functionality focusing on the out-of-tree driver aspect.
 
-The new version of SRO will have an API update and hence called SROv1beta1 for 
+The new version of SRO will have an API update and hence called SROv1beta1 for
 Tech Preview and will be SROv1 for GA.
 
 ### Combining both approaches
@@ -274,16 +274,15 @@ enablement.
 There are three main parts involved in the enablement of a kernel module. We
 have a specific (1) set of meta information needed for each kernel module, a (2)
 set of manifests to deploy a DriverContainer plus enablement stack and lastly
-(3) a framework running inside the container for managing the kernel module 
+(3) a framework running inside the container for managing the kernel module
 (dkms like functions).
 
-*(1) The metadata are encoded in the CR for a special resource*
+(1) The metadata are encoded in the CR for a special resource
 
-*(2) The manifests with templating functions to inject runtime information
+(2) The manifests with templating functions to inject runtime information
 are the so called recipes*
 
-*(3) This will be done by KVC and some enhancements that will be discussed later*
-
+(3) This will be done by KVC and some enhancements that will be discussed later
 
 The following section will walk one through the enablement of the different
 use-case scenarios. After deploying the operator the first step is to create an
@@ -370,9 +369,9 @@ spec:
 ```
 
 Since SRO will manage several special resources in different namespaces, hence
-the CRD will have cluster scope. The SRO can take care of creating and 
+the CRD will have cluster scope. The SRO can take care of creating and
 deleting of the namespace for the specialresource, which makes cleanup of
-a special resource easy, just by deleting the namespace. Otherwise one would have a 
+a special resource easy, just by deleting the namespace. Otherwise one would have a
 manual step in creating the new namespace before creating the CR for a specialresource.
 If there is no spec.metadata.namespace supplied SRO will set
 the namespace to the CR name per default to separate each resources.
@@ -381,27 +380,24 @@ With the above information SRO is capable of deducing all needed information
 to build and manage a DriverContainer. All manifests in SRO are templates that
 are templatized during reconciliation with runtime and meta information.
 
-Recipes will have a version field to distinguish them between operator upgrades. 
+Recipes will have a version field to distinguish them between operator upgrades.
 An operator upgrade will not create an updated version of the recipe. This can be done by
-editing the CR and updating the version field. 
+editing the CR and updating the version field.
 
-
-##### MachineConfigPools 
+##### MachineConfigPools
 
 There is also an optional field to set a MachineConfigPool per special resource.
 A paused MCP will not be upgraded but all other workers, masters and operators will be.
 
 An upgrade could introduce an incompatibility with the special resource and the kernel.
 The production workload can stay in the paused MCP and an updated special resource
-nodeSelector can be used to deploy the special resource to the upgraded nodes. 
+nodeSelector can be used to deploy the special resource to the upgraded nodes.
 
 SRO can handle different kernel versions in a cluster see [OpenShift Rolling Updates](#OpenShift-Rolling-Updates)
 
-This can reduce application downtime where we would have always a working version running 
+This can reduce application downtime where we would have always a working version running
 in the cluster. If the new upgraded Node can handle the special resoure the MPC can be unpaused
-an the rolling upgrade can be finished. 
-
-
+an the rolling upgrade can be finished.
 
 ```yaml
 metadata:
@@ -485,6 +481,7 @@ only available after the DriverContainer is executed.
       mountPath: "/usr/src/<vendor>-<internal>"
 
 ```
+
 The next section is used to tell SRO where to find build artifacts from other
 drivers. Some drivers need e.g. symbol information from kernel modules, header
 files or the complete driver sources to be built successfully. We are providing
@@ -496,6 +493,7 @@ is to use a DriverContainer image that is already built to get the needed
 artifacts (We are assuming here that the vendor is not exposing any artifacts
 to the host). We can leverage those images in a multi-stage build for the
 DriverContainer.
+
 ```yaml
   nodeSelector:
     key: "feature.../pci-<VENDOR_ID>.present"
@@ -516,12 +514,14 @@ For the case when no external or internal repository is available or in a
 disconnected environment, SRO can consume also sources from a PVC. This makes
 it easy to provide SRO with packages or artifacts that are only available
 offline.
+
 ```yaml
   dependsOn:
     - name: <CR_NAME_VENDOR_ID_SROv2>
       imageReference: "true"
     - name: <CR_NAME_VENDOR_ID_KJI>
 ```
+
 There are kernel-modules that are relying on symbols that another kernel-module
 exports which is also handled by SRO. We can model this dependency by the
 dependsOn tag. Multiple SRO CR names can be provided that have to be done
@@ -535,7 +535,6 @@ dependency, SRO will take care of it.
 If special resource *A* uses a container image from another special resource *B*
 e.g using it as a base container for a build, SRO will setup the correct RBAC
 rules to make this work.
-
 
 ```yaml
     buildArgs:
@@ -591,11 +590,6 @@ runtime problems. Metrics could expose resource consumption, because some of the
 DriverContainers are also shipping daemons and helper tools that are needed to
 enable the hardware.
 
-
-
-
-
-
 ### User Stories [optional]
 
 #### Story 1: Day-2 DriverContainer Kernel Module
@@ -637,7 +631,6 @@ of loading. Specific build artifacts need to be available during the build not
 for loading. These artifacts can be available in another DriverContainer or
 extracted during runtime.
 
-
 ### Implementation Details/Notes/Constraints
 
 DriverContainers need at least the following packages:
@@ -677,65 +670,71 @@ ImageContentSourcePolicy, currently only pulling by digest works, we cannot pull
 by label now. We need to accommodate this in the naming scheme of a
 DriverContainer.
 
-
 #### The driver-toolkit container
 
 The handling of repositories and extracting RPMs from the the machine-os-content
-can be a complex task. To make this easier SRO builds a driver-toolkit base container
-for easier out-of-tree driver building. This base container has the right kernel versions
-that are needed for a specific OpenShift release. 
+can be a complex task. To make this easier SRO builds a driver-toolkit base
+container for easier out-of-tree driver building. This base container has the
+right kernel versions that are needed for a specific OpenShift release.
 
-This container should be preferrably being build by ART and pushed to the 
-registry.redhat.io/openshift4 registry. The build should be done on all z-stream releases
-and nightlies to cover pre-release testing of customers and to catch any changes of 
-the kernel between releases. 
+This container should be preferrably being build by ART and pushed to the
+registry.redhat.io/openshift4 registry. The build should be done on all z-stream
+releases and nightlies to cover pre-release testing of customers and to catch
+any changes of the kernel between releases.
 
-Customers that want to build out-of-tree drivers would not need entitlements per se and would
-have all needed RPMs at hand. This container should be externally accessible to be used 
-in customer CI/CD pipelines that do not need a full cluster installation. 
+Customers that want to build out-of-tree drivers would not need entitlements per
+se and would have all needed RPMs at hand. This container should be externally
+accessible to be used in customer CI/CD pipelines that do not need a full
+cluster installation.
 
-This base container could also be used as the base for developers as a prototyping and testing
-tool in the pre-release phase. Tested drivers with a pre-release would make sure that when a
-OpenShift version goes GA the customer has already tested several version before the date. 
+This base container could also be used as the base for developers as a
+prototyping and testing tool in the pre-release phase. Tested drivers with a
+pre-release would make sure that when a OpenShift version goes GA the customer
+has already tested several version before the date.
 
-There could be several z-stream releases with the very same kernel but there wouldn't be a 
-single z-stream with different kernels. 
+There could be several z-stream releases with the very same kernel but there
+wouldn't be a single z-stream with different kernels.
 
-Currently the driver-toolkit by ART can only be tagged with the OpenShift "full" version (x.y.z).
-Meaning currently it is not easy to relate a specific driver-toolkit:vX.Y.Z to a specific node
-that could be in different versions in the cluster depending on the state of MCPs. 
+Currently the driver-toolkit by ART can only be tagged with the OpenShift "full"
+ version (x.y.z). Meaning currently it is not easy to relate a specific
+ driver-toolkit:vX.Y.Z to a specific node that could be in different versions in
+ the cluster depending on the state of MCPs.
 
-For building the driver-toolkit on the cluster as a fallback solution, if we do not have a recent
-build, the other problematic is that we cannot easily relate the correct m-o-c of the nodes. 
+For building the driver-toolkit on the cluster as a fallback solution, if we do
+not have a recent build, the other problematic is that we cannot easily relate
+the correct m-o-c of the nodes.
 
-The proposal is to create an annotation on the release-paylod to the machine-os-content. 
-The machine-os-content has already the kernel version annotation. 
+The proposal is to create an annotation on the release-paylod to the
+machine-os-content. The machine-os-content has already the kernel version
+annotation.
 
 ```json
 release-payload:4.7.2 -> moc:8.3 -> kernel-4.20
 release-payload:4.7.0 -> moc:8.2 -> kernel-4.19
 
-mcp0: node -> kernel-4.20 
+mcp0: node -> kernel-4.20
 mcp1: node -> kernel-4.19
 ```
 
-The *primary key* of those two datasets would be the kernel. This would also solve the issue of
-finding the right m-o-c for a specific release. The extensions are used to build on cluster as a
-fallback solution if the driver-toolkit container is not available, e.g. for an early nightly build. 
+The *primary key* of those two datasets would be the kernel. This would also
+solve the issue of finding the right m-o-c for a specific release. The
+extensions are used to build on cluster as a fallback solution if the
+driver-toolkit container is not available, e.g. for an early nightly build.
 
-Otherwise I would need to do the following, I am aware of the oc adm ... command but this literally
-pulls the container, mounts it and reads the manifest to print out the osImage URL.
-
+Otherwise I would need to do the following, I am aware of the `oc adm ...`
+command but this literally pulls the container, mounts it and reads the manifest
+to print out the osImage URL.
 
 ```yaml
 $ CNT=`buildah from registry.ci.openshift.org/ocp/release:4.8.0-0.ci-2021-03-17-153948`
 $ MNT=`buildah mount $CNT`
-$ yq  '.data.osImageURL' $MNT/release-manifests/0000_80_machine-config-operator_05_osimageurl.yaml: 
+$ yq  '.data.osImageURL' $MNT/release-manifests/0000_80_machine-config-operator_05_osimageurl.yaml:
 "registry.ci.openshift.org/ocp/4.8-2021-0 ... "
 ```
 
-A simple inspect of the image should work in this case (https://issues.redhat.com/browse/ART-2763), 
-see also `Can we update os-release to reflect the "full" version of OpenShift?` on cores-devel.
+A simple inspect of the image should work in this case
+[ART-2763](https://issues.redhat.com/browse/ART-2763), see also `Can we update
+os-release to reflect the "full" version of OpenShift?` on cores-devel.
 
 ```yaml
 $ skopeo inspect docker://registry.ci.openshift.org/ocp/release:4.8.0-0.ci-2021-03-17-153948 | grep os-image-url
@@ -750,8 +749,6 @@ $ skopeo inspect docker://registry.ci.openshift.org/ocp/4.8-2021-03-17-153948@sh
         "com.coreos.rpm.kernel": "4.18.0-240.15.1.el8_3.x86_64",
         "com.coreos.rpm.kernel-rt-core": "4.18.0-240.15.1.rt7.69.el8_3.x86_64",
 ```
-
-
 
 ### Risks and Mitigations
 
@@ -784,20 +781,23 @@ expectations).
 ### Upgrade / Downgrade Strategy
 
 #### Red Hat Kernel ABI
-Red Hat kernels guarantee an stable kernel application binary interface. If modules
-are only using whitelisted symbols then they can leverage weak-updates in the 
-case of an upgrade. An kmod that is build on 8.0 can be easily loaded on all
-subsequent y-stream releases. The weak-update is nothing more than a symlink in
-`lib/modules/..../weak-updates` for the driver. 
 
-We will extend KVC to check if an out-of-tree driver is able to do weak-updates and
-leverage the weak-modules script (part of RHEL) to create the correct symlinks.
+Red Hat kernels guarantee an stable kernel application binary interface. If
+modules are only using whitelisted symbols then they can leverage weak-updates
+in the case of an upgrade. An kmod that is build on 8.0 can be easily loaded on
+all subsequent y-stream releases. The weak-update is nothing more than a symlink
+in `lib/modules/..../weak-updates` for the driver.
 
-If the driver is not kABI compatible SRO will create an alert on the console for 
-awareness. 
+We will extend KVC to check if an out-of-tree driver is able to do weak-updates
+and leverage the weak-modules script (part of RHEL) to create the correct
+symlinks.
 
-In some rare occassions the kABI can change (CVE, bugs, etc) and hence as a preflight
-check SRO is going to comparte the curent kABI with the kABI coming with the update. 
+If the driver is not kABI compatible SRO will create an alert on the console for
+awareness.
+
+In some rare occassions the kABI can change (CVE, bugs, etc) and hence as a
+preflight check SRO is going to comparte the curent kABI with the kABI coming
+with the update.
 
 #### Updates in OpenShift
 
