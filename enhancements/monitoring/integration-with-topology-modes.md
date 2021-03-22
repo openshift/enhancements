@@ -159,12 +159,12 @@ proposal, in-place upgrades are a non-goal right now.
 
 ### Version Skew Strategy
 
-If CMO can't find the `infrastructures.config.openshift.io/cluster` resource or
-reads a value that is neither equal to `HighAvailable` nor `SingleReplica`, it
+If CMO reads a value from the `infrastructures.config.openshift.io/cluster`
+resource that is neither equal to `HighAvailable` nor `SingleReplica`, it
 considers that the topology is `HighAvailable`.
 
-If CMO gets any error other than `404 Not Found` while reading the resource, it
-errors out and retries.
+If CMO gets any error while reading the resource, it errors out and retries
+with a delay (as for any failure to synchronize the operands).
 
 ## Implementation History
 
