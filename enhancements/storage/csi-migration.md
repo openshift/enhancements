@@ -53,6 +53,8 @@ For GA, existing in-tree volumes will be migrated to use the CSI driver. Once th
 
 We propose to add a carry-patch to the Attach Detach Controller in OCP that enables the migration of some storage plugins. Initially we would start with Cinder and GCP, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
 
+In addition to that, we propose to utilize the existing **TechPreviewNoUpgrade** *FeatureSet* to switch the feature on and off during the Tech Preview phase.
+
 ### Implementation Details/Notes/Constraints
 
 Before getting to our proposal, we need to describe some of the upstream requirements for using CSI Migration.
@@ -105,9 +107,9 @@ It is important to notice that, with this carry-patch in OCP, Attach Detach Cont
 
 #### Graduation
 
-During Tech Preview in OCP 4.8, users can enable the CSI migration using a *FeatureSet*. It could be shared with [CCMO](https://github.com/openshift/enhancements/pull/463), but we may want to have a specific *FeatureSet* only for CSI Migration for users that want to enable CSI Migration without migrating to an external cloud provider.
+During the Tech Preview phase in OCP 4.8, users can enable and disable the CSI migration feature using the **TechPreviewNoUpgrade** *FeatureSet*. Among other things, this *FeatureSet* switches the complete [Cloud Migration](https://github.com/openshift/enhancements/pull/463) in OCP 4.8.
 
-Once CSI migration reaches GA in upstream, the associated feature gates will be enabled by default. As a result, it will remove the carry-patch above. Also, users will not have to use *FeatureSets* anymore.
+Once CSI migration of all storage plugins reaches GA in upstream, the associated feature gates will be enabled by default in OCP. As a result, we will remove the carry-patch we introduced in OCP 4.8. Also, users will not have to use the **TechPreviewNoUpgrade** *FeatureSet* anymore.
 
 ### Risks and Mitigations
 
