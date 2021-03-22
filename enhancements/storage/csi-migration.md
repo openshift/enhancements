@@ -107,7 +107,31 @@ It is important to notice that, with this carry-patch in OCP, Attach Detach Cont
 
 #### Graduation
 
-During the Tech Preview phase in OCP 4.8, users can enable and disable the CSI migration feature using the **TechPreviewNoUpgrade** *FeatureSet*. Among other things, this *FeatureSet* switches the complete [Cloud Migration](https://github.com/openshift/enhancements/pull/463) in OCP 4.8.
+During the Tech Preview phase in OCP 4.8, users can enable and disable the CSI migration feature using the **TechPreviewNoUpgrade** *FeatureSet*. Among other things, this *FeatureSet* switches the complete [Cloud Migration](https://github.com/openshift/enhancements/pull/463) in OCP 4.8. Here is a configuration example:
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: FeatureGate
+metadata:
+  name: cluster
+spec:
+  featureSet: TechPreviewNoUpgrade
+```
+
+Optionally, users can enable the CSI Migration *without* enabling the Cloud Migration by using the **CustomNoUpgrade** *FeatureSet*. Here is a configuration example to enable the migration for AWS EBS:
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: FeatureGate
+metadata:
+  name: cluster
+spec:
+  featureSet: CustomNoUpgrade
+  customNoUpgrade:
+    enabled:
+    - CSIMigrationAWS
+```
+
 
 Once CSI migration of all storage plugins reaches GA in upstream, the associated feature gates will be enabled by default in OCP. As a result, we will remove the carry-patch we introduced in OCP 4.8. Also, users will not have to use the **TechPreviewNoUpgrade** *FeatureSet* anymore.
 
