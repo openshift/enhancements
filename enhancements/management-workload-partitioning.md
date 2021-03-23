@@ -346,9 +346,12 @@ and
 
 ```yaml
 annotations:
-  cpu.workload.openshift.io/container-name: 400m
+  io.openshift.workload.management.cpu/container-name: 400m
 ```
 
+As a special case, kubelet and the API admission hook should strip any
+annotations from pods trying to set the "cpuset" resource. See the
+next section for more details.
 
 #### CRI-O Changes
 
@@ -359,24 +362,45 @@ CRI-O will be updated to support new configuration settings for workload types.
 
 ```ini
 [crio.runtime.workloads.{workload-type}]
-  cpu_set = "0-1"
   label = "workload.openshift.io/target={workload-type}"
+  resource_annotation_prefix = "io.openshift.workload.{workload-type}"
+  resources = {
+    "cpu": "",
+    "cpuset": "0-1",
+  }
 ```
 
-The `cpu_set` field describes the CPU set that workloads will be
-configured to use, based on their type.
+The `label` field is used to match pods that should be treated as
+having the workload type. The label key on the pod is compared for an
+exact match against the value specified in the configuration file.
 
-The `annotation` field gives the annotation prefix used to match pods
-to the workload type. Specifying this in the configuration file makes
-it easier to change later and keeps OpenShift-specific values out of
-CRI-O.
+The `resource_annotation_prefix` is the start of the annotation key
+used to pass settings down to CRI-O.
+
+The `resources` map associates annotation suffixes with default
+values. CRI-O will define a well-known set of resources and other
+values will not be allowed. In OpenShift, we do not want to allow
+arbitrary pods to set their own `cpuset` but other CRI-O users may
+want that ability.
+
+To pass a setting into CRI-O, the pod should have an annotation made
+by combining the `resource_annotation_prefix`, the key from
+`resources`, and the container name, like this:
+
+```
+io.openshift.workload.management.cpu/container_name = {value}
+```
 
 In the management workload case, we will configure it with values like
 
 ```ini
 [crio.runtime.workloads.management]
-  cpu_set = "0-1"
   label = "workload.openshift.io/target=mangement"
+  resource_annotation_prefix = "io.openshift.workload.management"
+  resources = {
+    "cpu": "",
+    "cpuset": "0-1",
+  }
 ```
 
 CRI-O will be configured to support a new annotation on pods,
