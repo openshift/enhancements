@@ -112,10 +112,6 @@ bogged down.
 
 Include a story on how this proposal will be operationalized:  lifecycled, monitored and remediated at scale.
 
-#### Story 1
-
-#### Story 2
-
 ### Implementation Details/Notes/Constraints [optional]
 
 What are the caveats to the implementation? What are some important details that
