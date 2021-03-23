@@ -82,7 +82,7 @@ available in the `pull-secret` (in the `openshift-config` namespace)
 
 ### Data in API
 
-The SCA certificate is available via the `simple-content-access-cert` secret in the `openshift-config-managed` namespace
+The SCA certificate is available via the `etc-pki-entitlement` secret in the `openshift-config` namespace
 
 ### Open questions
 - How often should the Insights Operator query the OCM API? Every 4 hours? Do we always need to download the full SCA cert data?
