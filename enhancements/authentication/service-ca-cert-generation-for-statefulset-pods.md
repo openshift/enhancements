@@ -99,7 +99,7 @@ Once the secret is generated, users can scale the StatefulSet with no change to 
 
 To ensure that a compromised StatefulSet pod can’t impersonate other pods from the
 same StatefulSet,
-or any other pods attached ot the same headless service
+or any other pods attached to the same headless service
 (if this goal is achievable for the application,
 i.e. if the pods treat the intra-StatefulSet communication as untrusted
 and can plausibly protect against a rogue StatefulSet member):
@@ -132,16 +132,16 @@ Second best is to rely on known properties of the environment,
 i.e. to assume that 127.0.0.1 is localhost-only
 and to use a non-TLS connection on that address.
 
-If a _pod_ had to use TLS for localhost for some reason, the closest to a right way to do that
+If a pod _had_ to use TLS for localhost for some reason, the closest to a right way to do that
 (relying on TLS to verify that only loopback connections happen) is to:
-- Create a temporary CA (specific to the individual pod for)
-- Generate, and have that CA sign a localhost certificate (specific to the individual pod)
+- Create a temporary CA (specific to the individual pod)
+- Generate, and have that CA sign, a localhost certificate (specific to the individual pod)
 - Set up the CA certificate as a trusted root
-- _Irreversibly erase_ the CA private key
+- (Irreversibly erase the CA private key to minimize risk)
 - Set up the pod with the generated localhost certificate+private key.
 - (This doesn’t benefit from service-ca involvement at all.)
 
-Similarly single-purpose CA could be set up for NodeIP services
+Similarly, a single-purpose CA could be set up for NodeIP services
 (if it makes sense to connect to node IP addresses directly at all)
 so that the client connects to the desired NodeIP service
 instead of to any NodeIP service.
@@ -150,9 +150,7 @@ instead of to any NodeIP service.
 
 The only mitigations for the risks below are not to use this feature,
 (and prevent untrusted users from using it — using an admission controller?)
-so that the wildcard certificate is not created at all,
-or perhaps $somehow ensure that any users/code with access to the wildcard certificate
-is not likely to be compromised.
+so that the wildcard certificate is not created at all.
 
 #### Unexpected DNS Collisions in the Future
 
@@ -193,28 +191,9 @@ to include the wildcard subjects, if they are missing.
 
 ### Graduation Criteria
 
-#### Dev Preview -> Tech Preview
+N/A, just a code change to the Service CA.
 
-- Ability to utilize the enhancement end to end
-- End user documentation (TBD: where?)
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-- Enumerate service level indicators (SLIs), expose SLIs as metrics
-  TBD?
-- Write symptoms-based alerts for the component(s)
-  TBD?
-
-#### Tech Preview -> GA
-
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-- Backhaul SLI telemetry
-  TBD?
-- Document SLOs for the component
-  TBD?
-- Conduct load testing
-  TBD?
+TBD: End-user documentation.
 
 ### Upgrade / Downgrade Strategy
 
@@ -223,17 +202,9 @@ requested for headless services.
 The previously-generated certificates will continue to be valid for their original lifetime,
 and previously-deployed components can continue to use them as before.
 
-If the upgrade to the first version that generates the wildcards
-also included an operator relying on this functionality,
-and the old version of the Service CA were still running,
-only the old version of the secret (with no wildcards) would be generated,
-and that could lead to surprising outcomes for a StatefulSet relying on the wildcard.
-Eventually, after the Service CA is upgrades,
-it will re-generate the secret to include the wildcard subjects.
-
-So, OpenShift components can either not use this feature until x.N+2,
-or design their StatefulSets to fail/wait until the Service CA is upgraded
-and a new wildcard certificate is available.
+No OpenShift components are expected to start using this feature until
+the minor version following the introduction of this feature,
+so version skew is not a current concern.
 
 Previous versions of the Service CA do not check subjects of the generated secrets
 (only that the secrets are signed by the currently-valid service CA root),
@@ -290,37 +261,6 @@ both creating the StatefulSet pods and a secret creation/update,
 which race against each other;
 So, the pods would have to explicitly account for that race,
 by failing, or waiting, if a certificate for their identity is not found.
-
-### Generate Multi-Service Certificates
-So that applications can simply use a single certificate on all listening ports,
-generate a single certificate that signs multiple ~unrelated services as subjects
-(combining the StatefulSet per-pod subjects and ClusterIP services,
-or a ClusterIP service with NodePort service),
-
-In the most general case, this is not possible to do using the current annotation approach,
-because services choose pods by pod labels,
-i.e. the set of services served by a single pod at once (which require a shared certificate)
-can only be determined once such a pod is created —
-and at that point it’s too late to generate a certificate for that pod.
-So, this would require defining a new Custom Resource
-that allows the user to define service combinations to be signed
-(and the user would be resposible for requesting the necessary service combinations).
-
-Generating multi-subject certificates also makes it more difficult
-to reason about security properties and to change service routing:
-once a single certificate for (serviceA+serviceB) exists,
-even if the implementation is later changed
-by moving serviceB to a separate set of pods,
-a compromised pod with access to the earlier combined certificate
-would allow an attacker to continue to impersonate both serviceA and serviceB
-(e.g. because the Service CA does not currently allow revoking certificates).
-
-If the different services are served on different ports,
-they can trivially use different certificates.
-
-Even for a single port exposed via the different services,
-the server should be able to use different certificates based on SNI nowadays
-(e.g. via https://golang.org/pkg/crypto/tls/#Config.Certificates ).
 
 ## Infrastructure Needed [optional]
 
