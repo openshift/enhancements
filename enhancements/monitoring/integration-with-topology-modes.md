@@ -163,8 +163,12 @@ If CMO reads a value from the `infrastructures.config.openshift.io/cluster`
 resource that is neither equal to `HighAvailable` nor `SingleReplica`, it
 considers that the topology is `HighAvailable`.
 
-If CMO gets any error while reading the resource, it errors out and retries
-with a delay (as for any failure to synchronize the operands).
+If CMO gets any error while reading the resource:
+* If it has never been able to read the resource/see a topology config (due to
+  error or missing value) it defaults to `HighAvailable`.
+* If it has previously determined the topology, but now can't read the topology
+  (i.e. during a resync/relist), it remains on whatever topology it last was
+  able to determine.
 
 ## Implementation History
 
