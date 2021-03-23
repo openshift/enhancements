@@ -41,6 +41,9 @@ This design fixes that problem and ensures that both PVs and symlinks are remove
 * Do not allow deletion of `LocalVolumeSet` object if it has bound PVCs.
 * Remove unbound PVs and remove symlinks on the host if `LocalVolume` or `LocalVolumeSet` objects are removed.
 
+Note: We already do not permit deletion of `LocalVolume` objects via finalizer if it has bound PVCs. This was difficult to implement correctly for `LocalVolumeSet` objects because local-static-provisoner was being used as a daemon and tracking of individual PVs was not possible. This is discussed in more detail in - https://github.com/openshift/local-storage-operator/pull/150#discussion_r492828334
+
+
 ### Non-Goals
 
 * There is another use-case that this design does not solve is - editing of `LocalVolume` and `LocalVolumeSet` objects. If user edits LSO CRs in such a manner that - a node which was previously selected is no longer included via
@@ -48,19 +51,47 @@ node-selector or if CR excludes a device which was previously used for local-sto
 
 ## Proposal
 
-1. We propose that when `LocalVolume` or `LocalVolumeSet` object is created - they both contain a finalizer (`LocalVolume` object already has a finalizer). In addition we propose that - when user deletes these objects then finalizer can only be removed:
-   a. If there are no bound PVs that are created by this LSO CR.
-   b. None of the existing PVs(that match LSO CR) should have reclaim policy of `Retain.`
-   c. If there are unbound PVs with reclaimPolicy of `Delete` then finalizer should not be removed until all such PVs are deleted.
+The reason we simply can not remove PVs and delete symlinks on the hosts is - a naive procedure is race prone. A PV that is being cleaned up can be claimed by a PVC and hence can result in data loss.
 
-2. If `LocalVolume` or `LocalVolumeSet` object can not be deleted because of #1.a or #1.b - then appropriate event should be logged and user should be informed. LSO is not going to perform any cleanup of bound PVs or PVs with `Retain` reclaim policy.
-3. Before we can remove finalizer from LSO managed CRs, we should ensure deletion of created unbound PVs. To do that:
-   a. First we should make all unbound PVs `Released` so as they can't be bound to PVCs. This will be done by control-plane of LSO.
-   b. After making sure all unbound PVs for a deleted LSO CR are released, control-plane of LSO will wait for all such PVs to be deleted before removing the finalizer.
-4. On the node if a `LocalVolume` or `LocalVolumeSet` objects is being deleted (i.e has `deletionTimestamp`) then - control-loop running on the node will stop "resyncing" the PV objects on the node, so as control-plane can mark them as released.
-5. On the node if a `LocalVolume` or `LocalVolumeSet` object is being deleted and its PVs are in `Released` status then - node side control-loop should scrub the device, remove the symlink on the node and then delete the PV.
-6. Once LSO's control-plane detects that all PVs created by LSO CR is deleted, it would remove the finalizer and related objects.
+### Prevent deletion of `LocalVolume` and `LocalVolumeSet` objects with PVs
+
+As a first step - we propose that both `LocalVolume` and `LocalVolumeSet` objects contain a finalizer which will prevent deletion of these objects and LSO will only remove the finalizer when all
+PVs created by these objects are removed.  This serves two purpose:
+
+1. It will prevent accidental deletion of `LocalVolume` and `LocalVolumeSet` objects.
+2. It will give LSO opportunity to cleanup the provisioned volumes before `LocalVolume` and `LocalVolumeSet` objects can be deleted.
+
+In addition we propose that bound PVs or Released PVs with `Retain` policy will actively prevent deletion of `LocalVolume` and `LocalVolumeSet` objects.
+No automatic cleanup will be possible in that case and events should be added to LSO CRs that inform the user about PVs that are blocking deletion of `LocalVolume` and `LocalVolumeSet` objects.
+
+* For Bound PVs, user should delete the corresponding PVC to get the PV Released.
+* For Released PVs with reclaim policy "Retain", user should back up any important data from the volume and delete the PV.
+
+
+### Automatic cleanup of available/pending PVs and symlinks by LSO
+
+In this proposal we only seek removal of available/pending PVs that were provisioned by LSO, when corresponding `LocalVolume` and `LocalVolumeSet` object is deleted. To accomplish this in a manner that
+would be free from potential race conditions, following steps needs to be performed by LSO:
+
+#### 1. Mark available PVs as released in LSO control-plane
+
+If `LocalVolume` or `LocalVolumeSet` has `deletionTimestamp` then control-plane of LSO should reconcile all PVs created by these objects and ensure that available PVs are marked as `Released`.
+This would prevent binding of these PVs to any incoming PVCs.
+
+#### 2. Cleanup of volumes, symlinks and PVs on the node
+
+Currently reconciler loop running on the node re-creates PVs as long as a symlink for the given device exists in the LSO's pre-configured directory. When PV is marked as `Released` in step#1, the
+static provisioner code will automatically scrub the volume and delete the PV and hence changes required in reconciler loop of node daemon is:
+
+1. If `LocalVolume` or `LocalVolumeSet` object is being deleted (has `deletionTimestamp`), it will not create new symlinks for automatically discovered volumes that match CR's device selection criteria.
+2. If `LocalVolume` or `LocalVolume` object is being deleted and symlink being evaluated exists but corresponding PV does not, then rather than creating new PV - it will remove the associated symlink.
+
+This would ensure that diskmaker daemon on the node will remove symlinks and PVs that belong to CR that is being deleted.
+
+#### 3. Remove finalizer from CR if no PV exists for given CR in LSO control-plane
+
+In the control-plane of LSO if a CR is being deleted and has no associated PVs, the finalizer that prevents deletion of these CRs will be removed and hence associated `LocalVolume` and `LocalVolumeSet` objects will be deleted and successfully cleaned up.
 
 ## Drawbacks
 
-One drawback is - if user wants to keep one or more PVs around (in case they have data on it) and still delete the `LocalVolume` or `LocalVolumeSet` object - this design will not allow such flow. Also this change would result in data being wiped off from previously created PVs, which could surprise some users.
+One drawback is - if user wants to keep one or more PVs around (in case they have data on it) and still delete the `LocalVolume` or `LocalVolumeSet` object - this will require users to set `ReclaimPolicy` of `Retain` on those PVs, before deleting `LocalVolume` or `LocalVolumeSet` objects and then using force delete to delete those objects.
