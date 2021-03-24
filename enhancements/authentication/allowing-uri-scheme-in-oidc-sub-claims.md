@@ -39,7 +39,8 @@ providers that use the URI scheme in the `sub` claim of their ID tokens.
 Per the [OIDC specification](https://openid.net/specs/openid-connect-core-1_0-final.html#IDToken)
 of the ID token and its more thorough details described in
 [RFC7519 - JSON Web Token (JWT)](https://tools.ietf.org/html/rfc7519#section-4.1.2),
-the `sub` claim may be represented as both a string or a URI. However, URI by
+the `sub` claim may be represented as both a string or a URI (as defined by the above RFC,
+URI is any string containing a `:`). However, URI by
 definition may contain characters such as `/` and `:` that are hard to digest
 for the `identity.oauth.openshift.io` API, which prevents integration with OIDCs
 that make use of this URI scheme. However, an identity provider that follows all
@@ -57,12 +58,24 @@ None.
 
 ## Problem Summary
 
-With OpenShift 4.x, the oauth-server no longer allows [configuring the claim
+With OpenShift 4.x, the OAuth configuration no longer allows [specifying the claim
 of ID tokens](https://github.com/openshift/api/blob/670ac3fc997c2f1d19b8c29ef04f70d6e3d4a59e/osin/v1/types.go#L341)
 retrieved from the OIDC provider to use as the unique identifier
-for the given user. This identifier is later used to construct the name of an
-`Identity` object that describes the mapping between the identity provider the
-user is a member of, and the user.
+for the given user. Allowing this configuration might end up in
+users configuring this to fields that either:
+
+- could be manually changed by the user on the OIDC provider side
+- was not unique per the configured client
+
+The OIDC specification directly specifies the `sub` claim of ID tokens
+to be the perfect candidate for use as an identifier, which is therefore
+enforced in 4.x in order to prevent the above issues.
+
+This identifier from an ID token's `sub` claim retrieved by OpenShift is used to
+construct the name of an `Identity` object that describes the mapping between
+the identity provider the user is a member of, and the user. It can also
+be used as the name of the respective `User` object if the claim for preferred
+username is not configured.
 
 The name of the `Identity` object is constructed by using the following pattern:
 
@@ -70,7 +83,7 @@ The name of the `Identity` object is constructed by using the following pattern:
 <identity provider name from config>:<unique user identifier from the identity provider>
 ```
 
-This naming is further validated so that neither the username, nor the identity provider
+This naming is validated so that neither the username, nor the identity provider
 name may contain the `:` character, and, according to Kubernetes naming schemes,
 neither can also contain the `/` sign, yet both of these commonly appear as a
 part of URI/URL schemes.
@@ -83,24 +96,24 @@ It is apparent that these will need to be encoded in a certain way. Simply encod
 a `sub` claim won't do as that would break authentication for any OIDC user
 that had its `Identity` created prior to the version containing this fix.
 
-Proposal: if a `sub` claim of an ID token contains either `:` or `/`, url-encode
+Proposal: if a `sub` claim of an ID token contains either `:` or `/`, base64-encode
 the value of the claim and create the new identity object like so:
 
 ```yaml
 apiVersion: user.openshift.io/v1
 kind: Identity
 metadata:
-  name: <identity provider name>:url:<url-encoded sub claim value>
+  name: <identity provider name>:b64:<base64--encoded sub claim value>
 providerName: <identity provider name>
-providerUserName: <url-encoded sub claim value>
+providerUserName: <base64-encoded sub claim value>
 user:
-  name: <preferred username || url-encoded sub claim value>
+  name: <preferred username || b64:b64-encoded sub claim value>
   uid: <as usual>
 ```
 
 Notice the naming scheme change where the `Identity` object name now consists of
 three sections instead of previous two. The additional section simply contains
-`url` to mark the encoding scheme used in the third section of the name.
+`b64` to denote the encoding scheme used in the third section of the name.
 
 The username of the user object also needs to be an encoded `sub` claim value if
 a preferred username is not configured for the identity provider.
@@ -119,15 +132,15 @@ OpenShift.
 When creating a user and an identity object, the oauth-server will have to check
 whether the username it retrieved from the third-party authentication logic contains
 either of `:` or `/`, and if it does, follow the naming scheme from [Proposal](#proposal),
-that is, url-encode the username for `User` objects for the object name, and
-url-encode the username and prepend it with `url:` to use as a username in the
+that is, base64-encode and prepend with `b64:` the username for `User` objects
+to the object name, and store it the same as a username in the
 `Identity` object naming scheme.
 
 #### oauth-apiserver
 
 Validation of the names of the `Identity` objects need to be loosened in order
 to allow three sections separated by the `:` character, where the only allowed
-value for the second section is `url`.
+value for the second section is `b64`.
 
 ### Risks and Mitigations
 
