@@ -40,7 +40,8 @@ to allow TLS-protected connections to individual StatefulSet pods.
 
 StatefulSet-managed pods often need to communicate with each other,
 or may be directly accessed by clients.
-This traffic may need to be TLS-protected; because it is cluster-internal,
+This traffic may need to be TLS-protected;
+because the intra-StatefulSet communication is cluster-internal,
 and necessary for deploying such a StatefulSet, letting the cluster automatically
 manage the certificates is a natural extension to the same feature already
 provided by the Service CA to allow TLS use with services.
@@ -57,7 +58,7 @@ without having to manually generate certificates for these pods.
   (See discussion in “Implementation Details/Notes/Constraints”)
 
 - Provide individual certificates that uniquely identify individual pods in the StatefulSet,
-  protecting the intra-StatefulSet communication against re-routing to unintended members
+  protecting connections to the StatefulSet against re-routing to unintended members
   of that StatefulSet
   (or to a different StatefulSet attached to the same headless service).
 
@@ -82,7 +83,7 @@ served in DNS for endpoints of that service
 
 #### Creating a TLS-protected StatefulSet
 
-**Note:** This only ensures that the communication happens between members of the StatefulSet,
+**Note:** This only ensures that the communication is made to a member of the StatefulSet,
 it does not provide individual identity.
 
 - The user creates/annotates a headless service with
@@ -171,7 +172,7 @@ but can’t be ruled out in advance.
 
 #### No Individual Pod Identity
 
-The wildcard certificate does not protect the intra-StatefulSet communication
+The wildcard certificate does not protect the connections to the StatefulSet
 against re-routing to unintended members of that StatefulSet
 (or to a different StatefulSet attached to the same headless service).
 
@@ -221,8 +222,8 @@ See above for the case of OpenShift components relying on wildcard certificates.
 
 ## Implementation History
 
-PR to generate wildcard certificates: TBD
-WIP PR to generate strict pod identities: https://github.com/openshift/service-ca-operator/pull/144
+PR to generate wildcard certificates: https://github.com/openshift/service-ca-operator/pull/149
+(Alternative WIP PR to generate strict pod identities: https://github.com/openshift/service-ca-operator/pull/144 )
 
 ## Drawbacks
 
