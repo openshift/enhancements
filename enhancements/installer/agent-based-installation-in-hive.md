@@ -13,7 +13,7 @@ reviewers:
 approvers:
   - "@markmc"
 creation-date: 2020-12-22
-last-updated: 2021-03-15
+last-updated: 2021-03-24
 status: implementable
 see-also:
   - enhancements/installer/connected-assisted-installer.md
@@ -199,6 +199,11 @@ existing REST API. In the future that may transition to using a CRD directly.
 In the meantime, status will be propagated to the appropriate k8s resource when
 an agent reports relevant information.
 
+New API resources will have a group name similar to
+`agentinstall.openshift.io`, though the final name is subject to change. For
+any cases where a well-known label or annotation key needs to be used, the key
+will have the same group name.
+
 **InstallEnv**
 This new resource, part of the assisted intaller's new operator, represents an
 environment in which a group of hosts share settings related to networking,
@@ -380,10 +385,10 @@ approach.
 1. Infra Owner creates BareMetalHost resources with corresponding BMC credentials. They must be labeled so that they match the selctor on the InstallEnv and must be in the same namespace as the InstallEnv.
 1. A new controller, the Baremetal Agent Controller, sees the matching BareMetalHosts and boots them using the discovery ISO URL found in the InstallEnv's status.
 1. The Agent starts up on each host and reports back to the assisted service, which creates an Agent resource in the same namespace as the InstallEnv. The Agent is automatically labeled with the labels that were specified in the InstallEnv's Spec.
-1. The Baremetal Agent Controller sets the Agent's Role field in its spec to "master" or "worker" if a corresponding label was present on its BareMetalHost.
+1. The Baremetal Agent Controller sets the Agent's Role field in its spec to "master" or "worker" if a corresponding label was present on its BareMetalHost. A well-known label key such as `agentinstall.openshift.io/role` will be used.
 1. The Baremetal Agent Controller marks the Agent as Approved via a field in its Spec based on being recognized as running on the known BareMetalHost. As an implementation detail, that recognition is currently based on matching a MAC address.
 1. The Agent runs through the validation and inspection phases. The results are shown on the Agent's Status, and eventually a condition marks the Agent as "ready".
-1. Cluster Creator creates a ClusterDeployment describing a new cluster. It describes how many control-plane and worker agents to expect. It also includes a label selector to match Agent resources that should be part of the cluster.
+1. Cluster Creator creates a ClusterDeployment describing a new cluster. It describes how many control-plane and worker agents to expect. It also includes a label selector to match Agent resources that can be part of the cluster.
 1. Cluster Creator or Infra Owner adds a reference to the ClusterDeployment onto the InstallEnv. This reference confirms that the ClusterDeployment, which resides in a different namespace, is authorized to consume Agents from this InstallEnv.
 1. Cluster Creator applies a label to Agents if necessary so that they match the ClusterDeployment's selector.
 1. Once there are enough ready Agents of each role to fulfill the expected number as expressed on the ClusterDeployment, installation begins.
