@@ -63,7 +63,7 @@ In case a machine enters the `Failed` state and does not have a NodeRef or a Pro
 
 ## Proposal
 
-We propose modifying the MachineHealthCheck CRD to support a FailedNodeStartupTimeout, this is the time period which controls remediation of a machine that enters the `Failed` state.
+We propose modifying the MachineHealthCheck CRD to support a failed node startup timeout. This timeout defines the period after which a `Failed` machine will be remediated by the MachineHealthCheck.
 
 ### User Stories
 
