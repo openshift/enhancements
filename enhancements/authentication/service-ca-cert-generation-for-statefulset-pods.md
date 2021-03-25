@@ -3,11 +3,14 @@ title: service-ca-cert-generation-for-statefulset-pods
 authors:
   - "@mtrmac"
 reviewers:
-  - TBD
+  - "@marun"
+  - "@sttts"
+  - "@Anandnatraj"
 approvers:
-  - TBD
+  - "@marun"
+  - "@sttts"
 creation-date: 2021-03-01
-last-updated: 2021-03-01
+last-updated: 2021-03-25
 status: implementable
 see-also:
 replaces:
@@ -31,11 +34,12 @@ The Service CA-generated certificates _for headless services_ include
 `*.${service.name}.${service.namespace}.svc` and
 `*.${service.name}.${service.namespace}.svc.cluster.local`
 as subjects,
-to allow TLS-protected communication between StatefulSet pods.
+to allow TLS-protected connections to individual StatefulSet pods.
 
 ## Motivation
 
-StatefulSet-managed pods often need to communicate with each other.
+StatefulSet-managed pods often need to communicate with each other,
+or may be directly accessed by clients.
 This traffic may need to be TLS-protected; because it is cluster-internal,
 and necessary for deploying such a StatefulSet, letting the cluster automatically
 manage the certificates is a natural extension to the same feature already
@@ -43,7 +47,7 @@ provided by the Service CA to allow TLS use with services.
 
 ### Goals
 
-Allow deploying StatefulSets with pods that communicate with each other using TLS,
+Allow connections directly to individual StatefulSets pods using TLS,
 without having to manually generate certificates for these pods.
 
 ### Non-Goals
@@ -95,7 +99,7 @@ it does not provide individual identity.
 
 Once the secret is generated, users can scale the StatefulSet with no change to the usual process.
 
-#### Using TLS to Guarantee Individual Identity of StatefulSet Pods, or StatefulSets
+#### Non-goal: Using TLS to Guarantee Individual Identity of StatefulSet Pods, or StatefulSets
 
 To ensure that a compromised StatefulSet pod can’t impersonate other pods from the
 same StatefulSet,
