@@ -80,22 +80,22 @@ type IngressControllerSpec struct {
 	// ...
 
 	// threading defines parameters for configuring threading options within
-	// routers created under this IngressController. See specific threading
-	// fields for their respective definitions and default values.
+	// ingress controller pods created under this IngressController. See
+	// specific threading fields for their respective definitions and default
+	// values.
 	//
 	// +optional
 	Threading IngressControllerThreading `json:"threading,omitempty"`
-}
 
 type IngressControllerThreading struct {
-	// count defines the number of threads created per router pod. Creating
-	// more threads allows each router pod to handle more connections, at the
-	// cost of more system resources used. If this field is empty, the
-	// IngressController will use the default value. The current default is 4
-	// threads, but this may change in future releases.
+	// count defines the number of threads created per ingress controller pod.
+	// Creating more threads allows each ingress controller pod to handle more
+	// connections, at the cost of more system resources being used. If this
+	// field is empty, the IngressController will use the default value. The
+	// current default is 4 threads, but this may change in future releases.
 	//
 	// +kubebuilder:validation:Optional
-	// +kubebuilder:validation:Minimum=4
+	// +kubebuilder:validation:Minimum=1
 	// +optional
 	Count int32 `json:"count,omitempty"`
 }
