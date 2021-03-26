@@ -6,7 +6,7 @@ reviewers:
   - "@Miciah"
   - "@danehans"
   - "@frobware"
-  - "@sgreene"
+  - "@sgreene570"
   - "@knobunc"
   - "@miheer"
   - "@candita"
@@ -16,9 +16,9 @@ approvers:
   - "@frobware"
   - "@danehans"
 creation-date: 2021-03-24
-last-updated: 2021-03-25
+last-updated: 2021-03-26
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
-see-also:
+see-also: [Tunalbe Router Buffer Sizes](https://github.com/openshift/enhancements/pull/449)
 replaces:
 superseded-by:
 ---
@@ -37,26 +37,27 @@ superseded-by:
 ## Summary
 
 This proposal is to allow the cluster administrator to configure the number of
-connection handling threads within router pods.
+connection handling threads within ingress controller pods.
 
 ## Motivation
 
 As the number of routes and the volume of traffic through a cluster increases,
-eventually the router pod will reach a limit to how many connections it can
-handle. In order to increase the maximum number of connections, administrators
-can split the routes into multiple shards, each shard being handled by a
-separate router.  More router pods can also be deployed without sharding,
-allowing more connections to be handled, but this comes with more overhead, as
-each router must separately verify the health of its backends.  These redundant
-health checks increase the volume of traffic passing through the cluster, and
-can cancel out much of the performance gain from deploying more router pods.
+eventually the ingress controller pod will reach a limit to how many
+connections it can handle. In order to increase the maximum number of
+connections, administrators can split the routes into multiple shards, each
+shard being handled by a separate ingress controller.  More ingress controller
+pods can also be deployed without sharding, allowing more connections to be
+handled, but this comes with more overhead, as each ingress controller must
+separately verify the health of its backends.  These redundant health checks
+increase the volume of traffic passing through the cluster, and can cancel out
+much of the performance gain from deploying more ingress controller pods.
 
 In OpenShift 3.x, users could configure routers to increase the number of
 threads that HAProxy spawns, allowing a single router to handle more
 connections without additional health check overhead. This document proposes to
 allow users to employ a similar strategy, and provide a field within the
-IngressController API to specify the number of threads allocated within router
-pods
+IngressController API to specify the number of threads allocated within ingress
+controller pods
 
 ### Goals
 
@@ -69,8 +70,8 @@ Expose additional performance tuning parameters available within HAProxy
 
 ## Proposal
 
-Add the subresource `threading` to the IngressController API. It will currently
-contain one field, `count`.
+Add the field `threading` to the IngressController API. It will currently
+contain one subfield, `count`.
 
 ```go
 type IngressControllerSpec struct {
@@ -90,26 +91,28 @@ type IngressControllerThreading struct {
 	// count defines the number of threads created per router pod. Creating
 	// more threads allows each router pod to handle more connections, at the
 	// cost of more system resources used. If this field is empty, the
-	// IngressController will use a default value of 4 threads.
+	// IngressController will use the default value. The current default is 4
+	// threads, but this may change in future releases.
 	//
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:Minimum=4
 	// +optional
-	Count int `json:"count,omitempty"`
+	Count int32 `json:"count,omitempty"`
 }
 ```
 
-When unset, the ingress operator will provision routers with 4 threads,
-matching the existing behavior in OpenShift 4.7.
+When unset, the ingress operator will provision ingress controller pods with 4
+threads, matching the existing behavior in OpenShift 4.7.
 
 It would be possible to implement this field as a simple integer within the
 `IngressControllerSpec` as `spec.threadCount` or something similar, however
-there are other tunable threading performance options that HAProxy exposes, and
-it is possible that the ingress controller will be updated to support those
-fields at a later date. If any of those fields are added, it would be
-preferable to include those fields within a single subresource. In order to
-make that potential upgrade less painful, the `spec.threading` subresource will
-be added with only one field, `spec.threading.count`.
+there are other tunable threading performance options that HAProxy exposes,
+such as cpu pinning, and it is possible that the ingress controller will be
+updated to support those fields at a later date. If any of those fields are
+added, it would be preferable to include those fields within a grouping field
+like `spec.threading`. In order to make that potential upgrade less painful,
+the `spec.threading` field will be added with only one subfield,
+`spec.threading.count`.
 
 ### User Stories
 
@@ -120,29 +123,39 @@ be added with only one field, `spec.threading.count`.
 > sharding
 
 The administrator can patch their existing ingress controller to increase the
-number of router threads:
+number of ingress controller threads:
 
 ```sh
 $ oc patch ingresscontroller/<controller-name> --type=merge -p '{"spec": {"threading": {"count": <new-thread-count>} } }'
 ```
 
-New router pods will be rolled out with the updated thread count.
+New ingress controller pods will be rolled out with the updated thread count.
+
+#### Story 2
+
+> As a cluster administrator, I have a node with large amounts of resources
+> (e.g. 100 cores, 256GB RAM) that I would like to handle as much of my ingress
+> as possible.
+
+To do this, the user can configure `spec.nodePlacement.nodeSelector` with
+labels that match the intended node, as well as configuring
+`spec.threading.count` to an appropriately high value.
 
 ### Risks and Mitigations
 
 #### Increased Resource Usage
 
-It's possible that an administrator could configure routers to have enough
-threads that other pods on the same node could become resource starved when the
-router pod is under full load. In order to mitigate this risk, the resources
-requested in the router deployment should scale with the number of threads
-configured.
+It's possible that an administrator could overcommit on the number of threads,
+causing other pods on the same node to become resource starved when the ingress
+controller pod is under full load. In order to mitigate this risk, the
+resources requested in the ingress controller deployment should scale with the
+number of threads configured.
 
 This still presents a problem of overestimating the amount of resources
-required when the router pod is under lower load, which could cause the node to
-be underutilized during low or moderate traffic load. As such, some amount of
-scale testing needs to be done before the appropriate resource request scaling
-factor can be determined.
+required when the ingress controller pod is under lower load, which could cause
+the node to be underutilized during low or moderate traffic load. As such, some
+amount of scale testing needs to be done before the appropriate resource
+request scaling factor can be determined.
 
 #### Maximum Connections Doesn't Scale Up With Additional Threads
 
@@ -159,27 +172,40 @@ shards.
 ### Test Plan
 
 #### Test 1
-1. Create an IngressController with `spec.threading.count` unset. Wait for
-   a router pod to be deployed.
-2. Verify the router has the environment variable `"ROUTER_THREADS"` set to 4.
-3. Patch the IngressController to set `spec.threading.count` to 7. Wait for
-   the router pod to be updated.
-4. Verify the router has the environment variable `"ROUTER_THREADS"` set to 7.
+1. Create an IngressController with `spec.threading.count` unset. Wait for a
+   ingress controller pod to be deployed.
+2. Verify the ingress controller has the environment variable
+   `"ROUTER_THREADS"` set to 4.
+3. Patch the IngressController to set `spec.threading.count` to 7. Wait for the
+   ingress controller pod to be updated.
+4. Verify the ingress controller has the environment variable
+   `"ROUTER_THREADS"` set to 7.
 5. Patch the IngressController to remove `spec.threading.count`. Wait for the
-   router pod to be updated.
-6. Verify the router has the environment variable `"ROUTER_THREADS"` set to 4.
+   ingress controller pod to be updated.
+6. Verify the ingress controller has the environment variable
+   `"ROUTER_THREADS"` set to 4.
 
 ### Graduation Criteria
 
-TODO
+N/A
 
 ### Upgrade / Downgrade Strategy
 
-TODO
+#### Upgrading from a release without `spec.threading.count`
+
+Upgrading from a previous release that does not have `spec.threading.count`
+will leave the field blank, which is an acceptable state. With the field left
+blank, the default value of 4 threads per pod will be used.
+
+#### Downgrading to a release without `spec.threading.count`
+
+If `spec.threading.count` is set when downgrading to a release without the
+field, the value will be discarded, and the ingress controller revert to the
+previous default of 4 threads per pod.
 
 ### Version Skew Strategy
 
-TODO
+N/A
 
 ## Implementation History
 
