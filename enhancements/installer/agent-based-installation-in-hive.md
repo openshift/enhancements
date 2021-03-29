@@ -205,7 +205,7 @@ any cases where a well-known label or annotation key needs to be used, the key
 will have the same group name.
 
 **InstallEnv**
-This new resource, part of the assisted intaller's new operator, represents an
+This new resource, part of the assisted installer's new operator, represents an
 environment in which a group of hosts share settings related to networking,
 local services, etc. This resource is used to create a discovery image that
 should be used for booting hosts. In the REST API this corresponds to the
