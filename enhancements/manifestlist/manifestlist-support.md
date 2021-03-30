@@ -360,6 +360,62 @@ $ oc get isimage <imagestream>@<sha of any of the child images>
 The output of the `oc describe isimage` command line will need to be changed to display
 information present in the DockerImageManifests property of the parent Image.
 
+### Proposed pruner changes
+
+Pruner gathers information about images in use within a cluster by inspecting the following
+objects:
+
+- Pods
+- Replication controllers
+- Deployment configs
+- Replica sets
+- Deployments
+- Daemon sets
+- Builds
+- Build configs
+- Stateful sets
+- Jobs
+- Cronjobs
+
+If a given image is in use by any of these entities it is not pruned. This operation will need
+to be refactored to take into account the extra level of indirection that the "child images"
+layer brings. For example, in a scenario where we have the following:
+
+```text
+ImageStream X -> Image A -> Image B
+                            Image C
+                            Image D
+
+```
+
+If a reference for, let's say, `Image D` exists in the cluster pruner will maintain `Image A`,
+`Image B`, `Image C`, and `Image D` as well. The same logic also applies when deleting tags from
+an `ImageStream` during prune: all child images are also deleted whenever a tag ceases to exist.
+
+The extra cost for this indirection analysis will be paid during the initial evaluation of images
+in use. During this operation, we already have all Images and ImageStreams available in memory and
+during evaluation, we fill in two maps indicating the images in use and who is using them using
+a struct like the following:
+
+```text
+p.usedImages = map[imageStreamImageReference][]resourceReference{}
+```
+
+By considering the above example scenario again (Pod called `pod0` using `Image D`), after
+the initial evaluation we would have the following resulting struct (edited for easier reading):
+
+```text
+p.usedImages = {
+	"Image A": [ "pod0" ],
+	"Image B": [ "pod0" ],
+	"Image C": [ "pod0" ],
+	"Image D": [ "pod0" ]  <- the actual image in use
+}
+```
+
+This would ensure that we treat the whole manifest list as a single entity at a cost of
+maintaining in the cluster images that may not be in use but are part of a manifest list.
+
 ### Test Plan
 
 #### Validate we can deploy manifest lists
