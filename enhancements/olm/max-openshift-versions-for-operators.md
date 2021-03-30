@@ -9,7 +9,7 @@ approvers:
   - "@ecordell"
   - "@spadgett"
 creation-date: 2021-01-11
-last-updated: 2021-01-19
+last-updated: 2021-03-29
 status: provisional
 see-also:
   -  N/A
@@ -186,8 +186,11 @@ As the index maintainer, I want to be able to dynamically change which `{major}.
 ### Risks and Mitigations
 
 - The most immediate risk to this solution is the fact that OLM will prevent Minor OpenShift Upgrades when an OLM Managed Operator does not support the next minor OpenShift version.
-This risk is mitigated given that admins will still be able to apply security fixes with patch updates whether or not OLM is blocking Minor OpenShift Upgrades. This gives them a safe window to either remove the minor-blocking operator or update it to a version that is compatible with the next minor OpenShift version.
-In extreme cases, cluster admins can override the CVO's upgrade checks via means documented elsewhere.
+  - This risk is mitigated given that admins will still be able to apply security fixes with patch updates whether or not OLM is blocking Minor OpenShift Upgrades. This gives them a safe window to either remove the minor-blocking operator or update it to a version that is compatible with the next minor OpenShift version.
+  - In extreme cases, cluster admins can override the CVO's upgrade checks via means documented elsewhere.
+- "Failing open", by assuming operators that don't specify their `maxOpenShiftVersion` are compatible with the next minor release of OpenShift, runs the risk of breaking installed operators
+  - ~~This could be mitigated by surfacing warnings for installed operators with unspecified compatability~~
+  - A mitigation was deemed unnecessary by stakeholders (OTA team)
 
 ## Design Details
 
