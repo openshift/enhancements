@@ -3,6 +3,7 @@ title: quick-starts
 authors:
   - "@jhadvig"
   - "@rebeccaalpert"
+  - "@nemesis09"
 reviewers:
   - "@spadgett"
   - "@alimobrem"
@@ -10,7 +11,7 @@ reviewers:
 approvers:
   - "@spadgett"
 creation-date: 2020-06-02
-last-updated: 2021-03-10
+last-updated: 2021-03-31
 status: implementable
 see-also:
   - "https://issues.redhat.com/browse/CONSOLE-2255"
@@ -45,7 +46,7 @@ understand the steps neccesary to get the desired outcome:
 * Networking
 * ...
 
-For Quick Starts we need a mechanism for their creation and publishment.
+For Quick Starts we need a mechanism for their creation and publishment. We also need a mechanism to allow cluster administrators to control the visibility of Quick Starts in the console UI.
 
 ## Motivation
 
@@ -57,11 +58,17 @@ Help users with their understanding the principles of their workflows by guiding
 2. Make users understand what are the steps needed to achieve their goals.
 3. Provide new CRD format for writing the Quick Starts.
 4. Have a repository for the out-of-the-box Quick Starts, those that describe how to install an operator or go though standard workflow.
+5. Allow cluster administrators to hide specific Quick Starts from displaying in the UI for all users.
+
+### Non-Goals
+
+1. Introducing a UI to list out disabled Quick Starts without a YAML editor.
 
 ## Proposal
 
 * Introduce CRD format that will be used for writing Quick Starts.
 * Introduce default repository for Quick Starts.
+* Extend the existing `operator.openshift.io~v1~Console` CRD. It has a `spec.customization` property where the list of Quick Start names to be disabled can be added.
 
 ### User Stories
 
@@ -80,6 +87,10 @@ As a developer, I need a guide to walk me through how to deploy an existing appl
 #### Story 4
 
 As a operator creator I want to provide operator consumers with a guide on how to install and user the my operator.
+
+#### Story 5
+
+As an administrator of an OpenShift cluster, I want to hide specific Quick Starts from displaying in the UI for all users.
 
 ### Implementation Details
 
@@ -210,6 +221,27 @@ metadata:
     console.openshift.io/lang: en
     console.openshift.io/country: gb
     console.openshift.io/name: explore-serverless
+```
+
+#### Disabling Quick Starts
+
+`operator.openshift.io/v1` / `Console` CRD provides a `spec.customization` property where an admin will list the Quick Starts to be disabled, by their name.
+This will hide the Quick Starts with corresponding `metadata.name` or `console.openshift.io/name` from the console UI.
+
+Console operator CRD with disabled Quick Starts:
+```yaml
+apiVersion: operator.openshift.io/v1
+kind: Console
+metadata:
+  name: cluster
+  ...
+spec:
+  customization:
+    brand: online
+    quickStarts:
+      disabled:
+        - 'serverless-application'
+  ...
 ```
 
 #### Air Gapped Environments
