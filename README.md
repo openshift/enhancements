@@ -30,6 +30,7 @@ A rough heuristic for an enhancement is anything that:
 - impacts upgrade/downgrade
 - needs significant effort to complete
 - requires consensus/code across multiple domains/repositories
+- proposes adding a new user-facing component
 - has phases of maturity (Dev Preview, Tech Preview, GA)
 - demands formal documentation to utilize
 
