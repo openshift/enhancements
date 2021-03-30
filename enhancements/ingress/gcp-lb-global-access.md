@@ -16,8 +16,8 @@ approvers:
   - "@knobunc"
   - "@miciah"
 creation-date: 2021-02-09
-last-updated: 2021-02-12
-status: implementable
+last-updated: 2021-03-30
+status: implemented
 ---
 
 # GCP Internal Ingress Load Balancer Global Access Option
