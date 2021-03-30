@@ -90,6 +90,11 @@ The egress router pod would have multus annotations saying to use the
 egress-router-cni plugin, and then the CNI plugin would create a macvlan
 interface (or, in the future, maybe ipvlan or Amazon ENI).
 
+We're using a CR and a controller in openshift in order to configure both the
+pod and the NetworkAttachmentDefinition, so a user would expect to be able to
+use both manual and controller-based workflow. All of the controller code will
+be handled by Cluster Network Operator (CNO).
+
 ### Overview
 
 The `egress-router` plugin creates some sort of
@@ -116,7 +121,34 @@ spec:
     }'
 ```
 
-#### ConfigMap
+#### CRD
+
+```yaml
+---
+apiVersion: network.operator.openshift.io/v1
+kind: EgressRouter
+metadata:
+  name: egress-router
+spec:
+  addresses: [
+    {
+      ip: "192.168.3.10/24",
+      gateway: "192.168.3.1",
+    },
+  ]
+  allowedDestinations: [
+    {
+      srcPort: 65,
+      destinationCIDR: "203.0.113.25/30",
+      protocol: "TCP",
+      dstPort: 75,
+    },
+    {
+      destinationCIDR: "203.0.113.26/30",
+      srcPort: 65535,
+    },
+  ]
+```
 
 ```yaml
 apiVersion: v1
