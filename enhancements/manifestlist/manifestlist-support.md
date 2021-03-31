@@ -379,7 +379,8 @@ objects:
 
 If a given image is in use by any of these entities it is not pruned. This operation will need
 to be refactored to take into account the extra level of indirection that the "child images"
-layer brings. For example, in a scenario where we have the following:
+layer brings. For example, in a scenario where we have a tag in ImageStream X pointing to a
+manifest list A containing images B, C, and D:
 
 ```text
 ImageStream X -> Image A -> Image B
