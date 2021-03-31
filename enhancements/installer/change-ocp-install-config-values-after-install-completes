@@ -3,11 +3,12 @@ title: change-ocp-install-config-values-after-install-completes
 authors:
   - "@hhockett"
 reviewers:
-  - "@romfreiman"
-  - "@yevgeny-shnaidman"
+  - "@mandre"
+  - "@pierreprinetti"
+  - "@adduarte"
 approvers:
-creation-date: 2021-03-24
-last-updated: 2021-03-24
+creation-date: 2021-03-31
+last-updated: 2021-03-31
 status: implementable
 ---
 
