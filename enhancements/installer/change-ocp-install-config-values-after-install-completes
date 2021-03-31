@@ -1,0 +1,120 @@
+---
+title: change-ocp-install-config-values-after-install-completes
+authors:
+  - "@hhockett"
+reviewers:
+  - "@romfreiman"
+  - "@yevgeny-shnaidman"
+approvers:
+creation-date: 2021-03-24
+last-updated: 2021-03-24
+status: implementable
+---
+
+# Change OCP Install Config Values After Install Completes
+
+## Release Signoff Checklist
+
+- [ ] Enhancement is `implementable`
+- [ ] Design details are appropriately documented from clear requirements
+- [ ] Test plan is defined
+- [ ] Graduation criteria for dev preview, tech preview, GA
+- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+
+## Summary
+
+Today an OpenShift cluster needs to be installed using networking
+and DNS configuration where it will permanently reside. 
+
+There are scenarios where you may want to install OpenShift
+plus a set of software on a system in one location, and then move the system 
+to another location. This would also involve modifying the OpenShift configuration 
+after it has been moved to another location where there are different networking 
+and DNS values.  
+
+This enhancement describes how to allow an OpenShift cluster to be 
+modified to a different set of networking and DNS values.  
+
+## Motivation
+
+Allow for OCP clusters to be incorporated into on-prem systems
+and edge devices in such a way that it can be installed in one location and then 
+easily re-configured once the system or edge device is moved to aother location. 
+
+Today an OCP cluster can only be installed once DNS and networking information
+are known.  
+
+### Goals
+
+- Allow an OCP cluster to be installed in one location and then
+reconfigured with updated IP addresses, DNS information (cluster name, 
+base domain, host names etc), pull secret, disconnected image registry, 
+etc after it is moved to another location.  Some of these values like pull secret 
+and image registry can be changed after install.  Others such as cluster name, 
+base domain, etc cannot be changed today.  
+
+### Non-Goals
+
+- Changing current installs as they work today.  Goal is more to allow
+for more flexibility in changing OpenShift configuration after install.  
+
+## Proposal
+
+The proposal is to allow among other fields necessary the ability
+to change values originally set in install-config.yaml such as:
+- cluster name
+- base domain
+- IP addresses of each compute and control node
+- IP addresses of API and Ingress VIPs
+
+The following values can already be changed after install completes
+- Pull Secret
+- Disconnected Registry information (Mirror Registry) 
+
+### User Stories
+
+#### Story 1
+
+As a OpenShift administrator, I want to be able to run the OpenShift installer 
+in one location with a set of install-config values, and then move the system to
+a new location and update the OpenShift networkign configuration for the new location.
+
+### Implementation Details/Notes/Constraints
+
+Reconfigure the OCP cluster when the following values are changed
+- cluster name
+- base domain
+- IP addresses of each compute and control node
+- IP addresses of API and Ingress VIPs
+
+### Risks and Mitigations
+
+There are no security implications for this change.
+
+## Design Details
+
+### Test Plan
+
+Regression testing will ensure there are no affects on existing install
+processes.
+
+Besides the existing and new unit tests, the existing e2e tests for
+the `baremetal` platform will continue to test the full set of
+validation rules. The test suite for the assisted installer will
+verify that no extra validation rules are applied.
+
+New tests will be created for validating changes to install-config values
+post install. 
+
+### Graduation Criteria
+
+None
+
+## Implementation History
+
+Major milestones in the life cycle of a proposal should be tracked in `Implementation
+History`.
+
+## Alternatives
+
+None at this time
