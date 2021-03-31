@@ -473,16 +473,27 @@ capacity of the host (not just the management CPU pool).
 
 #### Installer Changes
 
-The installer will be changed to accept a new `workloadSettings`
-parameter with a list of workload types and their settings. For now,
-the only setting will be the name and the CPU sets to treat as
-separate from the standard shared pool. The name `workloadSettings`
-may change, based on discussion on the installer code changes.
+The installer will be changed to accept a new `workload.partitions`
+parameter for each [machine
+pool](https://github.com/openshift/installer/blob/master/docs/user/customization.md#machine-pools)
+with a list of workload types and their settings. For now, the only
+setting will be the name and the CPU sets to treat as separate from
+the standard shared pool. The name `workload.partitions` may change,
+based on discussion on the installer code changes.
 
 ```yaml
-workloadSettings:
-  - name: management
-    cpuIDs: 0-1
+controlPlane:
+  name: master
+  workload:
+    partitions:
+      - name: management
+        cpuIDs: 0-1
+compute:
+  - name: worker
+    workload:
+      partitions:
+        - name: management
+          cpuIDs: 0-1
 ```
 
 The default is empty, and when the value is empty the management
