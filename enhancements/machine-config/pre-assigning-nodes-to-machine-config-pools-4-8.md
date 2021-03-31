@@ -17,7 +17,7 @@ creation-date: 2021-03-31
 last-updated: 2021-03-31
 status: provisional
 see-also:
-  - "https://github.com/openshift/enhancements/pulls/{long-term-proposal}"
+  - "/openshift/enhancements/pull/717"
 replaces:
   - 
 superseded-by:
@@ -71,7 +71,7 @@ could spend half of the 2 hour window just rebooting.
 ### Non-Goals
 
 - Establish a long-term direction for addressing this within the product.  See
-  [enhancement #XYZ](https://github.com/openshift/enhancements/pulls/XYZ) for
+  [enhancement #717](https://github.com/openshift/enhancements/pull/717) for
   discussion around an in-product approach
 
 ## Proposal
@@ -262,7 +262,7 @@ The idea is to find the best form of an argument why this enhancement should _no
    works, but is risky if that file ever needs to change, and considered a hack.
 
 4. Modifying some combination of MAO/MCO/MCD is considered unjustified by some
-   but may be a better long term approach.  See [enhancement #XYZ](https://github.com/openshift/enhancements/pulls/XYZ).
+   but may be a better long term approach.  See [enhancement #717](https://github.com/openshift/enhancements/pull/717).
 
 ## Infrastructure Needed [optional]
 
