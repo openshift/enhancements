@@ -396,7 +396,7 @@ To pass a setting into CRI-O, the pod should have an annotation made
 by combining the `resource_annotation_prefix`, the key from
 `resources`, and the container name, like this:
 
-```
+```text
 io.openshift.workload.management.cpu/container_name = {value}
 ```
 
