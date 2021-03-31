@@ -7,8 +7,8 @@ reviewers:
 approvers:
   - "@openshift/openshift-architects"
 creation-date: 2020-07-29
-last-updated: 2021-03-05
-status: provisional
+last-updated: 2021-03-31
+status: implementable
 see-also: https://github.com/openshift/enhancements/pull/463
 replaces:
 superseded-by:
@@ -18,7 +18,7 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
+- [x] Enhancement is `implementable`
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
@@ -51,7 +51,7 @@ For GA, existing in-tree volumes will be migrated to use the CSI driver. Once th
 
 ## Proposal
 
-We propose to add a carry-patch to the Attach Detach Controller in OCP that enables the migration of some storage plugins. Initially we would start with Cinder and GCP, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
+We propose to add a carry-patch to the Attach Detach Controller in OCP that enables the migration of some storage plugins. Initially we would start with Cinder and EBS, so that we are aligned with the goals of [CCMO](https://github.com/openshift/enhancements/pull/463).
 
 In addition to that, we propose to utilize the existing **TechPreviewNoUpgrade** *FeatureSet* to switch the feature on and off during the Tech Preview phase.
 
@@ -89,8 +89,8 @@ This carry-patch would only affect the Attach Detach Controller. Other parts of 
 In order to do this the least invasive way possible, we will refactor the upstream code to allow the carry-patch to be minimal and self-contained. An existing PoC [is available](https://github.com/openshift/kubernetes/pull/601) to demonstrate how this would look like.
 
 This patch would be carried over in OCP until all in-tree storage plugins are migrated to CSI, which should happen around 3 or 4 releases.
-Initially we would start with Cinder and GCP (_CSIMigrationGCE_ and _CSIMigrationCinder_ flags), so that we are aligned with the goals of both upstream and [CCMO](https://github.com/openshift/enhancements/pull/463).
-In subsequent OCP releases we would proceed with EBS, vSphere and Azure (_CSIMigrationAWS_, _CSIMigrationvSphere_ and _CSIMigrationAzureFile_), without a predefined order.
+Initially we would start with Cinder and EBS (_CSIMigrationAWS_ and _CSIMigrationCinder_ flags), so that we are aligned with the goals of both upstream and [CCMO](https://github.com/openshift/enhancements/pull/463).
+In subsequent OCP releases we would proceed with GCP, vSphere and Azure (_CSIMigrationGCE_, _CSIMigrationvSphere_ and _CSIMigrationAzureFile_), without a predefined order.
 
 With this patch, when deciding about using either the CSI driver or the in-tree plugin, the Attach Detach Controller will **only** rely on the information propagated by the node. In other words, Attach Detach Controller will start considering which plugin to use (in-tree or CSI) on a node basis only.
 
@@ -166,30 +166,30 @@ Once CSI migration is GA, we expect the regular upgrade jobs will cover upgrades
 
 ### Graduation Criteria
 
-Each storage plugin will be migrated at their own paces and will have different support phases across OCP releases. For instance, GCP and Cinder migration would be Tech Preview and OCP 4.8 and GA in 4.9. AWS EBS will _most likely_ be Tech Preview in 4.9 and GA in 4.10.
+Each storage plugin will be migrated at their own paces and will have different support phases across OCP releases. For instance, EBS and Cinder migration would be Tech Preview and OCP 4.8 and GA in 4.9. GCP PD will most likely be Tech Preview in 4.9 and GA in 4.10.
 
-Having said that, the items below only cover the initial targets for CSI Migration: GCP PD and Cinder.
+Having said that, the items below only cover the initial targets for CSI Migration: AWS EBS and Cinder.
 
 1. Tech Preview in 4.8:
 
 * Introduce a new *FeatureSet* in openshift/api called `CSIMigration`.
 * Make sure the *FeatureSet* used by [CCMO](https://github.com/openshift/enhancements/pull/463) contains the CSI migration feature flags enabled for the respective storage backend.
 * Introduce an upstream patch to refactor the Attach Detach Controller in order to make our carry-patch smaller and self-contained.
-* Introduce a carry-patch in OCP that enables CSI Migration for Cinder and GCP PD in Attach Detach Controller.
+* Introduce a carry-patch in OCP that enables CSI Migration for Cinder and EBS in Attach Detach Controller.
 
 2. GA in 4.9:
 
-* Update carry-patch to not force-enable CSI Migration for Cinder and GCP PD. Since the migration is enabled by default, there is no need to force-enable the migration.
+* Update carry-patch to not force-enable CSI Migration for Cinder and EBS. Since the migration is enabled by default, there is no need to force-enable the migration.
 
-Assuming the next storage plugin to be migrated is AWS EBS, the steps below represent what needs to be done for that plugin:
+Assuming the next storage plugin to be migrated is GCP PD, the steps below represent what needs to be done for that plugin:
 
 1. Tech Preview in 4.9:
 
-* Update the carry-patch in Attach Detach Controller to force-enable the CSI Migration for EBS.
+* Update the carry-patch in Attach Detach Controller to force-enable the CSI Migration for GCP PD.
 
 2. GA in 4.10:
 
-* Update the carry-patch in Attach Detach Controller to **not** force-enable the CSI Migration for EBS.
+* Update the carry-patch in Attach Detach Controller to **not** force-enable the CSI Migration for GCP PD.
 
 Once CSI Migration is GA for all storage plugins have been completely migrated to CSI, we can:
 
@@ -204,6 +204,7 @@ Main events only, this is not a faithful history.
 2020-07-29: Initial enhancement draft.
 2021-01-28: Re-worked proposal to use 2 _FeatureSets_ with manual application by the user.
 2021-03-05: Re-worked proposal to use carry-patch instead. Moved previous approach to "Alternatives" for reference.
+2021-03-31: Swapped GCE migration for EBS: GCP will be Tech Preview in 4.9, EBS in 3.8.
 
 ## Alternatives
 
