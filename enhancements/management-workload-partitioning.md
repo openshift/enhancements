@@ -243,6 +243,15 @@ labels ourselves, starting with
 * kubevirt
 * N3000
 
+Due to time constraints, the first iteration of this work will also
+require the
+[performance-addon-operators](https://github.com/openshift-kni/performance-addon-operators)
+to configure the [kube-reserved and system-reserved CPU sets for
+kubelet](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/). We
+expect those values to match the CPU set used for management
+workloads. Future work will eliminate the need for the extra operator
+(see GA graduation criteria).
+
 ### User Stories
 
 #### Radio Access Network (RAN) Use Case
@@ -613,6 +622,8 @@ to the aforementioned [maturity levels][maturity-levels].
 
 #### Tech Preview -> GA
 
+- Eliminate the need to have the performance-addon-operators configure
+  the kube-reserved and system-reserved CPU set.
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 - Available by default
