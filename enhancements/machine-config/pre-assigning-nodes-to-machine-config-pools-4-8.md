@@ -58,7 +58,7 @@ However, the MCO/MCD normally manages MCP assignment and does so based on Node
 Labels.  This creates a race to add the necessary labels before the MCO/MCD
 moves the Node back to the default config pool.
 
-On bare metal, the cost of loosing this race is significant, and as a result we
+On bare metal, the cost of losing this race is significant, and as a result we
 could spend half of the 2 hour window just rebooting.
 
 ### Goals
