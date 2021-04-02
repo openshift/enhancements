@@ -52,7 +52,7 @@ provisioned.
 
 In the case of remote worker nodes, they will typically need to be a part of a
 specific (non-default) MachineConfigPool, and are provisioned with the correct
-pool based on the Ingnition file contents.
+pool based on the Ignition file contents.
 
 However, the MCO/MCD normally manages MCP assignment and does so based on Node
 Labels.  This creates a race to add the necessary labels before the MCO/MCD
