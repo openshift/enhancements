@@ -290,10 +290,10 @@ Due to time constraints, the first iteration of this work will also
 require the
 [performance-addon-operators](https://github.com/openshift-kni/performance-addon-operators)
 to configure the [kube-reserved and system-reserved CPU sets for
-kubelet](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/). We
-expect those values to match the CPU set used for management
-workloads. Future work will eliminate the need for the extra operator
-(see GA graduation criteria).
+kubelet](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/)
+and enable the static CPU manager. We expect those values to match the
+CPU set used for management workloads. Future work will eliminate the
+need for the extra operator (see GA graduation criteria).
 
 ### User Stories
 
