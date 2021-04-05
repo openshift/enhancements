@@ -676,6 +676,9 @@ Installer changes: https://github.com/openshift/installer/pull/4802
 
 Admission API hook: https://github.com/openshift/kubernetes/pull/632
 
+Assisted service updating install-config:
+https://github.com/openshift/assisted-service/pull/1431
+
 ## Drawbacks
 
 Several of the changes described above are patches that we may end up
