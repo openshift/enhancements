@@ -6,6 +6,7 @@ authors:
   - "@browsell"
   - "@haircommander"
   - "@rphillips"
+  - "@lack"
 reviewers:
   - "@deads2k"
   - "@staebler"
@@ -74,7 +75,8 @@ management and normal workloads there.
   know what constraints we might be given in the future so we need a
   solution that is not tied to the current known limit.
 * We want a general approach, that can be applied to all OpenShift
-  control plane and per-node components.
+  control plane and per-node components and that can be extended to
+  other workload types in the future.
 
 ### Non-Goals
 
@@ -123,12 +125,16 @@ customers, and operators or other components from third-party vendors
 that the customer deems as management rather than operational. It is
 important to note that not all of those components will be delivered
 as part of the OpenShift payload and some may be written by the
-customer or by vendors who are not our partners.
+customer or by vendors who are not our partners. Therefore, while this
+feature will be released as Tech Preview initially with limited formal
+support, the APIs described are not internal or otherwise private to
+OpenShift.
 
-The basic proposal is to provide a way to identify management
+The basic proposal is to provide a way to identify different types of
 workloads at runtime and to use CRI-O to run them on a user-selected
 set of CPUs, while other workloads will be prevented from running
-there. This effectively gives 3 pools of CPUs
+there. For the management workload case, this effectively gives 3
+pools of CPUs
 
 * **management** -- a user-defined cpuset that restricts where
   management components run
@@ -146,20 +152,29 @@ specify the set of CPUs to run all management workloads. When the
 management CPU set is not defined, the feature will be completely
 disabled.
 
-We generally want components to opt-in to being considered management
-workloads. Therefore, for a regular pod to be considered to contain a
-management workload it must be labeled with a *workload label*,
-`workload.openshift.io/target={workload_type}`. For now, we will focus on
-`workload.openshift.io/target=management`, but this syntax supports other
-types of workloads that may be defined in future enhancements.
+We generally want components to opt-in to workload partitioning and
+especially to being considered management workloads. Therefore, for a
+regular pod to be considered to contain a management workload it must
+be labeled with a *workload annotation*,
+`workload.openshift.io/{target}`. For now, we will focus on targeting
+the management workloads via `workload.openshift.io/management`, but
+will use a syntax that supports other types of workloads that may be
+defined in future enhancements.
+
+We want to be able to differentiate between "hard" and "soft"
+partitioning requests. We also want to be able to support other
+partitioning parameters in the future. Therefore, workload
+partitioning settings will use an annotation with a JSON value (see
+below for details).
 
 We want to treat all OpenShift components as management workloads,
 including those that run the control plane. Therefore, kubelet will be
-modified to treat static pods with the label as management workloads,
-when the feature is enabled. We will update operator manifests and
-implementations to label all OpenShift components not running in
-static pods with the label, and add a CI job to require that the label
-be present in all workloads created from the release payload.
+modified to partition static pods with the annotation based on their
+workload type, when the feature is enabled. We will update operator
+manifests and implementations to annotate all OpenShift components not
+running in static pods to target the `management` CPUs, and add a CI
+job to require that the annotation be present in all workloads created
+from the release payload.
 
 We need kubelet to know when the feature is enabled, but we cannot
 change the configuration schema that kubelet inherits from
@@ -168,11 +183,11 @@ file on startup, and the feature will only be enabled if that file is
 found.
 
 We want to give cluster administrators control over which workloads
-are run on the management CPUs. Therefore, only pods in namespaces
-labeled with a label
+are run on the management CPUs. Normal users cannot add a label to a
+namespace without the right RBAC permissions. Therefore, only pods in
+namespaces labeled with a label
 `workload.openshift.io/allowed={comma_separated_list_of_type_names}`
-will be subject to special handling. Normal users cannot add a label
-to a namespace without the right RBAC permissions.
+will be subject to special handling.
 
 We want to continue to use the scheduler for placing management
 workloads, but we cannot rely on the CPU requests of those workloads
@@ -180,12 +195,14 @@ to accurately reflect the constrained environment in which they are
 expected to run. Instead of scaling those CPU request values, we will
 change them to request a new [extended
 resource](https://kubernetes.io/docs/tasks/administer-cluster/extended-resource-node/)
-called `cpu.workload.openshift.io/{workload_type}`.  We will modify
-kubelet to advertise the `cpu.workload.openshift.io/management`
-extended resource when the management workload partitioning feature is
-enabled, using a value equivalent to the CPU resources for the entire
-host. This large value should allow the scheduler to always be able to
-place workloads, while still accurately accounting for those
+called `cpu.workload.openshift.io/{target}` (for example,
+`cpu.workload.openshift.io/management`).  We will modify kubelet to
+advertise an extended resource for each target when the workload
+partitioning feature is enabled, using a value equivalent to the CPU
+resources for the entire host. This large value should allow the
+scheduler to be able to place workloads without being constrained by
+CPU requests while still taking other resource requests like memory
+into account and while still accurately accounting for all
 requests. The naming convention of the resource will allow us to
 support other CPU pools in future enhancements. We may change the
 formula for the advertised resources in future enhancements.
@@ -197,13 +214,14 @@ does receive the content of annotations on the pod. Therefore, we will
 copy the original CPU requests for containers in management workload
 pods into a annotations that CRI-O can use to configure the CPU shares
 when running the containers. We will use the naming convention
-`cpu.workload.openshift.io/{container-name}` and create an annotation
-for each container in the pod.
+`io.openshift.workload.{target}.cpu/{container-name}` and create an
+annotation for each container in the pod. See below for details about
+this choice of name.
 
 We need to change pod definitions as each pod is created, so that the
 scheduler, kubelet, and CRI-O all see a consistently updated version
 of the pod and do not need to make independent decisions about whether
-it should be treated as a management workload. We need to intercept
+it should be treated as a partitioned workload. We need to intercept
 pod creation for *all* pods, without race conditions that might be
 introduced with traditional admission webhooks or controllers.
 Therefore, we will build an admission hook into the [kubernetes API
@@ -212,14 +230,39 @@ OpenShift](https://github.com/openshift/kubernetes/tree/master/openshift-kube-ap
 to intercept API requests to create pods. We will update kubelet to
 make the same changes to static pods.
 
-The API server requires a configuration resource as input, rather than
-a ConfigMap or command line flag.  Therefore, we need an API-driven
-way to enable management workload partitioning in the admission
-hook. We will add a [feature
-set](https://github.com/openshift/api/blob/master/config/v1/types_feature.go#L102-L119)
-with a feature gate to control whether the feature is on or off.
+The admission hook receives the pod settings when the pod is created,
+and does not know where the pod will be scheduled to run and cannot
+make node-specific decisions about modifying its settings. Therefore,
+we will treat partitioning as a cluster-wide feature and all nodes in
+the cluster must have a CPU pool with a given target name configured
+before any workloads of that type will be run partitioned. Other than
+the target name, the settings on each node do not need to be the same,
+so different nodes can use different CPU sets for the same workload
+type.
 
-*We probably need more details about the feature gate.*
+The API server needs to know when workload partitioning is enabled so
+that it does not modify pod settings until the cluster is ready to
+receive them with the new resource requests and nodes are configured
+to actually partition the workloads. Therefore, the admission hook
+will look at the target name in the workload annotation and only
+change the pod if all nodes in the cluster report the associated
+resource. Future work may make this more flexible.
+
+There are a lot of edge cases and unknowns around expanding a cluster
+with workload partitioning enabled or disabling workload
+partitioning. Therefore, in the initial implementation, after the
+admission hook determines that partitioning is enabled for a given
+target it will always modify pods with that target, even if new nodes
+are added to the cluster without the configuration to provide the
+associated resource type. This is likely to result in unschedulable
+workloads, but we expect the resulting error message to explain the
+problem well enough for admins to recover. Future work may make this
+more flexible.
+
+We are not prepared to commit to an installer API for this feature in
+this initial implementation. Therefore, we will document how to create
+the correct machine config manifests to enable it in `kubelet` and
+CRI-O.
 
 Some pods used to run OpenShift control plane components
 (kubeapiserver, kube-controller-manager, scheduler, and etcd) are
@@ -291,49 +334,71 @@ their own workloads. OpenShift currently requires 7.
 #### High-level End-to-end Workflow
 
 This section outlines an end-to-end workflow for deploying a cluster
-with management-workload-partitioning enabled and how pods are
-correctly scheduled to run on the management CPU pool.
+with workload partitioning enabled and how pods are correctly
+scheduled to run on the management CPU pool.
 
 1. User sits down at their computer.
-2. The user creates their `install-config.yaml`, including extra
-   values in the specifying the CPUs to include in the management CPU
-   set. (See below for details.)
-3. The user runs the installer.
-4. The installer uses the management CPU pool settings to generate an
-   extra machine config manifest to configure CRI-O to process
-   management workloads in a special way.
-5. The installer creates a machine config manifest to write a
-   configuration file for kubelet. The file should only be readable by
-   the kubelet.
-6. The installer enables the feature set for the feature flag
-   controlling management workload partitioning.
-7. The kubelet starts up and finds the configuration file enabling the
+2. The user creates a machine config manifest to configure CRI-O to
+   partition management workloads.
+3. The user creates a machine config manifest to write a configuration
+   file for kubelet to enable the same workload partition. The file
+   should only be readable by the kubelet.
+4. The user runs the installer to create the standard manifests, adds
+   their extra manifests from steps 2 and 3, then creates the cluster.
+5. The kubelet starts up and finds the configuration file enabling the
    new feature.
-8. The kubelet advertises `cpu.workload.openshift.io/management`
+6. The kubelet advertises `cpu.workload.openshift.io/management`
    extended resources on the node based on the number of CPUs in the
    host.
-9. The kubelet reads static pod definitions. It replaces the `cpu`
+7. The kubelet reads static pod definitions. It replaces the `cpu`
    requests with `cpu.workload.openshift.io/management` requests of
    the same value and adds the
-   `cpu.workload.openshift.io/{container-name}` annotations for CRI-O
-   with the same values.
-10. Something schedules a regular pod with the
-    `workload.openshift.io/target=management` label in a namespace
-    with the `workload.openshift.io/allowed=management` label.
-11. The admission hook modifies the pod, replacing the CPU requests
-    with `cpu.workload.openshift.io/management` requests and adding
-    the `cpu.workload.openshift.io/{container-name}` annotations for
-    CRI-O.
-12. The scheduler sees the new pod and finds available
+   `io.openshift.workload.management.cpu/{container-name}` annotations
+   for CRI-O with the same values.
+8. Something schedules a regular pod with the
+   `workload.openshift.io/management` annotation in a namespace with
+   the `workload.openshift.io/allowed=management` label.
+9. The admission hook modifies the pod, replacing the CPU requests
+   with `cpu.workload.openshift.io/management` requests and adding the
+   `io.openshift.workload.management.cpu/{container-name}` annotations
+   for CRI-O.
+10. The scheduler sees the new pod and finds available
     `cpu.workload.openshift.io/management` resources on the node. The
     scheduler places the pod on the node.
-13. Repeat steps 10-12 until all pods are running.
-14. Single-node deployment comes up with management components
-    constrained to subset of available CPUs
+11. Repeat steps 8-10 until all pods are running.
+12. Single-node deployment comes up with management components
+    constrained to subset of available CPUs.
+
+#### Workload Annotation
+
+The `workload.openshift.io` annotation on each pod needs to allow us
+to add new parameters in the future, so the value will be a
+struct. Initially, it will encode 2 values.
+
+The `target` for the workloads is in the annotation name to make it
+easy for CRI-O and other lower-level components to detect it without
+understanding the full JSON struct in the value.
+
+The `effect` field will control whether the request is a soft or hard
+rule. It can contain either `PreferredDuringScheduling` for soft
+requests or `RequiredDuringScheduling` for hard requests. Initially we
+will only implement the soft request mode and that will be the
+default.
+
+```yaml
+metadata:
+  annotations:
+    workload.openshift.io/management: |
+      {"effect": "PreferredDuringScheduling"}
+```
+
+The admission hook will reject pods with multiple annotations, for
+now. Future work may allow multiple targets with different priorities
+to support clusters with different types of configurations.
 
 #### Pod mutation
 
-The kubelet and API admission hook will change pods labeled with
+The kubelet and API admission hook will change pods annotated with
 `workload.openshift.io/management` so the CPU requests are replaced
 with management CPU requests and an annotation is added with the same
 value.
@@ -348,15 +413,25 @@ becomes
 
 ```yaml
 requests:
-  cpu.workload.openshift.io/management: 400m
+  cpu.workload.openshift.io/management: 400
 ```
 
 and
 
 ```yaml
 annotations:
-  io.openshift.workload.management.cpu/container-name: 400m
+  io.openshift.workload.management.cpu/{container-name}: 400
 ```
+
+The annotation name used to set the resource requests is reversed
+(when compared to the other workload annotation or the resource
+request name) so that CRI-O can be configured with a prefix value to
+simplify the way it processes the strings without having to understand
+their content.
+
+The new request value and annotation value are scaled up by 1000 from
+the original CPU request input because opaque resources do not support
+units or fractional values.
 
 As a special case, kubelet and the API admission hook should strip any
 annotations from pods trying to set the "cpuset" resource. See the
@@ -364,27 +439,26 @@ next section for more details.
 
 #### CRI-O Changes
 
-*NOTE: This section needs to be updated to deal with the generalized
-CPU pools.*
-
-CRI-O will be updated to support new configuration settings for workload types.
+CRI-O will be updated to support new configuration settings for
+workload targets.
 
 ```ini
-[crio.runtime.workloads.{workload-type}]
-  label = "workload.openshift.io/target={workload-type}"
-  resource_annotation_prefix = "io.openshift.workload.{workload-type}"
+[crio.runtime.workloads.{target}]
+  annotation = "workload.openshift.io/{target}"
+  resource_annotation_prefix = "io.openshift.workload.{target}"
   resources = {
     "cpu": "",
     "cpuset": "0-1",
   }
 ```
 
-The `label` field is used to match pods that should be treated as
-having the workload type. The label key on the pod is compared for an
-exact match against the value specified in the configuration file.
+The `annotation` field is used to match pods that should be treated as
+having the workload type. The annotation key on the pod is compared
+for an exact match against the value specified in the configuration
+file.
 
 The `resource_annotation_prefix` is the start of the annotation key
-used to pass settings down to CRI-O.
+used to pass settings from the admission hook down to CRI-O.
 
 The `resources` map associates annotation suffixes with default
 values. CRI-O will define a well-known set of resources and other
@@ -435,15 +509,19 @@ container should also be considered to be managed.
 #### API Server Admission Hook
 
 A new admission hook in the kubernetes API server within OpenShift
-will mutate pods when they are created to make 2 changes.
+will mutate pods when they are created to make 3 changes.
 
 1. It will move CPU requests to workload CPU requests, so that
    the scheduler can successfully place the pod on the node, even
    though the sum of the CPU requests for all management workloads may
    exceed the actual CPU capacity of the management CPU pool.
-2. It will add annotations with for each container with the value
-   equal to the original CPU requests, so that CRI-O can use the value
-   to configure the CPU shares for the container.
+2. It will strip all container-specific workload annotations from new
+   pods. This both prevents a user from configuring a pod incorrectly
+   and prevents unprivileged users from running their pods in a CPU
+   pool they should not have access to.
+3. It will add annotations with for each container with the value
+   equal to the original CPU requests * 1000, so that CRI-O can use
+   the value to configure the CPU shares for the container.
 
 We will not change pods in a way that changes their quality-of-service
 class. So, we would not strip CPU requests unless they also have
@@ -458,7 +536,7 @@ indicator to configure the CPU shares as BestEffort.
 Kubelet will be changed to look for a configuration file,
 `/etc/kubernetes/management-pinning`, to enable the management
 workload partitioning feature. The file should contain the cpuset
-specifier for the CPUs making up the management CPU pool.
+specifier for the CPUs making up each CPU pool.
 
 Kubelet will be changed so that when the feature is enabled, [when a
 static pod definition is
@@ -467,60 +545,10 @@ it is mutated in a way similar to the API server admission hook will
 mutate regular pods.
 
 Kubelet will be changed so that when the feature is enabled, it
-advertises a new extended resource of
-`cpu.workload.openshift.io/management`, representing all of the CPU
-capacity of the host (not just the management CPU pool).
-
-#### Installer Changes
-
-The installer will be changed to accept a new `workload.partitions`
-parameter for each [machine
-pool](https://github.com/openshift/installer/blob/master/docs/user/customization.md#machine-pools)
-with a list of workload types and their settings. For now, the only
-setting will be the name and the CPU sets to treat as separate from
-the standard shared pool. The name `workload.partitions` may change,
-based on discussion on the installer code changes.
-
-```yaml
-controlPlane:
-  name: master
-  workload:
-    partitions:
-      - name: management
-        cpuIDs: 0-1
-compute:
-  - name: worker
-    workload:
-      partitions:
-        - name: management
-          cpuIDs: 0-1
-```
-
-The default is empty, and when the value is empty the management
-workload partitioning feature is disabled.
-
-For the first version, we will only support 1 workload type with the
-name "management". That restriction may be lifted in the future.
-
-The `cpuIDs` value is a CPU set specifier for the CPUs to add to the
-isolated set used for management components, using the same cpuset
-syntax used elsewhere in kubernetes. Asking for explicit IDs instead
-of simply a count gives the user control in situations where they need
-specific CPUs to be available because they're close to accelerators,
-NICs, or other special hardware.
-
-The installer will be changed to generate an extra machine config
-manifest to configure CRI-O so that containers from pods with the
-`cpu.workload.openshift.io/management` annotation are run on the
-CPU set specified by the management workload settings.
-
-The installer will be changed to create a machine config manifest to
-write the `/etc/kubernetes/management-pinning` configuration file for
-kubelet. The file will have SELinux settings configured so that it is
-only readable by the kubelet.
-
-The installer will be changed to support the feature flag for enabling
-management workload partitioning.
+advertises a new extended resource of `cpu.workload.openshift.io/{CPU
+pool}` for each CPU pool defined in the configuration file,
+representing all of the CPU capacity of the host (not just that CPU
+pool).
 
 ### Risks and Mitigations
 
@@ -554,36 +582,20 @@ it is described here, it will be informative to share the experience
 as we believe workload isolation is a common problem for other
 kubernetes users.
 
+It is possible to build a cluster with the feature enabled and then
+add a node in a way that does not configure the workload partitions
+only for that node. This may make the node appear as not ready and
+workloads in daemon sets may not be able to be scheduled on the
+node. We expect the resulting error message to explain the problem
+well enough for admins to recover. Future work may make this more
+flexible.
+
 ## Design Details
 
 ### Open Questions [optional]
 
-1. If we think this feature is eventually going to be useful in
-   regular clusters, do we want the settings in the `bootstrapInPlace`
-   section? Should we add a `managementWorkloadPartitioning` section,
-   or something similar, and say for now that it only applies when the
-   single-node deployment approach is used?
-2. What should the new field in the Infrastructure CRD be?
-3. Should we worry about heterogeneous control plane hardware in
-   multi-node clusters? The install-config schema may need to support
-   specifying the same pool as using different CPUs on different nodes
-   in that case. For example
-
-   ```yaml
-   workloadCPUPools:
-     - name: management
-       nodes:
-         - master-0
-       cpuIDs: 0-1
-     - name: management
-       nodes:
-         - master-1
-         - master-2
-       cpuIDs: 23-24
-   ```
-4. Is the feature flag enabled automatically when the user specifies
-   the workload settings in the install-config, or do they need to
-   enable it explicitly.
+1. Should the namespace label used by the cluster admin to activate
+   the feature for pods in a namespace be an annotation instead?
 
 ### Test Plan
 
@@ -594,33 +606,6 @@ We will add a CI job to ensure that single-node deployments configured
 with management workload partitioning pass the compliance tests.
 
 ### Graduation Criteria
-
-**Note:** *Section not required until targeted at a release.*
-
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-
-- Maturity levels
-  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
-- [Deprecation policy][deprecation-policy]
-
-Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
-or by redefining what graduation means.
-
-In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
-
-[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
-[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
-
-**Examples**: These are generalized examples to consider, in addition
-to the aforementioned [maturity levels][maturity-levels].
 
 #### Dev Preview -> Tech Preview
 
@@ -642,21 +627,17 @@ to the aforementioned [maturity levels][maturity-levels].
 - Document SLOs for the component
 - Conduct load testing
 
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
-
 #### Removing a deprecated feature
 
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
+N/A
 
 ### Upgrade / Downgrade Strategy
 
 This new behavior will be added in 4.8 for single-node clusters only.
 
-Enabling the feature after installation is not supported, so we do not
-need to address what happens if an older cluster upgrades and then the
-feature is turned on.
+Enabling the feature after installation is not supported in 4.8, so we
+do not need to address what happens if an older cluster upgrades and
+then the feature is turned on.
 
 ### Version Skew Strategy
 
@@ -729,6 +710,74 @@ long for the goals of some customers.
 * Have two different annotations, rather than just one.
   * This is only needed if we decide to configure the cpuset in the
     annotation.
+
+### Enable the admission hook with a cluster-wide API
+
+We could use a cluster-wide API (CRD or feature gate) to enable
+workload partitioning. However, we eventually want to allow the
+feature to be enabled on a running cluster and it takes time to roll
+the machine configuration out to all of the nodes in the cluster. If
+the admission hook sees a cluster-wide API that says the feature is
+on, but the nodes have not been updated and are not configured to
+partition the workloads, then pods would either be unschedulable or
+would be scheduled as BestEffort but not partitioned.
+
+### Have the installer configure the feature
+
+Instead of requiring the user to provide machine config manifests to
+configure kubelet and CRI-O to enable the feature, we could have the
+installer generate those manifests. This early in the life of the
+feature, we are reluctant to commit to what an install-config API
+would look like, but this is one option.
+
+The installer will be changed to accept a new `workload.partitions`
+parameter for each [machine
+pool](https://github.com/openshift/installer/blob/master/docs/user/customization.md#machine-pools)
+with a list of workload types and their settings. For now, the only
+setting will be the name and the CPU sets to treat as separate from
+the standard shared pool. The name `workload.partitions` may change,
+based on discussion on the installer code changes.
+
+```yaml
+controlPlane:
+  name: master
+  workload:
+    partitions:
+      - name: management
+        cpuIDs: 0-1
+compute:
+  - name: worker
+    workload:
+      partitions:
+        - name: management
+          cpuIDs: 0-1
+```
+
+The default is empty, and when the value is empty the management
+workload partitioning feature is disabled.
+
+For the first version, we will only support 1 workload type with the
+name "management". That restriction may be lifted in the future.
+
+The `cpuIDs` value is a CPU set specifier for the CPUs to add to the
+isolated set used for management components, using the same cpuset
+syntax used elsewhere in kubernetes. Asking for explicit IDs instead
+of simply a count gives the user control in situations where they need
+specific CPUs to be available because they're close to accelerators,
+NICs, or other special hardware.
+
+The installer will be changed to generate an extra machine config
+manifest to configure CRI-O so that containers from pods with the
+`cpu.workload.openshift.io/management` annotation are run on the
+CPU set specified by the management workload settings.
+
+The installer will be changed to create a machine config manifest to
+write the `/etc/kubernetes/management-pinning` configuration file for
+kubelet. The file will have SELinux settings configured so that it is
+only readable by the kubelet.
+
+The installer will be changed to support the feature flag for enabling
+management workload partitioning.
 
 ## Infrastructure Needed [optional]
 
