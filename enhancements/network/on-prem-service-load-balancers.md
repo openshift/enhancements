@@ -229,35 +229,16 @@ doing all of your testing in a virtual network built on top of it.
 
 #### Operator
 
-This is the first of two alternatives for how we might integrate MetalLB in
-OpenShift.
+CRDs for the configuration of MetalLB will be done as part of the main MetalLB
+project. We will use the Cluster Network Operator (CNO) for managing the
+deployment of MetalLB on OpenShift.  It's possible that we will want to have
+MetalLB on by default for bare metal or other on-premise infrastructure
+clusters in the future, and using the CNO will give us this flexibility.
 
-We must also create an operator for MetalLB.  We should develop an operator
-that is generally useful to the MetalLB community.  We should also have an
-OpenShift version of this operator for our use.
-
-It is assumed that the MetalLB operator would be managed by OLM as an optional
-additional component to be installed on on-premise clusters.  However, in the
-[ROADMAP.md
-document](https://github.com/openshift/enhancements/blob/master/ROADMAP.md),
-there is an item to "Front the API servers and other master services with
-service load balancers".  If this functionality is required at install time,
-the details on management of this operator may be revisited.
-
-There is a start of a
-[metallb-operator](https://github.com/cybertron/metallb-operator) available and
-a [video demo](https://www.youtube.com/watch?v=WgOZno0D7nw).
-
-#### Alternative Integration: Cloud Controller Manager
-
-An alternative integration approach would be via a cloud controller manager
-(CCM). An example of this is the [packet.net
-CCM](https://github.com/packethost/packet-ccm), which ensures MetalLB is
-deployed and also configures it properly to work in packet.net’s BGP
-environment.
-
-These integration options must be explored in more detail as part of a more
-detailed integration proposal.
+At this time, we do not expect any new configuration required for the CNO.  The
+expectation is to deploy MetalLB automatically if we see an instance of a
+MetalLB configuration resource get created, and we're on a platform where we
+allow MetalLB to be used, which would be bare metal only to start.
 
 ### Risks and Mitigations
 
