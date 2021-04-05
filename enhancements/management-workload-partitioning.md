@@ -478,7 +478,7 @@ In the management workload case, we will configure it with values like
 
 ```ini
 [crio.runtime.workloads.management]
-  label = "workload.openshift.io/target=mangement"
+  annotation = "workload.openshift.io/management"
   resource_annotation_prefix = "io.openshift.workload.management"
   resources = {
     "cpu": "",
@@ -487,19 +487,19 @@ In the management workload case, we will configure it with values like
 ```
 
 CRI-O will be configured to support a new annotation on pods,
-`cpu.workload.openshift.io/{container-name}`.
+`io.openshift.workload.management.cpu/{container-name}`.
 
 ```ini
 [crio.runtime.runtimes.runc]
   runtime_path = "/usr/bin/runc"
   runtime_type = "oci"
-  allowed_annotations = ["cpu.workload.openshift.io"]
+  allowed_annotations = ["io.openshift.workload.management.cpu"]
 ```
 
-Pods that have the `cpu.workload.openshift.io` annotation will have
-their cpuset configured to the value from the appropriate workload
-configuration, as well as have their CPU shares configured to the
-value of the annotation.
+Pods that have the `io.openshift.workload.management.cpu` annotation
+will have their cpuset configured to the value from the appropriate
+workload configuration, as well as have their CPU shares configured to
+the value of the annotation.
 
 Note that this field does not conflict with the `infra_ctr_cpuset`
 config option, as the infra container will still be put in that
