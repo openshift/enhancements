@@ -493,7 +493,6 @@ CRI-O will be configured to support a new annotation on pods,
 [crio.runtime.runtimes.runc]
   runtime_path = "/usr/bin/runc"
   runtime_type = "oci"
-  allowed_annotations = ["io.openshift.workload.management.cpu"]
 ```
 
 Pods that have the `io.openshift.workload.management.cpu` annotation
