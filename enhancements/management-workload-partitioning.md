@@ -444,7 +444,7 @@ workload types.
 
 ```ini
 [crio.runtime.workloads.{workload-type}]
-  annotation = "workload.openshift.io/{workload-type}"
+  activation_annotation = "workload.openshift.io/{workload-type}"
   resource_annotation_prefix = "io.openshift.workload.{workload-type}"
   resources = {
     "cpu": "",
@@ -452,10 +452,10 @@ workload types.
   }
 ```
 
-The `annotation` field is used to match pods that should be treated as
-having the workload type. The annotation key on the pod is compared
-for an exact match against the value specified in the configuration
-file.
+The `activation_annotation` field is used to match pods that should be
+treated as having the workload type. The annotation key on the pod is
+compared for an exact match against the value specified in the
+configuration file.
 
 The `resource_annotation_prefix` is the start of the annotation key
 used to pass settings from the admission hook down to CRI-O.
