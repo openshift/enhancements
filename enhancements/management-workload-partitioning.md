@@ -724,6 +724,8 @@ Admission API hook: https://github.com/openshift/kubernetes/pull/632
 Assisted service updating install-config:
 https://github.com/openshift/assisted-service/pull/1431
 
+Zero Touch Provisioning automation: https://github.com/redhat-ztp/ztp-cluster-deploy/pull/88/
+
 ## Drawbacks
 
 Several of the changes described above are patches that we may end up
