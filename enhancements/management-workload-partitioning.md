@@ -445,7 +445,7 @@ workload types.
 ```ini
 [crio.runtime.workloads.{workload-type}]
   activation_annotation = "workload.openshift.io/{workload-type}"
-  resource_annotation_prefix = "io.openshift.workload.{workload-type}"
+  annotation_prefix = "io.openshift.workload.{workload-type}"
   resources = {
     "cpu": "",
     "cpuset": "0-1",
@@ -457,7 +457,7 @@ treated as having the workload type. The annotation key on the pod is
 compared for an exact match against the value specified in the
 configuration file.
 
-The `resource_annotation_prefix` is the start of the annotation key
+The `annotation_prefix` is the start of the annotation key
 used to pass settings from the admission hook down to CRI-O.
 
 The `resources` map associates annotation suffixes with default
@@ -467,7 +467,7 @@ arbitrary pods to set their own `cpuset` but other CRI-O users may
 want that ability.
 
 To pass a setting into CRI-O, the pod should have an annotation made
-by combining the `resource_annotation_prefix`, the key from
+by combining the `annotation_prefix`, the key from
 `resources`, and the container name, like this:
 
 ```text
@@ -479,7 +479,7 @@ In the management workload case, we will configure it with values like
 ```ini
 [crio.runtime.workloads.management]
   activation_annotation = "workload.openshift.io/management"
-  resource_annotation_prefix = "io.openshift.workload.management"
+  annotation_prefix = "io.openshift.workload.management"
   resources = {
     "cpushares": "",
     "cpuset": "0-1",
@@ -499,7 +499,7 @@ Pods that have the `workload.openshift.io/management` annotation will
 have their cpuset configured to the value from the appropriate
 workload configuration. The CPU shares for each container in the pod
 will be configured to the value of the annotation with the name
-created by combining the `resource_annotation_prefix`, `"cpushares"`
+created by combining the `annotation_prefix`, `"cpushares"`
 and the container name (for example,
 `io.openshift.workload.management.cpushares/my-container`).
 
@@ -597,7 +597,7 @@ deployment):
 ```ini
 [crio.runtime.workloads.management]
 activation_annotation = "workload.openshift.io/management"
-resource_annotation_prefix = "io.openshift.workload.management"
+annotation_prefix = "io.openshift.workload.management"
 resources = { "cpushares" = "", "cpuset" = "0-1,52-53" }
 ```
 
