@@ -495,10 +495,13 @@ CRI-O will be configured to support a new annotation on pods,
   runtime_type = "oci"
 ```
 
-Pods that have the `io.openshift.workload.management.cpushares`
-annotation will have their cpuset configured to the value from the
-appropriate workload configuration, as well as have their CPU shares
-configured to the value of the annotation.
+Pods that have the `workload.openshift.io/management` annotation will
+have their cpuset configured to the value from the appropriate
+workload configuration. The CPU shares for each container in the pod
+will be configured to the value of the annotation with the name
+created by combining the `resource_annotation_prefix`, `"cpushares"`
+and the container name (for example,
+`io.openshift.workload.management.cpushares/my-container`).
 
 Note that this field does not conflict with the `infra_ctr_cpuset`
 config option, as the infra container will still be put in that
