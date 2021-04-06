@@ -49,16 +49,6 @@ done should be extensible enough that adding other architectures would be simple
 - Build and release OKD payloads for ppc64le alongside x86_64.
 - Update documentation to reflect ppc64le availability
 
-### Risks and Mitigations
-
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
-
-How will security be reviewed and by whom? How will UX be reviewed and by whom?
-
-Consider including folks that also work outside your immediate sub-project.
-
 ## Design Details
 
 ### Test Plan
