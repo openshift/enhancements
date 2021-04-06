@@ -656,6 +656,8 @@ Kubelet changes: https://github.com/openshift/kubernetes/pull/627
 The first set of CRI-O changes to refactor annotation handling:
 https://github.com/cri-o/cri-o/pull/4680
 
+Final CRI-O PR: https://github.com/cri-o/cri-o/pull/4725
+
 Installer changes: https://github.com/openshift/installer/pull/4802
 
 Admission API hook: https://github.com/openshift/kubernetes/pull/632
