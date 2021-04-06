@@ -553,6 +553,65 @@ advertises a new extended resource of
 configuration file, representing all of the CPU capacity of the host
 (not just that CPU pool).
 
+#### Example Manifests
+
+To enable workload partitioning, the user must provide a
+`MachineConfig` manifest during installation to configure CRI-O and
+kubelet to know about the workload types.
+
+The manifest, without the encoded file content, would look like this:
+
+```yaml
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineConfig
+metadata:
+  labels:
+    machineconfiguration.openshift.io/role: master
+  name: 02-master-workload-partitioning
+spec:
+  config:
+    ignition:
+      version: 3.2.0
+    storage:
+      files:
+      - contents:
+          source: data:text/plain;charset=utf-8;base64,encoded-content-here
+        mode: 420
+        overwrite: true
+        path: /etc/crio/crio.conf.d/01-workload-partitioning
+        user:
+          name: root
+      - contents:
+          source: data:text/plain;charset=utf-8;base64,encoded-content-here
+        mode: 420
+        overwrite: true
+        path: /etc/kubernetes/workload-pinning
+        user:
+          name: root
+```
+
+The contents of `/etc/crio/crio.conf.d/01-workload-partitioning`
+should look like this (the `cpuset` value will vary based on the
+deployment):
+
+```ini
+[crio.runtime.workloads.management]
+activation_annotation = "workload.openshift.io/management"
+resource_annotation_prefix = "io.openshift.workload.management"
+resources = { "cpu" = "", "cpuset" = "0-1,52-53" }
+```
+
+The contents of `/etc/kubernetes/workload-pinning` should look like
+this:
+
+```json
+{
+  "management": {
+    "cpuset": "0-1,52-53"
+  }
+}
+```
+
 ### Risks and Mitigations
 
 The first version of this feature must be enabled when a cluster is
