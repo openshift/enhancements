@@ -598,7 +598,7 @@ deployment):
 [crio.runtime.workloads.management]
 activation_annotation = "workload.openshift.io/management"
 resource_annotation_prefix = "io.openshift.workload.management"
-resources = { "cpu" = "", "cpuset" = "0-1,52-53" }
+resources = { "cpushares" = "", "cpuset" = "0-1,52-53" }
 ```
 
 The contents of `/etc/kubernetes/workload-pinning` should look like
