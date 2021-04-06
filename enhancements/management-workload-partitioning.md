@@ -480,10 +480,7 @@ In the management workload case, we will configure it with values like
 [crio.runtime.workloads.management]
   activation_annotation = "workload.openshift.io/management"
   annotation_prefix = "io.openshift.workload.management"
-  resources = {
-    "cpushares": "",
-    "cpuset": "0-1",
-  }
+  resources = { "cpushares" = "", "cpuset" = "0-1" }
 ```
 
 CRI-O will be configured to support a new annotation on pods,
