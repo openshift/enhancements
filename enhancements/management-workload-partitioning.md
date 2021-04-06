@@ -478,7 +478,7 @@ In the management workload case, we will configure it with values like
 
 ```ini
 [crio.runtime.workloads.management]
-  trigger_annotation = "workload.openshift.io/management"
+  activation_annotation = "workload.openshift.io/management"
   resource_annotation_prefix = "io.openshift.workload.management"
   resources = {
     "cpushares": "",
