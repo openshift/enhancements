@@ -10,7 +10,7 @@ reviewers:
 approvers:
   - "@mfojtik"
 creation-date: 2019-10-08
-last-updated: 2021-03-17
+last-updated: 2021-04-07
 status: implementable
 see-also:
 replaces:
@@ -90,7 +90,7 @@ superseded-by:
       Confirm the openshift/release change from step 4 is merged and the unit test is triggered in your PR.
 9. In oc repository:
    1. Edit the replace dependencies to point to the commits from the merged PRs from previous steps.
-   2. Edit the replace dependencies for all other k8s.io/repos to point to latest release (`release-1.18` here).
+   2. Edit the replace dependencies for all other k8s.io/repos to point to latest release (`v0.21.0-beta.1` here).
       It's useful to add a commit for steps 1,2.
    3. Run `go mod tidy` _then_ `go mod vendor` and verify the changes before committing.
    3. Update kubectl version fields injected in Makefile (using `git describe --long --tags --abbrev=7` in kubernetes fork).
