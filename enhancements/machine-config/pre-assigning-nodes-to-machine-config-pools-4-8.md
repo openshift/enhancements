@@ -76,7 +76,7 @@ could spend half of the 2 hour window just rebooting.
 
 ## Proposal
 
-Two new CRs, a controller to watch each, and a webhook.
+A [new repo](https://github.com/openshift-kni/node-label-operator) containing two new CRs, a controller to watch each, and a webhook.
 
 The first CR allows the admin to define patterns and a list of labels that
 should be applied to any Node with a matching name.
@@ -133,6 +133,20 @@ type OwnedLabelsSpec struct {
 }
 ```
 
+#### User flow
+
+1. Install the core cluster
+2. Install the Node Label Operator via OLM
+3. Create the CRs that describe which Labels to apply to Node(s)
+   based on `Node.name`
+5. Configure any CRs that describe Label domains that the NLO
+   owns exclusively (and is therefor allowed to remove unknown 
+   Labels from Nodes)
+7. Deploy additional Nodes
+8. Observe that Nodes have the Labels applied
+9. Deploy additional Nodes and/or change which Labels should be 
+   applied to existing Nodes
+
 ### User Stories
 
 1. As an admin, I want Nodes to have a specific set of labels based on their
@@ -179,53 +193,11 @@ expectations).
 
 ### Graduation Criteria
 
-**Note:** *Section not required until targeted at a release.*
+This implementation will be complete within a single release cycle.
 
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-
-- Maturity levels
-  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
 - [Deprecation policy][deprecation-policy]
 
-Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
-or by redefining what graduation means.
-
-In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
-
-[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
 [deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
-
-**Examples**: These are generalized examples to consider, in addition
-to the aforementioned [maturity levels][maturity-levels].
-
-#### Dev Preview -> Tech Preview
-
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-- Enumerate service level indicators (SLIs), expose SLIs as metrics
-- Write symptoms-based alerts for the component(s)
-
-#### Tech Preview -> GA
-
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-- Backhaul SLI telemetry
-- Document SLOs for the component
-- Conduct load testing
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
 
 #### Removing a deprecated feature
 
