@@ -40,8 +40,8 @@ With this enhancement we propose a better, future-proof mechanism, that aligns u
 This proposal is a backport of parts of the upstream machine healthcheck proposal [0], which
 also is already implemented [1].
 
-- [0] https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20191030-machine-health-checking.md
-- [1] https://github.com/kubernetes-sigs/cluster-api/pull/3606
+- [0] [upstream machine healthcheck proposal](https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20191030-machine-health-checking.md)
+- [1] [upstream machine healthcheck implementation](https://github.com/kubernetes-sigs/cluster-api/pull/3606)
 
 ## Motivation
 
@@ -63,10 +63,10 @@ TBD
 
 ## Proposal
 
-We propose modifying the MachineHealthCheck CRD to support a externalRemediationTemplate, an ObjectReference to
+We propose modifying the MachineHealthCheck CRD to add a new field, `externalRemediationTemplate`, an ObjectReference to
 a provider-specific remediation template CR.
 
-### User Stories 
+### User Stories
 
 #### Story 1
 
@@ -77,11 +77,7 @@ from transient errors faster and begin application recovery sooner.
 
 As an admin of a hardware based cluster, I would like unhealthy nodes to be power-cycled, so that I can detect
 non-transient issues faster.
-
-#### Story 3
-
-As an admin of a hardware based cluster, I would like the system to keep attempting to power-cycle unhealthy nodes,
-so that they are automatically added back to the cluster when I fix the underlying problem.
+If automatic power-cycles don't resolve the issue it helps the admin to rule out transient issues like software bugs, etc.
 
 ### Implementation Details/Notes/Constraints
 
@@ -95,14 +91,8 @@ External Remediation Controller (ERC) watching for that CR.
 No further action (deletion or applying conditions) will be taken by the MachineHealthCheck controller until the
 Node becomes healthy. After that, it will locate and delete the instantiated MachineRemediation CR.
 
-When a Machine enters an unhealthy state, the MHC will:
-* Look up the referenced template
-* Instantiate the template (for simplicity, we will refer to this as a External Machine Remediation CR, or EMR)
-* Force the name and namespace to match the unhealthy Machine
-* Save the new object in etcd
-
 We use the same name and namespace for the External Machine Remediation CR to ensure uniqueness and lessen the
-possibility for multiple parallel remediations of the same Machine. 
+possibility for multiple parallel remediations of the same Machine.
 
 The lifespan of the EMRs is that of the remediation process, and they are not intended to be a record of past events.
 The EMR will also contain an ownerRef to the Machine, to ensure that it does not outlive the Machine it references.
@@ -114,7 +104,7 @@ Node, or Machine as a result.
 
 When the external remediation controller detects the new EMR it starts remediation and performs whatever actions
 it deems appropriate until the EMR is deleted by the MHC. It is a detail of the ERC when and how to retry remediation
-in the event that a EMR is not deleted after the ERC considers remediation complete. 
+in the event that a EMR is not deleted after the ERC considers remediation complete.
 
 The ERC may wish to register a finalizer on its CR to ensure it has an opportunity to perform any additional cleanup
 in the case that the unhealthy state was transient and the Node returned to a healthy state prior to the completion
@@ -203,7 +193,7 @@ See deprecation and upgrade
 ### Test Plan
 
 The existing external remediation tests will be reviewed / adapted / extended as needed, and the upstream tests will
-be backported as well. 
+be backported as well.
 
 ### Graduation Criteria
 
@@ -217,7 +207,7 @@ TBD
 
 TBD
 
-##### Tech Preview -> GA 
+##### Tech Preview -> GA
 
 TBD
 
@@ -228,7 +218,7 @@ TBD
 
 ### Upgrade / Downgrade Strategy
 
-- Open question: do we need an automatic MHC conversion from the existing annotation based mechanism to the new one? 
+- Open question: do we need an automatic MHC conversion from the existing annotation based mechanism to the new one?
 
 ### Version Skew Strategy
 
@@ -250,11 +240,3 @@ no known drawbacks
 ## Alternatives
 
 - Keep the existing annotation based mechanism.
-
-## Infrastructure Needed [optional]
-
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
-
-Listing these here allows the community to get the process for these resources
-started right away.
