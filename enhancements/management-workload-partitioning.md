@@ -156,7 +156,7 @@ disabled.
 We generally want components to opt-in to workload partitioning and
 especially to being considered management workloads. Therefore, for a
 regular pod to be considered to contain a management workload it must
-be labeled with an annotation configuring its *workload type*,
+have an annotation configuring its *workload type*,
 `workload.openshift.io/{workload-type}`. For now, we will focus on
 management workloads via `workload.openshift.io/management`, but will
 use a syntax that supports other types of workloads that may be
@@ -184,9 +184,9 @@ file on startup, and the feature will only be enabled if that file is
 found.
 
 We want to give cluster administrators control over which workloads
-are run on the management CPUs. Normal users cannot add a label to a
-namespace without the right RBAC permissions. Therefore, only pods in
-namespaces labeled with a label
+are run on the management CPUs. Normal users cannot change the
+metadata of a namespace without the right RBAC permissions. Therefore,
+only pods in namespaces with an annotation
 `workload.openshift.io/allowed={comma_separated_list_of_type_names}`
 will be subject to special handling.
 
@@ -276,7 +276,7 @@ outside of the OpenShift release payload. Therefore we will need to
 document this feature so that workload authors can use it. We will
 also identify add-on components that we know our initial customers
 will use and to which we contribute, and make the changes to add the
-labels ourselves, starting with
+annotations ourselves, starting with
 
 * performance-addon-operator
 * sriov-network-operator
@@ -357,7 +357,7 @@ scheduled to run on the management CPU pool.
    annotations for CRI-O with the same values.
 8. Something schedules a regular pod with the
    `workload.openshift.io/management` annotation in a namespace with
-   the `workload.openshift.io/allowed=management` label.
+   the `workload.openshift.io/allowed=management` annotation.
 9. The admission hook modifies the pod, replacing the CPU requests
    with `management.workload.openshift.io/cores` requests and adding
    the `io.openshift.workload.management.cpushares/{container-name}`
@@ -524,7 +524,7 @@ Service](https://kubernetes.io/docs/tasks/configure-pod-container/quality-servic
 class. So, we would not strip CPU requests unless they also have
 memory requests, because if we mutate the pod so that it has no CPU or
 memory requests the quality-of-service class of the pod would be
-changed automatically. Any labeled pod that is already BestEffort
+changed automatically. Any pod that is already BestEffort
 would be annotated using `0` as the value so that CRI-O will have an
 indicator to configure the CPU shares as BestEffort.
 
@@ -650,13 +650,13 @@ flexible.
 
 ### Open Questions [optional]
 
-1. Should the namespace label used by the cluster admin to activate
-   the feature for pods in a namespace be an annotation instead?
+None
 
 ### Test Plan
 
 We will add a CI job to ensure that all release payload workloads and
-their namespaces are labeled with `io.openshift.management: true`.
+their namespaces have the `workload.openshift.io/management`
+annotation.
 
 We will add a CI job to ensure that single-node deployments configured
 with management workload partitioning pass the compliance tests.
@@ -735,8 +735,8 @@ We could force all pods of a certain priority into the management CPU
 pool. There are two issues with that approach:
 
 1. There are no RBAC restrictions on selecting the priority for a
-   pod. We could mitigate that by still using the namespace label to
-   opt-in.
+   pod. We could mitigate that by still using the namespace annotation
+   to opt-in.
 2. By not requiring opt-in, we make it harder for component authors to
    predict and understand how their code is run. The pods created from
    deployments managed by operators would not match the deployment
