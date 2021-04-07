@@ -64,6 +64,11 @@ Localization will not be included in the CLI at this time, and bidirectional (ri
 
 ## Proposal
 
+
+### User Stories
+
+As an OpenShift user, I want to access to the web console information in my preferred language.
+
 [react-i18next framework](https://react.i18next.com/) an internationalization framework for React based on [i18next](http://i18next.com/).
 It provides standard internationalization features such as plurals, context, interpolation, and format,
 as well as language detection, loading, caching, and extensions through additional plugins.
@@ -110,6 +115,15 @@ The desired fallback experience if not all pieces/parts of the UI are translated
 
 We will also modify our existing file conversion tools to handle translation files spread across multiple packages so we can easily export/import translation files.
 
+Translation of the login page will be handled by [oauth-server](https://github.com/openshift/oauth-server), which will check for request `Accept-Language` header. If the header is missing in the request, `oauth-server` will default to English language for localization.
+
+[oauth-server](https://github.com/openshift/oauth-server) contains the default OKD login templates. Custom templates are stored in the [oauth-templates](https://github.com/openshift/oauth-templates) repository and will also need to be updated for the other brands like the OCP and OpenShift Dedicated login pages.
+In case of any changes in these repositories, Console-Team will be responsible for syncing those changes between them.
+
+Since there are only a small number of strings that rarely change, the localized strings for each of the supported languages will be directly hardcoded into the `oauth-server`, so we don't have to load them during runtime.
+These strings are to be included in the console repository and the i18next-parser will add them into the files sent to the Globalization team for translation. Afterwards the console team will contribute them back to the [oauth-server](https://github.com/openshift/oauth-server).
+
+
 ### Risks and Mitigations
 
 **Risk**: All text is not translated.
@@ -141,15 +155,33 @@ We will have unit and integration tests. We will also work with the Globalizatio
 
 Initially we will just mark strings internally. Translations and testing will be added once marking is complete.
 
+#### Dev Preview -> Tech Preview
+
+None
+
+#### Tech Preview -> GA
+
+None
+
+#### Removing a deprecated feature
+
+None
+
 ### Upgrade / Downgrade Strategy
 
 We will need to make sure that new components with hard-coded strings are marked for translation.
+
+### Version Skew Strategy
+
+None
+
 
 ## Implementation History
 
 * 2020-08-03 - [PR against console](https://github.com/openshift/console/pull/6194) opened
 * 2020-04-23 - [UXD exploration of i18next](https://github.com/jschuler/console/pull/1) opened
 * 2020-04-13 - [UXD analysis and comparison of libraries](https://github.com/patternfly/patternfly-react/issues/3952#issuecomment-613645855) posted
+* 2021-03-25 - [PR against oauth-server](https://github.com/openshift/oauth-server/pull/71) opened
 
 ## Drawbacks
 
