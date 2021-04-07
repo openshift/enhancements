@@ -29,7 +29,7 @@ status: implementable
 Currently OKD only provides builds for x86_64 based systems. This enhancement
 is a proposal to build and publish OKD for ppc64le hardware alongside the
 x86_64 builds. In this proposal, how, when, and where these builds will
-happen will be detailed. 
+happen will be detailed.
 
 ## Motivation
 
