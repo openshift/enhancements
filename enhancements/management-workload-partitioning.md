@@ -531,7 +531,7 @@ indicator to configure the CPU shares as BestEffort.
 #### Kubelet Changes
 
 Kubelet will be changed to look for a configuration file,
-`/etc/kubernetes/workload-pinning`, to enable the management
+`/etc/kubernetes/openshift-workload-pinning`, to enable the management
 workload partitioning feature. The file should contain the cpuset
 specifier for the CPUs making up each CPU pool.
 
@@ -579,7 +579,7 @@ spec:
           source: data:text/plain;charset=utf-8;base64,encoded-content-here
         mode: 420
         overwrite: true
-        path: /etc/kubernetes/workload-pinning
+        path: /etc/kubernetes/openshift-workload-pinning
         user:
           name: root
 ```
@@ -595,7 +595,7 @@ annotation_prefix = "io.openshift.workload.management"
 resources = { "cpushares" = "", "cpuset" = "0-1,52-53" }
 ```
 
-The contents of `/etc/kubernetes/workload-pinning` should look like
+The contents of `/etc/kubernetes/openshift-workload-pinning` should look like
 this:
 
 ```json
@@ -832,7 +832,7 @@ manifest to configure CRI-O so that containers from pods with the
 CPU set specified by the management workload settings.
 
 The installer will be changed to create a machine config manifest to
-write the `/etc/kubernetes/management-pinning` configuration file for
+write the `/etc/kubernetes/openshift-workload-pinning` configuration file for
 kubelet. The file will have SELinux settings configured so that it is
 only readable by the kubelet.
 
