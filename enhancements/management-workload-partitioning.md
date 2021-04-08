@@ -351,7 +351,7 @@ scheduled to run on the management CPU pool.
    extended resources on the node based on the number of CPUs in the
    host.
 7. The kubelet reads static pod definitions. It replaces the `cpu`
-   requests with `cpu.workload.openshift.io/management` requests of
+   requests with `management.workload.openshift.io/cores` requests of
    the same value and adds the
    `io.openshift.workload.management.cpushares/{container-name}`
    annotations for CRI-O with the same values.
