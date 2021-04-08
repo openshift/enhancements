@@ -676,6 +676,8 @@ with management workload partitioning pass the compliance tests.
 
 - Eliminate the need to have the performance-addon-operators configure
   the kube-reserved and system-reserved CPU set.
+- Eliminate the need for the user to manually create manifests by
+  adding an installer interface for enabling the feature.
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 - Available by default
