@@ -84,12 +84,11 @@ available in the `pull-secret` (in the `openshift-config-managed` namespace)
 
 The SCA certificate is available via the `etc-pki-entitlement` secret in the `openshift-config-managed` namespace
 
-### Open questions
-- How often should the Insights Operator query the OCM API? Every 4 hours? Do we always need to download the full SCA cert data?
-- Where to verify that the SCA certs are valid (user can use it to consume RHEL content) ? Insights Operator integration tests?
+### Update period
+- Insights Operator query the OCM API every 8 hours and downloads the full data provided
 
 ### Test Plan
 
 - `insights-operator-e2e-tests` suite can verify the SCA cert data
   is available
-- the validity of the SCA certs can be tested as well (see the open questions)
+- Basic test of the validity of the SCA certs. Mount the `etc-pki-entitlement` secret and run e.g `yum install` in the container
