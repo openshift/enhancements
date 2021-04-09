@@ -2,11 +2,8 @@
 
 echo "Running"
 
-if [ ! -f $HOME/.hackmd/cookies.json ]
-then
+if hackmd-cli whoami | grep -q "not logged in"; then
     hackmd-cli login
-else
-    hackmd-cli whoami
 fi
 
 hackmd-cli import $1
