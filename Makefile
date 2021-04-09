@@ -1,4 +1,5 @@
 RUNTIME ?= podman
+DAYSBACK ?= 7
 
 .PHONY: help
 help:  ## Display this help
@@ -21,7 +22,7 @@ REPORT_FILE=this-week/$(shell date +%F).md
 report: report-gen lint report-upload  ## run weekly newsletter report tool
 
 report-gen:
-	(cd ./tools; go run ./main.go report > ../$(REPORT_FILE))
+	(cd ./tools; go run ./main.go report --days-back $(DAYSBACK) > ../$(REPORT_FILE))
 
 HACKMD_IMAGE=enhancements-hackmd-cli:latest
 
