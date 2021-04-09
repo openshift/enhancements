@@ -13,9 +13,15 @@ type GithubSettings struct {
 	Token string `yaml:"token"`
 }
 
+// ReviewerSettings includes the details needed to run the reviewer command.
+type ReviewerSettings struct {
+	Ignore []string `yaml:"ignore"`
+}
+
 // Settings includes all of the application settinggs
 type Settings struct {
-	Github GithubSettings `yaml:"github"`
+	Github    GithubSettings   `yaml:"github"`
+	Reviewers ReviewerSettings `yaml:"reviewers"`
 }
 
 // LoadFromFile reads the named file and returns the Settings
