@@ -3,11 +3,11 @@ title: apply-user-defined-tags-to-all-aws-resources-created-by-openshift
 authors:
   - "@gregsheremeta"
 reviewers:
-  - TBD
+  - @decarr @bparees
 approvers:
-  - TBD
+  - @decarr 
 creation-date: 2021-03-24
-last-updated: 2021-03-24
+last-updated: 2021-04-09
 status: implementable
 ---
 
@@ -36,75 +36,56 @@ Note: this enhancement is slightly retroactive. Work has already begun on this. 
 Motivations include but are not limited to:
 
  - allow admin, compliance, and security teams to keep track of assets and objects created by OpenShift,
-   both at install time during continuous operation (Day 2)
+   both at install time and during continuous operation (Day 2)
  - in a Managed OpenShift environment such as Red Hat OpenShift on AWS (ROSA), allow easy differentiation
    between Red Hat-managed AWS objects and customer-managed objects
  - *allow for the restriction of permissions granted to Red Hat in an AWS account by AWS resource tags.
-   For example, see SDE-1146 - "IAM users and roles can only operate on resources with specific tags"*
+   For example, see https://issues.redhat.com/browse/SDE-1146 - "IAM users and roles can only operate on resources with specific tags"*
 
 ### Goals
 
  - the administrator or service (in the case of Managed OpenShift) installing OpenShift can pass an arbitrary
    list of user-defined tags to the OpenShift Installer, and everything created by the installer and all other
-   bootstrapped components will apply those tags to all resources created in AWS, for the lift of the cluster.
- - Installer writes the tags to the infrastructure resource so that Day 2 operations can know what tags to apply
-   to AWS resources for the life of the cluster.
+   bootstrapped components will apply those tags to all resources created in AWS, for the life of the cluster.
  - tags must be applied at creation time, in an atomic operation. It isn't acceptable to create an object and,
    after some period of time, apply the tags post-creation.
 
 ### Non-Goals
 
  - to reduce initial scope, tags are applied only at creation time and not reconciled. If an administrator manually
-   changes the tags stores in the infrastructure resource, pre-existing AWS resources are not updated. Only newly-
-   created AWS resources would get the updated tags.
- - to reduce initial scope, we're not implementing this for clouds other than AWS. We shouldn't take any actions to
-   prohibit that later, though.
+   changes the tags stored in the infrastructure resource, behavior is undefined. See below.
+ - to reduce initial scope, we are not implementing this for clouds other than AWS. We will not take any actions
+   to prohibit that later.
 
 ## Proposal
 
-Add a new field `userTags` to `.spec.aws` of the `infrastructure.config.openshift.io` type. Tags included in the
-`userTags` field will be applied to new resources created for the cluster.
+New `experimentalPropagateUserTags` field added to `.platform.aws` of install config to indicate that the user tags should be applied to AWS
+resources created by in-cluster operators.
 
-Installer will apply these tags to all AWS resources it creates with terraform (e.g. bootstrap and master EC2 instances)
+If `experimentalPropagateUserTags` is true, install validation will fail if there is any tag that starts with `kubernetes.io` or `openshift.io`.
+
+Add a new field `userTags` to `.status.aws` of the `infrastructure.config.openshift.io` type. Tags included in the
+`userTags` field will be applied to new resources created for the cluster. The `userTags` field will be populated by the installer only if the `experimentalPropagateUserTags` field is true.
+
+Installer will apply these tags to all AWS resources it creates with terraform (e.g. bootstrap and master EC2 instances) (already exists)
 
 All operators that create AWS resources (ingress, cloud credential, storage, image registry, machine-api)
 will apply these tags to all AWS resources they create.
 
+userTags that are specified in the infrastructure resource will merge with userTags specified in an individual component. In the case where a userTag is specified in the infrastructure resource and there is a tag with the same key specified in an individual component, the value from the individual component will have precedence and be used.
+
 ### User Stories
 
-SDE-1146 - IAM users and roles can only operate on resources with specific tags
+https://issues.redhat.com/browse/SDE-1146 - IAM users and roles can only operate on resources with specific tags
 As a security-conscious ROSA customer, I want to restrict the permissions granted to Red Hat in my AWS account by using
 AWS resource tags.
 
-### Implementation Details/Notes/Constraints [optional]
-
-Some components, like machine-api and image registry, already have some support to allow adminstrators to
-push tags into EC2 instance and S3 buckets, respectively.
-
-In the case of machine-api, a user has to specify tags on the MachineSet as part of the Day 2 operation.
-
-In the case of image registry, a user has to pre-configure an S3 bucket with the required tags, and use the
-image registry's bring-your-own-bucket feature.
-
 ### Risks and Mitigations
 
-To reduce initial scope, tags are applied only at creation time and not reconciled. This behavior is atypical in
-Kubernetes and tends to cause confusion for users.
+The userTags field is intended to be set at install time and immutable. If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. If tags are removed from userTags, the tag may or may not be removed from the AWS resource.
+
 
 ## Design Details
-
-### Open Questions [optional]
-
- - Since machine-api and image registry already have some support to allow adminstrators to
-   push tags into EC2 instance and S3 buckets, respectively, should these be out of scope? Or can we agree
-   that it's a nicer user experience to specify the tags one time, at install time, and have everything just
-   work after that. Our intention is to change the contract of user tags to state that all resources created
-   for the cluster are tagged with the user-provided tags, putting the user-provided tags on equal footing with
-   the kubernetes owned tag. If we have to carve out exceptions from there that the user needs to remember to
-   fill out themselves, then it dilutes that contract.
-
- - How are upgrades handled? Is this an install-time only feature that requires a fresh cluster to adopt, or
-   can we somehow enable upgrade users to adopt it?
 
 ### Test Plan
 
