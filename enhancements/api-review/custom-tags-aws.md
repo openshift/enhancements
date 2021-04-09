@@ -74,6 +74,10 @@ will apply these tags to all AWS resources they create.
 
 userTags that are specified in the infrastructure resource will merge with userTags specified in an individual component. In the case where a userTag is specified in the infrastructure resource and there is a tag with the same key specified in an individual component, the value from the individual component will have precedence and be used.
 
+The userTags field is intended to be set at install time and is considered immutable. Components that respect this field must only ever add tags that they retrieve from this field to cloud resources, they must never remove tags from the existing underlying cloud resource even if the tags are removed from this field(despite it being immutable).
+
+If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. If tags are removed from userTags, the tag may or may not be removed from the AWS resource.
+
 ### User Stories
 
 https://issues.redhat.com/browse/SDE-1146 - IAM users and roles can only operate on resources with specific tags
@@ -81,9 +85,6 @@ As a security-conscious ROSA customer, I want to restrict the permissions grante
 AWS resource tags.
 
 ### Risks and Mitigations
-
-The userTags field is intended to be set at install time and immutable. If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. If tags are removed from userTags, the tag may or may not be removed from the AWS resource.
-
 
 ## Design Details
 
