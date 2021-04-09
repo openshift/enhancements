@@ -126,6 +126,24 @@ it is used to manage all elements of the cluster.
 * Every component must remain available to consumers without disruption during upgrades and reconfiguration
   * See the next section for more details
 
+#### High Availability
+
+We focus on minimizing the impact of a failure of individual nodes in a cluster by ensuring operators or operands are spread across multiple nodes.
+When OpenShift runs in [cluster high availability mode](https://github.com/openshift/enhancements/pull/555), the supported cluster topologies are 3 control-plane nodes and 2 workers, or 3 control-plane nodes that also run workloads (compact clusters).  The following scenarios are intended to support the minimum 2 worker node configuration.  
+Please note that in case of [Single Node OpenShift](https://github.com/openshift/enhancements/blob/master/enhancements/single-node/production-deployment-approach.md), since the replicas needed are always 1, there is no need to have affinities set.
+
+
+
+* If the operator or operand wishes to be highly available and can tolerate the loss of one replica, the default configuration for it should be
+  * Two replicas
+  * Hard pod [anti-affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#always-co-located-in-the-same-node) on hostname (no two pods on the same node)
+  * Use the maxUnavailable rollout strategy on deployments (prefer 25% by default for a value)
+  * This is the recommended approach for all the components unless the component needs 3 replicas
+* If the operator or operand requires >= 3 replicas and should be running on worker nodes
+  * Set soft pod anti-affinity on the hostname so that pods prefer to land on separate nodes (will be violated on two node clusters)
+  * Use maxSurge for deployments if possible since the spreading rules are soft
+
+In future, when we include the descheduler into OpenShift by default, it will periodically rebalance the cluster to ensure spreading for operand or operator is honored. At that time we will remove hard anti-affinity constraints, and recommend components move to a surge model during upgrades.
 
 #### Upgrade and Reconfiguration
 
