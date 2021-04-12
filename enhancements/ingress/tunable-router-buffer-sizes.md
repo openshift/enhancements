@@ -16,8 +16,8 @@ approvers:
   - "@frobware"
   - "@danehans"
 creation-date: 2020-08-18
-last-updated: 2021-02-12
-status: implementable
+last-updated: 2021-03-30
+status: implemented
 see-also:
 replaces:
 superseded-by:
@@ -92,20 +92,20 @@ type IngressControllerHttpHeaderBuffer struct {
 	// headerBufferSize describes how much memory should be reserved
 	// (in bytes) for IngressController connection sessions.
 	//
-	// +kubebuilder:validation:required
+	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:minimum=16384
-	// +required
-	HeaderBufferSize int `json:"headerBufferSize"`
+	// +optional
+	HeaderBufferSize int32 `json:"headerBufferSize,omitempty"`
 
 	// headerBufferMaxRewrite describes how much memory should be reserved
 	// (in bytes) from headerBufferSize for HTTP header rewriting
 	// and appending. Note that incoming HTTP requests will be limited to
 	// (headerBufferSize - headerBufferMaxRewrite) bytes.
 	//
-	// +kubebuilder:validation:required
+	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:minimum=4096
-	// +required
-	HeaderBufferMaxRewrite int `json:"headerBufferMaxRewrite"`
+	// +optional
+	HeaderBufferMaxRewrite int32 `json:"headerBufferMaxRewrite,omitempty"`
 }
 ```
 
