@@ -3,7 +3,8 @@ title: apply-user-defined-tags-to-all-aws-resources-created-by-openshift
 authors:
   - "@gregsheremeta"
 reviewers:
-  - @decarr @bparees
+  - @decarr
+  - @bparees
 approvers:
   - @decarr 
 creation-date: 2021-03-24
@@ -25,7 +26,7 @@ status: implementable
 ## Summary
 
 This enhancement describes a proposal to allow an administrator of OpenShift to
-have the ability to apply user defined tags to all resources created by OpenShift in AWS.
+have the ability to apply user defined tags to many resources created by OpenShift in AWS.
 
 Note: this enhancement is slightly retroactive. Work has already begun on this. See
  - https://github.com/openshift/api/pull/864
@@ -46,7 +47,7 @@ Motivations include but are not limited to:
 
  - the administrator or service (in the case of Managed OpenShift) installing OpenShift can pass an arbitrary
    list of user-defined tags to the OpenShift Installer, and everything created by the installer and all other
-   bootstrapped components will apply those tags to all resources created in AWS, for the life of the cluster.
+   bootstrapped components will apply those tags to all resources created in AWS, for the life of the cluster, and where supported by AWS.
  - tags must be applied at creation time, in an atomic operation. It isn't acceptable to create an object and,
    after some period of time, apply the tags post-creation.
 
@@ -67,7 +68,7 @@ If `experimentalPropagateUserTags` is true, install validation will fail if ther
 Add a new field `userTags` to `.status.aws` of the `infrastructure.config.openshift.io` type. Tags included in the
 `userTags` field will be applied to new resources created for the cluster. The `userTags` field will be populated by the installer only if the `experimentalPropagateUserTags` field is true.
 
-Installer will apply these tags to all AWS resources it creates with terraform (e.g. bootstrap and master EC2 instances) (already exists)
+Note existing unchanged behavior: The installer will apply these tags to all AWS resources it creates with terraform (e.g. bootstrap and master EC2 instances) from the install config, not from infrastructure status, and regardless if the propagation option is set.
 
 All operators that create AWS resources (ingress, cloud credential, storage, image registry, machine-api)
 will apply these tags to all AWS resources they create.
@@ -76,7 +77,7 @@ userTags that are specified in the infrastructure resource will merge with userT
 
 The userTags field is intended to be set at install time and is considered immutable. Components that respect this field must only ever add tags that they retrieve from this field to cloud resources, they must never remove tags from the existing underlying cloud resource even if the tags are removed from this field(despite it being immutable).
 
-If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. If tags are removed from userTags, the tag may or may not be removed from the AWS resource.
+If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. However, if tags are removed from userTags, the tag will not be removed from the AWS resource.
 
 ### User Stories
 
@@ -98,14 +99,13 @@ TBD
 
 ### Upgrade / Downgrade Strategy
 
-Consider the following in developing an upgrade/downgrade strategy for this
-enhancement:
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to keep previous behavior?
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to make use of the enhancement?
+On upgrade:
 
-Good question ^. TBD
+The new status field won't be populated since it is only populated by the installer and that can't have happened if the cluster was installed from a prior version. Components that consume the new field should take no action since they will see no additional tags.
+
+On downgrade:
+
+The status field may remain populated, components may or may not continue to tag newly created resources w/ the additional tags depending on whether or not a given component still has logic to respect the status tags, after the downgrade.
 
 ### Version Skew Strategy
 
@@ -115,7 +115,12 @@ TBD
 
 ## Drawbacks
 
-TBD
+If a customer decides they do not want these tags applied to new resources, there is no clean way to address that need:
+
+1. they would have to get help from support to edit the status field
+2. they would have to manually remove the undesired tags from any existing resources
+
+In the future we will want to introduce a spec field where a customer can specify and edit these tags, which will be reflected into status when changed, and we will expect consuming components to reconcile changes to the set of tags by applying net new tags to existing resources (but they will still not remove tags that are dropped from the list of tags).
 
 ## Alternatives
 
