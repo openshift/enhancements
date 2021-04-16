@@ -93,10 +93,10 @@ func newShowPRCommand() *cobra.Command {
 			var sinceUpdated float64
 			var sinceClosed float64
 
-			if !prd.Pull.UpdatedAt.IsZero() {
+			if prd.Pull.UpdatedAt != nil && !prd.Pull.UpdatedAt.IsZero() {
 				sinceUpdated = time.Since(*prd.Pull.UpdatedAt).Hours() / 24
 			}
-			if !prd.Pull.ClosedAt.IsZero() {
+			if prd.Pull.ClosedAt != nil && !prd.Pull.ClosedAt.IsZero() {
 				sinceClosed = time.Since(*prd.Pull.ClosedAt).Hours() / 24
 			}
 
