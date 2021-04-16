@@ -150,11 +150,21 @@ func GetSummary(pr int) (summary string, err error) {
 	if err != nil {
 		return "", errors.Wrap(err, "could not determine the list of modified files")
 	}
-	if len(filenames) != 1 {
-		return "", fmt.Errorf("expected 1 modified file, found %v", filenames)
+	enhancementFiles := []string{}
+	for _, name := range filenames {
+		if !strings.HasPrefix(name, "enhancements/") {
+			continue
+		}
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		enhancementFiles = append(enhancementFiles, name)
 	}
-	summary = fmt.Sprintf("(no '## Summary' section found in %s)", filenames[0])
-	fileRef := fmt.Sprintf("%s:%s", prRef(pr), filenames[0])
+	if len(enhancementFiles) != 1 {
+		return "", fmt.Errorf("expected 1 modified file, found %v", enhancementFiles)
+	}
+	summary = fmt.Sprintf("(no '## Summary' section found in %s)", enhancementFiles[0])
+	fileRef := fmt.Sprintf("%s:%s", prRef(pr), enhancementFiles[0])
 	content, err := getFileContents(fileRef)
 	if err != nil {
 		return summary, errors.Wrap(err, fmt.Sprintf("could not get content of %s", fileRef))
