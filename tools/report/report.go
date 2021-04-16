@@ -131,10 +131,9 @@ func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 					fmt.Fprintf(os.Stderr, "WARNING: failed to get summary of PR %d: %s\n",
 						*prd.Pull.Number, err)
 				}
-			} else {
-				if prd.Pull.Body != nil {
-					summary = *prd.Pull.Body
-				}
+			}
+			if summary == "" && prd.Pull.Body != nil {
+				summary = *prd.Pull.Body
 			}
 			if summary != "" {
 				fmt.Printf("\n%s\n\n", formatDescription(summary, descriptionIndent))
