@@ -23,7 +23,7 @@ replaces:
 
 creation-date: 2020-03-17
 
-last-updated: 2020-09-01
+last-updated: 2021-04-19
 
 <!-- status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced -->
 status: implementable
@@ -50,53 +50,33 @@ status: implementable
 >unmount associated tmpfs for the SA in questions (assuming tmpfs per SA scales) so the data is no longer available from
 >that location.  But since it could have copied the data elsewhere, do we need to kill the Pod?  If so, would the CSI
 >driver even be allowed to initiate killing a Pod?  If so, what is required and what approach should be employed?
-> 2. CVO vs. OLM for delivery.  May need @derekwaynecarr to cast the deciding vote.  Latest pro-con list below in the
->implementation details install section.  Top level question to answer is do we want this feature installed on
->all OCP clusters, or have it be an optional component.  If optional, OLM is the defacto answer.  If it always needs to
->be there, does that mandate CVO, or as some reviewers have speculated, *perhaps not in the near future*.
 
 ## Summary
 
-This proposal will describe a [CSI driver](https://github.com/container-storage-interface/spec/blob/master/spec.md) based
-means for OpenShift cluster administrators to share `Secrets` / `ConfigMaps` defined in one namespace with
-other namespaces.
+This proposal will describe a [CSI driver](https://github.com/container-storage-interface/spec/blob/master/spec.md) based means for OpenShift cluster administrators to share `Secrets` / `ConfigMaps` defined in one namespace with other namespaces.
 
-Any owners/authors/users of Pods in those namespaces can opt into the consumption of the content of those shared `Secrets` /
- `ConfigMaps` during their Pod's execution.
-
-This proposal was broken off from [a proposal on injecting RHEL entitlements/subscriptions](https://github.com/openshift/enhancements/pull/214)
-**EDITORIAL NOTE:** if/when PR 214 merges the reference link will be adjusted to point to the merged document hosted on
-https://github.com/openshift/enhancements.  Or if that PR is replaced by another proposal, or this proposal, this proposal will
-point that out.
-
+Any owners/authors/users of Pods in those namespaces can opt into the consumption of the content of those shared `Secrets` / `ConfigMaps` during their Pod's execution.
 
 ## Motivation
 
 Simplify provision and consumption of `Secrets` and `ConfigMaps` defined in one namespace by pods in other namespaces.
+There are numerous use cases where information should be defined only once on the cluster and shared broadly, such as:
+
+- Distribution of custom PKI certificate authorities, such as corporate self-signed certificates.
+- Simple Content Access certificates used to access RHEL subscription content.
+  See also the [Subscription Content Access](/enhancements/subscription-content/subscription-content/access.md) proposal.
 
 ### Goals
 
 - Provide easy to use sharing of `Secrets` and `ConfigMaps` defined in one namespace by pods in other namespaces.
-
-- When a shared `Secret` or `ConfigMap` changes, the container filesystem content the CSI driver injects into the Pod
-needs to reflect those changes.
-
-- When a cluster-admin revokes access to shared `Secrets` or `ConfigMaps` that was previously granted, that data should
-no longer be accessible.
+- When a shared `Secret` or `ConfigMap` changes, the container filesystem content the CSI driver injects into the Pod needs to reflect those changes.
+- When a cluster-admin revokes access to shared `Secrets` or `ConfigMaps` that was previously granted, that data should no longer be accessible.
 
 ### Non-Goals
 
-1. This proposal assumes the sensitive content encapsulated in the `Secret` or `ConfigMap` is valid and correct for the user's purposes.
-No validation of the content for specific usage within a Pod will be done.  That said, this proposal provides
-for watching for updates to those objects.
-So if the cluster administrator realized on their own they have provided bad data, and then corrects it, this proposal
-will watch for, discover, and propagate the update when new Pods consuming the content are provisioned.
-
-2. Protecting this content from being viewed/copied by users: if it's available for the Pod to use, the user who can
-create a Pod that can utilize this feature can also read / view / exfiltrate the Secret/ConfigMap contents. It is technically
-impossible to avoid that.
-
-3. This proposal for now assumes linux only for the underlying host/node.  No windows, etc.
+- Validate the content within a shared `Secret` or `ConfigMap`.
+- Prevent content in shared `Secrets` or `ConfigMaps` from being copied.
+- Support for Windows nodes/workloads.
 
 ## Proposal
 
@@ -118,52 +98,22 @@ the credentials, I want to stop updating content within the existing pods consum
 
 #### Install
 
-As per the open questions, whether to go with a CVO or OLM based approach, or perhaps some combination, is a question
-with no current consensus on the answer.
+For the developer preview release, the CSI driver will be installable via OLM.
+This release channel is meant to be a preview only option and allow the CSI driver to be installed on OpenShift outside of the normal release cycle.
 
-Some specifics:
-- During the review for the ["Installation of CSI drivers that replace in-tree drivers](https://github.com/openshift/enhancements/blob/master/enhancements/storage/csi-driver-install.md)
-a question posed about whether the exact type of CSI driver this proposal is describing would use the method
-described in that document (namely OLM).  The recommendation from the [storage SMEs was to go with CVO](https://github.com/openshift/enhancements/pull/139/files#r391761362)
-was to not use OLM, and use CVO instead.
-- Using CVO and thus making it a day 1 install operation meets the ease of use targets we are trying to
-reach with this proposal
-- Crafting OLM dependencies between this proposal and [related proposals](https://github.com/openshift/enhancements/pull/214)
-as part of an OLM based install at the time of this writing is immature, at least for some reviewers.
-- However, other reviewers wonder if we are in fact close from having either OLM or CVO operators being able to require
-an OLM operator to be present.
-- Using OLM avoids further increasing the install payload size.
-- Using OLM avoids unexpected hiccups in the feature's installation impacting initial cluster install or cluster upgrade.
+When the CSI driver is ready for general availability, it will be installed on OpenShift via the cluster storage operator and an associated delivery operator - see the [CSI driver install proposal](/enhancements/storage/csi-driver-install.md).
+The delivery operator and OLM operator can be one and the same, with appropriate modifications depending on the context.
 
 #### CSI starting points
 
-**WE ARE GOING WITH EPHEMERAL MODE**
-
-**NO SecretProvideClass IS NEEDED**
-
-With those simplifying decisions, a CSI driver with those characteristics still meets our needs.  And the storage
-SMEs recommend that approach to us.
-
-Crafting the CSI driver in this way also helps us deal with SELinux.  Specifically (thanks to @jsafrane for details):
-
-- when CRI-O starts any container, it updates the SELinux labels on all volumes for that container, where those labels are unique to the container
-- in the context of k8s, multiple containers within a pod have the same filesystem access
-- so, only that specific pod can read files on that volume
-- however, a file can only have one SELinux label
-- so two or more pods cannot access the same file
-- but if each pod has its own file, its own copy, of the shared data, things work easily from a SELinux perspective
-- this is where using ephemeral CSI storage comes in
-- using ephemeral based storage allows for use of a tmpfs (virtual memory filesystem) for storage
-- tmpfs is fast and has negligible overhead
-- it will have to reconstructed if the Pod moves
-- but how it eases dealing with SELinux protection is the bonus we are taking
-- so each pod gets its own tmpfs
-- the kubelet leverages tmpfs in a similar fashion already
+The projected resource CSI driver will provision ephemeral volumes and take advantage of upstream's ephemeral CSI storage mechanisms.
+Ephemeral storage allows the CSI driver to use tmpfs for storage while providing appropriate protection via SELinux labels.
+Each pod will have its own copy of the shared resource that the CSI driver mounts in, and there will be a 1:1 correspondence between the pod and the SELinux label applied to the mounted files.
+The process will be similar to what exists in core Kubernetes when Secrets and ConfigMaps are mounted into a pod.
 
 #### End to end flow (from creation, to opt-in, to validation, and then injections)
 
 An admin creates a new cluster level custom resource for encapsulating the sharable `Secret` or `ConfigMap`.
-
 
 ```yaml
 kind: Share
@@ -199,7 +149,7 @@ rules:
 
 ```
 
-So, how does an end user discover and utilize our new CR?
+So, how does an end user discover and utilize our new CR instance?
 
 First, a few considerations around discovery:
 
@@ -213,118 +163,94 @@ the underlying, associated Pod references CSI volumes using `Shares`
 
 Second, a few considerations around how we update objects, so they "get" `Shares` associated with them:
 
-- Pod objects themselves, or any API object that exposes the Pod's `volumes` array as part of providing an API that is
-converted by a controller into a Pod, can directly add a volume of the CSI type with the correct metadata in the volumeAttributes, a la
+- Pod objects themselves, or any API object that exposes the Pod's `volumes` array as part of providing an API that is converted by a controller into a Pod, can directly add a volume of the CSI type with the correct metadata in the volumeAttributes:
 
-```yaml
-csi:
-  driver: projected-resources.storage.openshift.io
-    volumeAttributes:
-      share: the-projected-resource
-
-```
+  ```yaml
+  csi:
+    driver: projected-resources.storage.openshift.io
+      volumeAttributes:
+        share: the-projected-resource
+  ```
 
 - with it as part of a Pod for example:
 
- ```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: some-pod
-spec:
-  containers:
-    ...
-     volumeMounts:
-        - name: shared-item-name
-          mountPath: /path/to/shared-item-data
-  volumes:
-      - name: entitlement
-        csi:
-          driver: projectedresources.storage.openshift.io
-          volumeAttributes:
-             share: the-projected-resource
-
-```
-
-- API objects which do not expose the resulting Pod's volume array will need to have an annotation set on it which triggers
-an admission plugin to mutate the Pod and add the CSI volume.
-
-On that new admission plugin introduced and its validation/mutation of Pods:
-- Pods with this annotation are mutated, adding the CSI driver volume specification,
-- if the Pod `ServiceAccount` is allowed sufficient
-access to the requested `ProjectedResource` (i.e. a SAR check for the SA getting the requested `ProjectedResource` passes)
-- if a Pod already happens to have the CSI Volume specified with reference to a `ProjectedResource`, again the plugin will see if the
-associated `ServiceAccount` for the Pod has sufficient access to the `ProjectedResource`
-- if sufficient access does not exist, the admission plugin marks the Pod as invalid/forbidden.
-- if sufficient access does exists, the admission plugin adds a CSI volume into the Pod's `volume` array, to match the
-example noted above.
-
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: some-pod
+  spec:
+    containers:
+      ...
+      volumeMounts:
+      - name: shared-item-name
+        mountPath: /path/to/shared-item-data
+    volumes:
+    - name: entitlement
+      csi:
+        driver: projectedresources.storage.openshift.io
+        volumeAttributes:
+          share: the-projected-resource
+  ```
 
 The CSI Driver, aside from all the CSI and filesystem bits (see below for details), performs:
-- reads of the `ProjectedResource` object referenced in the `volumeMetadata` which is available in the `NodePublishVolumeRequest`
-that comes into `NodePublishVolume`
-- the name, namespace, and `ServiceAccount` of the Pod wanting the volume is also included by the kubelet in the
-`NodePublishVolumeRequest` under the keys `csi.storage.k8s.io/pod.name`, `csi.storage.k8s.io/pod.namespace`,  and
-`csi.storage.k8s.io/serviceAccount.name` in the map returned by the `GetVolumeContext()` call
+
+- reads of the `ProjectedResource` object referenced in the `volumeMetadata` which is available in the `NodePublishVolumeRequest` that comes into `NodePublishVolume`.
+- the name, namespace, and `ServiceAccount` of the Pod wanting the volume is also included by the kubelet in the `NodePublishVolumeRequest` under the keys `csi.storage.k8s.io/pod.name`, `csi,storage.k8s.io/pod.namespace`, and `csi.storage.k8s.io/serviceAccount.name` in the map returned by the `GetVolumeContext()` call.
 - the `podInfoOnMount` field of the CSI Driver spec triggers the setting of these values; here is
 [an example from the hostpath plugin](https://github.com/kubernetes-csi/csi-driver-host-path/blob/master/deploy/kubernetes-1.17/hostpath/csi-hostpath-driverinfo.yaml#L12)
-- with all this necessary metadata, the CSI driver then
-- reads of the `Secret` or `ConfigMap` noted in the `ProjectedResource`, storing it on disk on initial
-reference to said `Secret` or `ConfigMap`
-- creation of a tmpfs filesystem for each requesting `ServiceAcount` that contains the `Secret` / `ConfigMap` data
-- creation of k8s watches `ProjectedResources`, and for `Secret` / `ConfigMaps` in the namespaces listed in each discovered
-`ProjectedResources`
-- final returning of a volume that is based off of the `ServiceAccount` specific tmpfs for the data noted in the
-`volumeAttributes`
+
+With all this necessary metadata, the CSI driver then:
+
+- reads of the `Secret` or `ConfigMap` noted in the `ProjectedResource`, storing it on disk on initial reference to said `Secret` or `ConfigMap`.
+- creation of a tmpfs filesystem for each requesting `ServiceAcount` that contains the `Secret` / `ConfigMap` data.
+- creation of k8s watches `ProjectedResources`, and for `Secret` / `ConfigMaps` in the namespaces listed in each discovered `ProjectedResources`.
+- final returning of a volume that is based off of the `ServiceAccount` specific tmpfs for the data noted in the `volumeAttributes`.
 
 After initial set up of things, steady state CSI driver activities include:
-- as updates of the watched `Secrets` and `ConfigMaps` come in, SAR checks will be done for each of the previous requesting
-`ServiceAccounts` being tracked against the updated `Secret` and `ConfigMap`
-- for any `ServiceAccounts` that no longer have access, their tmpfs filesystems are unmounted, effectively removing their access to
-the data (though in prototyping and implementation, we'll need focused testing that this scales and mount propagation
-does not become a gating factor)
-- the SAR checks and if need be removal of access to data can facilitate cluster admin scenarios noted in the `User Stories`
-section like credential rotation.
-- But for `ServiceAccounts` that pass the SAR check, the tmpfs file with the data for the `Secret` / `ConfigMap` is updated
 
+- as updates of the watched `Secrets` and `ConfigMaps` come in, SAR checks will be done for each of the previous requesting `ServiceAccounts` being tracked against the updated `Secret` and `ConfigMap`.
+- for any `ServiceAccounts` that no longer have access, their tmpfs filesystems are unmounted, effectively removing their access to the data (though in prototyping and implementation, we'll need focused testing that this scales and mount propagation does not become a gating factor).
+- the SAR checks and if need be removal of access to data can facilitate cluster admin scenarios noted in the `User Stories` section like credential rotation.
+- But for `ServiceAccounts` that pass the SAR check, the tmpfs file with the data for the `Secret` / `ConfigMap` is updated
 
 #### An overview of CSI and the main K8S hook points
 
 Research details and notes:
 
 - a [CSI plugin](https://github.com/container-storage-interface/spec) is a gRPC endpoint that implements CSI services and allows storage vendors to develop a storage solution that works across a number of container orchestration systems.
-- though for our purposes, we will not provide a generic CSI plugin, but rather a special case one only intended to work on OpenShift
+- though for our purposes, we will not provide a generic CSI plugin, but rather a special case one only intended to work on OpenShift.
 - also for our purposes, `plugin`, `driver`, and `endpoint` are the same thing based on which document you are reading.
 - The CSI spec outlines lifecycle methods for create/provision/publish, destroy/unprovision/unpublish, resize, etc.
 - In the ephemeral case, the Pod spec lists a volume and is considered to originate or "inline" it.
 - The `csi` subfield still pertains, citing the storage provider's name, as with the PVC based approach.
 
- ```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: some-pod
-spec:
-  containers:
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: some-pod
+  spec:
+    containers:
     ...
-     volumeMounts:
-        - name: shared-item-name
-          mountPath: /path/to/shared-item-data
-  volumes:
-      - name: entitlement
-        csi:
-          driver: projectedresources.storage.openshift.io
-          volumeAttributes:
-             share: the-projected-resource
-
-```
+      volumeMounts:
+      - name: shared-item-name
+        mountPath: /path/to/shared-item-data
+    volumes:
+    - name: entitlement
+      csi:
+        driver: projectedresources.storage.openshift.io
+        volumeAttributes:
+          share: the-projected-resource
+  ```
 
 - And then the [CSI plugin to the Kubelet](https://github.com/kubernetes/enhancements/blob/master/keps/sig-storage/20190122-csi-inline-volumes.md#ephemeral-inline-volume-proposal), performs the necessary steps to engage the CSI driver.
-- the [CSI spec](https://github.com/container-storage-interface/spec/blob/master/spec.md) details the CSI architecture, concepts, and protocol
+- the [CSI spec](https://github.com/container-storage-interface/spec/blob/master/spec.md) details the CSI architecture, concepts, and protocol.
 
 #### Current thoughts on implementation, how to inject/consume content on every host/node in an OpenShift cluster
 
 Implementation time approach:
+
 - Two example CSI plugins to use as a starting point are the [secrets
  store csi
  plugin](https://github.com/kubernetes-sigs/secrets-store-csi-driver),
@@ -361,10 +287,10 @@ Some details around inline ephemeral volumes:
 
 #### Some details around prototype efforts to date
 
-I was able to prototype both PVC and Ephemeral based samples with the HostPath example.  Per the above decision, the
-notes below here will focus on Ephemeral.
+I was able to prototype both PVC and Ephemeral based samples with the HostPath example.
+Per the above decision, the notes below here will focus on Ephemeral.
 
-In looking at the [kubernetes-csi hostpath example](https://github.com/kubernetes-csi/csi-driver-host-path)
+In looking at the [kubernetes-csi hostpath example](https://github.com/kubernetes-csi/csi-driver-host-path).
 - it is very, very similar to what we want to do, but with this exception:  it employs a `StatefulSet` for deploying the CSI driver that only supports a [running on only one node](https://github.com/kubernetes-csi/csi-driver-host-path/blob/master/deploy/kubernetes-1.17/hostpath/csi-hostpath-plugin.yaml#L18-L28)
 - that single node notion obviously won't work for us.
 - But prototyping has shown we can move to a `DaemonSet` for the
@@ -399,14 +325,18 @@ anyway.
 
 ### Risks and Mitigations
 
-While this proposal settles on installing via CVO, that decision has ramifications whose discussion are noted above.
-It is at least conceivable the need to revisit that decision may arise when implementation starts.
+**Risk:** Deploying via OLM and the cluster storage operator can lead to confusion
 
-Getting the flow and various stages from the CSI specification understood and correctly utilized so that we minimize
-the amount of times the Secret is read and stored on the local filesystem of each host/node is important.  We want
-to minimize local file system writes to when the Secret actually changes, and not when we provision the volume to
-a new Pod.
+*Mitigations:*
 
+- OLM version of the CSI driver operator will only be made available as a community operator
+- Users will be informed that this operator will need to be uninstalled prior to upgrading to the version of OpenShift that deploys this CSI driver via the OCP payload.
+
+**Risk:** CSI driver will not scale
+
+*Mitigations:*
+
+- Minimize local file system writes to when the Secret actually changes.
 
 ## Design Details
 
@@ -512,4 +442,5 @@ And some details from our PV based prototyping with the hostpath examples (again
 
 ## Infrastructure Needed
 
-N/A
+- GitHub repositories for the CSI driver and operator
+- Add the CSI driver and operator to the OpenShift release payload (ART)
