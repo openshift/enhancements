@@ -157,8 +157,8 @@ We generally want components to opt-in to workload partitioning and
 especially to being considered management workloads. Therefore, for a
 regular pod to be considered to contain a management workload it must
 have an annotation configuring its *workload type*,
-`workload.openshift.io/{workload-type}`. For now, we will focus on
-management workloads via `workload.openshift.io/management`, but will
+`target.workload.openshift.io/{workload-type}`. For now, we will focus on
+management workloads via `target.workload.openshift.io/management`, but will
 use a syntax that supports other types of workloads that may be
 defined in future enhancements.
 
@@ -187,7 +187,7 @@ We want to give cluster administrators control over which workloads
 are run on the management CPUs. Normal users cannot change the
 metadata of a namespace without the right RBAC permissions. Therefore,
 only pods in namespaces with an annotation
-`workload.openshift.io/allowed={comma_separated_list_of_type_names}`
+`workload.openshift.io/allowed: {comma_separated_list_of_type_names}`
 will be subject to special handling.
 
 We want to continue to use the scheduler for placing management
@@ -356,8 +356,8 @@ scheduled to run on the management CPU pool.
    `io.openshift.workload.management.cpushares/{container-name}`
    annotations for CRI-O with the same values.
 8. Something schedules a regular pod with the
-   `workload.openshift.io/management` annotation in a namespace with
-   the `workload.openshift.io/allowed=management` annotation.
+   `target.workload.openshift.io/management` annotation in a namespace with
+   the `workload.openshift.io/allowed: management` annotation.
 9. The admission hook modifies the pod, replacing the CPU requests
    with `management.workload.openshift.io/cores` requests and adding
    the `io.openshift.workload.management.cpushares/{container-name}`
@@ -371,9 +371,9 @@ scheduled to run on the management CPU pool.
 
 #### Workload Annotation
 
-The `workload.openshift.io` annotation on each pod needs to allow us
+The `target.workload.openshift.io` annotation on each pod needs to allow us
 to add new parameters in the future, so the value will be a
-struct. Initially, it will encode 2 values.
+struct. Initially, the annotation will encode 2 values.
 
 The *workload type* for the workloads is the suffix of the annotation
 name to make it easy for CRI-O and other lower-level components to
@@ -388,7 +388,7 @@ default.
 ```yaml
 metadata:
   annotations:
-    workload.openshift.io/management: |
+    target.workload.openshift.io/management: |
       {"effect": "PreferredDuringScheduling"}
 ```
 
@@ -399,7 +399,7 @@ priorities to support clusters with different types of configurations.
 #### Pod mutation
 
 The kubelet and API admission hook will change pods annotated with
-`workload.openshift.io/management` so the CPU requests are replaced
+`target.workload.openshift.io/management` so the CPU requests are replaced
 with management CPU requests and an annotation is added with the same
 value.
 
@@ -444,7 +444,7 @@ workload types.
 
 ```ini
 [crio.runtime.workloads.{workload-type}]
-  activation_annotation = "workload.openshift.io/{workload-type}"
+  activation_annotation = "target.workload.openshift.io/{workload-type}"
   annotation_prefix = "io.openshift.workload.{workload-type}"
   resources = { "cpushares": "", "cpuset": "0-1" }
 ```
@@ -475,7 +475,7 @@ In the management workload case, we will configure it with values like
 
 ```ini
 [crio.runtime.workloads.management]
-  activation_annotation = "workload.openshift.io/management"
+  activation_annotation = "target.workload.openshift.io/management"
   annotation_prefix = "io.openshift.workload.management"
   resources = { "cpushares" = "", "cpuset" = "0-1" }
 ```
@@ -489,7 +489,7 @@ CRI-O will be configured to support a new annotation on pods,
   runtime_type = "oci"
 ```
 
-Pods that have the `workload.openshift.io/management` annotation will
+Pods that have the `target.workload.openshift.io/management` annotation will
 have their cpuset configured to the value from the appropriate
 workload configuration. The CPU shares for each container in the pod
 will be configured to the value of the annotation with the name
@@ -590,7 +590,7 @@ deployment):
 
 ```ini
 [crio.runtime.workloads.management]
-activation_annotation = "workload.openshift.io/management"
+activation_annotation = "target.workload.openshift.io/management"
 annotation_prefix = "io.openshift.workload.management"
 resources = { "cpushares" = "", "cpuset" = "0-1,52-53" }
 ```
@@ -654,9 +654,9 @@ None
 
 ### Test Plan
 
-We will add a CI job to ensure that all release payload workloads and
-their namespaces have the `workload.openshift.io/management`
-annotation.
+We will add a CI job to ensure that all release payload workloads have
+the `target.workload.openshift.io/management` annotation and their
+namespaces have the `workload.openshift.io/allowed` annotation.
 
 We will add a CI job to ensure that single-node deployments configured
 with management workload partitioning pass the compliance tests.
