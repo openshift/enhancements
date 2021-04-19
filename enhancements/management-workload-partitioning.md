@@ -187,7 +187,7 @@ We want to give cluster administrators control over which workloads
 are run on the management CPUs. Normal users cannot change the
 metadata of a namespace without the right RBAC permissions. Therefore,
 only pods in namespaces with an annotation
-`allowed.workload.openshift.io: {comma_separated_list_of_type_names}`
+`workload.openshift.io/allowed: {comma_separated_list_of_type_names}`
 will be subject to special handling.
 
 We want to continue to use the scheduler for placing management
@@ -357,7 +357,7 @@ scheduled to run on the management CPU pool.
    annotations for CRI-O with the same values.
 8. Something schedules a regular pod with the
    `target.workload.openshift.io/management` annotation in a namespace with
-   the `allowed.workload.openshift.io: management` annotation.
+   the `workload.openshift.io/allowed: management` annotation.
 9. The admission hook modifies the pod, replacing the CPU requests
    with `management.workload.openshift.io/cores` requests and adding
    the `io.openshift.workload.management.cpushares/{container-name}`
@@ -656,7 +656,7 @@ None
 
 We will add a CI job to ensure that all release payload workloads have
 the `target.workload.openshift.io/management` annotation and their
-namespaces have the `allowed.workload.openshift.io` annotation.
+namespaces have the `workload.openshift.io/allowed` annotation.
 
 We will add a CI job to ensure that single-node deployments configured
 with management workload partitioning pass the compliance tests.
