@@ -654,9 +654,9 @@ None
 
 ### Test Plan
 
-We will add a CI job to ensure that all release payload workloads and
-their namespaces have the `target.workload.openshift.io/management`
-annotation.
+We will add a CI job to ensure that all release payload workloads have
+the `target.workload.openshift.io/management` annotation and their
+namespaces have the `allowed.workload.openshift.io` annotation.
 
 We will add a CI job to ensure that single-node deployments configured
 with management workload partitioning pass the compliance tests.
