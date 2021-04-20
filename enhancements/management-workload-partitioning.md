@@ -261,11 +261,16 @@ explain the problem well enough for admins to recover. Future work may
 make this more flexible.
 
 In a failure situation, we want to try to keep the cluster
-operational. Therefore, when pods ask for workload partitioning but
-the feature is disabled the admission hook will strip the
-workload-related annotations and add an annotation
-`workload.openshift.io/warning` with a message warning the user that
-their partitioning instructions were ignored.
+operational. Therefore, there are a few conditions under which the
+admission hook will strip the workload annotations and add an
+annotation `workload.openshift.io/warning` with a message warning the
+user that their partitioning instructions were ignored. These
+conditions are:
+
+1. When a pod has the Guaranteed QoS class
+2. When mutation would change the QoS policy for the pod
+3. When the feature is inactive because nodes are not reporting the
+   management resource
 
 We are not prepared to commit to an installer API for this feature in
 this initial implementation. Therefore, we will document how to create
