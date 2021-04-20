@@ -268,7 +268,7 @@ user that their partitioning instructions were ignored. These
 conditions are:
 
 1. When a pod has the Guaranteed QoS class
-2. When mutation would change the QoS policy for the pod
+2. When mutation would change the QoS class for the pod
 3. When the feature is inactive because nodes are not reporting the
    management resource
 
@@ -539,7 +539,7 @@ memory requests the quality-of-service class of the pod would be
 changed automatically. In this case, the
 `workload.openshift.io/warning` annotation will include a message
 explaining that the partitioning instructions were ignored. Any pod
-that is already BestEffort would be annotated using `0` as the value
+that is already BestEffort would be annotated using `2` as the value
 so that CRI-O will have an indicator to configure the CPU shares as
 BestEffort.
 
