@@ -35,7 +35,8 @@ superseded-by:
 
 ## Summary
 
-As part of an Operator's bundle definition it may specify the OpenShift version, or versions, it supports. The label, `com.redhat.openshift.versions` allows for this specification. Currently, this may be enforced at several points in the build pipeline (pyxis, IIB). This enhancement seeks to specify that bundle authors may list versions v4.5 or v4.6 in either order if providing a list of supported OpenShift versions. This enhancement also seeks to sunset this behavior, by only allowing these two specific versions as a list. Going forward, authors would specify a single version, or range, of OpenShift the bundle is supported on. There would no longer be a comma separated list allowed.
+As part of an Operator's bundle definition it may specify the OpenShift version, or versions, it supports. The label, `com.redhat.openshift.versions` allows for this specification. Currently, this may be enforced at several points in the build pipeline (pyxis, IIB). This enhancement seeks to specify that bundle authors may list versions v4.5 or v4.6 in either order if providing a list of supported
+OpenShift versions. This enhancement also seeks to sunset this behavior, by only allowing these two specific versions as a list. Going forward, authors would specify a single version, or range, of OpenShift the bundle is supported on. There would no longer be a comma separated list allowed.
 
 
 ## Motivation
@@ -53,7 +54,8 @@ Both pyxis and IIB check this `versions` label as part of building operators in 
 
 ## Proposal
 
-Create a new common routine that can be shared code between IIB and Pyxis to validate and process the value for `com.redhat.openshift.versions`. Valid values will include `v4.5,v4.6` or `v4.6,v4.5`. All other uses of commas will be disallowed, throw error on processing the bundle. Whitespace will be stripped and ignored before evaluation. These changes will effectively sunset this usage in OpenShift 4.7+
+Create a new common routine that can be shared code between IIB and Pyxis to validate and process the value for `com.redhat.openshift.versions`. Valid values will include `v4.5,v4.6` or `v4.6,v4.5`. All other uses of commas will be disallowed, throw error on processing the bundle. Whitespace will be stripped and ignored before evaluation. These changes will effectively sunset this usage in 
+OpenShift 4.7+
 
 No new documentation is needed, as this is already the stated behavior here: https://docs.engineering.redhat.com/display/CFC/Delivery . The Delivery doc will need to be updated to remove the mention of the need for ordering the version fields, as this enhancement will alleviate that limitation.
 
