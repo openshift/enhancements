@@ -698,9 +698,7 @@ ever have to build the driver-toolkit live on the cluster.
 
 ##### OBSOLETE Building the driver-toolkit on the cluster
 
-For building the driver-toolkit on the cluster as a fallback solution, if we do
-not have a recent build, the other problematic is that we cannot easily relate
-the correct m-o-c of the nodes.
+If the correct driver-toolkit is not available, SRO can build the driver-toolkit on the cluster as a fallback solution. The problem with this is that we cannot easily relate the correct m-o-c of the nodes.
 
 The proposal is to create an annotation on the release-paylod to the
 machine-os-content. The machine-os-content has already the kernel version
