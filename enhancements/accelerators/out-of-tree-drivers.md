@@ -32,12 +32,8 @@ superseded-by:
 
 ## Open Questions [optional]
 
-1. Should SRO be CVO or OLM managed, SRO creates an ClusterOperator object for must-gather and better status reporting to customers/developers/users
-2. Should the driver-toolkit container be part of the payload? It should be accessible through registry.
-redhat.io/openshift4 without a cluster for out-of-tree driver development, testing on prereleases, ... If
-a customer has a pull-secret for OCP he should be able to pull without "login"
-3. Should SRO be build by ART or by CPaaS? We already have NFD ART builds which
-is a prerequisite for SRO
+1. What is the best way to find out which node belongs to which OpenShift
+release (imagine stuck nodes during ugrades)?
 
 ## Summary
 
@@ -110,7 +106,8 @@ SRO has proven in the past to be the template for enabling hardware when on
 OpenShift. Its capabilities to handle several DriverContainers with only one
 copy of SRO running makes it a preferable solution to tackle kmods on OpenShift.
 
-SRO is going to be a core-component of OpenShift and delivered/managed by CVO.
+SRO is going to be a core-component of OpenShift and delivered/managed by OLM
+and build by ART.
 Here is an example how one can use SRO + KVC to deliver a simple kernel module
 via container in a OpenShift cluster:
 [https://bit.ly/2EAlLEF](https://bit.ly/2EAlLEF)
@@ -389,17 +386,10 @@ editing the CR and updating the version field.
 ##### MachineConfigPools
 
 There is also an optional field to set a MachineConfigPool per special resource.
-A paused MCP will not be upgraded but all other workers, masters and operators will be.
-
-An upgrade could introduce an incompatibility with the special resource and the kernel.
-The production workload can stay in the paused MCP and an updated special resource
-nodeSelector can be used to deploy the special resource to the upgraded nodes.
+Some node configuration settings would only be valid for a specific MCP, e.g.
+enabling real-time kernel.
 
 SRO can handle different kernel versions in a cluster see [OpenShift Rolling Updates](#OpenShift-Rolling-Updates)
-
-This can reduce application downtime where we would have always a working version running
-in the cluster. If the new upgraded Node can handle the special resoure the MPC can be unpaused
-an the rolling upgrade can be finished.
 
 ```yaml
 metadata:
@@ -698,9 +688,15 @@ There could be several z-stream releases with the very same kernel but there
 wouldn't be a single z-stream with different kernels.
 
 Currently the driver-toolkit by ART can only be tagged with the OpenShift "full"
- version (x.y.z). Meaning currently it is not easy to relate a specific
- driver-toolkit:vX.Y.Z to a specific node that could be in different versions in
- the cluster depending on the state of MCPs.
+version (x.y.z). Meaning currently it is not easy to relate a specific
+driver-toolkit:vX.Y.Z to a specific node that could be in different versions in
+the cluster depending on the state of nodes (see the open question).
+
+To always have a corresponding driver-toolkit build (with every z-stream release
+), the contiainer is going to be part of the payload. This will prevent that we
+ever have to build the driver-toolkit live on the cluster.
+
+##### OBSOLETE Building the driver-toolkit on the cluster
 
 For building the driver-toolkit on the cluster as a fallback solution, if we do
 not have a recent build, the other problematic is that we cannot easily relate
