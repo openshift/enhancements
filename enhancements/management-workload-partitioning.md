@@ -353,14 +353,14 @@ scheduled to run on the management CPU pool.
 7. The kubelet reads static pod definitions. It replaces the `cpu`
    requests with `management.workload.openshift.io/cores` requests of
    the same value and adds the
-   `resources.workload.openshift.io/{container-name}: {"cpushares": N}`
+   `resources.workload.openshift.io/{container-name}: {"cpushares": "400"}`
    annotations for CRI-O with the same values.
 8. Something schedules a regular pod with the
    `target.workload.openshift.io/management` annotation in a namespace with
    the `workload.openshift.io/allowed: management` annotation.
 9. The admission hook modifies the pod, replacing the CPU requests
    with `management.workload.openshift.io/cores` requests and adding
-   the `resources.workload.openshift.io/{container-name}: {"cpushares": N}`
+   the `resources.workload.openshift.io/{container-name}: {"cpushares": "400"}`
    annotations for CRI-O.
 10. The scheduler sees the new pod and finds available
     `management.workload.openshift.io/cores` resources on the node. The
@@ -484,7 +484,7 @@ In the management workload case, we will configure it with values like
 ```
 
 CRI-O will be configured to support a new annotation on pods,
-`resources.workload.openshift.io/{container-name}: {"cpushares": N}`.
+`resources.workload.openshift.io/{container-name}: {"cpushares": "400"}`.
 
 ```ini
 [crio.runtime.runtimes.runc]
