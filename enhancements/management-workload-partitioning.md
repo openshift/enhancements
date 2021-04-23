@@ -215,9 +215,9 @@ does receive the content of annotations on the pod. Therefore, we will
 copy the original CPU requests for containers in management workload
 pods into a annotations that CRI-O can use to configure the CPU shares
 when running the containers. We will use the naming convention
-`io.openshift.workload.{workload-type}.cpushares/{container-name}` and
+`resources.workload.openshift.io/{container-name}` and
 create an annotation for each container in the pod. See below for
-details about this choice of name.
+details about this choice of name and the value of the annotation.
 
 We need to change pod definitions as each pod is created, so that the
 scheduler, kubelet, and CRI-O all see a consistently updated version
@@ -353,14 +353,14 @@ scheduled to run on the management CPU pool.
 7. The kubelet reads static pod definitions. It replaces the `cpu`
    requests with `management.workload.openshift.io/cores` requests of
    the same value and adds the
-   `io.openshift.workload.management.cpushares/{container-name}`
+   `resources.workload.openshift.io/{container-name}: {"cpushares": 400}`
    annotations for CRI-O with the same values.
 8. Something schedules a regular pod with the
    `target.workload.openshift.io/management` annotation in a namespace with
    the `workload.openshift.io/allowed: management` annotation.
 9. The admission hook modifies the pod, replacing the CPU requests
    with `management.workload.openshift.io/cores` requests and adding
-   the `io.openshift.workload.management.cpushares/{container-name}`
+   the `resources.workload.openshift.io/{container-name}: {"cpushares": 400}`
    annotations for CRI-O.
 10. The scheduler sees the new pod and finds available
     `management.workload.openshift.io/cores` resources on the node. The
@@ -420,14 +420,8 @@ and
 
 ```yaml
 annotations:
-  io.openshift.workload.management.cpushares/{container-name}: 400
+  resources.workload.openshift.io/{container-name}: {"cpushares": 400}
 ```
-
-The annotation name used to set the resource requests is reversed
-(when compared to the other workload annotation or the resource
-request name) so that CRI-O can be configured with a prefix value to
-simplify the way it processes the strings without having to understand
-their content.
 
 The new request value and annotation value are scaled up by 1000 from
 the original CPU request input because opaque resources do not support
@@ -445,8 +439,8 @@ workload types.
 ```ini
 [crio.runtime.workloads.{workload-type}]
   activation_annotation = "target.workload.openshift.io/{workload-type}"
-  annotation_prefix = "io.openshift.workload.{workload-type}"
-  resources = { "cpushares": "", "cpuset": "0-1" }
+  annotation_prefix = "resources.workload.openshift.io"
+  resources = { "cpushares": 0, "cpuset": "0-1" }
 ```
 
 The `activation_annotation` field is used to match pods that should be
@@ -464,11 +458,14 @@ arbitrary pods to set their own `cpuset` but other CRI-O users may
 want that ability.
 
 To pass a setting into CRI-O, the pod should have an annotation made
-by combining the `annotation_prefix`, the key from
-`resources`, and the container name, like this:
+by combining the `annotation_prefix`, the key from `resources`, and
+the container name. The value should be a map of string keys to integer or string
+values. Only the keys that appear in the configuration file with empty
+values will be honored. Others will be ignored. For example, to set
+the cpushares for a container:
 
 ```text
-io.openshift.workload.management.cpushares/container_name = {value}
+resources.workload.openshift.io/container_name = {"cpushares": 400}
 ```
 
 In the management workload case, we will configure it with values like
@@ -476,12 +473,12 @@ In the management workload case, we will configure it with values like
 ```ini
 [crio.runtime.workloads.management]
   activation_annotation = "target.workload.openshift.io/management"
-  annotation_prefix = "io.openshift.workload.management"
+  annotation_prefix = "resources.workload.openshift.io"
   resources = { "cpushares" = "", "cpuset" = "0-1" }
 ```
 
 CRI-O will be configured to support a new annotation on pods,
-`io.openshift.workload.management.cpushares/{container-name}`.
+`resources.workload.openshift.io/{container-name}: {"cpushares": 400}`.
 
 ```ini
 [crio.runtime.runtimes.runc]
@@ -493,9 +490,9 @@ Pods that have the `target.workload.openshift.io/management` annotation will
 have their cpuset configured to the value from the appropriate
 workload configuration. The CPU shares for each container in the pod
 will be configured to the value of the annotation with the name
-created by combining the `annotation_prefix`, `"cpushares"`
+created by combining the `annotation_prefix`
 and the container name (for example,
-`io.openshift.workload.management.cpushares/my-container`).
+`resources.workload.openshift.io/my-container`).
 
 Note that this field does not conflict with the `infra_ctr_cpuset`
 config option, as the infra container will still be put in that
@@ -591,7 +588,7 @@ deployment):
 ```ini
 [crio.runtime.workloads.management]
 activation_annotation = "target.workload.openshift.io/management"
-annotation_prefix = "io.openshift.workload.management"
+annotation_prefix = "resources.workload.openshift.io"
 resources = { "cpushares" = "", "cpuset" = "0-1,52-53" }
 ```
 
@@ -764,7 +761,7 @@ long for the goals of some customers.
   necessary.
 * Have the cpuset configured on `runtime_class` level instead of
   top-level config
-* Have the cpuset configured as the value of `io.openshift.management`
+* Have the cpuset configured as the value of the annotation
   instead of hard coded
   * This option is not optimal because it requires multiple locations
     where the cpuset has to be configured (in the admission controller
