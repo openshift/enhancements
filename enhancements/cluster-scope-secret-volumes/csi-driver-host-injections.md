@@ -69,7 +69,7 @@ There are numerous use cases where information should be defined only once on th
 ### Goals
 
 - Provide easy to use sharing of `Secrets` and `ConfigMaps` defined in one namespace by pods in other namespaces.
-- When a shared `Secret` or `ConfigMap` changes, the container filesystem content the CSI driver injects into the Pod needs to reflect those changes.
+- [reach] When a shared `Secret` or `ConfigMap` changes, the container filesystem content the CSI driver injects into the Pod needs to reflect those changes.
 - When a cluster-admin revokes access to shared `Secrets` or `ConfigMaps` that was previously granted, that data should no longer be accessible.
 
 ### Non-Goals
@@ -98,18 +98,18 @@ the credentials, I want to stop updating content within the existing pods consum
 
 #### Install
 
-For the developer preview release, the CSI driver will be installable via OLM.
-This release channel is meant to be a preview only option and allow the CSI driver to be installed on OpenShift outside of the normal release cycle.
+For the developer preview release, the CSI driver will be installable via YAML manifests available on GitHub.
+This is meant to be a preview only option and allow the CSI driver to be installed on OpenShift outside of the normal release cycle.
 
 When the CSI driver is ready for general availability, it will be installed on OpenShift via the cluster storage operator and an associated delivery operator - see the [CSI driver install proposal](/enhancements/storage/csi-driver-install.md).
-The delivery operator and OLM operator can be one and the same, with appropriate modifications depending on the context.
 
 #### CSI starting points
 
 The projected resource CSI driver will provision ephemeral volumes and take advantage of upstream's ephemeral CSI storage mechanisms.
-Ephemeral storage allows the CSI driver to use tmpfs for storage while providing appropriate protection via SELinux labels.
-Each pod will have its own copy of the shared resource that the CSI driver mounts in, and there will be a 1:1 correspondence between the pod and the SELinux label applied to the mounted files.
+Ephemeral storage allows the CSI driver to create tmpfs filessytems for each pod, where the Secret/ConfigMap content will be copied.
+The tmpfs filesystems will automatically have appropriate SELinux labeling to ensure content does not leak between pods - the driver does not need to provision or manage these labels.
 The process will be similar to what exists in core Kubernetes when Secrets and ConfigMaps are mounted into a pod.
+Acutal implementation can borrow a significant amount of logic from the [secrets-store-csi-driver](https://github.com/kubernetes-sigs/secrets-store-csi-driver), which is used to mount secrets from external "sealed" secret providers like [Vault](https://learn.hashicorp.com/tutorials/vault/kubernetes-secret-store-driver).
 
 #### End to end flow (from creation, to opt-in, to validation, and then injections)
 
@@ -202,16 +202,18 @@ The CSI Driver, aside from all the CSI and filesystem bits (see below for detail
 
 With all this necessary metadata, the CSI driver then:
 
-- reads of the `Secret` or `ConfigMap` noted in the `ProjectedResource`, storing it on disk on initial reference to said `Secret` or `ConfigMap`.
-- creation of a tmpfs filesystem for each requesting `ServiceAcount` that contains the `Secret` / `ConfigMap` data.
-- creation of k8s watches `ProjectedResources`, and for `Secret` / `ConfigMaps` in the namespaces listed in each discovered `ProjectedResources`.
-- final returning of a volume that is based off of the `ServiceAccount` specific tmpfs for the data noted in the `volumeAttributes`.
+- Performs a subject access review (SAR) check to verify the pod's service account has permission to GET the referenced Share resource.
+- If the SAR check succeeds, reads of the `Secret` or `ConfigMap` noted in the `ProjectedResource`, storing it on disk on initial reference to said `Secret` or `ConfigMap`.
+- Creates a tmpfs filesystem for each requesting `ServiceAcount` that contains the `Secret` / `ConfigMap` data.
+- Creates k8s watches `ProjectedResources`, and for `Secret` / `ConfigMaps` in the namespaces listed in each discovered `ProjectedResources`.
+- Returns a volume that is based off of the `ServiceAccount` specific tmpfs for the data noted in the `volumeAttributes`.
 
 After initial set up of things, steady state CSI driver activities include:
 
-- as updates of the watched `Secrets` and `ConfigMaps` come in, SAR checks will be done for each of the previous requesting `ServiceAccounts` being tracked against the updated `Secret` and `ConfigMap`.
-- for any `ServiceAccounts` that no longer have access, their tmpfs filesystems are unmounted, effectively removing their access to the data (though in prototyping and implementation, we'll need focused testing that this scales and mount propagation does not become a gating factor).
-- the SAR checks and if need be removal of access to data can facilitate cluster admin scenarios noted in the `User Stories` section like credential rotation.
+- As updates of the watched `Secrets` and `ConfigMaps` come in, SAR checks will be done for each of the previous requesting `ServiceAccounts` being tracked against the updated `Secret` and `ConfigMap`.
+  SAR checks are also done at regular relist intervals, which will pick up permission changes to associated cluster roles/role bindings.
+- For any `ServiceAccounts` that no longer have access, contents in their tmpfs filesystems are removed. Unmounting any volume in a running pod is not feasible (can result in `EBUSY` errors).
+- The SAR checks and if need be removal of access to data can facilitate cluster admin scenarios noted in the `User Stories` section like credential rotation.
 - But for `ServiceAccounts` that pass the SAR check, the tmpfs file with the data for the `Secret` / `ConfigMap` is updated
 
 #### An overview of CSI and the main K8S hook points
@@ -247,43 +249,55 @@ Research details and notes:
 - And then the [CSI plugin to the Kubelet](https://github.com/kubernetes/enhancements/blob/master/keps/sig-storage/20190122-csi-inline-volumes.md#ephemeral-inline-volume-proposal), performs the necessary steps to engage the CSI driver.
 - the [CSI spec](https://github.com/container-storage-interface/spec/blob/master/spec.md) details the CSI architecture, concepts, and protocol.
 
-#### Current thoughts on implementation, how to inject/consume content on every host/node in an OpenShift cluster
+#### Ephemeral CSI driver implementation
 
-Implementation time approach:
-
-- Two example CSI plugins to use as a starting point are the [secrets
- store csi
- plugin](https://github.com/kubernetes-sigs/secrets-store-csi-driver),
- which includes a `SecretProviderClass` CSI plug point and a simpler
- [single node host path
- plugin](https://github.com/kubernetes-csi/csi-driver-host-path/),
- though for our read only purposes, prototyping has shown we can make
- it multi-node.
-- Both provide PV and ephemeral options.  We only need the ephemeral option.
-- The host path is simpler, but generally considered "POC" level
-- The secret store employs a `SecretProviderClass`, which we do not need.
-- So we will create a new plugin repo where we pick elements from either of these samples as it suits our purposes.
-- And delete all the PV related stuff we do not need.
-- Our new CSI plugin would be hosted as a `DaemonSet` on the k8s cluster, to get per node/host granularity
-- and that `DaemonSet` will have privileged containers.  See the
-  [csi-node-driver-registrar](https://github.com/kubernetes-csi/csi-driver-host-path/blob/master/deploy/kubernetes-1.17/hostpath/csi-hostpath-plugin.yaml#L48-L52)
-  container and the main [csi plugin
-  container](https://github.com/kubernetes-csi/csi-driver-host-path/blob/master/deploy/kubernetes-1.17/hostpath/csi-hostpath-plugin.yaml#L82-L83)
-  for the hostpath example and [secrets store
-  container](https://github.com/kubernetes-sigs/secrets-store-csi-driver/blob/master/deploy/secrets-store-csi-driver.yaml#L61)
-  in the secrets store example.
-- When provisioning volumes, the plugin can access the node/host
-  filesystem, like for example the directory, corresponding to the
-  Pod's mount point, where the secret contents will be stored (though
-  we have some choices on exactly which OS level file system features
-  we employ to store the content ... see the Open Questions)
-- All the reference implementations reviewed to date leverage https://github.com/kubernetes/utils/blob/master/mount/mount.go
+The CSI driver will be deployed as a DaemonSet so that shared Secrets/ConfigMaps can be added to pods running on the node.
+Pods for this DaemonSet will need to run as privileged to access host paths on the node.
+The CSI driver will only need to support "ephemeral" volumes that are specified by the `csi:` volume type on Pods.
+There is no requirement for this CSI driver to provision persistent volumes.
 
 Some details around inline ephemeral volumes:
 - The employ a subset of the CSI specification flows, specifically only the `NodePublish` and `NodeUnpublish` CSI steps
 - the underlying k8s api object `CSIVolumeSource` has the same `volumeAttributes` for storing metadata to be passed to the CSI driver
 - there is only a single `LocalObjectReference` for a `Secret` reference in the same namespace as the consuming pod.  So that aspect does not help us, and will not factor into the solution.
 - The `volumeAttributes` field for metadata gives us enough capabilities for expressing both the name, namespace, and type of sharable API object to be consumed.  And who is requesting access.
+
+#### Enhancements to Security Context Constraints
+
+OpenShift uses Security Context Constraints (SCCs) to regulate the capabilities granted to Pods, based on the user creating the pod and the service account assigned to the pod.
+Amongst other things, SCCs determine if a pod can mount a specific volume type.
+SCCs deny mounting a volume unless its type is explicitly allowed.
+The most restrictive SCC only allows volume types that are known to be isolated from the host filesystem (`secret`, `configMap`, `persistentVolumeClaim`, etc.).
+
+SCCs as designed today have an "all or nothing" approach when it comes securing CSI volume mounts.
+This is not sufficient as cluster admins are free to install third party CSI drivers that support `csi` volume mounts.
+Because we want to deliver this CSI driver in the payload, we need ensure that this CSI driver is usable while ensuring third party CSI drivers can be restricted.
+
+The following API extends SCCs to restrict the allowed CSI drivers used for ephemeral CSI volumes, in the same manner that Flexvolumes are restricted:
+
+```go
+type SecurityContextConstraints struct {
+  // existing API
+  ...
+  //
+
+  Volumes []FSType
+
+  // AllowedCSIVolumes is an allowlist of permitted ephemeral CSI volumes.
+  // Empty or nil indicates that all CSI drivers may be used.
+  // This parameter is effective only when the usage of CSI volumes is allowed in the "Volumes" field.
+	// +optional
+  AllowedCSIVolumes []AllowedCSIVolume
+}
+
+// AllowedCSIVolume represents a single CSI volume driver that is allowed to be used.
+type AllowedCSIVolume struct {
+  // Driver is the name of the CSI driver that supports ephemeral CSI volumes.
+  Driver string
+}
+```
+
+With this API, the default SCCs delivered via OpenShift can be updated to include the projected resource CSI driver as an allowed driver.
 
 #### Some details around prototype efforts to date
 
@@ -329,8 +343,7 @@ anyway.
 
 *Mitigations:*
 
-- OLM version of the CSI driver operator will only be made available as a community operator
-- Users will be informed that this operator will need to be uninstalled prior to upgrading to the version of OpenShift that deploys this CSI driver via the OCP payload.
+- There will be no OLM operator at outset, as the intent is to distribute this driver via the OCP payload. 
 
 **Risk:** CSI driver will not scale
 
