@@ -423,12 +423,6 @@ annotations:
   resources.workload.openshift.io/{container-name}: {"cpushares": 400}
 ```
 
-The annotation name used to set the resource requests is reversed
-(when compared to the other workload annotation or the resource
-request name) so that CRI-O can be configured with a prefix value to
-simplify the way it processes the strings without having to understand
-their content.
-
 The new request value and annotation value are scaled up by 1000 from
 the original CPU request input because opaque resources do not support
 units or fractional values.
