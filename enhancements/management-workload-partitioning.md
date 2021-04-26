@@ -474,7 +474,7 @@ In the management workload case, we will configure it with values like
 [crio.runtime.workloads.management]
   activation_annotation = "target.workload.openshift.io/management"
   annotation_prefix = "resources.workload.openshift.io"
-  resources = { "cpushares" = "", "cpuset" = "0-1" }
+  resources = { "cpushares" = 0, "cpuset" = "0-1" }
 ```
 
 CRI-O will be configured to support a new annotation on pods,
@@ -589,7 +589,7 @@ deployment):
 [crio.runtime.workloads.management]
 activation_annotation = "target.workload.openshift.io/management"
 annotation_prefix = "resources.workload.openshift.io"
-resources = { "cpushares" = "", "cpuset" = "0-1,52-53" }
+resources = { "cpushares" = 0, "cpuset" = "0-1,52-53" }
 ```
 
 The contents of `/etc/kubernetes/openshift-workload-pinning` should look like
