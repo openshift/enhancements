@@ -20,16 +20,19 @@ do
     # at least 2 # to start the line because the title header will be
     # different from the text in the template, and we check for a
     # title separately.
-    grep '^##' $TEMPLATE \
+    missing=$(grep '^##' $TEMPLATE \
         | grep -v '\[optional\]' \
         | while read header_line
     do
         if ! grep -q "^${header_line}" $file
         then
             echo "$file missing \"$header_line\""
-            RC=1
         fi
-    done
+    done)
+    if [ -n "$missing" ]; then
+        echo "$missing"
+        RC=1
+    fi
 
     # Now look for a title, one # followed by a space to start a line.
     if ! grep -q '^# ' $file
