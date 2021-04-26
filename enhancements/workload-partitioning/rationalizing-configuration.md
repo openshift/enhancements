@@ -134,7 +134,8 @@ have it generate manifests for the OpenShift installer to consume.
 2. Write an enhancement to describe the changes in
    performance-addon-operator to manage the kubelet and CRI-O
    configuration when workload partitioning is enabled, including the
-   `render` command.
+   `render` command. See https://issues.redhat.com/browse/CNF-2164 to
+   track that work.
 3. Write an enhancement to describe an API for enabling workload
    partitioning in an existing cluster.
 
