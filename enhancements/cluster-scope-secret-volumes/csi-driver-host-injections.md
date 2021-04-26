@@ -455,10 +455,13 @@ Setting up a share would require the following steps:
   - We can keep the current approach and use SAR checks against the `Share` object.
   - We could also propose SAR checks against the `SecretProviderClass` object as a feature upstream that works for all providers.
 
+The secret store CSI driver by default only asks for data to be mounted once per pod restart.
+There is a feature to [auto rotate secrets](https://secrets-store-csi-driver.sigs.k8s.io/topics/secret-auto-rotation.html), which is currently alpha.
+
 That said, implementing a secret store provider does have its advantages:
 
 - The API to implement the secret store provider is narrower in scope.
-- Upstream support for the core CSI driver.
+- Upstream support for the core CSI driver - this includes scale and [load testing](https://secrets-store-csi-driver.sigs.k8s.io/load-tests.html)
 - Other secret store providers could also be installed and used on the cluster.
 - Status of the pod mount is taken care of by the secret store CSI driver and the `SecretProviderClassPodStatus` object.
 
