@@ -258,9 +258,15 @@ There is no requirement for this CSI driver to provision persistent volumes.
 
 Some details around inline ephemeral volumes:
 - The employ a subset of the CSI specification flows, specifically only the `NodePublish` and `NodeUnpublish` CSI steps
-- the underlying k8s api object `CSIVolumeSource` has the same `volumeAttributes` for storing metadata to be passed to the CSI driver
-- there is only a single `LocalObjectReference` for a `Secret` reference in the same namespace as the consuming pod.  So that aspect does not help us, and will not factor into the solution.
-- The `volumeAttributes` field for metadata gives us enough capabilities for expressing both the name, namespace, and type of sharable API object to be consumed.  And who is requesting access.
+- The underlying k8s api object `CSIVolumeSource` has the same `volumeAttributes` for storing metadata to be passed to the CSI driver
+- There is only a single `LocalObjectReference` for a `Secret` reference in the same namespace as the consuming pod.
+  So that aspect does not help us, and will not factor into the solution.
+- The `volumeAttributes` field for metadata gives us enough capabilities for expressing both the name, namespace, and type of sharable API object to be consumed.
+  Using pod info on mount lets the driver see which service account is requesting access.
+
+The current driver implementation fuses the approaches of the [kubernetes-csi hostpath example](https://github.com/kubernetes-csi/csi-driver-host-path) with the [secrets store csi driver](https://github.com/kubernetes-sigs/secrets-store-csi-driver).
+Unlike the secret store CSI driver, the projected resource CSI driver uses the pod's service account to determine if it has access to the requested share volume.
+This is accomplished via a subject access review - the pod's service account must have GET permissions on the requested share.
 
 #### Enhancements to Security Context Constraints
 
@@ -350,6 +356,8 @@ anyway.
 *Mitigations:*
 
 - Minimize local file system writes to when the Secret actually changes.
+- Scale testing will ensure that a high volume of pods (ex 1000) can consume a single Share resource
+- Scale testing will ensure that a high volume of shares can be consumed by small groups of pods - ex 100 shares used by 10 pods each.
 
 ## Design Details
 
@@ -374,12 +382,23 @@ Some links related to that testing:
 
 ### Graduation Criteria
 
-We will not want to GA this EP as is until the related work noted in the Summary is complete.
+#### Developer Preview
 
+While the CSI driver is in developer preview state, cluster admins should be able to install via YAML manifests defined in GitHub.
+
+#### GA
+
+We will not want to GA this EP as is until the related work noted in the Summary is complete:
+
+- Delivery via a CSI deivery operator (integrated with the cluster storage operator)
+- Scale testing verifies the driver can handle a large number of pods consuming a single Share
+- Security audit
+- Share API reaches GA levels of supportability.
 
 ### Upgrade / Downgrade Strategy
 
-N/A
+Once included in the payload, the CSI driver will be installed and managed by the delivery operator.
+The delivery operator will be responsible for rolling out the updated DaemonSet.
 
 ### Version Skew Strategy
 
@@ -391,15 +410,17 @@ N/A
 
 ## Drawbacks
 
-N/A
+TODO
 
 ## Alternatives
 
-Operator/Controller solutions for specific API Object types, like say OpenShift Builds, would not require a CSI driver/
-plugin solution.  But the call for a generic solution around host/node level injection/consumption is clear and
-definitive.
+Operator/Controller solutions for specific API Object types, like say OpenShift Builds, would not require a CSI driver/plugin solution.
+But the call for a generic solution around host/node level injection/consumption is clear and definitive.
 
-Otherwise, at this time, the only means of achieving similar results to what is articulated by this proposal are:
+### Host Path Volumes
+
+Shared content could be managed at the cluster level via files injected to nodes via MachineConfig objects.
+Pods would then consume this content by mounting HostPath volumes.
 
 - Declare `HostPath` based PV/PVCs on the Pod spec, on a per Pod basis, by each author of the Pod
 - Leverage the 4.x machine configuration operator or MCO to update the host file system
@@ -408,22 +429,40 @@ There are several drawbacks with these approaches:
 
 - `HostPath` volumes require permissions that we do not want to give to the users targeted for consumption.
 Current understanding based on a conversation between @smarterclayton, @bparees, and @gabemontero:
->> - Typically, to read anything on the `HostPath` volume, the privileged bit needs to be set
->> - Some additional support, centered around `SecurityContextContraints` and SELinux, does exist as an add-on in OpenShift
->> (vs. standard K8S), and it allows users to mount `HostPath` volumes prepared for them, if they include necessary SELinux labelling.
->> - So the cluster admin sets that SELinux label on the `HostPath` volume and namespace where it will be consumed.
->> - a new `SecurityContextConstraint` that is based off of the `hostpath-anyuid` SCC (which is defined on install) and
->> includes the SELinux label can be created.
->> - then the serviceaccount for the user Pod in question would be given access to the new SCC
->> - However, the cluster administrator has to be careful with the mount provided.
->> - Mounts at certain parts of the filesystem can basically root the node
-- Host injection via the MCO requires a node reboot for the updates to take effect.  That is generally deemed
-undesirable for this feature.
-- The MCO API has not been intuitive for the type of users to date who are interested in introducing and then consuming
-small collections of files on a host.  The RHCOS team has experienced challenges in coaching consumers who want to put
-entitlements on 4.x nodes via the MCO.
+  - Typically, to read anything on the `HostPath` volume, the privileged bit needs to be set
+  - Some additional support, centered around `SecurityContextContraints` and SELinux, does exist as an add-on in OpenShift (vs. standard K8S), and it allows users to mount `HostPath` volumes prepared for them if they include necessary SELinux labelling.
+  - So the cluster admin sets that SELinux label on the `HostPath` volume and namespace where it will be consumed.
+    Admin would need to create a new `SecurityContextConstraint` that is based off of the `hostpath-anyuid` SCC (which is defined on install) and includes the SELinux label can be created.
+  - However, the cluster administrator has to be careful with the mount provided.
+    Mounts at certain parts of the filesystem can basically root the node.
+- Host injection via the MCO requires a node reboot for the updates to take effect.
+  That is generally deemedundesirable for this feature.
+- The MCO API has not been intuitive for the type of users to date who are interested in introducing and then consuming small collections of files on a host.
+  The RHCOS team has experienced challenges in coaching consumers who want to put entitlements on 4.x nodes via the MCO.
 
-### CSI specific alternatives
+### Implement a provider for the Secret Store CSI Driver
+
+Upstream sig-storage allows their Secret Store CSI driver to be extended via [secret store providers](https://secrets-store-csi-driver.sigs.k8s.io/providers.html).
+To use a secret store provider, each namespace needs to have a [SecretProviderClass](https://secrets-store-csi-driver.sigs.k8s.io/getting-started/usage.html#create-your-own-secretproviderclass-object) which configures the secret store provider.
+The secret store provider itself runs as a DaemonSet that communicates to the secret store CSI driver via gRPC.
+
+The addition of the `SecretProviderClass` adds an extra layer of overhead to configure secret consumption.
+Setting up a share would require the following steps:
+
+- Create the cluster-wide `Share` object.
+- Create a `SecretProviderClass` in each namespace that references the `Share`.
+- Configure RBAC
+  - We can keep the current approach and use SAR checks against the `Share` object.
+  - We could also propose SAR checks against the `SecretProviderClass` object as a feature upstream that works for all providers.
+
+That said, implementing a secret store provider does have its advantages:
+
+- The API to implement the secret store provider is narrower in scope.
+- Upstream support for the core CSI driver.
+- Other secret store providers could also be installed and used on the cluster.
+- Status of the pod mount is taken care of by the secret store CSI driver and the `SecretProviderClassPodStatus` object.
+
+### Persistent CSI driver
 
 On the CSI specifics, we are going with in-line ephemeral volumes, but for historical purposes some details around the
 persistent volume styled approach with CSI:
