@@ -8,7 +8,7 @@ TEMPLATE=$(dirname $0)/../guidelines/enhancement_template.md
 # We only look at the files that have changed in the current PR, to
 # avoid problems when the template is changed in a way that is
 # incompatible with existing documents.
-CHANGED_FILES=$(git log --name-only --pretty= master.. \
+CHANGED_FILES=$(git log --name-only --pretty= origin/master.. \
                     | grep '^enhancements' \
                     | grep '\.md$' \
                     | sort -u)
