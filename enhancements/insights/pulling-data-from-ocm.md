@@ -77,12 +77,14 @@ create a new alert based on this new state.
 
 ### Authorization
 
-Insights Operator is able to pull the data from the OCM API using the existing `cloud.openshift.com` token
-available in the `pull-secret` (in the `openshift-config-managed` namespace)
+The Insights Operator is able to pull the data from the OCM API using the existing `cloud.openshift.com` token
+available in the `pull-secret` (in the `openshift-config-managed` namespace).
+
+The Insights Operator must provide a cluster ID as an identifier of the cluster.
 
 ### Data in API
 
-The SCA certificate is available via the `etc-pki-entitlement` secret in the `openshift-config-managed` namespace
+The SCA certificate is available via the `etc-pki-entitlement` secret in the `openshift-config-managed` namespace.
 
 ### Update period
 - Insights Operator query the OCM API every 8 hours and downloads the full data provided
