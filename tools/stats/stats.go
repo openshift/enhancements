@@ -121,13 +121,13 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		}
 	}
 
-	group, isEnhancement, err := enhancements.GetGroup(int(*pr.Number))
 	modifiedFiles, err := enhancements.GetModifiedFiles(int(*pr.Number))
 	if err != nil {
 		return errors.Wrap(err,
 			fmt.Sprintf("could not determine group details for %s", *pr.HTMLURL))
 	}
 
+	group, isEnhancement := enhancements.DeriveGroup(modifiedFiles)
 	if err != nil {
 		return errors.Wrap(err,
 			fmt.Sprintf("could not determine group details for %s", *pr.HTMLURL))

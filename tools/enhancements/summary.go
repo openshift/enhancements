@@ -100,35 +100,31 @@ func extractSummary(body string) string {
 	return b.String()
 }
 
-// GetGroup returns the grouping of the enhancement, based
+// DeriveGroup returns the grouping of an enhancement, based
 // on the filename. Documents are normally named
 // "enhancements/group/title.md" or "enhancements/title.md"
-func GetGroup(pr int) (filename string, isEnhancement bool, err error) {
-	filenames, err := GetModifiedFiles(pr)
-	if err != nil {
-		return "", false, errors.Wrap(err, "could not determine the list of modified files")
-	}
+func DeriveGroup(filenames []string) (filename string, isEnhancement bool) {
 	// First look for an actual enhancement document...
 	// FIXME: What if we find more than one?
 	for _, name := range filenames {
 		if strings.HasPrefix(name, "enhancements/") {
 			parts := strings.Split(name, "/")
 			if len(parts) == 3 {
-				return parts[1], true, nil
+				return parts[1], true
 			}
-			return "general", true, nil
+			return "general", true
 		}
 	}
 	// Now look for some known housekeeping files...
 	for _, name := range filenames {
 		if strings.HasPrefix(name, "OWNERS") {
-			return "housekeeping", false, nil
+			return "housekeeping", false
 		}
 		if strings.HasPrefix(name, ".markdownlint-cli2.yaml") {
-			return "tools", false, nil
+			return "tools", false
 		}
 		if strings.HasPrefix(name, "hack/") {
-			return "tools", false, nil
+			return "tools", false
 		}
 	}
 	// If there was no enhancement, take the root directory of the
@@ -136,11 +132,11 @@ func GetGroup(pr int) (filename string, isEnhancement bool, err error) {
 	for _, name := range filenames {
 		if strings.Contains(name, "/") {
 			parts := strings.Split(name, "/")
-			return parts[0], false, nil
+			return parts[0], false
 		}
 	}
 	// If there was no directory, assume a "general" change like
-	return "general", false, nil
+	return "general", false
 }
 
 // GetSummary reads the files being changed in the pull request to
