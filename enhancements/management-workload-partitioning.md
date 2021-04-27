@@ -260,6 +260,18 @@ unschedulable workloads, but we expect the resulting error message to
 explain the problem well enough for admins to recover. Future work may
 make this more flexible.
 
+In a failure situation, we want to try to keep the cluster
+operational. Therefore, there are a few conditions under which the
+admission hook will strip the workload annotations and add an
+annotation `workload.openshift.io/warning` with a message warning the
+user that their partitioning instructions were ignored. These
+conditions are:
+
+1. When a pod has the Guaranteed QoS class
+2. When mutation would change the QoS class for the pod
+3. When the feature is inactive because nodes are not reporting the
+   management resource
+
 We are not prepared to commit to an installer API for this feature in
 this initial implementation. Therefore, we will document how to create
 the correct machine config manifests to enable it in `kubelet` and
@@ -521,9 +533,12 @@ Service](https://kubernetes.io/docs/tasks/configure-pod-container/quality-servic
 class. So, we would not strip CPU requests unless they also have
 memory requests, because if we mutate the pod so that it has no CPU or
 memory requests the quality-of-service class of the pod would be
-changed automatically. Any pod that is already BestEffort
-would be annotated using `0` as the value so that CRI-O will have an
-indicator to configure the CPU shares as BestEffort.
+changed automatically. In this case, the
+`workload.openshift.io/warning` annotation will include a message
+explaining that the partitioning instructions were ignored. Any pod
+that is already BestEffort would be annotated using `2` as the value
+so that CRI-O will have an indicator to configure the CPU shares as
+BestEffort.
 
 #### Kubelet Changes
 
