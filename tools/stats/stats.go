@@ -38,6 +38,7 @@ type PullRequestDetails struct {
 	Group         string
 	IsEnhancement bool
 	ModifiedFiles []enhancements.ModifiedFile
+	IsNew         bool
 }
 
 // RuleFilter refers to a function that selects pull requests. A
@@ -127,6 +128,16 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 			fmt.Sprintf("could not determine group details for %s", *pr.HTMLURL))
 	}
 
+	// Look for whether a file has been added in the PR to determine
+	// if this is a new enhancement.
+	var isNew bool
+	for _, f := range modifiedFiles {
+		if f.Mode == "A" {
+			isNew = true
+			break
+		}
+	}
+
 	group, isEnhancement := enhancements.DeriveGroup(modifiedFiles)
 	if err != nil {
 		return errors.Wrap(err,
@@ -148,6 +159,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		Group:               group,
 		IsEnhancement:       isEnhancement,
 		ModifiedFiles:       modifiedFiles,
+		IsNew:               isNew,
 	}
 	if isMerged {
 		details.State = "merged"
