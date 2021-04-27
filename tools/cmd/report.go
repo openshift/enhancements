@@ -8,7 +8,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/report"
 	"github.com/openshift/enhancements/tools/stats"
 	"github.com/openshift/enhancements/tools/util"
@@ -48,16 +47,9 @@ func newReportCommand() *cobra.Command {
 			// in the report, so the other rules aren't even applied.
 			ignore := stats.Bucket{
 				Rule: func(prd *stats.PullRequestDetails) bool {
-					group, _, err := enhancements.GetGroup(*prd.Pull.Number)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "WARNING: failed to get group of PR %d: %s\n",
-							*prd.Pull.Number, err)
-						group = "uncategorized"
-					}
-
 					// ignore pull requests with only changes in the
 					// hack, tools, or this-week directories
-					return group == "hack" || group == "tools" || group == "this-week"
+					return prd.Group == "hack" || prd.Group == "tools" || prd.Group == "this-week"
 				},
 			}
 

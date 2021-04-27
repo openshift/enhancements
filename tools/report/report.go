@@ -76,6 +76,8 @@ const descriptionIndent = "  "
 // ShowPRs prints a section of the report by formatting the
 // PullRequestDetails as a list.
 func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool) {
+	var err error
+
 	if len(prds) == 0 {
 		return
 	}
@@ -99,12 +101,8 @@ func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 			}
 		}
 
-		group, isEnhancement, err := enhancements.GetGroup(*prd.Pull.Number)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARNING: failed to get group of PR %d: %s\n",
-				*prd.Pull.Number, err)
-			group = "uncategorized"
-		}
+		group := prd.Group
+		isEnhancement := prd.IsEnhancement
 
 		groupPrefix := fmt.Sprintf("%s: ", group)
 		if strings.HasPrefix(*prd.Pull.Title, groupPrefix) {

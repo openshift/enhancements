@@ -7,6 +7,7 @@ import (
 	"github.com/google/go-github/v32/github"
 	"github.com/pkg/errors"
 
+	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/util"
 )
 
@@ -30,10 +31,12 @@ type PullRequestDetails struct {
 	RecentActivityCount int
 	AllActivityCount    int
 
-	State       string
-	LGTM        bool // lgtm
-	Prioritized bool // priority-important/soon or priority/critical-urgent
-	Stale       bool // lifecycle/stake
+	State         string
+	LGTM          bool // lgtm
+	Prioritized   bool // priority-important/soon or priority/critical-urgent
+	Stale         bool // lifecycle/stake
+	Group         string
+	IsEnhancement bool
 }
 
 // RuleFilter refers to a function that selects pull requests. A
@@ -117,6 +120,15 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		}
 	}
 
+	group, isEnhancement, err := enhancements.GetGroup(int(*pr.Number))
+	if err != nil {
+		return errors.Wrap(err,
+			fmt.Sprintf("could not determine group details for %s", *pr.HTMLURL))
+	}
+	if group == "" && !isEnhancement {
+		group = "housekeeping"
+	}
+
 	details := &PullRequestDetails{
 		Pull:                pr,
 		State:               *pr.State,
@@ -126,6 +138,8 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		LGTM:                lgtm,
 		Prioritized:         prioritized,
 		Stale:               stale,
+		Group:               group,
+		IsEnhancement:       isEnhancement,
 	}
 	if isMerged {
 		details.State = "merged"
