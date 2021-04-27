@@ -7,6 +7,7 @@ import (
 	"github.com/google/go-github/v32/github"
 	"github.com/pkg/errors"
 
+	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/util"
 )
 
@@ -30,10 +31,14 @@ type PullRequestDetails struct {
 	RecentActivityCount int
 	AllActivityCount    int
 
-	State       string
-	LGTM        bool // lgtm
-	Prioritized bool // priority-important/soon or priority/critical-urgent
-	Stale       bool // lifecycle/stake
+	State         string
+	LGTM          bool // lgtm
+	Prioritized   bool // priority-important/soon or priority/critical-urgent
+	Stale         bool // lifecycle/stake
+	Group         string
+	IsEnhancement bool
+	ModifiedFiles []enhancements.ModifiedFile
+	IsNew         bool
 }
 
 // RuleFilter refers to a function that selects pull requests. A
@@ -117,6 +122,31 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		}
 	}
 
+	modifiedFiles, err := enhancements.GetModifiedFiles(int(*pr.Number))
+	if err != nil {
+		return errors.Wrap(err,
+			fmt.Sprintf("could not determine group details for %s", *pr.HTMLURL))
+	}
+
+	// Look for whether a file has been added in the PR to determine
+	// if this is a new enhancement.
+	var isNew bool
+	for _, f := range modifiedFiles {
+		if f.Mode == "A" {
+			isNew = true
+			break
+		}
+	}
+
+	group, isEnhancement := enhancements.DeriveGroup(modifiedFiles)
+	if err != nil {
+		return errors.Wrap(err,
+			fmt.Sprintf("could not determine group details for %s", *pr.HTMLURL))
+	}
+	if group == "" && !isEnhancement {
+		group = "housekeeping"
+	}
+
 	details := &PullRequestDetails{
 		Pull:                pr,
 		State:               *pr.State,
@@ -126,6 +156,10 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		LGTM:                lgtm,
 		Prioritized:         prioritized,
 		Stale:               stale,
+		Group:               group,
+		IsEnhancement:       isEnhancement,
+		ModifiedFiles:       modifiedFiles,
+		IsNew:               isNew,
 	}
 	if isMerged {
 		details.State = "merged"

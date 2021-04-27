@@ -73,13 +73,65 @@ func formatDescription(text string, indent string) string {
 
 const descriptionIndent = "  "
 
+func showOnePR(prd *stats.PullRequestDetails, withDescription bool) {
+	author := ""
+	if prd.Pull.User != nil {
+		for _, option := range []*string{prd.Pull.User.Name, prd.Pull.User.Login} {
+			if option != nil {
+				author = *option
+				break
+			}
+		}
+	}
+
+	group := prd.Group
+	isEnhancement := prd.IsEnhancement
+
+	groupPrefix := fmt.Sprintf("%s: ", group)
+	if strings.HasPrefix(*prd.Pull.Title, groupPrefix) {
+		// avoid redundant group prefix
+		groupPrefix = ""
+	}
+
+	title := enhancements.CleanTitle(*prd.Pull.Title)
+
+	fmt.Printf("- [%d](%s): (%d/%d) %s%s (%s)\n",
+		*prd.Pull.Number,
+		*prd.Pull.HTMLURL,
+		prd.RecentActivityCount,
+		prd.AllActivityCount,
+		groupPrefix,
+		title,
+		author,
+	)
+	if withDescription {
+		var summary string
+		var err error
+
+		if isEnhancement {
+			summary, err = enhancements.GetSummary(*prd.Pull.Number)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "WARNING: failed to get summary of PR %d: %s\n",
+					*prd.Pull.Number, err)
+			}
+		}
+		if summary == "" && prd.Pull.Body != nil {
+			summary = *prd.Pull.Body
+		}
+		if summary != "" {
+			fmt.Printf("\n%s\n\n", formatDescription(summary, descriptionIndent))
+		}
+	}
+}
+
 // ShowPRs prints a section of the report by formatting the
 // PullRequestDetails as a list.
 func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool) {
 	if len(prds) == 0 {
 		return
 	}
-	fmt.Printf("\n### %s Enhancements\n", name)
+
+	fmt.Printf("\n### %s Changes\n", name)
 
 	fmt.Printf("\n*&lt;PR ID&gt;: (activity this week / total activity) summary*\n")
 
@@ -88,56 +140,23 @@ func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 	} else {
 		fmt.Printf("\nThere were %d %s pull requests:\n\n", len(prds), name)
 	}
+
+	foundUpdate := false
 	for _, prd := range prds {
-		author := ""
-		if prd.Pull.User != nil {
-			for _, option := range []*string{prd.Pull.User.Name, prd.Pull.User.Login} {
-				if option != nil {
-					author = *option
-					break
-				}
-			}
+		if !prd.IsNew {
+			foundUpdate = true
+			continue
 		}
+		showOnePR(prd, withDescription)
+	}
 
-		group, isEnhancement, err := enhancements.GetGroup(*prd.Pull.Number)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARNING: failed to get group of PR %d: %s\n",
-				*prd.Pull.Number, err)
-			group = "uncategorized"
-		}
-
-		groupPrefix := fmt.Sprintf("%s: ", group)
-		if strings.HasPrefix(*prd.Pull.Title, groupPrefix) {
-			// avoid redundant group prefix
-			groupPrefix = ""
-		}
-
-		title := enhancements.CleanTitle(*prd.Pull.Title)
-
-		fmt.Printf("- [%d](%s): (%d/%d) %s%s (%s)\n",
-			*prd.Pull.Number,
-			*prd.Pull.HTMLURL,
-			prd.RecentActivityCount,
-			prd.AllActivityCount,
-			groupPrefix,
-			title,
-			author,
-		)
-		if withDescription {
-			var summary string
-			if isEnhancement {
-				summary, err = enhancements.GetSummary(*prd.Pull.Number)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "WARNING: failed to get summary of PR %d: %s\n",
-						*prd.Pull.Number, err)
-				}
+	if foundUpdate {
+		fmt.Printf("\n#### %s Pull Requests Modifying Existing Documents\n\n", name)
+		for _, prd := range prds {
+			if prd.IsNew {
+				continue
 			}
-			if summary == "" && prd.Pull.Body != nil {
-				summary = *prd.Pull.Body
-			}
-			if summary != "" {
-				fmt.Printf("\n%s\n\n", formatDescription(summary, descriptionIndent))
-			}
+			showOnePR(prd, false)
 		}
 	}
 }

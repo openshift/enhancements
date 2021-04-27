@@ -9,7 +9,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/report"
 	"github.com/openshift/enhancements/tools/stats"
 	"github.com/openshift/enhancements/tools/util"
@@ -37,10 +36,6 @@ func newShowPRCommand() *cobra.Command {
 			if err != nil {
 				return errors.Wrap(err,
 					fmt.Sprintf("failed to interpret pull request ID %q as a number", args[0]))
-			}
-			group, isEnhancement, err := enhancements.GetGroup(prID)
-			if err != nil {
-				return errors.Wrap(err, fmt.Sprintf("failed to determine group for PR %d", prID))
 			}
 
 			ghClient := util.NewGithubClient(configSettings.Github.Token)
@@ -102,8 +97,8 @@ func newShowPRCommand() *cobra.Command {
 
 			fmt.Printf("Last updated:   %s (%.02f days)\n", prd.Pull.UpdatedAt, sinceUpdated)
 			fmt.Printf("Closed:         %s (%.02f days)\n", prd.Pull.ClosedAt, sinceClosed)
-			fmt.Printf("Group:          %s\n", group)
-			fmt.Printf("Enhancement:    %v\n", isEnhancement)
+			fmt.Printf("Group:          %s\n", prd.Group)
+			fmt.Printf("Enhancement:    %v\n", prd.IsEnhancement)
 			fmt.Printf("State:          %q\n", prd.State)
 			fmt.Printf("LGTM:           %v\n", prd.LGTM)
 			fmt.Printf("Prioritized:    %v\n", prd.Prioritized)
@@ -111,6 +106,11 @@ func newShowPRCommand() *cobra.Command {
 			fmt.Printf("Reviews:        %3d / %3d\n", prd.RecentReviewCount, len(prd.Reviews))
 			fmt.Printf("PR Comments:    %3d / %3d\n", prd.RecentPRCommentCount, len(prd.PullRequestComments))
 			fmt.Printf("Issue comments: %3d / %3d\n", prd.RecentIssueCommentCount, len(prd.IssueComments))
+			fmt.Printf("Is New:         %v\n", prd.IsNew)
+			fmt.Printf("Modified files:\n")
+			for _, file := range prd.ModifiedFiles {
+				fmt.Printf("\t(%s) %s\n", file.Mode, file.Name)
+			}
 
 			return nil
 		},
