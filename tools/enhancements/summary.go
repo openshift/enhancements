@@ -50,9 +50,9 @@ func ensureFetchSettings() error {
 	return nil
 }
 
-// getModifiedFiles tries to determine which files have changed in a
+// GetModifiedFiles tries to determine which files have changed in a
 // pull request.
-func getModifiedFiles(pr int) (filenames []string, err error) {
+func GetModifiedFiles(pr int) (filenames []string, err error) {
 	ref := prRef(pr)
 	out, err := exec.Command("git", "show", "--name-only", ref, "--format=").Output()
 	if err != nil {
@@ -104,7 +104,7 @@ func extractSummary(body string) string {
 // on the filename. Documents are normally named
 // "enhancements/group/title.md" or "enhancements/title.md"
 func GetGroup(pr int) (filename string, isEnhancement bool, err error) {
-	filenames, err := getModifiedFiles(pr)
+	filenames, err := GetModifiedFiles(pr)
 	if err != nil {
 		return "", false, errors.Wrap(err, "could not determine the list of modified files")
 	}
@@ -146,7 +146,7 @@ func GetGroup(pr int) (filename string, isEnhancement bool, err error) {
 // GetSummary reads the files being changed in the pull request to
 // find the summary block.
 func GetSummary(pr int) (summary string, err error) {
-	filenames, err := getModifiedFiles(pr)
+	filenames, err := GetModifiedFiles(pr)
 	if err != nil {
 		return "", errors.Wrap(err, "could not determine the list of modified files")
 	}

@@ -106,6 +106,10 @@ func newShowPRCommand() *cobra.Command {
 			fmt.Printf("Reviews:        %3d / %3d\n", prd.RecentReviewCount, len(prd.Reviews))
 			fmt.Printf("PR Comments:    %3d / %3d\n", prd.RecentPRCommentCount, len(prd.PullRequestComments))
 			fmt.Printf("Issue comments: %3d / %3d\n", prd.RecentIssueCommentCount, len(prd.IssueComments))
+			fmt.Printf("Modified files:\n")
+			for _, filename := range prd.ModifiedFiles {
+				fmt.Printf("\t%s\n", filename)
+			}
 
 			return nil
 		},

@@ -37,6 +37,7 @@ type PullRequestDetails struct {
 	Stale         bool // lifecycle/stake
 	Group         string
 	IsEnhancement bool
+	ModifiedFiles []string
 }
 
 // RuleFilter refers to a function that selects pull requests. A
@@ -121,6 +122,12 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 	}
 
 	group, isEnhancement, err := enhancements.GetGroup(int(*pr.Number))
+	modifiedFiles, err := enhancements.GetModifiedFiles(int(*pr.Number))
+	if err != nil {
+		return errors.Wrap(err,
+			fmt.Sprintf("could not determine group details for %s", *pr.HTMLURL))
+	}
+
 	if err != nil {
 		return errors.Wrap(err,
 			fmt.Sprintf("could not determine group details for %s", *pr.HTMLURL))
@@ -140,6 +147,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		Stale:               stale,
 		Group:               group,
 		IsEnhancement:       isEnhancement,
+		ModifiedFiles:       modifiedFiles,
 	}
 	if isMerged {
 		details.State = "merged"
