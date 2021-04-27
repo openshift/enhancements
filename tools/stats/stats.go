@@ -37,7 +37,7 @@ type PullRequestDetails struct {
 	Stale         bool // lifecycle/stake
 	Group         string
 	IsEnhancement bool
-	ModifiedFiles []string
+	ModifiedFiles []enhancements.ModifiedFile
 }
 
 // RuleFilter refers to a function that selects pull requests. A

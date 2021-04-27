@@ -59,10 +59,22 @@ func stringSliceContains(slice []string, target string) bool {
 	return false
 }
 
+type ModifiedFile struct {
+	Name string
+	Mode string
+}
+
 // GetModifiedFiles tries to determine which files have changed in a
 // pull request.
-func GetModifiedFiles(pr int) (filenames []string, err error) {
+func GetModifiedFiles(pr int) (files []ModifiedFile, err error) {
 	ref := prRef(pr)
+
+	// Find the list of files added or modified in the PR by starting
+	// from the oldest ancestor commit common with the origin/master
+	// branch and diffing the PR branch. Equivalent to:
+	//
+	// oldest_ancestor=$(git rev-list $(git rev-list --first-parent ^"$PR_BRANCH" "origin/master" | tail -n1)^^!)
+	// git diff --name-status ${oldest_ancestor}..${PR_BRANCH}
 
 	firstParentOut, err := exec.Command("git", "rev-list", "--first-parent", "^"+ref, "origin/master").Output()
 	if err != nil {
@@ -84,20 +96,27 @@ func GetModifiedFiles(pr int) (filenames []string, err error) {
 	}
 	oldestAncestor := strings.TrimSpace(string(oldestAncestorOut))
 
-	out, err := exec.Command("git", "log", "--oneline", "--pretty=", "--name-only",
-		oldestAncestor+".."+ref).Output()
+	out, err := exec.Command("git", "diff", "--name-status", oldestAncestor+".."+ref).Output()
 	if err != nil {
 		exitError := err.(*exec.ExitError)
 		return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
 			ref, exitError.Stderr))
 	}
-	for _, name := range strings.Split(string(out), "\n") {
-		trimmed := strings.TrimSpace(name)
-		if trimmed != "" && !stringSliceContains(filenames, trimmed) {
-			filenames = append(filenames, trimmed)
+	modifiedFiles := []ModifiedFile{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if line == "" {
+			continue
+		}
+		// The diff output shows the operation (mode) and filename:
+		// A       name-of-new-file
+		// C       name-of-changed-file
+		mode := line[0:1]
+		trimmed := strings.TrimSpace(line[1:])
+		if trimmed != "" {
+			modifiedFiles = append(modifiedFiles, ModifiedFile{Name: trimmed, Mode: mode})
 		}
 	}
-	return filenames, nil
+	return modifiedFiles, nil
 }
 
 func getFileContents(ref string) ([]byte, error) {
@@ -134,12 +153,12 @@ func extractSummary(body string) string {
 // DeriveGroup returns the grouping of an enhancement, based
 // on the filename. Documents are normally named
 // "enhancements/group/title.md" or "enhancements/title.md"
-func DeriveGroup(filenames []string) (filename string, isEnhancement bool) {
+func DeriveGroup(files []ModifiedFile) (filename string, isEnhancement bool) {
 	// First look for an actual enhancement document...
 	// FIXME: What if we find more than one?
-	for _, name := range filenames {
-		if strings.HasPrefix(name, "enhancements/") {
-			parts := strings.Split(name, "/")
+	for _, f := range files {
+		if strings.HasPrefix(f.Name, "enhancements/") {
+			parts := strings.Split(f.Name, "/")
 			if len(parts) == 3 {
 				return parts[1], true
 			}
@@ -147,22 +166,22 @@ func DeriveGroup(filenames []string) (filename string, isEnhancement bool) {
 		}
 	}
 	// Now look for some known housekeeping files...
-	for _, name := range filenames {
-		if strings.HasPrefix(name, "OWNERS") {
+	for _, f := range files {
+		if strings.HasPrefix(f.Name, "OWNERS") {
 			return "housekeeping", false
 		}
-		if strings.HasPrefix(name, ".markdownlint-cli2.yaml") {
+		if strings.HasPrefix(f.Name, ".markdownlint-cli2.yaml") {
 			return "tools", false
 		}
-		if strings.HasPrefix(name, "hack/") {
+		if strings.HasPrefix(f.Name, "hack/") {
 			return "tools", false
 		}
 	}
 	// If there was no enhancement, take the root directory of the
 	// first file that has a directory.
-	for _, name := range filenames {
-		if strings.Contains(name, "/") {
-			parts := strings.Split(name, "/")
+	for _, f := range files {
+		if strings.Contains(f.Name, "/") {
+			parts := strings.Split(f.Name, "/")
 			return parts[0], false
 		}
 	}
@@ -173,19 +192,19 @@ func DeriveGroup(filenames []string) (filename string, isEnhancement bool) {
 // GetSummary reads the files being changed in the pull request to
 // find the summary block.
 func GetSummary(pr int) (summary string, err error) {
-	filenames, err := GetModifiedFiles(pr)
+	files, err := GetModifiedFiles(pr)
 	if err != nil {
 		return "", errors.Wrap(err, "could not determine the list of modified files")
 	}
 	enhancementFiles := []string{}
-	for _, name := range filenames {
-		if !strings.HasPrefix(name, "enhancements/") {
+	for _, f := range files {
+		if !strings.HasPrefix(f.Name, "enhancements/") {
 			continue
 		}
-		if !strings.HasSuffix(name, ".md") {
+		if !strings.HasSuffix(f.Name, ".md") {
 			continue
 		}
-		enhancementFiles = append(enhancementFiles, name)
+		enhancementFiles = append(enhancementFiles, f.Name)
 	}
 	if len(enhancementFiles) != 1 {
 		return "", fmt.Errorf("expected 1 modified file, found %v", enhancementFiles)
