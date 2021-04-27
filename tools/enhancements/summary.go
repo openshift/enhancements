@@ -85,37 +85,57 @@ func GetModifiedFiles(pr int) (files []ModifiedFile, err error) {
 	firstParentLines := strings.Split(string(firstParentOut), "\n")
 	firstParent := firstParentLines[len(firstParentLines)-1]
 	if firstParent == "" {
-		firstParent = firstParentLines[len(firstParentLines)-2]
+		if len(firstParentLines) > 1 {
+			firstParent = firstParentLines[len(firstParentLines)-2]
+		}
 	}
 
-	oldestAncestorOut, err := exec.Command("git", "rev-list", firstParent+"^^!").Output()
-	if err != nil {
-		exitError := err.(*exec.ExitError)
-		return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
-			ref, exitError.Stderr))
-	}
-	oldestAncestor := strings.TrimSpace(string(oldestAncestorOut))
-
-	out, err := exec.Command("git", "diff", "--name-status", oldestAncestor+".."+ref).Output()
-	if err != nil {
-		exitError := err.(*exec.ExitError)
-		return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
-			ref, exitError.Stderr))
-	}
 	modifiedFiles := []ModifiedFile{}
-	for _, line := range strings.Split(string(out), "\n") {
-		if line == "" {
-			continue
+
+	if firstParent != "" {
+		oldestAncestorOut, err := exec.Command("git", "rev-list", firstParent+"^^!").Output()
+		if err != nil {
+			exitError := err.(*exec.ExitError)
+			return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
+				ref, exitError.Stderr))
 		}
-		// The diff output shows the operation (mode) and filename:
-		// A       name-of-new-file
-		// C       name-of-changed-file
-		mode := line[0:1]
-		trimmed := strings.TrimSpace(line[1:])
-		if trimmed != "" {
-			modifiedFiles = append(modifiedFiles, ModifiedFile{Name: trimmed, Mode: mode})
+		oldestAncestor := strings.TrimSpace(string(oldestAncestorOut))
+
+		out, err := exec.Command("git", "diff", "--name-status", oldestAncestor+".."+ref).Output()
+		if err != nil {
+			exitError := err.(*exec.ExitError)
+			return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
+				ref, exitError.Stderr))
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			if line == "" {
+				continue
+			}
+			// The diff output shows the operation (mode) and filename:
+			// A       name-of-new-file
+			// C       name-of-changed-file
+			mode := line[0:1]
+			trimmed := strings.TrimSpace(line[1:])
+			if trimmed != "" {
+				modifiedFiles = append(modifiedFiles, ModifiedFile{Name: trimmed, Mode: mode})
+			}
+		}
+	} else {
+		// Resort to using `git show` to find the changed files
+		out, err := exec.Command("git", "show", "--pretty=", "--name-only", ref).Output()
+		if err != nil {
+			exitError := err.(*exec.ExitError)
+			return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
+				ref, exitError.Stderr))
+		}
+		for _, name := range strings.Split(string(out), "\n") {
+			trimmed := strings.TrimSpace(name)
+			if trimmed != "" {
+				modifiedFiles = append(modifiedFiles, ModifiedFile{Name: trimmed, Mode: "?"})
+			}
 		}
 	}
+
 	return modifiedFiles, nil
 }
 
