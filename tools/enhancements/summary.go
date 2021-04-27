@@ -50,11 +50,42 @@ func ensureFetchSettings() error {
 	return nil
 }
 
+func stringSliceContains(slice []string, target string) bool {
+	for _, s := range slice {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}
+
 // GetModifiedFiles tries to determine which files have changed in a
 // pull request.
 func GetModifiedFiles(pr int) (filenames []string, err error) {
 	ref := prRef(pr)
-	out, err := exec.Command("git", "show", "--name-only", ref, "--format=").Output()
+
+	firstParentOut, err := exec.Command("git", "rev-list", "--first-parent", "^"+ref, "origin/master").Output()
+	if err != nil {
+		exitError := err.(*exec.ExitError)
+		return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
+			ref, exitError.Stderr))
+	}
+	firstParentLines := strings.Split(string(firstParentOut), "\n")
+	firstParent := firstParentLines[len(firstParentLines)-1]
+	if firstParent == "" {
+		firstParent = firstParentLines[len(firstParentLines)-2]
+	}
+
+	oldestAncestorOut, err := exec.Command("git", "rev-list", firstParent+"^^!").Output()
+	if err != nil {
+		exitError := err.(*exec.ExitError)
+		return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
+			ref, exitError.Stderr))
+	}
+	oldestAncestor := strings.TrimSpace(string(oldestAncestorOut))
+
+	out, err := exec.Command("git", "log", "--oneline", "--pretty=", "--name-only",
+		oldestAncestor+".."+ref).Output()
 	if err != nil {
 		exitError := err.(*exec.ExitError)
 		return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
@@ -62,7 +93,7 @@ func GetModifiedFiles(pr int) (filenames []string, err error) {
 	}
 	for _, name := range strings.Split(string(out), "\n") {
 		trimmed := strings.TrimSpace(name)
-		if trimmed != "" {
+		if trimmed != "" && !stringSliceContains(filenames, trimmed) {
 			filenames = append(filenames, trimmed)
 		}
 	}
