@@ -3,14 +3,17 @@
 # Check that the required section headers from the template are
 # present in the enhancement document(s).
 
+set -o errexit
+set -o nounset
+set -o pipefail
+
 TEMPLATE=$(dirname $0)/../guidelines/enhancement_template.md
 
 # We only look at the files that have changed in the current PR, to
 # avoid problems when the template is changed in a way that is
 # incompatible with existing documents.
-CHANGED_FILES=$(git log --name-only --pretty= origin/master.. \
-                    | grep '^enhancements' \
-                    | grep '\.md$' \
+CHANGED_FILES=$(git log --name-only --pretty= "${PULL_BASE_SHA:-origin/master}.." -- \
+                    | (grep '^enhancements.*\.md$' || true) \
                     | sort -u)
 
 RC=0
