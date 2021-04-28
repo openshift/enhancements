@@ -344,7 +344,7 @@ In general, we try to use the same stages (alpha, beta, GA), regardless how the 
 
 These are generalized examples to consider, in addition to the aforementioned [maturity levels][maturity-levels].
 
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
@@ -353,7 +353,7 @@ These are generalized examples to consider, in addition to the aforementioned [m
 - Enumerate service level indicators (SLIs), expose SLIs as metrics
 - Write symptoms-based alerts for the component(s)
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -365,7 +365,7 @@ These are generalized examples to consider, in addition to the aforementioned [m
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
 - Deprecate the feature
