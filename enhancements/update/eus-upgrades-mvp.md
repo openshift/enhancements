@@ -129,6 +129,20 @@ kubelet skew policy were to change, allowing for a version skew of N-2, the API
 Server Operator would report `Upgradeable=True` if all of the nodes are at N or
 N-1, and `Upgradeable=False` if any of the nodes are at N-2.
 
+It's critical to remember that the `Upgradeable` flag doesn't block z-stream
+updates. This detail allows the flag to be used indiscriminately, since
+OpenShift will never bump the API Server version in a z-stream update.
+
+It's also worth pointing out that this mechanism is a heuristic. It isn't
+necessarily guaranteed that every y-stream update will include a bump to the
+API Server, so there may be false positives. In a similar vein, in order for
+this check to remain valid, OpenShift will need to ensure that there are no
+API Server version bumps larger than N+1 between y-stream updates. Otherwise,
+the check may return a false negative (e.g. an existing cluster has N-1 skew
+and then applies a y-stream update where the API Server version bumps N+2,
+resulting in N-3 skew). If there are larger version bumps, the skew check will
+need to be modified in a backport to the previous version.
+
 These changes will need to be backported to 4.7 prior to 4.7 EOL.
 
 #### OLM - Allow Operators to define inclusive compatible version ranges
