@@ -16,7 +16,6 @@ import (
 func newReportCommand() *cobra.Command {
 	var (
 		daysBack int
-		devMode  bool
 	)
 
 	cmd := &cobra.Command{
@@ -243,7 +242,6 @@ func newReportCommand() *cobra.Command {
 	}
 
 	cmd.Flags().IntVar(&daysBack, "days-back", 7, "how many days back to query")
-	cmd.Flags().BoolVar(&devMode, "dev", false, "dev mode, stop after first page of PRs")
 
 	return cmd
 }

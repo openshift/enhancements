@@ -44,7 +44,6 @@ func (m *multiStringArg) Set(value string) error {
 func newReviewersCommand() *cobra.Command {
 	var (
 		daysBack     int
-		devMode      bool
 		numReviewers int
 	)
 	ignoreReviewers := multiStringArg{}
@@ -106,7 +105,6 @@ func newReviewersCommand() *cobra.Command {
 	}
 
 	cmd.Flags().IntVar(&daysBack, "days-back", 31, "how many days back to query, defaults to 31")
-	cmd.Flags().BoolVar(&devMode, "dev", false, "dev mode, stop after first page of PRs")
 	cmd.Flags().IntVar(&numReviewers, "num", 10, "number of reviewers to show, 0 is all")
 	cmd.Flags().Var(&ignoreReviewers, "ignore", "ignore a reviewer, can be repeated")
 

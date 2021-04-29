@@ -14,6 +14,7 @@ import (
 var (
 	configFilename    string
 	orgName, repoName string
+	devMode           bool
 
 	configSettings *config.Settings
 
@@ -33,6 +34,7 @@ func init() {
 
 	cobra.OnInitialize(initConfig)
 
+	rootCmd.PersistentFlags().BoolVar(&devMode, "dev", false, "dev mode, stop after first page of PRs")
 	rootCmd.PersistentFlags().StringVar(&configFilename, "config", defaultConfigFilename, "config file")
 	rootCmd.PersistentFlags().StringVar(&orgName, "org", "openshift", "github organization")
 	rootCmd.PersistentFlags().StringVar(&repoName, "repo", "enhancements", "github repository")
