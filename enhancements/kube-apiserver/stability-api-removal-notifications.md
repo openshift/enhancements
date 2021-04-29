@@ -2,6 +2,7 @@
 title: api-removal-notifications
 authors:
   - "@sanchezl"
+  - "@deads2k"
 reviewers:
   - "@deads2k"
   - "@sttts"
@@ -53,42 +54,47 @@ Fire an `APIRemovedInNextReleaseInUse` alert when an API that will be removed in
 On EUS releases, also fire an `APIRemovedInNextEUSReleaseInUse` alert when an API that will be removed in the next
 extended support release is in use.
 
-Introduce a `DeprecatedAPIRequest` API to track users of deprecated APIs.
+Introduce a `APIRequestCount` API to track users of deprecated APIs.
 
 Example:
 
 ```yaml
-version: api.openshift.io/v1
-kind: DeprecatedAPIRequest
-meta-data:
-  name: 'flowschemas.v1alpha1.flowcontrol.apiserver.k8s.io'
+apiVersion: apiserver.openshift.io/v1
+kind: APIRequestCount
+metadata:
+  name: certificatesigningrequests.v1beta1.certificates.k8s.io
+spec:
+  numberOfUsersToReport: 10
 status:
-  removedRelease: '1.21'
-  conditions:
-    - type: UsedInPastDay
-      status: True
-  requestsLastHour:
-    nodes:
-      - nodeName: master0
-        lastUpdate: '2020-01-02 05:00'
-        users:
-          - username: 'system:serviceaccount:openshift-cluster-version:default'
-            count: 10
-            requests:
-              - verb: get
-                count: 5
-              - verb: update
-                count: 3
-              - verb: delete
-                count: 2
+  removedRelease: '1.22'
+  currentHour:
+    byNode:
+    - byUser:
+      - byVerb:
+        - requestCount: 1
+          verb: delete
+        - requestCount: 31
+          verb: get
+        requestCount: 32
+        userAgent: "openshift-tests/0.0.0"
+        username: system:admin
+      nodeName: 10.0.0.3
+      requestCount: 32
+    requestCount: 32
   requestsLast24h:
-    nodes:
-      - nodename: master0
-        lastUpdate: '2020-01-02 00:00'
-        users:
-          - username: 'system:serviceaccount:openshift-network-operator:default'
-            ...
-      - nodename: master1
+    byNode:
+    - byUser:
+      - byVerb:
+        - requestCount: 1
+          verb: delete
+        - requestCount: 31
+          verb: get
+        requestCount: 32
+        userAgent: "openshift-tests/0.0.0"
+        username: system:admin
+      nodeName: 10.0.0.3
+      requestCount: 32
+    requestCount: 32
         ...
 ```
 
@@ -150,101 +156,166 @@ Value of `removed_release`:
 | 4.9               | 1.23            |                       |
 | 4.10 / 4.10 EUS   | 1.24            | TBD                   |
 
-#### DeprecatedAPIRequest Resource
+#### APIRequestCount Resource
 
-Patch the apiserver such that requests to a deprecated API are logged to a `DeprecatedAPIRequest` resource corresponding
+Patch the apiserver such that requests to a deprecated API are logged to a `APIRequestCount` resource corresponding
 to the deprecated API. This resource can help customers determine which workloads are using deprecated APIs, including
 those which are a being removed in the next release.
 
 ```go
-// Package v1 is an api version in the api.openshift.io group
+// Package v1 is an api version in the apiserver.openshift.io group
 package v1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-// DeprecatedAPIRequest tracts requests made to a deprecated API. The instance name should
-// be of the form `resource.version.group`, matching the deprecated resource.
-type DeprecatedAPIRequest struct {
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:resource:scope="Cluster"
+// +kubebuilder:subresource:status
+// +genclient:nonNamespaced
+
+// APIRequestCount tracks requests made to an API. The instance name must
+// be of the form `resource.version.group`, matching the resource.
+type APIRequestCount struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
 
-	Spec   DeprecatedAPIRequestSpec   `json:"spec"`
-	Status DeprecatedAPIRequestStatus `json:"status,omitempty"`
+	// spec defines the characteristics of the resource.
+	// +kubebuilder:validation:Required
+	// +required
+	Spec APIRequestCountSpec `json:"spec"`
+
+	// status contains the observed state of the resource.
+	Status APIRequestCountStatus `json:"status,omitempty"`
 }
 
-type DeprecatedAPIRequestSpec struct {
-	// RemovedRelease is when the API will be removed.
-	RemovedRelease string `json:"removedRelease"`
+type APIRequestCountSpec struct {
+
+	// numberOfUsersToReport is the number of users to include in the report.
+	// If unspecified or zero, the default is ten.  This is default is subject to change.
+	// +kubebuilder:default:=10
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +optional
+	NumberOfUsersToReport int64 `json:"numberOfUsersToReport"`
 }
 
-type DeprecatedAPIRequestStatus struct {
+// +k8s:deepcopy-gen=true
+type APIRequestCountStatus struct {
 
-	// Conditions contains details of the current status of this API Resource.
+	// conditions contains details of the current status of this API Resource.
 	// +patchMergeKey=type
 	// +patchStrategy=merge
-	// +optional
-	Conditions []metav1.Condition
+	Conditions []metav1.Condition `json:"conditions" patchStrategy:"merge" patchMergeKey:"type"`
 
-	// RequestsLastHour contains request history for the current hour. This is porcelain to make the API
-	// easier to read by humans seeing if they addressed a problem.
+	// removedInRelease is when the API will be removed.
+	// +kubebuilder:validation:MinLength=0
+	// +kubebuilder:validation:Pattern=^[0-9][0-9]*\.[0-9][0-9]*$
+	// +kubebuilder:validation:MaxLength=64
 	// +optional
-	RequestsLastHour RequestLog `json:"requestsLastHour"`
+	RemovedInRelease string `json:"removedInRelease,omitempty"`
 
-	// RequestsLast24h contains request history for the last 24 hours, indexed by the hour, so
-	// 12:00AM-12:59 is in index 0, 6am-6:59am is index 6, etc..
+	// requestCount is a sum of all requestCounts across all current hours, nodes, and users.
+	// +kubebuilder:validation:Minimum=0
+	// +required
+	RequestCount int64 `json:"requestCount"`
+
+	// currentHour contains request history for the current hour. This is porcelain to make the API
+	// easier to read by humans seeing if they addressed a problem. This field is reset on the hour.
 	// +optional
-	RequestsLast24h []RequestLog `json:"requestsLast24h"`
+	CurrentHour PerResourceAPIRequestLog `json:"currentHour"`
+
+	// last24h contains request history for the last 24 hours, indexed by the hour, so
+	// 12:00AM-12:59 is in index 0, 6am-6:59am is index 6, etc. The index of the current hour
+	// is updated live and then duplicated into the requestsLastHour field.
+	// +kubebuilder:validation:MaxItems=24
+	// +optional
+	Last24h []PerResourceAPIRequestLog `json:"last24h"`
 }
 
-// RequestLog logs request for various nodes.
-type RequestLog struct {
+// PerResourceAPIRequestLog logs request for various nodes.
+type PerResourceAPIRequestLog struct {
 
-	// Nodes contains logs of requests per node.
-	Nodes []NodeRequestLog `json:"nodes"`
+	// byNode contains logs of requests per node.
+	// +kubebuilder:validation:MaxItems=512
+	// +optional
+	ByNode []PerNodeAPIRequestLog `json:"byNode"`
+
+	// requestCount is a sum of all requestCounts across nodes.
+	// +kubebuilder:validation:Minimum=0
+	// +required
+	RequestCount int64 `json:"requestCount"`
 }
 
-// NodeRequestLog contains logs of requests to a certain node.
-type NodeRequestLog struct {
+// PerNodeAPIRequestLog contains logs of requests to a certain node.
+type PerNodeAPIRequestLog struct {
 
-	// NodeName where the request are being handled.
+	// nodeName where the request are being handled.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=512
+	// +required
 	NodeName string `json:"nodeName"`
 
-	// LastUpdate should *always* being within the hour this is for.  This is a time indicating
-	// the last moment the server is recording for, not the actual update time.
-	LastUpdate metav1.Time `json:"lastUpdate"`
+	// requestCount is a sum of all requestCounts across all users, even those outside of the top 10 users.
+	// +kubebuilder:validation:Minimum=0
+	// +required
+	RequestCount int64 `json:"requestCount"`
 
-	// Users contains request details by top 10 users.
-	Users []RequestUser `json:"users"`
+	// byUser contains request details by top .spec.numberOfUsersToReport users.
+	// Note that because in the case of an apiserver, restart the list of top users is determined on a best-effort basis,
+	// the list might be imprecise.
+	// In addition, some system users may be explicitly included in the list.
+	// +kubebuilder:validation:MaxItems=500
+	ByUser []PerUserAPIRequestCount `json:"byUser"`
 }
 
-// RequestUser contains logs of a user's requests.
-type RequestUser struct {
+// PerUserAPIRequestCount contains logs of a user's requests.
+type PerUserAPIRequestCount struct {
 
-	// UserName that made the request.
+	// userName that made the request.
+	// +kubebuilder:validation:MaxLength=512
 	UserName string `json:"username"`
 
-	// Count of requests.
-	Count int `json:"count"`
+	// userAgent that made the request.
+	// The same user often has multiple binaries which connect (pods with many containers).  The different binaries
+	// will have different userAgents, but the same user.  In addition, we have userAgents with version information
+	// embedded and the userName isn't likely to change.
+	// +kubebuilder:validation:MaxLength=1024
+	UserAgent string `json:"userAgent"`
 
-	// Requests details by verb.
-	Requests []RequestCount `json:"requests"`
+	// requestCount of requests by the user across all verbs.
+	// +kubebuilder:validation:Minimum=0
+	// +required
+	RequestCount int64 `json:"requestCount"`
+
+	// byVerb details by verb.
+	// +kubebuilder:validation:MaxItems=10
+	ByVerb []PerVerbAPIRequestCount `json:"byVerb"`
 }
 
-// RequestCount counts requests by API request verb.
-type RequestCount struct {
+// PerVerbAPIRequestCount requestCounts requests by API request verb.
+type PerVerbAPIRequestCount struct {
 
-	// Verb of API request (get, list, create, etc...)
+	// verb of API request (get, list, create, etc...)
+	// +kubebuilder:validation:MaxLength=20
+	// +required
 	Verb string `json:"verb"`
 
-	// Count of requests for verb.
-	Count int `json:"count"`
+	// requestCount of requests for verb.
+	// +kubebuilder:validation:Minimum=0
+	// +required
+	RequestCount int64 `json:"requestCount"`
 }
-```
 
-#### Determining Workload
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-```sh
-oc get deprecatedapirequests --field-selector status.removedRelease=1.21
+// APIRequestCountList is a list of APIRequestCount resources.
+type APIRequestCountList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []APIRequestCount `json:"items"`
+}
 ```
 
 ### Risks and Mitigations
@@ -268,13 +339,25 @@ storage version migration tool to perform the migrations automatically.
 
 ### Upgrade / Downgrade Strategy
 
+#### Dev Preview -> Tech Preview
+linter pass
+
+#### Tech Preview -> GA
+linter pass
+
+#### Removing a deprecated feature
+linter pass
+
 ### Version Skew Strategy
 
 ## Implementation History
+linter pass
 
 ## Drawbacks
+linter pass
 
 ## Alternatives
+linter pass
 
 ### Console Recommendations vs. Alerts
 
@@ -289,5 +372,3 @@ after analyzing the workloads on the cluster, might choose to ignore the removed
 upgrade to the next release.
 
 ## Infrastructure Needed [optional]
-
-
