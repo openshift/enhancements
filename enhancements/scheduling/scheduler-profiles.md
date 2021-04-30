@@ -11,8 +11,8 @@ approvers:
   - "@ingvagabund"
   - "@deads2k"
 creation-date: 2020-11-11
-last-updated: 2020-11-11
-status: provisional
+last-updated: 2021-04-30
+status: implemented
 see-also:
   - "https://github.com/kubernetes/enhancements/blob/master/keps/sig-scheduling/624-scheduling-framework/kep.yaml"
   - "/enhancements/kube-apiserver/audit-policy.md"
@@ -25,10 +25,10 @@ superseded-by:
 ## Release Signoff Checklist
 
 - [x] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
+- [x] Graduation criteria for dev preview, tech preview, GA
+- [x] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
@@ -181,6 +181,24 @@ The existing Policy field should immediately be marked as deprecated (effective 
 Profiles is promoted to GA. This removal may come as a requirement in the rebase if it is also removed upstream (or require
 a carry patch to continue support for this API).
 
+#### Dev Preview -> Tech Preview
+
+* Ability to utilize the enhancement end to end
+* End user documentation, relative API stability
+* Sufficient test coverage
+* Gather feedback from users rather than just developers
+
+#### Tech Preview -> GA
+
+* More testing (upgrade, downgrade, scale)
+* Sufficient time for feedback
+* Available by default
+
+#### Removing a deprecated feature
+
+Update 4/30/21 - Scheduler Profiles will be GA in OpenShift 4.9, and the existing Policy field will need to remain
+for config compatibility (though it will be clearly marked as deprecated and serve no functional purpose)
+
 ### Upgrade / Downgrade Strategy
 
 Upgrades may be an issue only for users of the old Policy API in the version that it is removed. We will provide both
@@ -202,8 +220,9 @@ components is not an issue.
 
 ## Implementation History
 
-Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`.
+* 11/11/20 - Created proposal
+* 12/5/20 - Implemented in kube-scheduler-operator https://github.com/openshift/cluster-kube-scheduler-operator/pull/307
+* 4/30/21 - Enhancement updated to reflect implemented status
 
 ## Drawbacks
 
