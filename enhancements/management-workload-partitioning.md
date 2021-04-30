@@ -452,7 +452,7 @@ workload types.
 [crio.runtime.workloads.{workload-type}]
   activation_annotation = "target.workload.openshift.io/{workload-type}"
   annotation_prefix = "resources.workload.openshift.io"
-  resources = { "cpushares": 0, "cpuset": "0-1" }
+  resources = { "cpushares" = 0, "cpuset" = "0-1" }
 ```
 
 The `activation_annotation` field is used to match pods that should be
