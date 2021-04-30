@@ -9,8 +9,8 @@ approvers:
   - "@soltysh"
   - "@ingvagabund"
 creation-date: 2020-11-23
-last-updated: 2020-11-23
-status: provisional
+last-updated: 2020-04-30
+status: implemented
 see-also:
   - "enhancements/scheduling/scheduler-profiles.md"
   - "/enhancements/kube-apiserver/audit-policy.md"
@@ -23,10 +23,10 @@ superseded-by:
 ## Release Signoff Checklist
 
 - [x] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
+- [x] Graduation criteria for dev preview, tech preview, GA
+- [x] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/blob/0261583/modules/nodes-descheduler-profiles.adoc)
 
 ## Summary
 
@@ -236,6 +236,24 @@ is currently only in tech preview.
 When we are able to remove the v1beta1 API (in 3 releases or 9 months, whichever is longer), the v1
 replacement will only have the new field.
 
+#### Dev Preview -> Tech Preview
+
+* Ability to utilize the enhancement end to end
+* End user documentation, relative API stability
+* Sufficient test coverage
+* Gather feedback from users rather than just developers
+
+#### Tech Preview -> GA
+
+* More testing (upgrade, downgrade, scale)
+* Sufficient time for feedback
+* Available by default
+
+#### Removing a deprecated feature
+
+Update 4/30/21 - The Descheduler Profiles will be GA in OpenShift 4.8, with a new Descheduler config API `v1`. The
+existing `v1beta1` will be removed in 4.9.
+
 ### Upgrade / Downgrade Strategy
 
 If the current `strategies` field stays supported, there will be no issues during upgrades or downgrades.
@@ -250,8 +268,10 @@ already GA upstream.
 
 ## Implementation History
 
-Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`.
+* 11/23/20 - Enhancement created
+* 12/3/20 - Profiles API introduced https://github.com/openshift/cluster-kube-descheduler-operator/pull/156
+* 4/7/21 - `v1` API introduced https://github.com/openshift/cluster-kube-descheduler-operator/pull/178
+* 4/30/21 - Enhancement updated to reflect current status
 
 ## Drawbacks
 
