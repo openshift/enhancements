@@ -43,6 +43,8 @@ logs, accepting the increased resource consumption of the API servers.
 This API is intentionally **not about filtering events**. Filtering is to be done via an external mechanism (post-filtering).
 It was proven through performance tests (compare alternatives section) that this trade-off is acceptable with small two-digit percent overhead.
 
+The new Audit Policy will however filter user groups to allow transparency into what resources system:authenticated:oauth group users are requesting.
+
 The API is not meant to replace the [upstream dynamic audit](https://github.com/kubernetes/enhancements/blob/f1a799d5f4658ed29797c1fb9ceb7a4d0f538e93/keps/sig-auth/0014-dynamic-audit-configuration.md) API
 now and in the future. I.e. the API of this enhancement is only about the master node audit files on disk, not about webhooks or
 any other alternative audit log sink.
@@ -152,7 +154,6 @@ we provide the following profiles:
 
 - `WriteRequestBodies`: this is like `Default`, but it logs request and response HTTP payloads for write requests (create, update, patch).
 - `AllRequestBodies`: this is like `WriteRequestBodies`, but also logs request and response HTTP payloads for read requests (get, list).
-- `UserRequests`: this logs the requests from users in the `system:authenticated:oauth` user groups and logs requests for (create, delete).
 
 All of the profiles have in common that security-sensitive resources, namely
 
