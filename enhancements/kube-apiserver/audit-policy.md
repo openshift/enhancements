@@ -80,7 +80,7 @@ resources right). Hence, this enhancement is about
 
 - a high-level API
 - which will satisfy the needs of most customers with strong regulatory or security requirement,
-  i.e. it allows them to increase audit verbosity and provides the specific policy required by a customer for a `UserRequests` policy.
+  i.e. it allows them to increase audit verbosity 
 - without risking to log security-sensitive resources
 - and it is feasible to maintain the feature in the future when the dynamic audit API takes over.
 
@@ -232,7 +232,7 @@ apiVersion: config.openshift.io/v1
 spec:
   ...
   audit:
-    profile: Default | WriteRequestBodies | AllRequestBodies | UserRequests
+    profile: Default | WriteRequestBodies | AllRequestBodies
 ```
 
 In the future, we could add more, even more detailed profiles of logging responses, if customers need this:
