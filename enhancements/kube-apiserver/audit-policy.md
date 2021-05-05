@@ -28,12 +28,6 @@ superseded-by:
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-#### Dev Preview
-
-#### Dev Preview -> Tech Preview
-
-#### Tech Preview -> GA
-
 ## Open Questions
 
 ## Summary
@@ -353,6 +347,12 @@ These items are invariants that should not be logged in all responses above `Met
 ### Graduation Criteria
 
 None
+
+#### Dev Preview
+
+#### Dev Preview -> Tech Preview
+
+#### Tech Preview -> GA
 
 ### Upgrade / Downgrade Strategy
 
