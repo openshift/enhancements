@@ -117,34 +117,31 @@ use.
 This allows us to *inform* the admin for removals that are more than one minor
 version away and *block* upgrades for removals which are imminent.
 
-### MCO - Enforce OpenShift's defined host component version skew policies
+### APIServer - Enforce OpenShift's defined kubelet version skew policies
 
-The MCO, will set Upgradeable=False whenever any MachineConfigPool has one more
-more nodes present which fall outside of a defined list of constraints. For
-instance, if OpenShift has a defined Kubelet Version Skew of N-1, the node
-constraints enforced by the MCO defined in OCP 4.7 (Kube 1.20) would be as follows:
+The API Server Operator will set `Upgradeable=False` whenever any of the nodes
+within the cluster are at the skew limit; that is, when an upgrade of the API
+Server would exceed the allowable kubelet version skew. For instance, if
+OpenShift has a defined kubelet version skew of N-1, the API Server Operator
+would report `Upgradeable=True` if all of the nodes are at N, and
+`Upgradeable=False` if at least one of the nodes is not up to date. If the
+kubelet skew policy were to change, allowing for a version skew of N-2, the API
+Server Operator would report `Upgradeable=True` if all of the nodes are at N or
+N-1, and `Upgradeable=False` if any of the nodes are at N-2.
 
-```yaml
-node.status.nodeInfo.kubeletVersion:
-- v1.20
-```
+It's critical to remember that the `Upgradeable` flag doesn't block z-stream
+updates. This detail allows the flag to be used indiscriminately, since
+OpenShift will never bump the API Server version in a z-stream update.
 
-If the policy were to change allowing for a version skew of N-2, v1.19 would be
-added to the list of acceptable matches. As a result a cluster which had been
-upgraded from 4.6 to 4.7 would allow a subsequent upgrade to 4.8 as long as all
-kubelets were either v1.19 or v1.20. The 4.8 MCO would then evaluate the Upgradeable
-condition based on its constraints, if v1.19 weren't allowed it would then
-inhibit upgrades to 4.9. This means the MCO must set Upgradeable=False until it
-has confirmed constraints have been met.
-
-```yaml
-node.status.nodeInfo.kubeletVersion:
-- v1.20
-- v1.19
-```
-
-The MCO is not responsible for defining these constraints and constraints are
-only widened whenever we have CI testing proves them to be safe.
+It's also worth pointing out that this mechanism is a heuristic. It isn't
+necessarily guaranteed that every y-stream update will include a bump to the
+API Server, so there may be false positives. In a similar vein, in order for
+this check to remain valid, OpenShift will need to ensure that there are no
+API Server version bumps larger than N+1 between y-stream updates. Otherwise,
+the check may return a false negative (e.g. an existing cluster has N-1 skew
+and then applies a y-stream update where the API Server version bumps N+2,
+resulting in N-3 skew). If there are larger version bumps, the skew check will
+need to be modified in a backport to the previous version.
 
 These changes will need to be backported to 4.7 prior to 4.7 EOL.
 
@@ -304,8 +301,8 @@ that's broadly scoped as "EUS 4.6 to EUS 4.10 Validator"?
 
 - CI tests are necessary which attempt to upgrade while violating kubelet to API
 compatibility, ie: 4.6 to 4.7 upgrade with MachineConfigPools paused, then check
-for Upgradeable=False condition to be set by MCO assuming that our rules only allow
-for N-1 skew.
+for Upgradeable=False condition to be set by the API Server Operator, assuming
+that our rules only allow for N-1 skew.
 - CI tests are necessary which install an OLM Operator which expresses a maxKubeVersion
 or maxOCPVersion equal to the current cluster version and checks for Upgradeable=False
 on OLM
@@ -347,7 +344,7 @@ In general, we try to use the same stages (alpha, beta, GA), regardless how the 
 
 These are generalized examples to consider, in addition to the aforementioned [maturity levels][maturity-levels].
 
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
@@ -356,7 +353,7 @@ These are generalized examples to consider, in addition to the aforementioned [m
 - Enumerate service level indicators (SLIs), expose SLIs as metrics
 - Write symptoms-based alerts for the component(s)
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -368,7 +365,7 @@ These are generalized examples to consider, in addition to the aforementioned [m
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
 - Deprecate the feature
@@ -392,6 +389,32 @@ above. Otherwise nothing specifically tied to this effort.
 The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
 
 ## Alternatives
+
+### MCO Kubelet Skew Enforcement
+
+Instead of the API Server Operator enforcing kubelet skew compliance through
+the `Upgradeable` flag, the MCO could provide this functionality. Either of
+these two operators are the obvious choice for such a check since they are
+responsible for both halves of the kubelet-API Server interaction. It makes
+more sense for the leading component to implement the check, however, since
+it's the leading edge that's going to violate the skew compliance first. In the
+case of OpenShift, that leading edge is the API Server and it makes more sense
+for it to determine whether a step forward is going to violate the skew policy.
+On top of that, the gating mechanism we have today is the `Upgradeable=False`
+flag, which indicates that a particular operator cannot be upgraded, thereby
+halting the upgrade of the entire cluster. It doesn't make sense for the MCO to
+assert this condition, since an upgrade of the MCO and its operands (RHCOS)
+would actually reduce the skew. If the MCO were to use this mechanism to
+enforce the skew, it would be a reinterpretation of the function of that flag
+to instead indicate that the entire cluster cannot be upgraded. It's a subtle
+but important distinction that preserves low coupling between individual
+operators.
+
+### MCO Rollout Gating
+
+(This section was written assuming that the MCO would be responsible for
+enforcing the node skew policy, but this plan has since been modified to make
+the API Server Operator responsible for this enforcement.)
 
 Rather than having MCO enforce version skew policies between OS managed
 components and operator managed components it could simply set Upgradeable=False
