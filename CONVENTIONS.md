@@ -156,6 +156,15 @@ In future, when we include the descheduler into OpenShift by default, it will pe
     * E.g. the upgrade of a network plugin must serve pod traffic without disruption (although tiny increases in latency are allowed)
     * All components that currently disrupt end-user workloads must prioritize addressing those issues, and new components may not be introduced that add disruption
 
+#### Priority Classes
+
+All components should have [priority class](https://kubernetes.io/docs/concepts/configuration/pod-priority-preemption/#pod-priority) associated with them. Without proper
+priority class set, the component may be scheduled onto the node very late in the cluster lifecycle causing disruptions to the end-user workloads or it may be
+evicted/preempted/OOMKilled last which may not be desirable for some components. When deciding on which priority class to use for your component, please use the following convention:
+
+* If it is fine for your operator/operand to be preempted by user-workload and OOMKilled use `openshift-user-critical` priority class
+* If you want your operator/operand not to be preempted by user-workload but still be OOMKilled use `system-cluster-critical` priority class
+* If you want operator/operand not be preempted by user-workload or be OOMKilled last use `system-node-critical` priority class
 
 #### Resources and Limits
 
