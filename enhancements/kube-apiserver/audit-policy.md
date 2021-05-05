@@ -354,6 +354,8 @@ None
 
 #### Tech Preview -> GA
 
+#### Removing a deprecated feature
+
 ### Upgrade / Downgrade Strategy
 
 If applicable, how will the component be upgraded and downgraded? Make sure this
