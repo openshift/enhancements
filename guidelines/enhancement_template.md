@@ -62,6 +62,9 @@ To get started with this template:
    of the platform. Aim for single topic PRs to keep discussions focused. If you
    disagree with what is already in a document, open a new PR with suggested
    changes.
+1. **Keep all required headers.** If a section does not apply to an
+   enhancement, explain why but do not remove the section. This part
+   of the process is enforced by the linter CI job.
 
 The `Metadata` section above is intended to support the creation of tooling
 around the enhancement process.
