@@ -58,6 +58,7 @@ custom manner.  For more information on the existing `IngressIPs` feature:
 
 * https://github.com/openshift/api/blob/master/config/v1/types_network.go#L99
 * https://github.com/openshift/openshift-docs/pull/21388
+* https://docs.openshift.com/container-platform/4.7/networking/configuring_ingress_cluster_traffic/configuring-externalip.html
 
 ### Goals
 
@@ -229,35 +230,55 @@ doing all of your testing in a virtual network built on top of it.
 
 #### Operator
 
-This is the first of two alternatives for how we might integrate MetalLB in
-OpenShift.
-
 We must also create an operator for MetalLB.  We should develop an operator
-that is generally useful to the MetalLB community.  We should also have an
-OpenShift version of this operator for our use.
+that is generally useful to the MetalLB community.  The upstream operator has
+been proposed [here](https://github.com/metallb/metallb/pull/859). We should
+also have an OpenShift version of this operator for our use, which would
+contain any needed OpenShift specific customizations.
 
-It is assumed that the MetalLB operator would be managed by OLM as an optional
-additional component to be installed on on-premise clusters.  However, in the
-[ROADMAP.md
+The MetalLB operator will be managed by OLM as an optional additional component
+to be installed on on-premise clusters.  However, in the [ROADMAP.md
 document](https://github.com/openshift/enhancements/blob/master/ROADMAP.md),
 there is an item to "Front the API servers and other master services with
 service load balancers".  If this functionality is required at install time,
-the details on management of this operator may be revisited.
+the details on management of this operator may be revisited, since MetalLB may
+become a hard requirement in some environments.
 
 There is a start of a
 [metallb-operator](https://github.com/cybertron/metallb-operator) available and
 a [video demo](https://www.youtube.com/watch?v=WgOZno0D7nw).
 
-#### Alternative Integration: Cloud Controller Manager
+#### Configuration Interfaces
 
-An alternative integration approach would be via a cloud controller manager
-(CCM). An example of this is the [packet.net
-CCM](https://github.com/packethost/packet-ccm), which ensures MetalLB is
-deployed and also configures it properly to work in packet.net’s BGP
-environment.
+MetalLB's current configuration interface is a single `ConfigMap`.  We only
+want to support CRD based configuration through OpenShift.  The ultimate goal
+will be to enhance MetalLB with a native CRD based configuration interface.
+The design work has begun here:
 
-These integration options must be explored in more detail as part of a more
-detailed integration proposal.
+https://github.com/metallb/metallb/pull/833
+
+Since this is an upstream effort, the completion of this work may take longer
+than the timeline for when we want to ship the first piece of MetalLB support
+for OpenShift, which will be to support MetalLB in layer2 mode only.
+
+To mitigate this timing risk, we will consider adding a minimal configuration
+CRD to the MetalLB operator which only covers the configuration needed for
+layer2 mode. This will buy us some additional time to determine whether we will
+build a more complete interface within the core MetalLB project, or whether we
+will continue to extend the configuration interface provided by the operator.
+
+The operator will reconcile this minimal layer2-only configuration CRD by
+creating a MetalLB ConfigMap.
+
+#### FRR for BGP
+
+We have concerns about the long term viability of the built-in BGP stack in
+MetalLB.  We have multiple features we'd like to add to the BGP stack and feel
+the project is better served by relying on an external BGP implementation.  We
+are actively working upstream to propose the option of using FRR as the BGP
+stack behind MetalLB.
+
+https://github.com/metallb/metallb/pull/832
 
 ### Risks and Mitigations
 
@@ -374,6 +395,24 @@ to think it owns a `Service`.
 These risks to version skew must be mitigated through upstream community
 engagement and contributions, as well as informed management of upgrades in the
 MetalLB operator.
+
+### Graduation Criteria
+
+This feature is expected to be released as GA (layer2 only as a first release),
+and later BGP once the FRR integration and complete CRD based configuration
+interface are complete.
+
+#### Dev Preview -> Tech Preview
+
+N/A
+
+#### Tech Preview -> GA
+
+N/A
+
+#### Removing a deprecated feature
+
+N/A
 
 ## Implementation History
 
