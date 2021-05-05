@@ -33,7 +33,13 @@ superseded-by:
 ## Open Questions [optional]
 
 1. What is the best way to find out which node belongs to which OpenShift
-release (imagine stuck nodes during ugrades)?
+release (imagine stuck nodes during ugrades)? See also email-thread on
+coreos-devel "Can we update os-release to reflect the "full" version
+of OpenShift?"
+2. Can an OLM managed operator create an ClusterOperator object to manage
+upgradeability of the cluster? SRO needs to run some preflight checks
+upfront before MCO updates the nodes to make sure the new kernel or
+driver-container is compatible.
 
 ## Summary
 
@@ -542,7 +548,7 @@ inject the variable into the manifest and the second pass it templatize this
 given variable. Even if we do not know the runtime information beforehand of an
 cluster we can use it in a CR.
 
-#### DriverContainer Manifests (recipes)
+#### DriverContainer Manifests (helm charts)
 
 The third part of enablement are the manifests for the DriverContainer. SRO
 provides a set of predefined manifests that are completely templatized and SRO
