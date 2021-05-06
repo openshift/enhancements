@@ -93,7 +93,6 @@ A SLB solution must provide these high level features:
     ECMP to send traffic to multiple Nodes for a single Service Load Balancer
 * Suitable for large scale clusters (target up to 2000 nodes).
 * Must be compatible with at least the following cluster network types:
-  [OpenShift-SDN](https://github.com/openshift/sdn) and
   [OVN-Kubernetes](https://github.com/ovn-org/ovn-kubernetes)
 
 ### Non-Goals
