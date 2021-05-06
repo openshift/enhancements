@@ -50,7 +50,6 @@ and DNS entries for api and the apps wildcard url.
 
 The minimal requirements includes:
 * Internal DNS:
-  - hostname resolution for masters and workers nodes.
   - `api-int` hostname resolution.
 * Highly available load-balancing API access for internal clients.
 * Highly available access for default ingress.
@@ -165,12 +164,13 @@ These records are used externally and internally for the cluster.
 In addition, internally resolvable DNS records are required for:
 
 * `api-int.$cluster_name.$base-domain` -
-* `$node_hostname.$cluster_name.$base-domain` -
 
 In cluster networking infrastructure, the goal is is to automate as much of the
 DNS requirements internal to the cluster as possible, leaving only a
 small amount of public DNS configuration to be implemented by the user
 before starting the installation process.
+
+TODO(bnemec): Rewrite this to reflect the lack of hostname resolution.
 
 In a non-cloud environment, we do not know the IP addresses of all hosts in
 advance.  Those will come from an organization’s DHCP server.  Further, we can
@@ -199,35 +199,6 @@ The configuration of CoreDNS for [bootstrap](https://github.com/openshift/machin
 
 1. Enable `mdns` plugin to perform DNS lookups based on discoverable information from mDNS. the `mdns` plugin is decribed below.
 2. `api-int` hostname resolution, the CoreDNS configured during [bootstrap phase](https://github.com/openshift/machine-config-operator/blob/master/manifests/baremetal/coredns-corefile.tmpl#L9) and [after that](https://github.com/openshift/machine-config-operator/blob/master/templates/common/baremetal/files/baremetal-coredns-corefile.yaml#L13) to resolve the `api-int` hostname to api-vip address.
-
-##### CoreDNS mdns plugin
-
-https://github.com/openshift/coredns-mdns/
-
-The `mdns` plugin for `coredns` was developed to resolve DNS requests based on information received from mDNS.
-This plugin will resolve the `$node_hostname` records.
-The IP addresses that the `$node_hostname` host records resolve to comes from the
-mDNS advertisement sent out by the `mdns-publisher` on that node.
-
-#### mdns-publisher
-
-https://github.com/openshift/mdns-publisher
-
-The `mdns-publisher` [pod](https://github.com/openshift/machine-config-operator/blob/master/templates/common/baremetal/files/baremetal-mdns-publisher.yaml)
-is configured with `hostNetwork: true` providing the IP address
-and hostname of the RHCOS instance.
-
-The [baremetal-runtimecfg](https://github.com/openshift/baremetal-runtimecfg)
-renders the `mdns-publisher` [configuration](https://github.com/openshift/machine-config-operator/blob/master/templates/master/00-master/baremetal/files/baremetal-mdns-config.yaml).
-Replacing `.NonVirtualIP`, `.Cluster.Name` and `.ShortHostname`.
-
-The `mdns-publisher` is the component that runs on each host to make itself
-discoverable by other hosts in the cluster.  Both control plane hosts and worker nodes
-advertise `$node_hostname` names.
-
-`mdns-publisher` does not run on the bootstrap node, as there is no need for any
-other host to discover the IP address that the bootstrap instance gets from DHCP.
-
 
 #### DNS Resolution in control plane and compute nodes
 
@@ -262,7 +233,8 @@ This has already been implemented for baremetal, Ovirt, vSphere and OpenStack.
 ### Risks and Mitigations
 
 - This network service design has not been verified to be resilient or performant.
-- mDNS could have potential security implications
+
+### User Stories
 
 ## Design Details
 
@@ -280,6 +252,8 @@ will be needed for internet-facing access to the API.  If Packet is to be used
 only Route53 will be needed to access the API.  The other potential issue
 will be determining the IP addresses for the VIPs but reusing the existing
 IPAM server might be an option.
+
+### Graduation Criteria
 
 #### Dev Preview -> Tech Preview
 
