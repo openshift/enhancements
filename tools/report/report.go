@@ -71,9 +71,17 @@ func formatDescription(text string, indent string) string {
 	return strings.Join(indentedLines, "\n")
 }
 
+func formatLabels(prd *stats.PullRequestDetails) string {
+	result := []string{}
+	for _, label := range prd.Pull.Labels {
+		result = append(result, *label.Name)
+	}
+	return strings.Join(result, ", ")
+}
+
 const descriptionIndent = "  "
 
-func showOnePR(prd *stats.PullRequestDetails, withDescription bool) {
+func showOnePR(prd *stats.PullRequestDetails, withDescription bool, withLabels bool) {
 	author := ""
 	if prd.Pull.User != nil {
 		for _, option := range []*string{prd.Pull.User.Name, prd.Pull.User.Login} {
@@ -119,6 +127,12 @@ func showOnePR(prd *stats.PullRequestDetails, withDescription bool) {
 			summary = *prd.Pull.Body
 		}
 		if summary != "" {
+			if withLabels {
+				labelText := formatLabels(prd)
+				if labelText != "" {
+					fmt.Printf("\n%s`%s`\n", descriptionIndent, labelText)
+				}
+			}
 			fmt.Printf("\n%s\n\n", formatDescription(summary, descriptionIndent))
 		}
 	}
@@ -126,7 +140,7 @@ func showOnePR(prd *stats.PullRequestDetails, withDescription bool) {
 
 // ShowPRs prints a section of the report by formatting the
 // PullRequestDetails as a list.
-func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool) {
+func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool, withLabels bool) {
 	if len(prds) == 0 {
 		return
 	}
@@ -147,7 +161,7 @@ func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 			foundUpdate = true
 			continue
 		}
-		showOnePR(prd, withDescription)
+		showOnePR(prd, withDescription, withLabels)
 	}
 
 	if foundUpdate {
@@ -156,7 +170,7 @@ func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 			if prd.IsNew {
 				continue
 			}
-			showOnePR(prd, false)
+			showOnePR(prd, false, false)
 		}
 	}
 }

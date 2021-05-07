@@ -81,6 +81,7 @@ func newShowPRCommand() *cobra.Command {
 				fmt.Sprintf("Pull Request %d", prID),
 				all.Requests,
 				true,
+				true,
 			)
 
 			prd := all.Requests[0]
