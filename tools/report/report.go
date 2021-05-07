@@ -71,12 +71,19 @@ func formatDescription(text string, indent string) string {
 	return strings.Join(indentedLines, "\n")
 }
 
-func formatLabels(prd *stats.PullRequestDetails) string {
+func extractLabels(prd *stats.PullRequestDetails) []string {
 	result := []string{}
 	for _, label := range prd.Pull.Labels {
 		result = append(result, *label.Name)
 	}
-	return strings.Join(result, ", ")
+	return result
+}
+
+func formatLabels(labels []string, indent string) string {
+	if len(labels) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s`%s`", indent, strings.Join(labels, ", "))
 }
 
 const descriptionIndent = "  "
@@ -128,9 +135,10 @@ func showOnePR(prd *stats.PullRequestDetails, withDescription bool, withLabels b
 		}
 		if summary != "" {
 			if withLabels {
-				labelText := formatLabels(prd)
+				labels := extractLabels(prd)
+				labelText := formatLabels(labels, descriptionIndent)
 				if labelText != "" {
-					fmt.Printf("\n%s`%s`\n", descriptionIndent, labelText)
+					fmt.Printf("\n%s\n", labelText)
 				}
 			}
 			fmt.Printf("\n%s\n\n", formatDescription(summary, descriptionIndent))
