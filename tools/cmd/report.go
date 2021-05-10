@@ -175,43 +175,45 @@ func newReportCommand() *cobra.Command {
 				fmt.Printf("\n## Enhancements for Release Priorities\n")
 
 				report.SortByID(prioritizedMerged.Requests)
-				report.ShowPRs("Prioritized Merged", prioritizedMerged.Requests, true)
+				report.ShowPRs("Prioritized Merged", prioritizedMerged.Requests, true, false)
 
 				report.SortByID(prioritizedNew.Requests)
-				report.ShowPRs("Prioritized New", prioritizedNew.Requests, true)
+				report.ShowPRs("Prioritized New", prioritizedNew.Requests, true, true)
 
 				report.SortByID(prioritizedRevived.Requests)
 				report.ShowPRs(
 					"Prioritized Revived (discussion after PR was merged)",
 					prioritizedRevived.Requests,
 					false,
+					false,
 				)
 
 				report.SortByActivityCountDesc(prioritizedActive.Requests)
-				report.ShowPRs("Prioritized Active", prioritizedActive.Requests, true)
+				report.ShowPRs("Prioritized Active", prioritizedActive.Requests, true, true)
 
 				report.SortByID(prioritizedClosed.Requests)
-				report.ShowPRs("Prioritized Closed", prioritizedClosed.Requests, false)
+				report.ShowPRs("Prioritized Closed", prioritizedClosed.Requests, false, false)
 			}
 
 			fmt.Printf("\n## Other Enhancements\n")
 
 			report.SortByID(otherMerged.Requests)
-			report.ShowPRs("Other Merged", otherMerged.Requests, true)
+			report.ShowPRs("Other Merged", otherMerged.Requests, true, false)
 
 			report.SortByID(otherNew.Requests)
-			report.ShowPRs("Other New", otherNew.Requests, true)
+			report.ShowPRs("Other New", otherNew.Requests, true, true)
 
 			report.SortByActivityCountDesc(otherActive.Requests)
-			report.ShowPRs("Other Active", otherActive.Requests, false)
+			report.ShowPRs("Other Active", otherActive.Requests, false, false)
 
 			report.SortByID(otherClosed.Requests)
-			report.ShowPRs("Other Closed", otherClosed.Requests, false)
+			report.ShowPRs("Other Closed", otherClosed.Requests, false, false)
 
 			report.SortByID(revived.Requests)
 			report.ShowPRs(
 				fmt.Sprintf("Revived (closed more than %d days ago, but with new comments)", daysBack),
 				revived.Requests,
+				false,
 				false,
 			)
 
@@ -221,6 +223,7 @@ func newReportCommand() *cobra.Command {
 					daysBack),
 				otherOld.Requests,
 				false,
+				false,
 			)
 
 			report.SortByID(stale.Requests)
@@ -228,12 +231,14 @@ func newReportCommand() *cobra.Command {
 				"Other lifecycle/stale",
 				stale.Requests,
 				false,
+				false,
 			)
 
 			report.SortByID(idle.Requests)
 			report.ShowPRs(
 				fmt.Sprintf("Idle (no comments for at least %d days)", daysBack),
 				idle.Requests,
+				false,
 				false,
 			)
 
