@@ -44,6 +44,7 @@ This API is intentionally **not about filtering events**. Filtering is to be don
 It was proven through performance tests (compare alternatives section) that this trade-off is acceptable with small two-digit percent overhead.
 
 The new Audit Policy will however filter user groups to allow transparency into what resources system:authenticated:oauth group users are requesting.
+Audit Profiles will be customizable to the group an admin chooses.
 
 The API is not meant to replace the [upstream dynamic audit](https://github.com/kubernetes/enhancements/blob/f1a799d5f4658ed29797c1fb9ceb7a4d0f538e93/keps/sig-auth/0014-dynamic-audit-configuration.md) API
 now and in the future. I.e. the API of this enhancement is only about the master node audit files on disk, not about webhooks or
@@ -82,7 +83,8 @@ resources right). Hence, this enhancement is about
 - which will satisfy the needs of most customers with strong regulatory or security requirement,
   i.e. it allows them to increase audit verbosity
 - without risking to log security-sensitive resources
-- and it is feasible to maintain the feature in the future when the dynamic audit API takes over.
+- and it is feasible to maintain the feature in the future when the dynamic audit API takes over
+- audit policy output files that are more specific to monitoring groups.
 
 With performance tests we have proven that there is no strong reason to pre-filter audit logs before
 writing them to disk. Filtering can be done by custom solutions implemented by customers, or by
@@ -318,6 +320,8 @@ The profile translate like this:
 With secure OAuth storage in-place (see "Logging of Token with Secure OAuth Storage" section) and
 therefore the `oauth-apiserver.openshift.io/secure-token-storage: true` annotation on the `apiservers.config.openshift.io/v1` resource,
 these policies are extended by allowing logging of `oauthaccesstokens` and `oauthauthorizetokens`.
+
+The user will enter in the name of the group and the Audit Policy Desired: `Default`, `WriteRequestBodies`, or `AllRequestBodies`. The group can be `all` or the group name the admin specifies.
 
 ### Test Plan
 
