@@ -139,6 +139,9 @@ Please note that in case of [Single Node OpenShift](https://github.com/openshift
   * Hard pod [anti-affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#always-co-located-in-the-same-node) on hostname (no two pods on the same node)
   * Use the maxUnavailable rollout strategy on deployments (prefer 25% by default for a value)
   * This is the recommended approach for all the components unless the component needs 3 replicas
+  * If you let customers change either affinity or replicas, please use this configuration when
+    * replica count is 2
+    * customers haven't overridden the affinity
 * If the operator or operand requires >= 3 replicas and should be running on worker nodes
   * Set soft pod anti-affinity on the hostname so that pods prefer to land on separate nodes (will be violated on two node clusters)
   * Use maxSurge for deployments if possible since the spreading rules are soft
