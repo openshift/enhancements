@@ -49,11 +49,25 @@ longer-term RHEL8 support is developed.
 
 ### Non-Goals
 
-* Deploying/upgrading RHEL8 worker nodes through other mechanisms. i.e. operators
+* Deploying/upgrading RHEL8 worker nodes through other mechanisms, i.e. operators
+* Changing the deployment/upgrade process for RHEL 7 worker nodes 
 
 ## Proposal
 
-This is where we get down to the nitty gritty of what the proposal actually is.
+Currently, for RHEL 7 worker node deployment, the user must [prepare the host][prepare-rhel]
+before running the scaleup.yml playbook.  This process can be cumbersome for
+automating deployment and also requires additional steps to update repos prior
+to performing an upgrade.  For RHEL 8 hosts preparing repos on the hosts will
+not be required because the necessary packages will be delivered as an image in 
+the release package.  This removes the need of mirroring the release package as
+well as setting up repo mirrors for offline or disconnected deployments.
+
+The basic process for scaling up and upgrading RHEL worker nodes will remain the
+same.  The playbooks will be updated to download and mount the image with the RPM
+content during the install/upgrade for RHEL 8 hosts.  The install process will
+not change for RHEL 7 worker nodes.
+
+[prepare-rhel]: https://docs.openshift.com/container-platform/4.7/machine_management/adding-rhel-compute.html#rhel-preparing-node_adding-rhel-compute
 
 ### User Stories
 
