@@ -5,7 +5,7 @@ authors:
 reviewers:
   - "@staebler"
 approvers:
-  - TBD
+  - "@derekwaynecarr"
 creation-date: 2021-05-13
 last-updated: 2021-05-13
 status: provisional
