@@ -31,9 +31,9 @@ superseded-by:
 ## Summary
 
 This enhancement proposes to add RHEL 8 Server support for deploying worker/infra
-nodes with [openshift-ansible](https://github.com/openshift/openshift-ansible).
-RHEL8 nodes will be deployed and upgraded using the same Ansible playbook process
-however, RPM content will be delivered using an image in the release package.
+nodes with [openshift-ansible] RHEL8 nodes will be deployed and upgraded using
+the same Ansible playbook process however, RPM content will be delivered using
+an image in the release package.
 
 ## Motivation
 
@@ -45,12 +45,12 @@ longer-term RHEL8 support is developed.
 ### Goals
 
 1. Implement an os-content image for RHEL8 RPMs
-1. Update openshift-ansible scaleup.yml and upgrade.yml playbooks to support RHEL8 workers
+1. Update [openshift-ansible] scaleup.yml and upgrade.yml playbooks to support RHEL8 workers
 
 ### Non-Goals
 
 * Deploying/upgrading RHEL8 worker nodes through other mechanisms, i.e. operators
-* Changing the deployment/upgrade process for RHEL 7 worker nodes 
+* Changing the deployment/upgrade process for RHEL 7 worker nodes
 
 ## Proposal
 
@@ -58,7 +58,7 @@ Currently, for RHEL 7 worker node deployment, the user must [prepare the host][p
 before running the scaleup.yml playbook.  This process can be cumbersome for
 automating deployment and also requires additional steps to update repos prior
 to performing an upgrade.  For RHEL 8 hosts preparing repos on the hosts will
-not be required because the necessary packages will be delivered as an image in 
+not be required because the necessary packages will be delivered as an image in
 the release package.  This removes the need of mirroring the release package as
 well as setting up repo mirrors for offline or disconnected deployments.
 
@@ -71,12 +71,11 @@ not change for RHEL 7 worker nodes.
 
 ### User Stories
 
-Detail the things that people will be able to do if this is implemented.
-Include as much detail as possible so that people can understand the "how" of
-the system. The goal here is to make this feel real for users without getting
-bogged down.
+1. As an OpenShift admin using [openshift-ansible], I want to deploy and upgrade
+   RHEL 8 Server worker nodes without needing to prepare hosts for installation.
 
-Include a story on how this proposal will be operationalized:  lifecycled, monitored and remediated at scale.
+1. As an Openshift admin, I want to be able to deploy RHEL 8 workers without
+   having to mirror RPM content.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -98,10 +97,8 @@ Consider including folks that also work outside your immediate sub-project.
 
 ### Open Questions [optional]
 
-This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance,
- > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this?
+1. How will this be implemented for OKD?  Is this a concern?
+1. Can we use existing os-content used for RHCOS to install required RPMs?
 
 ### Test Plan
 
@@ -250,3 +247,5 @@ subproject, repos requested, github details, and/or testing infrastructure.
 
 Listing these here allows the community to get the process for these resources
 started right away.
+
+[openshift-ansible]: (https://github.com/openshift/openshift-ansible)
