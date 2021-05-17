@@ -19,6 +19,14 @@ CHANGED_FILES=$(git log --name-only --pretty= "${PULL_BASE_SHA:-origin/master}..
 RC=0
 for file in $CHANGED_FILES
 do
+    # Look for files that were renamed.
+    if [ ! -f ${file} ]; then
+        echo "Skipping deleted file ${file}"
+        continue
+    fi
+
+    echo "Checking ${file}"
+
     # Iterate over the required headers in the template. We look for
     # at least 2 # to start the line because the title header will be
     # different from the text in the template, and we check for a
