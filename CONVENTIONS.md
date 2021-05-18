@@ -350,6 +350,12 @@ following taints if doing so is necessary to form a functional Kubernetes node:
 Operators should not specify tolerations in their manifests for any of the taints in
 the above list without an explicit and credible justification.
 
+Operators should never specify the following toleration:
+* `node.kubernetes.io/unschedulable`
+
+Tolerating `node.kubernetes.io/unschedulable` may result in the inability to
+drain nodes for upgrade operations.
+
 When an operator configures its operand, the operator likewise may specify
 tolerations for the aforementioned taints but should do so only as necessary and only
 with explicit justification.
@@ -382,6 +388,10 @@ spec:
       tolerations:
       - operator: Exists
 ```
+
+Tolerating all taints should be reserved for DaemonSets and static
+pods only.  Tolerating all taints on other types of pods may result in the
+inability to drain nodes for upgrade operations.
 
 An example of an operand that matches the first case is kube-proxy, which is required
 for services to work.  An example of an operand that matches the second case is the
