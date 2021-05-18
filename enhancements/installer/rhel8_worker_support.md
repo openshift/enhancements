@@ -31,26 +31,27 @@ superseded-by:
 ## Summary
 
 This enhancement proposes to add RHEL 8 Server support for deploying worker/infra
-nodes with [openshift-ansible] RHEL8 nodes will be deployed and upgraded using
+nodes with [openshift-ansible] RHEL 8 nodes will be deployed and upgraded using
 the same Ansible playbook process however, RPM content will be delivered using
 an image in the release package.
 
 ## Motivation
 
-Customers desire to deploy RHEL8 nodes and using containerized content will provide
+Customers desire to deploy RHEL 8 nodes and using containerized content will provide
 a better user experience than configuring RPM repositories on nodes.  Using the
-existing process will allow near-term support of RHEL8 nodes while enhanced
-longer-term RHEL8 support is developed.
+existing process will allow near-term support of RHEL 8 nodes while enhanced
+longer-term RHEL 8 support is developed.
 
 ### Goals
 
-1. Implement an os-content image for RHEL8 RPMs
-1. Update [openshift-ansible] scaleup.yml and upgrade.yml playbooks to support RHEL8 workers
+1. Implement an os-content image for RHEL 8 RPMs
+1. Update [openshift-ansible] scaleup.yml and upgrade.yml playbooks to support RHEL 8 workers
 
 ### Non-Goals
 
-* Deploying/upgrading RHEL8 worker nodes through other mechanisms, i.e. operators
+* Deploying/upgrading RHEL 8 worker nodes through other mechanisms, i.e. operators
 * Changing the deployment/upgrade process for RHEL 7 worker nodes
+* Upgrading existing RHEL 7 worker nodes to RHEL 8
 
 ## Proposal
 
