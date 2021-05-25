@@ -5,15 +5,16 @@ authors:
   - "@Hellcatlk"
   - "@hs0210"
   - "@zhouhao3"
+  - "@zhu1fei"
 reviewers:
   - TBD
 approvers:
   - TBD
 creation-date: 2021-05-18
-last-updated: 2021-05-24
+last-updated: 2021-05-25
 status: provisional
 see-also:
-  - 
+  -
 replaces:
   -
 superseded-by:
@@ -43,7 +44,7 @@ However, these features only work with a running cluster, users cannot configure
 
 ### Goals
 
-- Allow users to configure RAID and BIOS in ***install-config.yaml***.
+- Allow users to manage the RAID and BIOS configuration for control plane hosts during installation.
 - IPI deployments can handle the configuration of RAID and BIOS.
 
 ### Non-Goals
@@ -53,10 +54,10 @@ However, these features only work with a running cluster, users cannot configure
 ## Proposal
 
 The configuration of RAID and BIOS is finally handed over to Ironic during the IPI deployments.
-1. Add two new fields *raid* and *firmware* to *platform.baremetal.hosts* in the [install-config.yaml](https://github.com/openshift/installer/blob/master/data/data/install.openshift.io_installconfigs.yaml) file.
-2. Openshift Installer process the field contents into manifests.
+1. The user runs `create manifests` and then adds RAID and BIOS fields to the **BMH** created by the installer.
+2. The interface to terraform in the installer code parses the BIOS and RAID fields.
 3. [Terraform-provider-ironic](https://github.com/openshift-metal3/terraform-provider-ironic) gets the
-configuration of RAID and BIOS for master nodes and then passes it to Ironic([Baremetal Operator(BMO)](https://github.com/metal3-io/baremetal-operator)
+configuration of RAID and BIOS for control plane hosts and then passes it to Ironic([Baremetal Operator(BMO)](https://github.com/metal3-io/baremetal-operator)
 has supported the process of RAID and BIOS for worker nodes).
 
 ### User Stories
@@ -67,22 +68,17 @@ With the addition of this feature, the users can configure RAID and BIOS in IPI 
 
 #### Add two fields
 
-New *platform.baremetal.hosts* fields called *raid* and *firmware*.
+The user runs `create manifests` and then adds RAID and BIOS fields to the **BMH** created by the installer.
 
 ```yaml
-platform:
-  baremetal:
-    ...
-    hosts:
-      - name: master-0
-        role: master
-        bmc:
-          address: IPAddress
-          username: UserName
-          password: PassWord
-        bootMACAddress: MACAddress
-        raid: RAIDConfig
-        firmware: BIOSConfig
+spec:
+  bmc:
+    address: <bmc>://<ip-address>
+    credentialsName: worker-0-bmc-secret
+  bootMACAddress: mac-address
+  raid: raid-config
+  firmware: bios-config
+  ...
 ```
 
 RAID feature has been implemented in **BMO**, so the *raid* field here is the same as the [BMH](https://github.com/metal3-io/baremetal-operator/blob/399f5ef7ee3831014c1425250bc4fa49641a8709/config/crd/bases/metal3.io_baremetalhosts.yaml).
@@ -90,13 +86,11 @@ The *firmware* field is the same as the *spec.firmware* field in **BMH** which i
 
 #### Process the fields in installer
 
-For master nodes, call the `BuildTargetRAIDCfg` method in **BMO** to process the *raid* field into *target_raid_config*, and finally write *target_raid_config* into the ***terraform.baremetal.auto.tfvars.json*** file.
-
-For worker nodes, copy *raid* and *firmware* field to **BMH**.
+For control plane hosts, call the `BuildTargetRAIDCfg` method in **BMO** to process the *raid* field into *target_raid_config*, and finally write *target_raid_config* into the ***terraform.baremetal.auto.tfvars.json*** file.
 
 #### Process the fields in terraform-provider-ironic
 
-Add *target_raid_config* and *bios_settings* fields to terraform-provider-ironic API, 
+Add *target_raid_config* and *bios_settings* fields to terraform-provider-ironic API,
 process the two fields by [manual cleaning](https://docs.openstack.org/ironic/latest/admin/cleaning.html#manual-cleaning).
 
 ### Risks and Mitigations
