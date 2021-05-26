@@ -529,7 +529,10 @@ apiservercontrollerset.NewAPIServerControllerSet(
 )
 ```
 
-As audit policy file is not static anymore with the addition of custom rules, this approach will not work anymore. Instead, we need a dynamic audit policy controller that computes the policy depending on the apiserver configuration resource and copies that as a `ConfigMap` into the operand namespace. Then the revision controller will notice it changing and assigns a new operand revision that causes a rollout. We will add the audit policy controller to the APIServer controller set in library-go:
+As audit policy file is not static anymore with the addition of custom rules, this approach will not work anymore. Instead, we need
+a dynamic audit policy controller that computes the policy depending on the apiserver configuration resource and copies that as a
+`ConfigMap` into the operand namespace. Then the revision controller will notice it changing and assigns a new operand revision that
+causes a rollout. We will add the audit policy controller to the APIServer controller set in library-go:
 
 ```go
 apiservercontrollerset.NewAPIServerControllerSet(
