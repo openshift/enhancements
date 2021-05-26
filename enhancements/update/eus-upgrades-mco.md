@@ -87,7 +87,7 @@ N/A
 compatibility, ie: 4.6 to 4.7 upgrade with MachineConfigPools paused, then check
 for Upgradeable=False condition to be set by the API Server Operator, assuming
 that our rules only allow for N-1 skew.
-- CI tests will be necessary to veferify the events emitted from the MCO
+- CI tests will be necessary to verify the events emitted from the MCO
 
 ### Graduation Criteria
 
