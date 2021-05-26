@@ -7,9 +7,10 @@ reviewers:
   - "@soltysh"
   - "@deads2k"
   - "@stlaz"
+  - "@EmilyM1"
 approvers:
   - "@mfojtik"
-  - "@mcurry"
+  - "@Anandnatraj"
 creation-date: 2020-03-24
 last-updated: 2020-05-14
 status: provisional
