@@ -165,10 +165,13 @@ From the beginning we provide the following profiles (described as rules added a
 
   In addition, we add the following output to `oc adm must-gather -- /usr/bin/gather_audit_logs`:
 
-  ```
+  ```shell
+  $ oc adm must-gather -- /usr/bin/gather_audit_logs
+
   To raise a Red Hat support request, it is required to set the top level audit policy to
   Default, WriteRequestBodies, or AllRequestBodies to generate audit log events that can
-  be analyzed by support.
+  be analyzed by support. Try `oc edit apiservers` and set `spec.audit.profile` back to
+  "Default" and reproduce the issue while gathering audit logs.
   ```
 
   and the command will return with an error (non-zero exit code).
