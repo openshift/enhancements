@@ -397,6 +397,85 @@ The profiles are translated into:
     - level: RequestResponse
   ```
 
+### Library-go Implementation of CustomRules
+
+The library-go interface for audit policies before addition of `customRules` in `github.com/openshift/library-go/pkg/operator/apiserver/audit` looked like this:
+
+```go
+type AuditPolicyPathGetterFunc func(profile string) (string, error)
+
+func DefaultPolicy() ([]byte, error)
+func WithAuditPolicies(targetName string, targetNamespace string, assetDelegateFunc resourceapply.AssetFunc) resourceapply.AssetFunc
+func GetAuditPolicies(targetName, targetNamespace string) (*corev1.ConfigMap, error)
+func NewAuditPolicyPathGetter(path string) (AuditPolicyPathGetterFunc, error)
+```
+
+with a config observer in `github.com/openshift/library-go/pkg/operator/configobserver/apiserver`:
+
+```go
+func NewAuditObserver(pathGetter AuditPolicyPathGetterFunc) configobserver.ObserveConfigFunc
+```
+
+The asset func is wired into the static resource controller in our operators like this:
+
+```go
+apiservercontrollerset.NewAPIServerControllerSet(
+    ...
+).WithStaticResourcesController(
+    "APIServerStaticResources",
+    libgoassets.WithAuditPolicies("audit", operatorclient.TargetNamespace, v311_00_assets.Asset),
+    []string{
+	    ...,
+		libgoassets.AuditPoliciesConfigMapFileName,
+	},
+	...,
+).WithRevisionController(
+	operatorclient.TargetNamespace,
+	[]revision.RevisionResource{
+		{
+			Name: "audit",
+		},
+	},
+	...,
+)
+```
+
+As audit policy file is not static anymore with the addition of custom rules, this approach will not work anymore. Instead, we need a dynamic audit policy controller that computes the policy depending on the apiserver configuration resource and copies that as a `ConfigMap` into the operand namespace. Then the revision controller will notice it changing and assigns a new operand revision that causes a rollout. We will add the audit policy controller to the APIServer controller set in library-go:
+
+```go
+apiservercontrollerset.NewAPIServerControllerSet(
+    ...
+).WithAuditPolicyController(
+    operatorclient.TargetNamespace,
+    kubeInformersForNamespaces,
+    kubeClient.CoreV1(),
+	configClient.ConfigV1().APIServers(),
+).WithRevisionController(
+	operatorclient.TargetNamespace,
+	[]revision.RevisionResource{
+		{
+			Name: "audit",
+		},
+	},
+	...,
+)
+```
+
+In `github.com/openshift/library-go/pkg/operator/apiserver/audit` we replace `GetAuditPolicies` with 
+
+```go
+import auditv1beta1 "k8s.io/apiserver/pkg/apis/audit/v1"
+import configv1 "github.com/openshift/api/config/v1"
+
+func GetAuditPolicy(audit *configv1.Audit) (*auditv1beta1.Policy, error)
+```
+
+We can keep `DefaultPolicy` for bootstrapping of the control-plane, but remove `AuditPolicyPathGetterFunc`, `WithAuditPolicies` and `NewAuditPolicyPathGetter`.
+
+The audit policy controller then will watch the `config.openshift/v1` APIServer resoure and compute the audit policy for the audit configuration. It applies the result to the `<operand-namespace>/audit` ConfigMap, to be picked up by the revision controller. In addition, the audit policy controller will watch the operand namespace ConfigMaps in order to notice external changes to that `audit` ConfigMap.
+
+The pod manifest for the apiserver will mount a constant audit policy filename pointed to the mounted audit policy. We will remove the audit observer from `github.com/openshift/library-go/pkg/operator/configobserver/apiserver`.
+
 ### Test Plan
 
 **Note:** *Section not required until targeted at a release.*
