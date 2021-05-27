@@ -25,6 +25,16 @@ do
         continue
     fi
 
+    # Handle some special case files that live in the enhancements
+    # directory but are not enhancements, and cannot be moved
+    # elsewhere.
+    case "${file}" in
+        enhancements/operator-dev-doc.md | enhancements/README.md | enhancements/rebase.md)
+            echo "Skipping non-enhancement file ${file}"
+            continue
+            ;;
+    esac
+
     echo "Checking ${file}"
 
     # Iterate over the required headers in the template. We look for
