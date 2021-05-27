@@ -299,6 +299,17 @@ plus operator image build for such operators.
 
 ## Authenticating against ci registry
 (Internal Red Hat registries for developer testing)
+
+### registry.ci.openshift.org
+- Login at https://oauth-openshift.apps.ci.l2s4.p1.openshiftapps.com/oauth/token/request with your github account. This may require you to have access to the internal "OpenShift" Github organization so if you have access issues, double-check that you have access to that org and try requesting it if you don't have it.
+- Once logged in, an API token will be displayed. Please copy it.
+- Then login to a `registry.json` file like this
+
+```bash
+$ podman login --authfile registry.json -u ${GITHUB_USER} -p ${TOKEN}
+```
+
+### registry.svc.ci.openshift.org
 Add the necessary credentials to your local `~/.docker/config.json` (or equivalent file) like so:
 - visit `https://api.ci.openshift.org`, `upper right corner '?'` dropdown to `Command Line Tools`
 - copy the given `oc login https://api.ci.openshift.org --token=<hidden>`, paste in your terminal
