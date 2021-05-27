@@ -35,7 +35,7 @@ report-gen:
 HACKMD_IMAGE=enhancements-hackmd-cli:latest # hackmd-cli image
 
 .PHONY: report-upload
-report-upload: report-image
+report-upload: report-image  ## upload the current report to a new hackmd.io doc
 	$(RUNTIME) run --interactive --tty --rm=true \
 		-v $$(pwd):/workdir \
 		-v $$HOME:/home \
