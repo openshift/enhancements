@@ -585,7 +585,13 @@ expectations).
 
 ### Graduation Criteria
 
-None
+#### Dev Preview
+
+#### Dev Preview -> Tech Preview
+
+#### Tech Preview -> GA
+
+#### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 
