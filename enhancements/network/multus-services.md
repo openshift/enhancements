@@ -47,12 +47,14 @@ These functionality is implemented in various components (e.g. endpoint controll
 
 ### Non-Goals
 
+Due to the variety of service types, this must be handled in a phased approach. Therefore this covers the initial implementation and the structural elements, some of which may share commonalities with the future enhancements.
+
 - Provide whole Kubernetes service functionality for secondary network interface.
-- Provide completely same semantics for Kubernetes service mechanism (e.g. NodePort has slightly different semantics)
-- Provide Ingress and other functionalities related to Kubernetes service (this will be addressed in another enhancement)
-- Provide LoadBalancer features for pods' secondary network interface (this requires more discussion in upstream community)
-- Provide network verification for accesssing services (i.e. user need to make sure reachability to the target network)
-- Provide universal forwarding mechanisms (e.g DPDK Pods are not supported), we only focus on the pods which uses Linux network stack (i.e. iptables)
+- Provide completely same semantics for Kubernetes service mechanism
+- LoadBalancer features for pods' secondary network interface (this requires more discussion in upstream community)
+- Ingress and other functionalities related to Kubernetes service (this will be addressed in another enhancement)
+- Network verification for accesssing services (i.e. user need to make sure reachability to the target network)
+- Service for universal forwarding mechanisms (e.g DPDK Pods are not supported), we only focus on the pods which uses Linux network stack (i.e. iptables)
 
 ## Proposal
 
