@@ -41,8 +41,13 @@ The API is meant to enable customers with stronger audit requirements than the a
 (from _metadata_-only level, over _request payloads_ to _request and response payload_ level) of audit
 logs, accepting the increased resource consumption of the API servers.
 
-This API is intentionally **very limited in filtering events**. More advanced filtering is to be done via an external mechanism (post-filtering).
-It was proven through performance tests (compare alternatives section) that even a uniform profile for all events is acceptable with small two-digit percent overhead.
+This API is intentionally **very limited in filtering events**. More
+advanced filtering is to be done via an external mechanism
+(post-filtering), e.g. via
+[jq](https://docs.openshift.com/container-platform/4.7/security/audit-log-view.html#security-audit-log-basic-filtering_audit-log-view).
+It was proven through performance tests (compare alternatives section)
+that even a uniform profile for all events is acceptable with small
+two-digit percent overhead.
 
 In addition to the uniform policy, we allow custom profiles by groups the request user is member of.
 
@@ -529,10 +534,18 @@ apiservercontrollerset.NewAPIServerControllerSet(
 )
 ```
 
-As audit policy file is not static anymore with the addition of custom rules, this approach will not work anymore. Instead, we need
-a dynamic audit policy controller that computes the policy depending on the apiserver configuration resource and copies that as a
-`ConfigMap` into the operand namespace. Then the revision controller will notice it changing and assigns a new operand revision that
-causes a rollout. We will add the audit policy controller to the APIServer controller set in library-go:
+As the audit policy file is not static anymore with the addition of
+custom rules, this approach will not work anymore. Instead, we need a
+dynamic audit policy controller in the apiserver operators that
+
+1. computes the policy depending on the apiserver configuration
+   resource
+2. and copies that as a `ConfigMap` into the operand namespace.
+
+Then the revision controller will notice it changing and assigns a new
+operand revision that causes a rollout. We will add the audit policy
+controller to the APIServer controller set in library-go, shared by
+our three apiserver operators:
 
 ```go
 apiservercontrollerset.NewAPIServerControllerSet(
