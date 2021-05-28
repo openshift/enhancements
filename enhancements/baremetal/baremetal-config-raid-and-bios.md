@@ -93,6 +93,12 @@ For control plane hosts, call the `BuildTargetRAIDCfg` method in **BMO** to proc
 Add *target_raid_config* and *bios_settings* fields to terraform-provider-ironic API,
 process the two fields by [manual cleaning](https://docs.openstack.org/ironic/latest/admin/cleaning.html#manual-cleaning).
 
+#### Notes
+
+When the IPI deployments completed, the **BMH** resources will still get persisted in the cluster, though control plane hosts have
+RAID and BIOS field in their **BMH**, but the *externallyProvisioned* field's value is true, so the RAID and BIOS configurations are
+invalid.
+
 ### Risks and Mitigations
 
 TBD
