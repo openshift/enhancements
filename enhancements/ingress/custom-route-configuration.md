@@ -59,10 +59,11 @@ slightly different documentation.
 
 ### Goals
 
-1. provide a way for cluster-admins to see all the routes that have flexible names and serving certificates in the cluster.
+1. provide a way for cluster-admins to see all the routes that have flexible names and serving certificates in the cluster
 2. provide a single API that is consistent for every route they need to configure
 3. provides a way to have an operator with scope limited permissions read the serving cert/key pairs
-4. allow a cluster-admin to specify a different DNS name.
+4. allow a cluster-admin to specify a different DNS name
+5. provide a way for other components to trust the oauth-server with a custom serving certificate
 
 ### Non-Goals
 
@@ -193,6 +194,23 @@ pairs.
 Library-go is also an ideal spot to provide functionality to inject route hosts.  Something like our StaticResource
 controller which automatically handles the API status and the required route changes.
 
+#### Trusting the oauth-server
+
+Some OpenShift components need to communicate with the OpenShift oauth-server in order to
+retrieve access tokens on behalf of the user that wants to use them. Typical examples include
+the web console and anything that uses the oauth-proxy, like the monitoring tools. A custom oauth-server
+serving certificate might break trust from the other components in the cluster.
+
+The authentication operator needs to publish the oauth-server's  trust root in a well-known location so
+that components that need to trust the oauth-server can use it. The authentication operator will therefore
+always create a configMap `openshift-config-managed/oauth-server-cert` which is going to include the
+oauth-server's serving certificate.
+
+The certificate should be found in the `ca-bundle.crt` key in the `data` of such a configMap.
+
+The operators managing the components that need to trust the oauth-server have to consume this configMap
+and configure the components' so that they trust the certificate.
+
 ### Risks and Mitigations
 
 Some components have attempted to resolve similar issues in one off ways.
@@ -227,6 +245,11 @@ For components that created a one-off solution, the upgrade will vary depending 
 
 On downgrade, the customizations will be removed by the old versions of the operators.
 While this is annoying, it is consistent with our general downgrade story of new features require the new product.
+
+
+### Graduation Criteria
+#### Dev Preview -> Tech Preview
+#### Tech Preview -> GA
 
 ### Version Skew Strategy
 
