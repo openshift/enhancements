@@ -114,9 +114,25 @@ TBD
 
 TBD
 
+#### Dev Preview -> Tech Preview
+
+TBD
+
+#### Tech Preview -> GA
+
+TBD
+
+#### Removing a deprecated feature
+
+TBD
+
 ### Upgrade / Downgrade Strategy
 
 Older versions of the installer will ignore the *raid* and *firmware* fields.
+
+### Version Skew Strategy
+
+TBD
 
 ## Implementation History
 
