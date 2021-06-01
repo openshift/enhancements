@@ -139,12 +139,14 @@ operators, to have it generate manifests for the OpenShift installer
 to consume. This avoids any need to change the OpenShift installer to
 support this uncommon use case.
 
-The `render` command has an option to enable the management
-partition. When the option is given, the `render` command creates a
-manifest for the new enablement API with status data that includes the
-`management` workload type to enable partitioning. In the future, it
-might enable partitioning for all of the types mentioned in the input
-PerformanceProfiles, or based on some other input.
+The `render` command will have an option to enable the management
+partition. When the option is given, the `render` command will create
+a manifest for the new enablement API with status data that includes
+the `management` workload type to enable partitioning (the details of
+that API will be defined in a separate design document). In the
+future, the PAO might enable partitioning for all of the types
+mentioned in the input PerformanceProfiles, or based on some other
+input.
 
 For each PerformanceProfile, the PAO will render MachineConfig
 manifests with higher precedence than the default ones created by the
