@@ -50,7 +50,7 @@ with the reserved set configured by the performance-addon-operator
 (PAO) during day 2. For OCP 4.8, the onus is on the user to ensure
 these align, there is no interlock.
 
-The current implementation is prone to user error, because it has two
+The current implementation is prone to user error because it has two
 entities configuring and managing the same data. This design document
 describes phase 2 of the implementation plan for workload partitioning
 to improve the user experience when configuring the feature.
@@ -63,11 +63,18 @@ to improve the user experience when configuring the feature.
    in components in the OpenShift release payload and PAO.
 3. List the other enhancements that need to be written, and their
    scopes.
+4. Minimize the complexity of installing a "normal" cluster while
+   still supporting this very special case.
 
 ### Non-Goals
 
 1. Resolve all of the details for each of the next steps. We're not
-   going to talk a lot about names or implementation details here.
+   going to talk a lot about names, API fields, or implementation
+   details here.
+2. Describe an API for (re)configuring workload partitioning in a
+   running cluster. We are going to continue to require the user to
+   enable partitioning as part of deploying the cluster for another
+   implementation phase.
 
 ## Proposal
 
@@ -84,17 +91,19 @@ enabled.
 We eventually want to extend the partitioning feature to support
 non-management workloads to include workload types defined by cluster
 admins. For now, however, we want to keep the interface as simple as
-possible.  Therefore, the new API will be read-only, and only used so
-that the admission hook (and other consumers) can tell when workload
-partitioning is active.
+possible.  Therefore, the new API will only have status fields and
+will only be used so that the admission hook (and other consumers) can
+tell when workload partitioning is active.
 
-The new API will need a controller to manage it. We propose to add a
-controller to the existing cluster-config-operator, to avoid adding
-the overhead of another image, pod, etc. to the cluster.
+To manage the risk associated with rolling out a complicated feature
+like this, we are going to continue to require it to be enabled as
+part of deploying the cluster. The API does not need to support
+configuring the workload partitioning in a running cluster, so no
+controller is needed, for now.
 
 We propose that the API be owned by core OpenShift, and defined in the
 `openshift/api` repository. A separate enhancement will be written to
-describe the API and controller in more detail.
+describe the API in more detail.
 
 ### Owner for Enablement
 
@@ -114,18 +123,39 @@ including the machine config with settings for kubelet and CRI-O.
 The effect of this decision is that the easiest way to use the
 workload partitioning feature will be through the
 performance-addon-operator. This means that the implementation of the
-feature is split across a few components, and not all of them are
-delivered in all clusters, but it avoids duplicating a lot of the work
-already done in the PAO.
+feature is split across a few components, which avoids duplicating a
+lot of the work already done in the PAO.
 
 Workload partitioning is currently enabled as part of installing a
-cluster. This provides predictable behavior from the beginning of the
-life-cycle, and avoids extra reboots required to enable it in a
-running cluster (an important consideration in environments with short
-maintenance windows). To continue to support enabling the feature this
-way, and to simplify the configuration, we propose to extend the PAO
-with a `render` command, similar to the one in other operators, to
-have it generate manifests for the OpenShift installer to consume.
+cluster, and that will not change as part of the implementation of
+this design. Enabling partitioning early in this way provides
+predictable behavior from the beginning of the life-cycle, and avoids
+extra reboots required to enable it in a running cluster (an important
+consideration in environments with short, fixed maintenance
+windows). To continue to support enabling the feature during
+deployment, and to simplify the configuration, we propose to extend
+the PAO with a `render` command, similar to the one in other
+operators, to have it generate manifests for the OpenShift installer
+to consume. This avoids any need to change the OpenShift installer to
+support this uncommon use case.
+
+The `render` command has an option to enable the management
+partition. When the option is given, the `render` command creates a
+manifest for the new enablement API with status data that includes the
+`management` workload type to enable partitioning. In the future, it
+might enable partitioning for all of the types mentioned in the input
+PerformanceProfiles, or based on some other input.
+
+For each PerformanceProfile, the PAO will render MachineConfig
+manifests with higher precedence than the default ones created by the
+installer during bootstrapping. These manifests will include all of
+the details for configuring `kubelet`, CRI-O, and `tuned` to know
+about and partition workloads, including the cpusets for each workload
+type.
+
+The PAO `render` command also generates a manifest with the CRD for
+PerformanceProfile so bootstrapping does not block when trying to
+install the PerformanceProfile manifests.
 
 ### Future Work
 
@@ -136,12 +166,212 @@ have it generate manifests for the OpenShift installer to consume.
    configuration when workload partitioning is enabled, including the
    `render` command. See https://issues.redhat.com/browse/CNF-2164 to
    track that work.
-3. Write an enhancement to describe an API for enabling workload
-   partitioning in an existing cluster.
 
 ### User Stories
 
-N/A
+#### Enabling and Configuring at the Same Time
+
+In this workflow, the user provides all of the information needed to
+fully partition the workloads from the very beginning.
+
+1. User runs the installer to `create manifests` to get standard
+   manifests without any partitioning.
+2. The user creates PerformanceProfile manifests for each known
+   MachineConfigPool and adds them to the installer inputs.
+3. The user runs the PAO `render` command to read the
+   PerformanceProfile manifests and create additional manifests, as
+   described above.
+4. User runs the installer to `create cluster`.
+5. Installer bootstraps the cluster.
+6. Bootstrapping runs the machine-config-operator (MCO) `render`
+   command, which generates MachineConfig manifests with low
+   precedence.
+7. Bootstrapping uploads both sets of MachineConfig manifests, one
+   after the other.
+8. The machine-config-operator (MCO) applies MachineConfigs to nodes
+   in the cluster.
+9. Bootstrapping finishes and the cluster is launched.
+10. If the MCO does not apply KubeletConfig in step 8, it must do it
+    here.
+11. The cluster has complete partitioning configuration for management
+    workloads.
+12. Kubelet starts and sees the config file enabling partitioning
+    (delivered in the MachineConfig manifest generated by
+    PAO). Kubelet advertises the workload resource type on the Node
+    and mutates static pods with partitioning annotations.
+13. The admission plugin uses the workload types on the new enablement
+    API to decide when to mutate pods.
+14. CRI-O sees pods with workload annotations and uses the resource
+    request to set cpushares and cpuset.
+15. On day 2 PAO, is installed and takes ownership of the
+    PerformanceProfile CRs.
+
+#### Enabling During Installation, Configuring Later
+
+In this workflow, the user provides enough information to *enable*
+workload partitioning but not enough to actually *configure* all nodes
+to partition the workloads into specific CPUs.
+
+1. User runs the installer to `create manifests` to get standard
+   manifests without any partitioning.
+2. The user runs the PAO `render` command without any
+   PerformanceProfile manifests to create the additional manifests, as
+   described above. The manifests for CRI-O do not include cpuset
+   configuration, because there are no PerformanceProfiles.
+3. User runs the installer to `create cluster`.
+4. Installer bootstraps the cluster.
+5. Bootstrapping runs the machine-config-operator (MCO) `render`
+   command, which generates MachineConfig manifests with low
+   precedence.
+6. Bootstrapping uploads both sets of MachineConfig manifests, one
+   after the other.
+7. The machine-config-operator (MCO) applies MachineConfigs to nodes
+   in the cluster.
+8. Bootstrapping finishes and the cluster is launched.
+9. If the MCO does not apply KubeletConfig in step 7, it must do it
+   here.
+11. The cluster has partial partitioning enabled for `management`
+    workloads. Pods for management workloads are mutated, but not
+    actually partitioned.
+12. Kubelet starts and sees the config file enabling partitioning. It
+    advertises the workload resource type on the Node and mutates
+    static pods with partitioning annotations.
+13. Admission plugin uses the workload types on the workloads CR to
+    decide when to mutate pods.
+14. CRI-O sees pods with workload annotations and uses the resource
+    request to set cpushares but not cpuset.
+15. User installs the performance-addon-operator into the cluster.
+16. User creates PerformanceProfiles and adds them to the cluster.
+17. PAO generates new MachineConfigs, adding the cpuset information
+    from the PerformanceProfiles to the other partitioning info from
+    the new enablement API.
+18. MCO rolls out new MachineConfigs, rebooting nodes as it goes.
+19. The cluster has complete partitioning configuration for management
+    workloads and the management workloads are partitioned due to the
+    nodes rebooting.
+20. Kubelet starts and sees the config file enabling partitioning. It
+    advertises the workload resource type on the Node and mutates
+    static pods with partitioning annotations.
+21. Admission plugin uses the workload types on the workloads CR to
+    decide when to mutate pods.
+22. CRI-O sees pods with workload annotations and uses the resource
+    request to set cpushares and cpuset.
+
+#### Enabling and Configuring Through the Assisted Installer Workflow
+
+This section describes how a user will enable and configure workload
+partitioning for clusters deployed using the assisted installer
+workflow. We expect this workflow to be the most common approach used,
+especially for bulk deployments.
+
+1. The user creates PerformanceProfile manifests for each known
+   MachineConfigPool name
+
+   * The MachineConfig (MC) for the generic worker MachineConfigPool
+     (MCP) that includes partitioning without cpusets
+   * Other MCPs inherit from the worker MCP and include partitioning
+     with cpusets
+
+2. *something* runs the PAO `render` command to read the
+   PerformanceProfile manifests and create additional manifests, as
+   described above.
+
+   * The user may perform this step, or an orchestration system
+     managing the assisted installer workflow automatically may run
+     it.
+
+3. User generates a set of assisted installer CRs to deploy the
+   cluster.
+4. The assisted installer services start the cluster installation with
+   the artifacts from steps 1-3 as input (PerformanceProfile CRD,
+   PerformanceProfiles, MachineConfig, and enablement API).
+5. The assisted installer (or hive?) invokes the installer to `create
+   cluster`.
+6. The installer bootstraps the cluster.
+7. Bootstrapping runs the machine-config-operator (MCO) `render`
+   command, which generates MachineConfig manifests with low
+   precedence.
+8. Bootstrapping uploads both sets of MachineConfig manifests, one
+   after the other.
+9. The machine-config-operator (MCO) applies MachineConfigs to nodes
+   in the cluster.
+10. Bootstrapping finishes and the cluster is launched.
+11. If the MCO does not apply KubeletConfig in step 9, it must do it
+    here.
+12. The cluster has complete partitioning configuration for management
+    workloads.
+13. Kubelet starts and sees the config file enabling partitioning
+    (delivered in the MachineConfig manifest generated by
+    PAO). Kubelet advertises the workload resource type on the Node
+    and mutates static pods with partitioning annotations.
+14. The admission plugin uses the workload types on the new enablement
+    API to decide when to mutate pods.
+15. CRI-O sees pods with workload annotations and uses the resource
+    request to set cpushares and cpuset.
+16. On day 2 PAO, is installed and takes ownership of the
+    PerformanceProfile CRs.
+
+#### Day 2: Modify Reserved cpuset for a PerformanceProfile
+
+In a cluster with partitioning enabled and fully configured, modifying
+the reserved cpuset for a PerformanceProfile is safe because the node
+is rebooted when the new MachineConfig is applied.
+
+1. The user updates the cpuset in the PerformanceProfile(s).
+2. PAO generates new MachineConfigs, adding the cpuset information
+   from the PerformanceProfiles to the other partitioning info from
+   the new enablement API.
+3. The MCO rolls out new MachineConfigs, rebooting nodes as it goes.
+4. The cluster has complete partitioning configuration for management
+   workloads and the management workloads are partitioned due to the
+   nodes rebooting.
+5. Kubelet starts and sees the config file enabling partitioning. It
+   advertises the workload resource type on the Node and mutates
+   static pods with partitioning annotations.
+6. Admission plugin uses the workload types on the workloads CR to
+   decide when to mutate pods.
+7. CRI-O sees pods with workload annotations and uses the resource
+   request to set cpushares and cpuset.
+
+#### Day 2: Add a New Node to an Existing MachineConfigPool
+
+In a cluster with partitioning enabled and fully configured, adding a
+new node to an existing MachineConfigPool is safe because the
+MachineConfig will set up kubelet and CRI-O on the host correctly.
+
+1. The MCO applies the MachineConfigs to the node.
+2. Kubelet starts and sees the config file enabling partitioning. It
+   advertises the workload resource type on the Node and mutates
+   static pods with partitioning annotations.
+3. CRI-O sees pods with workload annotations and uses the resource
+   request to set cpushares and cpuset.
+
+#### Day 2: Add a New MachineConfigPool
+
+Adding a new MachineConfigPool is safe only if the MachineConfigPool
+has a PerformanceProfile associated and the PAO is installed.
+
+1. PAO reads PerformanceProfile to generate new MachineConfig for the
+   pool with CRI-O and `kubelet` settings.
+2. MachineConfigs are applied to appropriate nodes, rebooting them in
+   the process.
+3. Kubelet starts and sees the config file enabling partitioning. It
+   advertises the workload resource type on the Node and mutates
+   static pods with partitioning annotations.
+4. CRI-O sees pods with workload annotations and uses the resource
+   request to set cpushares and cpuset.
+
+If the MachineConfigPool does not match a PerformanceProfile, there
+will be no cpuset information and the PAO will generate MachineConfigs
+with partitioning enabled but not tied to a cpuset. This is somewhat
+safe, but may lead to unexpected behavior.
+
+If the PAO is not installed, it will not generate the overriding
+MachineConfigs for the new MachineConfigPool. The nodes in the pool
+will not enable partitioning at all. This may not be safe, since
+kubelet will not advertise the workload resource type but the
+admission plugin will mutate pods to require it. The scheduler may
+refuse to place management workloads on the nodes in the pool.
 
 ### Risks and Mitigations
 
@@ -154,7 +384,22 @@ closely with the node team on the implementation of this feature, so
 we do not anticipate any issues delivering the finished work in this
 way.
 
+If the PAO is not installed into a cluster with workload partitioning
+enabled and configured, adding a new MachineConfigPool can be
+unsafe. See the "Add a New MachineConfigPool" use case for details.
+
 ## Design Details
+
+### Open Questions
+
+1. What runs the PAO `render` command in the assisted installer
+   workflow?
+2. How hard do we need to work to ensure that the PAO version matches
+   the release payload version for the cluster being deployed?
+   What/who is responsible for that?
+3. We need to ensure MCO render handles the KubeletConfig CR generated
+   by PAO so kubelet has partitioning enabled without requiring an
+   extra reboot.
 
 ### Test Plan
 
