@@ -21,7 +21,6 @@ superseded-by:
 
 # Multus Service Abstraction
 
-
 ## Release Signoff Checklist
 
 - [x] Enhancement is `implementable`
@@ -52,12 +51,12 @@ Due to the variety of service types, this must be handled in a phased approach. 
 - Provide whole Kubernetes service functionality for secondary network interface.
 - Provide completely same semantics for Kubernetes service mechanism
 - LoadBalancer features for pods' secondary network interface (this requires more discussion in upstream community)
+- NodePort feature (still in discusssion among upstream community)
 - Ingress and other functionalities related to Kubernetes service (this will be addressed in another enhancement)
 - Network verification for accesssing services (i.e. user need to make sure reachability to the target network)
 - Service for universal forwarding mechanisms (e.g DPDK Pods are not supported), we only focus on the pods which uses Linux network stack (i.e. iptables)
 
 ## Proposal
-
 
 ### Target Service Functionality
 
@@ -77,11 +76,16 @@ When the service is created with 'type: ClusterIP', then Kubernetes assign clust
 
 #### Headless service
 
-XXX: fill 
+Headless service is implemented by CoreOS as DNS round-robin. Hence service can be reachable if pod can reach the IPs of headless service.
 
 #### NodePort
 
-XXX: Fill (note: NodePort only exposes port of pods' secondary network interface)
+===XXX====
+ - Still wondering whether we should implement...
+ - Consideration: NodePort seems to NOT be a good choise for customer 
+ - Consideration: In case of multus, k8s NodePort cannot be implemented because host may not connect to Multus network (e.g. SR-IOV).
+   Hence, we could only open the port in pods (e.g. 8001 port at Pod's eth1 goes to service A). Is that really needed?
+===XXX====
 
 ### User Stories
 
@@ -95,82 +99,63 @@ In this enhancement, we will introduce following components (components name mig
 - Multus Service Controller
 - Multus Proxy
 
-Multus service controller watches all Pods' secondary interfaces, services and network attachment definitions and it creates EndpointSlice for the service. EndpointSlice contains secondary network IP address. Multus proxy watches. Service and EndpointSlice has special label, `service.kubernetes.io/service-proxy-name`, which is defined at [kube-proxy APIs](https://pkg.go.dev/k8s.io/kubernetes/pkg/proxy/apis), to make target service out of Kubernetes management.
+Multus service controller watches all Pods' secondary interfaces, services and network attachment definitions and it creates EndpointSlice for the service. EndpointSlice contains secondary network IP address. Multus proxy watches. Service and EndpointSlice have the label, `service.kubernetes.io/service-proxy-name`, which is defined at [kube-proxy APIs](https://pkg.go.dev/k8s.io/kubernetes/pkg/proxy/apis), to make target service out of Kubernetes management.
+
+Multus proxy provides forwarding plane for multus-service with iptables at Pod's network namespace. It watches Service and EndpointSlice with 'service.kubernetes.io/service-proxy-name: multus-proxy' and creates changes destination to the service pods from Service VIP. It does not provide NAT (ip masquerade).
+
+XXX: Double check NAT is not required
 
 #### Create Service
 
 1. Service is created
 
-User creates Kubernetes service object. At that time, user needs to add following:
+User creates Kubernetes service object. At that time, user needs to add following annotation/label:
 
-- k8s.v1.cni.cncf.io/service-networks
+- label: service.kubernetes.io/service-proxy-name (well-known label, defined in kubernetes)
 
-`k8s.v1.cni.cncf.io/service-networks` specifies which network (i.e. net-attach-def) is the target to exporse the service.
-XXXX: TBD
+User need to set label, `service.kubernetes.io/service-proxy-name`, with value, `multus-proxy`. This label specifies the component that takes care of the service. Without this variable, upstream kubernetes (i.e. kube-proxy) will take care of, then kube-proxy create iptables rules. This label should be set to `multus-proxy`. For OpenShift, we should verify that this label is recognized at openshift-sdn as well as ovn-kubernetes. This enhancement should address it in openshift-sdn and ovn-kubernetes repository.
+
+- annotations: k8s.v1.cni.cncf.io/service-network (newly introduced)
+
+`k8s.v1.cni.cncf.io/service-network` specifies which network (i.e. net-attach-def) is the target to exporse the service.
+This label specify only one net-attach-def which is in same namespace of the Service/Pods, hence Service/Network Attachment Definition/Pods should be in same namespace. This annotation only allows user to specify one network, hence one Service VIP should be matched with one of service/network mappings.
+
+XXX: Need another label/annotations?
+
+Then multus service controller will watch the service and pods.
+
+2. Pods are launched and multus service controller creates the endpointslices for the sevice
+
+Once multus service controller find Pods associated the service, then the controller will create EndpointSlices for the service. The EndpointSlices contains Pod's net-attach-def IP address from Pod's network status annotation and the EndpointSlices has same label, 'service.kubernetes.io/service-proxy-name', and its value from corresponding Service to avoid kube-proxy to add iptables rules for Kubernetes Service forwarding plane. When the pods/services is updated/removed, then multus service controller changes/remove the corresponding endpoitslices to track the changes.
+
+3. Multus proxy generates iptables rules for the service in Pod's network namespace
+
+Multus proxy watches the endpointslices and services. Periodically multus proxy generates iptables rules for the pods and put it in pod's network namespace (not host network namespace as kube-proxy does). Multus proxy tracks the changes of service/endpoints, of course, hence multus proxy update/remove iptables rules when service/endpoints are updated/removed.
 
 ### Risks and Mitigations
 
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
+#### Interworking service.kubernetes.io/service-proxy-name among other Kubernetes network:
 
-How will security be reviewed and by whom? How will UX be reviewed and by whom?
+This feature depends on the well-known label, service.kubernetes.io/service-proxy-name implementation. If some Kubernetes network solution satisfy the following condition, then this feature does not work:
 
-Consider including folks that also work outside your immediate sub-project.
+- The SDN solution provides forwarding plane for Kubernetes service (i.e. Cilium, ovn-kubernetes)
+- The SDN solution does not recognize well-known label, service.kubernetes.io/service-proxy-name
+
+Hence we should mention which SDN solution support this enhancement in documents.
 
 ## Design Details
 
 ### Open Questions [optional]
 
-This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance,
- > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this?
+XXX: No open question?
 
 ### Test Plan
 
-**Note:** *Section not required until targeted at a release.*
-
-Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
-- What additional testing is necessary to support managed OpenShift service-based offerings?
-
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
-
-All code is expected to have adequate tests (eventually with coverage
-expectations).
+For upstream testing, we should address e2e test in upstream somehow, however, upstream test will be done wit `kind`, hence we could cover some of primitive testing. More detailed testing should be done in baremetal CI job or SR-IOV CI job with SR-IOV devices.
 
 ### Graduation Criteria
 
-**Note:** *Section not required until targeted at a release.*
-
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-
-- Maturity levels
-  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
-- [Deprecation policy][deprecation-policy]
-
-Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
-or by redefining what graduation means.
-
-In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
-
-[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
-[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
-
-**Examples**: These are generalized examples to consider, in addition
-to the aforementioned [maturity levels][maturity-levels].
+This feature, multus service abstraction, is pretty complecated because additional network (i.e. network attachment definition) depends on customer environment, so each customer has each network and never be same. So we really need customer feedback not only about its quality also about their use-case and their experiences. We should watch customer feedback and carefully think about the current status of the feature and proceed to graduation.
 
 #### Dev Preview -> Tech Preview
 
@@ -183,15 +168,12 @@ to the aforementioned [maturity levels][maturity-levels].
 
 #### Tech Preview -> GA
 
+- Make consensus desgin and implementation among upstream communities
 - More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
+- Sufficient feedback to cover various use-cases
 - Available by default
-- Backhaul SLI telemetry
-- Document SLOs for the component
 - Conduct load testing
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
+- End to end tests in CI
 
 #### Removing a deprecated feature
 
@@ -200,75 +182,30 @@ end to end tests.**
 
 ### Upgrade / Downgrade Strategy
 
-If applicable, how will the component be upgraded and downgraded? Make sure this
-is in the test plan.
-
-Consider the following in developing an upgrade/downgrade strategy for this
-enhancement:
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to keep previous behavior?
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to make use of the enhancement?
-
-Upgrade expectations:
-- Each component should remain available for user requests and
-  workloads during upgrades. Ensure the components leverage best practices in handling [voluntary disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to this should be
-  identified and discussed here.
-- Micro version upgrades - users should be able to skip forward versions within a
-  minor release stream without being required to pass through intermediate
-  versions - i.e. `x.y.N->x.y.N+2` should work without requiring `x.y.N->x.y.N+1`
-  as an intermediate step.
-- Minor version upgrades - you only need to support `x.N->x.N+1` upgrade
-  steps. So, for example, it is acceptable to require a user running 4.3 to
-  upgrade to 4.5 with a `4.3->4.4` step followed by a `4.4->4.5` step.
-- While an upgrade is in progress, new component versions should
-  continue to operate correctly in concert with older component
-  versions (aka "version skew"). For example, if a node is down, and
-  an operator is rolling out a daemonset, the old and new daemonset
-  pods must continue to work correctly even while the cluster remains
-  in this partially upgraded state for some time.
-
-Downgrade expectations:
-- If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
-  misbehaving, it should be possible for the user to rollback to `N`. It is
-  acceptable to require some documented manual steps in order to fully restore
-  the downgraded cluster to its previous state. Examples of acceptable steps
-  include:
-  - Deleting any CVO-managed resources added by the new version. The
-    CVO does not currently delete resources that no longer exist in
-    the target version.
+N/A
 
 ### Version Skew Strategy
 
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
-
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
+N/A: This feature is not particularly kubernetes-version sensitive.
 
 ## Implementation History
 
-Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`.
+- *4.10*: dev preview or tech preview
+- *4.XX*: Tech Preview
+- *4.XX*: GA
 
 ## Drawbacks
 
-The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
+- Redesign users' infrastructure (including network) not to use multus (i.e. additional secondary networks)
 
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement.
+- Implement secondary network and service feature in ovn-kubernetes (but of course, it cannot support macvlan and other interface)
 
 ## Infrastructure Needed [optional]
 
+XXX: need to update everything we need!!
+----
 Use this section if you need things from the project. Examples include a new
 subproject, repos requested, github details, and/or testing infrastructure.
 
