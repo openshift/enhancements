@@ -373,7 +373,10 @@ has a PerformanceProfile associated and the PAO is installed.
 If the MachineConfigPool does not match a PerformanceProfile, there
 will be no cpuset information and the PAO will generate MachineConfigs
 with partitioning enabled but not tied to a cpuset. This is somewhat
-safe, but may lead to unexpected behavior.
+safe, but may lead to unexpected behavior. The mutated pods would
+float across the full cpuset in the same way as if the feature
+enabled, however the cpushares would not be deducted from available
+CPUs, potentially leading to over commit scenarios.
 
 If the PAO is not installed, it will not generate the overriding
 MachineConfigs for the new MachineConfigPool. The nodes in the pool
