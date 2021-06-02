@@ -48,17 +48,24 @@ manually created manifest containing a machine config resource. The
 set of CPUs used for management workload partitioning has to align
 with the reserved set configured by the performance-addon-operator
 (PAO) during day 2. For OCP 4.8, the onus is on the user to ensure
-these align, there is no interlock.
+these align, there is no interlock.  The current implementation is
+prone to user error because it has two entities configuring and
+managing the same data.
 
-The current implementation is prone to user error because it has two
-entities configuring and managing the same data. This design document
-describes phase 2 of the implementation plan for workload partitioning
-to improve the user experience when configuring the feature.
+The 4.8 implementation is also limited to single-node deployments. We
+anticipate users of highly-available clusters also wanting to minimize
+the overhead of the management components to take full advantage of
+compute capacity for their own workloads.
+
+This design document describes phase 2 of the implementation plan for
+workload partitioning to improve the user experience when configuring
+the feature and to extend support to multi-node clusters.
 
 ### Goals
 
-1. Describe the remaining work at a high level for architectural
-   review and planning.
+1. Describe, at a high level, the remaining work to improve the user
+   experience and expand support to multi-node deployments for
+   architectural review and planning.
 2. Document the division of responsibility between workload management
    in components in the OpenShift release payload and PAO.
 3. List the other enhancements that need to be written, and their
