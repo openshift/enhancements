@@ -10,6 +10,7 @@ reviewers:
   - "@deads2k"
   - "@sttts"
   - maintainers of PAO
+  - maintainers of MCO
 approvers:
   - "@markmc"
   - "@derekwaynecarr"
