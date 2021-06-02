@@ -271,19 +271,14 @@ Kubernetes-nmstate will only affect post-kubelet so we comply with the "MC owns 
 
 ### Graduation Criteria
 
-- TBD
-
-#### Examples
-
-
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -292,7 +287,7 @@ Kubernetes-nmstate will only affect post-kubelet so we comply with the "MC owns 
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
 - Deprecate the feature
