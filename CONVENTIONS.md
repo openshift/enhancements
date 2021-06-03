@@ -286,6 +286,22 @@ end-to-end job run and the component being tuned uses 350m on the same
 run, the request for the component being tuned should be set to
 100m/600m * 350m ~= 58m.
 
+The following PromQL query illustrates how to calculate the adequate CPU request
+for all containers in the `openshift-monitoring` namespace:
+
+```PromQL
+# CPU request / usage of the SDN container
+scalar(
+  max(kube_pod_container_resource_requests{namespace="openshift-sdn", container="sdn", resource="cpu"}) /
+  max(max_over_time(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate{namespace="openshift-sdn", container="sdn"}[120m]))) * 
+# CPU usage of each container in the openshift-monitoring namespace
+max by (pod, container) (node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate{namespace="openshift-monitoring"})
+```
+
+> Please note that pods which run on control-plane nodes must use the etcd container as their baseline.
+The example above uses the SDN container for all pods in the `openshift-monitoring` namespace in order to simplify the
+Prometheus query. Since the `cluster-monitoring-operator` runs on control plane nodes, its CPU request should be evaluated against the `etcd` container.
+
 Kubernetes resource requests for memory are [measured in
 bytes](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-memory).
 
@@ -305,6 +321,20 @@ end-to-end parallel conformance test job. After running the tests, use
 the Prometheus instance in the cluster to query the
 `kube_pod_resource_request` and `kube_pod_resource_limit` metrics and
 find numbers for the Pod(s) for the component being tuned.
+
+The following PromQL query illustrates how to calculate the difference
+between the requested memory and used memory for each container in the
+`openshift-monitoring` namespace:
+```PromQL
+(
+  # Calculate the 90th percentile of memory usage over the past hour and add 10% to that 
+  1.1 * (max by (pod, container) (
+    quantile_over_time(0.9, container_memory_working_set_bytes{namespace="openshift-monitoring", container != "POD", container!=""}[60m]))
+  ) -
+  # Calculate the maximum requested memory per pod and container
+  max by (pod, container) (kube_pod_container_resource_requests{namespace="openshift-monitoring", resource="memory", container!="", container!="POD"}) 
+) / 1024 / 1024
+```
 
 Resource requests should be reviewed regularly. Ideally we will build
 tools to help us recognize when the requests are far out of line with
