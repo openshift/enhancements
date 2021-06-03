@@ -107,7 +107,7 @@ These stories define the core use cases OpenShift looks to address.
 
 As an enterprise IT organization deploying Kubernetes,
 I should have a stable and reliable Kubernetes distribution that reduces my support and operational burden while allowing me to meet the organizational, legal, and functional requirements I must work within,
-so that I can quickly evaluate, integrate, and deploy Kubernetest to production.
+so that I can quickly evaluate, integrate, and deploy Kubernetes to production.
 
 This includes:
 
