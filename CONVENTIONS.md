@@ -293,7 +293,7 @@ for all containers in the `openshift-monitoring` namespace:
 # CPU request / usage of the SDN container
 scalar(
   max(kube_pod_container_resource_requests{namespace="openshift-sdn", container="sdn", resource="cpu"}) /
-  max(max_over_time(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate{namespace="openshift-etcd", container="etcd"}[120m]))) * 
+  max(max_over_time(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate{namespace="openshift-sdn", container="sdn"}[120m]))) * 
 # CPU usage of each container in the openshift-monitoring namespace
 max by (pod, container) (node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate{namespace="openshift-monitoring"})
 ```
