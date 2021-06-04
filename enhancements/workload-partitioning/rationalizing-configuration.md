@@ -249,7 +249,9 @@ to partition the workloads into specific CPUs.
 13. Admission plugin uses the workload types on the workloads CR to
     decide when to mutate pods.
 14. CRI-O sees pods with workload annotations and uses the resource
-    request to set cpushares but not cpuset.
+    request to set cpushares but not cpuset. See the [Risks
+    section](#risks-and-mitigations) for details of the effects this
+    may have on the cluster.
 15. User installs the performance-addon-operator into the cluster.
 16. User creates PerformanceProfiles and adds them to the cluster.
 17. PAO generates new MachineConfigs, adding the cpuset information
@@ -373,18 +375,12 @@ has a PerformanceProfile associated and the PAO is installed.
 
 If the MachineConfigPool does not match a PerformanceProfile, there
 will be no cpuset information and the PAO will generate MachineConfigs
-with partitioning enabled but not tied to a cpuset. This is somewhat
-safe, but may lead to unexpected behavior. The mutated pods would
-float across the full cpuset in the same way as if the feature
-enabled, however the cpushares would not be deducted from available
-CPUs, potentially leading to over commit scenarios.
+with partitioning enabled but not tied to a cpuset. See the [Risks
+section](#risks-and-mitigations) for details.
 
 If the PAO is not installed, it will not generate the overriding
-MachineConfigs for the new MachineConfigPool. The nodes in the pool
-will not enable partitioning at all. This may not be safe, since
-kubelet will not advertise the workload resource type but the
-admission plugin will mutate pods to require it. The scheduler may
-refuse to place management workloads on the nodes in the pool.
+MachineConfigs for the new MachineConfigPool. See the [Risks
+section](#risks-and-mitigations) for details.
 
 ### Risks and Mitigations
 
@@ -397,9 +393,21 @@ closely with the node team on the implementation of this feature, so
 we do not anticipate any issues delivering the finished work in this
 way.
 
+If a MachineConfigPool exists without a matching PerformanceProfile,
+there will be no cpuset information and the PAO will generate
+MachineConfigs with partitioning enabled but not tied to a cpuset.
+This is somewhat safe, but may lead to unexpected behavior. The
+mutated pods would float across the full cpuset in the same way as if
+partitioning was not enabled and the cpushares would not be deducted
+from available CPUs, potentially leading to over commit scenarios.
+
 If the PAO is not installed into a cluster with workload partitioning
-enabled and configured, adding a new MachineConfigPool can be
-unsafe. See the "Add a New MachineConfigPool" use case for details.
+enabled and configured, adding a new MachineConfigPool can be unsafe.
+The nodes in the pool will not enable partitioning at all. This may
+not be safe, since kubelet will not advertise the workload resource
+type but the admission plugin will mutate pods to require it. The
+scheduler may refuse to place management workloads on the nodes in the
+pool.
 
 ## Design Details
 
