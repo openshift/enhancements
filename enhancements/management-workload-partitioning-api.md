@@ -79,7 +79,7 @@ The short term goal is to get enough functionality to create the `management` pa
 
 - Long term goal of allowing cluster admins to create their own partitions is not part of this proposal for now
 - Day 2 creation of partitions is not part of the proposal
-- Namespace or MCP specific partitions are not part of the proposal 
+- Namespace or MCP specific partitions are not part of the proposal
 
 ## Proposal
 
