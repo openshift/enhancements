@@ -17,7 +17,7 @@ creation-date: 2021-06-04
 last-updated: 2021-06-04
 status: provisional
 see-also:
-  - "/enhancements/management-workload-partitioning.md"
+  - "/enhancements/workload-partitioning/management-workload-partitioning.md"
 ---
 
 # Management workload partitioning API
@@ -60,18 +60,13 @@ around the enhancement process.
 
 ## Summary
 
-The overall feature summary is present in the [Management workload partitioning](management-workload-partitioning.md) feature. This document focuses on how the feature enablement API and its interactions will look like.
+The overall feature summary is present in the [Management workload partitioning](workload-partitioning/management-workload-partitioning.md) feature. This document focuses on how the feature enablement API and its interactions will look like.
 
 ## Motivation
 
-This section is for explicitly listing the motivation, goals and non-goals of
-this proposal. Describe why the change is important and the benefits to users.
-
-### Goals
-
 This feature is about designing a read-only API that will describe the enabled workload partitions (types, classes, etc.). This information is needed for kubelet to start exposing the right resources as well for the admission webhook to know when the pod manipulation is needed.
 
-It is expected this API will be created at the installation process. Either manually or using the Performance addon operator render mode.
+### Goals
 
 The short term goal is to get enough functionality to create the `management` partition where all OpenShift infrastructure could be placed. This partition is cluster wide and only affects pods with certain pre-agreed-upon labels and placed in specific pre-annotated namespaces.
 
@@ -79,27 +74,31 @@ The short term goal is to get enough functionality to create the `management` pa
 
 - Long term goal of allowing cluster admins to create their own partitions is not part of this proposal for now
 - Day 2 creation of partitions is not part of the proposal
-- Namespace or MCP specific partitions are not part of the proposal
+- Partitions with scope less than the entire cluster (such as being limited to Namespaces or MCPs) are not part of the proposal
 
 ## Proposal
 
 The proposal is to define a new cluster-wide Custom Resource Definition that would describe the allowed partition names in the status section. That way it hints at being a read only object where no user/admin input or modifications are expected.
 
 ```yaml
-apiVersion: workloadpartitioning.openshift.io/v1
+apiVersion: workload.openshift.io/v1
 kind: WorkloadPartitions
 metadata:
   # arbitrary name, all objects of this Kind should be processed and merged
   name: management-partition
 status:
-  # list of strings, defines partition names to be exposed by kubelet
-  globalPartitionNames:
+  # List of strings, defines partition names that will be recognized by the
+  # workload partitioning webhook. This list will also inform PAO about partitions
+  # that should be configured on the kubelet and CRI-O level.
+  clusterPartitionNames:
     - management
 ```
 
+It is expected this API will be created at the installation process. Either manually or using the Performance Addon Operator render mode.
+
 To allow for future extensibility and possible multiple sources of workload partition names (coming from customers, the installer, or other operators, etc.), we propose that there might be multiple `WorkloadPartitions` objects injected into the cluster. The expected behavior is that all components would just merge all the defined names together.
 
-Only the cluster administrator will have the ability to create or manipulate the WorkloadPartitions objects. Anyone will be allowed to read them.
+There is no controller or reconcile loop as part of this proposal. Only the cluster administrator will have the ability to create or manipulate the WorkloadPartitions objects. Anyone will be allowed to read them.
 
 ### User Stories
 
@@ -135,6 +134,7 @@ Consider including folks that also work outside your immediate sub-project.
 1) Where should this CRD be defined and who will own the definition?
    - Just as a manifest coming from the installer?
    - Part of some CVO related component?
+1) the apiVersion namespace needs to be given some thought
 
 ### Test Plan
 
@@ -209,7 +209,7 @@ end to end tests.**
 
 ### Upgrade / Downgrade Strategy
 
-There is currently no active component managing the WorkloadPartitions custom resource. Since we do not want to allow enabling workload partitioning for existing clusters there does not have to be any upgrade logic.
+There is currently no active component managing the WorkloadPartitions custom resource. Since we do not want to allow enabling workload partitioning for existing clusters there does not have to be any upgrade logic. There is an associated risk (discussed in the Risks section) if the admin enables workload partitioning manually on a cluster where it was not enabled before.
 
 In the future, we will have to handle upgrade from older to newer versions of the WorkloadPartitions CRD if we change it in a backwards incompatible way.
 
@@ -217,7 +217,7 @@ In the future, we will have to handle upgrade from older to newer versions of th
 
 This CRD is closely tied to features in Kubelet and the new workload partitioning admission webhook. All those pieces are supposed to be shipped and deployed as part of standard OpenShift installation.
 
-In case an old kubelet with no admission webhook is used (hypothetical scenario) nothing will happen, the cluster will behave is if no workload partitioning was enabled
+If someone creates a WorkloadPartitions CR in a cluster without the admission hook and with an old kubelet, pods would not be mutated because nothing would be looking at the Workloads CR.
 
 ## Implementation History
 
@@ -230,9 +230,19 @@ This feature and its implementation might lead cluster administrators to start u
 
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement.
+There is an alternative style of the CRD that is possible. Instead of a `clusterPartitionNames` we could use just `partitions` and declare the expected scope in `partitions.scope`. See the example below.
+
+```yaml
+apiVersion: workload.openshift.io/v1
+kind: WorkloadPartitions
+metadata:
+  name: management-partition
+status:
+  partitions:
+    - name: management
+      scope: cluster # optional, cluster scope would be the default
+    # No other partition or scope is expected to be supported in this initial version
+```
 
 ## Infrastructure Needed [optional]
 
