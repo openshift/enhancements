@@ -11,7 +11,7 @@ creation-date: 2021-06-04
 last-updated: yyyy-mm-dd
 status: implementable
 see-also:
-  - "/enhancements/management-workload-partitioning.md"
+  - "/enhancements/workload-partitioning/management-workload-partitioning.md"
 ---
 
 Start by filling out this header template with metadata for this enhancement.
@@ -75,7 +75,7 @@ around the enhancement process.
 
 ## Summary
 
-The Performance addon operator is a day 2 optional operator installed via OLM. However the [Workload partitioning](management-workload-partitioning.md) feature needs to have some configuration ready at the installation time when PAO is not yet ready.
+The Performance addon operator is a day 2 optional operator installed via OLM. However the [Workload partitioning](workload-partitioning/management-workload-partitioning.md) feature needs to have some configuration ready at the installation time when PAO is not yet ready.
 This feature is about adding a `render` mode to PAO that would allow an admin to pre-compute all the Openshift manifests that are needed in a way that prevents any typing mistakes from happening.
 These generated manifests can then be passed to the installer and later taken over by the PAO reconcile loop. 
 
