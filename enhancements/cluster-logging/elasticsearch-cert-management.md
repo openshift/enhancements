@@ -24,11 +24,11 @@ superseded-by: []
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Migration plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [x] Enhancement is `implementable`
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
+- [x] Migration plan is defined
+- [x] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
@@ -85,7 +85,7 @@ metadata:
   name: elasticsearch
   annotations:
     logging.openshift.io/elasticsearch-cert-management: true
-    logging.openshift.io/elasticsearch-cert/fluentd: system.logging.fluentd
+    logging.openshift.io/elasticsearch-cert.fluentd: system.logging.fluentd
 ```
 
 Similarly, Jaeger would do the following to have a client cert with the CN `user.jaeger` injected into the secret `jaeger`:
@@ -97,7 +97,7 @@ metadata:
   name: jaeger-cluster
   annotations:
     logging.openshift.io/elasticsearch-cert-management: true
-    logging.openshift.io/elasticsearch-cert/jaeger: user.jaeger
+    logging.openshift.io/elasticsearch-cert.jaeger: user.jaeger
 ```
 
 ## Proposal
@@ -171,7 +171,7 @@ kind: Elasticsearch
 metadata:
   name: elasticsearch
   annotations:
-    logging.openshift.io/elasticsearch-cert/fluentd: system.logging.fluentd
+    logging.openshift.io/elasticsearch-cert.fluentd: system.logging.fluentd
 ```
 
 ```yaml
@@ -204,6 +204,22 @@ The keys used for injecting into the secret will be `tls.crt`, `tls.key`, and `c
 
 ### Graduation Criteria
 
+#### Dev Preview -> Tech Preview
+
+N/A
+
+#### Tech Preview -> GA
+
+N/A
+
+#### Removing a deprecated feature
+
+N/A
+
+### Upgrade / Downgrade Strategy
+
+N/A
+
 #### GA
 
 * End user documentation
@@ -224,6 +240,10 @@ We need to have a proper upgrade strategy from our LTS version to the version th
 
 Given the OCP cert signing service does not allow for mTLS configuration with custom fields that the ES cluster requires, we are unable to use it so we have to implement something similar to a pre-existing service.https://bugzilla.redhat.com/show_bug.cgi?id=1925627
 None
+
+## Alternatives
+
+Continue using cert generation in disparate way
 
 ## References
 
