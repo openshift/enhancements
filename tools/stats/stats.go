@@ -132,7 +132,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 	// if this is a new enhancement.
 	var isNew bool
 	for _, f := range modifiedFiles {
-		if f.Mode == "A" {
+		if f.Mode == "A" || f.Mode == "?" {
 			isNew = true
 			break
 		}
