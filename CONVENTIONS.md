@@ -442,8 +442,8 @@ namespace contains pods that must be running before the openshift-apiserver.
 
 There are two main levels:
 
-  * `openshift.io/run-level: 0` - starting the kube-apiserver
-  * `openshift.io/run-level: 1` - starting the openshift-apiserver
+* `openshift.io/run-level: 0` - starting the kube-apiserver
+* `openshift.io/run-level: 1` - starting the openshift-apiserver
 
 However, other than the kube-apiserver and openshift-apiserver API groups,
 runlevels *SHOULD NOT* be used. As they indicate pods that must be running
