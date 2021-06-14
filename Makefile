@@ -12,7 +12,7 @@ help:  ## Display this help
 image:  ## Build local container image
 	$(RUNTIME) image build -f ./hack/Dockerfile.markdownlint --tag enhancements-markdownlint:latest
 
-lint:  ## run the markdown linter
+lint: image  ## run the markdown linter
 	$(RUNTIME) run \
 		--rm=true \
 		--env RUN_LOCAL=true \
