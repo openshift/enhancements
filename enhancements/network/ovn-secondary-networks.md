@@ -63,11 +63,32 @@ those overlays as they would for any other secondary network.
 ### Implementation Details/Notes/Constraints
 
 ## Design Details
-TODO
+This enhancement can happen in two ways:
+- introduce a new dedicated CNI plugin + controller
+- add a sort of plugin into OVN-Kubernetes allowing flat layer 2 networks to
+  be created
+
+Independently of where the code will live, there are things we can define as
+of now:
+- a logical switch per network. We will define an external id "owners" field
+  so other ovn related projects can keep away from our stuff (e.g. avoid ovn-k
+  reconciliation loops)
+  - for IPv6 subnets we would need to also create a logical router and
+    logical router port, to be able to send the RAs. Would we want
+    these routers for other scenarios ? I.e. is there any reason to create
+    them for IPv4 subnets ?
+- MTU propagation via dhcp options (ipv4)
+- a controller, which will watch out for `net-attach-def` and create the
+  logical switch encoding the network. It must also reconcile the logical
+  switch ports, which would be left behind when nodes are deleted
+- active port security on the logical switch ports(preventing both MAC and
+  IP spoofing).
 
 ### Impacts in multus
 No changes are required in multus, since the feature would only consume the
 `network-attachment-definition` CRD and does not change it.
+
+### Limitations
 
 ### Net-attach-def samples
 This is an example of a network attachment definition that will create an
@@ -107,6 +128,7 @@ spec:
 ```
 
 ### Test Plan
+TODO
 
 ### Graduation Criteria
 
