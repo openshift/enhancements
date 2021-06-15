@@ -12,7 +12,6 @@ reviewers:
   - maintainers of PAO
   - maintainers of MCO
 approvers:
-  - "@markmc"
   - "@derekwaynecarr"
 creation-date: 2021-04-26
 status: implementable
