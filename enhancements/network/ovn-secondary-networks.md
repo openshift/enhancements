@@ -70,6 +70,8 @@ No changes are required in multus, since the feature would only consume the
 `network-attachment-definition` CRD and does not change it.
 
 ### Net-attach-def samples
+This is an example of a network attachment definition that will create an
+isolated flat L2 network.
 
 ```yaml
 apiVersion: "k8s.cni.cncf.io/v1"
@@ -109,20 +111,17 @@ spec:
 ### Graduation Criteria
 
 #### Dev Preview
+- defined user stories validated by the upstream project CI
+- minor documentation (how to use & contribute / examples / roadmap)
 
 #### Dev Preview -> Tech Preview
+- end user documentation, relative API stability
+- sufficient test coverage
 
 #### Tech Preview -> GA
-
-### Upgrade / Downgrade Strategy
-
-### Version Skew Strategy
-
-## Implementation History
-
-## Drawbacks
-
-## Alternatives
+- integrated with baremetal OCP CI
+- upgrade & perf testing
+- sufficient time for feedback
 
 ## Infrastructure Needed
 OpenShift 4.x cluster
