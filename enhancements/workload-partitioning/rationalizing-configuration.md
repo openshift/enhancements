@@ -82,6 +82,7 @@ the feature and to extend support to multi-node clusters.
    running cluster. We are going to continue to require the user to
    enable partitioning as part of deploying the cluster for another
    implementation phase.
+3. Support for external control plane topologies.
 
 ## Proposal
 
