@@ -46,7 +46,10 @@ simple L2 overlays without the need for a network administrator.
 - optional connection to the external networks
 
 ### Non-Goals
-- network policy concerns
+- network policy concerns. There isn't a requirement for having network
+  policies for the secondary networks. There is an
+  [enhancement proposal](enhancements/network/multi-networkpolicy.md) about
+  this subject, not scoped around OVN.
 
 ## Proposal
 
