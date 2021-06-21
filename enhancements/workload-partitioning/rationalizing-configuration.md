@@ -144,7 +144,7 @@ windows). To continue to support enabling the feature during
 deployment, and to simplify the configuration, we propose to extend
 the PAO with a `render` command, similar to the one in other
 operators, to have it generate manifests for the OpenShift installer
-to consume. This avoids any need to change the OpenShift installer to
+as extra manifests. This avoids any need to change the OpenShift installer to
 support this uncommon use case, and is consistent with the way
 third-party networking solutions are installed.
 
