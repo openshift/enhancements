@@ -145,7 +145,8 @@ deployment, and to simplify the configuration, we propose to extend
 the PAO with a `render` command, similar to the one in other
 operators, to have it generate manifests for the OpenShift installer
 to consume. This avoids any need to change the OpenShift installer to
-support this uncommon use case.
+support this uncommon use case, and is consistent with the way
+third-party networking solutions are installed.
 
 The `render` command will have an option to enable the management
 partition. When the option is given, the `render` command will create
