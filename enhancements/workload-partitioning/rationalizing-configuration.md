@@ -159,10 +159,10 @@ input.
 
 For each PerformanceProfile, the PAO will render MachineConfig
 manifests with higher precedence than the default ones created by the
-installer during bootstrapping. These manifests will include all of
-the details for configuring `kubelet`, CRI-O, and `tuned` to know
-about and partition workloads, including the cpusets for each workload
-type.
+installer during bootstrapping, in the same way it does when running
+in the cluster. These manifests will include all of the details for
+configuring `kubelet`, CRI-O, and `tuned` to know about and partition
+workloads, including the cpusets for each workload type.
 
 The PAO `render` command also generates a manifest with the CRD for
 PerformanceProfile so bootstrapping does not block when trying to
