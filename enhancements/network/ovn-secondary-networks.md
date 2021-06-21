@@ -63,10 +63,35 @@ those overlays as they would for any other secondary network.
 ### Implementation Details/Notes/Constraints
 
 ## Design Details
+
+### Where to host the code
 This enhancement can happen in two ways:
 - introduce a new dedicated CNI plugin + controller
 - add a sort of plugin into OVN-Kubernetes allowing flat layer 2 networks to
   be created
+
+There are pros and cons to each of the options, which will be captured below:
+- new cni plugin
+  - pros
+    - independent release cycle / development / review process / test matrix
+    - clear scopes of responsibility (who maintains what)
+    - re-use the ovn-k deployed components
+  - cons
+    - support nightmare (which team handles a customer case)
+      - co-existance of the DBs
+    - duplication of effort (external network connectivity, etc)
+- ovn-kubernetes
+  - pros
+    - unified delivery / deployment
+    - connectivity to external networks implemented for free
+    - NVIDIA plans to contribute these topologies (our use cases are the
+      first two):
+      - flat L2
+      - flat L2 w/ external network connectivity
+      - routed L3 (one logical switch per node, inter-connected by a logical
+        router)
+  - cons
+    - bloating the test matrix of ovn-kubernetes
 
 Independently of where the code will live, there are things we can define as
 of now:
