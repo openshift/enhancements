@@ -240,7 +240,8 @@ to partition the workloads into specific CPUs.
    in the cluster.
 8. Bootstrapping finishes and the cluster is launched.
 9. If the MCO does not apply KubeletConfig in step 7, it must do it
-   here.
+   here after the MCO is running in the cluster and can reconcile
+   normally.
 11. The cluster has partial partitioning enabled for `management`
     workloads. Pods for management workloads are mutated, but not
     actually partitioned.
