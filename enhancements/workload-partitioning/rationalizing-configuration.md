@@ -420,6 +420,15 @@ type but the admission plugin will mutate pods to require it. The
 scheduler may refuse to place management workloads on the nodes in the
 pool.
 
+When a custom MachineConfigPool is used it is possible to introduce
+conflicts in content ownership between the custom pool and the base
+worker pool. This affects workload partitioning because it relies on
+kubelet and CRI-O configuration files that are already potential
+sources of contention from different inputs. To mitigate this risk, we
+recommend not placing any kubelet or CRI-O configuration in the base
+worker settings and instead creating a separate pool for each
+configuration variant.
+
 ## Design Details
 
 ### Open Questions
