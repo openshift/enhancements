@@ -99,15 +99,24 @@ enabled.
 We eventually want to extend the partitioning feature to support
 non-management workloads to include workload types defined by cluster
 admins. For now, however, we want to keep the interface as simple as
-possible.  Therefore, the new API will only have status fields and
-will only be used so that the admission hook (and other consumers) can
-tell when workload partitioning is active.
+possible.  Therefore, even though the new API will have both spec and
+status fields, only the status fields will be used so that the
+admission hook (and other consumers) can tell when workload
+partitioning is active.
 
 To manage the risk associated with rolling out a complicated feature
 like this, we are going to continue to require it to be enabled as
 part of deploying the cluster. The API does not need to support
 configuring the workload partitioning in a running cluster, so no
 controller is needed, for now.
+
+Because of the extensive hardware-specific planning needed to use
+partitioning successfully, there is no clear business case for ever
+allowing the feature to be enabled in a running cluster. We will
+therefore also include an admission hook to prevent anyone from
+changing or deleting the API resource after it is created, following
+the pattern established in
+<https://github.com/openshift/kubernetes/blob/master/openshift-kube-apiserver/admission/customresourcevalidation/features/validate_features.go>.
 
 We propose that the API be owned by core OpenShift, and defined in the
 `openshift/api` repository. A separate enhancement will be written to
