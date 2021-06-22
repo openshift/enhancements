@@ -10,7 +10,7 @@ approvers:
   - "@spadgett"
   - "@cvogt"
 creation-date: 2021-02-25
-last-updated: 2021-04-07
+last-updated: 2021-06-11
 status: implementable
 ---
 
@@ -66,20 +66,11 @@ spec:
     brand: online
     addPage:
       disabledActions:
-      - devcatalog/databases
-      - devcatalog/helmcharts
-      - devcatalog/operatorbacked
-      - devcatalog/virtualmachinetemplates
-      - devcatalog/managedservices
-      - fromgit
-      - fromdevfile
-      - fromdockerfile
-      - containerimage
-      - importyaml
-      - uploadajar
-      - knative.openshift.io/eventsource
-      - knative.openshift.io/channel
-      - tekton.dev/pipelines
+        # You can find a list of all available options in the YAML editor sidebar
+        # Check out the snippet "Add page actions"
+        - deploy-image
+        - helm
+        - upload-jar
   ...
 ```
 
@@ -101,13 +92,11 @@ As a user, I don't want to see any actions on the add page which are hidden by t
 
 ### Risks and Mitigations
 
-#### How we handle upgrade
+None
 
-**Mitigation**: The cluster admin can provide a list of actions which should not shown to the users. All features which are not defined in that list will be shown after an upgrade.
+## Design Details
 
-**Drawback** If the cluster admin installs a new OpenShift upgrade, the customized add page will contain new or unexpected actions.
-
-## Open Questions
+### Open Questions
 
 - [x] Should we save a list of enabled actions instead of a list of ids which should not be shown?
 
@@ -118,9 +107,10 @@ spec:
   customization:
     addPage:
       actions:
-      - databases
-      - helmcharts
-      - ...
+        - deploy-image
+        - helm
+        - upload-jar
+        - ...
   ...
 ```
 
@@ -145,8 +135,9 @@ spec:
   customization:
     addPage:
       actions:
-        databases: true
-        helmcharts: false
+        deploy-image: true
+        helm: false
+        upload-jar: false
   ...
 ```
 
@@ -162,10 +153,38 @@ Testing will be carried out with the usual Console unit and e2e test suites.
 
 ### Graduation Criteria
 
+Available actions could be disabled by the cluster admin.
+
+#### Dev Preview -> Tech Preview
+
 None
+
+#### Tech Preview -> GA
+
+None
+
+#### Removing a deprecated feature
+
+None
+
+### Upgrade / Downgrade Strategy
+
+The cluster admin can provide a list of actions which should not shown to the users. All features which are not defined in that list will be shown after an upgrade.
+
+If the cluster admin installs a new OpenShift upgrade, the customized add page will contain new or unexpected actions.
 
 ### Version Skew Strategy
 
 None, console is the only consumer of this configuration.
 
+## Implementation History
+
+* [ODC-5013](https://issues.redhat.com/browse/ODC-5013) add support to hide actions
+
+## Drawbacks
+
+Customization does not allow the cluster admin to add own actions. Hide actions is only available via YAML.
+
 ## Alternatives
+
+Allow the cluster admin to deactivate features or extentions in a more generic way instead of only allowing this on the add page.

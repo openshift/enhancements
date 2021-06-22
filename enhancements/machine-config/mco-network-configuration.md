@@ -97,7 +97,7 @@ Do a KubeletConfig like integration:
 
 Interact with kubernetes-nmstate handler through MCD. Prepare hooks in MCD for that. User would create MCs, those would be propagated to MCD, MCD would delegate to kubernetes-nmstate handler.
 
-#### Option C
+### Option C
 
 1. Set the NetworkManager config to point to a "merged" keyfile path.
 2. Create two temporary directories for overlay purposes.
@@ -106,7 +106,7 @@ Interact with kubernetes-nmstate handler through MCD. Prepare hooks in MCD for t
 kubernetes-nmstate will then operate as is, but the keyfiles that ultimately are written by nmstate would effectively be ephemeral. When a node is rebooted, the kubernetes-nmstate-handler will re-process any existing NodeNetworkConfigurationPolicy CRs, and put the configuration back in place.
 
 
-#### Recommendation
+### Recommendation
 
 We believe that option C poses the best combination of using existing MCO with the introduction of kubernetes-nmstate. It would require no fundamental changes to MCO (like rebootless config applies, and machine-specific configuration).
 
@@ -157,16 +157,25 @@ If it doesn't come up on reboot, it's likely an environment issue (e.g. cable un
 These configuration files would be handled via MCO, for the Baremetal platform only.
 
 In /etc/NetworkManager/conf.d/99-kni.conf we add:
+
+```ini
 [keyfile]
 path=/etc/NetworkManager/system-connections-merged
+```
 
 In /etc/tmpfiles.d add a file to specify:
+
+```text
 D /tmp/nm-system-connections 0755 root root
 D /tmp/nm-system-connections-work 0755 root root
+```
 
 Create a .mount systemd unit to mount the overlay:
+
+```text
 /etc/NetworkManager/system-connections-merged
 overlay lowerdir=/etc/NetworkManager/system-connections,upperdir=/tmp/nm-system-connections,workdir=/tmp/nm-system-connections-work
+```
 
 All the changes that nmstate will do will end up affecting just /tmp/nm-system-connections so once the machine reboots those will be gone, and only what's on /etc/NetworkManager/system-connections , which is where people would put their keyfiles with MachineConfig would remain.
 
@@ -262,19 +271,14 @@ Kubernetes-nmstate will only affect post-kubelet so we comply with the "MC owns 
 
 ### Graduation Criteria
 
-- TBD
-
-#### Examples
-
-
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -283,7 +287,7 @@ Kubernetes-nmstate will only affect post-kubelet so we comply with the "MC owns 
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
 - Deprecate the feature

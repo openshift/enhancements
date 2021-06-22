@@ -12,8 +12,8 @@ approvers:
   - "@alanconway"
   - "@jcantril"
 creation-date: 2021-03-29
-last-updated: 2021-03-29
-status: provisional
+last-updated: 2021-05-10
+status: implemented
 see-also: []
 replaces: []
 superseded-by: []
@@ -23,9 +23,9 @@ superseded-by: []
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
+- [x] Enhancement is `implementable`
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
 - [ ] Operational readiness criteria is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
@@ -362,7 +362,7 @@ The global/per-tenant ingestion limits are typical rate limiting control options
 
 1. Log volume rate and burst size to omit unbound memory operations, i.e. by setting `IngestionRate` and `IngestionBurstSize`.
 2. Label key and value lenghts to ensure faster log stream lookups, i.e. by setting `MaxLabelLength`, `MaxLabelValueLength`, `MaxLabelNamessPerSeries`.
-3. Log stream limits to ensure better object storage utilization, i.e. by setting `MaxStreamsPerTenant`, `MaxGlobalStreamsPerTenant`.
+3. Log stream limits to ensure better object storage utilization, i.e. by setting `MaxGlobalStreamsPerTenant`.
 
 From the above the most significant for healthy Loki operations are the the log stream limits. Since Logs are aggregated per tenant and unique set of labels to log streams, a high number of streams has a negative impact on object storage usage.
 
@@ -401,12 +401,6 @@ type IngestionLimitSpec struct {
     //
     // +optional
     MaxLabelNamessPerSeries int32 `json:"maxLabelNamesPerSeries,omitempty"`
-
-    // MaxStreamsPerTenant defines the maximum number of active streams
-    // per tenant, per ingester.
-    //
-    // +optional
-    MaxStreamsPerTenant int32 `json:"maxStreamsPerTenant,omitempty"`
 
     // MaxGlobalStreamsPerTenant defines the maximum number of active streams
     // per tenant, across the cluster.
