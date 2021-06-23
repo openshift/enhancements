@@ -201,15 +201,20 @@ retrieve access tokens on behalf of the user that wants to use them. Typical exa
 the web console and anything that uses the oauth-proxy, like the monitoring tools. A custom oauth-server
 serving certificate might break trust from the other components in the cluster.
 
-The authentication operator needs to publish the oauth-server's  trust root in a well-known location so
+The authentication operator needs to publish the oauth-server's serving certificate in a well-known location so
 that components that need to trust the oauth-server can use it. The authentication operator will therefore
-always create a configMap `openshift-config-managed/oauth-server-cert` which is going to include the
+always create a configMap `openshift-config-managed/oauth-serving-cert` which is going to include the
 oauth-server's serving certificate.
 
-The certificate should be found in the `ca-bundle.crt` key in the `data` of such a configMap.
+The certificate should be found in the `ca-bundle.crt` key in the `data` of such a configMap and
+any authenticated entity (i.e. members of the `system:authenticated` group) should be able
+to read this configMap.
 
 The operators managing the components that need to trust the oauth-server have to consume this configMap
 and configure the components' so that they trust the certificate.
+
+The oauth-proxy should automatically look for the configMap in order to set up trust
+to the oauth-server.
 
 ### Risks and Mitigations
 
