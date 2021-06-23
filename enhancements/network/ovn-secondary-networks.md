@@ -67,6 +67,8 @@ those overlays as they would for any other secondary network.
 
 ### Implementation Details/Notes/Constraints
 
+### Risks and Mitigations
+
 ## Design Details
 
 ### Net-attach-def samples
@@ -106,37 +108,6 @@ spec:
         }'
 ```
 
-### Where to host the code
-This enhancement can happen in two ways:
-- introduce a new dedicated CNI plugin + controller
-- add a sort of plugin into OVN-Kubernetes allowing flat layer 2 networks to
-  be created
-
-There are pros and cons to each of the options, which will be captured below:
-- new cni plugin
-  - pros
-    - independent release cycle / development / review process / test matrix
-    - clear scopes of responsibility (who maintains what)
-    - re-use the ovn-k deployed components
-  - cons
-    - support nightmare (which team handles a customer case)
-      - co-existance of the DBs
-    - duplication of effort (external network connectivity, etc)
-- ovn-kubernetes
-  - pros
-    - unified delivery / deployment
-    - connectivity to external networks implemented for free
-    - NVIDIA plans to contribute these topologies (our use cases are the
-      first two):
-      - flat L2
-      - flat L2 w/ external network connectivity
-      - routed L3 (one logical switch per node, inter-connected by a logical
-        router)
-  - cons
-    - bloating the test matrix of ovn-kubernetes
-
-Independently of where the code will live, there are things we can define as
-of now:
 - a logical switch per network. We will define an external id "owners" field
   so other ovn related projects can keep away from our stuff (e.g. avoid ovn-k
   reconciliation loops)
@@ -174,6 +145,48 @@ TODO
 - integrated with baremetal OCP CI
 - upgrade & perf testing
 - sufficient time for feedback
+
+#### Removing a deprecated feature
+
+### Upgrade / Downgrade Strategy
+Secondary OVN networks just uses the `net-attach-def` CRD and do not rely on
+any Kubernetes object is used, hence we could say that it is not kubernetes
+version sensitive.
+
+### Version Skew Strategy
+
+## Implementation History
+
+## Drawbacks
+We are proposing implementing secondary OVN networks in the `ovn-kubernetes`
+repo. This will potentially cause the downstream test matrix around
+ovn-kubernetes to bloat.
+
+## Alternatives
+This enhancement can also be implemented as a dedicated CNI plugin + controller.
+
+There are pros and cons to each of the options, which will be captured below:
+- new cni plugin
+  - pros
+    - independent release cycle / development / review process / test matrix
+    - clear scopes of responsibility (who maintains what)
+    - re-use the ovn-k deployed components
+  - cons
+    - support nightmare (which team handles a customer case)
+      - co-existance of the DBs
+    - duplication of effort (external network connectivity, etc)
+- ovn-kubernetes
+  - pros
+    - unified delivery / deployment
+    - connectivity to external networks implemented for free
+    - NVIDIA plans to contribute these topologies (our use cases are the
+      first two):
+      - flat L2
+      - flat L2 w/ external network connectivity
+      - routed L3 (one logical switch per node, inter-connected by a logical
+        router)
+  - cons
+    - bloating the test matrix of ovn-kubernetes
 
 ## Infrastructure Needed
 OpenShift 4.x cluster
