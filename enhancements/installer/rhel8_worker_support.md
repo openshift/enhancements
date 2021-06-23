@@ -7,7 +7,7 @@ reviewers:
 approvers:
   - "@derekwaynecarr"
 creation-date: 2021-05-13
-last-updated: 2021-06-04
+last-updated: 2021-06-23
 status: provisional
 see-also:
   - "https://issues.redhat.com/browse/CORS-1650"
@@ -32,19 +32,15 @@ superseded-by:
 
 This enhancement proposes to add traditional RHEL 8 Server support for deploying worker/infra
 nodes with [openshift-ansible].  OpenShift will be deployed and upgraded on RHEL 8 nodes using
-the same [Ansible playbook process][adding-rhel-compute] however, OpenShift RPM content will be delivered using
-an image in the release payload.
+the same [Ansible playbook process][adding-rhel-compute].
 
 ## Motivation
 
-The process of scaling up traditional RHEL 8 worker nodes by using containerized OpenShift content will provide
-a better user experience than configuring OpenShift RPM repositories on hosts.  Using the
-[existing process][adding-rhel-compute] will allow near-term support of RHEL 8 nodes while developing enhanced
-longer-term RHEL 8 support.
+Using the [existing process][adding-rhel-compute] will allow near-term support
+of RHEL 8 nodes while developing enhanced longer-term RHEL 8 support.
 
 ### Goals
 
-1. Implement an os-content image for RHEL 8 OpenShift RPMs or files.
 1. Update [openshift-ansible] scaleup.yml and upgrade.yml playbooks to support traditional RHEL 8 workers
 
 ### Non-Goals
@@ -56,35 +52,21 @@ longer-term RHEL 8 support.
 
 ## Proposal
 
-Currently, for RHEL 7 worker node deployment, the user must [prepare the host][prepare-rhel]
-before running the scaleup.yml playbook.  This process can be cumbersome for
-automating deployment and also requires additional steps to update OpenShift repos before
-performing an OpenShift upgrade on the node.  For traditional RHEL 8 hosts, preparing OpenShift repos on the hosts will
-not be required because the necessary content will be delivered as an image in
-the release payload.  The RHEL 8 hosts will still need to be subscribed and have
-base channels enabled for package dependencies and operating system updates.
-
 The basic process for scaling up and upgrading RHEL worker nodes will remain the
-same.  The playbooks will be updated to download and mount the image with the OpenShift RPM
-content during the install/upgrade for RHEL 8 hosts.  The installation process will
+same.  The playbooks will be updated to install the appropriate RPMs based on
+the OS during the install/upgrade for RHEL 8 hosts.  The installation process will
 not change for RHEL 7 worker nodes.
 
 To migrate from RHEL 7 worker nodes, new RHEL 8 nodes should be provisioned,
 and the existing RHEl 7 worker nodes removed.
 
-[prepare-rhel]: https://docs.openshift.com/container-platform/4.7/machine_management/adding-rhel-compute.html#rhel-preparing-node_adding-rhel-compute
 
 ### User Stories
 
 1. As an OpenShift admin using [openshift-ansible], I want to deploy and upgrade
-   traditional RHEL 8 Server worker nodes without needing to configure OpenShift repos for installation.
-
-1. As an Openshift admin, I want to be able to deploy traditional RHEL 8 workers without
-   having to mirror OpenShift RPM content.
+   traditional RHEL 8 Server worker nodes.
 
 ### Open Questions [optional]
-
-1. Can we use existing os-content used for RHCOS to install required RPMs or files?
 
 ---
 
