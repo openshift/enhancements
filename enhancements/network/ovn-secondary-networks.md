@@ -129,7 +129,11 @@ No changes are required in multus, since the feature would only consume the
 ### Limitations
 
 ### Test Plan
-TODO
+The first layer of OVN secondary networks will happen on the upstream repo
+`ovn-kubernetes` e2e tests, ran using kind.
+
+We will additionally going to use baremetal CI job to assert the feature works
+as intended.
 
 ### Graduation Criteria
 
