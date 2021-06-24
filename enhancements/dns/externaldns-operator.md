@@ -20,7 +20,7 @@ approvers:
   - "@knobunc"
   - "@Miciah"
 creation-date: 2020-08-26
-last-updated: 2021-06-16
+last-updated: 2021-06-25
 status: implementable
 ---
 
@@ -155,22 +155,20 @@ metadata:
   namespace: my-externaldns-namespace
 spec:
   domains:
-    - my-cluster.my-domain.com
-  excludeDomains:
-    - apps.my-cluster.my-domain.com
+    - matchType: Exact
+      name: my-cluster.my-domain.com
+      filterType: Include
+    - matchType: Exact
+      name: apps.my-cluster.my-domain.com
+      filterType: Exclude
   provider:
     type: AWS
     credentials: my-secret-reference
-  sources:
-    - openshiftRoute:
-        ignoreHostnameAnnotation: "true"
-        labelSelector:
-          foo: bar
-    - crd:
-        resource: dnsrecords
-    - service:
-        namespace: foo
-        publishInternal: "true"
+  source:
+    type: OpenShiftRoute
+    hostnameAnnotationPolicy: Allow
+    AnnotationFilter:
+      "some.annotation.io/foo": "bar"
   zones:
     - my-public-zone-id
     - my-private-zone-id
@@ -191,6 +189,9 @@ status:
   provider:
     type: AWS
     credentials: my-secret-reference
+  zones:
+    - my-public-zone-id
+    - my-private-zone-id
 ```
 
 Additional `spec` and/or `status` fields may be introduced based on requirements.
@@ -204,19 +205,17 @@ or when using multiple DNS Providers. See ExternalDNS' upstream
 as an example. For this example ExternalDNS CR above, it may be acceptable to run one ExternalDNS instance for a given public zone, and one ExternalDNS instance for a
 given private zone, via the same deployment (See the [Open Questions](#open-questions) section).
 
-The `zones` field contains a list of DNS zone IDs. On OpenShift, the ExternalDNS operator could read
-the cluster DNS config resource and extract the available public/private zone IDs when the `zone` field is not specified.
-Note that a zone lookup may need to be performed by the ExternalDNS Operator in order to determine the ID of any zones that are specified
-via a resource tag in the cluster DNS config resource. The ExternalDNS operator will then take the provided zone IDs
-and map them to the given provider's complete hosted zone ID string.
+The `zones` field contains a list of DNS zone IDs. When the `zones` field is omitted on OpenShift, the ExternalDNS operator could read
+the cluster DNS config resource and extract the available public/private zone IDs (or tags, if the cluster platform is AWS).
+The ExternalDNS operator could then pass the extracted public/private zone IDs/tags to the relevant ExternalDNS deployment.
 See the ExternalDNS deployment example loosely based off of this ExternalDNS operator CRD instance in [Implementation Details](#implementation-details).
-
-Alternatively, users who wish to explicitly set the `zones` field on OpenShift (or on vanilla Kubernetes) would do so by using
-the desired zones' zoneID strings.
 
 On OpenShift, the ExternalDNS Operator could create a `credentialsrequest.cloudcredential.openshift.io` resource so that
 the cluster administrator would not have to worry about providing cloud credentials by hand when creating an ExternalDNS operator resource.
-ExternalDNS requires different permissions for each cloud provider, as documented in the
+The ExternalDNS Operator would the be responsible for configuring the relevant ExternalDNS deployments to consume the secret
+produced from the `credentialsrequest.cloudcredential.openshift.io` resource.
+
+Note that ExternalDNS requires different permissions for each cloud provider, as documented in the
 [tutorial section of the ExternalDNS docs](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials).
 In general, ExternalDNS needs proper permissions to view, update, and delete DNS resource records in the relevant DNS zones.
 
@@ -235,15 +234,19 @@ such as a secret or configmap in an arbitrary namespace.
 By default, the operator would assume the cluster's platform is the desired DNS Provider. The operator would allow a user to specify
 an alternative External DNS Provider, such as BlueCat DNS. The ExternalDNS operator would be able to create multiple ExternalDNS deployments
 to run in concert, one for each ExternalDNS operator Custom Resource (similar to how the OpenShift [Ingress Operator](https://github.com/openshift/cluster-ingress-operator)
-consumes one or more Ingress Controller resources). The `domains` field would be used to filter source resources according to the requested DNS hostname
-(sans any domains matching any values specified in the `excludeDomains` field).
-If an ExternalDNS operator Custom Resource specifies multiple DNS Zones, multiple instances of ExternalDNS would be deployed within the same deployment accordingly.
+consumes one or more Ingress Controller resources). The `domains` field would be used to filter source resources based on the desired hostname.
+The `domains` field should be expressive enough to allow a user to specify multiple sets of domains that are considered included or excluded.
+In the ExternalDNS operator CR above, ExternalDNS is configured to create DNS records with hostnames that fit under `my-cluster.my-domain.com` that are not under
+`apps.my-cluster.my-domain.com`.
 
-By default, ExternalDNS would create DNS records for all instances of the given Source resources. A union type would be defined to allow for
-source-specific parameters. For the example ExternalDNS CR above, the ExternalDNS operator would create DNS records for Route resources that match the label (read: annotation, more on this later)
-`foo: bar`, and would ignore the ExternalDNS Host Target Override Annotation (see [Implementation Details](#implementation-details) for more details about ExternalDNS
-annotations). This example CR would also instruct ExternalDNS to create DNS records for CR instances of type `dnsrecords` (not a part of OCP 4.9 implementation).
-Finally, this example CR would instruct ExternalDNS to create DNS records in the given private zone for Service resource instances in namespace `foo`.
+By default, ExternalDNS would create DNS records for all instances of the given Source resource. A union type would be defined to allow for
+source-specific parameters. For the example ExternalDNS CR above, the ExternalDNS operator would configure ExternalDNS to create DNS records for Route resources that have the annotation
+`some.annotation.io/foo=bar`, and would allow the ExternalDNS custom Hostname Annotation (see [Implementation Details](#implementation-details) for more details about ExternalDNS
+annotations).
+
+Note that only one Source resource can be specified for each ExternalDNS operator CR. This is to highlight the fact that a single ExternalDNS instance cannot manage more than one
+source resource, which means that one ExternalDNS deployment is required for each source resource. See [Upstream Issue 1961](https://github.com/kubernetes-sigs/external-dns/issues/1961)
+to better understand this design implementation of ExternalDNS.
 
 ExternalDNS's `--annotation-filter` option filters source resource instances via annotations using label selector semantics, which is somewhat unexpected.
 Note that the upstream CRD source implementation actually filters based on resource labels. If upstream ExternalDNS is open to the idea of implementing
@@ -341,7 +344,7 @@ were to change, ExternalDNS would not have to update every managed Route resourc
 
 Note that the OpenShift [Route source implementation](https://github.com/kubernetes-sigs/external-dns/blob/master/source/ocproute.go)
 in ExternalDNS supports some of the common [ExternalDNS annotations](https://github.com/kubernetes-sigs/external-dns/blob/master/source/source.go),
-such as the ExternalDNS TTL and target override annotations.
+such as the ExternalDNS TTL, hostname, and target override annotations.
 
 Currently, the Ingress Operator publishes wildcard DNS Records to point an Ingress Controller's domain to the Ingress Controller's
 LoadBalancer type Service (or alternatively, a cluster administrator configures this for their administrator-managed Load Balancer, etc.).
