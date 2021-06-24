@@ -221,9 +221,10 @@ the EFS operator. **We do not want to maintain it for everyone.**
 
 ### Code organization
 
-* Reuse existing `github.com/openshift/aws-efs-operator` repository for the operator code.
-  * Move the controller-runtime based operator one to a separate branch (`release-community`?)
-  * Continue with library-go based one in `master`.
+* Create new  `github.com/openshift/aws-efs-csi-driver-operator` repository for the operator code and start from
+  scratch there.
+* Leave existing `github.com/openshift/aws-efs-operator` untouched, for the community version that may be maintained
+  for older OCP releases.
 * Fork the CSI driver into `github.com/openshift/aws-efs-csi-driver`.
 * Fork `github.com/aws/efs-utils` into `github.com/openshift/aws-efs-utils`.
 
