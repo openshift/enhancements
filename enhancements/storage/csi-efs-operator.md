@@ -3,14 +3,14 @@ title: AWS EFS CSI driver operator via OLM
 authors:
   - "@jsafrane"
 reviewers:
-  - TBD # someone from OpenShift Dedicated
-  - TBD # someone from ART to agree they will ship it using their tooling
+  - 2uasimojo # from OCP Dedicated team (i.e. "the customer")
+  - bertinatto # from OCP storage
 approvers:
   - bbennett # As pillar lead?
 
 creation-date: 2021-03-09
-last-updated: 2021-03-09
-status: provisional
+last-updated: 2021-06-24
+status: implementable
 see-also:
   - "/enhancements/storage/csi-driver-install.md"
 replaces:
@@ -21,11 +21,11 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Operational readiness criteria is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [x] Enhancement is `implementable`
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
+- [x] Operational readiness criteria is defined
+- [x] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
@@ -79,19 +79,17 @@ Summary of current [aws-efs-operator](https://github.com/openshift/aws-efs-opera
 
 ### AWS EFS CSI driver
 
-AWS EFS CSI driver is different than the other CSI drivers we ship. Listing the main differences here for completeness.
+AWS EFS CSI driver is different from the other CSI drivers we ship. Listing the main differences here for completeness.
 
-* Right now, it does not implement dynamic provisioning. As described above, cluster admin must create the volume in
-  AWS and figure out the networking + security manually.
-  * [Long upstream thread about dynamic provisioning](https://github.com/kubernetes-sigs/aws-efs-csi-driver/issues/6)
-  * Upstream [will offer some sort of dynamic provisioning in the next version](https://github.com/kubernetes-sigs/aws-efs-csi-driver/pull/274)
-    by creating subdirectories (Access Points) in existing EFS volumes as PVs. AWS has a limit of 120 Access Points per
-    EFS volume, i.e. only 120 PVs can be created for a single StorageClass.
+* It implements dynamic provisioning in non-standard way. Cluster admin must manually create an EFS share in the cloud
+  (and figure out related networking and firewalls). The EFS CSI driver will provision volumes out of it as
+  *subdirectories* of it. The CSI driver cannot create EFS shares on its own.
+  * AWS has a limit of 120 Access Points per EFS volume, i.e. only 120 PVs can be created for a single StorageClass.
     [Upstream issue](https://github.com/kubernetes-sigs/aws-efs-csi-driver/issues/310).
   * Proper dynamic provisioning can come in the future, dealing with the networking and security groups is the hardest
     part there.
 * AWS EFS volumes do not have any size enforcement. They can hold as much data as apps put there and someone will have to
-  pay for the storage. OCP offer standard metrics for amount of data on PVCs, it's up to the cluster admin to create
+  pay for the storage. OCP offers standard metrics for amount of data on PVCs, it's up to the cluster admin to create
   alerts if the consumption gets too high.
 * It uses [efs-utils](https://github.com/aws/efs-utils) to provide encryption in transport, which is not included in
   RHEL. We will need to package it, either as an image or RPM package.
@@ -171,13 +169,13 @@ controller-runtime in a single binary, we may as well reimplement the handling t
 ### Upgrade from the community operator
 
 Prerequisites:
-* The community aws-efs-operator is installed in OCP 4.7 cluster in `openshift-operators` namespace. The CSI driver runs
+* The community aws-efs-operator is installed in OCP 4.8 cluster in `openshift-operators` namespace. The CSI driver runs
 in the same namespace too.
   * The operator `Subscription` contains the community catalog as the operator source.
 
 Expected workflow (confirmed with OLM team):
 
-1. User upgrades to 4.8. Nothing interesting happens at this point, because the operator `Subscription` still points
+1. User upgrades to 4.9. Nothing interesting happens at this point, because the operator `Subscription` still points
    to the community source. The "old" operator is still running.
 2. User edits the `Subscription` and updates the `source:` to the Red Hat certified catalog.
    (Alternatively, user may un-install the community operator and install the supported one.)
@@ -205,7 +203,7 @@ to support a generic RPM that can be used outside of OCP.
 1. Fork `github.com/aws/efs-utils` into `github.com/openshift/aws-efs-utils`.
 2. Create a new base image with the utilities, say `ose-aws-efs-utils-base`:
    ```Dockerfile
-   FROM: ocp4.8:base
+   FROM: ocp-4.9:base
    RUN yum install stunnel python <and any other deps>
    COPY <the utilities> /usr/bin
    ```
@@ -231,8 +229,10 @@ the EFS operator. **We do not want to maintain it for everyone.**
 
 ### Open Questions
 
-**How to actually hide the community operator in 4.8 and newer operator catalogs?** We don't want to have two operators
-in the catalog there. We still want to offer the community operator in 4.7 and earlier though.
+**How to actually hide the community operator in 4.9 and newer operator catalogs?** We don't want to have two operators
+in the catalog there. We still want to offer the community operator in 4.8 and earlier though.
+
+  * Right now it seems there will be two operators available in OLM and it's not that bad.
 
 ### Test Plan
 
@@ -241,8 +241,7 @@ in the catalog there. We still want to offer the community operator in 4.7 and e
      1. Install OCP on AWS.
      2. Install the operator.
      3. Create AWS EFS share (this may require extra privileges in CI and figure out the networking!)
-     4. Set up dynamic provisioning in the driver (by creating a StorageClass). This assumes dynamic provisioning
-        is implemented (released) upstream before we start testing.
+     4. Set up dynamic provisioning in the driver (by creating a StorageClass).
      5. Run CSI certification tests.
   * Run upgrade tests:
      1. Install OCP on AWS.
@@ -327,11 +326,9 @@ N/A, it's managed by OLM and allows to run on any OCP within the boundaries set 
 
 ## Implementation History
 
-
 ## Drawbacks
 
 ## Alternatives
-
 
 ## Infrastructure Needed [optional]
 
