@@ -4,9 +4,10 @@ authors:
   - "@marsik"
   - "@titzhak"
 reviewers:
-  - TBD
+  - "@fromanirh"
+  - "@cynepco3hahue"
 approvers:
-  - TBD
+  - "@dhellmann"
 creation-date: 2021-06-04
 last-updated: yyyy-mm-dd
 status: implementable
