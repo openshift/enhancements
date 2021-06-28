@@ -137,6 +137,18 @@ spec:
 
 N/A?
 
+#### Dev Preview -> Tech Preview
+
+N/A
+
+#### Tech Preview -> GA
+
+N/A
+
+#### Removing a deprecated feature
+
+N/A
+
 ### Upgrade / Downgrade Strategy
 
 #### Upgrade Strategy
@@ -146,7 +158,8 @@ unset, causing the existing defaults to be used.
 
 #### Downgrade Strategy
 
-TODO
+When downgrading from 4.9 to 4.8 or earlier, the specified timeout values will
+be discarded, and the previous defaults will be used.
 
 ### Version Skew Strategy
 
