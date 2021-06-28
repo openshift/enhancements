@@ -13,6 +13,7 @@ approvers:
   - "@smarterclayton"
   - "@derekwaynecarr"
   - "@markmc"
+  - "@dhellmann"
 creation-date: 2021-06-04
 last-updated: 2021-06-04
 status: provisional
