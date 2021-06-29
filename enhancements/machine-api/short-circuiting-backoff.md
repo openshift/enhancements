@@ -108,8 +108,8 @@ MachineHealthCheck:
 ```
 
 ### Risks and Mitigations
-
-No known risks.
+In case `FailedNodeStartupTimeout` is undefined default behaviour is preserved (i.e. remediation is not postponed).
+The Pro is that naive users aren't being surprised with a new behavior however, the con is that naive users do benefit from the new behavior.
 
 ## Design Details
 
@@ -125,20 +125,15 @@ The existing remediation tests will be reviewed / adapted / extended as needed.
 
 TBD
 
-#### Examples
+#### Dev Preview -> Tech Preview
 
 TBD
 
-##### Dev Preview -> Tech Preview
+#### Tech Preview -> GA
 
 TBD
 
-##### Tech Preview -> GA
-
-TBD
-
-##### Removing a deprecated feature
-
+#### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 
@@ -154,12 +149,6 @@ no known drawbacks
 
 ## Alternatives
 
-- Instead of delaying, canceling the remediation for failed machines.
+In case a machine enters the `Failed` state and does not have a NodeRef or a ProviderID do not perform remediation on that machine.
 
-## Infrastructure Needed [optional]
-
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
-
-Listing these here allows the community to get the process for these resources
-started right away.
+This alternative is simpler since it does not require `FailedNodeStartupTimeout` however it does not allow an option to retain the system previous behaviour and relies completely on manual fix of the failed machines.
