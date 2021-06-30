@@ -79,6 +79,23 @@ contributing to a single monorepo.
 
 ## Proposal
 
+### User Stories
+
+#### Story 1
+
+As a user of OpenShift, I should be able to utilize the currently installed operator
+APIs and features in console frontend via plugins delivered through these operators.
+
+#### Story 2
+
+As a developer of OpenShift, I should be able to develop, build and deploy plugins
+on the cluster to expose APIs and features of the given operator in console frontend.
+
+#### Story 3
+
+As an admin of an OpenShift cluster, I should be able to list plugins available on
+the cluster and enable/disable plugins upon operator install or at any point later.
+
 ### Module Federation
 
 Console will use [Webpack module federation](https://webpack.js.org/concepts/module-federation/)
@@ -393,6 +410,18 @@ matures.
 
 Static plugins are already a supported feature. Any existing static plugin that
 is migrated to a dynamic plugin will need to have the same support level.
+
+#### Dev Preview -> Tech Preview
+
+None
+
+#### Tech Preview -> GA
+
+None
+
+#### Removing a deprecated feature
+
+None
 
 ### Upgrade / Downgrade Strategy
 
