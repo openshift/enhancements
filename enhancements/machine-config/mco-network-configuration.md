@@ -7,21 +7,23 @@ reviewers:
 approvers:
   - TBD
 creation-date: 2020-06-25
-last-updated: 2020-06-25
-status: provisional
+last-updated: 2021-06-30
+status: implemented
 ---
 
 # Extend MCO to support declarative host network configuration [baremetal]
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
+- [x] Enhancement is `implementable`
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
+
+Option C has been implemented.
 
 The ability to configure additional host networking parameters is
 paramount on some platforms, especially baremetal. Baremetal nodes
