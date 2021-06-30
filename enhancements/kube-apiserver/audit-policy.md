@@ -11,9 +11,9 @@ reviewers:
 approvers:
   - "@mfojtik"
   - "@Anandnatraj"
-creation-date: 2020-03-24
-last-updated: 2020-05-14
-status: provisional
+creation-date: 2021-03-24
+last-updated: 2021-06-30
+status: implementable
 see-also:
 replaces:
 superseded-by:
@@ -458,7 +458,7 @@ type Audit struct {
     // +listType=map
     // +listMapKey=group
     // +optional
-    CustomRules AuditCustomRule `json:"customRules,omitempty"`
+    CustomRules []AuditCustomRule `json:"customRules,omitempty"`
 }
 
 // AuditCustomRule describes a custom rule for an audit profile that takes precedence over
