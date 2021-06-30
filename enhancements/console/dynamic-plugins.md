@@ -208,7 +208,7 @@ extension points will be available.
   "version": "1.2.3",
   "displayName": "My Plugin",
   "dependencies": {
-    "@console/pluginAPI": "*"
+    "@console/pluginAPI": "4.8.x"
   },
   "extensions": [
     {
