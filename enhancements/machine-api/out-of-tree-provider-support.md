@@ -126,6 +126,7 @@ Every cloud manages its configuration differently, but shares a common overall s
   - This `Deployment` will run the `CCM` pods on the `control-plane` nodes, and will tolerate the `cloudprovider.kubernetes.io/uninitialized` and `node-role.kubernetes.io/master` taints.
   - This will run at least `2` replicas of the pods with anti-affinity settings to prevent scheduling on the same machine to allow some fault-tolerance if a machine were to fail. Note that since OpenShift typically deploys masters across multiple failure domains, this should provide zone by zone fault tolerance without having to rely on cloud provider scheduling information.
 - Own a `ClusterOperator` resource, which will report the readiness of all workloads at post-install phase. The conditions reported will help other dependent components, such as [openshift-ingress](https://github.com/openshift/cluster-ingress-operator).
+- Syncronize the `cloud-config` `ConfigMap` into `openshift-cloud-controller-manager` namespace for use in cloud providers which require it to be present.
 - Be built with consideration for potential future implementations of hybrid OpenShift clusters which support multiple cloud providers simultaneously (ie ensure resources created for each provider by the operator do not clash with resources for other providers).
 *Note: static resource creation is delegated to CVO (SA, RBAC, Namespaces, etc.)*
 
