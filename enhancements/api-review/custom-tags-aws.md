@@ -36,11 +36,11 @@ Note: this enhancement is slightly retroactive. Work has already begun on this. 
 
 Motivations include but are not limited to:
 
- - allow admin, compliance, and security teams to keep track of assets and objects created by OpenShift,
+- allow admin, compliance, and security teams to keep track of assets and objects created by OpenShift,
    both at install time and during continuous operation (Day 2)
- - in a Managed OpenShift environment such as Red Hat OpenShift on AWS (ROSA), allow easy differentiation
+- in a Managed OpenShift environment such as Red Hat OpenShift on AWS (ROSA), allow easy differentiation
    between Red Hat-managed AWS objects and customer-managed objects
- - *allow for the restriction of permissions granted to Red Hat in an AWS account by AWS resource tags.
+- *allow for the restriction of permissions granted to Red Hat in an AWS account by AWS resource tags.
    For example, see https://issues.redhat.com/browse/SDE-1146 - "IAM users and roles can only operate on resources with specific tags"*
 
 ### Goals
