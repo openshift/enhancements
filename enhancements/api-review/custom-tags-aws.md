@@ -45,10 +45,10 @@ Motivations include but are not limited to:
 
 ### Goals
 
- - the administrator or service (in the case of Managed OpenShift) installing OpenShift can pass an arbitrary
+- the administrator or service (in the case of Managed OpenShift) installing OpenShift can pass an arbitrary
    list of user-defined tags to the OpenShift Installer, and everything created by the installer and all other
    bootstrapped components will apply those tags to all resources created in AWS, for the life of the cluster, and where supported by AWS.
- - tags must be applied at creation time, in an atomic operation. It isn't acceptable to create an object and,
+- tags must be applied at creation time, in an atomic operation. It isn't acceptable to create an object and,
    after some period of time, apply the tags post-creation.
 
 ### Non-Goals
