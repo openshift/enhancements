@@ -53,9 +53,9 @@ Motivations include but are not limited to:
 
 ### Non-Goals
 
- - to reduce initial scope, tags are applied only at creation time and not reconciled. If an administrator manually
+- to reduce initial scope, tags are applied only at creation time and not reconciled. If an administrator manually
    changes the tags stored in the infrastructure resource, behavior is undefined. See below.
- - to reduce initial scope, we are not implementing this for clouds other than AWS. We will not take any actions
+- to reduce initial scope, we are not implementing this for clouds other than AWS. We will not take any actions
    to prohibit that later.
 
 ## Proposal
