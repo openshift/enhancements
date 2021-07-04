@@ -97,6 +97,18 @@ TBD
 
 TBD
 
+#### Dev Preview -> Tech Preview
+
+TBD
+
+#### Tech Preview -> GA
+
+TBD
+
+#### Removing a deprecated feature
+
+This enhancement does not remove or deprecate any features.
+
 ### Upgrade / Downgrade Strategy
 
 On upgrade:
