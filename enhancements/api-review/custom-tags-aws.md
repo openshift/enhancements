@@ -65,8 +65,8 @@ resources created by in-cluster operators.
 
 If `experimentalPropagateUserTags` is true, install validation will fail if there is any tag that starts with `kubernetes.io` or `openshift.io`.
 
-Add a new field `userTags` to `.status.aws` of the `infrastructure.config.openshift.io` type. Tags included in the
-`userTags` field will be applied to new resources created for the cluster. The `userTags` field will be populated by the installer only if the `experimentalPropagateUserTags` field is true.
+Add a new field `resourceTags` to `.status.aws` of the `infrastructure.config.openshift.io` type. Tags included in the
+`resourceTags` field will be applied to new resources created for the cluster. The `resourceTags` field will be populated by the installer only if the `experimentalPropagateUserTags` field is true.
 
 Note existing unchanged behavior: The installer will apply these tags to all AWS resources it creates with terraform (e.g. bootstrap and master EC2 instances) from the install config, not from infrastructure status, and regardless if the propagation option is set.
 
