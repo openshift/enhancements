@@ -29,8 +29,8 @@ This enhancement describes a proposal to allow an administrator of OpenShift to
 have the ability to apply user defined tags to many resources created by OpenShift in AWS.
 
 Note: this enhancement is slightly retroactive. Work has already begun on this. See
- - https://github.com/openshift/api/pull/864
- - https://github.com/openshift/cluster-ingress-operator/pull/578
+- https://github.com/openshift/api/pull/864
+- https://github.com/openshift/cluster-ingress-operator/pull/578
 
 ## Motivation
 
