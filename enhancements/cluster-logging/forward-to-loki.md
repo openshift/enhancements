@@ -1,6 +1,22 @@
+---
+title: forward_to_loki
+authors:
+  - "@alanconway"
+reviewers:
+  - "@jcantrill"
+  - "@periklis"
+approvers:
+  - "@jcantrill"
+creation-date: 2021-03-29
+last-updated: 2021-07-13
+status: implementable
+see-also:
+superseded-by:
+---
+
 # Forward to Loki
 
-## Release Sign-off Checklist
+## Release Signoff Checklist
 
 - [X] Enhancement is `implementable`
 - [X] Design details are appropriately documented from clear requirements
@@ -91,13 +107,9 @@ The default label set is:
 
 `log_type`: One of `application`, `infrastructure`, `audit`. Basic log categorization.
 
-`cluster`: The cluster name, i.e. the DNS authority part of the cluster master URL.\
-This name is DNS-unique, human readable, and known to all k8s API clients.
-It is recommend as a cluster ID by [this discussion](https://github.com/kubernetes/kubernetes/issues/2292).
-To print the name of the connected cluster:
-```bash
-oc config view -o jsonpath='{.clusters[].name}{"\n"}
-```
+`cluster`: The openshift cluster name as printed by: \
+`oc get infrastructure/cluster -o template="{{.status.infrastructureName}}"` \
+NOTE: If the cluster name is not available, no cluster label is applied. This is not an error.
 
 `kubernetes.namespace_name`: namespace where the log originated.
 
@@ -136,12 +148,6 @@ The following optional output fields are Loki-specific:
   Example: `kubernetes.labels.foo` => `kubernetes_labels_foo`.\
   **Note**: `kubernetes.host` is *always* be included, even if not requested.
   It is required to ensure ordered label streams.
-- `tenantKey`: (string, default=`"kubernetes.namespaceName"`) \
-  Use the value of this meta-data key as the Loki tenant ID.\
-  At least these keys are supported:
-  - `kubernetes.namespaceName`: Use the namespace name as the tenant ID.
-  - `kubernetes.labels.<key>`: Use the string value of kubernetes label with key `<key>`.
-  - `openshift.labels.<key>`: use the value of a label attached by the forwarder.
 
 The full set of meta-data keys is listed in [data model][].
 
@@ -154,23 +160,10 @@ Notes on plug-in configuration:
 - Security: configured by the `output.secret` as usual.
 - K8s labels as Loki labels: supported by the plug-in.
 - Always include `kubernetes.host` to avoid avoid out-of-order streams.
-- Tenant set from `output.tenantKey`
 - Output format is `json`, serializes the fluentd record like other outputs.
 - Static labels set as `extra_labels` to avoid extracting from each record.
 
 ### User Stories
-
-#### Treat each namespace as a separate Loki tenant
-
-I want logs from each namespace to be directed to separate Loki tenants, using Loki's "soft tenancy" model:
-
-``` yaml
-- name: myLokiOutput
-  type: loki
-  url: ...
-  secret: ...
-  tenantKey: kubernetes.namespace_name
-```
 
 #### Query all logs from a namespace
 
@@ -223,7 +216,8 @@ we assume this configuration to speed up queries:
 {cluster="rh-idev", kubernetes_labels_deploymentconfig="wwwopenshifio"} |= message:"Connection reset by peer"
 ```
 
-### Risks and Mitigation
+
+### Risks and Mitigations
 
 #### Cardinality explosions for large scale clusters
 
@@ -241,15 +235,24 @@ For example a CI test cluster that constantly creates and destroys randomly-name
 
 ### Graduation Criteria
 
-Acceptable performance & passing stress tests.
+- Performance benchmarks, must equal or outperform Elasticsearch store.
+
+#### Dev Preview -> Tech Preview
+#### Tech Preview -> GA
+#### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 
-_**TODO** Migrating from Elasticsearch_
+Need to provide migration assistance for users coming from Elasticsearch.
+Out of scope for this proposal.
+
+### Version Skew Strategy
 
 ## Implementation History
+## Drawbacks
 
-None yet.
+## Alternatives
+
 
 [label names]: https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels
 [data model]: https://github.com/openshift/origin-aggregated-logging/blob/master/docs/com.redhat.viaq-openshift-project.asciidoc
