@@ -27,13 +27,13 @@ status: provisional
 
 ## Summary
 
-The intent of this enhancement is to take the process of credentials management outside the OpenShift cluster for new 
+The intent of this enhancement is to take the process of credentials management outside the OpenShift cluster for new
 platforms. We propose to make *manual* mode as default for clusters on new platforms, optionally supported by CLI tooling
 that follows the best practices of the hosting infrastructure at that time.
 
 ## Motivation
 
-The main motivation behind this enhancement is to satisfy the customer requirement to follow the best security practices 
+The main motivation behind this enhancement is to satisfy the customer requirement to follow the best security practices
 by not storing admin credentials inside the cluster
 
 ### Goals
@@ -50,44 +50,44 @@ As part of this enhancement we plan to do the following:
 
 ## Proposal
 
-Currently, *mint* is a default credentials mode for OpenShift. In this mode we run OpenShift installer with an admin 
-level cloud credential. The admin credential is stored in kube-system namespace and then used by the cloud credential 
+Currently, *mint* is a default credentials mode for OpenShift. In this mode we run OpenShift installer with an admin
+level cloud credential. The admin credential is stored in kube-system namespace and then used by the cloud credential
 operator to process the CredentialRequests in the cluster and create new users with fine-grained permissions.
-The customers have reported that the need to store admin credentials inside the cluster is a major disadvantage. Based 
-on the feedback, we propose to run credentials related setup outside a cluster and then start installation process in a 
+The customers have reported that the need to store admin credentials inside the cluster is a major disadvantage. Based
+on the feedback, we propose to run credentials related setup outside a cluster and then start installation process in a
 *manual* mode without providing admin credentials to the installer.
 
 ### User Stories
 
 #### Story 1
-As an OpenShift cluster administrator I should be able to extract the CredentialsRequest manifests from the release image 
-and create required manifests/infrastructure to satisfy all in-cluster component's CredentialsRequests. This has been 
+As an OpenShift cluster administrator I should be able to extract the CredentialsRequest manifests from the release image
+and create required manifests/infrastructure to satisfy all in-cluster component's CredentialsRequests. This has been
 already [implemented](https://github.com/openshift/cloud-credential-operator/blob/master/docs/ccoctl.md).
 
 #### Story 2
-As an OpenShift cluster administrator, I should be able to reconcile my credentials manually using local CLI tooling on 
+As an OpenShift cluster administrator, I should be able to reconcile my credentials manually using local CLI tooling on
 an on-going basis. This is in [backlog](https://issues.redhat.com/browse/CCO-106) and targeted for 4.9.
 
 #### Story 3
-As an OpenShift cluster administrator, I should be able to prep credentials for a cluster upgrade. This is in [backlog](https://issues.redhat.com/browse/CCO-106) 
+As an OpenShift cluster administrator, I should be able to prep credentials for a cluster upgrade. This is in [backlog](https://issues.redhat.com/browse/CCO-106)
 and targeted for 4.9.
 
 ### Risks and Mitigations
 
 ## Design Details
 
-We intend to build an optional tool **ccoctl** which will handle credentials management of the cluster in *manual* mode. 
-The following is the set of requirements for the current prototype (for AWS). We can have something similar for other 
+We intend to build an optional tool **ccoctl** which will handle credentials management of the cluster in *manual* mode.
+The following is the set of requirements for the current prototype (for AWS). We can have something similar for other
 platforms.
 
 * ccoctl should be able to setup Identity Provider to authenticate OpenShift components
-* ccoctl should be able to take a list of CredentialsRequests from the release image and create/update 
+* ccoctl should be able to take a list of CredentialsRequests from the release image and create/update
   Roles/Users/ServicePrincipals/ServiceAccounts with appropriate permissions.
-* ccoctl should be able to take list of CredentialsRequests for a release image, and the Identity Provider URL to generate 
+* ccoctl should be able to take list of CredentialsRequests for a release image, and the Identity Provider URL to generate
   the objects that need to be passed to the installer for successful installation
 * ccoctl should be able to delete all the resources that it had created in the cloud
 
-We envision **ccoctl** as a recommended tool to setup credentials on new platforms but customers are free to use other 
+We envision **ccoctl** as a recommended tool to setup credentials on new platforms but customers are free to use other
 tools like Terraform/AWS CloudFormation to do the above mentioned tasks. Read more about AWS implementation details [here](https://github.com/openshift/cloud-credential-operator/blob/master/docs/ccoctl.md)
 
 We also plan to have a detailed documentation in place to guide new cloud providers to implement *manual* mode.
@@ -97,7 +97,7 @@ To upgrade a cluster we need to execute following steps:
   have changed.
 * Create/update credentials in the underlying cloud provider, and also create/update Kubernetes Secrets in the correct
   namespaces to satisfy all CredentialsRequests in the new release.
-* CCO sets `Upgradeable=False` when in manual mode. Set an appropriate annotation `cloudcredential.openshift.io/upgradeable-to` 
+* CCO sets `Upgradeable=False` when in manual mode. Set an appropriate annotation `cloudcredential.openshift.io/upgradeable-to`
   to a new upgradable version to allow upgrade.
 
 All the above task will also be executable by *ccoctl*. Details in [this](https://issues.redhat.com/browse/CCO-84) card.
@@ -106,10 +106,36 @@ All the above task will also be executable by *ccoctl*. Details in [this](https:
 
 ### Test Plan
 
-We plan to have a e2e test that will externally set up a credentials management infrastructure and then kickstart 
+We plan to have a e2e test that will externally set up a credentials management infrastructure and then kickstart
 install in a *manual* mode.
 
 ### Graduation Criteria
+
+#### Dev Preview -> Tech Preview
+
+- Ability to utilize the enhancement end to end
+- End user documentation, relative API stability
+- Sufficient test coverage
+- Gather feedback from users rather than just developers
+- Enumerate service level indicators (SLIs), expose SLIs as metrics
+- Write symptoms-based alerts for the component(s)
+
+#### Tech Preview -> GA
+
+- More testing (upgrade, downgrade, scale)
+- Sufficient time for feedback
+- Available by default
+- Backhaul SLI telemetry
+- Document SLOs for the component
+- Conduct load testing
+
+**For non-optional features moving to GA, the graduation criteria must include
+end to end tests.**
+
+#### Removing a deprecated feature
+
+- Announce deprecation and support policy of the existing feature
+- Deprecate the feature
 
 ### Upgrade / Downgrade Strategy
 
@@ -117,7 +143,7 @@ install in a *manual* mode.
 
 ## Implementation History
 
-We currently have a work-in-progress CLI tool [ccoctl](https://github.com/openshift/cloud-credential-operator/blob/master/docs/ccoctl.md) 
+We currently have a work-in-progress CLI tool [ccoctl](https://github.com/openshift/cloud-credential-operator/blob/master/docs/ccoctl.md)
 to create and manage cloud credentials outside the cluster for AWS cloud. The design details of this tool is discussed above.
 
 ## Drawbacks
@@ -125,10 +151,9 @@ to create and manage cloud credentials outside the cluster for AWS cloud. The de
 * Taking the credentials management outside the cluster will create additional overhead for the customer to make sure all
   the required infrastructure is in place before starting the installation process. Current tooling we have only supports
   the AWS cloud, we do not have anything planned for other cloud providers.
-* Push-button upgrades will not work in *manual* mode as the cluster no longer has the admin credentials to mint credentials 
+* Push-button upgrades will not work in *manual* mode as the cluster no longer has the admin credentials to mint credentials
   (with fine-grained permissions) for in-cluster components.
 
 ## Alternatives
 
 ## Infrastructure Needed [optional]
-
