@@ -105,6 +105,11 @@ resource in the form of an annotation, which we want to backport. Its key is `cl
 will be paused as soon as this annotation exists. However, its value can be for used for syncing between multiple
 parties which want to use the annotation.
 
+### User Stories
+- I want my worker machines to be remediated when the backed node has `ready=false` or `ready=Unknown` condition for more than 10m.
+- I want remediation to temporary short-circuit if the 40% or more of the targets of this pool are unhealthy at the same time.
+- I want no remediation to happen while my cluster is upgrading its machines / nodes.
+
 ### Implementation Details
 
 #### MachineHealthCheck CRD
@@ -112,11 +117,6 @@ parties which want to use the annotation.
 - Enable defining an unhealthy node criteria (based on a list of node conditions).
 - Enable setting a threshold of unhealthy nodes. If the current number is at or above this threshold no further remediation will take place. This can be expressed as an int or as a percentage of the total targets in the pool.
 - Enable pausing of remediation
-
-E.g:
-- I want my worker machines to be remediated when the backed node has `ready=false` or `ready=Unknown` condition for more than 10m.
-- I want remediation to temporary short-circuit if the 40% or more of the targets of this pool are unhealthy at the same time.
-- I want no remediation to happen while my cluster is upgrading its machines / nodes.
 
 ```yaml
 apiVersion: machine.openshift.io/v1beta1
@@ -198,6 +198,12 @@ This feature will be tested for public clouds in the e2e machine API suite as th
 
 ### Graduation Criteria
 An implementation of this feature is currently gated behind the `TechPreviewNoUpgrade` flag. This proposal wants to remove the gating flag and promote machine health check to a GA status with a beta API.
+
+#### Dev Preview -> Tech Preview
+
+#### Tech Preview -> GA
+
+#### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 
