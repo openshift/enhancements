@@ -96,17 +96,27 @@ For a node notFound or a failed machine, the machine is considerable unrecoverab
 - The machine controller provider implementation deletes the cloud instance.
 - The machine controller deletes the machine resource.
 
+### Pausing
+
+Some cluster operations, e.g. upgrades, result in temporarily unhealthy machines / nodes, which might trigger
+unnecessary remediation. To allow cluster admins or new controllers to prevent this from happening, we will implement a
+`pause` feature on the machineHealthCheck resource. This feature already exists on the upstream machineHealthCheck
+resource in the form of an annotation, which we want to backport. Its key is `cluster.x-k8s.io/paused`, and remediation
+will be paused as soon as this annotation exists. However, its value can be for used for syncing between multiple
+parties which want to use the annotation.
+
 ### Implementation Details
 
 #### MachineHealthCheck CRD
 - Enable watching a pool of machines (based on a label selector).
 - Enable defining an unhealthy node criteria (based on a list of node conditions).
 - Enable setting a threshold of unhealthy nodes. If the current number is at or above this threshold no further remediation will take place. This can be expressed as an int or as a percentage of the total targets in the pool.
+- Enable pausing of remediation
 
 E.g:
 - I want my worker machines to be remediated when the backed node has `ready=false` or `ready=Unknown` condition for more than 10m.
 - I want remediation to temporary short-circuit if the 40% or more of the targets of this pool are unhealthy at the same time.
-
+- I want no remediation to happen while my cluster is upgrading its machines / nodes.
 
 ```yaml
 apiVersion: machine.openshift.io/v1beta1
@@ -114,6 +124,8 @@ kind: MachineHealthCheck
 metadata:
   name: example
   namespace: openshift-machine-api
+  annotations:
+    cluster.x-k8s.io/paused: "clusterUpgrading"
 spec:
   selector:
     matchLabels:
@@ -137,6 +149,7 @@ Watch:
 - Watch machines and nodes with an event handler e.g controller runtime `EnqueueRequestsFromMapFunc` which returns machineHealthCheck resources.
 
 Reconcile:
+- Don't start remediation in case the pause annotation is set on the machineHealthCheck resource.
 - Fetch all the machines in the pool and operate over machine/node targets. E.g:
 ```go
 type target struct {
