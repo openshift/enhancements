@@ -8,8 +8,10 @@ reviewers:
 approvers:
   - "@deads2k"
   - "@sttts"
+  - "@sur"
+  - "@stlaz"
 creation-date: 2021-05-22
-last-updated: yyyy-mm-dd
+last-updated: 2021-07-07
 status: implementable
 see-also:
 replaces:
