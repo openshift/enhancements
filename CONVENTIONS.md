@@ -143,7 +143,51 @@ Please note that in case of [Single Node OpenShift](https://github.com/openshift
   * Set soft pod anti-affinity on the hostname so that pods prefer to land on separate nodes (will be violated on two node clusters)
   * Use maxSurge for deployments if possible since the spreading rules are soft
 
-In future, when we include the descheduler into OpenShift by default, it will periodically rebalance the cluster to ensure spreading for operand or operator is honored. At that time we will remove hard anti-affinity constraints, and recommend components move to a surge model during upgrades.
+In the future, when we include the descheduler into OpenShift by default, it will periodically rebalance the cluster to ensure spreading for operand or operator is honored. At that time we will remove hard anti-affinity constraints, and recommend components move to a surge model during upgrades.
+
+##### Handling kube-apiserver disruption
+
+kube-apiserver disruption can happen for multiple reasons, including
+1. kube-apiserver rollout on a non-HA cluster
+2. networking disruption on the host running the client
+3. networking disruption on the host running the server
+4. internal load balancer disruption
+5. external load balancer disruption
+
+We have seen all of these cases, and more, disrupt connections.
+Many workloads, controllers, and operators rely on the kube-apiserver for making authentication, authorization, and leader election.
+To avoid disruption and mass pod-death, it is important to
+1. /healthz, /readyz, /livez should not require authorization.
+   They are already open to unauthenticated, so the delegated authorization check presents a reliability risk without
+   a security benefit.
+   This is now the default in the delegated authorizer in k8s.io/apiserver based servers.
+   Controller-runtime does not protect these by default.
+2. Binaries should handle mTLS negotiation using the in-cluster client certificate configuration.
+   This allows for authentication without contacting the kube-apiserver.
+   The canonical case here is the metrics scraper.
+   In 4.9, the metrics scraper will support using in-cluster client-certificates to increase reliability of scraping
+   in cases of kube-apiserver disruption.
+   This is now the default in the delegated authenticator in k8s.io/apiserver based servers.
+   Controller-runtime is missing this feature, but it is critical for secure monitoring.
+   This gap in controller-runtime should be addressed, but in the short-term kube-rbac-proxy can honor client certificates.
+3. /metrics should use a hardcoded authorizer.
+   The metrics scraping identity is `system:serviceaccount:openshift-monitoring:prometheus-k8s`
+   In OCP, we know that the metrics-scraping identity will *always* have access to /metrics.
+   The delegated authorization check for that user on that endpoint presents a reliability risk without a security benefit.
+   You can use a construction like: https://github.com/openshift/library-go/blob/7a65fdb398e28782ee1650959a5e0419121e97ae/pkg/controller/controllercmd/builder.go#L254-L259 .
+   Controller-runtime missing this feature, but it is critical for reliability.
+   Again, in the short term, kube-rbac-proxy can provide static authorization policy.
+4. Leader election needs to be able to tolerate 60s worth of disruption.
+   The default in library-go has been upgaded to handle this case in 4.9: https://github.com/openshift/library-go/blob/4b9033d00d37b88393f837a88ff541a56fd13621/pkg/config/leaderelection/leaderelection.go#L84
+   In essence, the kube-apiserver downtime tolerance is `floor(renewDeadline/retryPeriod)*retryPeriod-retryPeriod`.
+   Recommended defaults are LeaseDuration=137s, RenewDealine=107s, RetryPeriod=26s.
+   These are the configurable values in k8s.io/client-go based leases and controller-runtime exposes them.
+   This gives us
+   1. clock skew tolerance == 30s
+   2. kube-apiserver downtime tolerance == 78s
+   3. worst non-graceful lease reacquisition == 163s
+   4. worst graceful lease reacquisition == 26s
+
 
 #### Upgrade and Reconfiguration
 
