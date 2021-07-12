@@ -22,7 +22,7 @@ approvers:
   - "@mrunalp"
   - "@sttts"
 creation-date: 2020-08-31
-last-updated: 2021-06-29
+last-updated: 2021-07-14
 status: implementable
 replaces:
 superseded-by:
@@ -203,6 +203,21 @@ Without this information, the `scheduler` cannot schedule `Pods` that have any s
 To ensure that cluster disaster recovery procedures can still operate smoothly, we will ensure that core control plane components and their operators tolerate the uninitialized taint, to prevent `CCM` blocking new control plane hosts being added if `CCM` is non-functional.
 This will include, but is not limited to: Kube Controller Manager, Etcd, Kube API Server, Networking, Cluster Machine Approver.
 
+#### Windows Machine Config Operator
+
+##### Kubelet Changes
+
+To generate the configuration for Windows nodes, `WMCO` reads the output of MCO's rendered configuration as a basis for its own config for Kubelet on the Windows node.
+As we are making changes to the output of the Kubelet service in `MCO` (namely change the value of the `cloud-provider` flag), we will need to verify that `WMCO` reads this flag and copies its value to the Kubelet Windows service.
+
+##### Node Initialization
+
+On most platforms, `Node` initialization is handled centrally by the `CCM`, specifically the Cloud Node Manager (`CNM`) running within it.
+However, On certain platforms (e.g. Azure), the `CNM` must be run on the `Node` itself, typically via a `DaemonSet`.
+Since Red Hat cannot supply or support Windows container images, we cannot run a `DaemonSet` for the `CNM` targeted at Windows Nodes as we would do on Linux Nodes.
+Instead, we must adapt the `WMCO` to, on these particular platforms, deploy a new Windows service that runs the `CNM` on the `Node`.
+This pattern is already in place for other components that are required to run on the host (eg `CNI` and Kube-Proxy), so we will be able to reuse the existing pattern to add support for `CNM` on platforms that require a `CNM` per host.
+
 ##### Example flag changes for kubelet
 
 Current flag configuration for kubelet in AWS provider:
@@ -332,18 +347,19 @@ Once the provider is moved to out-of-tree, the migration mechanism will be disab
 
 #### Bootstrap changes
 
-One of the responsibilities of the initialisation process for Kubelet is to set the `Node`’s IP addresses within the status of the `Node` object. The remaining responsibilities are not important for this document bar the removal of a taint which prevents workloads running on the `Node` until the initialisation has completed.
+One of the responsibilities of the initialisation process for Kubelet is to set the `Node`’s IP addresses within the status of the `Node` object. The remaining responsibilities are not important for bootstrapping, bar the removal of a taint which prevents workloads running on the `Node` until the initialisation has completed.
 
 A second part of the bootstrap process for a new `Node`, is to initialise the `CNI` (networking). Typically in an OpenShift cluster, this is handled once the Networking Operator starts.
-The Networking operator will create the `CNI` pods (typically OpenShift SDN), which schedule on the `Node`, use the `Node` IP addresses to create a `HostSubnet` resource within Kubernetes and then mark then complete the initialisation process for the `CNI`, in doing so, marking the `Node` as ready and allowing the remaining workloads to start.
+The Networking operator will create the `CNI` pods (typically OpenShift SDN), which schedule on the `Node`, use the `Node` IP addresses to create a `HostSubnet` resource within Kubernetes and then complete the initialisation process for the `CNI`, in doing so, marking the `Node` as ready and allowing the remaining workloads to start.
 
-Before the `CNI` is initialized on a `Node`, in-cluster networking such as Service IPs, in particular the API server Service, will not work for any `Pod` on the `Node`. Additionally, any `Pod` that requires the Pod Networking implemented by `CNI`, cannot start. For this reason, `Pods` such as the Networking Operator must use host networking and the “API Int” load balancer to contact the Kube API Server.
+Before the `CNI` is initialized on a `Node`, in-cluster networking such as Service IPs, in particular the API server Service, will not work for any `Pod` on the `Node`. Additionally, any `Pod` that requires the Pod Networking implemented by `CNI`, cannot start.
+For this reason, `Pods` such as the Networking Operator must use host networking and the “API Int” load balancer to contact the Kube API Server.
 
 Because the `CCM` is taking over the responsibility of setting the `Node` IP addresses, `CCM` will become a prerequisite for networking to become functional within any Cluster. Because the `CNI` is not initialised, we must ensure that the `CCCMO` and `CCM` Pods tolerate the scenario where `CNI` is non-functional.
 
 To do so, we must tolerate the not-ready taint for these pods and they must all run with host networking and use the API load balancer, rather than using the internal Service. This will ensure that the cluster can bootstrap successfully and recover from any disaster recovery scenario.
 
-Our operator will take precedence for CNI operator. It will tolerate `NotReady` `NoSchedule` taint and `CCM` specific `Uninitialized` taint. Operator would start as the first operator in the cluster when first `control-plane` is created, and be responsible for initializing `Nodes` which will allow latter operators to start.
+Our operator will become a prerequisite for the Network Operator. CCCMO will tolerate the `Node` `NotReady:NoSchedule` and `CCM` specific `Uninitialized` taints. CCCMO will start as the first operator on the control plane hosts, and be responsible for initializing `Nodes`, allowing other operators to start.
 
 #### Metrics
 
@@ -553,7 +569,8 @@ This functionality should not be required as OpenShift handles certificate appro
 
 Q: Does every node need a CCM?
 
-- A: No. The cluster only needs one active `CCM` at any time. A `Deployment` will manage the `CCM` pod and will have 2 replicas which will use leader election to nominate an active leader.
+- A: No. The cluster only needs one active `CCM` at any time. A `Deployment` will manage the `CCM` pod and will have 2 replicas which will use leader election to nominate an active leader and maintain HA by scheduling on control-plane nodes located in the different regions.
+Only in some scenarios (depending on the cloud provider implementation) like Azure `cloud-node-manager` has to run on all the `Nodes` due to 1:1 relation betwen `Node` and a `CNM` replica in their case.
 [Source](https://kubernetes.io/docs/concepts/overview/components/#cloud-controller-manager) This assumption may change in the future, as `CCM` may run in worker nodes to determine the state of the instance.
 
 Q: How metrics are affected by the CCM migration?
@@ -708,4 +725,4 @@ Mandatory operator repository:
 - [The Kubernetes Cloud Controller Manager](https://medium.com/@m.json/the-kubernetes-cloud-controller-manager-d440af0d2be5) article
 https://hackmd.io/00IoVWBiSVm8mMByxerTPA#
 - [CSI support](https://github.com/openshift/enhancements/blob/master/enhancements/storage/csi-driver-install.md#ocp-45-kubernetes-118)
-- [CNI ]
+- [CCM role in bootstrap process](https://docs.google.com/document/d/1yAczhHNJ4rDqVFFvyi7AZ27DEQdvx8DmLNbavIjrjn0)
