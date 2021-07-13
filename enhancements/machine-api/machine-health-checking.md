@@ -99,16 +99,17 @@ For a node notFound or a failed machine, the machine is considerable unrecoverab
 ### Pausing
 
 Some cluster operations, e.g. upgrades, result in temporarily unhealthy machines / nodes, which might trigger
-unnecessary remediation. To allow cluster admins or new controllers to prevent this from happening, we will implement a
-`pause` feature on the machineHealthCheck resource. This feature already exists on the upstream machineHealthCheck
-resource in the form of an annotation, which we want to backport. Its key is `cluster.x-k8s.io/paused`, and remediation
-will be paused as soon as this annotation exists. However, its value can be for used for syncing between multiple
-parties which want to use the annotation.
+unnecessary remediation. To allow cluster admins or new controllers to prevent this from happening without having to
+delete and re-create machineHealthCheck objects, we will implement a `pause` feature on the machineHealthCheck resource.
+This feature already exists on the upstream machineHealthCheck resource in the form of an annotation, which we want to
+backport. Its key is `cluster.x-k8s.io/paused`. While this isn't consistent with existing downstream annotation keys, it
+will make future alignment with Cluster API easier. Remediation will be paused as soon as this annotation exists. Its
+value isn't checked but is expected to be empty.
 
 ### User Stories
 - I want my worker machines to be remediated when the backed node has `ready=false` or `ready=Unknown` condition for more than 10m.
 - I want remediation to temporary short-circuit if the 40% or more of the targets of this pool are unhealthy at the same time.
-- I want no remediation to happen while my cluster is upgrading its machines / nodes.
+- I want to prevent remediation, without deleting the entire MHC configuration, while my cluster is upgrading its machines / nodes.
 
 ### Implementation Details
 
@@ -125,7 +126,7 @@ metadata:
   name: example
   namespace: openshift-machine-api
   annotations:
-    cluster.x-k8s.io/paused: "clusterUpgrading"
+    cluster.x-k8s.io/paused: ""
 spec:
   selector:
     matchLabels:
