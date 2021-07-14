@@ -37,7 +37,7 @@ status: implementable
 
 ## Summary
 
-Static pods operators use a revisioned pod manifest and revisioned manifests to roll out and start a new configuration of the operand in an atomic way.
+Static pods operators use a revisioned pod manifest and revisioned configmap and secret manifests to roll out and start a new configuration of the operand in an atomic way.
 
 Configuration can be bad in different ways. In HA OpenShift, the static pod operator will wait for operands on one node to start up and to become healthy and ready. The operator will stop rolling out bad revisions further.
 
