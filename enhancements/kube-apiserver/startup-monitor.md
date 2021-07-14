@@ -88,13 +88,13 @@ the task for startup-monitor is to fall back:
 
 1. when detecting problems with the new revision, the startup-monitor will copy the pod-manifest of the `/etc/kubernetes/static-pods/last-known-good` link (or the previous revision if the link does not exist, or don't do anything if there is no previous revision as in bootstrapping) into `/etc/kubernetes`.
 
-It will add annotations to the old revision pod manifest:
+  It will add annotations to the old revision pod manifest:
 
-- `startup-monitor.static-pods.openshift.io/fallback-for-revision: <revision>`
-- `startup-monitor.static-pods.openshift.io/fallback-reason: MachineReadableReason`
-- `startup-monitor.static-pods.openshift.io/fallback-message: "Human readable, possibly multiline message"`
+  - `startup-monitor.static-pods.openshift.io/fallback-for-revision: <revision>`
+  - `startup-monitor.static-pods.openshift.io/fallback-reason: MachineReadableReason`
+  - `startup-monitor.static-pods.openshift.io/fallback-message: "Human readable, possibly multiline message"`
 
-These will be copied into the mirror pod by kubelet and the operator knows that this is due to a problem to start up the new revision.
+  These will be copied into the mirror pod by kubelet and the operator knows that this is due to a problem to start up the new revision. The message annotation will be published to the user through the operator degraded condition.
 
 2. if the operand becomes ready, the startup-monitor will link the revision to `/etc/kubernetes/static-pods/last-known-good`, and then remove its own pod-manifest from `/etc/kubernetes`, and hence commit suicide.
 
