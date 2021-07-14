@@ -53,8 +53,8 @@ In SNO, we only have one chance to start the new static pod for the kube-apiserv
 
 Bad configurations can have many reasons:
 - **the pod manifest can be wrong**: e.g. by YAML syntax, not validating as a pod or some deeper semantical error:
-    - **each one of the [23 different config observers of kube-apiserver]([https://](https://github.com/openshift/cluster-kube-apiserver-operator/blob/ce4170b4a040fc03603f62d686a6e9ea0cadde34/pkg/operator/configobservation/configobservercontroller/observe_config_controller.go#L119)) provided and owned by 9 different teams can lead to bad configuration**. E.g. a config observer adds a flag `--foo` which was removed in the current upstream release, but lacking test coverage did not show this in CI.
-    - **source invalid data from other sources with incomplete validation**: e.g. the network mask given through some other config.openshift.io/v1 CR defined by the user is invalid.
+  - **each one of the [23 different config observers of kube-apiserver]([https://](https://github.com/openshift/cluster-kube-apiserver-operator/blob/ce4170b4a040fc03603f62d686a6e9ea0cadde34/pkg/operator/configobservation/configobservercontroller/observe_config_controller.go#L119)) provided and owned by 9 different teams can lead to bad configuration**. E.g. a config observer adds a flag `--foo` which was removed in the current upstream release, but lacking test coverage did not show this in CI.
+  - **source invalid data from other sources with incomplete validation**: e.g. the network mask given through some other config.openshift.io/v1 CR defined by the user is invalid.
 - **some ConfigMap or Secret can be wrong**: e.g. the audit policy is a YAML file inside a ConfigMap. If it is invalid, the kube-apiserver will refuse startup. ConfigMaps and Secrets are synced into the operand namespace from many different sources, and then copied as files onto the master node file system by the installer pod.
 - **some ConfigMap or Secret marked as optional but is actually required**: the installer will continue rolling out the pod after skipping the optional files. In HA OpenShift, this might not show up because the operator create quickly another revision when the ConfigMap or Secret show up. In SNO this race might be fatal.
 
@@ -88,13 +88,13 @@ the task for startup-monitor is to fall back:
 
 1. when detecting problems with the new revision, the startup-monitor will copy the pod-manifest of the `/etc/kubernetes/static-pods/last-known-good` link (or the previous revision if the link does not exist, or don't do anything if there is no previous revision as in bootstrapping) into `/etc/kubernetes`.
 
-  It will add annotations to the old revision pod manifest:
+   It will add annotations to the old revision pod manifest:
 
-  - `startup-monitor.static-pods.openshift.io/fallback-for-revision: <revision>`
-  - `startup-monitor.static-pods.openshift.io/fallback-reason: MachineReadableReason`
-  - `startup-monitor.static-pods.openshift.io/fallback-message: "Human readable, possibly multiline message"`
+   - `startup-monitor.static-pods.openshift.io/fallback-for-revision: <revision>`
+   - `startup-monitor.static-pods.openshift.io/fallback-reason: MachineReadableReason`
+   - `startup-monitor.static-pods.openshift.io/fallback-message: "Human readable, possibly multiline message"`
 
-  These will be copied into the mirror pod by kubelet and the operator knows that this is due to a problem to start up the new revision. The message annotation will be published to the user through the operator degraded condition.
+   These will be copied into the mirror pod by kubelet and the operator knows that this is due to a problem to start up the new revision. The message annotation will be published to the user through the operator degraded condition.
 
 2. if the operand becomes ready, the startup-monitor will link the revision to `/etc/kubernetes/static-pods/last-known-good`, and then remove its own pod-manifest from `/etc/kubernetes`, and hence commit suicide.
 
@@ -121,7 +121,8 @@ The timeout is to be specified in the operator. Hence, another operator might wa
 
 ### Retries
 
-The readiness procedure above has the risk of considering external reasons as fatal reasons for kube-apiserver readiness. E.g. etcd unstable or kubelet not updating the mirror pod. Both would led us to believe the new revision is broken. This is different in HA OpenShift because there is no time limit exists for a new static pod to start up. It can keep crash-looping for hours and eventually start-up to finish the roll-out.
+The readiness procedure above has the risk of considering external reasons as fatal reasons for kube-apiserver readiness. E.g. etcd unstable or kubelet not updating the mirror pod. Both would led us to believe the new revision is broken. 
+This is different in HA OpenShift because there is no time limit exists for a new static pod to start up. It can keep crash-looping for hours and eventually start-up to finish the roll-out.
 
 In order to mitigate this difference in error behaviour, a failing revision in SNO will be retried to roll-out after >=N minutes, N=O(10), a reasonable time for the cluster to recover from a previous attempt. In the time in-between, the fallback mechanism will move the cluster back to the old revision, until the retry is started.
 
@@ -160,7 +161,9 @@ The pruner today does not know about the `last-known-good` symlink to the last s
 
 - Why is it safe to go back to last-known-good?
 
-  Handwaving ahead: ee don't really know what happens when a new kube-apiserver is deployed, but fails to get ready. It might be that some object got written to etcd with the broken config. Mathematically, we can only be sure that this is harmless if last-known-good revision is one behind the last revision (think about how we allow that in etcd encryption that we need more than one revision to phase out a read key). When going back 2 or more revisions this invariant breaks. But it is the best we can do as the alternative is be unavailable.
+  Handwaving ahead: ee don't really know what happens when a new kube-apiserver is deployed, but fails to get ready. It might be that some object got written to etcd with the broken config. 
+  Mathematically, we can only be sure that this is harmless if last-known-good revision is one behind the last revision (think about how we allow that in etcd encryption that we need more than one revision to phase out a read key). 
+  When going back 2 or more revisions this invariant breaks. But it is the best we can do as the alternative is be unavailable.
 
   Note: in etcd encryption controllers we wait until deployments settle. We won't make progress when the operator is in Progression=True state.
 
@@ -225,6 +228,6 @@ History`.
 
 ## Alternatives
 
-- we have talked about starting the new apiserver in parallel and to have some proxy or iptables mechanism to switch over only when the new revision is ready. This was rejected as we don't have the memory resources on nodes to run two apiservers in parallel. Instead, it was decided that 60s downtime of the API for the happy-case (= configuration is not bad) is acceptable. Hence, we changed direction to only cover the disaster recovery case that is described in this enhancement.
-
-
+- we have talked about starting the new apiserver in parallel and to have some proxy or iptables mechanism to switch over only when the new revision is ready. This was rejected as we don't have the memory resources on nodes to run two apiservers in parallel. 
+  Instead, it was decided that 60s downtime of the API for the happy-case (= configuration is not bad) is acceptable. 
+  Hence, we changed direction to only cover the disaster recovery case that is described in this enhancement.
