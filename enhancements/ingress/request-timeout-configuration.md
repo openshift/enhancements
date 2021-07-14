@@ -16,7 +16,7 @@ approvers:
   - "@frobware"
   - "@knobunc"
 creation-date: 2021-06-17
-last-updated: 2021-06-28
+last-updated: 2021-07-14
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
 see-also:
 replaces:
@@ -43,7 +43,7 @@ open connections that are awaiting a response.
 ## Motivation
 
 Customers need the ability to adjust how long HAProxy holds connections open,
-either by extending the timeout to accomodate slower backends or clients, or by
+either by extending the timeout to accommodate slower backends or clients, or by
 shortening the timeout, allowing connections to be closed more aggressively.
 
 ### Goals
@@ -77,7 +77,23 @@ milliseconds.
 
 ### User Stories
 
-TODO
+#### User Story 1
+
+My application starts processing requests from clients, but the connection is
+getting closed before it can respond.
+
+I set `spec.tuningOptions.serverTimeout` in the ingresscontroller API to a
+higher value to accommodate the slow response from the server.
+
+#### User Story 2
+
+The router has many connections open because an application running on my
+cluster doesn't close connections properly.
+
+I set `spec.tuningOptions.serverTimeout` and
+`spec.tuningOptions.serverFinTimeout` in the ingresscontroller API to a lower
+value, forcing those connections to close sooner if my application stops
+responding to them.
 
 ### Implementation Details/Notes/Constraints
 
