@@ -150,7 +150,7 @@ Watch:
 - Watch machines and nodes with an event handler e.g controller runtime `EnqueueRequestsFromMapFunc` which returns machineHealthCheck resources.
 
 Reconcile:
-- Don't start remediation in case the pause annotation is set on the machineHealthCheck resource.
+- Don't do anything when the pause annotation is set on the machineHealthCheck resource.
 - Fetch all the machines in the pool and operate over machine/node targets. E.g:
 ```go
 type target struct {
