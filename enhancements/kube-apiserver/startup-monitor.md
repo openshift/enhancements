@@ -45,7 +45,7 @@ In SNO, there is no other pod to ensure availability when a roll-out of a new re
 
 This enhancement is describing a fallback mechanism that will make the operand to revert to the last healthy revision when the new revision fails, and how the operator will notice this event and how it will react.
 
-The fallback mechanism is opt-in by the operator, and kube-apiserver and etcd operators (and potentially kcm and ks) have to consult the deployment topology in the infrastructure resource to decide.
+The fallback mechanism is opt-in by the operator, and kube-apiserver and etcd operators (and potentially kcm and ks) have to consult the deployment topology in the infrastructure resource to decide. Most of the text here is generic, but we will focus mainly on the cluster-kube-apiserver-operator use-case first.
 
 ## Motivation
 
@@ -84,10 +84,6 @@ If the operand pod does not start up in N minutes, e.g. due to:
 - not answering on the expected port (connection refused)
 - healthy but never readyz
 
-but not in case of
-
-- etcd not healthy
-
 the task for startup-monitor is to fall back:
 
 1. when detecting problems with the new revision, the startup-monitor will copy the pod-manifest of the `/etc/kubernetes/static-pods/last-known-good` link (or the previous revision if the link does not exist, or don't do anything if there is no previous revision as in bootstrapping) into `/etc/kubernetes`.
@@ -116,18 +112,29 @@ The startup-monitor watches the mirror pod for readiness, i.e. by
 5. check the revision annotation is the expected one. Set Reason=**NotReady** if this is red and the monitor times out.
 6. checking status.ready. Set Reason=**NotReady** if this is red and the monitor times out.
 
+The timeout for the readiness check is defined to be 5 min for the following reasons:
+
+- this timeout is for the disaster recovery case, not for the happy case. Hence, we don't have to get into the range of 60s of maxmimal API outage, i.e. around 45s as upper bound for the happy case readiness time.
+- 5 min is already a very generous duration for kube-apiserver startup. In normal situation we are in the area of O(30s).
+
+The timeout is to be specified in the operator. Hence, another operator might want different timeouts.
+
 ### Retries
 
 The readiness procedure above has the risk of considering external reasons as fatal reasons for kube-apiserver readiness. E.g. etcd unstable or kubelet not updating the mirror pod. Both would led us to believe the new revision is broken. This is different in HA OpenShift because there is no time limit exists for a new static pod to start up. It can keep crash-looping for hours and eventually start-up to finish the roll-out.
 
-In order to mitigate this difference in error behaviour, a failing revision in SNO will be retried to roll-out after N minutes, N=O(10), a reasonable time for the cluster to recover from a previous attempt. In the time in-between, the fallback mechanism will move the cluster back to the old revision, until the retry is started.
+In order to mitigate this difference in error behaviour, a failing revision in SNO will be retried to roll-out after >=N minutes, N=O(10), a reasonable time for the cluster to recover from a previous attempt. In the time in-between, the fallback mechanism will move the cluster back to the old revision, until the retry is started.
+
+We will start with infinite retries, but use an exponential backoff starting at N=O(10) as described above, moving up to 6h maximum (i.e. around 5 min API outage per 6h).
 
 While retries are attempted, the operator will report Degraded=true.
 
 Retries are not attempted for the following reasons:
-- EtcdHealthy
+
 - CrashLooping
 - NeverStartedUp
+
+Note that in case of EtcdUnhealthy we fall back (because e.g. the etcd endpoints got wrong), but we also retry because we want to roll out the configuration changes (e.g. cert rotations). Clearly, there is also the case when etcd is just down, and in this case the retry wouldn't help to solve the problem. But eventually the cluster will recover when the etcd outage is solved.
 
 ### Coordination of Installer and Startup-Monitor
 
@@ -150,13 +157,13 @@ The pruner today does not know about the `last-known-good` symlink to the last s
 ### Risks and Mitigations
 
 ## Design Details
+
 - Why is it safe to go back to last-known-good?
 
   Handwaving ahead: ee don't really know what happens when a new kube-apiserver is deployed, but fails to get ready. It might be that some object got written to etcd with the broken config. Mathematically, we can only be sure that this is harmless if last-known-good revision is one behind the last revision (think about how we allow that in etcd encryption that we need more than one revision to phase out a read key). When going back 2 or more revisions this invariant breaks. But it is the best we can do as the alternative is be unavailable.
 
   Note: in etcd encryption controllers we wait until deployments settle. We won't make progress when the operator is in Progression=True state.
 
-  TODO: double check that ^ is true
 ### Open Questions [optional]
 
 ### Test Plan
@@ -181,7 +188,7 @@ For the error case, we have to inject the different types of errors into an oper
 
 - [ ] test case to recover from bad etcd smoke test
 
-  The new kube-apiserver starts up, but the etcd post-start hook never finishes. The reason is EtcdUnhealthy. The operator does not retry.
+  The new kube-apiserver starts up, but the etcd post-start hook never finishes. The reason is EtcdUnhealthy. The operator does retry and the cluster recovers when etcd is back again. For example wrong etcd endpoints can lead to this case.
 
 - [ ] test case to recover from non-etcd post-start hook never finishing
 
