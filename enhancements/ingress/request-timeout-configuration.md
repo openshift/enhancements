@@ -48,11 +48,16 @@ shortening the timeout, allowing connections to be closed more aggressively.
 
 ### Goals
 
-Allow admins to configure various HAProxy connection timeout parameters
+Allow admins to configure the following HAProxy connection timeout parameters:
+- timeout client
+- timeout client-fin
+- timeout server
+- timeout server-fin
+- tcp-request inspect-delay
 
 ### Non-Goals
 
-TODO
+- Allow admins to configure every HAProxy timeout parameter
 
 ## Proposal
 
@@ -76,6 +81,8 @@ TODO
 
 ### Implementation Details/Notes/Constraints
 
+#### Router Image Environment Variables
+
 `timeout client`, `timeout client-fin`, `timeout server`, and `timeout
 server-fin` were all configurable in 3.X, and the router image still supports
 configuring them from the environment variables
@@ -84,14 +91,40 @@ configuring them from the environment variables
 respectively.
 
 A new environment variable will be defined, `ROUTER_INSPECT_DELAY`, which will
-control the `tcp-request inspect-delay` variable. If no unit is specified, the
-value represents the delay in milliseconds, but time units can be specified,
-following the time format outlined in [section 2.4. of the HAProxy 2.2
+control the `tcp-request inspect-delay` variable.
+
+All the timeout environment variables expect values to follow the HAProxy time
+format. The format is an integer optionally followed by a time unit. If no unit
+is specified, the value represents the delay in milliseconds. The full
+description of the time format can be found in [section 2.4. of the HAProxy 2.2
 documentation](https://github.com/haproxy/haproxy/blob/v2.2.0/doc/configuration.txt).
+
+#### Time Format Validation
+
+The format specified in [section 2.4. of the HAProxy 2.2
+documentation](https://github.com/haproxy/haproxy/blob/v2.2.0/doc/configuration.txt)
+will be enforced when the ingresscontroller config is admitted using the
+regular expression `[0-9]+(?:[um]?s|[mhd])?`. The regular expression should
+accept strings containing one or more digits, optionally followed by one of the
+following time units:
+- us
+- ms
+- s
+- m
+- h
+- d
+
+In addition, HAProxy only allows a maximum timeout of 2,147,483,647ms (about 24
+days, 20 hours). If a time greater than the maximum is specified for any of the
+API fields added in this proposal, the timeout will be set to the maximum
+allowed value, and an error message will be logged by the ingress operator.
 
 ### Risks and Mitigations
 
-TODO
+Setting timeout values in the ingress controller will only affect timeouts
+caused by ingress. Other hops in the connection, such as the backend or the
+cloud LB, may still cause connections to time out even if the fields added in
+this proposal are set sufficiently high.
 
 ## Design Details
 
@@ -135,7 +168,7 @@ spec:
 
 ### Graduation Criteria
 
-N/A?
+N/A
 
 #### Dev Preview -> Tech Preview
 
@@ -163,7 +196,22 @@ be discarded, and the previous defaults will be used.
 
 ### Version Skew Strategy
 
-TODO
+In order to take full advantage of the new API fields, the ingress controller
+API, the ingress operator, and the router image must all be upgraded.
+
+If the ingress controller API is behind, none of the new fields can be set,
+forcing the operator to use their default values.
+
+If the ingress operator is behind, the operator will ignore the new API fields.
+The new timeout variables will remain set to the fixed values used in 4.8,
+which are the same as the new default values.
+
+If the router image is behind, all environment variables will be set for router
+pods, but `tlsInspectDelay`/`ROUTER_TLS_INSPECT_DELAY` will not be recognized
+by the HAProxy config generator. This will allow `clientTimeout`,
+`clientFinTimeout`, `serverTimeout`, and `serverFinTimeout` to be set, but
+`tlsInspectDelay` will effectively remain at the default value (5s) regardless
+of the value in `tlsInspectDelay`.
 
 ## Implementation History
 
