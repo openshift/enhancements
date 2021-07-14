@@ -41,7 +41,7 @@ Static pods operators use a revisioned pod manifest and revisioned configmap and
 
 Configuration can be bad in different ways. In HA OpenShift, the static pod operator will wait for operands on one node to start up and to become healthy and ready. The operator will stop rolling out bad revisions further.
 
-In SNO, there is no other pod to ensure availability when a roll-out of a new revision happens. Hence, a bad revision can be fatal for the cluster, especially for the kube-apiserver and etcd
+In SNO, there is no other pod to ensure availability when a roll-out of a new revision happens. Hence, a bad revision can be fatal for the cluster, especially for the kube-apiserver and etcd.
 
 This enhancement is describing a fallback mechanism that will make the operand to revert to the last healthy revision when the new revision fails, and how the operator will notice this event and how it will react.
 
@@ -84,6 +84,10 @@ If the operand pod does not start up in N minutes, e.g. due to:
 - not answering on the expected port (connection refused)
 - healthy but never readyz
 
+but not in case of
+
+- etcd not healthy
+
 the task for startup-monitor is to fall back:
 
 1. when detecting problems with the new revision, the startup-monitor will copy the pod-manifest of the `/etc/kubernetes/static-pods/last-known-good` link (or the previous revision if the link does not exist, or don't do anything if there is no previous revision as in bootstrapping) into `/etc/kubernetes`.
@@ -104,13 +108,13 @@ As long as the startup-monitor notices an operand pod-manifest of a different re
 
 The startup-monitor watches the mirror pod for readiness, i.e. by
 
-1. watch `/var/log/kube-apiserver/termination.log` for the first start-up attempt (beware of the race of startup-monitor startup and kube-apiserver startup). Set Reason=*NeverStartedUp* when this times out.
-2. watch `/var/log/kube-apiserver/termination.log` for more than one start-up attempt. Set Reason=*CrashLooping* if more than one is found and the monitor times out.
-3. check https://localhost:6443/healthz. Set Reason=*Unhealthy* if this is red and the monitor times out.
-4. check https://localhost:6443/readyz. Set Reason=*NotReady* if this is red and the monitor times out. Reason=EtcdUnhealthy if the etcd post-start-hook never finished. In all case: message should contain the unfinished post-start-hooks.
+1. watch `/var/log/kube-apiserver/termination.log` for the first start-up attempt (beware of the race of startup-monitor startup and kube-apiserver startup). Set Reason=**NeverStartedUp** when this times out.
+2. watch `/var/log/kube-apiserver/termination.log` for more than one start-up attempt. Set Reason=**CrashLooping** if more than one is found and the monitor times out.
+3. check https://localhost:6443/healthz. Set Reason=**Unhealthy** if this is red and the monitor times out.
+4. check https://localhost:6443/readyz. Set Reason=**NotReady** if this is red and the monitor times out. Reason=EtcdUnhealthy if the etcd post-start-hook never finished. In all case: message should contain the unfinished post-start-hooks.
 4. get the mirror pod from the localhost kube-apiserver
-5. check the revision annotation is the expected one. Set Reason=*NotReady* if this is red and the monitor times out.
-6. checking status.ready. Set Reason=*NotReady* if this is red and the monitor times out.
+5. check the revision annotation is the expected one. Set Reason=**NotReady** if this is red and the monitor times out.
+6. checking status.ready. Set Reason=**NotReady** if this is red and the monitor times out.
 
 ### Retries
 
