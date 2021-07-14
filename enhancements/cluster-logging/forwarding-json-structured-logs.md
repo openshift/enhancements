@@ -34,7 +34,8 @@ see-also:
 
 ## Summary
 
-This enhancement allows structured JSON log entries to be forwarded as JSON objects in JSON output records:
+This enhancement allows structured JSON log for `application` and `infrastructure` logs.
+Note that `audit` logs are always JSON and do not require the steps described here.
 
 * Add an object field `structured` to log records, holds a JSON log entriy as an object.
 * Extend `ClusterLogForwarder` input API to enable JSON parsing.
@@ -115,7 +116,7 @@ New fields in  `output.elasticsearch`:
 
 Notes:
 * The Elasticsearch _index_ for structured records is formed by prepending "app-" to the structured type and appending "-write".
-* Unstructured records are not sent to the structured index, they are indexed as usual in application, infrastructure or audit indices.
+* Unstructured records are not sent to the structured index, they are indexed as usual in `application`, `infrastructure` or `audit` indices.
 * If there is no non-empty structured type, forward an _unstructured_ record with no `structured` field.
 
 It is important not to overload elasticsearch with too many indices.
@@ -139,6 +140,9 @@ outputs:
 
 pipelines:
 - inputRefs: [ application ]
+  outputRefs: myFluentd
+  parse: json
+- inputRefs: [ infrastructure ]
   outputRefs: myFluentd
   parse: json
 ```
@@ -182,7 +186,7 @@ This structured log record will go to the index `app-google-write`:
 ```
 
 **Note**: Only _structured_ logs with a `logForward` label go to the `logForward` index.
-All others go to the default application index as _unstructured_ records, including:
+All others go to the default `application`, `audit` or `infrastructure` indices as _unstructured_ records, including:
 
 * Records with missing or empty `logFormat` label.
 * Records that could not be parsed as JSON,  _even if_ they have a `logFormat` label.
