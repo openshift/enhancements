@@ -606,20 +606,31 @@ Follow the Kubernetes community discussions and implementation/releases
 
 #### OCP 4.9
 
-##### Technical preview
+Technical preview - installation and upgrade supported via `TechPreviewNoUpgrade` FeatureGate.
+General availability - upgrade and installation with the out-of-tree CCM by default.
+
+##### Technical preview - 4.9
 
 - AWS on out-of-tree `CCM` tech-preview. `CSI` is optional (via OLM) since [4.6](https://github.com/openshift/enhancements/blob/master/enhancements/storage/csi-driver-install.md#ocp-45-kubernetes-118).
+- Azure
+- OpenStack
 
-##### General availability
+##### General availability - 4.9
 
-- Azure - support for Azure Stack. Bootstrap and post-install phase supported by operator.
-- OpenStack platform on out-of-tree `CCM` graduates as tech-preview.
+- Azure Stack Hub
 
 #### OCP 4.10
 
-- OpenStack upgrade and installation with the out-of-tree CCM by default. (GA)
-- vSphere as a TP.
-- GCP.
+##### Technical preview - 4.10
+
+- vSphere
+- GCP
+
+##### General availability - 4.10
+
+- OpenStack
+- Azure
+- AWS
 
 ### Release boundaries
 
