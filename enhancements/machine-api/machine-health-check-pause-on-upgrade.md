@@ -48,16 +48,18 @@ workloads while they are transferred to other nodes.
 
 - Automatically pause all machineHealthChecks during cluster upgrades
 - Automatically unpause all machineHealthChecks when cluster upgrade finished
+- Get a simple solution done in time for OCP 4.9, by using what we have upstream already (the pause annotation), for
+  avoiding worst case behaviour during cluster upgrades. Look for better solutions for future releases
 
 ### Non-Goals
 
-tbd
+- Track the status of each single node (upgrading or not upgrading) for more fine-grained pausing of remediation
 
 ## Proposal
 
-Introduce a new controller, which watches the clusterVersion resource, and pauses all machineHealthChecks when the
-clusterVersion status indicates an ongoing cluster upgrade. The controller will unpause the machineHealthChecks when the
-clusterVersion status indicates that the upgrade process finished.
+Introduce a new controller, which watches clusterVersion and machineHealthCheck resources, and pauses all
+machineHealthChecks when the clusterVersion status indicates an ongoing cluster upgrade. The controller will unpause the
+machineHealthChecks when the clusterVersion status indicates that the upgrade process finished.
 
 ### User Stories
 
@@ -124,7 +126,7 @@ Nothing we are aware of today
 
 2. Today there is no way to coordinate multiple users of the pause feature of machineHealthChecks. The value of the
 annotation is supposed to be empty. This means that the annotation might already be set by someone else when the new
-controller want to set it as well. That introduces the question what to do in this case after cluster upgrade: remove
+controller want to set it as well. That introduces the question of what to do in this case after cluster upgrade: remove
 the annotation, or keep it? In the latter case: how to keep track whether the controller set the annotation or not (e.g.
 in another annotation?)
 
@@ -147,7 +149,7 @@ TODO I have no good idea yet
 
 ### Upgrade / Downgrade Strategy
 
-The new controller lives in the machine-api-operator image so the upgrades will be driven by the CVO which will fetch
+The new controller lives in the machine-api-operator image, so the upgrades will be driven by the CVO which will fetch
 the right image version as usual.
 The controller does not offer any API or configuration. The controller can be replaced with an older or newer
 version without side effects or risks.
@@ -155,20 +157,31 @@ version without side effects or risks.
 ### Version Skew Strategy
 
 This controller has some expectation to other APIs, which are the clusterVersion status conditions, and the
-machineHealthCheck pause annotation. In case any of those changes their API (new condition name or annotaton key), the
-controller will stop to work. This will catched in CI.
+machineHealthCheck pause annotation. In case any of those changes their API (new condition name or annotation key), the
+controller will stop to work. This will be caught in CI.
 
 ## Implementation History
 
 ## Drawbacks
 
+The controller can't stop ongoing external remediation, which is executed by an external remediation controller. For
+this to happen we would either need to introduce and implement a pause flag on the external remediation CRD, or the
+external remediation controller needs to look for the pause annotation on the machineHealthCheck resource.
+
 ## Alternatives
 
 - Not having this feature at all: cluster admins could pause machineHealthChecks manually, but that is unneeded work,
   and too easy to forget.
-- Implement this in the machine healthcheck controller: this would be an obviuos choice on a first look. But since the
+- Implement this in the machine-healthcheck-controller: this would be an obvious choice on a first look. But since the
   clusterVersion resource is Openshift specific, it would further diverge Openshift machine API and upstream Cluster
   API. The goal is to align them over time.
+- Track the status of nodes more fine-grained and continue to remediate nodes that currently are not upgrading: this
+  would be a perfect solution and might be investigated more deeply in the future. For now, with respect to timeline, we
+  want to concentrate on the simple solution of pausing MHCs completely.
+- Use node leases: there are efforts to introduce the concept of node leases
+  (https://github.com/kubernetes/enhancements/pull/1411). They can be used for coordinating parties which want to do
+  destructive actions on nodes, like e.g. upgrades or remediation. This would also result in more fine-grained "pausing"
+  of node remediation. With respect to the timeline we don't want to wait for this effort, but will keep an eye on it.
 
 ## Infrastructure Needed [optional]
 
