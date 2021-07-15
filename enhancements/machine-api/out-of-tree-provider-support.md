@@ -218,6 +218,8 @@ Since Red Hat cannot supply or support Windows container images, we cannot run a
 Instead, we must adapt the `WMCO` to, on these particular platforms, deploy a new Windows service that runs the `CNM` on the `Node`.
 This pattern is already in place for other components that are required to run on the host (eg `CNI` and Kube-Proxy), so we will be able to reuse the existing pattern to add support for `CNM` on platforms that require a `CNM` per host.
 
+It is worth noting that `WMCO` is deployed via `OLM` and so there might be a `CNM` image version skew during cluster upgrades via `CVO` as Windows nodes will be updated independently from the rest of the cluster. This may last for a period of time, especially if `WMCO` upgrades are set to be manually approved by the cluster administrator.
+
 ##### Example flag changes for kubelet
 
 Current flag configuration for kubelet in AWS provider:
