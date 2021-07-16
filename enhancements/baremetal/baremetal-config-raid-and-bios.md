@@ -18,7 +18,7 @@ see-also:
 replaces:
   -
 superseded-by:
-  - https://github.com/metal3-io/baremetal-operator/pull/302
+  -
 ---
 
 # Config RAID and BIOS for Baremetal IPI deployments
@@ -38,7 +38,7 @@ This enhancement proposes to add the support of RAID and BIOS configuration for 
 
 ## Motivation
 
-With the new feature of [RAID configuration](https://github.com/metal3-io/baremetal-operator/pull/292) and the upcoming feature of [BIOS configuration](https://github.com/metal3-io/baremetal-operator/pull/302), openshift already has or will have the ability to configure RAID and BIOS for baremetal.
+With the new features of [RAID configuration](https://github.com/metal3-io/baremetal-operator/pull/292) and [BIOS configuration](https://github.com/metal3-io/baremetal-operator/pull/302), openshift already has the ability to configure RAID and BIOS for baremetal.
 
 However, these features only work with a running cluster, users cannot configure desired RAID and BIOS during IPI deployments.
 
@@ -86,12 +86,13 @@ The *firmware* field is the same as the *spec.firmware* field in **BMH** which i
 
 #### Process the fields in installer
 
-For control plane hosts, call the `BuildTargetRAIDCfg` method in **BMO** to process the *raid* field into *target_raid_config*, and finally write *target_raid_config* into the ***terraform.baremetal.auto.tfvars.json*** file.
+For control plane hosts, transform the *raid* and *firmware* fields into json respectively and then write them into the
+***terraform.baremetal.auto.tfvars.json*** file as the values of *raid_config* and *bios_settings* respectively.
 
 #### Process the fields in terraform-provider-ironic
 
-Add *target_raid_config* and *bios_settings* fields to terraform-provider-ironic API,
-process the two fields by [manual cleaning](https://docs.openstack.org/ironic/latest/admin/cleaning.html#manual-cleaning).
+Add *raid_config* and *bios_settings* fields to terraform-provider-ironic API, transform them back to struct format, and then call the
+methods in **BMO** to process the two fields to perform [manual cleaning](https://docs.openstack.org/ironic/latest/admin/cleaning.html#manual-cleaning).
 
 #### Notes
 
