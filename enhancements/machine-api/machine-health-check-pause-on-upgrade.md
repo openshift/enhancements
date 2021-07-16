@@ -63,7 +63,7 @@ machineHealthChecks when the clusterVersion status indicates that the upgrade pr
 
 ### User Stories
 
-- As a cluster admin I don't want unneeded reboots of nodes during cluster upgrades
+- As a cluster admin I don't want unneeded remediation/reboots of nodes during cluster upgrades
 - As a cluster admin I don't want to manually pause machineHealthChecks during cluster upgrades
 - As a user I don't want my workloads to be transferred to new nodes more often than needed during cluster upgrades
 
