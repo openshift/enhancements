@@ -4,10 +4,12 @@ authors:
   - "@marun"
 reviewers:
   - "@hexfusion"
+  - "@lilic"
   - "@deads2k"
   - "@smarterclayton"
 approvers:
   - "@hexfusion"
+  - "@lilic"
   - "@deads2k"
   - "@smarterclayton"
 creation-date: 2021-07-08
@@ -49,10 +51,13 @@ in a control plane node being taken offline in the process of attempting to
 follow the documented backup procedure.
 
 Finally, OpenShift 4.9 is intended to ship with etcd 3.5, and this will mean
-an upgrade for existing clusters from 3.4. Ensuring support for automated
-backups in the 4.8 edge required to upgrade to 4.9 will increase the
-likelyhood that customers will have cluster backups available in case of any
-trouble with the etcd upgrade.
+an upgrade for existing clusters from etcd 3.4. Since etcd will not support
+downgrade from 3.5 to 3.4, downgrade of a OpenShift cluster from 4.9 to 4.8
+will only be possible by restoring from backup. Ensuring support for
+automated backups in the 4.8 edge required to upgrade to 4.9 will increase
+the likelyhood that customers will have cluster backups available in case a
+downgrade is required.
+
 
 ### Goals
 
