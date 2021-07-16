@@ -125,7 +125,8 @@ The new controller will be implemented in the `openshift/machine-api-operator` r
 
 ### Risks and Mitigations
 
-Nothing we are aware of today
+Hosts that are not successfully rebooted as part of the upgrade won't be remediated, until either the upgrade finishes,
+or an admin unpauses the machineHealthChecks manually.
 
 ## Design Details
 
@@ -184,9 +185,12 @@ external remediation controller needs to look for the pause annotation on the ma
 - Implement this in the machine-healthcheck-controller: this would be an obvious choice on a first look. But since the
   clusterVersion resource is Openshift specific, it would further diverge Openshift machine API and upstream Cluster
   API. The goal is to align them over time.
-- Track the status of nodes more fine-grained and continue to remediate nodes that currently are not upgrading: this
-  would be a perfect solution and might be investigated more deeply in the future. For now, with respect to timeline, we
-  want to concentrate on the simple solution of pausing MHCs completely.
+- Track the upgrading status on single nodes instead of the cluster: on one hand this would allow to remediate hosts
+  which are unhealthy but not caused by the upgrade, but on the other hand it might have the risk that both upgrade and
+  remediation drain nodes, and the cluster runs out of capacity. This can result in upgrade and remediation controllers
+  blocking each other from taking action, and the cluster wouldn't be upgradeable or fixable. This might be investigated
+  more deeply in the future, but for now, with respect to timeline, we want to concentrate on the simple solution of
+  pausing MHCs completely.
 - Use node leases: there are efforts to introduce the concept of node leases
   (https://github.com/kubernetes/enhancements/pull/1411). They can be used for coordinating parties which want to do
   destructive actions on nodes, like e.g. upgrades or remediation. This would also result in more fine-grained "pausing"
