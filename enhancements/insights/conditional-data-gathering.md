@@ -147,6 +147,11 @@ for example, introducing the limit for amount of collected logs.
 Also in the regular workflow, changing the config involves going through the repo's CI (JSON schema validator) 
 and probably a simple review process. 
 
+Not really a risk, but in case the service is not available or provides invalid config for the operator,
+we would just have less data in the archives (everything except conditional gatherer's data), 
+an error would be written to the logs and to the metadata which would allow us to know 
+that something is broken and we need to bring the service back.
+
 ## Design Details
 
 Empty
