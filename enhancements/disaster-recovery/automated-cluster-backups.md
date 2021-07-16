@@ -35,7 +35,8 @@ see-also:
 
 ## Summary
 
-Enable the configuration of automated cluster backups.
+Enable the configuration of automated backup of etcd and the static pod
+content that underpin an OpenShift 4.x self-hosted cluster.
 
 ## Motivation
 
@@ -85,9 +86,13 @@ downgrade is required.
       - Default: `""`
     - spec.schedule `string`
       - [Standard cron expression](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/#cron-schedule-syntax)
+        - This supports flexibility in scheduling e.g.
+          - every 2 hours: `0 */2  * * *`
+          - every day at 3am: `0 3 * * *`
       - Results in backups scheduled repeatedly to successive control plane
         nodes.
       - Default: `""`
+        - An empty string disables scheduled backups
     - spec.maxDurationWithoutBackup `duration`
       - If a backup has not successfully completed in the configured
         interval, a critical alert will be generated for this and every
@@ -140,8 +145,8 @@ downgrade is required.
       scheduled backup for (TODO How long)
   - If the number of successful backups matches `retentionCount`
     - Ensure removal of the oldest backup from the node that it was written to
-    - Remove record of removed backup from the api?
     - Log removal of the backup
+    - Remove record of removed backup from the api
   - Find the set of candidate nodes that have fewer backups than other nodes
     - Could be 1 node (e.g. 2 nodes have 1 backup and 1 node has zero)
     - Could be a subset of nodes (e.g. 1 node has 1 backup and 2 nodes have
@@ -150,11 +155,11 @@ downgrade is required.
   - Schedule a backup pod to a random member of the set of candidate nodes
     - A backup pod should invoke the `cluster-backup.sh` script on the host
       via chroot and write the backup data to the host.
-    - A backup pod should first check that the available disk space on the
-      node it is running on is a multiple of the size of the node's
-      /var/lib/etcd path. A node needs a minimum amount of available storage
-      to operate reliably and automated backup must make every effort not to
-      exhaust a node's available storage.
+    - The `cluster-backup.sh` script should be updated to first check that
+      the available disk space on the node it is running on is a multiple of
+      the size of the node's /var/lib/etcd path. A node needs a minimum
+      amount of available storage to operate reliably and automated backup
+      must make every effort not to exhaust a node's available storage.
   - When a backup pod terminates, record the succcess or failure to a backup
     resource
 
