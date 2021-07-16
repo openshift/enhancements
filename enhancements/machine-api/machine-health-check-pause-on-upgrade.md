@@ -47,7 +47,7 @@ workloads while they are transferred to other nodes.
 ### Goals
 
 - Automatically pause all machineHealthChecks during cluster upgrades
-- Automatically unpause all machineHealthChecks when cluster upgrade finished
+- Automatically unpause all machineHealthChecks when cluster upgrade finished, in case they were paused for the upgrade
 - Get a simple solution done in time for OCP 4.9, by using what we have upstream already (the pause annotation), for
   avoiding worst case behaviour during cluster upgrades. Look for better solutions for future releases
 
@@ -57,9 +57,10 @@ workloads while they are transferred to other nodes.
 
 ## Proposal
 
-Introduce a new controller, which watches clusterVersion and machineHealthCheck resources, and pauses all
+Introduce a new controller, which watches clusterVersion and machineHealthCheck resources, and pauses all unpaused
 machineHealthChecks when the clusterVersion status indicates an ongoing cluster upgrade. The controller will unpause the
-machineHealthChecks when the clusterVersion status indicates that the upgrade process finished.
+machineHealthChecks, when the clusterVersion status indicates that the upgrade process finished, and the
+machineHealthChecks were paused by this controller.
 
 ### User Stories
 
@@ -107,9 +108,17 @@ metadata:
   ...
 ```
 
-The new controller will add the pause annotation on the machineHealthChecks when the clusterVersion's `Progressing`
-condition switches to `"True"`. When that condition switches back to `"False"`, the controller will remove the
+When the clusterVersion's `Progressing` condition switches to `"True"`, the new controller will iterate all
+machineHealthCheck resources, and add the pause annotation to all of them which are not paused already. For tracking
+which resources are being paused by the controller, it will also add a `machine.openshift.io/paused-for-upgrade: ""`
 annotation.
+
+During the cluster upgrade, the controller will also pause and mark all newly created machineHealthChecks.
+When a machineHealthCheck is unpaused by another party though, the controller will not pause it again, in order
+to allow admins to explicitly start remediation during upgrades.
+
+When the clusterVersion condition switches back to `"False"`, the controller will remove both annotations from all
+machineHealthChecks, which were paused by this controller.
 
 The new controller will be implemented in the `openshift/machine-api-operator` repository, and be deployed in the
 `machine-api-controllers` pod, both alongside the machine-healthcheck-controller.
