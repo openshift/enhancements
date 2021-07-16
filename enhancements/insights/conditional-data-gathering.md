@@ -30,8 +30,8 @@ The conditional gatherer for Insights Operator collects data according to the de
 Each rule contains one or more conditions such as "alert A is firing" 
 and one or more gatherers with parameters such as "collect N lines of logs from containers in namespace N".
 Current version has these rules defined in the code and the proposal is to load them from an external source
-to make collection of new conditional data faster. Unlike with Thin IO idea, it's not about running brand new 
-code, but just calling the existing gatherers with different validated parameters, so the operator can't 
+to make collection of new conditional data faster. It's NOT about running brand new code, 
+but just calling the existing gatherers with different validated parameters, so the operator can't 
 collect anything we don't expect. 
 
 \* note that rule here and later has nothing to do with rules used to analyze data in archives written 
@@ -185,8 +185,8 @@ None?
 
 ## Alternatives
 
-Thin IO idea could also solve this, but thin IO was about adding new code bypassing the standard release process 
-which could potentially be very dangerous. 
+Thin IO idea (https://github.com/openshift/enhancements/pull/465) could also solve this, but thin IO was about adding 
+new code bypassing the standard release process which could potentially be very dangerous.
 
 ## Infrastructure Needed [optional]
 
