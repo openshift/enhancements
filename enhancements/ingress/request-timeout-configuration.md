@@ -19,6 +19,7 @@ creation-date: 2021-06-17
 last-updated: 2021-07-14
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
 see-also:
+  - https://github.com/openshift/enhancements/pull/461
 replaces:
 superseded-by:
 ---
@@ -27,9 +28,9 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
+- [X] Enhancement is `implementable`
+- [X] Design details are appropriately documented from clear requirements
+- [X] Test plan is defined
 - [ ] Operational readiness criteria is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
@@ -38,7 +39,7 @@ superseded-by:
 
 This document proposes the addition of several API fields into the ingress
 controller API, allowing the cluster admin to adjust how long routers will hold
-open connections that are awaiting a response.
+open connections under various circumstances.
 
 ## Motivation
 
@@ -53,11 +54,13 @@ Allow admins to configure the following HAProxy connection timeout parameters:
 - timeout client-fin
 - timeout server
 - timeout server-fin
+- timeout tunnel
 - tcp-request inspect-delay
 
 ### Non-Goals
 
 - Allow admins to configure every HAProxy timeout parameter
+- Allow users to configure timeouts per route
 
 ## Proposal
 
@@ -69,6 +72,7 @@ spec:
     clientFinTimeout: "1s"
     serverTimeout: "30s"
     serverFinTimeout: "1s"
+	tunnelTimeout: "1h"
     tlsInspectDelay: "10s"
 ```
 
@@ -100,11 +104,11 @@ responding to them.
 #### Router Image Environment Variables
 
 `timeout client`, `timeout client-fin`, `timeout server`, and `timeout
-server-fin` were all configurable in 3.X, and the router image still supports
-configuring them from the environment variables
+server-fin` `timeout tunnel` were all configurable in 3.X, and the router image
+still supports configuring them from the environment variables
 `ROUTER_DEFAULT_CLIENT_TIMEOUT`, `ROUTER_CLIENT_FIN_TIMEOUT`,
-`ROUTER_DEFAULT_SERVER_TIMEOUT`, and `ROUTER_DEFAULT_SERVER_FIN_TIMEOUT`,
-respectively.
+`ROUTER_DEFAULT_SERVER_TIMEOUT`, `ROUTER_DEFAULT_SERVER_FIN_TIMEOUT`, and
+`ROUTER_DEFAULT_TUNNEL_TIMEOUT` respectively.
 
 A new environment variable will be defined, `ROUTER_INSPECT_DELAY`, which will
 control the `tcp-request inspect-delay` variable.
@@ -146,7 +150,7 @@ this proposal are set sufficiently high.
 
 ### Open Questions
 
-- How do these timeout variables affect websocket connections (if at all)?
+None
 
 ### Test Plan
 
@@ -159,6 +163,7 @@ spec:
     clientFinTimeout: "3s"
     serverTimeout: "60s"
     serverFinTimeout: "4s"
+	tunnelTimeout: "30m"
     tlsInspectDelay: "5s"
 ```
 - verify that the router deployment contains the following values:
@@ -177,6 +182,8 @@ spec:
           value: "60s"
         - name: "ROUTER_DEFAULT_SERVER_FIN_TIMEOUT"
           value: "4s"
+		- name: "ROUTER_DEFAULT_TUNNEL_TIMEOUT"
+		  value: "30m"
         - name: "ROUTER_TLS_INSPECT_DELAY"
           value: "5s"
         ...
@@ -232,8 +239,8 @@ of the value in `tlsInspectDelay`.
 ## Implementation History
 
 `ROUTER_DEFAULT_CLIENT_TIMEOUT`, `ROUTER_CLIENT_FIN_TIMEOUT`,
-`ROUTER_DEFAULT_SERVER_TIMEOUT`, and `ROUTER_DEFAULT_SERVER_FIN_TIMEOUT` were
-previously configurable in 3.x
+`ROUTER_DEFAULT_SERVER_TIMEOUT`, `ROUTER_DEFAULT_SERVER_FIN_TIMEOUT`, and
+`ROUTER_DEFAULT_TUNNEL_TIMEOUT` were previously configurable in 3.x
 
 ## Drawbacks
 
