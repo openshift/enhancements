@@ -79,8 +79,7 @@ spec:
     tlsInspectDelay: "10s"
 ```
 
-All variables expect time values. If no units are specified, the router assumes
-milliseconds.
+All variables expect time values. Units are required.
 
 ### User Stories
 
@@ -128,8 +127,8 @@ The format specified in [section 2.4. of the HAProxy 2.2
 documentation](https://github.com/haproxy/haproxy/blob/v2.2.0/doc/configuration.txt)
 will be enforced when the ingresscontroller config is admitted using the
 regular expression `[0-9]+(?:[um]?s|[mhd])?`. The regular expression should
-accept strings containing one or more digits, optionally followed by one of the
-following time units:
+accept strings containing one or more digits, followed by one of the following
+time units:
 - us
 - ms
 - s
