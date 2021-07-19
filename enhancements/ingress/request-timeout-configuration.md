@@ -61,6 +61,9 @@ Allow admins to configure the following HAProxy connection timeout parameters:
 
 - Allow admins to configure every HAProxy timeout parameter
 - Allow users to configure timeouts per route
+- Allow configuration of the `hard-stop-after` parameter, which is already
+  configurable using the annotation
+  `ingress.operator.openshift.io/hard-stop-after`
 
 ## Proposal
 
@@ -72,7 +75,7 @@ spec:
     clientFinTimeout: "1s"
     serverTimeout: "30s"
     serverFinTimeout: "1s"
-	tunnelTimeout: "1h"
+    tunnelTimeout: "1h"
     tlsInspectDelay: "10s"
 ```
 
@@ -103,9 +106,9 @@ responding to them.
 
 #### Router Image Environment Variables
 
-`timeout client`, `timeout client-fin`, `timeout server`, and `timeout
-server-fin` `timeout tunnel` were all configurable in 3.X, and the router image
-still supports configuring them from the environment variables
+`timeout client`, `timeout client-fin`, `timeout server`, `timeout server-fin`,
+and `timeout tunnel` were all configurable in 3.X, and the router image still
+supports configuring them from the environment variables
 `ROUTER_DEFAULT_CLIENT_TIMEOUT`, `ROUTER_CLIENT_FIN_TIMEOUT`,
 `ROUTER_DEFAULT_SERVER_TIMEOUT`, `ROUTER_DEFAULT_SERVER_FIN_TIMEOUT`, and
 `ROUTER_DEFAULT_TUNNEL_TIMEOUT` respectively.
@@ -163,7 +166,7 @@ spec:
     clientFinTimeout: "3s"
     serverTimeout: "60s"
     serverFinTimeout: "4s"
-	tunnelTimeout: "30m"
+    tunnelTimeout: "30m"
     tlsInspectDelay: "5s"
 ```
 - verify that the router deployment contains the following values:
@@ -182,8 +185,8 @@ spec:
           value: "60s"
         - name: "ROUTER_DEFAULT_SERVER_FIN_TIMEOUT"
           value: "4s"
-		- name: "ROUTER_DEFAULT_TUNNEL_TIMEOUT"
-		  value: "30m"
+        - name: "ROUTER_DEFAULT_TUNNEL_TIMEOUT"
+          value: "30m"
         - name: "ROUTER_TLS_INSPECT_DELAY"
           value: "5s"
         ...
