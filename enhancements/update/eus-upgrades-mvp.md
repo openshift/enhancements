@@ -275,6 +275,38 @@ customers.
 
 ## Design Details
 
+### Offline Discussion
+
+To recap an offline discussion about this for those that were not able
+to attend based on [review comments on the original
+PR](https://github.com/openshift/enhancements/pull/762/files#r626609451):
+
+* The API server ships with a set of built-in types (pod and node).
+* The upstream project via API review/human or project operator
+  oversight ensures that skew between API server and kubelet is n-2.
+* The API server operator is being asked to report Upgradeable=False
+  to capture that API review/human/operational oversight because it is
+  the component that must not upgrade.
+* The Machine Config Operator is the component that must upgrade, so
+  reporting Upgradeable=False is confusing.
+* The Machine Config Operator should report a message in its reporting
+  that admins should perform an action.
+
+I (@derekwaynecarr) agree that the API server (and its operators)
+should not have to understand all API types it serves and all its
+clients. I think its reasonable for API types that are built-in, whose
+upstream set of human operators/api-reviewers/etc. are trying to
+ensure that skew in either direction (api-server or kubelet) is
+preserved that both operators in our context should report a desired
+action (apiserver operator should say I cannot upgrade, machine config
+operator should promote an upgrade).
+
+For types that are not built-in (CRDs, etc.), it is extremely
+reasonable to say that the future philosophy is not for the API server
+to block its own upgrade on those types because the upgrade of the API
+server itself is not what will evolve those CRD definitions, unlike
+the built-in types.
+
 ### Open Questions [optional]
 
 - As this is a bit of a meta-enhancement calling out epic level work it should be
