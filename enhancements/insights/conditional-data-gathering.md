@@ -26,7 +26,7 @@ status: implementable
 
 ## Summary
 
-The conditional gatherer for Insights Operator collects data according to the defined rules*. 
+The conditional gatherer for Insights Operator collects data according to the defined gathering rules*. 
 Each rule contains one or more conditions such as "alert A is firing" 
 and one or more gatherers with parameters such as "collect N lines of logs from containers in namespace N".
 Current version has these rules defined in the code and the proposal is to load them from an external source
@@ -46,8 +46,8 @@ what to collect on which condition externally will help to do that faster.
 ### Goals
 
 - Implement validation of the rules for conditional gatherer
-- Create a service providing these rules
-- Fetch them from there and apply to the conditional gatherer
+- Create a service taking gathering rules from the git repo and providing them through the API
+- Fetch the rules definitions from the service's API and apply them to the conditional gatherer
 
 ### Non-Goals
 
@@ -103,7 +103,7 @@ or the version with an example of JSON schema validation:
 
 https://github.com/tremes/insights-operator-gathering-rules/tree/schema 
 
-2. There's a service living in cloud.redhat.com fetching the rules from the repo and providing them through its API.
+2. There's a service living in console.redhat.com fetching the rules from the repo and providing them through its API.
 The very first version is going to provide just all the rules, but later we may consider splitting them by 
 cluster version and introducing some more complicated logic around fetching the rules
 3. Insights Operator fetches a config with the rules from the service and unmarshalls JSON to Go structs
@@ -196,4 +196,4 @@ new code bypassing the standard release process which could potentially be very 
 ## Infrastructure Needed [optional]
 
 - The repo in RedHatInsights
-- The service living in cloud.redhat.com
+- The service living in console.redhat.com
