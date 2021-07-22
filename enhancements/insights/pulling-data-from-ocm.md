@@ -95,6 +95,10 @@ The SCA certificate is available via the `etc-pki-entitlement` secret in the `op
   is available
 - Basic test of the validity of the SCA certs. Mount the `etc-pki-entitlement` secret and run e.g `yum install` in the container
 
+### Graduation Criteria
+
+This feature is planned as a technical preview in OCP 4.9 and is planned to go GA in 4.10.
+
 #### Dev Preview -> Tech Preview
 - Insights Operator is able to download the data from OCM API and expose it in a cluster API
 - basic functionality is tested
@@ -104,13 +108,25 @@ The SCA certificate is available via the `etc-pki-entitlement` secret in the `op
 - ability to distinguish various error states - e.g organization doesn't have SCA allowed versus API returns 404
 - inform a cluster user about the error state (problem with pulling the certificates)
 
+#### Removing a deprecated feature
+
+The periodical data pulling can be easily disabled in the cluster configuration. Removing this feature will require updating the Insights operator code base and will remove the `etc-pki-entitlement` secret from the `openshift-config-managed` namespace. 
+
 ### Upgrade / Downgrade Strategy
 
-There's no upgrade/downgrade strategy needed.
+There is no upgrade/downgrade strategy needed.
 
 ### Version Skew Strategy
 
-There's no Skew strategy needed. This work should have no impact on the upgrade. It doesn't require any coordinated behavior in the control plane. No other components will change.
+There is no Skew strategy needed. This work should have no impact on the upgrade. It doesn't require any coordinated behavior in the control plane. No other components will change.
+
+## Implementation History
+
+There are no other major milestones in the implementation history than the graduation criteria mentioned above.
+
+## Drawbacks
+
+There is no significant drawback.
 
 ## Alternatives
 
