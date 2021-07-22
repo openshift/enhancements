@@ -110,7 +110,7 @@ This feature is planned as a technical preview in OCP 4.9 and is planned to go G
 
 #### Removing a deprecated feature
 
-The periodical data pulling can be easily disabled in the cluster configuration. Removing this feature will require updating the Insights operator code base and will remove the `etc-pki-entitlement` secret from the `openshift-config-managed` namespace. 
+The periodical data pulling can be easily disabled in the cluster configuration. Removing this feature will require updating the Insights operator code base and will remove the `etc-pki-entitlement` secret from the `openshift-config-managed` namespace.
 
 ### Upgrade / Downgrade Strategy
 
