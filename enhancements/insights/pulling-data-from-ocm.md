@@ -4,8 +4,8 @@ authors:
   - "@tremes"
 reviewers:
   - "@sbose78"
-  - "@0sewa0"
   - "@inecas"
+  - "@petli-openshift"
   - "@smarterclayton"
 approvers:
   - "@sbose78"
@@ -94,3 +94,24 @@ The SCA certificate is available via the `etc-pki-entitlement` secret in the `op
 - `insights-operator-e2e-tests` suite can verify the SCA cert data
   is available
 - Basic test of the validity of the SCA certs. Mount the `etc-pki-entitlement` secret and run e.g `yum install` in the container
+
+#### Dev Preview -> Tech Preview
+- Insights Operator is able to download the data from OCM API and expose it in a cluster API
+- basic functionality is tested
+- this new functionality is documented
+
+#### Tech Preview -> GA
+- ability to distinguish various error states - e.g organization doesn't have SCA allowed versus API returns 404
+- inform a cluster user about the error state (problem with pulling the certificates)
+
+### Upgrade / Downgrade Strategy
+
+There's no upgrade/downgrade strategy needed. 
+
+### Version Skew Strategy
+
+There's no Skew strategy needed. This work should have no impact on the upgrade. It doesn't require any coordinated behavior in the control plane. No other components will change.
+
+## Alternatives
+
+Only possible alternative is to implement this functionality in another control plane component/operator. 
