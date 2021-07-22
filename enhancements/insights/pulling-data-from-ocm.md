@@ -106,7 +106,7 @@ The SCA certificate is available via the `etc-pki-entitlement` secret in the `op
 
 ### Upgrade / Downgrade Strategy
 
-There's no upgrade/downgrade strategy needed. 
+There's no upgrade/downgrade strategy needed.
 
 ### Version Skew Strategy
 
@@ -114,4 +114,4 @@ There's no Skew strategy needed. This work should have no impact on the upgrade.
 
 ## Alternatives
 
-Only possible alternative is to implement this functionality in another control plane component/operator. 
+Only possible alternative is to implement this functionality in another control plane component/operator.
