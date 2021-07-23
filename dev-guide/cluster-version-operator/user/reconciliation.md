@@ -101,7 +101,7 @@ The cluster-version operator unpacks the release image, ingests manifests, loads
 For upgrades, the graph is ordered by the number and component of the manifest file:
 
 <div style="text-align:center">
-  <img src="tasks-by-number-and-component.svg" width="100%" />
+  <img src="https://raw.githubusercontent.com/openshift/cluster-version-operator/master/docs/user/tasks-by-number-and-component.svg" width="100%" />
 </div>
 
 The `0000_03_authorization-openshift_*` manifest gets its own node, the `0000_03_quota-openshift_01_*` manifest gets its own node, and the `0000_03_security-openshift_*` manifest gets its own node.
@@ -112,7 +112,7 @@ We are more relaxed for the initial install, because there is not yet any user d
 So the graph nodes are all parallelized with the by-number ordering flattened out:
 
 <div style="text-align:center">
-  <img src="tasks-flatten-by-number-and-component.svg" width="100%" />
+  <img src="https://raw.githubusercontent.com/openshift/cluster-version-operator/master/docs/user/tasks-flatten-by-number-and-component.svg" width="100%" />
 </div>
 
 For the usual reconciliation loop (neither an upgrade between releases nor a fresh install), the flattened graph is also randomly permuted to avoid hanging on ordering bugs.
