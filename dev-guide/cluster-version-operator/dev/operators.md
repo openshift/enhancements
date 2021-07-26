@@ -75,7 +75,7 @@ Manifest files may also be used to delete your object [more info here](object-de
 Your manifests will be applied in alphabetical order by the CVO, so name your files in the order you want them run.
 If you are a normal operator (don’t need to run before the kube apiserver), you should name your manifest files in a way that feels easy:
 
-```
+```linter
 /manifests/
   deployment.yaml
   roles.yaml
@@ -83,7 +83,7 @@ If you are a normal operator (don’t need to run before the kube apiserver), yo
 
 If you’d like to ensure your manifests are applied in order to the cluster add a numeric prefix to sort in the directory:
 
-```
+```linter
 /manifests/
   01_roles.yaml
   02_deployment.yaml
@@ -91,7 +91,7 @@ If you’d like to ensure your manifests are applied in order to the cluster add
 
 When your manifests are added to the release image, they’ll be given a prefix that corresponds to the name of your repo/image:
 
-```
+```linter
 /release-manifests/
   99_ingress-operator_01_roles.yaml
   99_ingress-operator_02_deployment.yaml
@@ -110,11 +110,15 @@ To do this, you can set .metadata.annotations["release.openshift.io/create-only"
 
 Some operators need to run at a specific time in the release process (OLM, kube, openshift core operators, network, service CA).  These components can ensure they run in a specific order across operators by prefixing their manifests with:
 
+```linter
     0000_<runlevel>_<dash-separated-component>_<manifest_filename>
+```
 
 For example, the Kube core operators run in runlevel 10-19 and have filenames like
 
+```linter
     0000_13_cluster-kube-scheduler-operator_03_crd.yaml
+```
 
 Assigned runlevels
 

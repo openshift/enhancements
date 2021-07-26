@@ -2,7 +2,12 @@
 
 The Cluster Version Operator (CVO) runs in every cluster. CVO is in charge of performing updates to the cluster. It does this primarily by updating the manifests for all of the Second-Level Operators.
 
-The Cluster Version Operator, like all operators, is driven by its corresponding Operator custom resources. This custom resource (i.e. clusterversion object) reports the next available updates considered by the CVO. CVO gets the next available update information from policy engine of OpenShift update service (OSUS). OSUS is part of the cluster version object. This allows the cluster updates to be driven both by the console, OC command line interface and by modifying the clusterversion object manually. Also clusterversion object can modified to direct the CVO to the policy engine API endpoint provided by any OSUS instance.
+The Cluster Version Operator, like all operators, is driven by its corresponding Operator custom resources.
+This custom resource (i.e. clusterversion object) reports the next available updates considered by the CVO.
+CVO gets the next available update information from policy engine of OpenShift update service (OSUS).
+OSUS is part of the cluster version object.
+This allows the cluster updates to be driven both by the console, OC command line interface and by modifying the clusterversion object manually.
+Also clusterversion object can modified to direct the CVO to the policy engine API endpoint provided by any OSUS instance.
 
 
 

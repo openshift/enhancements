@@ -16,9 +16,15 @@ metadata:
   annotations:
     release.openshift.io/delete: "true"
 ```
-The existing CVO ordering scheme defined [here](operators.md) is also used for object removal. This provides a simple and familiar method of deleting multiple objects by reversing the order in which they were created. It is the developer's responsibility to ensure proper deletion ordering and to ensure that all items originally created by an object are deleted when that object is deleted. For example, an operator may have to be modified, or a new operator created, to take explicit actions to remove external resources. The modified or new operator would then be removed in a subsequent update.
+The existing CVO ordering scheme defined [here](operators.md) is also used for object removal.
+This provides a simple and familiar method of deleting multiple objects by reversing the order in which they were created.
+It is the developer's responsibility to ensure proper deletion ordering and to ensure that all items originally created by an object are deleted when that object is deleted.
+For example, an operator may have to be modified, or a new operator created, to take explicit actions to remove external resources.
+The modified or new operator would then be removed in a subsequent update.
 
-Similar to how CVO handles create/update requests, deletion requests are implemented in a non-blocking manner whereby CVO issues the initial request to delete an object kicking off resource finalization and after which resource removal. CVO does not wait for actual resource removal but instead continues. CVO logs when a delete is initiated, that the delete is ongoing when a manifest is processed again and found to have a deletion time stamp, and delete completion upon resource finalization.
+Similar to how CVO handles create/update requests, deletion requests are implemented in a non-blocking manner whereby CVO issues the initial request to delete an object kicking off resource finalization and after which resource removal.
+CVO does not wait for actual resource removal but instead continues.
+CVO logs when a delete is initiated, that the delete is ongoing when a manifest is processed again and found to have a deletion time stamp, and delete completion upon resource finalization.
 
 If an object cannot be successfully removed CVO will set `Upgradeable=False` which in turn blocks cluster update to the next minor release.
 

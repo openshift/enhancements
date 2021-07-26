@@ -18,7 +18,7 @@ All components must be N-1 minor version (4.y and 4.y-1) compatible - a componen
 
 The following rough order is defined for how upgrades should proceed:
 
-```
+```linter
 config-operator
 
 kube-apiserver
@@ -45,7 +45,7 @@ maximum disruptive:
 
 Which in practice can be described in runlevels:
 
-```
+```linter
 0000_10_*: config-operator
 0000_20_*: kube-apiserver
 0000_25_*: kube scheduler and controller manager
@@ -62,7 +62,8 @@ Which in practice can be described in runlevels:
 
 Since the release of OpenShift 4, a somewhat frequently asked question is: Why sometimes during an `oc adm upgrade` (cluster upgrade) does the process appear to re-start partway through?  [This bugzilla](https://bugzilla.redhat.com/show_bug.cgi?id=1690816) for example has a number of duplicates, and I've seen the question appear in chat and email forums.
 
-The answer to this question is worth explaining in detail, because it illustrates some fundamentals of the [self-driving, operator-focused OpenShift 4](https://blog.openshift.com/openshift-4-a-noops-platform/).  During the initial development of OpenShift 4, the toplevel [cluster-version-operator](https://github.com/openshift/cluster-version-operator/) (CVO) and the [machine-config-operator](https://github.com/openshift/machine-config-operator/) (MCO) were developed concurrently (and still are).
+The answer to this question is worth explaining in detail, because it illustrates some fundamentals of the [self-driving, operator-focused OpenShift 4](https://blog.openshift.com/openshift-4-a-noops-platform/).
+During the initial development of OpenShift 4, the toplevel [cluster-version-operator](https://github.com/openshift/cluster-version-operator/) (CVO) and the [machine-config-operator](https://github.com/openshift/machine-config-operator/) (MCO) were developed concurrently (and still are).
 
 The MCO is just one of a number of "second level" operators that the CVO manages.  However, the relationship between the CVO and MCO is somewhat special because the MCO [updates the operating system itself](https://github.com/openshift/machine-config-operator/blob/master/docs/OSUpgrades.md) for the control plane.
 
