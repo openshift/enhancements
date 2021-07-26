@@ -15,8 +15,7 @@ config:
   commands-show-output: false
 
   # We like to use really long lines
-  line-length:
-    line_length: 400
+  line-length: false
 
   # Sometimes we repeat headings, and it's easier to just turn those
   # into emphasis
