@@ -46,3 +46,6 @@ config:
 
   # Do not require language declarations for code blocks.
   fenced-code-language: false
+
+  # Allow indented code blocks
+  code-block-style: false
