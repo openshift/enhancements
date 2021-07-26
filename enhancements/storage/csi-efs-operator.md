@@ -50,12 +50,12 @@ registry.redhat.com and therefore cannot be supported by us.
 
 * Allow users to use AWS EFS volumes in a supported way.
 * Allow existing users of community-supported aws-efs-operator to update to Red Hat supported solution (mostly manually).
-* Keep existing community-supported aws-efs-operator features (namely, `SharedVolume` in
-  `aws-efs.managed.openshift.io` API group). See below.
 
 ### Non-Goals
 
 * Change the EFS CSI driver in any way. All missing functionality there must go through RFE process.
+* Keep existing community-supported aws-efs-operator features (namely, `SharedVolume` in
+  `aws-efs.managed.openshift.io` API group will not be preserved). See below.
 
 ## Existing situation
 
@@ -86,20 +86,22 @@ AWS EFS CSI driver is different from the other CSI drivers we ship. Listing the 
 * It implements dynamic provisioning in non-standard way. Cluster admin must manually create an EFS share in the cloud
   (and figure out related networking and firewalls). The EFS CSI driver will provision volumes out of it as
   *subdirectories* of it. The CSI driver cannot create EFS shares on its own.
-  * AWS has a limit of 120 Access Points per EFS volume, i.e. only 120 PVs can be created for a single StorageClass.
-    [Upstream issue](https://github.com/kubernetes-sigs/aws-efs-csi-driver/issues/310).
+  * The driver creates an [AccessPoint](https://docs.aws.amazon.com/efs/latest/ug/efs-access-points.html) for each
+    subdirectory for easier usage.
+  * AWS has a limit of 120 Access Points per EFS volume, i.e. only 120 PVs can be created for a single StorageClass
+    (= single EFS volume). [Upstream issue](https://github.com/kubernetes-sigs/aws-efs-csi-driver/issues/310).
   * Proper dynamic provisioning can come in the future, dealing with the networking and security groups is the hardest
     part there.
 * AWS EFS volumes do not have any size enforcement. They can hold as much data as apps put there and someone will have to
   pay for the storage. OCP offers standard metrics for amount of data on PVCs, it's up to the cluster admin to create
   alerts if the consumption gets too high.
 * It uses [efs-utils](https://github.com/aws/efs-utils) to provide encryption in transport, which is not included in
-  RHEL. We will need to package it, either as an image or RPM package.
+  RHEL. We will need to package it, either as an image or a RPM package.
 
 ## Proposal
 High level only, see design details below.
 
-1. Write a new aws-efs-csi-driver-operator from scrach using [CSI driver installation functions of library-go](https://github.com/openshift/library-go/tree/master/pkg/operator/csi/csicontrollerset).
+1. Write a new aws-efs-csi-driver-operator from scratch using [CSI driver installation functions of library-go](https://github.com/openshift/library-go/tree/master/pkg/operator/csi/csicontrollerset).
    * This allows us to share well tested code to install CSI drivers and implement bugfixes / new features at a single
      place.
    * It will add common features of CSI driver operators which are missing in the current community operator, such as
@@ -257,14 +259,9 @@ in the catalog there. We still want to offer the community operator in 4.8 and e
 
 #### Tech Preview -> GA
 
-TODO. Mainly all tests in CI & feedback from the users (OSD!)
-
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-- Backhaul SLI telemetry
-- Document SLOs for the component
-- Conduct load testing
+* Test plan is implemented in our CI.
+* All bus with urgent + high severity are fixed.
+* The tech preview operator was available in at lest one OCP release.
 
 #### Removing a deprecated feature
 
@@ -274,45 +271,7 @@ need to use the community CSI driver operator + driver.
 
 ### Upgrade / Downgrade Strategy
 
-TODO. Nothing special expected here. No downgrade in OLM!
-
-If applicable, how will the component be upgraded and downgraded? Make sure this
-is in the test plan.
-
-Consider the following in developing an upgrade/downgrade strategy for this
-enhancement:
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to keep previous behavior?
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to make use of the enhancement?
-
-Upgrade expectations:
-- Each component should remain available for user requests and
-  workloads during upgrades. Ensure the components leverage best practices in handling [voluntary disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to this should be
-  identified and discussed here.
-- Micro version upgrades - users should be able to skip forward versions within a
-  minor release stream without being required to pass through intermediate
-  versions - i.e. `x.y.N->x.y.N+2` should work without requiring `x.y.N->x.y.N+1`
-  as an intermediate step.
-- Minor version upgrades - you only need to support `x.N->x.N+1` upgrade
-  steps. So, for example, it is acceptable to require a user running 4.3 to
-  upgrade to 4.5 with a `4.3->4.4` step followed by a `4.4->4.5` step.
-- While an upgrade is in progress, new component versions should
-  continue to operate correctly in concert with older component
-  versions (aka "version skew"). For example, if a node is down, and
-  an operator is rolling out a daemonset, the old and new daemonset
-  pods must continue to work correctly even while the cluster remains
-  in this partially upgraded state for some time.
-
-Downgrade expectations:
-- If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
-  misbehaving, it should be possible for the user to rollback to `N`. It is
-  acceptable to require some documented manual steps in order to fully restore
-  the downgraded cluster to its previous state. Examples of acceptable steps
-  include:
-  - Deleting any CVO-managed resources added by the new version. The
-    CVO does not currently delete resources that no longer exist in
-    the target version.
+Nothing special here, the operator will follow generic OLM upgrade path. We do not support downgrade of the operator.
 
 ### Version Skew Strategy
 
