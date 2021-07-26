@@ -43,3 +43,6 @@ config:
   blanks-around-lists: false
   single-trailing-newline: false
   no-multiple-blanks: false
+
+  # Do not require language declarations for code blocks.
+  fenced-code-language: false
