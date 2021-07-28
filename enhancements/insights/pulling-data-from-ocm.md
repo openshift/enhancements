@@ -41,15 +41,17 @@ Users could consume RHEL content and container images using the RHEL subscriptio
 In the OpenShift 4, this is no longer possible because the Red Hat Enterprise Linux Core OS (RHCOS) does not
 provide any attached subscription. This enhancement is to provide users the Simple Content Access (SCA) certs
 from Red Hat Subscription Manager (RHSM).
+The Insights Operator is now the only OCP component that connects an OpenShift cluster to a Red Hat subscription experience (console.redhat.com APIs). The consumers of the SCA certs are not only builds, but also shared resources, such as the CSI driver.
 
 ### Goals
 
 - Extend the Insights Operator config with an OCM API URL to be able to query the data
 - Periodically pull the data from the OCM API and expose it in the OpenShift API
+- This is an opt-in feature by a cluster user and might be moved to a different OCP component in the future
 
 ### Non-Goals
 
-- Insights Operator providing any transformation or post-processing of the data pulled
+- Insights Operator providing any transformation or post-processing of the SCA certs pulled
   from the OCM API
 
 ## Proposal
@@ -105,7 +107,7 @@ This feature is planned as a technical preview in OCP 4.9 and is planned to go G
 - this new functionality is documented
 
 #### Tech Preview -> GA
-- ability to distinguish various error states - e.g organization doesn't have SCA allowed versus API returns 404
+- ability to distinguish various error states - e.g organization doesn't have SCA allowed versus API returns an error
 - inform a cluster user about the error state (problem with pulling the certificates)
 
 #### Removing a deprecated feature
@@ -130,4 +132,6 @@ There is no significant drawback.
 
 ## Alternatives
 
-Only possible alternative is to implement this functionality in another control plane component/operator.
+- Alternative is to implement this functionality in another control plane component/operator (e.g openshift-controller-manager).
+- Current state, which is the manual addition of the SCA certs to cluster worker nodes. This is not very convenient because the SCA certs change regularly and the change requires node reboot.
+
