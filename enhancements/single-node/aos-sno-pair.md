@@ -50,7 +50,8 @@ Provide the ability for exactly two all-in-one OpenShift clusters to operate as 
 Assuming workloads that require some form of coordination between the two nodes (either at-most-one semantics or simply to reduce machine load during normal operation):
 
 - Pacemaker and Corosync from the RHEL-HA cluster stack are deployed [in Pods](https://github.com/beekhof/installer/blob/aio/pod-cluster.yaml.in) on both OCP clusters, and they are configured to form a RHEL-HA cluster which is composed of two independent SNO clusters.
-- The Pacemaker cluster is configured so that on peer failure the cluster can reliably ensure that the workload on an unhealthy peer is stopped before starting the workload on the healthy peer. Configuration [flexibility](https://github.com/openshift/enhancements/blob/fb3faa767a04866ee6d6ef46127636bd086df658/enhancements/single-node/aos-sno-resources/2%20Node%20HA%20Menu.svg) is provided here to allow for the anticipated variety of customer requirements.
+- The Pacemaker cluster is configured so that on peer failure the cluster can reliably ensure that the workload on an unhealthy peer is stopped before starting the workload on the healthy peer.
+  Configuration [flexibility](https://github.com/openshift/enhancements/blob/fb3faa767a04866ee6d6ef46127636bd086df658/enhancements/single-node/aos-sno-resources/2%20Node%20HA%20Menu.svg) is provided here to allow for the anticipated variety of customer requirements.
 - One or more identical Kubernetes Deployments are created on both OCP clusters, and a Pacemaker [Resource Agent](https://github.com/beekhof/pcmk/blob/master/k8sDeployment) is used to manage the replica count of these Deployments in order to ensure the singleton workload instance is always running on a healthy peer.
 - Each Kubernetes Deployment can be configured to prefer a particular OCP cluster in order to make effective use of the hardware during normal operation.
 
