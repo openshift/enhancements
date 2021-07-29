@@ -10,7 +10,7 @@ reviewers:
 approvers:
   - "@bparees"
 creation-date: 2020-08-18
-last-updated: 2021-06-30
+last-updated: 2021-07-22
 status: implementable
 ---
 
@@ -349,6 +349,33 @@ shows a message in a toast notification indicating that there is an update
 available and the user must refresh their browser to see the changes. (We won't
 refresh the page automatically to avoid possibly losing data if the user is
 entering something into a form or the YAML editor.)
+
+### Localization
+
+Info on how Console is handling i18n is in this [enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/console/internationalization.md).
+
+Console uses [react-i18next](https://github.com/i18next/react-i18next) for i18n,
+and dynamic plugins must use react-i18next as well.
+
+All dynamic plugins must use a single react-i18next [namespace](https://www.i18next.com/principles/namespaces),
+named after the plugin, e.g. for `kubevirt` the filename would be
+`plugin__kubevirt.json`. Localization resources need to be served
+by the plugin service under the `locales/{language}/{namespace}.json`
+path relative to the `basePath` defined in the `ConsolePlugin` resource.
+All dynamic plugins must use the `plugin__` namespace prefix, e.g.
+`plugin__knative` or `plugin__kubevirt`. The request for the dynamic
+plugin localization resources will be proxied by console backend.
+For example, the `kubevirt` plugin localization resource
+in the `en` language will be requested at path
+`/locales/en/plugin__kubevirt.json`
+
+Here's a code example of how the `kubevirt` plugin would translate a message:
+```js
+const VMHeading = () => {
+  const { t } = useTranslation();
+  return <h1>{t('plugin__kubevirt~Virtual Machine')}</h1>;
+};
+```
 
 ### Error Handling
 
