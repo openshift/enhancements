@@ -90,6 +90,7 @@ _The "two node cluster" is a use case that requires special consideration.  With
 For environments in which customers will allow it, Corosync also ships a lightweight quorum arbitrator that can be run locally or in the cloud on any non-cluster node.  In such cases, no special quorum handling is required and careful placement of the arbitrator also ensures that the surviving peer is reachable by its intended clients.
 
 Where this is not possible, there are existing capabilities that we can leverage by enabling the _Corosync two_node, last_man_standing, and wait_for_all_ options (See: man votequorum) and configuring a fencing delay in Pacemaker.
+<br>See [RHEL-HA product documentation](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/high_availability_add-on_administration/ch-startup-haaa) for more details.
 
 In combination, these options provide the following behaviour:
 - Both sides retain quorum in the event of a network split.
