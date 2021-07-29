@@ -84,6 +84,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9102  | ovn-kubernetes master kube-rbac-proxy | sdn || metrics, control plane only, ovn-kubernetes only |
 | 9102  | kube-proxy | sdn | 4.7 | metrics, third-party network plugins only |
 | 9103  | ovn-kubernetes node kube-rbac-proxy | sdn || metrics |
+| 9258  | cluster-cloud-controller-manager-operator | cluster infra | 4.9 | metrics, control plane only |
 | 9537  | crio      | node || metrics |
 | 9641  | ovn-kubernetes northd | sdn | 4.3 | control plane only, ovn-kubernetes only |
 | 9642  | ovn-kubernetes southd | sdn | 4.3 | control plane only, ovn-kubernetes only |
@@ -98,7 +99,9 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 10256 | openshift-sdn | sdn || healthz, openshift-sdn only |
 | 10256 | kube-proxy | sdn || healthz, third-party network plugins only, deprecated |
 | 10257 | kube-controller-manager | apiserver || metrics, healthz, control plane only |
+| 10258 | cloud-controller-manager | cluster infra | 4.9 | metrics, healthz, control plane only |
 | 10259 | kube-scheduler | apiserver || metrics, control plane only |
+| 10263 | cloud-node-manager | cluster infra | 4.9 | metrics, healthz, some platforms only |
 | 10357 | cluster-policy-controller | apiserver || healthz, control plane only |
 | 10443 | haproxy   | net edge    | 3.0 | HAProxy internal `fe_no_sni` frontend; localhost only; baremetal only; only on nodes running router pod replicas |
 | 10444 | haproxy   | net edge    | 3.0 | HAProxy internal `fe_sni` frontend; localhost only; baremetal only; only on nodes running router pod replicas |
@@ -124,6 +127,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 |-------|-----------|-------------|-------|-------|
 | 4180  | machine-config-daemon oauth-proxy | node ||
 | 8797  | machine-config-daemon | node |4.0| metrics |
+| 9259  | cluster-cloud-controller-manager-operator | cluster infra | 4.9 | healthz, control plane only |
 | 9443 | kube-controller-manager | workloads || recovery-controller|
 | 9977  | etcd | etcd || ? |
 | 10248 | kubelet | node || healthz |
