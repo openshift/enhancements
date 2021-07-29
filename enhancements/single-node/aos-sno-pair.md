@@ -51,7 +51,7 @@ Assuming workloads that require some form of coordination between the two nodes 
 
 - Pacemaker and Corosync from the RHEL-HA cluster stack are deployed [in Pods](https://github.com/beekhof/installer/blob/aio/pod-cluster.yaml.in) on both OCP SNO clusters, and they are configured to form a RHEL-HA cluster which is composed of two independent SNO clusters.
 - The RHEL-HA cluster is configured so that on peer failure the RHEL-HA cluster can reliably ensure that the workload on an unhealthy peer is stopped before starting the workload on the healthy peer.
-  Configuration [flexibility](https://github.com/openshift/enhancements/blob/fb3faa767a04866ee6d6ef46127636bd086df658/enhancements/single-node/aos-sno-resources/2%20Node%20HA%20Menu.svg) is provided here to allow for the anticipated variety of customer requirements.
+  Configuration [flexibility](aos-sno-resources/2_node_HA_menu.svg) is provided here to allow for the anticipated variety of customer requirements.
 - One or more identical Kubernetes Deployments are created on both OCP SNO clusters, and a Pacemaker [Resource Agent](https://github.com/beekhof/pcmk/blob/master/k8sDeployment) is used to manage the replica count of these Deployments in order to ensure the singleton workload instance is always running on a healthy peer.
 - Each Kubernetes Deployment can be configured to prefer a particular OCP SNO cluster in order to make effective use of the hardware during normal operation.
 
@@ -67,7 +67,7 @@ The RHEL-HA cluster performs periodic health checking of Deployments at two leve
 
 It is imagined that most Deployments would be scaled between 0 and 1 but the minimum and maximum counts are admin configurable for added flexibility.
 
-Rather than creating a one-size-fits-all 2 node architecture, supportable customer deployments must include a minimum number of [redundancy options](https://github.com/openshift/enhancements/blob/fb3faa767a04866ee6d6ef46127636bd086df658/enhancements/single-node/aos-sno-resources/2%20Node%20HA%20Menu.svg) based on the constraints of their environment.
+Rather than creating a one-size-fits-all 2 node architecture, supportable customer deployments must include a minimum number of [redundancy options](aos-sno-resources/2_node_HA_menu.svg) based on the constraints of their environment.
 
 #### Network Redundancy
 Bonding or Knet can be configured with redundant network paths in environments where this is possible.  This helps ensure that the RHEL-HA cluster does not attempt recovery until all communication paths between the peers have been exhausted.
