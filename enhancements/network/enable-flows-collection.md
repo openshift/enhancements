@@ -48,7 +48,7 @@ tracing (on or off).
 
 Both via Command-Line Interface (CLI) and Graphical User Interface (UI):
 
-* To provide to the users a simple mechanism to enable and disable flows emission and 
+* To provide to the users a simple mechanism to enable and disable flows emission and
   collection.
 * To provide to the users a simple mechanism to retrieve the current status of the flows'
   emission.
@@ -72,19 +72,19 @@ flow collection and storage pipeline.
 
 To enable Netflow emission:
 
-```
+```text
 $ oc flows start netflow
 ```
 
 To enable IPFIX emission:
 
-```
+```text
 $ oc flows start ipfix
 ```
 
 To disable any flow emission:
 
-```
+```text
 $ oc flows stop
 ```
 
@@ -93,7 +93,7 @@ same time.
 
 To retrieve the status of the flows' emission, it could be shown by node:
 
-```
+```text
 $ oc get flows
 NAME    STATUS      TYPE     ENDPOINT
 node-a  emitting    netflow  http://10.1.2.3:30001
@@ -104,14 +104,14 @@ node-c  emitting    netflow  http://10.1.2.5:30001
 The command should return error if you try to enable flows in any cluster operator
 different from `OVNKubernetes`.
 
-```
+```text
 $ oc flows start netflow
 OpenShiftSDN does not support flows tracing.
 ```
 
 ### Console-based flow status and retrieval
 
-If the cluster uses `OVNKubernetes` CNI type, in the side panel of the Openshift 
+If the cluster uses `OVNKubernetes` CNI type, in the side panel of the Openshift
 Console, an "Observability" or "Monitoring" entry would appear inside the
 "Networking" group.
 
@@ -120,7 +120,7 @@ see their status. When the flows' emission is disabled, it would just show an
 "Enable flows" dropdown list, where you can select one of the following
 entries:
 
-```
+```text
                  +-----------+-+                            
  Flows emission: |Disabled   |V|                            
                  |NetFlow    +-+                            
@@ -131,7 +131,7 @@ entries:
 Once the emission has been enabled, the GUI would show a table with the
 status for each node, analogue to the CLI use case:
 
-```
+```text
                        +-----------+-+
        Flows emission: |Netflow    |V|
                        +-----------+-+
@@ -168,7 +168,7 @@ fixed or discovered).
 Given the aforementioned details, following subsections depicts the work to do,
 grouped in different tasks.
 
-#### Task 1: modify OVN-Kubernetes configuration to discover automatically the collector address.
+#### Task 1: modify OVN-Kubernetes configuration to discover automatically the collector address
 
 [Current `Network` operator configuration allows setting a static host:port address](
 https://docs.okd.io/latest/networking/ovn_kubernetes_network_provider/tracking-network-flows.html#nw-network-flows-object_tracking-network-flows).
@@ -260,6 +260,10 @@ To be discussed.
 ### Graduation Criteria
 
 **Note:** *Section not required until targeted at a release.*
+
+#### Dev Preview -> Tech Preview
+#### Tech Preview -> GA
+#### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 
