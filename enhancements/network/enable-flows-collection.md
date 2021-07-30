@@ -194,9 +194,9 @@ by one of the following properties:
 
 * `nodePort: (int)`: if set, the OVN will discover the node IP and submit the flows to the
   port indicated by such property. E.g. `nodePort: 30023`.
-* `selector: (map)`: if set, the OVN will fetch for any `NodePort` matching
-  the labels passed as argument, and use the discovered host:ip that matches the node and
-  labels. For example:
+* `selector: (map)`: if set, the OVN will search for any `Service` with `type: NodePort`
+  matching the labels passed as argument, then extract the service's `NodePort` and use
+  it alongside with the node IP. Configuration example:
   ```yaml
   selector:
     role: flows-collector
@@ -224,7 +224,7 @@ After this task is finished:
 * You can operate flows through the `oc` CLI command: enable, disable, get status...
 
 This task could involve setting new RBAC permissions to allow interaction between the
-Flow operator and the OVF-Kubernetes pods.
+Flow operator and the OVN-Kubernetes pods.
 
 #### Task 4: enable the Flows' operation in the Console GUI
 
