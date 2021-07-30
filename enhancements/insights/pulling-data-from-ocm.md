@@ -102,6 +102,7 @@ The SCA certificate is available via the `etc-pki-entitlement` secret in the `op
 This feature is planned as a technical preview in OCP 4.9 and is planned to go GA in 4.10.
 
 #### Dev Preview -> Tech Preview
+- opt-in feature (called `InsightsOperatorPullingSCA`) enabled with `TechPreviewNoUpgrade` feature set
 - Insights Operator is able to download the data from OCM API and expose it in a cluster API
 - basic functionality is tested
 - this new functionality is documented
@@ -109,6 +110,7 @@ This feature is planned as a technical preview in OCP 4.9 and is planned to go G
 #### Tech Preview -> GA
 - ability to distinguish various error states - e.g organization doesn't have SCA allowed versus API returns an error
 - inform a cluster user about the error state (problem with pulling the certificates)
+- the feature might be moved to a different OCP component
 
 #### Removing a deprecated feature
 
