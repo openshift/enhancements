@@ -116,6 +116,18 @@ In combination, these options provide the following behaviour:
 
 ### Test Plan
 
+**Note:** *Section not required until targeted at a release.*
+
+Testing should be thoroughly done at all levels, including unit, end-to-end, and
+integration. The tests should be straightforward.
+
+**Setup Test** - verifying peer pod is created on both (predefined) SNOs once HA-RHEL operator is deployed and HA-RHEL CR is created.
+
+**Functionality Test** - create a resource on HA-RHEL cluster and verify it’s started on one of the SNOs.
+
+**HA Test** - Terminate one SNO and verify HA-RHEL cluster transfer the terminated SNO workload to the other one and verify fencing is configured.
+
+**Failure Conditions Tests** - Bad inputs during setup, both nodes failing, etc.
 ### Graduation Criteria
 
 #### Examples
