@@ -138,6 +138,30 @@ High level only, see design details below.
    * This way, cluster admins can tag the volumes to be deleted when the cluster is deleted (this is opt in!).
      At least CI should use this approach to ensure there are no leftovers.
 
+### User Stories
+
+#### Story 1: Installation
+
+1. Cluster-admin installs EFS CSI driver operator via OLM.
+2. Cluster-admin creates ClusterCSIDriver instance for the driver (`efs.csi.aws.com`).
+3. Cluster-admin creates EFS volumes in AWS.
+   1. Including mount targets creation.
+   2. Including firewall configuration to allow access to the EFS volume from all cluster nodes.
+4. Cluster-admin makes the EFS volume available to OCP users.
+   1. Either the volume EFS volume will be one PV.
+   2. Or the cluster-admin creates a StorageClass that will provision PVs as subdirectories of the EFS volume.
+5. User (or StatefulSet or Template etc) can create PVC that is either bound to the pre-provisioned PV or a new EFS subdir + PV is dynamically provisioned.
+
+#### Story 2: Un-installation
+1. Cluster-admin ensures that nothing uses EFS PVs, e.g. by stopping all application pods that use EFS.
+2. Clusted-admin deletes the PVs. This is not required, but it will help the pods to be stopped.
+3. Cluster-admin can optionally back-up EFS volumes.
+4. Cluster-admin deletes ClusterCSIDriver `efs.csi.aws.com`.
+   1. The operator will remove the CSI driver and allow ClusterCSIDriver to be deleted.
+5. Cluster-admin deletes EFS volumes in AWS.
+6. Cluster admin un-installs the EFS CSI driver operator. This should be done only after the CSI driver itself was already removed.
+   Removing the operator does not automatically remove the driver!
+
 ### Implementation Details/Notes/Constraints [optional]
 
 ### Risks and Mitigations
