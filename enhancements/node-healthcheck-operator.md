@@ -29,9 +29,11 @@ approvers:
 ## Summary
 
 
-Enable opt in for automated node health checking and create objects
-for unhealthy nodes, to be handled later by external controllers
-that comply with the existing  [api].
+This enhancement proposes the creation of a new OLM-delivered operator
+that supports NodeCondition-based health checking of UPI worker nodes.
+
+The new operator utilises the same External Remediation API as Machine 
+Healthcheck to trigger recovery of affected nodes and workloads.
 
 ## Motivation
 
@@ -445,5 +447,4 @@ started right away.
 [poison pill]: https://github.com/poison-pill/poison-pill
 [node maintenance lease proposal]: https://github.com/kubernetes/enhancements/pull/1411/
 [remediation API]:
-
 
