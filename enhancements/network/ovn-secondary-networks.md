@@ -147,7 +147,7 @@ spec:
             "type": "ovn-kubernetes",
             "name": "tenant-overlay-ext-network",
             "subnet": "10.10.20.0/24",
-            "has_external_connectivity": true,
+            "hasExternalConnectivity": true,
         }'
 ```
 
