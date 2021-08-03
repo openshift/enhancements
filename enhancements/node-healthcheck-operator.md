@@ -82,7 +82,7 @@ expected to track the [node maintenance lease proposal]
 - Recording long-term stable history of all health-check failures or remediation
   actions.
 
-- Detection of Machines that never become healthy Nodes is not part of the initial implementation.  Machine API based cluster can/should continue to use MHC at this time.
+- Replace Machine Healthcheck for IPI clusters
 
 ## Proposal
 The main use-case being targeted is clusters which, for technical and/or political reasons, do not have
