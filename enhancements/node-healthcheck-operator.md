@@ -5,7 +5,7 @@ title: node-healthcheck-controller
 authors:
   - "@rgolangh"
 reviewers:
-  - "@abeekof"
+  - "@abeekhof"
   - "@n1r1"
   - "@mshitrit"
   - "@slintes"
