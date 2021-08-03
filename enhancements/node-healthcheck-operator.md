@@ -11,7 +11,7 @@ reviewers:
   - "@slintes"
   - "@dhellmann"
 approvers:
-  - "@abeekof"
+  - "@abeekhof"
   - "@n1r1"
 ---
 
