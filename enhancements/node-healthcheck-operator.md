@@ -37,7 +37,22 @@ that comply with the existing  [api].
 
 Enable clusters that do not have a functioning Machine API to detect and respond to node-level failures in order to recover workloads , and/or restore cluster capacity.
 
-The existing Machine Health Check controller requires a functioning machine-api. This prevents its use in the majority of Kubernetes and OpenShift clusters.
+The majority of OpenShift clusters are UPI based and do not have Machine objects
+and/or a functioning Machine API - which is a prerequisite for using the Machine 
+HealthCheck controller.
+
+There are a variety of reasons, even on cloud, that customers might want or need
+to pursue a UPI strategy *for deployment*, but that doesn't need to prevent them
+from being able to use a standard solution for protecting their workloads, or imply 
+that they would prefer to create a bespoke solution.
+
+There are a number of barriers to retrofitting a Machine API to an existing UPI 
+cluster, but the most common raised are: complexity, technical limitations, and 
+customer policies which prevent BMCs or platform credentials from being stored 
+within the cluster).
+
+While there remains a need for UPI, there is also a need to allow UPI workloads to 
+be made highly available, and customers look to Red Hat to provide a solution.
 The proposed Node Healthcheck Controller (NHC) provides a generic solution that fits all installation types, together with an external remediation API that allows a pluggable remediation system to be installed and remediate unhealthy nodes.
 
 ### Goals
@@ -430,6 +445,5 @@ started right away.
 [poison pill]: https://github.com/poison-pill/poison-pill
 [node maintenance lease proposal]: https://github.com/kubernetes/enhancements/pull/1411/
 [remediation API]:
-
 
 
