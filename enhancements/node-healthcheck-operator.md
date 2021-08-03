@@ -85,7 +85,7 @@ expected to track the [node maintenance lease proposal]
 - Detection of Machines that never become healthy Nodes is not part of the initial implementation.  Machine API based cluster can/should continue to use MHC at this time.
 
 ## Proposal
-The main use-case we target is UPI, user provisioned infrastructure, which do not have
+The main use-case being targeted is clusters which, for technical and/or political reasons, do not have
 the Machine-API controlling them. This enables any kind of recovery mechanism to be built and handle remediation.
 
 #### Stories
@@ -447,4 +447,3 @@ started right away.
 [poison pill]: https://github.com/poison-pill/poison-pill
 [node maintenance lease proposal]: https://github.com/kubernetes/enhancements/pull/1411/
 [remediation API]:
-
