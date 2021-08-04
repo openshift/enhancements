@@ -130,6 +130,20 @@ integration. The tests should be straightforward.
 **Failure Conditions Tests** - Bad inputs during setup, both nodes failing, etc.
 ### Graduation Criteria
 
+**Note:** *Section not required until targeted at a release.*
+
+Define graduation milestones.
+
+These may be defined in terms of API maturity, or as something else. Initial proposal
+should keep this high-level with a focus on what signals will be looked at to
+determine graduation.
+
+Consider the following in developing the graduation criteria for this
+enhancement:
+- Maturity levels - `Dev Preview`, `Tech Preview`, `GA`
+- Deprecation
+
+Clearly define what graduation means.
 #### Examples
 
 #### Dev Preview -> Tech Preview
