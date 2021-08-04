@@ -35,7 +35,7 @@ Some companies have a need for a highly available container management solution 
   
 ### Goals
 
-Provide the ability for exactly two all-in-one OpenShift clusters to operate as a **predefined** pair in an **active-active** configuration, detect when its peer has died and **automatically** take over its workloads after ensuring it is safe to do so.
+Provide the ability for exactly two Single Node OpenShift clusters to operate as a **predefined** pair in an **active-active** configuration, detect when its peer has died and **automatically** take over its workloads after ensuring it is safe to do so.
 
 ### Non-Goals
 
