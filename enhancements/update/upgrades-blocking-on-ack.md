@@ -9,10 +9,11 @@ reviewers:
   - "@csrwng"
   - "@relyt0925"
   - "@jeremyeder"
+  - "@wking"
 approvers:
   - "@sdodson"
 creation-date: 2021-07-08
-last-updated: 2021-07-23
+last-updated: 2021-08-06
 status: implementable
 ---
 
@@ -71,7 +72,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: admin-gates
-  namespace: openshift-cluster-version
+  namespace: openshift-config-managed
 data:
   ack-4.8-kube-122-api-removals-in-4.9: |
      Detailed description of what admin needs to do...Read documentation here https://
@@ -90,7 +91,7 @@ The keys will be named to make it explicitly clear what the administrator is ack
 CVO will set `Upgradeable=false` which in turn blocks cluster upgrades to the next minor release until it finds each of the applicable predefined keys in the configmap with a value of `true`.
 For each key blocking an upgrade, CVO will generate a detailed message containing the key and pointing to relevant OCP documentation explaining what the administrator is expected to do before acknowledging task completion, i.e. entering the corresponding key into the configmap with a value of `true`.
 
-The new configmap `admin-acks` will be installed `create-only` as part of the release in the namespace `openshift-cluster-version`.
+The new configmap `admin-acks` will be installed `create-only` as part of the release in the namespace `openshift-config`.
 ```yaml
 apiVersion: v1
 kind: ConfigMap
@@ -98,7 +99,7 @@ metadata:
   annotations:
     release.openshift.io/create-only="true"
   name: admin-acks
-  namespace: openshift-cluster-version
+  namespace: openshift-config
 data:
 ```
 It will initially have no keys since the administrator is expected to add the relevant key as part of acknowledgement.
@@ -108,13 +109,13 @@ It will initially have no keys since the administrator is expected to add the re
 Clusters upgraded to 4.9 will no longer have access to these [APIs][k8s-1.22-removed-apis].
 This new upgrade blocking mechanism will be used in an attempt to require administrators to read detailed documentation regarding the removed APIs and the possible impact.
 This OCP documentation will list which APIs have been removed and how an administrator checks their cluster for use of those APIs.
-4.8.z versions that are upgradeable to 4.9 will contain this enhancement and have the configmaps `openshift-cluster-version/admin-gates` and `openshift-cluster-version/admin-acks`.
+4.8.z versions that are upgradeable to 4.9 will contain this enhancement and have the configmaps `openshift-config-managed/admin-gates` and `openshift-config/admin-acks`.
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: admin-gates
-  namespace: openshift-cluster-version
+  namespace: openshift-config-managed
 data:
   ack-4.8-kube-122-api-removals-in-4.9: |
      Detailed description of what admin needs to do...Read documentation here https://
@@ -127,7 +128,7 @@ metadata:
   annotations:
     release.openshift.io/create-only="true"
   name: admin-acks
-  namespace: openshift-cluster-version
+  namespace: openshift-config
 data:
     ack-4.8-kube-122-api-removals-in-4.9: "true"
 ```
@@ -205,15 +206,27 @@ Major milestones in the life cycle of a proposal should be tracked in `Implement
 
 ## Alternatives
 
-* apiserver could be the component setting `Upgradeable=false` and looking for the acknowledgement, since it is the component that is "removing" the APIs.
+### API-server sets `Upgradeable=False`
+
+apiserver could be the component setting `Upgradeable=False` and looking for the acknowledgement, since it is the component that is "removing" the APIs.
 However this alternative was rejected because:
-  * Whether the kubernetes v1.22 APIs are removed has no true affect on whether the apiserver is upgradeable.
-    API removal is a cluster-wide condition that is more accurately represented and managed by the CVO.
-  * This mechanism is a generically useful concept so implementing it in a way that allows reuse for other similar upgrade gates requiring manual administrator action felt right.
-    CVO already manages upgrades and contains extensive upgrade gating logic that can be reused.
-* Another rejected alternative is to use the apiserver's data about what APIs are in use, and block upgrades if removed APIs are in use.
-  This was rejected because that information isn't sufficient to make an informed choice.
-  As described in [the *Motivation* section](#motivation), just because an API was used last week doesn't mean it's still required, and just because it was not used within the last week doesn't mean a tool or workload is not going to try to use it tomorrow.
+
+* Whether the kubernetes v1.22 APIs are removed has no true affect on whether the apiserver is upgradeable.
+  API removal is a cluster-wide condition that is more accurately represented and managed by the CVO.
+* This mechanism is a generically useful concept so implementing it in a way that allows reuse for other similar upgrade gates requiring manual administrator action felt right.
+  CVO already manages upgrades and contains extensive upgrade gating logic that can be reused.
+
+### Consuming API-server's in-use-API data
+
+Another rejected alternative is to use the apiserver's data about what APIs are in use, and block upgrades if removed APIs are in use.
+This was rejected because that information isn't sufficient to make an informed choice.
+As described in [the *Motivation* section](#motivation), just because an API was used last week doesn't mean it's still required, and just because it was not used within the last week doesn't mean a tool or workload is not going to try to use it tomorrow.
+
+### Keeping both configmaps in `openshift-cluster-version`
+
+Earlier versions of this enhancement suggested holding both new configmaps in `openshift-cluster-version`.
+Instead, we hold `admin-gates` in `openshift-config-managed`, alongside other resources that admins traditionally do not touch, and we hold `admin-acks` in `openshift-config`, alongside other resources that admins traditionally do touch.
+This avoids the confusion of pointing admins at a single namespace where they are encouraged to touch some, but not all, of the configmaps.
 
 [k8s-1.22-removed-apis]: https://kubernetes.io/docs/reference/using-api/deprecation-guide/#v1-22
 [upgradeableCheck-interface]: https://github.com/openshift/cluster-version-operator/blob/3a68652568e9075c23f491bc8c037942bd67ec82/pkg/cvo/upgradeable.go#L132
