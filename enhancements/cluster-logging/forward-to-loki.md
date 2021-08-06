@@ -21,8 +21,8 @@ superseded-by:
 - [X] Enhancement is `implementable`
 - [X] Design details are appropriately documented from clear requirements
 - [X] Test plan is defined
-- [ ] Operational readiness criteria is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [X] Operational readiness criteria is defined
+- [X] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
@@ -78,9 +78,10 @@ To summarize the key points:
 - Minimize the _total number_ of labels per stream
   - There is a limit of 30 max, fewer labels == better performance.
 - Log streams must be _ordered by collection timestamp_.
-  - Must not allow distinct nodes with separate clocks to contribute to a single stream.
+  - Must not combine independent logs streams that may have out-of-order clocks.\
+  **Note**: Grafana claim they will remove this restriction in future, but this design can cope with it.
 
-All logging meta-data will still be included in log records.
+All log record data will still be available as a JSON object in the Loki log payload.
 Labels do not need to _identify the source of logs_, only to _partition the search space_.
 At query time labels reduce the search space, then Loki uses log content to complete the search.
 
@@ -100,31 +101,37 @@ would match this LogQL filter:
 ```
 ### Default Loki Labels
 
+By default the following log fields are translated to Loki labels and may be used in queries:
+
+* `log_type`: Category of log, a string prefixed with `application`, `infrastructure` or `audit`.
+* `kubernetes.namespace_name`: namespace where the log originated.
+* `kubernetes.pod_name`: name of the pod where the log originated.
+* `kubernetes.container_name`: name of the container within the pod.
+* `kubernetes_host`: host name of the kubernetes node where the stream originated.
+
 The default label set should be suitable for most deployments.
 The user can configure a different set for specific needs.
 
-The default label set is:
+Log streams _may_ have additional labels not mentioned here.
+User queries should not rely on such labels, they may change without notice.
 
-`log_type`: One of `application`, `infrastructure`, `audit`. Basic log categorization.
+**Note:** Labels are used to partition the search space.
+The full log meta-data is available in the JSON payload for filtering.
 
-`cluster`: The openshift cluster name as printed by: \
-`oc get infrastructure/cluster -o template="{{.status.infrastructureName}}"` \
-NOTE: If the cluster name is not available, no cluster label is applied. This is not an error.
+#### Implementation detail: labels for uniqueness
 
-`kubernetes.namespace_name`: namespace where the log originated.
+In the initial implementation, the following fields are _always_ translated to labels.
+This is necessary to ensure ordered time-stamps in log streams.
 
-`kubernetes.pod_name`: name of the pod where the log originated.
+* `kubernetes_host`: host name of the kubernetes node where the stream originates.
+* `tag`: a value that distinguishes a unique stream on a host.
 
-`kubernetes.host`: Host name of the cluster node where the log record originated.\
-This is *always included* to guarantee ordered streams, even if the user configures a label set without it.
+**Note**: The `tag` label is used _only_ to ensure ordered streams.
+It should not be used in queries, its format may change in future.
 
-**Note:** `container_name` and `image_name` are *not* included in the defaults. They are not high-cardinality by themselves, but they are multipliers of `namespace/pod`, which is the highest cardinality we want to allow by default.
-
-**Note:** We use names rather than UID for cluster, namespace and pod.
-Names are more likely to be known and easier to use in queries.
-Using both names *and* UIDs is redundant, they partition the data in approximately the same way.
-
-UIDs (and all other meta-data) are still available in the log payload for filtering in queries.
+**Note**: The set of additional labels to enforce uniqueness may change without notice.
+Users should only rely on the listed default labels, or on labels explicitly mentioned
+in a custom configuration.
 
 ### Proposed API
 
@@ -133,6 +140,7 @@ Add a new `loki` output type to the `ClusterLogForwarder` API:
 ``` yaml
 - name: myLokiOutput
   type: loki
+
   url: ...
   secret: ...
 ```
@@ -141,13 +149,16 @@ Add a new `loki` output type to the `ClusterLogForwarder` API:
 The `secret` may also contain `username` and `password` fields for Loki.
 
 The following optional output fields are Loki-specific:
-
-- `labelKeys`: ([]string, default=_see [Default Loki Labels](#default-loki-labels))_ \
+* `tenentKey: (string, optional) \
+   Tenet name (also known as org-id) to add to loki requests. See [Loki Multi-Tenancy](https://grafana.com/docs/loki/latest/operations/multi-tenancy/)
+* `labelKeys`: ([]string, default=_see [Default Loki Labels](#default-loki-labels))_ \
   A list of meta-data keys to replace the default labels.\
   Keys are translated to [label names][] as described in [Summary of Loki Labels](#summary-of-loki-labels)
   Example: `kubernetes.labels.foo` => `kubernetes_labels_foo`.\
-  **Note**: `kubernetes.host` is *always* be included, even if not requested.
-  It is required to ensure ordered label streams.
+  At least these keys are supported:
+  - `kubernetes.namespaceName`: Use the namespace name as the tenant ID.
+  - `kubernetes.labels.<key>`: Use the string value of kubernetes label with key `<key>`.
+  - `openshift.labels.<key>`: use the value of a label attached by the forwarder.
 
 The full set of meta-data keys is listed in [data model][].
 
@@ -160,10 +171,23 @@ Notes on plug-in configuration:
 - Security: configured by the `output.secret` as usual.
 - K8s labels as Loki labels: supported by the plug-in.
 - Always include `kubernetes.host` to avoid avoid out-of-order streams.
+- Tenant set from `output.tenantKey`
 - Output format is `json`, serializes the fluentd record like other outputs.
 - Static labels set as `extra_labels` to avoid extracting from each record.
 
 ### User Stories
+
+#### Treat each namespace as a separate Loki tenant
+
+I want logs from each namespace to be directed to separate Loki tenants.
+
+``` yaml
+- name: myLokiOutput
+  type: loki
+  url: ...
+  secret: ...
+  tenantKey: kubernetes.namespace_name
+```
 
 #### Query all logs from a namespace
 
@@ -242,17 +266,16 @@ For example a CI test cluster that constantly creates and destroys randomly-name
 #### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
-
-Need to provide migration assistance for users coming from Elasticsearch.
-Out of scope for this proposal.
-
 ### Version Skew Strategy
 
-## Implementation History
 ## Drawbacks
 
 ## Alternatives
 
+## Implementation History
+
+None.
 
 [label names]: https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels
-[data model]: https://github.com/openshift/origin-aggregated-logging/blob/master/docs/com.redhat.viaq-openshift-project.asciidoc
+[data model]: https://github.com/openshift/origin-aggregated-logging/blob/master/docs/com.redh
+at.viaq-openshift-project.asciidoc
