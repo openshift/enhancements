@@ -7,7 +7,7 @@ reviewers:
 approvers:
   - TBD
 creation-date: 2021-03-10
-last-updated: 2021-03-10
+last-updated: 2021-08-09
 status: implementable
 ---
 
@@ -73,7 +73,7 @@ It will now watch for mirrors configured through spec `repositoryMirrors` to not
 
 An example ImageContentSourcePolicy file will look like:
 ```yaml
-apiVersion: operator.openshift.io/v1alpha1
+apiVersion: operator.openshift.io/v1alpha2
 kind: ImageContentSourcePolicy
 metadata:
   name: ubi8repo
@@ -90,7 +90,10 @@ spec:
 #### As a user, I would like to pull images from mirror using tag, without digests reference
 The user need to define multiple ImageContentSourcePolicies, used by apps/manifests that don't use digests to pull
 the images when working with disconnected environments or pulling from registries that act as transparent pull-through proxy cache.
-The user can pull image without digest by configuring `repositoryMirrors` spec in the ImageContentSourcePolicy file.
+The user can pull image without digest by configuring `repositoryMirrors` spec in the ImageContentSourcePolicy file. For users still use `repositoryDigestMirrors` 
+from operator.openshift.io/v1alpha1, the conversion webhook will automatically convert the
+ImageContentSourcePolicies to operator.openshift.io/v1alpha2 and enable using
+`oc edit imagecontentsourcepolicy.operator.openshift.io` to configure `repositoryMirrors`.
 And create the ImageContentSourcePolicy project. Once this is done, the images can be pulled from the mirrors without the digest referenced.
 
 ### Implementation Details/Notes/Constraints [optional]
@@ -102,7 +105,7 @@ Implementing this enhancement requires changes in:
 This is an example of the ImageContentSourcePolicy file:
 
 ```yaml
-apiVersion: operator.openshift.io/v1alpha1
+apiVersion: operator.openshift.io/v1alpha2
 kind: ImageContentSourcePolicy
 metadata:
   name: ubi8repo
@@ -166,6 +169,7 @@ determine graduation.
 
 - With `repositoryMirrors` getting in, the current `repositoryDigestMirrors` can be deprecated since its functionality will also be fully satisfied by `repositoryMirrors` and we don't have to keep duplicated APIs.
 - In operator.openshift.io/v1alpha1, gently announce to the users the `repositoryDigestMirrors` will be deprecated. In operator.openshift.io/v1alpha2, the implementation of `repositoryDigestMirrors` will be removed and replaced by `repositoryMirrors`.
+- ImageContentSourcePolicy CRD version conversion strategy: A conversion webhook needs to be created and deployed for deprecating the `repositoryDigestMirrors` and migrating users to new `repositoryMirrors`.
 
 ### Upgrade / Downgrade Strategy
 
