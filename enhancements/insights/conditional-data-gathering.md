@@ -28,7 +28,7 @@ status: implementable
 
 The conditional gatherer for Insights Operator collects data according to the defined gathering rules*. 
 Each rule contains one or more conditions such as "alert A is firing" 
-and one or more gatherers with parameters such as "collect N lines of logs from containers in namespace N".
+and one or more gatherers with parameters such as "collect X lines of logs from containers in namespace N".
 Current version has these rules defined in the code and the proposal is to load them from an external source
 to make collection of new conditional data faster. It's NOT about running brand new code, 
 but just calling the existing gatherers with different validated parameters, so the operator can't 
@@ -93,28 +93,39 @@ limiting it to only last N lines from parameter `tail_lines`
 
 The proposal is to implement the next process of adding new rules:
 
-1. We have a repo with json configs defining the rules. The repo will have some simple CI with validation
-against JSON schema and possibly some review process. 
+1. We'll have a repo with json configs defining the rules. The repo is going to have a simple CI with validation
+against JSON schema and possibly some review process. The repo should live in https://github.com/RedHatInsights
 We have created a PoC for the repo: 
 
 https://github.com/tremes/insights-operator-gathering-rules
 
-or the version with an example of JSON schema validation:
+The JSON schema can be found here:
 
-https://github.com/tremes/insights-operator-gathering-rules/tree/schema 
+https://raw.githubusercontent.com/openshift/insights-operator/f9b762149cd10ec98079e48b8a96fc02a2aca3c6/pkg/gatherers/conditional/gathering_rule.schema.json
 
-2. There's a service living in console.redhat.com fetching the rules from the repo and providing them through its API.
-The very first version is going to provide just all the rules, but later we may consider splitting them by 
-cluster version and introducing some more complicated logic around fetching the rules
-3. Insights Operator fetches a config with the rules from the service and unmarshalls JSON to Go structs
-4. Insights Operator makes the most important validation which checks the next things:
+2. There will be a service living in console.redhat.com which will have the rules baked into the container and will
+provide all the rules through its API. The very first version of the service is going to be simple, but later we may
+add some filtering on the API level (for example by cluster version).
+
+3. Insights Operator fetches a config with the rules from the service and unmarshalls JSON to Go structs.
+
+4. Insights Operator makes the most important validation against the next JSON schemas:
+
+- https://raw.githubusercontent.com/openshift/insights-operator/f9b762149cd10ec98079e48b8a96fc02a2aca3c6/pkg/gatherers/conditional/gathering_rule.schema.json
+- https://raw.githubusercontent.com/openshift/insights-operator/f9b762149cd10ec98079e48b8a96fc02a2aca3c6/pkg/gatherers/conditional/gathering_rules.schema.json
+
+which check the next things:
 
 - The JSON version of the config matches the structs defined in the code 
-- For each rule, there's at least one gathering function
+- The maximum number of rules is 64
+- The rules should not repeat
+- There can be up to 8 conditions in each rule
 - Only implemented conditions can be used
 - Alert name from `alert_is_firing` condition should be a string of length between 1 and 128 
 and consist of only alphanumeric characters
+- For each rule, there's at least one gathering function
 - Only implemented gathering functions can be used
+- There can be up to 8 gathering functions in each rule
 - Namespace from `gather_logs_of_namespace` function should be a string of length between 1 and 128, 
 match the next regular expression `^[a-zA-Z]([a-zA-Z0-9\-]+[\.]?)*[a-zA-Z0-9]$` and start with `openshift-`
 - Tail lines from `gather_logs_of_namespace` function should be an integer between 1 and 4096
@@ -122,9 +133,12 @@ match the next regular expression `^[a-zA-Z]([a-zA-Z0-9\-]+[\.]?)*[a-zA-Z0-9]$` 
 match the next regular expression `^[a-zA-Z]([a-zA-Z0-9\-]+[\.]?)*[a-zA-Z0-9]$` and start with `openshift-`
 
 If anything fails to be validated, the config is rejected and an error is written to the logs.
-The PR with validation on operator side - https://github.com/openshift/insights-operator/pull/470
+The PR with validation on operator side - https://github.com/openshift/insights-operator/pull/483
 
 5. Insights Operator goes rule by rule and collects the requested data if corresponding conditions are met
+
+The new gathering functions and conditions are added the same way as any other code changes to insights-operator. 
+The JSON schema also lives in the operator repo and is changed through the regular process.
 
 ### User Stories
 
@@ -140,9 +154,11 @@ Empty
 
 The potential risks could come from an attacker spoofing the config somehow (if they got access to the repo),
 all they could do is let the insights operator collect more data and send it to the c.r.c, but because of validation
-on the operator side, the potential of collecting data is limited. For example, 
-we check that namespaces start with `openshift-`, we're also limiting the amount of potentially collected data by,
-for example, introducing the limit for amount of collected logs. 
+on the operator side, the potential of collecting data is limited and there still would be 
+the same anonymization of potentially sensitive data as before. 
+For example, we check that namespaces start with `openshift-`, we're also limiting 
+the amount of potentially collected data by, for example, introducing the limit for amount of collected logs 
+(per container and the number of containers).
 
 Also in the regular workflow, changing the config involves going through the repo's CI (JSON schema validator) 
 and probably a simple review process. 
