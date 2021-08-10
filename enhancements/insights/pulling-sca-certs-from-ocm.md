@@ -1,31 +1,35 @@
 ---
-title: pulling-and-exposing-data-from-ocm
+title: pulling-and-exposing-sca-certs-from-ocm
 authors:
   - "@tremes"
 reviewers:
   - "@sbose78"
   - "@inecas"
   - "@petli-openshift"
-  - "@smarterclayton"
+  - "@bparees"
+  - "@dhellman"
+  - "@mfojtik"
+  - "@adambkaplan"
 approvers:
   - "@sbose78"
-  - "@smarterclayton"
+  - "@bparees"
+  - "@dhellman"
 creation-date: 2021-03-04
-last-updated: 2021-03-09
+last-updated: 2021-08-10
 status: implementable
 see-also:
 replaces:
 superseded-by:
 ---
 
-# Insights Operator pulling and exposing data from the OCM API
+# Insights Operator pulling and exposing SCA certs from the OCM API
 
 ## Release Signoff Checklist
 
 - [x] Enhancement is `implementable`
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [x] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
@@ -41,7 +45,6 @@ Users could consume RHEL content and container images using the RHEL subscriptio
 In the OpenShift 4, this is no longer possible because the Red Hat Enterprise Linux Core OS (RHCOS) does not
 provide any attached subscription. This enhancement is to provide users the Simple Content Access (SCA) certs
 from Red Hat Subscription Manager (RHSM).
-The Insights Operator is now the only OCP component that connects an OpenShift cluster to a Red Hat subscription experience (console.redhat.com APIs). The consumers of the SCA certs are not only builds, but also shared resources, such as the CSI driver.
 
 ### Goals
 
@@ -55,6 +58,10 @@ The Insights Operator is now the only OCP component that connects an OpenShift c
   from the OCM API
 
 ## Proposal
+
+### Why is it in the Insights Operator?
+
+The Insights Operator is now the only OCP component that connects an OpenShift cluster to a Red Hat subscription experience (console.redhat.com APIs). The consumers of the SCA certs are not only builds, but also shared resources, such as the CSI driver.
 
 ### User Stories
 
@@ -84,12 +91,19 @@ available in the `pull-secret` (in the `openshift-config-managed` namespace).
 
 The Insights Operator must provide a cluster ID as an identifier of the cluster.
 
-### Data in API
+### SCA certs in API
 
-The SCA certificate is available via the `etc-pki-entitlement` secret in the `openshift-config-managed` namespace.
+The SCA certificate is available via the `etc-pki-entitlement` secret in the `openshift-config-managed` namespace. The secret will be available for use in other namespaces by creating a cluster-scoped `Share` resource. Cluster admin creates a `clusterrolebinding` to allow a service account access to the `Share` resource.
+
+### Use of the SCA certs
+
+- The SCA certificate can be mounted to a `Pod` as a CSI volume (where the volume attributes will reference the `Share` resource making the secret accessible)
+- The SCA certificate can be mounted to a `Build` strategy as a CSI volume. The CSI driver is described in the [Share Secrets And ConfigMaps Across Namespaces via a CSI Driver](/enhancements/cluster-scope-secret-volumes/csi-driver-host-injections.md) enhancement.
 
 ### Update period
 - Insights Operator query the OCM API every 8 hours and downloads the full data provided
+- The time period is configurable and can be changed by the cluster admin. Cluster admin can temporarily set a shorter time period to try to refresh the SCA certs
+- The documentation will describe the steps how to pull the SCA certs and update the secret manually
 
 ### Test Plan
 
@@ -124,16 +138,19 @@ There is no upgrade/downgrade strategy needed.
 
 There is no Skew strategy needed. This work should have no impact on the upgrade. It doesn't require any coordinated behavior in the control plane. No other components will change.
 
+The format of the SCA certs is not checked by the Insights Operator.
+
 ## Implementation History
 
 There are no other major milestones in the implementation history than the graduation criteria mentioned above.
 
 ## Drawbacks
 
-There is no significant drawback.
+The performance of the OCM API can be a possible drawback.
 
 ## Alternatives
 
 - Alternative is to implement this functionality in another control plane component/operator (e.g openshift-controller-manager).
+- Another option is to create a new component/operator for this functionality. This would probably require the most effort and would require additional CPU and memory resources in a cluster.
 - Current state, which is the manual addition of the SCA certs to cluster worker nodes. This is not very convenient because the SCA certs change regularly and the change requires node reboot.
 
