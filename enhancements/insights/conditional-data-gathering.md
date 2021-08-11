@@ -158,7 +158,8 @@ on the operator side, the potential of collecting data is limited and there stil
 the same anonymization of potentially sensitive data as before. 
 For example, we check that namespaces start with `openshift-`, we're also limiting 
 the amount of potentially collected data by, for example, introducing the limit for amount of collected logs 
-(per container and the number of containers).
+(per container and the number of containers) and, in the worst case, if the conditional gathering takes too much time
+it would be stopped by the timeout and we would just get less data. 
 
 Also in the regular workflow, changing the config involves going through the repo's CI (JSON schema validator) 
 and probably a simple review process. 
