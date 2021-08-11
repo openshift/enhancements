@@ -34,8 +34,8 @@ superseded-by:
 
 ## Summary
 
-This enhancement will enable the Insights Operator to pull the data (SCA certs)
-from the OCM (OpenShift Cluster Manager) API. The data will be exposed by the Insights Operator
+This enhancement will enable the Insights Operator to pull the Simple Content Access certs for using RHEL subscription content
+from the OCM (OpenShift Cluster Manager) API. The certificates will be exposed by the Insights Operator
 in the OpenShift API to allow users to use them when consuming and building container images
 on the platform.
 
@@ -48,8 +48,8 @@ from Red Hat Subscription Manager (RHSM).
 
 ### Goals
 
-- Extend the Insights Operator config with an OCM API URL to be able to query the data
-- Periodically pull the data from the OCM API and expose it in the OpenShift API
+- Extend the Insights Operator config with an OCM API URL to be able to query the certificates
+- Periodically pull the certificates from the OCM API and expose it in the OpenShift API
 - This is an opt-in feature by a cluster user and might be moved to a different OCP component in the future
 
 ### Non-Goals
@@ -85,7 +85,7 @@ Mitigation: The Insights Operator is marked as Degraded (in case of HTTP error c
 
 ### Authorization
 
-The Insights Operator is able to pull the data from the OCM API using the existing `cloud.openshift.com` token
+The Insights Operator is able to pull the certificates from the OCM API using the existing `cloud.openshift.com` token
 available in the `pull-secret` (in the `openshift-config-managed` namespace).
 
 The Insights Operator must provide a cluster ID as an identifier of the cluster.
@@ -101,7 +101,7 @@ The SCA certificate is available via the `etc-pki-entitlement` secret in the `op
 
 ### Update period
 - Insights Operator query the OCM API every 8 hours and downloads the full data provided
-- The time period is configurable and can be changed by the cluster admin. Cluster admin can temporarily set a shorter time period to try to refresh the SCA certs
+- The time period is configurable (via `support` secret key/value pair) and can be changed by the cluster admin. Cluster admin can temporarily set a shorter time period to try to refresh the SCA certs
 - The documentation will describe the steps how to pull the SCA certs and update the secret manually
 
 ### Test Plan
@@ -116,7 +116,7 @@ This feature is planned as a technical preview in OCP 4.9 and is planned to go G
 
 #### Dev Preview -> Tech Preview
 - opt-in feature (called `InsightsOperatorPullingSCA`) enabled with `TechPreviewNoUpgrade` feature set
-- Insights Operator is able to download the data from OCM API and expose it in a cluster API
+- Insights Operator is able to download the certificates from OCM API and expose it in a cluster API
 - basic functionality is tested
 - this new functionality is documented
 
