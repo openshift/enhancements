@@ -1,6 +1,7 @@
 ##@ General
 
 RUNTIME ?= podman # container command for linter and report-upload
+PULL_BASE_SHA ?= origin/master # Allow the template check base ref to be overriden
 
 .PHONY: help
 help:  ## Display this help
@@ -17,6 +18,7 @@ lint:  ## run the markdown linter
 		--rm=true \
 		--env RUN_LOCAL=true \
 		--env VALIDATE_MARKDOWN=true \
+		--env PULL_BASE_SHA=$(PULL_BASE_SHA) \
 		-v $$(pwd):/workdir:Z \
 		enhancements-markdownlint:latest
 
