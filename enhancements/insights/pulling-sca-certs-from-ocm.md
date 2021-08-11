@@ -79,8 +79,7 @@ Risk: OCM API is down or doesn't provide up to date data.
 
 Risk: Insights Operator is unable to expose/update the data in the OpenShift API
 
-Mitigation: Introduce a new state in the Insights Operator (e.g "SCADataDegraded") and
-create a new alert based on this new state.
+Mitigation: The Insights Operator is marked as Degraded (in case of HTTP error code other than 404, which means that the organization didn't allow this feature on the OCM side).
 
 ## Design Details
 
@@ -98,7 +97,7 @@ The SCA certificate is available via the `etc-pki-entitlement` secret in the `op
 ### Use of the SCA certs
 
 - The SCA certificate can be mounted to a `Pod` as a CSI volume (where the volume attributes will reference the `Share` resource making the secret accessible)
-- The SCA certificate can be mounted to a `Build` strategy as a CSI volume. The CSI driver is described in the [Share Secrets And ConfigMaps Across Namespaces via a CSI Driver](/enhancements/cluster-scope-secret-volumes/csi-driver-host-injections.md) enhancement.
+- The SCA certificate can be mounted to a `Build` strategy as a CSI volume. The CSI driver is described in the [Share Secrets And ConfigMaps Across Namespaces via a CSI Driver](/enhancements/cluster-scope-secret-volumes/csi-driver-host-injections.md) enhancement and implemented in [https://github.com/openshift/csi-driver-shared-resource](https://github.com/openshift/csi-driver-shared-resource).
 
 ### Update period
 - Insights Operator query the OCM API every 8 hours and downloads the full data provided
@@ -138,7 +137,7 @@ There is no upgrade/downgrade strategy needed.
 
 There is no Skew strategy needed. This work should have no impact on the upgrade. It doesn't require any coordinated behavior in the control plane. No other components will change.
 
-The format of the SCA certs is not checked by the Insights Operator.
+There's no plan to change the OCM API in the near future. The certificate format is versioned, but note that the format is not checked by the Insights Operator.
 
 ## Implementation History
 
@@ -146,7 +145,7 @@ There are no other major milestones in the implementation history than the gradu
 
 ## Drawbacks
 
-The performance of the OCM API can be a possible drawback.
+The performance of the OCM API can be a possible drawback, but the certificates are cached in the OCM API server so the expected impact should be minimal.
 
 ## Alternatives
 
