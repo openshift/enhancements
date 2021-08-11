@@ -29,15 +29,15 @@ superseded-by:
 ## Summary
 
 This document defines the steps required to facilitate the enablement and collection
-of network Flows' tracing from the user side, as well as the status retrieval.
+of network flows' tracing from the user side, as well as the status retrieval.
 It describes the user stories to switch on/off the flows both from the command-line
 interface and the web console, and depicts the implementation details required in
 the existing OVN-Kubernetes component, as well as the new components that should
-be created.
+be created. We consider IPFix as the unique protocol to be supported by now.
 
 ## Motivation
 
-Flows (NetFlow, IPFIX) emission, collection and processing may have an overall
+Flows (IPFIX) emission, collection and processing may have an overall
 impact in the system performance. By this reason, we need to allow users to
 switch on and off the flows' tracing feature.
 
@@ -48,10 +48,12 @@ tracing (on or off).
 
 Both via Command-Line Interface (CLI) and Graphical User Interface (UI):
 
-* To provide to the users a simple mechanism to enable and disable flows emission and
+* To provide the users with a simple mechanism to enable and disable flows emission and
   collection.
-* To provide to the users a simple mechanism to retrieve the current status of the flows'
+* To provide the users with a simple mechanism to retrieve the current status of the flows'
   emission.
+* To provide the users with a mean to retrieve and set the flows' cache setting,
+  which can play an important role to mitigate potential issues with a too high ingestion rate.
 
 ### Non-Goals
 
@@ -70,16 +72,16 @@ flow collection and storage pipeline.
 
 (The following verbs and commands are not definitive but just illustrative examples).
 
-To enable Netflow emission:
+To enable IPFix emission:
 
 ```text
-$ oc flows start netflow
+$ oc flows start
 ```
 
 To enable IPFIX emission:
 
 ```text
-$ oc flows start ipfix
+$ oc flows start
 ```
 
 To disable any flow emission:
@@ -88,28 +90,28 @@ To disable any flow emission:
 $ oc flows stop
 ```
 
-For simplicity purposes, we do not allow emitting both netflow and IPFIX at the
-same time.
+For simplicity purposes, we only allow emitting IPFix samples, but we might support other protocols
+(e.g. Netflow) in the future.
 
 To retrieve the status of the flows' emission, it could be shown by node:
 
 ```text
 $ oc get flows
 NAME    STATUS      TYPE     ENDPOINT
-node-a  emitting    netflow  http://10.1.2.3:30001
-node-b  emitting    netflow  http://10.1.2.4:30001
-node-c  emitting    netflow  http://10.1.2.5:30001
+node-a  emitting    ipfix    http://10.1.2.3:30001
+node-b  emitting    ipfix    http://10.1.2.4:30001
+node-c  emitting    ipfix    http://10.1.2.5:30001
 ```
 
 The command should return error if you try to enable flows in any cluster operator
 different from `OVNKubernetes`.
 
 ```text
-$ oc flows start netflow
+$ oc flows start
 OpenShiftSDN does not support flows tracing.
 ```
 
-### Console-based flow status and retrieval
+#### Console-based flow status and retrieval
 
 If the cluster uses `OVNKubernetes` CNI type, in the side panel of the Openshift
 Console, an "Observability" or "Monitoring" entry would appear inside the
@@ -123,8 +125,8 @@ entries:
 ```text
                  +-----------+-+                            
  Flows emission: |Disabled   |V|                            
-                 |NetFlow    +-+                            
-                 |IPfix        |                            
+                 |           +-+                            
+                 |IPFix        |                            
                  +-------------+                            
 ```
 
@@ -133,7 +135,7 @@ status for each node, analogue to the CLI use case:
 
 ```text
                        +-----------+-+
-       Flows emission: |Netflow    |V|
+       Flows emission: |IPFix      |V|
                        +-----------+-+
 
                                 
@@ -145,6 +147,39 @@ status for each node, analogue to the CLI use case:
     |  node-c     emitting    http://10.7.8.9:30001  |
     +------------------------------------------------+
 ```
+
+#### Tuning flows' emission parameters
+
+Some setups might lead to an overcongestion of the cluster resources such as the network or the
+flows' ingestion/processing/storage pipeline (e.g. because the size and frequency of reported
+flows is too high).
+
+To minimize it, the user should be able to tune up the flows' cache mechanism in order to control
+the number of records sent to collector.
+
+According to the [OpenVSwitch configuration options](https://www.openvswitch.org/support/dist-docs/ovs-vswitchd.conf.db.5.html),
+there are multiple configuration options that could be exposed to the user:
+
+* `cache_active_timeout`: optional integer, in range 0 to 4,200
+  The maximum period in seconds for which an IPFIX flow record  is
+  cached  and  aggregated  before  being  sent.  If not specified,
+  defaults to 0. If 0, caching is disabled.
+
+* `cache_max_flows`: optional integer, in range 0 to 4,294,967,295
+  The maximum number of IPFIX flow records that can be cached at a
+  time.  If  not  specified,  defaults to 0. If 0, caching is disabled.
+
+* `sampling`: optional integer, in range 1 to 4,294,967,295
+  The  rate  at  which  packets should be sampled and sent to each
+  target collector. If not specified, defaults to 400, which means
+  one  out of 400 packets, on average, will be sent to each target
+  collector.
+
+Other arguments might be considered, such as `enable-input-sampling`, `enable-output-sampling`,
+or `enable-tunnel-sampling`.
+
+The configuration should be also exposed in the Console UI, along with the current
+emission status (see previous subsection).
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -165,6 +200,9 @@ To limit the flows' traffic to internal nodes, each collector should expose a no
 port, so each OVN instance only has to know the node IP and Port (which might be
 fixed or discovered).
 
+From the user-side configuration of the IPFix cache and sampling, we should use a `ConfigMap` and
+expose it to OVN-Kubernetes with read permissions.
+
 Given the aforementioned details, following subsections depicts the work to do,
 grouped in different tasks.
 
@@ -181,9 +219,8 @@ metadata:
   name: cluster
 spec:
   exportNetworkFlows:
-    netFlow:
-      collectors:
-        - 192.168.1.99:2056
+    collectors:
+      - 192.168.1.99:2056
 ```
 
 However, we need to set this address dynamically to ensure that each pod will forward
@@ -216,20 +253,26 @@ The simplest way to expose this error status would be exposing it as a metadata 
 the Pod is kept in the `Running` status (to avoid a wrong observability configuration to interrupt
 the normal network operation).
 
-#### Task 3: create a Flow operator to manage the flows status
+#### Task 3: tune up flows enablement in OVN-Kubernetes
+
+If OVN-Kubernetes has access to the [performance-tuning configmap](#tuning-flows-emission-parameters),
+it should pass the contained arguments [when it enables the flows](https://github.com/ovn-org/ovn-kubernetes/commit/ecc4047f5d0e732c267fccb2eabd64b5894b9f9a#diff-9c3b7372332fd16d60dba539a94dd0f819d262d1fbabd1e5d9c09e47da5af0ffR167).
+
+#### Task 4: create a Flow operator to manage the flows status
 
 After this task is finished:
 * The operator can communicate with OVN-Kubernetes pods to patch their configuration.
 * There is an exposed API to perform the various operations: enable, disable, get status...
 * You can operate flows through the `oc` CLI command: enable, disable, get status...
-
+* The operator should be able to detect changes in the [performance-tuning configmap](#tuning-flows-emission-parameters)
+  and restart the OVN-Kubernetes emission with the new arguments.
 This task could involve setting new RBAC permissions to allow interaction between the
 Flow operator and the OVN-Kubernetes pods.
 
-#### Task 4: enable the Flows' operation in the Console GUI
+#### Task 5: enable the Flows' operation in the Console GUI
 
 As described in the above [console-based flow status and retrieval](#console-based-flow-status-and-retrieval)
-section.
+section. It should also visualize the [configuration options for tuning IPFix performance](#tuning-flows-emission-parameters). 
 
 The features should be implemented within a Console plugin.
 
@@ -250,12 +293,14 @@ To be discussed.
   - Flows' operator <-> OVN-Kubernetes
   - UI <-> Flows' operator
 * End-to-end tests:
-  * deploying a cluster with netflow collection/processing
-  * enabling netflow/ipfix and verify that it is collected
+  * deploying a cluster with IPFix collection/processing
+  * enabling IPFix and verify that it is collected
   * disabling flows and verify that it stopped being collected
 * Performance tests
   * We need to evaluate the impact of enabling flow tracing in a cluster's
     resources. Mainly Network, CPU and Memory.
+  * We need to evaluate the effect of the different sampling and cache configuration options
+    in the overall performance impact.
 
 ### Graduation Criteria
 
