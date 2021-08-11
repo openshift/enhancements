@@ -168,6 +168,9 @@ we would just have less data in the archives (everything except conditional gath
 an error would be written to the logs and to the metadata which would allow us to know 
 that something is broken and we need to bring the service back.
 
+In case GitHub is not available, we won't be able to add new rules, but the old ones would still be returned by 
+the service.
+
 ## Design Details
 
 Empty
