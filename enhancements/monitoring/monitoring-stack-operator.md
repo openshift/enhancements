@@ -221,12 +221,14 @@ In the first iteration, this can be implemented by defining a ServiceMonitor aga
 
 #### High Availability
 
-All components except Prometheus are stateless and can run with more than one replica. In order to make Prometheus highly-available, a similar approach to the one in CMO will be used. The monitoring operator will provide a Thanos Querier for each `MonitoringStack` and a sidecar next to each Prometheus. A Thanos Ruler is not needed in this architecture since all recording rules and alerts will be evaluated locally in each Prometheus instance.
+All components except Prometheus are stateless and can run with more than one replica. In order to make Prometheus highly-available, a similar approach to the one in CMO will be used. The monitoring operator will provide a Thanos Querier for each `MonitoringStack` and a sidecar next to each Prometheus.
+A Thanos Ruler is not needed in this architecture since all recording rules and alerts will be evaluated locally in each Prometheus instance.
 
 
 #### Alert Routing
 
-For simplicity reasons, routing alerts that come from managed service monitoring stacks will be handled by a single Alertmanager. We can take advantage of the recently added <code>[AlertmanagerConfig](https://github.com/prometheus-operator/prometheus-operator/blob/master/Documentation/api.md#alertmanagerconfig)</code> and allow MTO/MTSRE to create their own routing configuration in a centrally deployed Alertmanager instance. Finally, the MTSRE team could centrally configure receivers in one place for all managed services and service owners would simply use those receivers in their routing rules. It is worth noting that the last feature depends on [https://github.com/prometheus-operator/prometheus-operator/issues/4033](https://github.com/prometheus-operator/prometheus-operator/issues/4033)
+For simplicity reasons, routing alerts that come from managed service monitoring stacks will be handled by a single Alertmanager. We can take advantage of the recently added <code>[AlertmanagerConfig](https://github.com/prometheus-operator/prometheus-operator/blob/master/Documentation/api.md#alertmanagerconfig)</code> and allow MTO/MTSRE to create their own routing configuration in a centrally deployed Alertmanager instance. 
+Finally, the MTSRE team could centrally configure receivers in one place for all managed services and service owners would simply use those receivers in their routing rules. It is worth noting that the last feature depends on [https://github.com/prometheus-operator/prometheus-operator/issues/4033](https://github.com/prometheus-operator/prometheus-operator/issues/4033)
 
 In addition to the built-in Alertmanager from MSO, users will have the option to route alerts to external Alertmanagers, such as the PM Alertmanager.
 
@@ -268,15 +270,19 @@ One solution which we can aim for long-term would be to deploy User Workload Mon
 
 Deploying a single prometheus instance for each managed service does come with certain resource overhead. Even though the data will be perfectly sharded, there is still a certain fixed resource requirement for simply running Prometheus. In addition to this, sharing resources is usually more efficient because it reduces idle time.
 
-In order to evaluate the resource overhead that comes with functional sharding, we did an experiment where we deployed one Prometheus instance scraping metrics from 3 exporters (node_exporter, kube-state-metrics and kubelet) alongside 3 independent Prometheus instances, each scraping data from only one exporter. We then visualized the memory usage of each Prometheus instance over time and the results are shown on the image below.
+In order to evaluate the resource overhead that comes with functional sharding, we did an experiment where we deployed one Prometheus instance scraping metrics from 3 exporters (node_exporter, kube-state-metrics and kubelet) alongside 3 independent Prometheus instances, each scraping data from only one exporter.
+We then visualized the memory usage of each Prometheus instance over time and the results are shown on the image below.
 
 ![alt_text](https://docs.google.com/drawings/d/e/2PACX-1vTQR13HcQ_wbAqVdX7rRAGBXxRJmrhN-DBMLQ1i92DqjIFVUD05uIsezacTilkZM7CwMP6XHVh4u3Uo/pub?w=1440&h=813)
 
 At the latest timestamp, the total memory usage for the 3 instances forming functional sharding is 434MB, while the memory usage of the single instance is 316MB. What is also worth pointing out, and is already illustrated by the graph, is that systems that do not export many metrics, such as node_exporter and kubelet, require small Prometheus instances in terms of memory requirements.
 
-We also performed some back-of-the envelope calculations in order to illustrate the added cost of functional sharding in terms of actual money. A` c5.xlarge` on-demand instance in AWS (a compute optimized instance with 4 CPUs and 8GB RAM) costs 140$ per month or 18$ per GB per month. When using reserved capacity, the cost goes down to 11$ per GB per month for the same instance with a 1 year reservation.
+We also performed some back-of-the envelope calculations in order to illustrate the added cost of functional sharding in terms of actual money. A` c5.xlarge` on-demand instance in AWS (a compute optimized instance with 4 CPUs and 8GB RAM) costs 140$ per month or 18$ per GB per month.
+When using reserved capacity, the cost goes down to 11$ per GB per month for the same instance with a 1 year reservation.
 
-Our conclusion based on these factors is as follows: while sharing a Prometheus instance does come with better resource utilization, we do not believe it justifies the reduced resiliency that it also brings along. The resiliency of such a shared instance would be further reduced as more managed services are installed in a cluster. In addition, a shared Prometheus instance is often more volatile regarding resource utilization, which leads to users over provisioning resources to prevent OOMs by misconfiguration or complex querying patterns. Finally, even if at one point functional sharding does end up being a problem from a resource usage perspective, the monitoring operator will nevertheless support deploying multi-namespace monitoring stacks. This will effectively support the pattern of sharing a prometheus instance between managed services.
+Our conclusion based on these factors is as follows: while sharing a Prometheus instance does come with better resource utilization, we do not believe it justifies the reduced resiliency that it also brings along.
+The resiliency of such a shared instance would be further reduced as more managed services are installed in a cluster. In addition, a shared Prometheus instance is often more volatile regarding resource utilization, which leads to users over provisioning resources to prevent OOMs by misconfiguration or complex querying patterns.
+Finally, even if at one point functional sharding does end up being a problem from a resource usage perspective, the monitoring operator will nevertheless support deploying multi-namespace monitoring stacks. This will effectively support the pattern of sharing a prometheus instance between managed services.
 
 ### Migration
 
