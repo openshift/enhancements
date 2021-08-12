@@ -99,9 +99,17 @@ The SCA certificate is available via the `etc-pki-entitlement` secret in the `op
 - The SCA certificate can be mounted to a `Pod` as a CSI volume (where the volume attributes will reference the `Share` resource making the secret accessible)
 - The SCA certificate can be mounted to a `Build` strategy as a CSI volume. The CSI driver is described in the [Share Secrets And ConfigMaps Across Namespaces via a CSI Driver](/enhancements/cluster-scope-secret-volumes/csi-driver-host-injections.md) enhancement and implemented in [https://github.com/openshift/csi-driver-shared-resource](https://github.com/openshift/csi-driver-shared-resource).
 
+### Configuration
+- The new configuration is tied to the Insights Operator, because the Insights Operator is currently the only component reading and using the `console.redhat.com` authentication token in the `pull-secret` in the `openshift-config` namespace, so if we decide to move this somewhere else, we must consider this fact.
+- The new OCM API related config attributes are adjustable via `support` secret in the `openshift-config` namespace
+- Following attributes are configurable via the `support` secret:
+  - OCM API endpoint
+  - time period to query the OCM API
+  - flag to disable this functionality
+
 ### Update period
 - Insights Operator query the OCM API every 8 hours and downloads the full data provided
-- The time period is configurable (via `support` secret key/value pair) and can be changed by the cluster admin. Cluster admin can temporarily set a shorter time period to try to refresh the SCA certs
+- The time period is configurable (via `support` secret) and can be changed by the cluster admin. Cluster admin can temporarily set a shorter time period to try to refresh the SCA certs
 - The documentation will describe the steps how to pull the SCA certs and update the secret manually
 
 ### Test Plan
@@ -117,12 +125,15 @@ This feature is planned as a technical preview in OCP 4.9 and is planned to go G
 #### Dev Preview -> Tech Preview
 - opt-in feature (called `InsightsOperatorPullingSCA`) enabled with `TechPreviewNoUpgrade` feature set
 - Insights Operator is able to download the certificates from OCM API and expose it in a cluster API
+- Insights Operator is marked as degraded in case of the number of unsuccessful requests to the OCM API exceeds defined threshold
 - basic functionality is tested
-- this new functionality is documented
+- this new functionality is documented in the Insights Operator documentation as tech preview
 
 #### Tech Preview -> GA
-- ability to distinguish various error states - e.g organization doesn't have SCA allowed versus API returns an error
+- `Share` resource object is automatically created by the Insights Operator
 - inform a cluster user about the error state (problem with pulling the certificates)
+- the documentation is revisited and updated
+- the use of SCA certs in the `Build` is documented in the Build API documentation
 - the feature might be moved to a different OCP component
 
 #### Removing a deprecated feature
