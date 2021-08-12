@@ -79,7 +79,7 @@ Risk: OCM API is down or doesn't provide up to date data.
 
 Risk: Insights Operator is unable to expose/update the data in the OpenShift API
 
-Mitigation: The Insights Operator is marked as Degraded (in case of HTTP error code other than 404, which means that the organization didn't allow this feature on the OCM side).
+Mitigation: The Insights Operator is marked as Degraded (in case the HTTP code is lower than 200 or greater than 399 and is not equal to 404, because HTTP 404 means that the organization didn't allow this feature).
 
 ## Design Details
 
