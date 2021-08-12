@@ -145,16 +145,16 @@ As a Customer, I can use UWM without seeing Addons metrics, alerting or recordin
 
 ### Implementation Details/Notes/Constraints
 
-Since UWM and PM are part of Openshift Core, we would like to avoid increasing the complexity and introducing potential bugs for customers using those monitoring stacks. Because of this, we propose developing a new stack that will be able to support the managed service use-case while staying compatible with upcoming use-cases such as Hypershift or [KCP](https://github.com/kcp-dev/kcp).
+Since UWM and PM are part of Openshift Core, we would like to avoid increasing the complexity and introducing potential bugs for customers by extending those monitoring stacks. Because of this, we propose developing a new stack that will be able to support the managed service use-case while staying compatible with upcoming use-cases such as Hypershift or [KCP](https://github.com/kcp-dev/kcp).
 
 #### Overview
 
-We propose developing a new open-source operator with a working name, “MonitoringStack Operator” (official name proposals are welcome!) that manages a `MonitoringStack` CRD, which can be used to deploy an independent, prometheus-based stack for each managed service. The operator will be installed into its own namespace and will watch `MonitoringStack` resources in the entire cluster. Alongside itself, the operator will deploy two other operators:
+We propose developing a new open-source operator with a working name, “MonitoringStack Operator” (official name proposals are welcome!) that manages a `MonitoringStack` CRD and can be used to deploy an independent, prometheus-based stack for each managed service. The operator will be installed into its own namespace and will watch `MonitoringStack` resources in the entire cluster. Alongside itself, the operator will deploy two other operators:
 
 * A Prometheus Operator in order to take advantage of the Prometheus management functionality already present in PO. An Alertmanager instance for managing alert routing will also be provisioned in the same namespace.
 * A [Grafana Operator](https://operatorhub.io/operator/grafana-operator)
 
-Once `MonitoringStack` has been created, the operator will deploy the appropriate resources in the `MonitoringStackOperaornamespace` based on how the stack is configured. In a simple case, this might be:
+Once a `MonitoringStack` has been created, the operator will deploy the appropriate resources in the `MonitoringStackOperor`'s namespace based on how the stack is configured. In a simple case, this might be:
 
 * a Prometheus CR
 * a Grafana CR and a Grafana Data Source CR
@@ -162,7 +162,7 @@ Once `MonitoringStack` has been created, the operator will deploy the appropriat
 
 In other cases, it might be just a Prometheus Agent deployment (forwarding only capabilities).
 
-MonitoringStack CRD is meant to be an abstraction over monitoring needs and requirements for a single tenant that specifies their needs. The underlying implementation is up to the MonitoringStackOperator.
+The `MonitoringStack` CRD is meant to be an abstraction over monitoring needs and requirements for a single tenant that specifies their needs. The underlying implementation is up to the MonitoringStackOperator.
 
 In this manner, managed service owners can simply create an instance of `MonitoringStack` alongside their services and delegate the provisioning and management of their monitoring stack to the operator.
 
@@ -174,7 +174,7 @@ apiVersion: monitoring.coreos.io/v1alpha1
 kind: MonitoringStack
 metadata:
     name: monitoring
-    namespace: kafka
+    namespace: redhat-kafka
 spec:
     retention: 12d
     resources:
@@ -217,7 +217,7 @@ In order for MTSRE/MTO to be able to view portions of metrics for all of their d
 
 MTOs often need to create alerts and dashboards which include metrics coming from platform components. A typical example is using CPU and memory resource metrics from kube-state-metrics. For ease of use, MTOs will be able to define allow-listed scrape on Platform Monitoring /federate endpoint to access relevant metrics.
 
-In the first iteration, this can be implemented by defining a ServiceMonitor against the /federate endpoint of the Platform Monitoring Prometheus. Improvement on this side will be revisited in the next enhancement (e.g ability to scrape those data directly from sources).
+In the first iteration, this can be implemented by defining a ServiceMonitor against the `/federate` endpoint of the Platform Monitoring Prometheus. Improvement on this side will be revisited in the next enhancement (e.g ability to scrape those data directly from sources).
 
 #### High Availability
 
@@ -247,7 +247,6 @@ For this reason, the monitoring operator will optionally deploy a Grafana operat
 #### Release Model
 
 We plan to follow similar “[Layered Release Cycles](https://docs.google.com/presentation/d/1b7VRJpaUcidZso6BNx4F0AmWYh5f_F1-ZmMLs4IFGLA/edit#slide=id.ge68369526c_0_0)” proposed by the Logging team.
-
 
 ### Risks and Mitigations
 
@@ -302,7 +301,7 @@ In all cases, MSO should not conflict with any other monitoring tool installed i
 
 ### Open Questions
 
-* If a customer can use MSO and UWM and have options, should it use UWM?
+* If customer can use both MSO and UWM in the future, which one should they use?
 * Should we allow customer to create MSO CRs? (MonitoringStacks).
 * How will it fit into Hypershift? Will it have enough flexibility to support the Hypershift use case?
     * Full Hypershift proposal is in progress, but the whole stack can be simply run on DataPlane with all capabilities except kube-state-metrics. Given that it is unknown how Addons will run their services on Hypershift, discussing this would be premature.
@@ -426,7 +425,7 @@ Pros:
 Cons:
 
 * This approach makes a `MonitoringStack `coupled to a centralized component. In order for individual teams to query their own metrics, they will need to query all prometheus instances.
-* Currently Thanos Query does not have good QoS mechanisms for independent query targets. Intensive heavy queries from one team could therefore impact querying capabilities for other teams.
+* Currently Thanos Query does not have good QoS mechanisms for independent query targets. Intensive queries from one team could therefore impact querying capabilities of other teams.
 * Since we want to build a community around the project, this approach makes the stack overall less composable and less reusable. It assumes that `MonitoringStack` owners are fine with exposing their metrics to each other. This might be the case for Managed Services, but it does not necessarily apply in the general sense.
 * In case a central view is needed, an additional Thanos Query instance can still be deployed independently.
 
