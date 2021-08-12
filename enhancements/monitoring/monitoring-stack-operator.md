@@ -371,10 +371,10 @@ We have already implemented such a remote storage project, [observatorium,](http
 * We need to have a pipeline for this anyway (for SLO).
 * In terms of complexity, the in-cluster solutions need to be multi-service anyway: Prometheus +sidecar + querier, so there is already some complexity we cannot avoid.
 * If we use RHOBS:
-    * MTOs will use a single Grafana instance for querying.
-    * Relieved operational burden off of MTSRE - no need to keep Prometheus locally running.
-    * Reduced client-side cost.
-    * Better user defined flows since data is in central place.
+  * MTOs will use a single Grafana instance for querying.
+  * Relieved operational burden off of MTSRE - no need to keep Prometheus locally running.
+  * Reduced client-side cost.
+  * Better user defined flows since data is in central place.
 
 **Cons:**
 
@@ -424,7 +424,7 @@ Pros:
 
 Cons:
 
-* This approach makes a `MonitoringStack `coupled to a centralized component. In order for individual teams to query their own metrics, they will need to query all prometheus instances.
+* This approach makes a `MonitoringStack` coupled to a centralized component. In order for individual teams to query their own metrics, they will need to query all prometheus instances.
 * Currently Thanos Query does not have good QoS mechanisms for independent query targets. Intensive queries from one team could therefore impact querying capabilities of other teams.
 * Since we want to build a community around the project, this approach makes the stack overall less composable and less reusable. It assumes that `MonitoringStack` owners are fine with exposing their metrics to each other. This might be the case for Managed Services, but it does not necessarily apply in the general sense.
 * In case a central view is needed, an additional Thanos Query instance can still be deployed independently.
@@ -435,7 +435,8 @@ This alternative was explored and was designated as not viable in OSD clusters. 
 
 ### Deploy a third Prometheus instance through Cluster Monitoring Operator
 
-While this is a viable alternative, deploying a third instance through CMO will merely be a stop-gap solution that can be challenging to reuse for upcoming use-cases, such as hypershift. In addition, coupling managed service monitoring to OCP releases will reduce delivery velocity, thereby inhibiting agile software development and iterative value delivery. An OLM-based stack, on the other hand, allows us to release as often as possible and deliver value to managed service owners faster and in incremental batches.
+While this is a viable alternative, deploying a third instance through CMO will merely be a stop-gap solution that can be challenging to reuse for upcoming use-cases, such as hypershift. In addition, coupling managed service monitoring to OCP releases will reduce delivery velocity, thereby inhibiting agile software development and iterative value delivery.
+An OLM-based stack, on the other hand, allows us to release as often as possible and deliver value to managed service owners faster and in incremental batches.
 
 Furthermore, CMO in the current state already takes on a lot of responsibility. It defines and manages two stacks, Platform Monitoring and User Workload Monitoring. Expanding the scope of CMO further would make it harder to maintain in the long run.
 
