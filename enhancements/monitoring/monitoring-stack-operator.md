@@ -283,11 +283,11 @@ Our conclusion based on these factors is as follows: while sharing a Prometheus 
 There are multiple monitoring solutions that Addons currently use:
 
 * UWM and AppSRE has their monitoring stack for SaaS services, which they plan to migrate to UWM
-    * MSO is planned to have feature parity with UWM with the exception of global view with Platform Monitoring. We will initially use federation to close this gap (See )
+  * MSO is planned to have feature parity with UWM with the exception of global view with Platform Monitoring. We will initially use federation to close this gap (See )
 * Platform Monitoring
-    * The PM stack cannot be used for user/managed service monitoring anyway. Therefore no migration is predicted so far.
+  * The PM stack cannot be used for user/managed service monitoring anyway. Therefore no migration is predicted so far.
 * Observability Operator
-    * This is great work done by the Kafka team to get unblocked and as we see it has feature parity to UWM with addition of Dashboarding and Promtail (logging aggregation). MSO will provide all but logging integration. For the logging part, Openshift Logging Operator should be leveraged.
+  * This is great work done by the Kafka team to get unblocked and as we see it has feature parity to UWM with addition of Dashboarding and Promtail (logging aggregation). MSO will provide all but logging integration. For the logging part, Openshift Logging Operator should be leveraged.
 
 For other cases we are not aware of, we will be providing a weekly [Working Group](https://docs.google.com/document/d/1fVDDn9b69mXNyfIFpuCoOHasY0pGkDyuJ6qUyPySSdI/edit#) for internal teams as well as for building a community to support it.
 
@@ -304,7 +304,7 @@ In all cases, MSO should not conflict with any other monitoring tool installed i
 * If customer can use both MSO and UWM in the future, which one should they use?
 * Should we allow customer to create MSO CRs? (MonitoringStacks).
 * How will it fit into Hypershift? Will it have enough flexibility to support the Hypershift use case?
-    * Full Hypershift proposal is in progress, but the whole stack can be simply run on DataPlane with all capabilities except kube-state-metrics. Given that it is unknown how Addons will run their services on Hypershift, discussing this would be premature.
+  * Full Hypershift proposal is in progress, but the whole stack can be simply run on DataPlane with all capabilities except kube-state-metrics. Given that it is unknown how Addons will run their services on Hypershift, discussing this would be premature.
 
 ### FAQ
 
@@ -356,7 +356,8 @@ We have already implemented such a remote storage project, [observatorium,](http
 
 ![drawing](https://docs.google.com/drawings/d/e/2PACX-1vTmpByDHmOQPyinczrPhOwintNfo3nhi8ymhHAYrwRE65PlZ0ujtiLNm8SoHnLpoyrfHeFoBm6Nu5IB/pub?w=1259&h=668)
 
-**TL;DR Verdict: **This solution is very tempting since it reflects fully flexible deployment. However, at the current moment (August 2021) we agreed we don’t want to pursue this option yet, due to complience reasons (RHOBS) and complexity involved with non-integrated storage on local in-cluster level (local Observatorium). Nevertheless, the current solution is an enormous step towards this approach. The only difference is an integrated storage that saves some complexity for lower scalability, which is fine for sharded, dedicated setups. Still, we want to gradually enable partial forwarding only for the chosen solution to enable RHOBS, remote Observatorium or any other Prometheus remote write compatible storage.
+**TL;DR Verdict:** This solution is very tempting since it reflects fully flexible deployment. However, at the current moment (August 2021) we agreed we don’t want to pursue this option yet, due to compliance reasons (RHOBS) and complexity involved with non-integrated storage on local in-cluster level (local Observatorium).
+Nevertheless, the current solution is an enormous step towards this approach. The only difference is an integrated storage that saves some complexity for lower scalability, which is fine for sharded, dedicated setups. Still, we want to gradually enable partial forwarding only for the chosen solution to enable RHOBS, remote Observatorium or any other Prometheus remote write compatible storage.
 
 **Pros:**
 
@@ -379,7 +380,7 @@ We have already implemented such a remote storage project, [observatorium,](http
 **Cons:**
 
 * More complex strategies of degradation (no integrated storage)
-    * More things than go wrong: Obs cluster down, connection down, client cluster down
+  * More things than go wrong: Obs cluster down, connection down, client cluster down
 * We still need to design some "MonitoringStack" that allows us to have a scalable collection pipeline and forwarding pipeline
 * If we use RHOBS
   * There is a risk for large slowdowns due to data compliance needs, since it’s related to user addon utilization.
