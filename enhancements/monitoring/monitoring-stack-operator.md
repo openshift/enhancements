@@ -209,7 +209,7 @@ Alternatively, we could also consider using a higher-level operator, such as [lo
 
 ## Design Details
 
-#### Installation
+### Installation
 
 The newly developed operator will be deployed using the Operator Lifecycle Manager (OLM).
 
@@ -219,26 +219,26 @@ In order to be aligned with the descoping [plan](https://docs.google.com/present
 For this reason, the newly developed operator should be installed globally in a cluster and should provide its own CRDs and Roles as part of the installation bundle. A cluster administrator would then create RoleBindings to bind the roles to namespaces to which the operator needs access.
 More details about the descoping plans and strategies are currently described can be found in this [hackmd](https://hackmd.io/wVfLKpxtSN-P0n07Kx4J8Q?view#Descoping-Plan) document and are also illustrated in a short [slide-deck](https://docs.google.com/presentation/d/1j1J575SxS8LtL_YvKqrexUhso7j4SgrLfyNrDUroJcc/edit#slide=id.ga089527607_0_0).
 
-#### Metrics retention
+### Metrics retention
 
 Since each addon can create its own monitoring stack, MTOs will be able to configure retention for their service as they see fit.
 
-#### Global view
+### Global view
 
 In order for MTSRE/MTO to be able to view portions of metrics for all of their deployments, each managed service will have its own tenant in Red Hat Observability (RHOBS). This will allow remote-writing a subset of metrics from the Prometheus instances into RHOBS.
 
-#### Scraping metrics from platform components
+### Scraping metrics from platform components
 
 MTOs often need to create alerts and dashboards which include metrics coming from platform components. A typical example is using CPU and memory resource metrics from kube-state-metrics. For ease of use, MTOs will be able to define allow-listed scrape on Platform Monitoring /federate endpoint to access relevant metrics.
 
 In the first iteration, this can be implemented by defining a ServiceMonitor against the `/federate` endpoint of the Platform Monitoring Prometheus. Improvement on this side will be revisited in the next enhancement (e.g ability to scrape those data directly from sources).
 
-#### High Availability
+### High Availability
 
 All components except Prometheus are stateless and can run with more than one replica. In order to make Prometheus highly-available, a similar approach to the one in CMO will be used. The monitoring operator will provide a Thanos Querier for each `MonitoringStack` and a sidecar next to each Prometheus.
 A Thanos Ruler is not needed in this architecture since all recording rules and alerts will be evaluated locally in each Prometheus instance.
 
-#### Alert Routing
+### Alert Routing
 
 For simplicity reasons, routing alerts that come from managed service monitoring stacks will be handled by a single Alertmanager.
 We can take advantage of the recently added <code>[AlertmanagerConfig](https://github.com/prometheus-operator/prometheus-operator/blob/master/Documentation/api.md#alertmanagerconfig)</code> and allow MTO/MTSRE to create their own routing configuration in a centrally deployed Alertmanager instance.
@@ -246,7 +246,7 @@ Finally, the MTSRE team could centrally configure receivers in one place for all
 
 In addition to the built-in Alertmanager from MSO, users will have the option to route alerts to external Alertmanagers, such as the PM Alertmanager.
 
-##### Notable Alerting Routing Alternative
+#### Notable Alerting Routing Alternative
 
 During the Monitoring Enablement Working Group meetings, we received feedback from both Platform SRE and Managed Tenant SRE that Alertmanager, in general, has a low footprint, and the Prometheus Operator does a good job of upgrading it and keeping it running.
 
@@ -254,13 +254,13 @@ Moreover, Platform SRE expressed concerns that a shared Alertmanager configurati
 
 Based on the information, we do not see strong reasons not to have one Alertmanager per managed service. Either approach should work as an initial solution.
 
-#### Creating Dashboards
+### Creating Dashboards
 
 The OCP Console does not (yet) support querying different Prometheus instances, making it hard to use it for creating dashboards.
 
 For this reason, the monitoring operator will optionally deploy a Grafana operator that can manage Grafana instances in the namespaces where a MonitoringStack CR is present. Managed service SREs and owners will then be able to use the CRDs provided by the Grafana operator to create their own dashboards.
 
-#### Release Model
+### Release Model
 
 We plan to follow similar “[Layered Release Cycles](https://docs.google.com/presentation/d/1b7VRJpaUcidZso6BNx4F0AmWYh5f_F1-ZmMLs4IFGLA/edit#slide=id.ge68369526c_0_0)” proposed by the Logging team.
 
