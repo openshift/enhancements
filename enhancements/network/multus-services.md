@@ -192,6 +192,7 @@ N/A: This feature is not particularly kubernetes-version sensitive.
 
 ## Infrastructure Needed [optional]
 
+<<<<<<< HEAD
 ### Required for GA
 
 GA requires following testing infrastructure:
