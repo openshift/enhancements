@@ -239,7 +239,7 @@ A Thanos Ruler is not needed in this architecture since all recording rules and 
 #### Alert Routing
 
 For simplicity reasons, routing alerts that come from managed service monitoring stacks will be handled by a single Alertmanager.
-We can take advantage of the recently added <code>[AlertmanagerConfig](https://github.com/prometheus-operator/prometheus-operator/blob/master/Documentation/api.md#alertmanagerconfig)</code> and allow MTO/MTSRE to create their own routing configuration in a centrally deployed Alertmanager instance. 
+We can take advantage of the recently added <code>[AlertmanagerConfig](https://github.com/prometheus-operator/prometheus-operator/blob/master/Documentation/api.md#alertmanagerconfig)</code> and allow MTO/MTSRE to create their own routing configuration in a centrally deployed Alertmanager instance.
 Finally, the MTSRE team could centrally configure receivers in one place for all managed services and service owners would simply use those receivers in their routing rules. It is worth noting that the last feature depends on [https://github.com/prometheus-operator/prometheus-operator/issues/4033](https://github.com/prometheus-operator/prometheus-operator/issues/4033).
 
 In addition to the built-in Alertmanager from MSO, users will have the option to route alerts to external Alertmanagers, such as the PM Alertmanager.
