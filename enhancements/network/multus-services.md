@@ -38,7 +38,7 @@ This propose introduces to implement Kubernetes service in secondaly network int
 
 Kubernetes Service object is commonly used abstraction to access Pod workloads. User can define service with label selector and the service provides load-balancing mechanisms to access the pods. This is very useful for usual network services, such as HTTP server. Kubernetes provides various service modes to access, such as ClusterIP, LoadBalancer, headless service, ExternalName and NodePort, not only for inside cluster also for outside of cluster.
 
-These functionality is implemented in various components (e.g. endpoint controller, kube-proxy/openvSwitch) and that is the reason we cannot use it for pods' secondary network because pods' secondary network is not under management of Kubernetes.
+These functionality is implemented in various components (e.g. endpoint controller, kube-proxy, iptables/Open vSwitch) and that is the reason we cannot use it for pods' secondary network because pods' secondary network is not under management of Kubernetes.
 
 ### Goals
 
@@ -64,7 +64,6 @@ We targets the following service functionality for this proposal:
 
 - ClusterIP
 - headless service
-- NodePort
 
 #### Service Reachability
 
@@ -78,19 +77,12 @@ When the service is created with 'type: ClusterIP', then Kubernetes assign clust
 
 Headless service is implemented by CoreOS as DNS round-robin. Hence service can be reachable if pod can reach the IPs of headless service.
 
-#### NodePort
-
-===XXX====
- - Still wondering whether we should implement...
- - Consideration: NodePort seems to NOT be a good choise for customer 
- - Consideration: In case of multus, k8s NodePort cannot be implemented because host may not connect to Multus network (e.g. SR-IOV).
-   Hence, we could only open the port in pods (e.g. 8001 port at Pod's eth1 goes to service A). Is that really needed?
-===XXX====
-
 ### User Stories
 
-XXX: need to add user stories for cluseter IP/headless services (inside cluster access)
-XXX: need to add user stories for NodePort services (outside cluster access)
+- OpenShift developers require the ability to segregate my Kubernetes service data plane traffic onto different networks for reasons of security and performance.
+- OpenShift developers require the ability to segregate my Kubernetes service data plane traffic to a secondary interface that is associated with a different CNI plugin to provide functionality not available in the primary (default) CNI plugin.
+- OpenShift networking administrators require the ability to provide access to an internally-only-facing corporate network and an externally-facing DMZ network, so application developers can choose which network (pod interface) to use for the different types of traffic that make up their application (e.g. web server:external, DB:internal).
+- OpenShift networking administrators require the ability to use one NIC in my hosts for control plane traffic, and additional NICs for data plane traffic.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -101,9 +93,7 @@ In this enhancement, we will introduce following components (components name mig
 
 Multus service controller watches all Pods' secondary interfaces, services and network attachment definitions and it creates EndpointSlice for the service. EndpointSlice contains secondary network IP address. Multus proxy watches. Service and EndpointSlice have the label, `service.kubernetes.io/service-proxy-name`, which is defined at [kube-proxy APIs](https://pkg.go.dev/k8s.io/kubernetes/pkg/proxy/apis), to make target service out of Kubernetes management.
 
-Multus proxy provides forwarding plane for multus-service with iptables at Pod's network namespace. It watches Service and EndpointSlice with 'service.kubernetes.io/service-proxy-name: multus-proxy' and creates changes destination to the service pods from Service VIP. It does not provide NAT (ip masquerade).
-
-XXX: Double check NAT is not required
+Multus proxy provides forwarding plane for multus-service with iptables at Pod's network namespace. It watches Service and EndpointSlice with 'service.kubernetes.io/service-proxy-name: multus-proxy' and creates changes destination to the service pods from Service VIP. It does not provide NAT (ip masquerade) for now because multus network is mainly for 'secondary network' and it assumes default route to primary Kubernetes cluster network.
 
 #### Create Service
 
@@ -119,8 +109,6 @@ User need to set label, `service.kubernetes.io/service-proxy-name`, with value, 
 
 `k8s.v1.cni.cncf.io/service-network` specifies which network (i.e. net-attach-def) is the target to exporse the service.
 This label specify only one net-attach-def which is in same namespace of the Service/Pods, hence Service/Network Attachment Definition/Pods should be in same namespace. This annotation only allows user to specify one network, hence one Service VIP should be matched with one of service/network mappings.
-
-XXX: Need another label/annotations?
 
 Then multus service controller will watch the service and pods.
 
@@ -147,7 +135,7 @@ Hence we should mention which SDN solution support this enhancement in documents
 
 ### Open Questions [optional]
 
-XXX: No open question?
+N/A
 
 ### Test Plan
 
@@ -204,10 +192,9 @@ N/A: This feature is not particularly kubernetes-version sensitive.
 
 ## Infrastructure Needed [optional]
 
-XXX: need to update everything we need!!
-----
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
+### Required for GA
 
-Listing these here allows the community to get the process for these resources
-started right away.
+GA requires following testing infrastructure:
+
+- Baremetal OpenShift deployment (for scale testing), with multiple network (macvlan/ipvlan/sr-iov)
+- Baremetal OpenShift deployment (for CI e2e testing), with multiple network. It might be possible to implement in equinix metal. Need to work on.
