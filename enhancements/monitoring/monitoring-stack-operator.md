@@ -18,7 +18,7 @@ status: implementable
 
 # Monitoring for Red Hat Managed Services
 
-## Release Sign Off Checklist
+## Release Signoff Checklist
 
 - [X] Enhancement is `implementable`
 - [X] Design details are appropriately documented from clear requirements
@@ -62,7 +62,7 @@ The way these managed services are intended to run is presented in the following
 
 We expect many more Addons to come in the following years.
 
-### Motivation
+## Motivation
 
 Red Hat managed services are deployed in OSD clusters and run alongside user workloads.
 
@@ -206,6 +206,8 @@ _First iteration of the new monitoring operator, showing a monitoring stack with
 
 We recommend using either [OperatorSDK](https://github.com/operator-framework/operator-sdk) or [KubeBuilder](https://github.com/kubernetes-sigs/kubebuilder) to develop the operator to increase development efficiency by taking advantage of the higher abstraction constructs, the rich documentation, and a vibrant community.
 Alternatively, we could also consider using a higher-level operator, such as [locutus](https://github.com/brancz/locutus), for rapid development with a path for GitOps deployments. In any case, this is an implementation detail that should be left to the team implementing this to decide on.
+
+## Design Details
 
 #### Installation
 
