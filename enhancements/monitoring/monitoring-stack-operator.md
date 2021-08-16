@@ -463,6 +463,26 @@ Furthermore, CMO in the current state already takes on a lot of responsibility. 
 
 New versions of the managed service monitoring stack will be published in OLM. Upgrades and downgrades will be performed by OLM itself.
 
+### Graduation Criteria
+
+TBD
+
+#### Dev Preview -> Tech Preview
+
+TBD
+
+#### Tech Preview -> GA
+
+TBD
+
+#### Removing a deprecated feature
+
+TBD
+
+### Version Skew Strategy
+
+TBD
+
 ### Previous Docs
 
 * Initial [OSD/Layered Product](https://docs.google.com/document/d/18OUgqqBkoe2SNw0ziQp0qPRdyzUvVos38g2gY94sJ58/edit#heading=h.3b0wy8sjfa2r) (internal doc)
