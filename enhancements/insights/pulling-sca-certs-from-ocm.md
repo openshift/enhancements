@@ -61,7 +61,7 @@ from Red Hat Subscription Manager (RHSM).
 
 ### Why is it in the Insights Operator?
 
-The Insights Operator is now the only OCP component that connects an OpenShift cluster to a Red Hat subscription experience (console.redhat.com APIs). The consumers of the SCA certs are not only builds, but also shared resources, such as the CSI driver.
+The Insights Operator is now the only OCP component that connects an OpenShift cluster to a Red Hat subscription experience (console.redhat.com APIs). The consumers of the SCA certs are builds, shared resources (such as the CSI driver) and any workload that requires access to the RHEL subscription content.
 
 ### User Stories
 
@@ -79,20 +79,25 @@ Risk: OCM API is down or doesn't provide up to date data.
 
 Risk: Insights Operator is unable to expose/update the data in the OpenShift API
 
-Mitigation: The Insights Operator is marked as Degraded (in case the HTTP code is lower than 200 or greater than 399 and is not equal to 404, because HTTP 404 means that the organization didn't allow this feature).
+Mitigation: The Insights Operator is marked as Degraded (in case the HTTP code is lower than 200
+or greater than 399 and is not equal to 404, because HTTP 404 means that the organization didn't allow this feature).
+At the same time, the Insights Operator must not be marked as Degraded in a disconnected cluster. The Insights Operator is marked as degraded after a number of unsuccessful exponential backoff steps.
 
 ## Design Details
 
 ### Authorization
 
 The Insights Operator is able to pull the certificates from the OCM API using the existing `cloud.openshift.com` token
-available in the `pull-secret` (in the `openshift-config-managed` namespace).
+available in the `pull-secret` (in the `openshift-config` namespace).
 
 The Insights Operator must provide a cluster ID as an identifier of the cluster.
 
 ### SCA certs in API
 
-The SCA certificate is available via the `etc-pki-entitlement` secret in the `openshift-config-managed` namespace. The secret will be available for use in other namespaces by creating a cluster-scoped `Share` resource. Cluster admin creates a `clusterrolebinding` to allow a service account access to the `Share` resource.
+The SCA certificate is available via the `etc-pki-entitlement` secret in the `openshift-config-managed` namespace.
+The type of the `etc-pki-entitlement` secret is the `kubernetes.io/tls` with standard `tls.key` and `tls.crt` attributes.
+The secret will be available for use in other namespaces by creating a cluster-scoped `Share` resource.
+Cluster admin creates a `clusterrolebinding` to allow a service account access to the `Share` resource.
 
 ### Use of the SCA certs
 
@@ -102,6 +107,7 @@ The SCA certificate is available via the `etc-pki-entitlement` secret in the `op
 ### Configuration
 - The new configuration is tied to the Insights Operator, because the Insights Operator is currently the only component reading and using the `console.redhat.com` authentication token in the `pull-secret` in the `openshift-config` namespace, so if we decide to move this somewhere else, we must consider this fact.
 - The new OCM API related config attributes are adjustable via `support` secret in the `openshift-config` namespace
+- The Insights Operator respects the cluster wide proxy configuration (if any) so that it can reach the OCM API when behind a proxy
 - Following attributes are configurable via the `support` secret:
   - OCM API endpoint
   - time period to query the OCM API
