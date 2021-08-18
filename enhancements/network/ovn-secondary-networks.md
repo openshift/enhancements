@@ -111,6 +111,19 @@ the annotations field. The requested IP address **must** be in range of the
 corresponding `OVNSecondaryNetwork`.
 
 ### Risks and Mitigations
+There is [ongoing upstream work](https://github.com/ovn-org/ovn-kubernetes/pull/2301)
+by NVIDIA that extends OVN-Kubernetes and implements the required use-cases.
+More information about their proposal can be found in this
+[slide deck](https://docs.google.com/presentation/d/1bUtdNF--ydHukw4dwBDrvHv6Jh0NwOrN2JjfSzJNgq4/edit#slide=id.p).
+
+Their proposal implements the following topologies for OVN secondary networks:
+  - routed L3 networks (same as OVN-Kubernetes primary network)
+  - flat L2 networks (our requirement)
+  - flat L2 networks with external network connectivity (our requirement)
+
+As such, there is the risk that the upstream community decides to accept
+NVIDIA's contribution but Red Hat decides to ship this feature via a dedicated
+CNI plugin, as described in the [alternatives section](#alternatives).
 
 ## Design Details
 
