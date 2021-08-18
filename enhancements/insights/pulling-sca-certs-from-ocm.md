@@ -82,6 +82,8 @@ Risk: Insights Operator is unable to expose/update the data in the OpenShift API
 Mitigation: The Insights Operator is marked as Degraded (in case the HTTP code is lower than 200
 or greater than 399 and is not equal to 404, because HTTP 404 means that the organization didn't allow this feature).
 At the same time, the Insights Operator must not be marked as Degraded in a disconnected cluster. The Insights Operator is marked as degraded after a number of unsuccessful exponential backoff steps.
+The reason for marking the Insights Operator as Degraded is that we would like to gather data for such cases during the tech preview period. After the tech preview period, this should help with the fact that a cluster may have outdated or invalid entitlements.
+This can be crucial for the workloads using these entitlements (in other words you want to know about a situation where you do not have valid entitlements before the upgrade, because all the Pods using the entitlements will fail after restart during the upgrade).
 
 ## Design Details
 
