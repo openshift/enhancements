@@ -51,6 +51,9 @@ simple L2 overlays without the need for a network administrator.
   policies for the secondary networks. There is an
   [enhancement proposal](enhancements/network/multi-networkpolicy.md) about
   this subject, not scoped around OVN.
+- ingress into the OVN secondary networks. This is not a current objective,
+  and should be treated in a separate enhancement proposal, which would depend
+  on the [services on secondary networks feature](TODO: add link to PR) availability.
 
 ## Proposal
 
