@@ -4,10 +4,9 @@ authors:
   - "@s1061123"
 reviewers:
   - TBD
-  - "@alicedoe"
+  - "@dougbtv"
 approvers:
   - TBD
-  - "@oscardoe"
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
 status: implementable
