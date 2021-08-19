@@ -36,13 +36,13 @@ This document proposes a solution and a delivery plan for scraping, querying and
 * MS-SRE/MT-SRE: Managed Service / Managed Tenant Site Reliability Engineer
 * MTO: Managed Tenant Owners - the teams that develop each Managed Service. The Kafka Team is one example of an MTO.
 * RHOBS: Red Hat Observability Service
-* RHODF: Red Hat Openshift Data Foundation
+* RHODF: Red Hat OpenShift Data Foundation
 
 For additional acronyms, see [Red Hat Dictionary](https://source.redhat.com/groups/public/red-hat-dictionary-or-lexicon/red_hat_abbreviations_acronyms_and_initialisms_dictionary_wiki)
 
 ## Background
 
-Openshift Monitoring is currently composed of two main systems - Platform Monitoring (PM) and User Workload Monitoring (UWM), both of which are part of OpenShift core.
+OpenShift Monitoring is currently composed of two main systems - Platform Monitoring (PM) and User Workload Monitoring (UWM), both of which are part of OpenShift core.
 
 Platform Monitoring holds metrics about core system components running in `openshift-*` and `kube-*` namespaces. Platform Monitoring is enabled in all OpenShift installations and cannot be disabled. Some of the components scraped by PM include core-dns, etcd, kube-apiserver, image-registry, operator-lifecycle-manager etc.
 Platform Monitoring is by design an immutable stack, [which means that admins cannot extend it with additional metrics without losing the support.](https://docs.openshift.com/container-platform/4.7/monitoring/configuring-the-monitoring-stack.html#support-considerations_configuring-the-monitoring-stack)
@@ -80,7 +80,7 @@ This imposes an extra cost on teams developing and maintaining a managed service
 
 This enhancement aims to relieve the burden from managed service owners by providing a ready-made monitoring solution. Such a solution would encapsulate existing patterns already present in Platform Monitoring and User Workload monitoring.
 Furthermore, it will reduce the operational complexity of running a managed service since the Managed Tenant SREs will not need to familiarise themselves with a new monitoring stack for each managed service.
-In future it can be used to allow customers to define their monitoring stacks. UWM could use it in future underneath too. In details:
+In future it can be used to allow customers to define their monitoring stacks. UWM could use it under the hood too. In details:
 
 * Provide a way for managed services to scrape metrics from their own services and from platform components into prometheus-compatible storage.
 * Allow managed service owners to query metrics from their services and platform components from prometheus-compatible storage.
@@ -109,7 +109,7 @@ To avoid maintaining multiple monitoring solutions, this proposal aims to be a f
 * Expose managed service metrics to end-users. We know e.g. OCS addon wants this, but this can be achieved on top of the proposed solution using client or backend side filtering for data isolation if needed (e.g. prom-label-proxy). The monitoring team can do this in the next iteration.
 * Integrate managed service metrics into the OpenShift console. We know OCS wants to integrate with OCP Console, but we assume the console team can help support switching between Prometheus-compatible data sources.
 * Solve Platform Monitoring SPOF, scalability and overhead. This will be targeted in a follow-up enhancement.
-* Allow logging and tracing capabilities. Other solutions should tackle this (designed by Logging and Tracing teams.
+* Allow logging and tracing capabilities. Other solutions should tackle this (designed by Logging and Tracing teams.)
 
 ## Proposal
 
@@ -119,7 +119,7 @@ To avoid maintaining multiple monitoring solutions, this proposal aims to be a f
 * MTSRE
 * RHOBS Devs
 * MTO
-* Customer: User of Manage Service and OSD
+* Customer: User of Managed Service and OSD
 
 ### User Stories
 
@@ -163,7 +163,7 @@ The operator will be installed into its own namespace and will watch `Monitoring
 * A Prometheus Operator in order to take advantage of the Prometheus management functionality already present in PO. An Alertmanager instance for managing alert routing will also be provisioned in the same namespace.
 * A [Grafana Operator](https://operatorhub.io/operator/grafana-operator)
 
-Once a `MonitoringStack` has been created, the operator will deploy the appropriate resources in the `MonitoringStackOperor`'s namespace based on how the stack is configured. In a simple case, this might be:
+Once a `MonitoringStack` custom resource (CR) has been created, the operator will deploy the appropriate resources in the `MonitoringStackOperor`'s namespace based on how the stack is configured. In a simple case, this might be:
 
 * a Prometheus CR
 * a Grafana CR and a Grafana Data Source CR
@@ -225,7 +225,7 @@ Since each addon can create its own monitoring stack, MTOs will be able to confi
 
 ### Global view
 
-In order for MTSRE/MTO to be able to view portions of metrics for all of their deployments, each managed service will have its own tenant in Red Hat Observability (RHOBS). This will allow remote-writing a subset of metrics from the Prometheus instances into RHOBS.
+In order for MTSRE/MTO to be able to view portions of metrics for all of their deployments, each managed service will have its own tenant in Red Hat Observability Service (RHOBS). This will allow remote-writing a subset of metrics from the Prometheus instances into RHOBS.
 
 ### Scraping metrics from platform components
 
