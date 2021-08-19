@@ -106,11 +106,6 @@ When an overlay network with external connectivity is requested, the traffic
 will be directly dumped onto the host's underlay via a localnet port.
 
 #### Network-attachment-definition provisioning
-When a new network attachment is provisioned (or removed), the corresponding
-controller will create a logical switch (named
-`secondary_<namespace>_<networkName>`), which will assign IP addresses in the
-configured range (defined by the `OVNSecondaryNetwork`).
-
 A removed `Network-Attachment-definition` with present attachment will
 trigger a reconciliation loop, which will cause the net-attach-def entity to be
 reprovisioned; if the network attachment definition is removed and the
@@ -118,8 +113,14 @@ corresponding OVN logical switch does not have any logical ports attached
 triggers the logical switch to be deleted.
 
 #### Adding / removing a pod using an OVN secondary network
-Adding / removing a pod will lead to a logical switch port to be created,
-attached to the corresponding logical switch.
+When a pod connected to an overlay network is scheduled, the logical switch
+that will implement the layer 2 network will be (lazily) created if it does not
+already exist. The logical switch name will be
+`secondary_<namespace>_<networkName>`, and it will assign IP addresses in the
+configured range (defined in the `OverlayNetwork::Subnet` attribute).
+
+A logical switch port will also be created (or removed), on the corresponding
+logical switch whenever a pod is scheduled (or removed).
 
 ### Requesting static IP / MAC
 A static MAC / IP address can be requested for the pods by specifying those in
