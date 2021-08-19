@@ -246,10 +246,15 @@ spec:
     logical router port, to be able to send the RAs. Would we want
     these routers for other scenarios ? I.e. is there any reason to create
     them for IPv4 subnets ?
-- MTU propagation via dhcp options (ipv4)
-- a controller, which will watch out for `net-attach-def` and create the
-  logical switch encoding the network. It must also reconcile the logical
-  switch ports, which would be left behind when nodes are deleted
+- MTU propagation via dhcp options - i.e. `options : mtu`  (ipv4)
+  - MTU propagation via `ipv6_ra_configs : mtu` (ipv6)
+  - the MTU attribute will be encoded in the logical switch's external ids,
+    and will be carried to each dhcp options / logical router port as required.
+- a controller that must reconcile the logical switch ports, which would be left
+  behind when nodes are deleted.
+- a controller that will render network-attachment-definitions once
+  `OverlayNetwork`s are provisioned, reconcile them if the corresponding
+  logical has attached ports.
 - active port security on the logical switch ports(preventing both MAC and
   IP spoofing).
 
