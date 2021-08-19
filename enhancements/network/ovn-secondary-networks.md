@@ -86,12 +86,20 @@ type OVNSecondaryNetworkSpec struct {
     // Subnet is a RFC 4632/4291-style string that represents an IP address and prefix length in CIDR notation
     Subnet                  string `json:"subnet"`
     HasExternalConnectivity bool   `json:"hasExternalConnectivity,omitempty"`
+    MTU                     uint16 `json:"mtu,omitempty"`
 }
 ```
 
 A controller will watch out for the creation / deletion of these
 `OVNSecondaryNetwork`s, and will render and provision the corresponding
 `NetworkAttachmentDefinition`s.
+
+**Note**: the subnet attribute requires some validation, especially *if* the
+subnet has external connectivity: we need to assure the uniqueness of the
+subnet on these overlay networks, and when the provisioned overlay has external
+connectivity, we need to furthermore assure that its range does not clash with
+the node CIDRs, cluster CIDR, and service CIDR. An error will be thrown when
+the provided range clashes with the aforementioned CIDRs.
 
 #### Network-attachment-definition provisioning
 When a new network attachment is provisioned (or removed), the corresponding
