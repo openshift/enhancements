@@ -69,20 +69,20 @@ Afterwards, the users can then request their pods - and / VMs - to connect to
 those overlays as they would for any other secondary network.
 
 ### Implementation Details/Notes/Constraints
-A new CRD will be introduced, named `OVNSecondaryNetwork`. When this CRD is
+A new CRD will be introduced, named `OverlayNetwork`. When this CRD is
 provisioned, a `NetworkAttachmentDefinition` object will be rendered.
 
 The new CRD will look like:
 
 ```golang
-type OVNSecondaryNetwork struct {
+type OverlayNetwork struct {
     metav1.TypeMeta   `json:",inline"`
     metav1.ObjectMeta `json:"metadata,omitempty"`
 
-    Spec OVNSecondaryNetworkSpec `json:"spec,omitempty"`
+    Spec OverlayNetworkSpec `json:"spec,omitempty"`
 }
 
-type OVNSecondaryNetworkSpec struct {
+type OverlayNetworkSpec struct {
     // Subnet is a RFC 4632/4291-style string that represents an IP address and prefix length in CIDR notation
     Subnet                  string `json:"subnet"`
     HasExternalConnectivity bool   `json:"hasExternalConnectivity,omitempty"`
@@ -91,7 +91,7 @@ type OVNSecondaryNetworkSpec struct {
 ```
 
 A controller will watch out for the creation / deletion of these
-`OVNSecondaryNetwork`s, and will render and provision the corresponding
+`OverlayNetwork`s, and will render and provision the corresponding
 `NetworkAttachmentDefinition`s.
 
 **Note**: the subnet attribute requires some validation, especially *if* the
@@ -125,7 +125,7 @@ logical switch whenever a pod is scheduled (or removed).
 ### Requesting static IP / MAC
 A static MAC / IP address can be requested for the pods by specifying those in
 the annotations field. The requested IP address **must** be in range of the
-corresponding `OVNSecondaryNetwork`, otherwise the pod creation will fail.
+corresponding `OverlayNetwork`, otherwise the pod creation will fail.
 
 The usage of static MAC / IPs must be validated: once an IP is requested, we
 must make sure it is not in use within any logical port connected to that
