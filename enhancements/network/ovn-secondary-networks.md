@@ -101,6 +101,10 @@ connectivity, we need to furthermore assure that its range does not clash with
 the node CIDRs, cluster CIDR, and service CIDR. An error will be thrown when
 the provided range clashes with the aforementioned CIDRs.
 
+#### External connectivity considerations
+When an overlay network with external connectivity is requested, the traffic
+will be directly dumped onto the host's underlay via a localnet port.
+
 #### Network-attachment-definition provisioning
 When a new network attachment is provisioned (or removed), the corresponding
 controller will create a logical switch (named
