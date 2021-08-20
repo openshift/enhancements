@@ -7,7 +7,7 @@ reviewers:
 approvers:
   - TBD
 creation-date: 2021-03-10
-last-updated: 2021-03-10
+last-updated: 2021-08-19
 status: implementable
 ---
 
@@ -73,7 +73,7 @@ It will now watch for mirrors configured through spec `repositoryMirrors` to not
 
 An example ImageContentSourcePolicy file will look like:
 ```yaml
-apiVersion: operator.openshift.io/v1alpha1
+apiVersion: operator.openshift.io/v1
 kind: ImageContentSourcePolicy
 metadata:
   name: ubi8repo
@@ -102,7 +102,7 @@ Implementing this enhancement requires changes in:
 This is an example of the ImageContentSourcePolicy file:
 
 ```yaml
-apiVersion: operator.openshift.io/v1alpha1
+apiVersion: operator.openshift.io/v1
 kind: ImageContentSourcePolicy
 metadata:
   name: ubi8repo
@@ -164,8 +164,13 @@ determine graduation.
 
 #### Removing a deprecated feature
 
-- With `repositoryMirrors` getting in, the current `repositoryDigestMirrors` can be deprecated since its functionality will also be fully satisfied by `repositoryMirrors` and we don't have to keep duplicated APIs.
-- In operator.openshift.io/v1alpha1, gently announce to the users the `repositoryDigestMirrors` will be deprecated. In operator.openshift.io/v1alpha2, the implementation of `repositoryDigestMirrors` will be removed and replaced by `repositoryMirrors`.
+- The `ImageContentSourcePolicy` CRD with `repositoryMirrors` will be added to operator.openshift.io/v1. With `repositoryMirrors` getting in, the`repositoryDigestMirrors` will be
+removed and replaced by `repositoryMirrors`, since its functionality can be fully satisfied by
+`repositoryMirrors` and we don't have to keep duplicated APIs.
+- In operator.openshift.io/v1alpha1, the `ImageContentSourcePolicy` will be kept it as it is.
+- The MCO will support both versions of `ImageContentSourcePolicy`. The support will need to
+be add to MCO for accepting request of v1 and v1alpha1, and handles the requests depending on
+different versions.
 
 ### Upgrade / Downgrade Strategy
 
