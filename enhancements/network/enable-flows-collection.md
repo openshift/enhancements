@@ -272,7 +272,7 @@ Flow operator and the OVN-Kubernetes pods.
 #### Task 5: enable the Flows' operation in the Console GUI
 
 As described in the above [console-based flow status and retrieval](#console-based-flow-status-and-retrieval)
-section. It should also visualize the [configuration options for tuning IPFix performance](#tuning-flows-emission-parameters). 
+section. It should also visualize the [configuration options for tuning IPFix performance](#tuning-flows-emission-parameters).
 
 The features should be implemented within a Console plugin.
 
