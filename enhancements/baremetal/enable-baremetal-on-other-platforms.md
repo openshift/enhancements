@@ -4,12 +4,11 @@ authors:
   - "@asalkeld"
   - "@sadasu"
 reviewers:
-  - TBD
   - "@hardy"
   - "@romfreiman"
   - "@dhellman"
 approvers:
-  - TBD
+  - "@hardy"
 creation-date: 2021-08-20
 last-updated: 2021-08-20
 status: implementable
@@ -19,7 +18,7 @@ replaces:
 superseded-by:
 ---
 
-# Enable Baremetal on other Platforms to support ZTP
+# Enable baremetal on other Platforms to support centralized host management
 
 ## Release Signoff Checklist
 
@@ -43,11 +42,15 @@ An initial driver of this feature are the centralized host management use cases
 in edge topologies, which without this feature, is restricted to having the
 central OpenShift cluster deployed on baremetal.
 
+See:
+- https://github.com/openshift/enhancements/blob/master/enhancements/installer/agent-based-installation-in-hive.md
+- https://github.com/openshift/assisted-service/tree/master/docs/hive-integration
+
 ### Goals
 
 The specific goals of this proposal are to:
 
-Support the ZTP (Zero Touch Provisioning) use case by partially enabling Baremetal Host API
+Support the centralized host management use case by partially enabling Baremetal Host API
 on the following platforms:
 - None
 - OpenStack
@@ -55,14 +58,14 @@ on the following platforms:
 
 We will be successful when:
 
-ZTP can deploy clusters when running on the above platforms.
+Centralized host management can deploy clusters when running on the above platforms.
 
 ### Non-Goals
 
 Allow Baremetal Host API to be fully enabled on all platforms.
 
 Note that the scope of this epic is only enablement of the Metal3
-BaremetalHost API and associated controller/services - the edge ZTP flow
+BaremetalHost API and associated controller/services - the centralized host management flow
 currently interacts directly via this API without any Machine API integration.
 
 ## Proposal
@@ -71,7 +74,8 @@ BMO (baremetal-operator) provides the Baremetal Host API, it in turn is configur
 and managed by CBO (cluster-baremetal-operator).
 
 CBO reads the Provisioning CR that is created by the installer on baremetal platforms
-and uses that to configure and deploy BMO.
+and uses that to configure and deploy BMO. In the case of non-baremetal platforms
+the user (or automation) will need to define the Provisioning CR.
 
 Currently CBO checks the platform and if it is not baremetal it will be in a "disabled" state i.e. it will
 1. set status.conditions Disabled=true and
@@ -80,14 +84,22 @@ Currently CBO checks the platform and if it is not baremetal it will be in a "di
 This proposal is to allow CBO to be enabled on the Platforms: None, OpenStack or vSphere.
 
 Further (to restrict the testing matrix) the allowed configuration options
-of the Provisioning CR will be restricted to exactly those required by ZTP.
+of the Provisioning CR will be restricted to exactly those required by centralized host management.
 
 *Only spec.provisioningNetwork=Disabled mode will be accepted in the Provisioning CR.*
 
-If any other provisioningNetwork mode is set, the CBO webhook will refuse the change.
+If any other provisioningNetwork mode is set, the CBO webhook will refuse the change
+in the usual case, but if defined before upgrading the operator, the Reconcile loop
+must always validate the Provisioning CR.
 
-Note: documentation will need to be added to the ZTP docs explaining how to create
-a Provisioning CR. Current doc are here:
+Note:
+
+1. when the Provisioning CR is set to provisioningNetwork=Disabled mode, worker
+nodes would be booted via virtual media. This removes the requirement for the
+Provisioning Network which can be expected to be available only in Baremetal platform types.
+
+2. documentation will need to be added to the centralized host management documentation
+explaining how to create a Provisioning CR. Current documentation is here:
 https://github.com/openshift/assisted-service/blob/8880093ef5ce041d4c1951ffd5ea1096991ec3ee/docs/user-guide/assisted-service-on-openshift.md#configure-bare-metal-operator
 
 
@@ -97,7 +109,7 @@ https://github.com/openshift/assisted-service/blob/8880093ef5ce041d4c1951ffd5ea1
 
 No change.
 
-#### Story 2 - ZTP use case
+#### Story 2 - centralized host management use case
 
 As a user of a hub cluster that performs central infrastructure management, and
 optionally zero-touch provisioning, I need to provision hosts using the k8s-native
@@ -114,10 +126,7 @@ all platforms and with full feature set. However it is still a potential issue.
 
 ### Open Questions [optional]
 
-1. Are these all the platforms that are required?
-2. Is just enabling spec.provisioningNetwork=Disabled mode sufficient?
-3. What will create the Provisioning CR?
-4. Where will the feature be e2e tested?
+1. Where will the feature be e2e tested?
 
 ### Test Plan
 
@@ -127,13 +136,16 @@ We will add unit tests to confirm that cluster-baremetal-operator:
 * is enabled on the required platforms.
 * will restrict functionality on these platforms to ProvisioningNetork=Disabled.
 
-#### e2e Testing
+#### Functional Testing
 
-An e2e test will be written that will:
+An e2e test will be written in the Assisted Installer CI that will:
+1. create one of the platforms above (SNO Platform=None might be the easiest) with Assisted Service.
+2. confirm that CBO is enabled
+3. create a Provisioning CR and confirm that BMO is running
+4. provision a baremetal cluster
 
-1. create one of the platforms above (SNO Platform=None might be the easiest).
-2. Then create the Provisioning CR and wait for CBO to be ready
-3. provision a baremetal host.
+QE will validate the remaining platforms that are supported to reduce the load
+on CI.
 
 ### Graduation Criteria
 
@@ -151,8 +163,8 @@ cluster-baremetal-operator will upgrade as it currently does, this is only a
 minor change in functionality.
 
 On the platforms (None, OpenStack and vSphere) where the operator was in a disabled
-state, after been upgraded it will move into an enabled state. However in all but ZTP
-use cases nothing will change as there is no Provisioning CR.
+state, after been upgraded it will move into an enabled state. However in all but
+centralized host management use cases nothing will change as there is no Provisioning CR.
 
 ### Version Skew Strategy
 
