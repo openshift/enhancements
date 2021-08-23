@@ -137,7 +137,8 @@ TBD
 
 ## Implementation History
 
-NONE
+- [Implementation on openshift/installer](https://github.com/hs0210/installer/tree/ipi-support-raid-bios)
+- [Implementation on openshift-metal3/terraform-provider-ironic](https://github.com/hs0210/terraform-provider-ironic/tree/ipi-support-raid-bios)
 
 ## Drawbacks
 
