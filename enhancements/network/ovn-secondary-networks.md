@@ -84,11 +84,22 @@ type OverlayNetwork struct {
 
 type OverlayNetworkSpec struct {
     // Subnet is a RFC 4632/4291-style string that represents an IP address and prefix length in CIDR notation
-    Subnet                  string `json:"subnet"`
-    HasExternalConnectivity bool   `json:"hasExternalConnectivity,omitempty"`
-    MTU                     uint16 `json:"mtu,omitempty"`
+    Subnet                     string               `json:"subnet"`
+    ExternalConnectivityConfig ExternalConnectivity `json:"externalConnectivityConfig,omitempty"`
+    MTU                        uint16               `json:"mtu,omitempty"`
 }
+
+type ExternalConnectivity string
+
+const (
+    NoExternalConnectivity ExternalConnectivity = "NoExternalConnectivity"
+    NodeGatewayRouter      Externalconnectivity = "NodeGatewayRouter"
+    CentralizedGateway     ExternalConnectivity = "CentralizedGateway"
+)
 ```
+**Note:** the `NodeGatewayRouter` mentioned above only makes sense if this
+solution is implemented on ovn-kubernetes, which has the advantages / drawbacks
+described in the [alternatives](#alternatives) section.
 
 A controller will watch out for the creation / deletion of these
 `OverlayNetwork`s, and will render and provision the corresponding
