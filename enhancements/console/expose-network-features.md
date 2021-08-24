@@ -55,31 +55,24 @@ N/A.
 
 ## Proposal
 
-The Console UI should be able to query the SDN component for a set of available features. For
-example, the SDN component would return a list of named features, e.g.:
+The Console UI should be able to read the set of features that the SDN component supports. These
+features are accessed via a ConfigMap (read-only permissions) that is written by the Cloud Network
+Operator (CNO). For example, the CNO would write a Config Map with a list of features, e.g.:
 
-```json
-{
-  "features": {
-    "network_policy_egress": true,
-    "network_policy_peer_ipblock_exceptions": true
-  }
-}
+```properties
+network_policy_egress=true
+network_policy_peer_ipblock_exceptions=true
 ```
 
 or:
 
-```json
-{
-  "features": {
-    "network_policy_egress": false,
-    "network_policy_peer_ipblock_exceptions": false
-  }
-}
+```properties
+network_policy_egress=false
+network_policy_peer_ipblock_exceptions=false
 ```
 
-The decision of exposing the features as a `string` -> `boolean` map instead of an array is
-argumented in the [Version Skew Strategy](#version-skew-strategy) section.
+The decision of exposing the features as a `string` -> `boolean` map instead of, e.g. an array or
+a set is argued in the [Version Skew Strategy](#version-skew-strategy) section.
 
 ### User Stories
 
