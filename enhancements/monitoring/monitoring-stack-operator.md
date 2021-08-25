@@ -278,31 +278,31 @@ In addition to this, several teams in the OpenShift organization already deliver
 
 The Cluster Monitoring Operator has grown in features over time and the codebase contains functionality that might also be needed for the Monitoring Stack Operator. Over time, we could end up implementing the same features in two different projects.
 
-One solution which we can aim for long-term would be to deploy User Workload Monitoring as another `MonitoringStack` instance. CMO and users can still deploy UWM will be able to configure it the same way as today, only CMO would delegate the provisioning and management to MSO by creating a `MonitoringStack` resource.
+One solution which we can aim for long-term would be to deploy User Workload Monitoring as another `MonitoringStack` instance. Users will be able to enable and configure UWM through CMO in the same way as today, only CMO would delegate the provisioning and management to the MonitoringStack Operator by creating a `MonitoringStack` resource.
 
 #### Resource usage overhead: Prometheus
 
 Deploying a single prometheus instance for each managed service does come with certain resource overhead. Even though the data will be perfectly sharded, there is still a certain fixed resource requirement for simply running Prometheus. In addition to this, sharing resources is usually more efficient because it reduces idle time.
 
-In order to evaluate the resource overhead that comes with functional sharding, we did an experiment where we deployed one Prometheus instance scraping metrics from 3 exporters (node_exporter, kube-state-metrics and kubelet) alongside 3 independent Prometheus instances, each scraping data from only one exporter.
+In order to evaluate this, we deployed one Prometheus instance scraping metrics from 3 exporters (node_exporter, kube-state-metrics and kubelet) alongside 3 independent Prometheus instances, each scraping data from only one exporter.
 We then visualized the memory usage of each Prometheus instance over time and the results are shown on the image below.
 
 ![alt_text](https://docs.google.com/drawings/d/e/2PACX-1vTQR13HcQ_wbAqVdX7rRAGBXxRJmrhN-DBMLQ1i92DqjIFVUD05uIsezacTilkZM7CwMP6XHVh4u3Uo/pub?w=1440&h=813)
 
 At the latest timestamp, the total memory usage for the 3 instances forming functional sharding is 434MB, while the memory usage of the single instance is 316MB. What is also worth pointing out, and is already illustrated by the graph, is that systems that do not export many metrics, such as node_exporter and kubelet, require small Prometheus instances in terms of memory requirements.
 
-We also performed some back-of-the envelope calculations in order to illustrate the added cost of functional sharding in terms of actual money. A `c5.xlarge` on-demand instance in AWS (a compute optimized instance with 4 CPUs and 8GB RAM) costs 140$ per month or 18$ per GB per month.
+We also performed some back-of-the-envelope calculations in order to illustrate the added cost of functional sharding in terms of actual money. A `c5.xlarge` on-demand instance in AWS (a compute optimized instance with 4 CPUs and 8GB RAM) costs 140$ per month or 18$ per GB per month.
 When using reserved capacity, the cost goes down to 11$ per GB per month for the same instance with a 1 year reservation.
 
 Our conclusion based on these factors is as follows: while sharing a Prometheus instance does come with better resource utilization, we do not believe it justifies the reduced resiliency that it also brings along.
 The resiliency of such a shared instance would be further reduced as more managed services are installed in a cluster. In addition, a shared Prometheus instance is often more volatile regarding resource utilization, which leads to users over provisioning resources to prevent OOMs by misconfiguration or complex querying patterns.
-Finally, even if at one point functional sharding does end up being a problem from a resource usage perspective, the monitoring operator will nevertheless support deploying multi-namespace monitoring stacks. This will effectively support the pattern of sharing a prometheus instance between managed services.
+Finally, with the proposed stack we retain the option of deploying multi-namespace monitoring stacks. This will effectively support the pattern of sharing a prometheus instance between managed services.
 
 ### Migration
 
 There are multiple monitoring solutions that Addons currently use:
 
-* UWM and AppSRE has their monitoring stack for SaaS services, which they plan to migrate to UWM
+* AppSRE have their monitoring stack for SaaS services, which they plan to migrate to UWM
   * MSO is planned to have feature parity with UWM with the exception of global view with Platform Monitoring. We will initially use federation to close this gap (See )
 * Platform Monitoring
   * The PM stack cannot be used for user/managed service monitoring anyway. Therefore no migration is predicted so far.
