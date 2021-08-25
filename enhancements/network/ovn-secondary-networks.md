@@ -84,8 +84,9 @@ type OverlayNetwork struct {
 }
 
 type OverlayNetworkSpec struct {
-    // Subnet is a RFC 4632/4291-style string that represents an IP address and prefix length in CIDR notation
-    Subnet                     string               `json:"subnet"`
+    // Subnet is a RFC 4632/4291-style array of strings that represents an IP
+    // address and prefix length in CIDR notation for each IP family.
+    Subnet                     []string             `json:"subnet"`
     ExternalConnectivityConfig ExternalConnectivity `json:"externalConnectivityConfig,omitempty"`
     MTU                        uint16               `json:"mtu,omitempty"`
 }
@@ -133,12 +134,18 @@ A controller will watch out for the creation / deletion of these
 `OverlayNetwork`s, and will render and provision the corresponding
 `NetworkAttachmentDefinition`s.
 
-**Note**: the subnet attribute requires some validation, especially *if* the
+**Note**: the subnet attribute is an array where the user can define a single
+CIDR for each IP familty (one for IPv4, another for IPv6).
+Each of the subnet attributes requires some validation, especially *if* the
 subnet has external connectivity: we need to assure the uniqueness of the
 subnet on these overlay networks, and when the provisioned overlay has external
 connectivity, we need to furthermore assure that its range does not clash with
-the node CIDRs, cluster CIDR, and service CIDR. An error will be thrown when
-the provided range clashes with the aforementioned CIDRs.
+the node CIDRs, cluster CIDR, and service CIDR. A new cluster condition will be
+added, marking the network as `Degraded`, should this happen.
+IPAM will be provided (within the supplied range) for the pods attached to the
+subnet.
+The .1 IPs will be excluded from the subnet range, and reserved for gateway
+addresses - which will only be used *if* the network has external connectivity.
 
 **Note:** reasons for the `OverlayNetwork` to be degraded can be:
 - the provided subnet does not have available IPs within the range.
