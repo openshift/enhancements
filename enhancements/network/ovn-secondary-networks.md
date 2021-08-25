@@ -79,7 +79,8 @@ type OverlayNetwork struct {
     metav1.TypeMeta   `json:",inline"`
     metav1.ObjectMeta `json:"metadata,omitempty"`
 
-    Spec OverlayNetworkSpec `json:"spec,omitempty"`
+    Spec   OverlayNetworkSpec   `json:"spec,omitempty"`
+    Status OverlayNetworkStatus `json:"status,omitempty"`
 }
 
 type OverlayNetworkSpec struct {
@@ -88,6 +89,33 @@ type OverlayNetworkSpec struct {
     ExternalConnectivityConfig ExternalConnectivity `json:"externalConnectivityConfig,omitempty"`
     MTU                        uint16               `json:"mtu,omitempty"`
 }
+
+type OverlayNetworkStatus struct {
+    Conditions []OverlayNetworkCondition `json:"conditions,omitempty"  patchStrategy:"merge" patchMergeKey:"type"`
+}
+
+type OverlayNetworkCondition struct {
+    Type               OverlayNetworkConditionType `json:"type"`
+    Status             ConditionStatus             `json:"status"`
+    LastTransitionTime metav1.Time                 `json:"lastTransitionTime,omitempty"`
+    Reason             string                      `json:"reason,omitempty"`
+    Message            string                      `json:"message,omitempty"`
+}
+
+type OverlayNetworkConditionType string
+
+const (
+    Ready                  OverlayNetworkConditionType = "Ready"
+    Degraded               OverlayNetworkConditionType = "Degraded"
+)
+
+type ConditionStatus string
+
+const (
+	ConditionTrue    ConditionStatus = "True"
+	ConditionFalse   ConditionStatus = "False"
+	ConditionUnknown ConditionStatus = "Unknown"
+)
 
 type ExternalConnectivity string
 
@@ -111,6 +139,13 @@ subnet on these overlay networks, and when the provisioned overlay has external
 connectivity, we need to furthermore assure that its range does not clash with
 the node CIDRs, cluster CIDR, and service CIDR. An error will be thrown when
 the provided range clashes with the aforementioned CIDRs.
+
+**Note:** reasons for the `OverlayNetwork` to be degraded can be:
+- the provided subnet does not have available IPs within the range.
+- the provided subnet range overlaps with another range. The name of the
+  overlay network with which it conflicts should be listed, or, when the
+  network features external connectivity, it should be indicated if it
+  conflicts with the service or node CIDRs.
 
 #### External connectivity considerations
 When an overlay network with external connectivity is requested, the traffic
