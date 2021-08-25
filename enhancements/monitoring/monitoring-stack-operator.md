@@ -72,7 +72,7 @@ Because of this, managed tenant owners (MTOs) cannot create additional ServiceMo
 User Workload Monitoring was designed to be primarily used by customers for monitoring their own workloads. Managed services are discouraged from using this stack since they could easily get DOS-ed by high cardinality data from end-users.
 Similarly, the configuration of the Prometheus instance itself and Alerting and Routing, would be shared with customers and other managed service owners.
 
-As a result, each MTOs currently needs to deploy its own self-developed monitoring solutions alongside its service.
+As a result, each MTO currently needs to deploy its own self-developed monitoring solutions alongside its service.
 Current options like [Prometheus Operator](https://operatorhub.io/operator/prometheus) (PO) through OLM provide inital value, but they require expertise on how to build a full-fledged monitoring stack with multi-tenancy and high availability in mind (RBAC proxies, HA, Thanos Querier, Ruler etc.).
 This imposes an extra cost on teams developing and maintaining a managed service and increases time-to-market for new services.
 
@@ -282,14 +282,14 @@ One solution which we can aim for long-term would be to deploy User Workload Mon
 
 #### Resource usage overhead: Prometheus
 
-Deploying a single prometheus instance for each managed service does come with certain resource overhead. Even though the data will be perfectly sharded, there is still a certain fixed resource requirement for simply running Prometheus. In addition to this, sharing resources is usually more efficient because it reduces idle time.
+Deploying a single prometheus instance for each managed service does come with a certain resource overhead. Even though the data will be perfectly sharded, there is still a certain fixed resource requirement for simply running Prometheus. In addition to this, sharing resources is usually more efficient because it reduces idle time.
 
 In order to evaluate this, we deployed one Prometheus instance scraping metrics from 3 exporters (node_exporter, kube-state-metrics and kubelet) alongside 3 independent Prometheus instances, each scraping data from only one exporter.
 We then visualized the memory usage of each Prometheus instance over time and the results are shown on the image below.
 
 ![alt_text](https://docs.google.com/drawings/d/e/2PACX-1vTQR13HcQ_wbAqVdX7rRAGBXxRJmrhN-DBMLQ1i92DqjIFVUD05uIsezacTilkZM7CwMP6XHVh4u3Uo/pub?w=1440&h=813)
 
-At the latest timestamp, the total memory usage for the 3 instances forming functional sharding is 434MB, while the memory usage of the single instance is 316MB. What is also worth pointing out, and is already illustrated by the graph, is that systems that do not export many metrics, such as node_exporter and kubelet, require small Prometheus instances in terms of memory requirements.
+At the latest timestamp, the total memory usage for the 3 instances forming functional sharding is 434MB, while the memory usage of the single instance is 316MB. What is also worth pointing out, and is already illustrated by the graph, is that systems that do not export many metrics, such as node_exporter and kubelet, require small Prometheus instances in terms of memory requirements. This leads to easier scheduling of Prometheus pods across a wider range of nodes.
 
 We also performed some back-of-the-envelope calculations in order to illustrate the added cost of functional sharding in terms of actual money. A `c5.xlarge` on-demand instance in AWS (a compute optimized instance with 4 CPUs and 8GB RAM) costs 140$ per month or 18$ per GB per month.
 When using reserved capacity, the cost goes down to 11$ per GB per month for the same instance with a 1 year reservation.
