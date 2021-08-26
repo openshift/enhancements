@@ -488,3 +488,59 @@ components.
 If an operand meets neither of the two conditions listed above, it must not tolerate
 all taints.  This constraint is enforced by [a CI test
 job](https://github.com/openshift/origin/blob/7d07adcf518a846b898cd0958b85f2daf624476a/test/extended/operators/tolerations.go).
+
+#### Runlevels
+
+Runlevels in OpenShift are used to help manage the startup of major API groups
+such as the kube-apiserver and openshift-apiserver. They indicate that a
+namespace contains pods that must be running before the openshift-apiserver.
+
+There are two main levels:
+
+* `openshift.io/run-level: 0` - starting the kube-apiserver
+* `openshift.io/run-level: 1` - starting the openshift-apiserver
+
+However, other than the kube-apiserver and openshift-apiserver API groups,
+runlevels *SHOULD NOT* be used. As they indicate pods that must be running
+before the openshift-apiserver's pods, no Security Context Constraints (SCCs)
+are applied.
+
+This is significant as if no SCC is set then any workload running in that
+namespace may be highly privileged, a level reserved for trusted workloads.
+Early runlevels are used for namespaces containing pods that provide admission
+webhooks for workload pods.
+
+Without the SCC restrictions enforced in these namespaces, the power to create
+pods in these namespaces are equivalent to root on the node. Security measures
+like requiring workloads to run as random uids (a good thing for multi-tenancy
+and helping to protect against container escapes) and dropping some capabilities
+are never applied.
+
+It is important to note that by
+[default](https://github.com/openshift/origin/blob/0104fb51cb31e1f5920b778b17eec8b3286eefee/vendor/k8s.io/kubernetes/openshift-kube-apiserver/admission/namespaceconditions/decorator.go#L11)
+there are a number of statically defined namespaces with runlevels set
+in OpenShift: `default`, `kube-system`, `kube-public`, `openshift`, `openshift-infra`
+and `openshift-node`. These are defined with either runlevel 0 or 1 specified, but as
+runlevel 1 is [inclusive](https://github.com/openshift/origin/blob/03a44ceb76961ad9f97df57367be3db1c8e8b792/vendor/k8s.io/kubernetes/openshift-kube-apiserver/admission/namespaceconditions/decorator.go#L16)
+ of 0, all don't receive an SCC.
+
+In addition a namespace can also be annotated with the label:
+
+```yaml
+labels:
+    openshift.io/run-level: "1"
+```
+
+Regardless of a given user's permissions, any pod created in these namespaces
+will not receive an SCC context. However, a user must be first granted
+permissions to create resources in these namespaces (or to create a namespace
+with a runlevel) as by default such requests are denied.
+
+*So why are runlevels still being used?*
+
+Historically, in older versions of OCP (4.4) there was a significant delay in
+the bootstrapping flow. Meaning that if a component existed in a namespace which
+used SCC there would be a delay before it could start. In recent versions of OCP
+(4.6+) this delay has been virtually eliminated, the usage of runlevels should
+not be required at all hence the primary alternative is to simply try the
+workload without any runlevel specified.
