@@ -138,7 +138,7 @@ In the sections below we will describe the user-facing API that contains network
 
 ### User-facing API
 
-RHCOS already provides a mechanism to specify NetworkManager keyfiles during deployment of a new node. We need to expose that functionality during the IPI install process. There are a couple of options on how to do that:
+RHCOS already provides a mechanism to specify NetworkManager keyfiles during deployment of a new node. We need to expose that functionality during the IPI install process, but preferably using [nmstate](https://nmstate.io) files as the interface for a more user-friendly experience. There are a couple of options on how to do that:
 
 * A new section in install-config.
 * A secret that contains base64-encoded content for the keyfiles.
@@ -147,28 +147,22 @@ These are not mutually exclusive. If we implement the install-config option, we 
 
 The data provided by the user will need to have the following structure:
 ```yaml
-[hostname]:
-  [interface name]:
-    [contents of NetworkManager key file for interface]
-  [second interface name]:
-    [contents of NetworkManager key file for second interface]
-  etc...
+<hostname>: <nmstate configuration>
+<hostname 2>: <nmstate configuration>
+etc...
 ```
 
 For example:
 ```yaml
 openshift-master-0:
-  eth0:
-    [connection]
-    id=eth0
-    uuid=18e0cec7-041c-4fb3-957c-a60c80dd9b85
-    type=ethernet
-    etc...
+  interfaces:
+    - name: eth0
+      type: ethernet
+      etc...
 openshift-master-1:
-  eth0:
-    [connection]
-    id=eth0
-    etc...
+  interfaces:
+    - name: eth0
+      etc...
 ```
 
 In install-config this would look like:
@@ -178,13 +172,10 @@ platform:
     hosts:
       - name: openshift-master-0
         networkConfig:
-        - interface: eth0
-          data: |
-            [connection]
-            id=eth0
-            uuid=18e0cec7-041c-4fb3-957c-a60c80dd9b85
-            type=ethernet
-            etc...
+          interfaces:
+            - name: eth0
+              type: ethernet
+              etc...
 ```
 
 Because the initial implementation will be baremetal-specific, we can put the
@@ -210,9 +201,9 @@ implementation will have a 1:1 Secret:BareMetalHost mapping.
 BareMetalHost resources for workers will be created with the Secret containing the network data referenced in the `preprovisioningNetworkData` field defined in the Metal³ [image builder integration design](https://github.com/metal3-io/metal3-docs/blob/master/design/baremetal-operator/image-builder-integration.md#custom-agent-image-controller).
 This will cause the baremetal-operator to create a PreprovisioningImage CRD and wait for it to become available before booting the IPA image.
 
-An OpenShift-specific PreprovisioningImage controller will use the provided network data to build a CoreOS IPA image with the correct ignition configuration in place, and the baremetal-operator will then use this to boot the Host.
+An OpenShift-specific PreprovisioningImage controller will use the provided network data to build a CoreOS IPA image with the correct ignition configuration in place. This will be accomplished by [converting the nmstate data](https://nmstate.io/features/gen_conf.html) from the Secret into NetworkManager keyfiles using `nmstatectl gc`. The baremetal-operator will then use this customised image to boot the Host into IPA. The network configuration will be retained when CoreOS is installed to disk during provisioning.
 
-If not overridden, the contents of the same network data secret will be passed to the Ironic custom deploy step for CoreOS that installs the node.
+If not overridden, the contents of the same network data secret will be passed to the Ironic custom deploy step for CoreOS that installs the node, though this will be ignored at least initially.
 
 ### Test Plan
 
@@ -236,7 +227,7 @@ N/A
 
 ### Upgrade / Downgrade Strategy
 
-There should be little impact on upgrades and downgrades. Nodes are deployed with network configuration baked into the image, which means it will remain over upgrades or downgrades. NetworkManager keyfiles are considered a stable interface so any version of NetworkManager should be able to parse them equally.
+There should be little impact on upgrades and downgrades. Nodes are deployed with network configuration baked into the image, which means it will remain over upgrades or downgrades. NetworkManager keyfiles are considered a stable interface so any version of NetworkManager should be able to parse them equally. The same is true of nmstate files.
 
 Any additions or deprecations in the keyfile interface would need to be handled per the NetworkManager policy.
 
@@ -262,13 +253,7 @@ at day-1 then we could use that as the configuration interface. This has the adv
 This is currently blocked on a resolution to [Enable Kubernetes NMstate by default for selected platforms](https://github.com/openshift/enhancements/pull/747). Without NMState content available at day-1 we do not have any way to process the NMState configuration to a format usable in initial deployment.
 While we hope to eventually come up with a mechanism to make NMState available on day-1, we needed another option that did not make use of NMState in order to deliver the feature on time.
 
-Once the keyfile implementation is done it should be simpler to layer NMState over that, so the two solutions are not exclusive of each other.
-
-### Provide raw nmstate data
-
-We could expose an interface to the user which accepts raw nmstate data (not a CR wrapper).  This would mean a common DSL to the NodeNetworkConfigurationPolicy resource, but not directly reusing that API, so there is risk of drift between the two APIs.
-
-This does not solve the problem of the user needing to pass the same configuration in multiple formats, although it does ensure that the same underlying format is used, which somewhat reduces the opportunity for errors.
+In any event, we inevitably need to store the network config data for each node in a (separate) Secret to satisfy the PreprovisioningImage interface in Metal³, so the existence of the same data in a NNCP CRD is irrelevant. In future, once this is available we could provide a controller to keep them in sync.
 
 #### Create a net-new NMState Wrapper CR
 
@@ -278,4 +263,12 @@ We probably want to avoid a proliferation of different CR wrappers for nmstate
 data, but one option would be to convert that (or something similar) into a common
 OpenShift API, could such an API be a superset of NNCP e.g also used for day-2?
 
-This would mean we could at least use a common configuration format based on nmstate with minimal changes (or none if we make it _the_ way OpenShift users interact with nmstate), but unless the new API replaces NNCP there is still the risk of configuration drift between the day-1 and day-2 APIs.
+This would mean we could at least use a common configuration format based on nmstate with minimal changes (or none if we make it _the_ way OpenShift users interact with nmstate), but unless the new API replaces NNCP there is still the risk of configuration drift between the day-1 and day-2 APIs. And we still need a Secret to generate the PreprovisioningImage.
+
+### Pass NetworkManager keyfiles directly
+
+NetworkManager keyfiles are already used (directly with CoreOS) for UPI and when doing network configuration in the Machine Config Operator (MCO). However, they are harder to read, harder to produce, and they don't store well in JSON.
+
+In addition, we hope to eventually base Day-2 networking configuration on nmstate NodeNetworkConfigurationPolicy (as KubeVirt already does). So using the nmstate format provides a path to a more consistent interface in the future than do keyfiles.
+
+If we were eventually decide never to use NNCP and instead try to configure Day-2 networking through the Machine Config Operator, then it might perhaps be better to use keyfiles as that is what MCO uses.
