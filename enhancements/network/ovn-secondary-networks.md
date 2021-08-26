@@ -363,10 +363,8 @@ There are pros and cons to each of the options, which will be captured below:
   - pros
     - independent release cycle / development / review process / test matrix
     - clear scopes of responsibility (who maintains what)
-    - re-use the ovn-k deployed components
+    - re-use the ovn-k deployed components (ovn, OVS)
   - cons
-    - support nightmare (which team handles a customer case)
-      - co-existance of the DBs
     - duplication of effort (external network connectivity, etc)
 - ovn-kubernetes
   - pros
@@ -380,6 +378,16 @@ There are pros and cons to each of the options, which will be captured below:
         router)
   - cons
     - bloating the test matrix of ovn-kubernetes
+
+**Note:** Right now it is not possible to run two different OVN controllers
+connected to the same OVS deployment. There
+[was some effort in the past to implement this feature](https://patchwork.ozlabs.org/project/ovn/patch/20201119032052.599236-1-ihrachys@redhat.com/),
+but it apparently was not merged.
+Another option would be to run two separate OVS deployments within the same
+node, but that does not seem to be supported, as indicated
+[in the following bug report](https://bugzilla.redhat.com/show_bug.cgi?id=1285005).
+This means that if the new CNI alternative ends up being chosen, the underlying
+OVS (and OVN) system must be shared between both CNIs.
 
 ## Infrastructure Needed
 OpenShift 4.x cluster
