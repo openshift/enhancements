@@ -76,14 +76,16 @@ ironic-ipa-downloader as part of the payload as well, since it (a) is huge and
 we are not updating the provisioning OS image to include the deploy image as
 well, although we will continue to be able to update IPA itself.
 
-Once this is in place, we no longer need the QCOW2 image at all, since we can
-‘provision’ by asking CoreOS in the deploy image to install itself (using
-custom deploy steps in Ironic, exposed as a custom deploy method in Metal³).
-However, this requires updating any existing MachineSets, which is not planned
-for the first release.
+Once the CoreOS-based deploy image is in place, we no longer need the QCOW2
+image at all for newly-deployed clusters, since we can ‘provision’ by asking
+CoreOS to install itself (using custom deploy steps in Ironic, exposed as a
+custom deploy method in Metal³). However, to use this method on pre-existing
+clusters requires updating any existing MachineSets, which is not planned for
+the first release.
 
-A naive approach would mean that upon upgrading from an existing cluster, we
-would no longer have a guaranteed way of booting into _either_ deploy image:
+A naive approach to rolling out the CoreOS-based deploy image would mean that
+upon upgrading from an existing cluster, we would no longer have a guaranteed
+way of booting into _either_ deploy image:
 
 * The existing deploy kernel + initrd will still exist on at least one master,
   but may not exist on all of them, and not all that do exist are necessarily
@@ -148,16 +150,16 @@ the image cache).
 If the `ProvisioningOSDownloadURL` has been customised to point to a
 non-standard location and any of the `PreprovisioningOSDownloadURLs` are not
 set, the cluster-baremetal-operator will attempt to heuristically infer the
-correct URLs. It will do so by substitution the release version and file
+correct URLs. It will do so by substituting the release version and file
 extension with the latest version and appropriate extension (respectively)
 wherever those appear in the QCOW path. It will then attempt to verify the
 existence of these files by performing an HTTP HEAD request to the generated
 URLs. If the request succeeds, the cluster-baremetal-operator will update the
 Provisioning Spec with the generated URL. If it fails, the
-cluster-baremetal-operator will report its status as incomplete. This will
-prevent upgrading to the next release (which will *not* continue to ship
-ironic-ipa-downloader as a backup), until such time as the user manually makes
-the required images available.
+cluster-baremetal-operator will report its status as Degraded and not
+Upgradeable. This will prevent upgrading, since the next major release will
+*not* continue to ship ironic-ipa-downloader as a backup, until such time as
+the user manually makes the required images available.
 
 If any of the `PreprovisioningOSDownloadURLs` have been customised to point to
 a non-standard location and a version that is not the latest, the
@@ -194,9 +196,9 @@ on the images it downloads.
 
 ### Open Questions
 
-* Will marking the cluster-baremetal-operator as incomplete cause an upgrade to
+* Will marking the cluster-baremetal-operator as degraded cause an upgrade to
   be rolled back? Is there a better form of alert that will prevent a future
-  upgrade without rolling back the current one?
+  major upgrade?
 * Should we try to heuristically infer the URLs at all when they are missing,
   or just require the user to manually set them?
 * Is it acceptable to require users of disconnected installs to take action on
@@ -217,6 +219,11 @@ release payload.
 
 Furthermore, we will need to test each of these scenarios both with the default
 image URLs and with custom URLs for disconnected installs.
+
+In the case of disconnected installs, we should be sure test the scenario where
+the user initially fails to make the new image available. This must block
+further upgrades without breaking anything else (including the ability to
+provision new servers), and recover complete once the image is provided.
 
 ### Graduation Criteria
 
