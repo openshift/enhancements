@@ -298,7 +298,8 @@ When using reserved capacity, the cost goes down to 11$ per GB per month for the
 
 Our conclusion based on these factors is as follows: while sharing a Prometheus instance does come with better resource utilization, we do not believe it justifies the reduced resiliency that it also brings along.
 The resiliency of such a shared instance would be further reduced as more managed services are installed in a cluster. In addition, a shared Prometheus instance is often more volatile regarding resource utilization, which leads to users over provisioning resources to prevent OOMs by misconfiguration or complex querying patterns.
-Finally, with the proposed stack we retain the option of deploying multi-namespace monitoring stacks. This will effectively support the pattern of sharing a prometheus instance between managed services.
+On the other hand, an independent Prometheus instance for each add-on yields a better separation of concerns by allowing autonomy, control and responsibility to be delegated to the appropriate teams. In other words, addon owners will become fully responsible for properly configuring and sizing their Prometheus instance to support the query patterns they need and the time series they need to store.
+Finally, with the proposed stack we nevertheless retain the option of deploying multi-namespace monitoring stacks. This will effectively support the pattern of sharing a Prometheus instance between managed services.
 
 ### Migration
 
