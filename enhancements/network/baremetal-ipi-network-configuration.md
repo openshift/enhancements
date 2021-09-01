@@ -201,7 +201,8 @@ implementation will have a 1:1 Secret:BareMetalHost mapping.
 BareMetalHost resources for workers will be created with the Secret containing the network data referenced in the `preprovisioningNetworkData` field defined in the Metal³ [image builder integration design](https://github.com/metal3-io/metal3-docs/blob/master/design/baremetal-operator/image-builder-integration.md#custom-agent-image-controller).
 This will cause the baremetal-operator to create a PreprovisioningImage CRD and wait for it to become available before booting the IPA image.
 
-An OpenShift-specific PreprovisioningImage controller will use the provided network data to build a CoreOS IPA image with the correct ignition configuration in place. This will be accomplished by [converting the nmstate data](https://nmstate.io/features/gen_conf.html) from the Secret into NetworkManager keyfiles using `nmstatectl gc`. The baremetal-operator will then use this customised image to boot the Host into IPA. The network configuration will be retained when CoreOS is installed to disk during provisioning.
+An OpenShift-specific PreprovisioningImage controller will use the provided network data to build a CoreOS IPA image with the correct ignition configuration in place. This will be accomplished by [converting the nmstate data](https://nmstate.io/features/gen_conf.html)
+from the Secret into NetworkManager keyfiles using `nmstatectl gc`. The baremetal-operator will then use this customised image to boot the Host into IPA. The network configuration will be retained when CoreOS is installed to disk during provisioning.
 
 If not overridden, the contents of the same network data secret will be passed to the Ironic custom deploy step for CoreOS that installs the node, though this will be ignored at least initially.
 
