@@ -75,7 +75,7 @@ User Workload Monitoring was designed to be primarily used by customers for moni
 Similarly, the configuration of the Prometheus instance itself, including alerting and routing, would be shared with customers and other managed service owners.
 
 As a result, each MTO currently needs to deploy its own self-developed monitoring solutions alongside its service.
-Current options like [Prometheus Operator](https://operatorhub.io/operator/prometheus) (PO) through OLM provide inital value, but they require expertise on how to build a full-fledged monitoring stack with multi-tenancy and high availability in mind (RBAC proxies, HA, Thanos Querier, Ruler etc.).
+Current options like [Prometheus Operator](https://operatorhub.io/operator/prometheus) (PO) through OLM provide an inital value, but they require expertise on how to build a full-fledged monitoring stack with multi-tenancy and high availability in mind (RBAC proxies, HA, Thanos Querier, Ruler etc.). PO from OperatorHub is also not officially supported by the OpenShift monitoring team.
 This imposes an extra cost on teams developing and maintaining a managed service and increases time-to-market for new services.
 
 ### Goals
@@ -84,7 +84,7 @@ This enhancement aims to relieve the burden from managed service owners by provi
 Furthermore, it will reduce the operational complexity of running a managed service since the Managed Tenant SREs will not need to familiarise themselves with a new monitoring stack for each managed service.
 In future it can be used to allow customers to define their monitoring stacks. UWM could use it under the hood too. In details:
 
-* Provide a way for managed services to scrape metrics from their own services and from platform components into prometheus-compatible storage.
+* Provide a way for managed services to scrape metrics from their own services and from platform components into prometheus-compatible storage (from multiple namespaces).
 * Allow managed service owners to query metrics from their services and platform components from prometheus-compatible storage.
 * Provide a way for managed services to define alerting and recording rules on their own metrics and a subset of platform metrics.
 * Provide a way for managed services to create dashboards for monitoring their services.
@@ -165,17 +165,17 @@ The operator will be installed into its own namespace and will watch `Monitoring
 * An instance of Prometheus Operator managing Prometheus and Alertmanager statefulsets in the same namespace.
 * A [Grafana Operator](https://operatorhub.io/operator/grafana-operator)
 
-Once a `MonitoringStack` custom resource (CR) has been created, the operator will deploy the appropriate resources in the `MonitoringStackOperor`'s namespace based on how the stack is configured. In a simple case, this might be:
+Once a `MonitoringStack` custom resource (CR) has been created, the operator will deploy the appropriate resources in the `MonitoringStackOperator`'s namespace based on how the stack is configured. In a simple case, this might be:
 
 * a Prometheus CR
 * a Grafana CR and a Grafana Data Source CR
 * a Thanos Querier if the stack is configured for high availability
 
-In other cases, it might be just a Prometheus Agent deployment (forwarding only capabilities).
+In other cases, in next iterations of MonitoringStack Operator, with single option, it might deploy just a Prometheus Agent deployment (forwarding only capabilities). This will align with what will be needed in HyperShift, where we don't want or need a full-blown monitoring stack on every cluster.
 
 The `MonitoringStack` CRD is meant to be an abstraction over monitoring needs and requirements for a single tenant that specifies their needs. The underlying implementation is up to the MonitoringStackOperator.
 
-In this manner, managed service owners can simply create an instance of `MonitoringStack` alongside their services and delegate the provisioning and management of their monitoring stack to the operator.
+In this manner, managed service owners can simply create an instance of `MonitoringStack` alongside their services and delegate the provisioning and management of their monitoring stack to the operator. This can be done on runtime to e.g create email template for Alertmanager based on cluster data.
 
 An example `MonitoringStack` resource could look as follows:
 
@@ -187,6 +187,9 @@ metadata:
     name: monitoring
     namespace: redhat-kafka
 spec:
+    resourceSelector:
+      matchLabels:
+        namespace: [A, B]
     retention: 12d
     resources:
       requests: 
@@ -206,9 +209,6 @@ The following diagram illustrates a high-level overview of the final solution ap
 
 _First iteration of the new monitoring operator, showing a monitoring stack with a Prometheus, Grafana and a shared Alertmanager._
 
-We recommend using either [OperatorSDK](https://github.com/operator-framework/operator-sdk) or [KubeBuilder](https://github.com/kubernetes-sigs/kubebuilder) to develop the operator to increase development efficiency by taking advantage of the higher abstraction constructs, the rich documentation, and a vibrant community.
-Alternatively, we could also consider using a higher-level operator, such as [locutus](https://github.com/brancz/locutus), for rapid development with a path for GitOps deployments. In any case, this is an implementation detail that should be left to the team implementing this to decide on.
-
 ## Design Details
 
 ### Installation
@@ -217,9 +217,14 @@ The newly developed operator will be deployed using the Operator Lifecycle Manag
 
 This will allow us to make releases much faster and iteratively and incrementally. As a result, we will be able to respond to new requirements much more rapidly. Release batches will also become smaller, reducing the risk of multiple independent features affecting each other.
 
-In order to be aligned with the descoping [plan](https://docs.google.com/presentation/d/1j1J575SxS8LtL_YvKqrexUhso7j4SgrLfyNrDUroJcc/edit#slide=id.ga089527607_0_0) that the OLM team is currently working towards, we recommend avoiding `OperatorGroups` as they are going to become deprecated in the future (possibly as soon as OpenShift 4.11).
+In order to be aligned with the descoping [plan](https://docs.google.com/presentation/d/1j1J575SxS8LtL_YvKqrexUhso7j4SgrLfyNrDUroJcc/edit#slide=id.ga089527607_0_0) that the OLM team is currently working towards, we recommend avoiding [`OperatorGroups`](https://docs.openshift.com/container-platform/4.2/operators/understanding_olm/olm-understanding-operatorgroups.html) as they are going to become deprecated in the future (possibly as soon as OpenShift 4.11).
 For this reason, the newly developed operator should be installed globally in a cluster and should provide its own CRDs and Roles as part of the installation bundle. A cluster administrator would then create RoleBindings to bind the roles to namespaces to which the operator needs access.
 More details about the descoping plans and strategies are currently described can be found in this [hackmd](https://hackmd.io/wVfLKpxtSN-P0n07Kx4J8Q?view#Descoping-Plan) document and are also illustrated in a short [slide-deck](https://docs.google.com/presentation/d/1j1J575SxS8LtL_YvKqrexUhso7j4SgrLfyNrDUroJcc/edit#slide=id.ga089527607_0_0).
+
+### Operator Implementation
+
+While deployable through OLM we recommend using either [OperatorSDK](https://github.com/operator-framework/operator-sdk) or [KubeBuilder](https://github.com/kubernetes-sigs/kubebuilder) to develop the operator to increase development efficiency by taking advantage of the higher abstraction constructs, the rich documentation, and a vibrant community.
+Alternatively, we could also consider using a higher-level operator, such as [locutus](https://github.com/brancz/locutus), for rapid development with a path for GitOps deployments. In any case, this is an implementation detail that should be left to the team implementing this to decide on.
 
 ### Metrics retention
 
@@ -233,20 +238,21 @@ In order for MTSRE/MTO to be able to view portions of metrics for all of their d
 
 MTOs often need to create alerts and dashboards which include metrics coming from platform components. A typical example is using CPU and memory resource metrics from kube-state-metrics. For ease of use, MTOs will be able to define allow-listed scrape on Platform Monitoring /federate endpoint to access relevant metrics.
 
-In the first iteration, this can be implemented by defining a ServiceMonitor against the `/federate` endpoint of the Platform Monitoring Prometheus. Improvement on this side will be revisited in the next enhancement (e.g ability to scrape those data directly from sources).
+In the first iteration, this can be implemented by defining a ServiceMonitor against the `/federate` endpoint of the Platform Monitoring Prometheus. Improvement on this side will be revisited in the next enhancement (e.g ability to scrape those data directly from sources which has other problems e.g mTLS certification).
 
 ### High Availability
 
-All components except Prometheus are stateless and can run with more than one replica. In order to make Prometheus highly-available, a similar approach to the one in CMO will be used. The monitoring operator will provide a Thanos Querier for each `MonitoringStack` and a sidecar next to each Prometheus.
+All components except Prometheus and Alertmanager are stateless and can run with more than one replica. In order to make Prometheus highly-available, a similar approach to the one in CMO will be used. The monitoring operator will provide a Thanos Querier for each `MonitoringStack` and a sidecar next to each Prometheus.
+
 A Thanos Ruler is not needed in this architecture since all recording rules and alerts will be evaluated locally in each Prometheus instance.
 
 ### Alert Routing
 
-For simplicity reasons, routing alerts that come from managed service monitoring stacks will be handled by a single Alertmanager.
-We can take advantage of the recently added <code>[AlertmanagerConfig](https://github.com/prometheus-operator/prometheus-operator/blob/master/Documentation/api.md#alertmanagerconfig)</code> and allow MTO/MTSRE to create their own routing configuration in a centrally deployed Alertmanager instance.
-Finally, the MTSRE team could centrally configure receivers in one place for all managed services and service owners would simply use those receivers in their routing rules. It is worth noting that the last feature depends on [https://github.com/prometheus-operator/prometheus-operator/issues/4033](https://github.com/prometheus-operator/prometheus-operator/issues/4033).
+For simplicity reasons, routing alerts that come from managed service monitoring stacks will be handled by a single Alertmanager deployed in the MonitoringOperator namespace.
 
-In addition to the built-in Alertmanager from MSO, users will have the option to route alerts to external Alertmanagers, such as the PM Alertmanager.
+We can take advantage of the recently added <code>[AlertmanagerConfig](https://github.com/prometheus-operator/prometheus-operator/blob/master/Documentation/api.md#alertmanagerconfig)</code> and allow MTO/MTSRE to create their own routing configuration in a centrally deployed Alertmanager instance.
+
+Finally, the MTSRE team could centrally configure receivers in one place for all managed services and service owners would simply use those receivers in their routing rules.
 
 #### Notable Alerting Routing Alternative
 
@@ -254,7 +260,7 @@ During the Monitoring Enablement Working Group meetings, we received feedback fr
 
 Moreover, Platform SRE expressed concerns that a shared Alertmanager configuration could lead to conflicts or misconfiguration that can impact alerting for every managed tenant running in the cluster.
 
-Based on the information, we do not see strong reasons not to have one Alertmanager per managed service. Either approach should work as an initial solution.
+Yet, we don't have enough information to reject idea behind shared Alertmanager (AM), so we propose to postpone capability to deploy AM per managed service.
 
 ### Creating Dashboards
 
@@ -297,7 +303,9 @@ We also performed some back-of-the-envelope calculations in order to illustrate 
 When using reserved capacity, the cost goes down to 11$ per GB per month for the same instance with a 1 year reservation.
 
 Our conclusion based on these factors is as follows: while sharing a Prometheus instance does come with better resource utilization, we do not believe it justifies the reduced resiliency that it also brings along.
+
 The resiliency of such a shared instance would be further reduced as more managed services are installed in a cluster. In addition, a shared Prometheus instance is often more volatile regarding resource utilization, which leads to users over provisioning resources to prevent OOMs by misconfiguration or complex querying patterns.
+
 On the other hand, an independent Prometheus instance for each add-on yields a better separation of concerns by allowing autonomy, control and responsibility to be delegated to the appropriate teams. In other words, addon owners will become fully responsible for properly configuring and sizing their Prometheus instance to support the query patterns they need and the time series they need to store.
 Finally, with the proposed stack we nevertheless retain the option of deploying multi-namespace monitoring stacks. This will effectively support the pattern of sharing a Prometheus instance between managed services.
 
@@ -306,7 +314,7 @@ Finally, with the proposed stack we nevertheless retain the option of deploying 
 There are multiple monitoring solutions that Addons currently use:
 
 * AppSRE have their monitoring stack for SaaS services, which they plan to migrate to UWM
-  * MSO is planned to have feature parity with UWM with the exception of global view with Platform Monitoring. We will initially use federation to close this gap (See )
+  * MSO is planned to have feature parity with UWM with the exception of global view with Platform Monitoring. We will initially use federation to close this gap (See [Scraping Metrics From Platform Components section](#scraping-metrics-from-platform-components)).
 * Platform Monitoring
   * The PM stack cannot be used for user/managed service monitoring anyway. Therefore no migration is predicted so far.
 * Observability Operator
@@ -331,7 +339,14 @@ In all cases, MSO should not conflict with any other monitoring tool installed i
 
 ### FAQ
 
-Waiting for questions first (:
+* Q: In older OpenShift, the UWM is watching all non OpenShift namespaces, so it will watch Monitoring Stack too. How to solve it.
+  * A: In 4.9 a namespace can be excluded from UWM by adding a label to it, which should solve the problem for addons.
+* Q: How MonitoringStack user can do auth for remote write service?
+  * A: No secrets will be added to OLM bundle. We plan to support bundle to read secrets from e.g Kubernetes secret and inject with Prometheus (OIDC/token).
+* Q: How we handle version skew of shared Custom Resource Definition like `Prometheus` or `ServiceMonitoring`? 
+  * A: It depends on OperatorHub catalog:
+    * For Kubernetes we can have dependency on Prometheus Operator.
+    * For OpenShift we don't deploy them and rely on CMO to provide them.
 
 ### Test Plan
 
@@ -349,7 +364,7 @@ We plan to develop the solution in multiple deliverable milestones:
 1. Create GitHub Project, CI setup
 2. Create OLM bundle with Monitoring Stack operator and basic CR
 3. Allow OLM bundle to deploy or require further operators (Grafana, Prometheus)
-4. MonitoringStack CR constructing simple Prometheus stack without HA
+4. MonitoringStack CR constructing simple Prometheus stack without HA and Thanos Querier.
 5. Remote Write integration with RHOBS
 
 *Add Alert Routing:*
