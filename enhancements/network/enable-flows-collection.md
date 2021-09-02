@@ -3,7 +3,8 @@ title: neat-enhancement-idea
 authors:
   - "@mariomac"
 reviewers:
-  - TBD
+  - "@astoycos"
+  - "@jotak"
 approvers:
   - TBD
 creation-date: 2021-07-29
@@ -33,7 +34,8 @@ of network flows' tracing from the user side, as well as the status retrieval.
 It describes the user stories to switch on/off the flows both from the command-line
 interface and the web console, and depicts the implementation details required in
 the existing OVN-Kubernetes component, as well as the new components that should
-be created. We consider IPFix as the unique protocol to be supported by now.
+be created. We consider IPFix as the unique protocol to be supported by now, but
+we might also consider using other protocols like Netflow.
 
 ## Motivation
 
@@ -72,13 +74,13 @@ flow collection and storage pipeline.
 
 (The following verbs and commands are not definitive but just illustrative examples).
 
-To enable IPFix emission:
+To enable flows emission:
 
 ```text
 $ oc flows start
 ```
 
-To enable IPFIX emission:
+To enable flows emission:
 
 ```text
 $ oc flows start
@@ -192,21 +194,22 @@ the collector will be deployed as a DaemonSet, to ensure that there will be an
 instance of the collector for each node.
 
 Exposing the collector endpoint as a Kubernetes ClusterIP Service would cause the traffic
-to be distributed across all the nodes (unless you enable the `ServiceInternalTrafficPolicy`
-cluster-wide feature gate, which at this moment is in alpha status, only available
-for the latest Kubernetes 1.21 version).
+to be distributed across all the nodes (there is a `ServiceInternalTrafficPolicy`
+cluster-wide feature gate but, at the moment of writing this document, it is not implemented in
+OVN-Kubernetes, and it's beta in Kubernetes 1.22).
 
 To limit the flows' traffic to internal nodes, each collector should expose a node
-port, so each OVN instance only has to know the node IP and Port (which might be
-fixed or discovered).
+port, so each OVN instance will discover the Node IP (instead of the Service IP) and submit
+data to the NodeIP:NodePort address. The Node IP can be discovered.
 
 From the user-side configuration of the IPFix cache and sampling, we should use a `ConfigMap` and
-expose it to OVN-Kubernetes with read permissions.
+expose it to the CNO with read permissions. The CNO would configure OVN-Kubernetes with the configmap
+data.
 
 Given the aforementioned details, following subsections depicts the work to do,
 grouped in different tasks.
 
-#### Task 1: modify OVN-Kubernetes configuration to discover automatically the collector address
+#### Task 1: modify CNO and OVN-Kubernetes configuration to accept the new configuration options
 
 [Current `Network` operator configuration allows setting a static host:port address](
 https://docs.okd.io/latest/networking/ovn_kubernetes_network_provider/tracking-network-flows.html#nw-network-flows-object_tracking-network-flows).
@@ -226,8 +229,9 @@ spec:
 However, we need to set this address dynamically to ensure that each pod will forward
 the flows to the collector in its same node.
 
-We need to extend the previous configuration to allow replacing the `collectors` property
-by one of the following properties:
+A ConfigMap will be available with read permissions for the CNO, which will use it to
+configure the OVN-Kubernetes operator. The following ConfigMap values would override or coexist
+with the previous Network configuration:
 
 * `nodePort: (int)`: if set, the OVN will discover the node IP and submit the flows to the
   port indicated by such property. E.g. `nodePort: 30023`.
@@ -239,26 +243,21 @@ by one of the following properties:
     role: flows-collector
   ```
 
-#### Task 2: implement new discovery options in OVN-Kubernetes
+The [performance-tuning configmap](#tuning-flows-emission-parameters) arguments should be also
+passed from the CNO to OVN-Kubernetes, so it can properly
+[configure OpenVSwitch when it enables the flows](https://github.com/ovn-org/ovn-kubernetes/commit/ecc4047f5d0e732c267fccb2eabd64b5894b9f9a#diff-9c3b7372332fd16d60dba539a94dd0f819d262d1fbabd1e5d9c09e47da5af0ffR167).
+
+#### Task 2: implement new discovery options in OVN-Kubernetes and OpenVswitch configuration
 
 Before [OVN-Kubernetes invokes OpenVSwitch to enable flows](https://github.com/ovn-org/ovn-kubernetes/commit/ecc4047f5d0e732c267fccb2eabd64b5894b9f9a#diff-9c3b7372332fd16d60dba539a94dd0f819d262d1fbabd1e5d9c09e47da5af0ffR119-R128),
 if the network provider is configured for discovery, it needs to fetch the host/port and pass it
-to OpenVSwitch, in the `targets=` argument.
+to OpenVSwitch, in the `targets=` argument. The host and port discovery information is taken
+from the ConfigMap described in the previous section.
 
 If, by any reason, the Collector host:port can't be discovered (e.g. because the collector is not
-properly deployed). The error status should be visible for the customer (e.g. in the `oc get flows`
-table).
+yet deployed). It will be ignored and the discovery will be retriggered after a period of time.
 
-The simplest way to expose this error status would be exposing it as a metadata annotation, while
-the Pod is kept in the `Running` status (to avoid a wrong observability configuration to interrupt
-the normal network operation).
-
-#### Task 3: tune up flows enablement in OVN-Kubernetes
-
-If OVN-Kubernetes has access to the [performance-tuning configmap](#tuning-flows-emission-parameters),
-it should pass the contained arguments [when it enables the flows](https://github.com/ovn-org/ovn-kubernetes/commit/ecc4047f5d0e732c267fccb2eabd64b5894b9f9a#diff-9c3b7372332fd16d60dba539a94dd0f819d262d1fbabd1e5d9c09e47da5af0ffR167).
-
-#### Task 4: create a Flow operator to manage the flows status
+#### Task 3: create a Flow operator to manage the flows status
 
 After this task is finished:
 * The operator can communicate with OVN-Kubernetes pods to patch their configuration.
@@ -269,7 +268,13 @@ After this task is finished:
 This task could involve setting new RBAC permissions to allow interaction between the
 Flow operator and the OVN-Kubernetes pods.
 
-#### Task 5: enable the Flows' operation in the Console GUI
+This operator should also check the health of the collector and rest of the pipeline. If by any
+reason the collector can't be discovered , the error status should be visible for the customer
+(e.g. in the `oc get flows` table).
+
+The simplest way to expose this error status would be exposing it as a metadata annotation.
+
+#### Task 4: enable the Flows' operation in the Console GUI
 
 As described in the above [console-based flow status and retrieval](#console-based-flow-status-and-retrieval)
 section. It should also visualize the [configuration options for tuning IPFix performance](#tuning-flows-emission-parameters).
