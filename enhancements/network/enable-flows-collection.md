@@ -209,7 +209,7 @@ data.
 Given the aforementioned details, following subsections depicts the work to do,
 grouped in different tasks.
 
-#### Task 1: modify CNO and OVN-Kubernetes configuration to accept the new configuration options
+#### Task 1: setup a new configurable CRD that is readable by the CNO
 
 [Current `Network` operator configuration allows setting a static host:port address](
 https://docs.okd.io/latest/networking/ovn_kubernetes_network_provider/tracking-network-flows.html#nw-network-flows-object_tracking-network-flows).
@@ -229,22 +229,27 @@ spec:
 However, we need to set this address dynamically to ensure that each pod will forward
 the flows to the collector in its same node.
 
-A ConfigMap will be available with read permissions for the CNO, which will use it to
-configure the OVN-Kubernetes operator. The following ConfigMap values would override or coexist
-with the previous Network configuration:
+While the above `Network` configuration is still valid for the current use cases, the Network
+Observability components will provide a new CRD whose configuration is exposed to the CNO, which
+will use it to configure the OVN-Kubernetes operator. For example:
 
-* `nodePort: (int)`: if set, the OVN will discover the node IP and submit the flows to the
-  port indicated by such property. E.g. `nodePort: 30023`.
-* `selector: (map)`: if set, the OVN will search for any `Service` with `type: NodePort`
-  matching the labels passed as argument, then extract the service's `NodePort` and use
-  it alongside with the node IP. Configuration example:
-  ```yaml
-  selector:
-    role: flows-collector
-  ```
+```yaml
+apiVersion: operator.openshift.io/v1
+kind: NetObserv
+metadata:
+  name: cluster
+spec:
+  collector:
+    nodePort: 30023
+  sampling: 1024
+```
 
-The [performance-tuning configmap](#tuning-flows-emission-parameters) arguments should be also
-passed from the CNO to OVN-Kubernetes, so it can properly
+Assuming that each OVS instance will forward flows to the same node (to minimize network traffic
+between nodes), the `nodePort` property will tell the CNO which port of its node should send data
+to. The node IP is discoverable by OVN-Kubernetes or the CNO.
+
+Other [performance-tuning configuration](#tuning-flows-emission-parameters) properties should be also
+configurable and exposed, so the CNO or OVN-Kubernetes can properly
 [configure OpenVSwitch when it enables the flows](https://github.com/ovn-org/ovn-kubernetes/commit/ecc4047f5d0e732c267fccb2eabd64b5894b9f9a#diff-9c3b7372332fd16d60dba539a94dd0f819d262d1fbabd1e5d9c09e47da5af0ffR167).
 
 #### Task 2: implement new discovery options in OVN-Kubernetes and OpenVswitch configuration
@@ -252,7 +257,7 @@ passed from the CNO to OVN-Kubernetes, so it can properly
 Before [OVN-Kubernetes invokes OpenVSwitch to enable flows](https://github.com/ovn-org/ovn-kubernetes/commit/ecc4047f5d0e732c267fccb2eabd64b5894b9f9a#diff-9c3b7372332fd16d60dba539a94dd0f819d262d1fbabd1e5d9c09e47da5af0ffR119-R128),
 if the network provider is configured for discovery, it needs to fetch the host/port and pass it
 to OpenVSwitch, in the `targets=` argument. The host and port discovery information is taken
-from the ConfigMap described in the previous section.
+from the CRD configuration described in the previous section.
 
 If, by any reason, the Collector host:port can't be discovered (e.g. because the collector is not
 yet deployed). It will be ignored and the discovery will be retriggered after a period of time.
@@ -263,7 +268,7 @@ After this task is finished:
 * The operator can communicate with OVN-Kubernetes pods to patch their configuration.
 * There is an exposed API to perform the various operations: enable, disable, get status...
 * You can operate flows through the `oc` CLI command: enable, disable, get status...
-* The operator should be able to detect changes in the [performance-tuning configmap](#tuning-flows-emission-parameters)
+* The operator should be able to detect changes in the [performance-tuning configuration](#tuning-flows-emission-parameters)
   and restart the OVN-Kubernetes emission with the new arguments.
 This task could involve setting new RBAC permissions to allow interaction between the
 Flow operator and the OVN-Kubernetes pods.
