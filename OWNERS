@@ -12,10 +12,10 @@ approvers:
   - danehans
   - deads2k
   - derekwaynecarr
-  - dhellmann
   - dgoodwin
+  - dhellmann
+  - dtantsur
   - dustymabe
-  - ecordell
   - enxebre
   - eparis
   - ericavonb
@@ -24,6 +24,7 @@ approvers:
   - imcleod
   - ironcladlou
   - jcantrill
+  - jerpeter1
   - joelanford
   - joelspeed
   - josephschorr
@@ -41,6 +42,8 @@ approvers:
   - pmorie
   - runcom
   - russellb
+  - rvanderp3
+  - sadasu
   - sdodson
   - shawn-hurley
   - sjenning
@@ -53,6 +56,4 @@ approvers:
   - stevekuznetsov
   - sttts
   - sudhaponnaganti
-  - rvanderp3
-  - dtantsur
-  - sadasu
+  - tjungblu
