@@ -173,10 +173,11 @@ From the beginning we provide the following profiles (described as rules added a
   ```shell
   $ oc adm must-gather -- /usr/bin/gather_audit_logs
 
-  To raise a Red Hat support request, it is required to set the top level audit policy to
-  Default, WriteRequestBodies, or AllRequestBodies to generate audit log events that can
-  be analyzed by support. Try `oc edit apiservers` and set `spec.audit.profile` back to
-  "Default" and reproduce the issue while gathering audit logs.
+     Warning: It is not recommended to disable audit logging by using the `None` profile unless you
+	 are fully aware of the risks of not logging data that can be beneficial when troubleshooting issues.
+	 If you disable audit logging and a support situation arises, you might need to enable audit logging
+	 and reproduce the issue in order to troubleshoot properly.
+  
   ```
 
   and the command will return with an error (non-zero exit code).
