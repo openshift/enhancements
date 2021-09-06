@@ -91,6 +91,11 @@ A gathering function consists of its name and parameters, implemented functions 
 limiting it to only last N lines from parameter `tail_lines`
 - `image_streams_of_namespace` which collects image streams of the namespace from parameter `namespace`
 
+Conditions to be implemented:
+
+- `cluster_version_matches` with parameter `version` makes the rule to be applied on specific cluster version.
+It will use semantic versioning so you can wildcards and ranges like here https://github.com/blang/semver#features
+
 The proposal is to implement the next process of adding new rules:
 
 1. We'll have a repo with json configs defining the rules. The repo is going to have a simple CI with validation
