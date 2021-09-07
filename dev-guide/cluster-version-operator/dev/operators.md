@@ -99,12 +99,22 @@ When your manifests are added to the release image, they’ll be given a prefix 
 
 Only manifests with the extensions `.yaml`, `.yml`, or `.json` will be applied, like `kubectl create -f DIR`.
 
+### Specifying a cluster profile in your manifest
+
+Cluster profiles are a way to support different deployment models for OpenShift clusters.
+CVO uses the profile identifier to determine which manifests to apply therefore your manifest must contain one or more profile annotations specifying applicable profiles.
+See the [cluster-profiles enhancement](/enhancements/update/cluster-profiles.md) for details.
+
 ### What if I only want the CVO to create my resource, but never update it?
 
 This is only applicable to cases where the contents of a resource are not managed, but the presence is required for
 usability.  Today the only known use-case is config.openshift.io, so that `oc edit foo.config.openshift.io` "just works".
 
-To do this, you can set .metadata.annotations["release.openshift.io/create-only"]="true".
+To do this, you can set the following metadata annotation:
+
+```yaml
+release.openshift.io/create-only: "true"
+```
 
 ### How do I get added as a special run level?
 
