@@ -81,7 +81,14 @@ Currently CBO checks the platform and if it is not baremetal it will be in a "di
 1. set status.conditions Disabled=true and
 2. not read or process the Provisioning CR and thus not deploy baremetal-operator.
 
-This proposal is to allow CBO to be enabled on the Platforms: None, OpenStack or vSphere.
+This proposal is to allow CBO to be enabled on the following platforms only:
+- Baremetal (current)
+- None
+- OpenStack
+- vSphere.
+
+Note: The Hypershift use case will be explicitly disallowed by disabling CBO when
+Infrastructure.Status.ControlPlaneTopology == "External".
 
 Further (to restrict the testing matrix) the allowed configuration options
 of the Provisioning CR will be restricted to exactly those required by centralized host management.
@@ -101,7 +108,6 @@ Provisioning Network which can be expected to be available only in Baremetal pla
 2. documentation will need to be added to the centralized host management documentation
 explaining how to create a Provisioning CR. Current documentation is here:
 https://github.com/openshift/assisted-service/blob/8880093ef5ce041d4c1951ffd5ea1096991ec3ee/docs/user-guide/assisted-service-on-openshift.md#configure-bare-metal-operator
-
 
 ### User Stories
 
