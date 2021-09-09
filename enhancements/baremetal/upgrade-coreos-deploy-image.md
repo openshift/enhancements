@@ -12,6 +12,8 @@ reviewers:
   - "@cgwalters"
   - "@cybertron"
   - "@dhellmann"
+  - "@sdodson"
+  - "@LorbusChris"
 approvers:
   - "@hardys"
   - "@sadasu"
@@ -64,7 +66,7 @@ particular hardware may theoretically require a particular version of CoreOS.
 a [long-standing enhancement
 proposal](https://github.com/openshift/enhancements/pull/201).)
 
-We want to change the deploy disk image to use CoreOS. This may take the form
+We are changing the deploy disk image to use CoreOS. This may take the form
 of both an ISO (for hosts that can use virtualmedia) and of a kernel + initrd +
 rootfs (for hosts that use PXE). Like the provisioning disk image, the URLs for
 these are known by the installer, but they point to the cloud by default and
@@ -108,7 +110,7 @@ way of booting into _either_ deploy image:
 * Automatically switch pre-existing MachineSets to deploy with `coreos-install`
   instead of via QCOW2 images.
 * Update the CoreOS QCOW2 image in the cluster with each OpenShift release.
-* Provide the CoreOS images as part of the release payload.
+* Build the CoreOS images from the release payload.
 
 ## Proposal
 
@@ -134,7 +136,10 @@ If any of the `PreprovisioningOSDownloadURLs` are not set and the
 `ProvisioningOSDownloadURL` is set to point to the regular location (i.e. the
 QCOW location has not been customised), then the cluster-baremetal-operator
 will update the Provisioning Spec to use the latest images in the
-`PreprovisioningOSDownloadURLs`.
+`PreprovisioningOSDownloadURLs`. The servers set by previous versions of the
+installer are `rhcos-redirector.apps.art.xq1c.p1.openshiftapps.com` and
+`releases-art-rhcos.svc.ci.openshift.org`. OKD uses a separate mirror for
+(Fedora) CoreOS, and this too should be treated as a non-customised location.
 
 If any of the `PreprovisioningOSDownloadURLs` are set to point to the regular
 location (i.e. the ISO or kernel/initramfs/rootfs have not been customised) but
@@ -150,24 +155,35 @@ the image cache).
 If the `ProvisioningOSDownloadURL` has been customised to point to a
 non-standard location and any of the `PreprovisioningOSDownloadURLs` are not
 set, the cluster-baremetal-operator will attempt to heuristically infer the
-correct URLs. It will do so by substituting the release version and file
+correct URL(s). It will do so by substituting the release version and file
 extension with the latest version and appropriate extension (respectively)
-wherever those appear in the QCOW path. It will then attempt to verify the
-existence of these files by performing an HTTP HEAD request to the generated
-URLs. If the request succeeds, the cluster-baremetal-operator will update the
-Provisioning Spec with the generated URL. If it fails, the
-cluster-baremetal-operator will report its status as Degraded and not
-Upgradeable. This will prevent upgrading, since the next major release will
-*not* continue to ship ironic-ipa-downloader as a backup, until such time as
-the user manually makes the required images available.
+wherever those appear in the QCOW path. The default paths include both short
+version strings (of the form `/4\.[4-9]\b/`) and longer build versions (of the
+form `/4[4-9]\.[0-9]{2}\.[0-9]{12}-[0-9]/`). The cluster-baremetal-operator
+will then attempt to verify the existence of these files by performing an HTTP
+HEAD request to the generated URLs. If the request succeeds, the
+cluster-baremetal-operator will update the Provisioning Spec with the generated
+URL. If it fails, the cluster-baremetal-operator will report its status as
+Degraded and not Upgradeable. This will prevent upgrading, since the next major
+release will *not* continue to ship ironic-ipa-downloader as a backup, until
+such time as the user manually makes the required images available.
+(Unfortunately this prevents even minor version upgrades, when it is only the
+next major version that we really want to block.)
 
 If any of the `PreprovisioningOSDownloadURLs` have been customised to point to
 a non-standard location and a version that is not the latest, the
 cluster-baremetal-operator will perform the same procedure, except that the new
 URL for each field will be the existing URL with the version replaced with the
-latest one wherever it appears in the path. The status will be reported as
-incomplete on failure, which means that users must provide the latest images at
-a predictable location for every upgrade of the cluster.
+latest one wherever it appears in the path. If this fails, the operator will
+report its status as Degraded but still Upgradeable.
+
+To ensure that the machine config will work with different versions of
+Ignition, we will restore a [change to the Machine Config
+Operator](https://github.com/openshift/machine-config-operator/pull/1792) that
+was [previously
+reverted](https://github.com/openshift/machine-config-operator/pull/2126) but
+should now be viable after [fixes to the
+installer](https://github.com/openshift/installer/pull/4413).
 
 ### User Stories
 
@@ -187,32 +203,26 @@ distribution of RHEL, as part of the release payload.
 
 ### Risks and Mitigations
 
-If the HEAD request succeeds but does not result in a valid image, we may
-report success when in fact we will be unable to boot any hosts with the given
-image. The machine-os-downloader container should do some basic due diligence
-on the images it downloads.
+If the HEAD request succeeds but does not refer to a valid image, we may report
+success when in fact we will be unable to boot any hosts with the given image.
+The expected checksum is available in the metadata, so the
+machine-os-downloader should check it. However, if this fails it will block the
+rollout of Metal³ altogether.
 
 ## Design Details
 
 ### Open Questions
 
-* Will marking the cluster-baremetal-operator as degraded cause an upgrade to
-  be rolled back? Is there a better form of alert that will prevent a future
-  major upgrade?
 * Should we try to heuristically infer the URLs at all when they are missing,
   or just require the user to manually set them?
-* Is it acceptable to require users of disconnected installs to take action on
-  every upgrade? Is that better or worse than leaving them with an out-of-date
-  OS to run IPA on (since it will *not* be updated until actually provisioned
-  as a cluster node).
 
 ### Test Plan
 
 We will need to test all of the following scenarios:
 
-* Install with release N
-* Upgrade from release N-1 -> N
-* Simulated upgrade from release N -> N+1
+* Install with release 4.y
+* Upgrade from release 4.(y-1) -> 4.y
+* Simulated upgrade from release 4.y -> 4.y.z
 
 The simulated upgrade will require modifying the image metadata inside the
 release payload.
@@ -223,7 +233,7 @@ image URLs and with custom URLs for disconnected installs.
 In the case of disconnected installs, we should be sure test the scenario where
 the user initially fails to make the new image available. This must block
 further upgrades without breaking anything else (including the ability to
-provision new servers), and recover complete once the image is provided.
+provision new servers), and recover completely once the image is provided.
 
 ### Graduation Criteria
 
@@ -265,6 +275,9 @@ available the latest CoreOS images on each cluster version upgrade.
 
 Don't try to keep the CoreOS image up to date with each release, and instead
 require only that working images have been specified at least once.
+
+Wait for it to be possible to [build images within the cluster using only the
+release payload](https://github.com/openshift/enhancements/pull/201).
 
 Instead of upgrading, have CoreOS somehow try to update itself in place before
 running IPA. (This is likely to be slow, and it's not clear that it is even
