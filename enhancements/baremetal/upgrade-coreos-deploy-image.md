@@ -141,13 +141,6 @@ installer are `rhcos-redirector.apps.art.xq1c.p1.openshiftapps.com` and
 `releases-art-rhcos.svc.ci.openshift.org`. OKD uses a separate mirror for
 (Fedora) CoreOS, and this too should be treated as a non-customised location.
 
-If any of the `PreprovisioningOSDownloadURLs` are set to point to the regular
-location (i.e. the ISO or kernel/initramfs/rootfs have not been customised) but
-they point to a version that is not the latest, then the
-cluster-baremetal-operator will update the Provisioning Spec to use the latest
-images in the `PreprovisioningOSDownloadURLs`. Note that the kernel, initramfs
-and rootfs must always be changed (or not) in lockstep.
-
 The `ProvisioningOSDownloadURL` (QCOW2 link) will never be modified
 automatically, since there may be MachineSets relying on it (indirectly, via
 the image cache).
@@ -169,21 +162,6 @@ release will *not* continue to ship ironic-ipa-downloader as a backup, until
 such time as the user manually makes the required images available.
 (Unfortunately this prevents even minor version upgrades, when it is only the
 next major version that we really want to block.)
-
-If any of the `PreprovisioningOSDownloadURLs` have been customised to point to
-a non-standard location and a version that is not the latest, the
-cluster-baremetal-operator will perform the same procedure, except that the new
-URL for each field will be the existing URL with the version replaced with the
-latest one wherever it appears in the path. If this fails, the operator will
-report its status as Degraded but still Upgradeable.
-
-To ensure that the machine config will work with different versions of
-Ignition, we will restore a [change to the Machine Config
-Operator](https://github.com/openshift/machine-config-operator/pull/1792) that
-was [previously
-reverted](https://github.com/openshift/machine-config-operator/pull/2126) but
-should now be viable after [fixes to the
-installer](https://github.com/openshift/installer/pull/4413).
 
 ### User Stories
 
@@ -213,6 +191,12 @@ rollout of Metal³ altogether.
 
 ### Open Questions
 
+* Do we need to restore a [change to the Machine Config
+  Operator](https://github.com/openshift/machine-config-operator/pull/1792) to
+  allow working with different versions of Ignition that was [previously
+  reverted](https://github.com/openshift/machine-config-operator/pull/2126) but
+  should now be viable after [fixes to the
+  installer](https://github.com/openshift/installer/pull/4413)?
 * Should we try to heuristically infer the URLs at all when they are missing,
   or just require the user to manually set them?
 
@@ -234,6 +218,9 @@ In the case of disconnected installs, we should be sure test the scenario where
 the user initially fails to make the new image available. This must block
 further upgrades without breaking anything else (including the ability to
 provision new servers), and recover completely once the image is provided.
+
+In future releases we will need to test that new versions of IPA work with all
+of the previous releases of CoreOS.
 
 ### Graduation Criteria
 
@@ -269,12 +256,23 @@ N/A
 ## Drawbacks
 
 Users operating disconnected installs will be required to manually make
-available the latest CoreOS images on each cluster version upgrade.
+available the latest CoreOS images either before or after the initial upgrade.
+
+Hosts that are running the ironic agent (i.e. that have not yet been
+provisioned as cluster members) will be running out-of-date versions of CoreOS
+(though not the agent) that may be missing specific hardware support or contain
+bugs including CVEs. (However, this was already the case for the deployed image
+in the window where it is updating itself, so the problem of missing hardware
+support may not get any worse.) Updating to the latest images requires manual
+intervention from the user.
 
 ## Alternatives
 
-Don't try to keep the CoreOS image up to date with each release, and instead
-require only that working images have been specified at least once.
+Use similar heuristics to also update the CoreOS image on each subsequent
+release (including minor releases if the image in the metadata changes). In a
+disconnected environment, if the image is not available we would mark the
+operator as Degraded but leave it as Upgradeable provided that _some_ image is
+specified.
 
 Wait for it to be possible to [build images within the cluster using only the
 release payload](https://github.com/openshift/enhancements/pull/201).
