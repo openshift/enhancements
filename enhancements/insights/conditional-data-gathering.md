@@ -5,9 +5,10 @@ authors:
 reviewers:
   - "@inecas"
   - "@tremes"
-  - "@smarterclayton"
+  - "@sttts"
+  - "@deads2k"
 approvers:
-  - "@smarterclayton"
+  - "@tremes"
 creation-date: 2021-07-15
 last-updated: 2021-07-15
 status: implementable
