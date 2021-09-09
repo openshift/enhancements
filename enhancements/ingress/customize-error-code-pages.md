@@ -67,7 +67,8 @@ metadata:
   name: default
   namespace: openshift-ingress-operator
 spec:
-  httpErrorCodePage: "my-custom-error-code-pages" 
+  httpErrorCodePage: 
+    name: "my-custom-error-code-pages" 
 ```
 2. The configmap keys shall have the format `error-page-`<error code>`.http`. Right now only error-page-503.http and
    error-page-404.http will be available.
