@@ -162,12 +162,13 @@ Since UWM and PM are part of Openshift Core, we would like to avoid increasing t
 We propose developing a new open-source operator with a working name, “MonitoringStack Operator” (official name proposals are welcome!) that manages a `MonitoringStack` CRD and can be used to deploy an independent, prometheus-based stack for each managed service.
 The operator will be installed into its own namespace and will watch `MonitoringStack` resources in the entire cluster. Alongside itself, the operator will deploy two other operators:
 
-* An instance of Prometheus Operator managing Prometheus and Alertmanager statefulsets in the same namespace.
+* An instance of Prometheus Operator for managing Prometheus and Alertmanager resources in user namespaces.
 * A [Grafana Operator](https://operatorhub.io/operator/grafana-operator)
 
 Once a `MonitoringStack` custom resource (CR) has been created, the operator will deploy the appropriate resources in the `MonitoringStackOperator`'s namespace based on how the stack is configured. In a simple case, this might be:
 
 * a Prometheus CR
+* an Alertmanager CR
 * a Grafana CR and a Grafana Data Source CR
 * a Thanos Querier if the stack is configured for high availability
 
@@ -184,18 +185,18 @@ An example `MonitoringStack` resource could look as follows:
 apiVersion: monitoring.coreos.io/v1alpha1
 kind: MonitoringStack
 metadata:
-    name: monitoring
-    namespace: redhat-kafka
+  name: monitoring
+  namespace: redhat-kafka
 spec:
-    resourceSelector:
-      matchLabels:
-        namespace: [A, B]
-    retention: 12d
-    resources:
-      requests: 
-        memory: 512M
-      limits:  
-        memory: 1G
+  resourceSelector:
+    matchLabels:
+      system: kafka
+  retention: 12d
+  resources:
+    requests: 
+      memory: 512M
+    limits:  
+      memory: 1G
 ---
 ```
 
@@ -248,19 +249,10 @@ A Thanos Ruler is not needed in this architecture since all recording rules and 
 
 ### Alert Routing
 
-For simplicity reasons, routing alerts that come from managed service monitoring stacks will be handled by a single Alertmanager deployed in the MonitoringOperator namespace.
+During the Monitoring Enablement Working Group meetings, we received feedback from both Platform SRE and Managed Tenant SRE that Alertmanager, in general, has a low footprint, and the Prometheus Operator does a good job of upgrading it and keeping it running. Moreover, Platform SRE expressed concerns that a shared Alertmanager configuration could lead to conflicts or misconfiguration that can impact alerting for every managed tenant running in the cluster.
 
-We can take advantage of the recently added <code>[AlertmanagerConfig](https://github.com/prometheus-operator/prometheus-operator/blob/master/Documentation/api.md#alertmanagerconfig)</code> and allow MTO/MTSRE to create their own routing configuration in a centrally deployed Alertmanager instance.
-
-Finally, the MTSRE team could centrally configure receivers in one place for all managed services and service owners would simply use those receivers in their routing rules.
-
-#### Notable Alerting Routing Alternative
-
-During the Monitoring Enablement Working Group meetings, we received feedback from both Platform SRE and Managed Tenant SRE that Alertmanager, in general, has a low footprint, and the Prometheus Operator does a good job of upgrading it and keeping it running.
-
-Moreover, Platform SRE expressed concerns that a shared Alertmanager configuration could lead to conflicts or misconfiguration that can impact alerting for every managed tenant running in the cluster.
-
-Yet, we don't have enough information to reject idea behind shared Alertmanager (AM), so we propose to postpone capability to deploy AM per managed service.
+Based on these discussions, we suggest that a dedicated Alertmanager instance is deployed with each `MonitoringStack` CR in the same namespace as the CR itself.
+We can also take advantage of the recently added <code>[AlertmanagerConfig](https://github.com/prometheus-operator/prometheus-operator/blob/master/Documentation/api.md#alertmanagerconfig)</code> and allow MTO/MTSRE to create their own routing configuration in a centrally deployed Alertmanager instance.
 
 ### Creating Dashboards
 
