@@ -4,16 +4,16 @@ authors:
   - "@asalkeld"
   - "@sadasu"
 reviewers:
-  - "@hardy"
+  - "@hardys"
   - "@romfreiman"
   - "@dhellman"
 approvers:
-  - "@hardy"
+  - "@hardys"
 creation-date: 2021-08-20
 last-updated: 2021-08-20
 status: implementable
 see-also:
-  - "/enhancements/baremetal-provisiong-config.md"
+  - "/enhancements/baremetal/baremetal-provisioning-config.md"
 replaces:
 superseded-by:
 ---
@@ -64,9 +64,12 @@ Centralized host management can deploy clusters when running on the above platfo
 
 Allow Baremetal Host API to be fully enabled on all platforms.
 
-Note that the scope of this epic is only enablement of the Metal3
-BaremetalHost API and associated controller/services - the centralized host management flow
-currently interacts directly via this API without any Machine API integration.
+Allow Machine API integration across platform types.
+- The centralized host management flow currently interacts directly via this API
+  without any Machine API integration.
+- This means further work will be required via a future enhancement to enable the
+  single cluster case where a combination of e.g VM controlplane and Baremetal
+  workers is desired.
 
 ## Proposal
 
@@ -106,8 +109,7 @@ nodes would be booted via virtual media. This removes the requirement for the
 Provisioning Network which can be expected to be available only in Baremetal platform types.
 
 2. documentation will need to be added to the centralized host management documentation
-explaining how to create a Provisioning CR. Current documentation is here:
-https://github.com/openshift/assisted-service/blob/8880093ef5ce041d4c1951ffd5ea1096991ec3ee/docs/user-guide/assisted-service-on-openshift.md#configure-bare-metal-operator
+explaining how to create and update a Provisioning CR for these platforms.
 
 ### User Stories
 
@@ -191,7 +193,6 @@ Customers can instead create a dedicated baremetal cluster to use as the hub
 cluster.
 
 Another alternative is to additionally distribute baremetal-operator as an optional
-operator with OLM. It's probably not a good idea, but worth enumerating as an alternative.
-The main downsides are the complexity of releasing and distributing the same project
-two different ways, and the potential for install-time confusion or conflict over
-which method should be used to install it.
+operator with OLM. The main downsides are the complexity of releasing and
+distributing the same project two different ways, and the potential for install-time
+confusion or conflict over which method should be used to install it.
