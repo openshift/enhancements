@@ -49,8 +49,9 @@ OpenShift Monitoring is currently composed of two main systems - Platform Monito
 Platform Monitoring holds metrics about core system components running in `openshift-*` and `kube-*` namespaces. Platform Monitoring is enabled in all OpenShift installations and cannot be disabled. Some of the components scraped by PM include core-dns, etcd, kube-apiserver, image-registry, operator-lifecycle-manager etc.
 Platform Monitoring is by design an immutable stack, [which means that admins cannot extend it with additional metrics without losing the support.](https://docs.openshift.com/container-platform/4.7/monitoring/configuring-the-monitoring-stack.html#support-considerations_configuring-the-monitoring-stack)
 
-User Workload Monitoring is an optional stack managed by Cluster Monitoring Operator (CMO) and is disabled by default. Once enabled by cluster admins, it allows users to monitor namespaces that are not part of OpenShift core.
-Please refer to the User Workload Monitoring [enhancement proposal](https://github.com/openshift/enhancements/blob/master/enhancements/monitoring/user-workload-monitoring.md) for more details. If enabled, only one stack can be deployed. The recommended way to get “platform” data is through Thanos Querier. Alternatively, the UWM stack can scrape the `/federate` endpoint expsed by the Platform Monitoring Prometheus to injest a subset of the available platform metrics.
+User Workload Monitoring is an optional stack managed by Cluster Monitoring Operator (CMO) and is disabled by default. Once enabled by cluster admins, it allows users to monitor namespaces that are not part of OpenShift core. If enabled, only one stack can be deployed.
+The recommended way to get “platform” data is through Thanos Querier. Alternatively, the UWM stack can scrape the `/federate` endpoint expsed by the Platform Monitoring Prometheus to injest a subset of the available platform metrics.
+Please refer to the User Workload Monitoring [enhancement proposal](https://github.com/openshift/enhancements/blob/master/enhancements/monitoring/user-workload-monitoring.md) for more details.
 
 Recently an essential model of managing software for customers emerged at Red Hat, referred to as “Managed Services” or “Managed Tenants”. From an architectural point there are three types of such services:
 
@@ -218,7 +219,8 @@ The newly developed operator will be deployed using the Operator Lifecycle Manag
 
 This will allow us to make releases much faster and iteratively and incrementally. As a result, we will be able to respond to new requirements much more rapidly. Release batches will also become smaller, reducing the risk of multiple independent features affecting each other.
 
-In order to be aligned with the descoping [plan](https://docs.google.com/presentation/d/1j1J575SxS8LtL_YvKqrexUhso7j4SgrLfyNrDUroJcc/edit#slide=id.ga089527607_0_0) that the OLM team is currently working towards, we recommend avoiding [`OperatorGroups`](https://docs.openshift.com/container-platform/4.2/operators/understanding_olm/olm-understanding-operatorgroups.html) as they are going to become deprecated in the future (possibly as soon as OpenShift 4.11).
+In order to be aligned with the descoping [plan](https://docs.google.com/presentation/d/1j1J575SxS8LtL_YvKqrexUhso7j4SgrLfyNrDUroJcc/edit#slide=id.ga089527607_0_0) that the OLM team is currently working towards, we recommend avoiding [`OperatorGroups`](https://docs.openshift.com/container-platform/4.2/operators/understanding_olm/olm-understanding-operatorgroups.html).
+There is a good chance that they will become deprecated in the future (possibly as soon as OpenShift 4.11).
 For this reason, the newly developed operator should be installed globally in a cluster and should provide its own CRDs and Roles as part of the installation bundle. A cluster administrator would then create RoleBindings to bind the roles to namespaces to which the operator needs access.
 More details about the descoping plans and strategies are currently described can be found in this [hackmd](https://hackmd.io/wVfLKpxtSN-P0n07Kx4J8Q?view#Descoping-Plan) document and are also illustrated in a short [slide-deck](https://docs.google.com/presentation/d/1j1J575SxS8LtL_YvKqrexUhso7j4SgrLfyNrDUroJcc/edit#slide=id.ga089527607_0_0).
 
@@ -249,7 +251,8 @@ A Thanos Ruler is not needed in this architecture since all recording rules and 
 
 ### Alert Routing
 
-During the Monitoring Enablement Working Group meetings, we received feedback from both Platform SRE and Managed Tenant SRE that Alertmanager, in general, has a low footprint, and the Prometheus Operator does a good job of upgrading it and keeping it running. Moreover, Platform SRE expressed concerns that a shared Alertmanager configuration could lead to conflicts or misconfiguration that can impact alerting for every managed tenant running in the cluster.
+During the Monitoring Enablement Working Group meetings, we received feedback from both Platform SRE and Managed Tenant SRE that Alertmanager, in general, has a low footprint, and the Prometheus Operator does a good job of upgrading it and keeping it running.
+Moreover, Platform SRE expressed concerns that a shared Alertmanager configuration could lead to conflicts or misconfiguration that can impact alerting for every managed tenant running in the cluster.
 
 Based on these discussions, we suggest that a dedicated Alertmanager instance is deployed with each `MonitoringStack` CR in the same namespace as the CR itself.
 We can also take advantage of the recently added <code>[AlertmanagerConfig](https://github.com/prometheus-operator/prometheus-operator/blob/master/Documentation/api.md#alertmanagerconfig)</code> and allow MTO/MTSRE to create their own routing configuration in a centrally deployed Alertmanager instance.
@@ -289,7 +292,8 @@ We then visualized the memory usage of each Prometheus instance over time and th
 
 ![alt_text](./assets/monitoring-stack-prometheus-baseline.png)
 
-At the latest timestamp, the total memory usage for the 3 instances forming functional sharding is 434MB, while the memory usage of the single instance is 316MB. What is also worth pointing out, and is already illustrated by the graph, is that systems that do not export many metrics, such as node_exporter and kubelet, require small Prometheus instances in terms of memory requirements. This leads to easier scheduling of Prometheus pods across a wider range of nodes.
+At the latest timestamp, the total memory usage for the 3 instances forming functional sharding is 434MB, while the memory usage of the single instance is 316MB.
+What is also worth pointing out, and is already illustrated by the graph, is that systems that do not export many metrics, such as node_exporter and kubelet, require small Prometheus instances in terms of memory requirements. This leads to easier scheduling of Prometheus pods across a wider range of nodes.
 
 We also performed some back-of-the-envelope calculations in order to illustrate the added cost of functional sharding in terms of actual money. A `c5.xlarge` on-demand instance in AWS (a compute optimized instance with 4 CPUs and 8GB RAM) costs 140$ per month or 18$ per GB per month.
 When using reserved capacity, the cost goes down to 11$ per GB per month for the same instance with a 1 year reservation.
@@ -335,7 +339,7 @@ In all cases, MSO should not conflict with any other monitoring tool installed i
   * A: In 4.9 a namespace can be excluded from UWM by adding a label to it, which should solve the problem for addons.
 * Q: How MonitoringStack user can do auth for remote write service?
   * A: No secrets will be added to OLM bundle. We plan to support bundle to read secrets from e.g Kubernetes secret and inject with Prometheus (OIDC/token).
-* Q: How we handle version skew of shared Custom Resource Definition like `Prometheus` or `ServiceMonitoring`? 
+* Q: How we handle version skew of shared Custom Resource Definition like `Prometheus` or `ServiceMonitoring`?
   * A: It depends on OperatorHub catalog:
     * For Kubernetes we can have dependency on Prometheus Operator.
     * For OpenShift we don't deploy them and rely on CMO to provide them.
