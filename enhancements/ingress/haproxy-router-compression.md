@@ -53,55 +53,53 @@ their ingress workloads, as described in feature request [NE-542](https://issues
 HAProxy in OpenShift 3.x exposed compression variables, so lack of access to the variables in OpenShift 4.x
 is a migration blocker for customers that were using them in OpenShift 3.x.
 
-The ability to configure compression was available in 3.x, but it applied only to the HAProxy
-`defaults` configuration section, and supported only the `gzip` compression algorithm.  This proposal
-reintroduces and then enhances the previous implementation in these ways:
-- allow the `frontend`, and `backend` sections in addition to the `defaults` section, which would provide for more
-  fine-grain configuration at the route level.
-- allow a choice of `gzip` or `raw-deflate` compression algorithms.
+The ability to configure compression was available in 3.11 and disappeared in 4.x. This proposal
+reintroduces this ability to the extent of feature parity with 3.11.
 
 ### Goals
 
-Enable the configuration of HTTP compression global defaults via the `IngressControllerSpec`.
+Enable the configuration of HTTP compression global defaults via the `IngressControllerSpec`, which will
+expose the two environment variables `ROUTER_ENABLE_COMPRESSION` and `ROUTER_COMPRESSION_MIME`.
 
-Enable the configuration of HTTP compression for route backends/frontends via route annotations.
+Enable HTTP compression on selected MIME types, be they wildcard (e.g. `text/*`, `application/*`, etc.) or
+specific (e.g. `text/html`, `text/plain`, `text/css`, `application/json`, `image/svg+xml`, `font/eot`, etc.).
 
-Enable HTTP compression on selected MIME types, be they wildcard (e.g. text/*, application/*, etc.) or
-specific (e.g. text/html, text/plain, text/css, application/json, image/svg+xml, font/eot, etc.).  Not all MIME
-types benefit from compression, but there is a short list found [here](https://letstalkaboutwebperf.com/en/gzip-brotli-server-config/)
-that will be implemented as a part of this proposal.
-
-By exposing ROUTER_ENABLE_COMPRESSION, any HTTP request with the header "Accept-Encoding: gzip" or
-"Accept-Encoding: raw-deflate" with a MIME type that matches one of the configured ROUTER_COMPRESSION_MIME types
-will have HTTP compression applied to its payload.
+By exposing the environment variables, any HTTP request that terminates within HAProxy, with the header
+**"Accept-Encoding: gzip"**, and with a MIME type that matches one of the configured MIME types, will qualify to have
+HTTP compression applied to its payload.  Note 1: HAProxy can skip compression if it does not have the resources
+available to provide compression at the moment when it is requested.
 
 ### Non-Goals
 
-HAProxy provides for the choice of compression algorithm (e.g. `identity`, `gzip`, `deflate`,
-and `raw-deflate`) but this proposal selectively covers only the `gzip` and `raw-deflate` algorithms.
-The `identity` algorithm is for debugging and doesn't apply any change on data.  The `deflate` algorithm
-is a variation on `gzip` that is not supported on all browsers and lacks universal value.
+Though it is possible to provide the following options, they are not included in this proposal because they
+were not requested in the RFE, which requests only feature parity with OCP 3.11.
 
-HAProxy allows compression to be applied to the `listen` section as well as the `defaults`, `backend`, and `frontend`
-sections of the configuration file.  A `listen` section is used to define a combined `frontend` and `backend`.
-Since the current OpenShift HAProxy template only has a `listen` definition for the `StatsPort`, and
-doesn't allow user configuration of a `listen` section, it is not considered in this proposal.
+* It is possible for us to validate the MIME types in order to preclude pointless compression on data that is already
+  compressed.  This proposal specifically allows admins to choose their own MIME types but will provide guidance in the
+  godoc on how to avoid pointless compression.  It is more likely that we would receive a request to change the allowed
+  MIME types, than to receive a request for support on a HAProxy spending unnecessary resources on compression duties.
 
-HAProxy provides a `compression offload` configuration option that makes HAProxy remove the "Accept-Encoding"
+* HAProxy provides for the choice of compression algorithm (e.g. `identity`, `gzip`, `deflate`,
+and `raw-deflate`).  This proposal covers only the `gzip` algorithm.
+
+* HAProxy allows compression to be applied to the `listen`, `defaults`, `backend`, and `frontend`
+sections of the configuration file.  This proposal covers only the global `defaults` section.
+
+* HAProxy provides a `compression offload` configuration option that makes HAProxy remove the "Accept-Encoding"
 header to prevent backend servers from compressing responses.  This forces all response compression to happen within
 HAProxy, jeopardizing its performance.  This configuration option is not recommended, even by HAProxy guides, so it
 is omitted from this proposal.
 
-A performance tuning variable, `maxcomprate`, sets the maximum per-process input compression rate to the specified
-number of kilobytes per second.  It works in conjunction with `tune.comp.maxlevel` to rate-limit the compression
-level to save data bandwidth. Another, `maxcompcpuusage`, does the same to save limit CPU used on compression.
-Neither variable is currently exposed, and both are omitted from this proposal.  Other per-session performance tuning
+* HAProxy provides a performance tuning variable, `maxcomprate`, to set the maximum per-process input compression rate
+  to the specified number of kilobytes per second.  It works in conjunction with `tune.comp.maxlevel` to rate-limit the
+  compression level to save data bandwidth. Another, `maxcompcpuusage`, does the same to limit CPU used on compression.
+Neither variable is currently exposed, and both are omitted from this proposal.  (Other per-session performance tuning
 variables like `maxconnrate`, which set the maximum per-process number of connections per second, and `maxsslrate`,
-which sets the maximum per-process number of SSL sessions per second, are not exposed either.
+which sets the maximum per-process number of SSL sessions per second, are not exposed either.)
 
 ## Proposal
 
-Currently, the haproxy.cfg contains the lines below in the `defaults` section, but the mechanism for setting these
+Currently, OpenShift router's `haproxy-config.template` file contains the lines below in the `defaults` section, but the mechanism for setting the
 environment variables is not exposed.
 ```go
 defaults
@@ -114,53 +112,6 @@ defaults
 
 ### Global HTTP Compression via IngressControllerSpec and environment variables
 
-To expose the two compression directives in the `defaults` section, the ROUTER_ENABLE_COMPRESSION environment variable
-will be replaced with ROUTER_COMPRESSION_ALGORITHM, and these changes will be made:
-```go
-{{- /* compressionAlgoPattern matches valid options for HTTP compression */}}
-{{- $compressionAlgoPattern := "gzip|raw-deflate" -}}
-
-{{- /* compressionMimeTypes stores valid options for HTTP compression MIME Types */}}
-{{- $compressionMimeTypes := "text/html text/css text/plain text/xml text/x-component text/javascript \
-application/x-javascript application/javascript application/json application/manifest+json application/vnd.api+json \
-application/xml application/xhtml+xml application/rss+xml application/atom+xml application/vnd.ms-fontobject \
-application/x-font-ttf application/x-font-opentype application/x-font-truetype \
-image/svg+xml image/x-icon image/vnd.microsoft.icon font/ttf font/eot font/otf font/opentype" -}}
-...
-defaults
-...
-{{- with  $compressionAlg := firstMatch $compressionAlgoPattern {{ env "ROUTER_COMPRESSION_ALGORITHM"}} -}}
-compression algo {{ $compressionAlg }}
-{{- with $compressionMimeTypes := allMatches $compressionMimeTypes {{ env "ROUTER_COMPRESSION_MIME"}} -}}
-compression type {{ $compressMimeTypes }}
-{{- end }}
-{{- end -}}
-```
-The new function `allMatches` will be added to the `template_helper.go` code:
-```go
-// Compare two white-space delimited strings and return the latter if all its substrings
-// exist in former
-func allMatches(defined string, supplied string) string {
-	log.V(7).Info("allMatches called", "supplied", supplied, "defined", defined)
-	numFound := 0
-	suppliedRange := strings.Fields(supplied)
-	definedRange := strings.Fields(defined)
-	for _, s := range suppliedRange {
-		for _, d := range definedRange {
-            if d == s { // optimize this
-                log.V(7).Info("allMatches validated", "supplied", s)
-                numFound++
-                break
-            }
-        }
-	}
-	if numFound == len(suppliedRange){
-        return supplied
-    }
-	return ""
-}
-```
-
 The proposed change to IngressControllerSpec exposes the HTTP compression configuration variables at the default level:
 ```go
 type IngressControllerSpec struct {
@@ -170,41 +121,79 @@ type IngressControllerSpec struct {
     // The default value is no compression
     //
     // +optional
-    HTTPCompression *HTTPCompressionPolicy `json:"httpCompression,omitempty"`
+    HTTPCompression HTTPCompressionPolicy `json:"httpCompression,omitempty"`
 }
 ...
-// httpCompressionPolicy defines the compression algorithm and MIME types that need to
-// have compression applied.
+// httpCompressionPolicy turns on compression for the specified MIME types
 //
 // This field is optional, and its absence implies that compression should not be enabled
 // globally in HAProxy.
 //
-// If httpCompressionPolicy exists, compression should be enabled only for the listed
-// MIME types, and only using the designated compression algorithm.
+// If httpCompressionPolicy exists, compression should be enabled only for the specified
+// MIME types
 type HTTPCompressionPolicy struct {
-
-	// compressionAlgorithm defines the desired compression algorithm.
+	// compressionMIMETypes is a list of MIME types that should have compression applied.
+	// At least one MIME type must be specified.
+	//
+	// Note: Not all MIME types benefit from compression, but HAProxy will still use resources
+	// to try to compress if instructed to.  Generally speaking, text (html, css, js, etc.)
+	// formats benefit from compression, but formats that are already compressed (pdf, image,
+	// audio, video, etc.) benefit little in exchange for the time and cpu spent on compressing
+	// again. See https://joehonton.medium.com/the-gzip-penalty-d31bd697f1a2
 	//
 	// +required
-	CompressionAlgorithm CompressionAlgorithmType `json:"compressionAlgorithm,omitempty"`
-	
-	// compressionMIMETypes is a list of MIME types that should have compression applied
-	//
-	// +kubebuilder:MinItems=1
-	// +required
-	CompressionMIMETypes []string `json:"compressionMIMETypes,omitempty"`
+	// +kubebuilder:validation:MinItems=0
+	CompressionMIMETypes []CompressionMIMEType `json:"compressionMIMETypes,omitempty"`
 }
 
-// CompressionAlgorithmType defines the type of compression algorithm
-// +kubebuilder:validation:Enum=gzip;raw-deflate
-type CompressionAlgorithmType string
-const (
-	gzipCompressionAlgorithm CompressionAlgorithmType = "gzip"
-	rawdeflateCompressionAlgorithm CompressionAlgorithmType = "raw-deflate"
-)
+// CompressionMIMEType defines the format of a single MIME type
+// E.g. "text/css;charset=utf-8", "text/html", "text/*", "image/svg+xml",
+// "application/octet-stream", "X-custom/customsub", etc.
+// The format should follow the Content-Type definition in RFC1341 - https://datatracker.ietf.org/doc/html/rfc1341#page-7
+//
+// +kubebuilder:validation:Pattern="^"?(X\-[^ \(\)<>@,;:\\"\/\[\]\?.\=]+|[application|audio|image|message|multipart|text|video])"?\/"?([^ \(\)<>@,;:\\"\/\[\]\?.\=]+(;? *([^ \(\)<>@,;:\\"\/\[\]\?.\=]+=([^ \(\)<>@,;:\\"\/\[\]\?.\=]|".+")+))?)+"?$
+type CompressionMIMEType string
 ```
 
-To set up the IngressControllerSpec to use HTTP compression on all routes, the configuration
+The `CompressionMIMEType` validation pattern is loosely defined as:
+```shell
+type/subtype[;attribute=value]
+```
+The types are: application, image, message, multipart, text, video,
+or a custom type prefaced by "X-".
+
+The subtypes and following directive patterns are defined by the notation, from
+[RFC1341](https://datatracker.ietf.org/doc/html/rfc1341#page-7).
+
+The whole notation format is summarized here:
+
+```shell
+Content-Type := type "/" subtype *[";" parameter]
+
+type :=          "application"     / "audio"
+                 / "image"         / "message"
+                 / "multipart"     / "text"
+                 / "video"         / x-token
+
+x-token := <The two characters "X-" followed, with no intervening white space, by any token>
+
+subtype := token
+
+parameter := attribute "=" value
+
+attribute := token
+
+value := token / quoted-string
+
+token := 1*<any CHAR except SPACE, CTLs, or tspecials>
+
+tspecials :=  "(" / ")" / "<" / ">" / "@"     ; Must be in
+              /  "," / ";" / ":" / "\" / <">  ; quoted-string,
+              /  "/" / "[" / "]" / "?" / "."  ; to use within
+              /  "="                          ; parameter values
+```
+
+To set up the IngressControllerSpec to use HTTP compression for a set of specific MIME types, the configuration
 might resemble:
 ```yaml
 apiVersion: operator.openshift.io/v1
@@ -214,46 +203,39 @@ metadata:
   namespace: openshift-ingress-operator
 spec:
   httpCompression:
-    compressionAlgorithm: gzip
     compressionMIMETypes:
     - "text/html"
-    - "text/css"
-    - "application/pdf"
+    - "text/css; charset=utf-8"
+    - "application/json"
 ```
 
-### Route-based HTTP Compression via Annotations
-To expose these variables at the route level, the mechanism will be two route annotations that are processed in the
-haproxy.cfg `frontend` and `backend` sections:
+To expose the HTTP compression variables, enhancements will be added to the ingress operator's desired router deployment:
 ```go
-{{- /* Route-Specific Annotations */ -}}
+const (
+	WildcardRouteAdmissionPolicy = "ROUTER_ALLOW_WILDCARD_ROUTES"
+    ...
+	RouterEnableCompression = "ROUTER_ENABLE_COMPRESSION"
+	RouterCompressionMIMETypes = "ROUTER_COMPRESSION_MIME"
+)
 ...
-{{- /* compressionAlgorithmHeader configures which compression algorithm is applied to payload */ -}}
-{{- $compressionAlgorithmHeader := "haproxy.router.openshift.io/compressionAlgorithm" -}}
-
-{{- /* compressionMimeTypesHeader configures which MIME types have compression applied to payload */ -}}
-{{- $compressionMimeTypesHeader := "haproxy.router.openshift.io/compressionMimeTypes" -}}
-
-
-...
-backend ... /* or frontend */
-...
-{{- with $compressionAlg := firstMatch $compressionAlgoPattern (index $cfg.Annotations $compressionAlgorithmHeader)}}
-  compression algo {{ $compressionAlg }}
-{{- with $compressionTypes := allMatches $compressionMimeTypes (index $cfg.Annotations $compressionMimeTypesHeader)}}
-  compression type {{ $compressionTypes }}
-{{- end -}}
-{{-end -}}
+    // desiredRouterDeployment returns the desired router deployment.
+    func desiredRouterDeployment(ci *operatorv1.IngressController, ingressControllerImage string, ingressConfig *configv1.Ingress, apiConfig *configv1.APIServer, networkConfig *configv1.Network, proxyNeeded bool, haveClientCAConfigmap bool, clientCAConfigmap *corev1.ConfigMap) (*appsv1.Deployment, error) {
+    ...
+      if len(ci.Spec.HTTPCompression.CompressionMIMETypes) != 0 {
+        env = append(env, corev1.EnvVar{Name: RouterEnableCompression, Value: "true"})
+        var mimes []string
+        for _, := range ci.Spec.HTTPCompression.CompressionMIMETypes {
+            mimeType := string(m)
+            if strings.Contains(mimeType, " ")    {
+                mimeType = strconv.Quote(mimeType)
+            }
+            // TODO - parameter value on the right hand side of the "/" and after "; <attribute>=" permits quotes
+            mimes = append(mimes, mimeType)
+        }
+        env = append(env, corev1.EnvVar{Name: RouterCompressionMIMETypes, Value: strings.Join(mimes, " ")})
+      }
+    ...
 ```
-
-To set up a route to use HTTP compression, the configuration might resemble:
-````yaml
-apiVersion: v1
-kind: Route
-metadata:
-  annotations:
-    haproxy.router.openshift.io/compressionAlgorithm: "gzip"
-    haproxy.router.openshift.io/compressionMimeTypes: "text/html text/css application/pdf"
-````
 
 ### User Stories
 
@@ -269,51 +251,22 @@ metadata:
   namespace: openshift-ingress-operator
 spec:
   httpCompression:
-    compressionAlgorithm: gzip
     compressionMIMETypes:
     - "text/html"
     - ...
 ```
-#### As a cluster administrator, I need to enable gzip HTTP compression for only one route and one MIME type, "text/html"
-
-To apply HTTP compression to all routes in the cluster, use a command like this. (This command requires
-an updated `oc` client that supports the `--all-namespaces` flag on the `oc annotate` verb):
-```shell
-$ oc annotate route --all --all-namespaces --overwrite=true "haproxy.router.openshift.io/compressionAlgorithm"="gzip"
-$ oc annotate route --all --all-namespaces --overwrite=true "haproxy.router.openshift.io/compressionMIMETypes"="text/html text/css text/xml"
-
-```
-To apply router compression to all routes in a particular namespace, use commands like these:
-```shell
-$ oc annotate route --all -n my-namespace --overwrite=true "haproxy.router.openshift.io/compressionAlgorithm"="gzip"
-$ oc annotate route --all -n -my-namespace --overwrite=true "haproxy.router.openshift.io/compressionMIMETypes"="text/html text/css text/xml"
-```
-
-#### As a cluster administrator, I need to verify all routes have HTTP compression enabled for a specific MIME type
-```shell
-$ oc -n openshift-ingress-operator get ingresscontrollers/default -o jsonpath=`{spec.httpCompression}`
-```
-
-#### As a cluster administrator, I need to verify which routes have HTTP compression enabled, and for which MIME types
-
-To review the HTTP compression annotations on all routes:
-```shell
-$ oc get route  --all-namespaces -o go-template='{{range .items}}{{if .metadata.annotations}}{{$a := index .metadata.annotations "haproxy.router.openshift.io/compressionMIMETypes"}}{{$n := .metadata.name}}{{with $a}}Name: {{$n}} MIME Types: {{$a}}{{"\n"}}{{else}}{{""}}{{end}}{{end}}{{end}}'
-
-Name: myBigRoute MIME Types: "text/html"
-```
 
 Tips for troubleshooting:
-- check response headers for evidence of compression: "Content-Encoding" header with `gzip` or `raw-deflate` value
-- the content of the response should be smaller than what was sent
+- check response headers for evidence of compression: **"Content-Encoding: gzip"**
+- the content of the response should be smaller than what was sent by the application
 
 ### Implementation Details/Notes/Constraints
 
 Compression is not always applied even if it is requested.  If a backend server supports HTTP compression, the
 compression directives will become no-op: HAProxy will see the compressed response and will not compress again. If a
 backend server does not support HTTP compression, and the header "Accept-Encoding" exists in the request, HAProxy will
-compress the matching response.  Also, if the HAProxy doesn't have enough resources to compress, it may skip the
-compression in order to stay functional.  Process-level directives exist to tune this behavior: `maxcomprate`,
+compress the matching response.  Also, if the HAProxy doesn't have enough resources to perform compression, it may skip
+the compression in order to stay functional.  Process-level directives exist to tune this behavior: `maxcomprate`,
 `maxcompcpuusage`, and `tune.comp.maxlevel` as described in the
 [HAProxy compression documentation](https://www.haproxy.com/documentation/hapee/latest/load-balancing/compression/),
 but these are not in scope of this proposal.
@@ -321,12 +274,15 @@ but these are not in scope of this proposal.
 ### Risks and Mitigations
 
 Overuse of compression can cause the HAProxy to devote more resources to compression than to other operations,
-compromising its usefulness.  I have mentioned the process-level directives that would tune the dedication of
-resources to compression, but for now have decided that adding more tunable knobs at this stage is premature and
-could cause more issues than it mitigates.
+compromising its operation.  We do not have any evidence that this will occur, and give detailed notes on use of
+necessary MIME types to mitigate pointless compression and overuse of compression.  Should this become a problem
+in the future, we can add default values for the process-level directives mentioned above (`maxcomprate`,
+`maxcompcpuusage`, and `tune.comp.maxlevel`).  The team consensus is that adding more tunable knobs at this stage is
+premature and could cause more issues than it mitigates.
 
-I am considering disallowing wildcard MIME types (e.g. "text/*"), so that explicit choices must be made on which
-MIME types are subject to compression.
+We considered disallowing wildcard MIME types (e.g. `application/*`), so that explicit choices must be made on which
+MIME types are subject to compression, but as mentioned, it is more likely that any MIME type omission would generate
+a new RFE than for there to be a support issue caused by excessive pointless compression.
 
 Security and UX are not a part of this proposal, but API team members will be invited to comment.
 
@@ -335,41 +291,29 @@ Design details are covered in the Proposal section, but some additional detailed
 [HAProxy compression documentation](https://www.haproxy.com/documentation/hapee/latest/load-balancing/compression/)
 are listed below.
 
-### Compression algorithms supported by HAProxy
-- deflate: applies deflate compression with zlib format. Not recommended in combination with raw-deflate
-- gzip: applies gzip compression
-- identity: does not alter content at all; used for debugging purposes only
-- raw-deflate: applies deflate compression without zlib wrapper. May be used as an alternative to deflate
-
 ### Compression types
-MIME types to apply compression to, read from the Content-Type response header field. If not set, HAProxy
-Enterprise tries to compress all responses that are not compressed by the server.
-
-### Process-level directives
-**maxcomprate**: sets the maximum per-process input compression rate to <number> kilobytes per second.
-For each session, if the maximum is reached, the compression level will be decreased during the session.
-If the maximum is reached at the beginning of a session, the session will not compress at all. If the maximum
-is not reached, the compression level will be increased up to tune.comp.maxlevel. A value of zero means there
-is no limit, this is the default value.
-
-**maxcompcpuusage**: sets the maximum CPU usage HAProxy Enterprise can reach before stopping the compression for
-new requests or decreasing the compression level of current requests. It works like maxcomprate but measures CPU
-usage instead of incoming data bandwidth. The value is expressed in percent of the CPU used by HAProxy Enterprise.
-In case of multiple processes (nbproc > 1), each process manages its individual usage. A value of 100 (the default)
-disables the limit. Setting a lower value will prevent the compression work from slowing the whole
-process down and from introducing high latencies.
-
-**tune.comp.maxlevel**: sets the maximum compression level. The compression level affects CPU usage during compression.
-Each session using compression initializes the compression algorithm with this value. The default is 1.
+MIME types to apply compression to,  are read from the Content-Type response header field. If a MIME type is not set,
+HAProxy tries to compress all responses that are not compressed by the server.  Therefore, at least one MIME type is
+required in the `HTTPCompressionPolicy`.  We consider the fact that cluster admins may want to create and use their
+own MIME type, but the allowed set of characters is defined in a kubebuilder validation
+pattern  of `"[a-zA-Z0-9\\+-;= ]+/([a-zA-Z0-9\\\+-;= ]+|\\*)"`, to allow a token of alphanumeric plus "_-;= " followed
+by "/" followed by another alphanumeric token of the same pattern, or "*", the wildcard character.
 
 ### Open Questions
+n/a
+
 ### Test Plan
-- Unit tests will validate that HTTP compression directives appear in the `frontend`/`backend` sections of the HAProxy
-  template when it is properly configured in a route.
-- Unit tests will validate that the HTTP compression directive appears in the `defaults` section of the HAProxy template
-  when it is properly configured on the IngressController spec.
-- E2e tests will validate that the IngressController spec accepts and enables compression in the `defaults` section of
+- Unit tests will validate
+  - that at least one HTTP compression MIME type exists and any listed MIME types adhere to the
+  correct pattern
+  - that the HTTP compression directive appears in the `defaults` section of the HAProxy template
+  when it is enabled and properly configured on the IngressController spec
+  - that a downgrade to version 4.9 (or version previous to feature implementation version) will not retain the
+  compression configuration of 4.10 (the environment variables should no longer be exposed)
+- E2e tests will validate
+  - that the IngressController spec accepts and enables compression in the `defaults` section of
   the generated haproxy.cfg
+  - that only requested MIME types receive compression
 
 Note that HAProxy Enterprise **disables** HTTP compression when:
 - The request does not advertise a supported compression algorithm in the "Accept-Encoding" header
@@ -392,18 +336,16 @@ n/a
 n/a
 
 #### Removing a deprecated feature
-
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
+n/a
 
 ### Upgrade / Downgrade Strategy
 
-An upgrade from a previous installation that had the compression directives exposed, will need to change to use the
-IngressController spec.  No previous installation would have any compression directives via route annotations.
+The compression directives have never been exposed, so there should be no change in behavior or
+need for migration during upgrades.
 
 If a cluster administrator applied any of the compression configuration options
-in 4.10, then downgraded to 4.9, the compression configuration settings would no longer be in effect unless they
-used a custom unmanaged HAProxy configuration.
+in 4.10, then downgraded to 4.9, the compression configuration settings should no longer be in effect for the default
+IngressController/HAProxy.
 
 ### Version Skew Strategy
 n/a
