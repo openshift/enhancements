@@ -42,8 +42,8 @@ upgrades meant to reduce the duration of upgrades and workload disruption.
 
 All of the work detailed herein is prerequisite to enabling upgrades which skip
 reboots. However where non-overlapping resources exist we can pursue reboot
-removal in parallel such as the Node team validating upstream's stated Kubelet
-version skew policies.
+removal in parallel such as the Node team validating [upstream's stated Kubelet
+version skew policies][upstream-kubelet-skew].
 
 ## Motivation
 
@@ -465,3 +465,5 @@ duration.
 ## Infrastructure Needed [optional]
 
 N/A
+
+[upstream-kubelet-skew]: https://kubernetes.io/releases/version-skew-policy/#kubelet

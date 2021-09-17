@@ -119,10 +119,10 @@ We propose to add an `audit` struct to `apiservers.config.openshift.io/v1` with
 2. a `profile` field for requests that don't match any rule in (1).
 This struct specifies the audit policy to be deployed to all OpenShift-provided API servers in the cluster.
 
-The generated `audit.k8s.io/v1beta1` has a constant preamble:
+The generated `audit.k8s.io/v1` has a constant preamble:
 
 ```yaml
-apiVersion: audit.k8s.io/v1beta1
+apiVersion: audit.k8s.io/v1
 kind: Policy
 rules:
 # Don't log requests for events
@@ -156,7 +156,7 @@ followed by the catch-all rule of (2):
   resources: ...
 ```
 
-The `audit.k8s.io/v1beta1` policy rules are evaluated from top to bottom (first matching rule applies), which matches the semantics of the API here.
+The `audit.k8s.io/v1` policy rules are evaluated from top to bottom (first matching rule applies), which matches the semantics of the API here.
 
 From the beginning we provide the following profiles (described as rules added as a block for (1) or (2) as described above):
 
@@ -173,10 +173,11 @@ From the beginning we provide the following profiles (described as rules added a
   ```shell
   $ oc adm must-gather -- /usr/bin/gather_audit_logs
 
-  To raise a Red Hat support request, it is required to set the top level audit policy to
-  Default, WriteRequestBodies, or AllRequestBodies to generate audit log events that can
-  be analyzed by support. Try `oc edit apiservers` and set `spec.audit.profile` back to
-  "Default" and reproduce the issue while gathering audit logs.
+     Warning: It is not recommended to disable audit logging by using the `None` profile unless you
+	 are fully aware of the risks of not logging data that can be beneficial when troubleshooting issues.
+	 If you disable audit logging and a support situation arises, you might need to enable audit logging
+	 and reproduce the issue in order to troubleshoot properly.
+  
   ```
 
   and the command will return with an error (non-zero exit code).
@@ -284,10 +285,10 @@ the respective file-based audit policy of
 
 by their respective operators.
 
-The generated `audit.k8s.io/v1beta1` policy has a constant preamble:
+The generated `audit.k8s.io/v1` policy has a constant preamble:
 
 ```yaml
-apiVersion: audit.k8s.io/v1beta1
+apiVersion: audit.k8s.io/v1
 kind: Policy
 rules:
 # Don't log requests for events
@@ -321,7 +322,7 @@ followed by the catch-all top-level profile:
   resources: ...
 ```
 
-The `audit.k8s.io/v1beta1` policy rules are evaluated from top to bottom (first matching rule applies), which matches the semantics of the API here.
+The `audit.k8s.io/v1` policy rules are evaluated from top to bottom (first matching rule applies), which matches the semantics of the API here.
 
 The profiles are translated into:
 
@@ -569,10 +570,10 @@ apiservercontrollerset.NewAPIServerControllerSet(
 In `github.com/openshift/library-go/pkg/operator/apiserver/audit` we replace `GetAuditPolicies` with
 
 ```go
-import auditv1beta1 "k8s.io/apiserver/pkg/apis/audit/v1"
+import auditv1 "k8s.io/apiserver/pkg/apis/audit/v1"
 import configv1 "github.com/openshift/api/config/v1"
 
-func GetAuditPolicy(audit *configv1.Audit) (*auditv1beta1.Policy, error)
+func GetAuditPolicy(audit *configv1.Audit) (*auditv1.Policy, error)
 ```
 
 We can keep `DefaultPolicy` for bootstrapping of the control-plane, but remove `AuditPolicyPathGetterFunc`, `WithAuditPolicies` and `NewAuditPolicyPathGetter`.
