@@ -14,7 +14,7 @@ reviewers:
 approvers:
   - "@sdodson"
 creation-date: 2020-07-07
-last-updated: 2021-09-14
+last-updated: 2021-09-23
 status: implementable
 ---
 
@@ -51,7 +51,7 @@ This enhancement aims to reduce that tension.
 ### Goals
 
 * [Cincinnati graph-data][graph-data] maintainers will have the ability to block edges for a vulnerable subset of clusters.
-* Cluster administrators will have convenient access to the issues graph-data maintainers considered when conditionally or unconditionally blocking edges.
+* Cluster administrators will have convenient access to the issues graph-data maintainers considered when conditionally or unconditionally blocking edges (a portion of which is currently filled by text-only errata like [this][text-only-errata-example]).
 * Avoiding excessive load evaluating in-cluster conditionals.
 
 ### Non-Goals
@@ -77,10 +77,10 @@ This enhancement aims to reduce that tension.
   Consumers should walk the array in order.
   For a given entry, if a condition type is unrecognized, or fails to evaluate, consumers should proceed to the next entry.
   If a condition successfully evaluates (either as a match or as an explicit does-not-match), that result is used, and no further entries should be attempted.
-  If no condition can be successfully evaluated, the update should not be recommended
+  If no condition can be successfully evaluated, the update should not be recommended.
   Each entry must be an [object][json-object] with at least the following property:
   * `type` (required, [string][json-string]), defining the type in [the condition type registry](#cluster-condition-type-registry).
-    For example, `type: promql` identifies the condition as [the `promql` type](#promql).
+    For example, `type: Always` identifies the condition as [the `Always` type](#always).
   Additional, type-specific properties for each entry are defined in [the cluster-condition type registry](#cluster-condition-type-registry).
 
 [The schema version][graph-data-schema-version] would also be bumped to 1.1.0, because this is a backwards-compatible change.
@@ -99,16 +99,21 @@ Cluster condition evaluation has three possible outcomes:
 They are represented as [objects][json-object] with at least the following property:
 
 * `type` (required, [string][json-string]), defining the type in the condition type registry.
-  For example, `type: promql` identifies the condition as [the `promql` type](#promql).
+  For example, `type: Always` identifies the condition as [the `Always` type](#always).
 
 Additional, type-specific properties for each entry are defined in the following subsections.
 
-#### promql
+#### Always
 
-The `type: promql` condition entry is an [object][json-object] with the following additional property:
+The `type: Always` condition entry is an [object][json-object] with no additional properties.
+This condition always matches.
 
-* `promql` (required, [object][json-object]), with the following properties:
-  * `promql` (required, [string][json-string]), with a [PromQL][] query classifying clusters.
+#### PromQL
+
+The `type: PromQL` condition entry is an [object][json-object] with the following additional property:
+
+* `PromQL` (required, [object][json-object]), with the following properties:
+  * `PromQL` (required, [string][json-string]), with a [PromQL][] query classifying clusters.
     This query will be evaluated on the local cluster, so it has access to data beyond the subset that is [uploaded to Telemetry][uploaded-telemetry].
     The query should return a 1 in the match case (risk matches, update should not be recommended) and a 0 in the does-not-match case (risk does not match, update should be recommended).
     Queries which return no time series, or which return values besides 0 or 1, are evaluation failures, as discussed in [the query coverage section](#query-coverage).
@@ -121,21 +126,21 @@ The `type: promql` condition entry is an [object][json-object] with the followin
   Each entry is an [object][json-object] with the following schema:
   * `from` (required, [string][json-string]), with the `version` of the starting node.
   * `to` (required, [string][json-string]), with the `version` of the ending node.
-* `risks` (optional, [array][json-array], with conditional risks around the recommendation.
+* `risks` (required, [array][json-array], with conditional risks around the recommendation.
   Consumers should evaluate all entries, and only recommend the update if there is at least one entry and all entries recommend the update.
   Each entry is an [object][json-object] with the following schema:
-  * `url` (optional, [string][json-string]), with a URI documenting the issue, as described in [the blocked-edges section](#enhanced-graph-data-schema-for-blocking-edges).
-  * `name` (optional, [string][json-string]), with a CamelCase reason, as described in [the blocked-edges section](#enhanced-graph-data-schema-for-blocking-edges).
-  * `message` (optional, [string][json-string]), with a human-oriented message describing the blocking reason, as described in [the blocked-edges section](#enhanced-graph-data-schema-for-blocking-edges).
-  * `matchingRules` (optional, [array][json-array]), defining conditions for deciding which clusters have the update recommended and which do not.
+  * `url` (required, [string][json-string]), with a URI documenting the issue, as described in [the blocked-edges section](#enhanced-graph-data-schema-for-blocking-edges).
+  * `name` (required, [string][json-string]), with a CamelCase reason, as described in [the blocked-edges section](#enhanced-graph-data-schema-for-blocking-edges).
+  * `message` (required, [string][json-string]), with a human-oriented message describing the blocking reason, as described in [the blocked-edges section](#enhanced-graph-data-schema-for-blocking-edges).
+  * `matchingRules` (required with at least one entry, [array][json-array]), defining conditions for deciding which clusters have the update recommended and which do not.
     The array is ordered by decreasing precedence.
     Consumers should walk the array in order.
     For a given entry, if a condition type is unrecognized, or fails to evaluate, consumers should proceed to the next entry.
     If a condition successfully evaluates (either as a match or as an explicit does-not-match), that result is used, and no further entries should be attempted.
-    If no condition can be successfully evaluated, the update should not be recommended
+    If no condition can be successfully evaluated, the update should not be recommended.
     Each entry must be an [object][json-object] with at least the following property:
     * `type` (required, [string][json-string]), defining the type in [the condition type registry](#cluster-condition-type-registry).
-      For example, `type: promql` identifies the condition as [the `promql` type](#promql).
+      For example, `type: Always` identifies the condition as [the `Always` type](#always).
     Additional, type-specific properties are defined in [the cluster-condition type registry](#cluster-condition-type-registry).
 
 ### Enhanced ClusterVersion representation
@@ -150,8 +155,9 @@ The `type: promql` condition entry is an [object][json-object] with the followin
 // availableUpdates. This list may be empty if no updates are
 // recommended, if the update service is unavailable, or if an empty
 // or invalid channel has been specified.
+// +listType=atomic
 // +optional
-conditionalUpdates []ConditionalUpdate `json:"conditionalUpdates,omitempty"`
+ConditionalUpdates []ConditionalUpdate `json:"conditionalUpdates,omitempty"`
 ```
 
 The `availableUpdates` documentation will be adjusted to read:
@@ -170,9 +176,9 @@ The new ConditionalUpdate type will have the following schema:
 // ConditionalUpdate represents an update which is recommended to some
 // clusters on the version the current cluster is reconciling, but which
 // may not be recommended for the current cluster.
-// +k8s:deepcopy-gen=true
 type ConditionalUpdate struct {
 	// release is the target of the update.
+	// +kubebuilder:validation:Required
 	// +required
 	Release Release `json:"release"`
 
@@ -181,8 +187,14 @@ type ConditionalUpdate struct {
 	// operator will evaluate all entries, and only recommend the
 	// update if there is at least one entry and all entries
 	// recommend the update.
-	// +optional
-	Risks []ConditionalUpdateRisk `json:"risks,omitempty"`
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +patchMergeKey=name
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=name
+	// +required
+	Risks []ConditionalUpdateRisk `json:"risks"`
 
 	// conditions represents the observations of the conditional update's
 	// current status. Known types are:
@@ -204,22 +216,29 @@ The new ConditionalUpdateRisk type will have the following schema:
 // +k8s:deepcopy-gen=true
 type ConditionalUpdateRisk struct {
 	// url contains information about this risk.
-	// +optional
-	URL URL `json:"url,omitempty"`
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Format=uri
+	// +kubebuilder:validation:MinLength=1
+	// +required
+	URL string `json:"url"`
 
 	// name is the CamelCase reason for not recommending a
 	// conditional update, in the event that matchingRules match the
 	// cluster state.
-	// +optional
-	Name string `json:"name,omitempty"`
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +required
+	Name string `json:"name"`
 
 	// message provides additional information about the risk of
 	// updating, in the event that matchingRules match the cluster
 	// state. This is only to be consumed by humans. It may
 	// contain Line Feed characters (U+000A), which should be
 	// rendered as new lines.
-	// +optional
-	Message string `json:"message,omitempty"`
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +required
+	Message string `json:"message"`
 
 	// matchingRules is a slice of conditions for deciding which
 	// clusters match the risk and which do not. The slice is
@@ -227,8 +246,11 @@ type ConditionalUpdateRisk struct {
 	// operator will walk the slice in order, and stop after the
 	// first it can successfully evaluate. If no condition can be
 	// successfully evaluated, the update will not be recommended.
-	// +optional
-	MatchingRules []ClusterCondition `json:"matchingRules,omitempty"`
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +listType=atomic
+	// +required
+	MatchingRules []ClusterCondition `json:"matchingRules"`
 }
 ```
 
@@ -242,13 +264,15 @@ The new ClusterCondition type will have the following schema:
 // +k8s:deepcopy-gen=true
 type ClusterCondition struct {
 	// type represents the cluster-condition type. This defines
-	// the members and semantics of any 'extra' properties.
+	// the members and semantics of any additional properties.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum={"Always","PromQL"}
 	// +required
-	Type string
+	Type string `json:"type"`
 
 	// PromQL represents a cluster condition based on PromQL.
 	// +optional
-	PromQL *PromQLClusterCondition `json:"promql,omitempty"`
+	PromQL *PromQLClusterCondition `json:"PromQL,omitempty"`
 }
 
 // PromQLClusterCondition represents a cluster condition based on PromQL.
@@ -258,16 +282,22 @@ type PromQLClusterCondition struct {
 	// does-not-match case case. Queries which return no time
 	// series, or which return values besides 0 or 1, are
 	// evaluation failures.
+	// +kubebuilder:validation:Required
 	// +required
-	PromQL string `json:"promql"`
+	PromQL string `json:"PromQL"`
 }
 ```
 
 [ClusterVersion's `status.history` entries][api-history] will be extended with the following property:
 
 ```go
-// overrides records update guards which were overriden to initiate the update.
-Overrides string `json:"overrides,omitempty"`
+// acceptedRisks records risks which were accepted to initiate the update.
+// For example, it may menition an Upgradeable=False or missing signature
+// that was overriden via desiredUpdate.force, or an update that was
+// initiated despite not being in the availableUpdates set of recommended
+// update targets.
+// +optional
+AcceptedRisks string `json:"acceptedRisks,omitempty"`
 ```
 
 ### Update service support for the enhanced schema
@@ -309,8 +339,8 @@ Both `availableUpdates` and `conditionalUpdates` should be sorted in decreasing 
 
 The cluster-version operator does not currently gate update acceptance on whether the requested target release is a recommended update.
 Update targets that are not currently recommended, or are not supported at all, will be allowed without any ClusterVersion overrides ([`force`][api-force] or a similar, new property).
-But update targets that are not currently recommended will result in entries in [the `overrides` history entries](#enhanced-clusterversion-representation).
-The `overrides` history entries will also include descriptions of any other complaints, like forced guards, that the cluster-version operator would like to record.
+But update targets that are not currently recommended will result in entries in [the `acceptedRisks` history entries](#enhanced-clusterversion-representation).
+The `acceptedRisks` history entries will also include descriptions of any other complaints, like forced guards, that the cluster-version operator would like to record.
 
 ### Update client support for the enhanced schema
 
@@ -339,7 +369,7 @@ url: https://bugzilla.redhat.com/show_bug.cgi?id=1941840#c33
 name: AuthOAuthProxyLeakedConnections
 message: On clusters with a Proxy configured, the authentication operator may keep many oauth-server connections open, resulting in high memory consumption by the authentication operator and router pods.
 matchingRules:
-- type: promql
+- type: PromQL
   promql:
     promql: max(cluster_proxy_enabled{type=~"https?"})
 ```
@@ -353,7 +383,7 @@ url: https://bugzilla.redhat.com/show_bug.cgi?id=1942207#c3
 name: VSphereNodeNameChanges
 message: vSphere clusters leveraging the vSphere cloud provider may lose node names which can have serious impacts on the stability of the control plane and workloads.
 matchingRules:
-- type: promql
+- type: PromQL
   promql:
     promql: |
       cluster_infrastructure_provider{type=~"VSphere|None"}
@@ -370,7 +400,7 @@ url: https://access.redhat.com/solutions/5896081
 name: VSphereHW14CrossNodeNetworkingError
 message: Clusters on vSphere Virtual Hardware Version 14 and later may experience cross-node networking issues.
 matchingRules:
-- type: promql
+- type: PromQL
   promql:
     promql: |
       cluster_infrastructure_provider{type=~"VSphere|None"}
@@ -411,7 +441,7 @@ Update services would consume the above graph-data, and serve graphs with:
           "message": "On clusters with a Proxy configured, the authentication operator may keep many oauth-server connections open, resulting in high memory consumption by the authentication operator and router pods.",
           "matchingRules": [
             {
-              "type": "promql",
+              "type": "PromQL",
               "promql": {
                 "promql": "max(cluster_proxy_enabled{type=~\"https?\"})"
               }
@@ -424,7 +454,7 @@ Update services would consume the above graph-data, and serve graphs with:
           "message": "vSphere clusters leveraging the vSphere cloud provider may lose node names which can have serious impacts on the stability of the control plane and workloads.",
           "matchingRules": [
             {
-              "type": "promql",
+              "type": "PromQL",
               "promql": {
                 "promql": "cluster_infrastructure_provider{type=~\"VSphere|None\"}\nor\n0 * cluster_infrastructure_provider"
               }
@@ -437,7 +467,7 @@ Update services would consume the above graph-data, and serve graphs with:
           "message": "Clusters on vSphere Virtual Hardware Version 14 and later may experience cross-node networking issues.",
           "matchingRules": [
             {
-              "type": "promql",
+              "type": "PromQL",
               "promql": {
                 "promql": "cluster_infrastructure_provider{type=~\"VSphere|None\"}\nor\n0 * cluster_infrastructure_provider"
               }
@@ -481,14 +511,14 @@ status:
       name: AuthOAuthProxyLeakedConnections
       message: On clusters with a Proxy configured, the authentication operator may keep many oauth-server connections open, resulting in high memory consumption by the authentication operator and router pods.
       matchingRules:
-      - type: promql
+      - type: PromQL
         promql:
           promql: "max(cluster_proxy_enabled{type=~\"https?\"})"
     - url: https://bugzilla.redhat.com/show_bug.cgi?id=1942207#c3
       name: VSphereNodeNameChanges
       message: vSphere clusters leveraging the vSphere cloud provider may lose node names which can have serious impacts on the stability of the control plane and workloads.
       matchingRules:
-      - type: promql
+      - type: PromQL
         promql:
           promql: |
             cluster_infrastructure_provider{type=~"VSphere|None"}
@@ -498,7 +528,7 @@ status:
       name: VSphereHW14CrossNodeNetworkingError",
       message: Clusters on vSphere Virtual Hardware Version 14 and later may experience cross-node networking issues.
       matchingRules:
-      - type: promql
+      - type: PromQL
         promql:
           promql: |
             cluster_infrastructure_provider{type=~"VSphere|None"}
@@ -601,7 +631,7 @@ $ oc adm upgrade --allow-not-recommended --to 4.7.4
 
 #### ClusterVersion history
 
-After updating along a supported but not recommended path, the history entry would contain an `overrides` entry:
+After updating along a supported but not recommended path, the history entry would contain an `acceptedRisks` entry:
 
 ```yaml
 status:
@@ -614,7 +644,7 @@ status:
     version: 4.7.4
     image: quay.io/openshift-release-dev/ocp-release@sha256:999a6a4bd731075e389ae601b373194c6cb2c7b4dadd1ad06ef607e86476b129
     verified: true
-    overrides: |
+    acceptedRisks: |
       Updating from 4.6.23 to 4.7.4 is supported, but not recommended for this cluster.
 
       Reason: MultipleReasons
@@ -669,7 +699,7 @@ And it's also possible to teach the cluster-version operator to reject PromQL th
 The Prometheus and monitoring stacks are fairly resource-intensive.
 There are [open proposals][mon-1569] to reduce their resource requirements.
 It is possible that some future clusters decide they need to drop the Prometheus stack entirely, which would leave the CVO unable to evaluate conditions based on PromQL.
-A future mitigation would be extending to support [non-PromQL filters](#non-promql-filters).
+A future mitigation would be extending to support [non-PromQL filters](#non-PromQL-filters).
 
 For clusters whose Prometheus stack is present but troubled, [the query coverage subsection](#query-coverage) explains how this enhancement identifies queries where the PromQL is successfully evaluated, but due to local cluster state (e.g. missing metrics, failed scrapes, etc.) the cluster cannot be clearly assigned to either the "vulnerable" or "immune" categories.
 
@@ -723,12 +753,12 @@ Older clients consuming newer ClusterVersion will not notice `conditionalUpdates
 
 ## Implementation History
 
-Major milestones in the life cycle of a proposal should be tracked in `Implementation History`.
+* 2021-09-23: `openshift/api` changes [implemented][implemented-API] for OpenShift 4.10.
 
 ## Drawbacks
 
 Dynamic edge status that is dependent on cluster state makes [the graph-data repository][graph-data] a less authoritative view of the graph served to a given client at a given time, as discussed in [the *risks and mititgations* section](#risks-and-mitigations).
-This is mitigated by ClusterVersion's [`status.history[].overrides`](#enhanced-clusterversion-representation), which records any cluster-version operator objections which the cluster administrator chose to override.
+This is mitigated by ClusterVersion's [`status.history[].acceptedRisks`](#enhanced-clusterversion-representation), which records any cluster-version operator objections which the cluster administrator chose to override.
 It is possible that cluster administrators would chose to clear that data, but it seems unlikely that they would invest significant effort in trying to cover their tracks when [the edges are supported regardless of whether they were recommended][openshift-docs-32091].
 
 ## Alternatives
@@ -782,7 +812,7 @@ promql: cluster_infrastructure_provider{type=~"VSphere|None"}
 
 However, while that would clearly distinguish the "yes, this cluster is vulnerable" case, it would not distinguish between "this cluster is not vulnerable" and "for some reason, this cluster doesn't have `cluster_infrastructure_provider` data at the moment" or other issues with PromQL execution.
 
-[The `promql` proposal](#enhanced-graph-data-schema-for-blocking-edges) specifies a single query that allows the update service to distinguish clusters in the matching state (query returns 1, risk matches, update is not recommended) from clusters that do not match (the query returns 0, risk does not match, update is recommended).
+[The `PromQL` proposal](#enhanced-graph-data-schema-for-blocking-edges) specifies a single query that allows the update service to distinguish clusters in the matching state (query returns 1, risk matches, update is not recommended) from clusters that do not match (the query returns 0, risk does not match, update is recommended).
 This allows the cluster-version operator to distinquish between the three states of `Recommended=True` (0), `Recommended=False` (1), or `Recommended=Unknown` (no result, for example because the query asked for metrics which the local Prometheus was failing to scrape).
 
 ### PromQL validation
@@ -800,12 +830,24 @@ A URI seems like the floor for metadata.
 The benefit is giving users some context about what they'd see if the clicked through to the detail URI.
 The downside is that we need to boil the issue down to a slug and sentence or two, and that might lead to some tension about how much detail to include.
 
-The properties are optional, but they could have been required.
-A benefit of making the properties required include simpler enforcement in the various clients.
+The properties are required, although personnally I would have preferred them to be optional.
+A benefit of making the properties required is simpler enforcement and post-enforcement consumer code, due to the decreased flexibility.
 A drawback of making the properties required is that an update service rejecting graph-data input, or a cluster-version operator rejecting Cincinnati JSON, etc. on the lack of one of these properies is unlikely to improve the user experience.
-We get most of the benefit, and avoid the drawback, by using optional properties.
-This forces clients to be more robust and consider how they will handle the lack of some motivational context.
-And [presubmit guards on graph-data](#test-plan) will enforce a local policy to ensure these properties are populated.
+A conditional update risk that is populated except for a `name` (but which has a `url`, `message`, and `matchingRules`) is probably almost as understandable to a cluster administrator as one which does include a `name`.
+
+[Presubmit guards on graph-data](#test-plan) will enforce a local policy to ensure these properties are populated.
+So the likelihood that and cluster retrieved incomplete data from the `upstream` update service is low, just "graph-data presubmit tests had a hole that graph-data admins fell through" and "external folks running their own policy engines".
+
+But if that ever happened, in the optional-property world, the CVO would execute the partial data to the best of its ability and pass the partial metadata on to the cluster admin (who could complain to their graph-data admins if the partial data wasn't actionable).
+
+In the required-property alternative, the cluster-version operator (which needs to continue to successfully write ClusterVersion status) would self-censor, removing any unacceptable-to-the-Kube-API-server risks or conditional targets until the result would be acceptable.
+That means that risks and conditional edges which would have been partially represented in the optional-property alternative ClusterVersion object are missing entirely from the required-property alternative.
+This could potentially lead to "hey, where did that edge go?  It was there yesterday..." cluster admin confusion, of the sort that currently lead us to publish text-only errata like [this][text-only-errata-example].
+
+Mitigating that "where did that edge go?" confusion in the required-property alternative, David expects graph-admins to be keeping watch over enough ClusterVersion content that they notice quickly if the CVO is not publishing some data that they expected to get through.
+So that in cases where partial data does slip into graph-data, the graph-data admins are likely to notice and fix the data before graph admins have time to get too worked up.
+
+David [was unconvinced][reqired-by-david] by my arguments about cluster admins being able to act on incomplete data (at least more than if the relevant conditional updates were missing entirely), so this enhancement uses required properties.
 
 Also, while I personally prefer `reason` for the slug, [David prefers `name`][name-over-reason], so that's what this enhancement uses.
 
@@ -819,7 +861,7 @@ For example, the:
 
 ```yaml
 matchingRules:
-- type: promql
+- type: PromQL
   promql:
     promql: |
       cluster_infrastructure_provider{type=~"VSphere|None"}
@@ -842,7 +884,7 @@ If we decide to add additional [cluster-condition types](#cluster-condition-type
 
 ```yaml
 matchingRules:
-- type: promql
+- type: PromQL
   promql:
     promql: |
       cluster_infrastructure_provider{type=~"VSphere|None"}
@@ -857,7 +899,7 @@ matchingRules:
 
 In which case, the cluster-version operator would:
 
-* Attempt to evaluate the `promql` condition.
+* Attempt to evaluate the `PromQL` condition.
   * If the PromQL returns "match", the risk matches, and the update is not recommended.
     No further checks needed for this rule set.
   * If the PromQL returns "does not match", the risk does not match, and the update is recommended.
@@ -871,6 +913,23 @@ In which case, the cluster-version operator would:
 
 This will gracefully handle the addition of new cluster-condition types, as consumers can treat unrecognized types as evaluation failures.
 As long as `matchingRules` contains at least one recognized, functioning type, the cluster-version operator will be able to distinguish recommended from not recommended.
+
+#### Implicit always condition
+
+[The `matchingRules` semantics](enhanced-graph-data-schema-for-blocking-edges) include:
+
+> If no condition can be successfully evaluated, the update should not be recommended.
+
+That means that an empty or unset array would mark the risk as a match for all clusters.
+However, David and Scott [requested][always-type] an explicit type for "always matches", so we have [`type: Always`](#always).
+
+#### Lowercase type names
+
+I'd initially gone with `type: promql` and `type: always`, but David said:
+
+> Always and PromQL.  We use CamelCase for enumerated values
+
+So that's what we went with.
 
 ### Discriminating union implementation
 
@@ -903,7 +962,7 @@ With [Go's lack of union support][go-union], there are a few possible approachs:
   Drawbacks include the slight awkwardness of parsing their data out of `Point`, and the useless nesting of `Point` in the JSON serialization.
 
 * A central struct capable of holding all the data.
-  [OpenShift's `BuildSource`] uses this pattern.
+  [OpenShift's `BuildSource`][api-buildsource] uses this pattern.
   Applied to the above color example, it would be:
 
   ```go
@@ -954,6 +1013,10 @@ I'd initially gone with the `Extra` map, because there are only a handful of dev
 But Ben and David convinced me that it's ok blocking external extensibility and requiring folks to go through openshift/api or fork to add new cluster-condition types.
 And the central-struct approach collects all the documentation in one place, making it easier to discover (turning the lack of extensibility from a draback into a benefit).
 
+David went a step further and required [an enum for `type`][enum-by-david].
+That means that, not only can the discriminating union hold type-specific configuration for an unrecognized type, it cannot hold the fact that an unrecognized type was even requested.
+So if we add additional [non-PromQL filters](#non-promql-filters) in future enhancements, the CVO will need to self-censor to keep the Kube-API-server from rejecting the not-in-the-enum `type`, and you get the "where did that edge go?" exposure for cluster-admins discussed in[the section about metadata alternatives](#metadata-to-include-when-blocking-a-conditional-request).
+
 #### Flattening or nesting per-type properties in discriminating unions
 
 As a sub-choice of the central-struct approach to discriminating unions, I had to decide between:
@@ -961,7 +1024,7 @@ As a sub-choice of the central-struct approach to discriminating unions, I had t
 ```go
 type ClusterCondition struct {
 	Type   string
-	PromQL string `json:"promql,omitempty"`
+	PromQL string `json:"PromQL,omitempty"`
 }
 ```
 
@@ -969,8 +1032,8 @@ with JSON like:
 
 ```json
 {
-  "type": "promql",
-  "promql": "max(cluster_proxy_enabled{type=~\"https?\"})"
+  "type": "PromQL",
+  "PromQL": "max(cluster_proxy_enabled{type=~\"https?\"})"
 }
 ```
 
@@ -979,11 +1042,11 @@ and:
 ```go
 type ClusterCondition struct {
 	Type   string
-	PromQL *PromQLClusterCondition `json:"promql,omitempty"`
+	PromQL *PromQLClusterCondition `json:"PromQL,omitempty"`
 }
 
 type PromQLClusterCondition struct {
-	PromQL string `json:"promql"`
+	PromQL string `json:"PromQL"`
 }
 ```
 
@@ -991,15 +1054,15 @@ with JSON like:
 
 ```json
 {
-  "type": "promql",
-  "promql": {
-    "promql": "max(cluster_proxy_enabled{type=~\"https?\"})"
+  "type": "PromQL",
+  "PromQL": {
+    "PromQL": "max(cluster_proxy_enabled{type=~\"https?\"})"
   }
 }
 ```
 
-The former avoids the useless `promql` nesting layer, as long as [the `promql` type](#promql) does not require additional configuration beyond the single query string.
-The latter allows for extension if we decide the `promql` type requires additional configuration.
+The former avoids the useless `PromQL` nesting layer, as long as [the `PromQL` type](#promql) does not require additional configuration beyond the single query string.
+The latter allows for extension if we decide the `PromQL` type requires additional configuration.
 
 In the `PromQLClusterCondition` approach, the query does not need to be a pointer, because once you have decided to use PromQL it is no longer optional and will always be required for backwards compatibility.
 
@@ -1014,24 +1077,25 @@ For the moment, we have decided that the additional transparency is not with it.
 ### Blocking CVO gates on update acceptance
 
 [The update-client support section](#update-client-support-for-the-enhanced-schema) suggests a client-side `--allow-not-recommended` gate on choosing a supported-but-not-recommended target.
-[The cluster-version operator support section](#cluster-version-operator-support-for-the-enhanced-schema) currently calls for informative [`history[].overrides`](enhanced-clusterversion-representation) complaints.
+[The cluster-version operator support section](#cluster-version-operator-support-for-the-enhanced-schema) currently calls for informative [`history[].acceptedRisks`](enhanced-clusterversion-representation) complaints.
 
 But the CVO could have a blocking gate, and require [`force`][api-force] or similar to override those guards.
 A benefit would be that the [`upstream`][api-upstream] recommendation service would be much harder to casually ignore.
 A drawback would be that blocking gates would be a large departure from the current lack of any gates `upstream`-based at all.
 Skipping CVO-side gates entirely would make it more difficult to reconstruct the frequency of this behavior, compared to scraping it out of ClusterVersion's `history` in Insights tarballs.
-For now, non-blocking CVO-side `overrides` complaints feel like a happy middle ground.
+For now, non-blocking CVO-side `acceptedRisks` complaints feel like a happy middle ground.
 
 ### Structured override history
 
-The [enhanced ClusterVersion representation](#enhanced-clusterversion-representation) adds an `string` `overrides` history entry.
+The [enhanced ClusterVersion representation](#enhanced-clusterversion-representation) adds an `string` `acceptedRisks` history entry.
 That entry could instead be structured, with slugs for each overridden condition and messages explaining the why the CVO at the time felt the condition was unhappy.
 A structured entry would allow for convenient, automated analysis of frequently-overriden conditions.
 But there is a risk that we would make a poor guess at structure, and need follow-up, schema-migrating changes to iterate towards better structures.
-With the single string, automated consumers are restricted to a boolean "were there any overrides?", although in exceptional cases they might want to search the message for particular substrings.
-And overrides themselves should be exceptional cases, so using a single string to hold a consolidated message seems like a sufficient level of engineering for the scale of this issue.
-We can revisit the structure (in an awkward, schema-migrating change) if analysis of the single strings shows that actually, overrides are not as execeptional as we'd thought, if we decide we'd need additional structure to get a handle on the now-larger issue.
+With the single string, automated consumers are restricted to a boolean "were there any accepted risks?", although in exceptional cases they might want to search the message for particular substrings.
+And accepted risks themselves should be exceptional cases, so using a single string to hold a consolidated message seems like a sufficient level of engineering for the scale of this issue.
+We can revisit the structure (in an awkward, schema-migrating change) if analysis of the single strings shows that actually, accepted risks are not as execeptional as we'd thought, if we decide we'd need additional structure to get a handle on the now-larger issue.
 
+[always-type]: https://github.com/openshift/enhancements/pull/821#discussion_r709177386
 [api-availableUpdates]: https://github.com/openshift/api/blob/67c28690af52a69e0b8fa565916fe1b9b7f52f10/config/v1/types_cluster_version.go#L126-L133
 [api-buildsource]: https://github.com/openshift/api/blob/85977bee07221f012896dcc53b77f44da0be0c4e/build/v1/types.go#L412-L437
 [api-cluster-version-status]: https://github.com/openshift/api/blob/67c28690af52a69e0b8fa565916fe1b9b7f52f10/config/v1/types_cluster_version.go#L78-L134
@@ -1051,12 +1115,14 @@ We can revisit the structure (in an awkward, schema-migrating change) if analysi
 [cincinnati-graph-api]: https://github.com/openshift/cincinnati/blob/master/docs/design/cincinnati.md#graph-api
 [cincinnati-graph-api-versioning]: https://github.com/openshift/enhancements/pull/870
 [cincinnati-spec]: https://github.com/openshift/cincinnati/blob/master/docs/design/cincinnati.md
+[enum-by-david]: https://github.com/openshift/api/pull/1011#discussion_r712428578
 [go-interface]: https://golang.org/ref/spec#Interface_types
 [go-json-RawMessage-Unmarshal]: https://pkg.go.dev/encoding/json#example-RawMessage-Unmarshal
 [go-union]: https://github.com/golang/go/issues/6213
 [graph-data]: https://github.com/openshift/cincinnati-graph-data
 [graph-data-pull-1]: http://github.com/openshift/cincinnati-graph-data/pull/1
 [graph-data-schema-version]: https://github.com/openshift/cincinnati-graph-data/tree/f7528c3120d818c3365361b281b6079b6a858397#schema-version
+[implemented-API]: https://github.com/openshift/api/pull/1011
 [json-array]: https://datatracker.ietf.org/doc/html/rfc8259#section-5
 [json-object]: https://datatracker.ietf.org/doc/html/rfc8259#section-4
 [json-string]: https://datatracker.ietf.org/doc/html/rfc8259#section-7
@@ -1070,12 +1136,14 @@ We can revisit the structure (in an awkward, schema-migrating change) if analysi
 [PromQL]: https://prometheus.io/docs/prometheus/latest/querying/basics/
 [PromQL-or]: https://prometheus.io/docs/prometheus/latest/querying/operators/#logical-set-binary-operators
 [PromQL-go-parser]: https://github.com/openshift/prometheus/tree/989765ceb07f61a85c65777dba1ff8fb7651d647/promql/parser
+[required-by-david]: https://github.com/openshift/api/pull/1011#discussion_r712426388
 [rhbz-1838007]: https://bugzilla.redhat.com/show_bug.cgi?id=1838007
 [rhbz-1858026-impact-statement]: https://bugzilla.redhat.com/show_bug.cgi?id=1858026#c28
 [rhbz-1858026-impact-statement-request]: https://bugzilla.redhat.com/show_bug.cgi?id=1858026#c26
 [rhbz-1941840-impact-statement]: https://bugzilla.redhat.com/show_bug.cgi?id=1941840#c33
 [rhbz-1957584-impact-statement]: https://bugzilla.redhat.com/show_bug.cgi?id=1957584#c19
 [support-documentation]: https://docs.openshift.com/container-platform/4.7/updating/updating-cluster-between-minor.html#upgrade-version-paths
+[text-only-errata-example]: https://access.redhat.com/errata/RHBA-2021:3415
 [tombstone]: https://github.com/openshift/cincinnati-graph-data/tree/f7528c3120d818c3365361b281b6079b6a858397#tombstones
 [uploaded-telemetry]: https://docs.openshift.com/container-platform/4.7/support/remote_health_monitoring/showing-data-collected-by-remote-health-monitoring.html#showing-data-collected-from-the-cluster_showing-data-collected-by-remote-health-monitoring
 [uploaded-telemetry-cluster_version_available_updates]: https://github.com/openshift/cluster-monitoring-operator/blame/e104fcc9a5c2274646ee3ac50db2cfb7905004e4/Documentation/data-collection.md#L43-L47
