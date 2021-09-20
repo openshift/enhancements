@@ -80,3 +80,22 @@ The following labels may be applied to enhancements to help categorize them:
 - `priority/important-soon` indicates that the enhancement is related to a
 top level release priority. These will be highlighted in the
 [this-week](this-week/) newsletters.
+
+## Life-cycle
+
+
+Pull requests to this repository should be short-lived and merged as
+soon as there is consensus. Therefore, the normal life-cycle timeouts
+are shorter than for most of our code repositories.
+
+Pull requests being actively discussed will stay open
+indefinitely. Inactive pull requests will automatically have the
+`life-cycle/stale` label applied after 28 days. Removing the
+life-cycle label will reset the clock. After 7 days, stale pull
+requests are updated to `life-cycle/rotten`. After another 7 days,
+rotten pull requests are closed.
+
+Ideally pull requests with enhancement proposals will be merged before
+significant coding work begins, since this avoids having to rework the
+implementation if the design changes as well as arguing in favor of
+accepting a design simply because it is already implemented.
