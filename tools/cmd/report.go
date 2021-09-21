@@ -97,11 +97,6 @@ func newReportCommand() *cobra.Command {
 					return prd.Pull.CreatedAt.After(earliestDate)
 				},
 			}
-			otherOld := stats.Bucket{
-				Rule: func(prd *stats.PullRequestDetails) bool {
-					return prd.Stale && prd.RecentActivityCount > 0
-				},
-			}
 
 			// Define some extra buckets for older or lingering items
 			revived := stats.Bucket{
@@ -143,7 +138,6 @@ func newReportCommand() *cobra.Command {
 				&otherClosed,
 				&revived,
 				&otherNew,
-				&otherOld,
 
 				&stale,
 				&otherActive,
@@ -217,11 +211,10 @@ func newReportCommand() *cobra.Command {
 				false,
 			)
 
-			report.SortByID(otherOld.Requests)
+			report.SortByID(idle.Requests)
 			report.ShowPRs(
-				fmt.Sprintf("Old (labeled as stale, but discussion in last %d days)",
-					daysBack),
-				otherOld.Requests,
+				fmt.Sprintf("Idle (no comments for at least %d days)", daysBack),
+				idle.Requests,
 				false,
 				false,
 			)
@@ -230,14 +223,6 @@ func newReportCommand() *cobra.Command {
 			report.ShowPRs(
 				"Other lifecycle/stale or lifecycle/rotten",
 				stale.Requests,
-				false,
-				false,
-			)
-
-			report.SortByID(idle.Requests)
-			report.ShowPRs(
-				fmt.Sprintf("Idle (no comments for at least %d days)", daysBack),
-				idle.Requests,
 				false,
 				false,
 			)
