@@ -228,7 +228,7 @@ func newReportCommand() *cobra.Command {
 
 			report.SortByID(stale.Requests)
 			report.ShowPRs(
-				"Other lifecycle/stale",
+				"Other lifecycle/stale or lifecycle/rotten",
 				stale.Requests,
 				false,
 				false,
