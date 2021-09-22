@@ -9,8 +9,8 @@ approvers:
   - bbennett # As pillar lead?
 
 creation-date: 2021-03-09
-last-updated: 2021-06-24
-status: implementable
+last-updated: 2021-09-22
+status: implemented
 see-also:
   - "/enhancements/storage/csi-driver-install.md"
 replaces:
@@ -26,7 +26,7 @@ superseded-by:
 - [x] Test plan is defined
 - [x] Operational readiness criteria is defined
 - [x] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [x] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
