@@ -34,7 +34,7 @@ type PullRequestDetails struct {
 	State         string
 	LGTM          bool // lgtm
 	Prioritized   bool // priority-important/soon or priority/critical-urgent
-	Stale         bool // lifecycle/stake
+	Stale         bool // lifecycle/stale or lifecycle/rotten
 	Group         string
 	IsEnhancement bool
 	ModifiedFiles []enhancements.ModifiedFile
@@ -118,6 +118,9 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 			prioritized = true
 		}
 		if *label.Name == "lifecycle/stale" {
+			stale = true
+		}
+		if *label.Name == "lifecycle/rotten" {
 			stale = true
 		}
 	}
