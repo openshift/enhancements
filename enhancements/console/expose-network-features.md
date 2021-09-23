@@ -41,7 +41,7 @@ a Network Policy).
 [In the new network policy creation forms, some fields may depend on the type
 of cluster network type](https://issues.redhat.com/browse/NETOBSERV-16).
 For example, `OpenShiftSDN` neither supports egress
-network policies nor ingress exceptions. The related fields should be only visible
+network policies nor ingress ipblock exceptions. The related fields should be only visible
 when the cluster network is `OVNKubernetes`.
 
 ### Goals
@@ -56,7 +56,7 @@ N/A.
 ## Proposal
 
 The Console UI should be able to read the set of features that the SDN component supports. These
-features are accessed via a ConfigMap (read-only permissions) that is written by the Cloud Network
+features are accessed via a ConfigMap (read-only permissions) that is written by the Cluster Network
 Operator (CNO). For example, the CNO would write a Config Map with a list of features, e.g.:
 
 ```properties
