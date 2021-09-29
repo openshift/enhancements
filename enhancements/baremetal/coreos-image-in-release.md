@@ -151,6 +151,15 @@ not possible to simply download the image from the public Internet at container
 build time. Instead this will be accomplished by *MAGIC*. Uploading the ISOs to
 the lookaside cache in Brew is one possibility.
 
+Different processor architectures require different ISOs (though all are
+represented in the stream metadata). It may make sense to have a separate
+Dockerfile for each architecture. For the foreseeable future, we only need to
+be able to pull a container for the local architecture that contains an ISO for
+that same architecture. In the future, it is possible that the containers for
+each architecture's ISO may themselves need to be multi-architecture, so that
+it is possible to run a container image containing an ISO for a *different*
+architecture.
+
 The RHCOS release pipeline may need to be adjusted to ensure that the latest
 ISO is always available in the necessary location.
 
