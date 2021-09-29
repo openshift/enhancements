@@ -163,10 +163,11 @@ architecture.
 The RHCOS release pipeline may need to be adjusted to ensure that the latest
 ISO is always available in the necessary location.
 
-OKD uses (rebuilt) Fedora CoreOS images instead of RHEL CoreOS, and this will
-need to be taken into account. It may be that the build environment for OKD
-allows for a more straightforward solution there (like downloading the image
-directly).
+OKD uses Fedora CoreOS images instead of RHEL CoreOS, but the URLs are
+nevertheless listed in the installer's [stream
+metadata](https://github.com/openshift/installer/blob/master/data/data/fcos-stream.json).
+The build environment for OKD is *not* disconnected, so the container build can
+download the image directly.
 
 ### Risks and Mitigations
 
@@ -179,9 +180,6 @@ latest bug and security fixes.
 ### Open Questions [optional]
 
 How will we provide up-to-date images to the container build?
-
-Are there similar internet access restrictions on the build environment for
-OKD?
 
 ### Test Plan
 
