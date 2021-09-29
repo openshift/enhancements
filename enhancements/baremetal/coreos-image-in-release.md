@@ -12,6 +12,7 @@ reviewers:
   - "@cgwalters"
   - "@aravindhp"
   - "@jlebon"
+  - "@sosiouxme"
   - "@dhellmann"
   - "@sdodson"
   - "@LorbusChris"
@@ -138,8 +139,12 @@ reverted](https://github.com/openshift/machine-config-operator/pull/2126) but
 should now be viable after [fixes to the
 installer](https://github.com/openshift/installer/pull/4413).
 
-The correct version of CoreOS to use is available from the openshift-installer;
-this could be obtained by using the installer container image as a build image.
+The correct version of CoreOS to use is available from the [stream
+metadata](https://github.com/openshift/installer/blob/master/data/data/rhcos-stream.json)
+in the openshift-installer. This could be obtained by using the installer
+container image as a build image. Deriving the container image from the
+installer container has the convenient side-effect of always triggering a
+rebuild when the version changes.
 
 Because OpenShift container images are built in an offline environment, it is
 not possible to simply download the image from the public Internet at container
@@ -148,9 +153,6 @@ the lookaside cache in Brew is one possibility.
 
 The RHCOS release pipeline may need to be adjusted to ensure that the latest
 ISO is always available in the necessary location.
-
-We will need to ensure that the container image is rebuilt whenever the RHCOS
-image is updated.
 
 OKD uses (rebuilt) Fedora CoreOS images instead of RHEL CoreOS, and this will
 need to be taken into account. It may be that the build environment for OKD
