@@ -51,7 +51,7 @@ See:
 The specific goals of this proposal are to:
 
 Support the centralized host management use case by partially enabling Baremetal Host API
-on the following platforms:
+on the following on-premise platforms:
 - None
 - OpenStack
 - vSphere
@@ -99,8 +99,9 @@ of the Provisioning CR will be restricted to exactly those required by centraliz
 *Only spec.provisioningNetwork=Disabled mode will be accepted in the Provisioning CR.*
 
 If any other provisioningNetwork mode is set, the CBO webhook will refuse the change
-in the usual case, but if defined before upgrading the operator, the Reconcile loop
-must always validate the Provisioning CR.
+in the usual way, but if defined before upgrading the operator, the Reconcile loop must always
+validate the Provisioning CR
+(by setting ClusterOperator/baremetal condition[InvalidConfiguration] = true ).
 
 Note:
 
@@ -130,11 +131,10 @@ There is concern that *random* customers will use this feature out of context
 and create support burden. This is why we have not suggested enabling CBO on
 all platforms and with full feature set. However it is still a potential issue.
 
+Another mitigation for this is to avoid documenting this outside of the CIM/ZTP case.
+For that reason this change won't be documented as a standalone feature, only in the context of CIM/ZTP.
+
 ## Design Details
-
-### Open Questions [optional]
-
-1. Where will the feature be e2e tested?
 
 ### Test Plan
 
