@@ -2,12 +2,13 @@
 title: alerting-consistency
 authors:
   - "@michaelgugino"
+  - "@bison"
 reviewers:
   - TBD
 approvers:
   - TBD
 creation-date: 2021-02-03
-last-updated: 2021-02-03
+last-updated: 2021-09-09
 status: implementable
 ---
 
@@ -25,29 +26,31 @@ status: implementable
 ## Summary
 
 Clear and actionable alerts are a key component of a smooth operational
-experience.  Ensuring we have clear and concise guidelines for our alerts
-will allow developers to better inform users of problem situations and how to
-resolve them.
+experience.  Ensuring we have clear and concise guidelines for developers and
+administrators creating new alerts for OpenShift will result in a better
+experience for end users.  This proposal aims to outline the collective wisdom
+of the OpenShift developer and wider monitoring communities in a way which can
+then be translated into official documentation.
 
 ## Motivation
 
-Improve Signal to noise of alerts.  Align alert levels "Critical, Warning, Info"
-with operational expectations to allow easier triaging.  Ensure current and
-future alerts have documentation covering problem/investigation/solution steps.
+There seems to be consensus that the signal-to-noise ratio of alerts in
+OpenShift could be improved, and alert fatigue for administrators thereby
+reduced.  There should be clear guidance aligning critical, warning, and info
+alert severities with expected outcomes across components.  There must be agreed
+upon acceptance criteria for new critical alerts introduced in OpenShift.
 
 ### Goals
 
-* Define clear criteria for designating an alert 'critical'
-* Define clear criteria for designating an alert 'warning'
-* Define minimum time thresholds before prior to triggering an alert
-* Define ownership and responsibilities of existing and new alerts
-* Establish clear documentation guidelines
-* Outline operational triage of firing alerts
+* Define acceptance criteria for new critical alerts.
+* Define practical guidelines for writing alerts of each severity.
+* Translate this into clear developer documentation with examples.
+* Enforce acceptance criteria for critical alerts in the OpenShift test suite.
 
 ### Non-Goals
 
-* Define specific alert needs
-* Implement user-defined alerts
+* Define needs for specific alerts.
+* Implement user-defined alerts.
 
 ## Proposal
 
@@ -63,31 +66,69 @@ tuned to allow end-user operational efficiency.
 As an SRE, I need alerts to be informative, actionable and thoroughly
 documented.
 
-### Implementation Details/Notes/Constraints [optional]
-
-This enhancement will require some developers and administrators to rethink
-their concept of alerts and alert levels.  Many people seem to have an
-intuition about how alerts should work that doesn't necessarily match how
-alerts actually work or how others believe alerts should work.
-
-Formalizing an alerting specification will allow developers and administrators
-to speak a common language and have a common understanding, even if the concepts
-seem unintuitive initially.
-
 ### Risks and Mitigations
 
-People will make wrong assumptions about alerts and how to handle them.  This
-is not unique to alerts, people often believe certain components should behave
-in a particular way in which they do not.  This is an artifact of poor
-documentation that leaves too much to the imagination.
-
-We can work around this problem with clear and concise documentation.
+As the primary goal of this proposal is to collect feedback to be translated
+into developer documentation, there isn't much risk.  The primary source of risk
+is friction introduced by enforcing acceptance criteria for critical alerts in
+shared OpenShift test suites.  This could be an issue for teams already shipping
+critical alerts, but can be mitigated by providing case by case exceptions until
+the monitoring team can reach out and provide guidance on correcting any issues.
+This also provides a concrete process by which we can audit existing critical
+alerts across components, and bring them into compliance one by one.
 
 ## Design Details
 
+### Recommended Reading
+
+A list of references on good alerting practices:
+
+* [Google SRE Book - Monitoring Distributed Systems][7]
+* [Prometheus Alerting Documentation][8]
+* [Alerting for Distributed Systems][9]
+
+### Alert Ownership
+
+Individual teams are responsible for writing and maintaining alerting rules for
+their components, i.e. their operators and operands.  The monitoring team is
+available for consulting.  Frequently asked questions and broadly applicable
+patterns should be added to the developer documentation this proposal aims to
+result in.
+
+Teams should also take into consideration how their components interact with
+existing monitoring and alerting.  As an example, if your operator deploys a
+service which creates one or more `PersistentVolume` resources, and these
+volumes are expected to be mostly full as part of normal operation, it's likely
+that this will cause unnecessary `KubePersistentVolumeFillingUp` alerts to fire.
+You should work with the monitoring team to find a solution to avoid triggering
+these alerts if they are not actionable.
+
+### Style Guide
+
+* Alert names MUST be CamelCase, e.g.: `PrometheusRuleFailures`
+* Alert names SHOULD be prefixed with a component, e.g.: `AlertmanagerFailedReload`
+  * There may be exceptions for some broadly scoped alerts, e.g.: `TargetDown`
+* Alerts MUST include a `severity` label indicating the alert's urgency.
+  * Valid severities are: `critical`, `warning`, or `info` — see below for
+    guidelines on writing alerts of each severity.
+* Alerts MUST include `summary` and `description` annotations.
+  * Think of `summary` as the first line of a commit message, or an email
+    subject line.  It should be brief but informative.  The `description` is the
+    longer, more detailed explanation of the alert.
+* Alerts SHOULD include a `namespace` label indicating the source of the alert.
+  * Many alerts will include this by virtue of the fact that their PromQL
+    expressions result in a namespace label.  Others may require a static
+    namespace label — see for example, the [KubeCPUOvercommit][1] alert.
+* All critical alerts MUST include a `runbook_url` annotation.
+  * Runbook style documentation for resolving critical alerts is required.
+    These runbooks are reviewed by OpenShift SREs and currently live in the
+    [openshift/runbooks][2] repository.
+
 ### Critical Alerts
 
-TL/DR:  For alerting current and impending disaster situations.
+TL/DR: For alerting current and impending disaster situations.  These alerts
+page an SRE.  The situation should warrant waking someone in the middle of the
+night.
 
 Timeline:  ~5 minutes.
 
@@ -99,37 +140,39 @@ alerts so they fire before the situation becomes irrecoverable. Expect users to
 be notified of a critical alert within a short period of time after it fires so
 they can respond with corrective action quickly.
 
-Some disaster situations are:
-* loss or impending loss of etcd-quorum
-* etcd corruption
-* inability to route application traffic externally or internally
-(data plane disruption)
-* inability to start/restart any pod other than capacity.  EG, if the API server
-were to restart or need to be rescheduled, would it be able to start again?
+Example critical alert: [KubeAPIDown][3]
 
-In other words, critical alerts are something that require someone to get out
-of bed in the middle of the night and fix something **right now** or they will
-be faced with a disaster.
+```yaml
+- alert: KubeAPIDown
+  annotations:
+    summary: Target disappeared from Prometheus target discovery.
+    description: KubeAPI has disappeared from Prometheus target discovery.
+    runbook_url: https://github.com/openshift/runbooks/blob/master/alerts/cluster-monitoring-operator/KubeAPIDown.md
+  expr: |
+    absent(up{job="apiserver"} == 1)
+  for: 15m
+  labels:
+    severity: critical
+```
 
-An example of something that is NOT a critical alert:
-* MCO and/or related components are completely dead/crash looping.
+This alert fires if no Kubernetes API server instance has reported metrics
+successfully in the last 15 minutes.  This is a clear example of a critical
+control-plane issue that represents a threat to the operability of the cluster
+as a whole, and likely warrants paging someone.  The alert has clear summary and
+description annotations, and it links to a runbook with information on
+investigating and resolving the issue.
 
-Even though the above is quite significant, there is no risk of immediate loss
-of the cluster or running applications.
-
-You might be thinking to yourself: "But my component is **super** important, and
-if it's not working, the user can't do X, which user definitely will want."  All
-that is probably true, but that doesn't make your alert "critical" it just makes
-it worthy of an alert.
-
-The group of critical alerts should be small, very well defined,
-highly documented, polished and with a high bar set for entry. This includes a
+The group of critical alerts should be small, very well defined, highly
+documented, polished and with a high bar set for entry.  This includes a
 mandatory review of a proposed critical alert by the Red Hat SRE team.
 
 ### Warning Alerts
 
-TL/DR: fix this soon, or some things won't work and upgrades will probably be
-blocked.
+TL/DR: The vast majority of alerts should use the severity.  Issues at the
+warning level should be addressed in a timely manner, but don't pose an
+immediate threat to the operation of the cluster as a whole.
+
+Timeline:  ~60 minutes
 
 If your alert does not meet the criteria in "Critical Alerts" above, it belongs
 to the warning level or lower.
@@ -141,88 +184,65 @@ that they do not fire until components have sufficient time to try to recover
 from the interruption automatically. Expect users to be notified of a warning,
 but for them not to respond with corrective action immediately.
 
-Timeline:  ~60 minutes
+Example warning alert: [ClusterNotUpgradeable][4]
 
-60 minutes?  That seems high!  That's because it is high.  We want to reduce
-the noise.  We've done a lot to make clusters and operators auto-heal
-themselves.  The whole idea is that if a condition has persisted for more than
-60 minutes, it's unlikely to be resolved without intervention any time later.
+```yaml
+- alert: ClusterNotUpgradeable
+  annotations:
+    summary: One or more cluster operators have been blocking minor version cluster upgrades for at least an hour.
+    description: In most cases, you will still be able to apply patch releases.
+      Reason {{ "{{ with $cluster_operator_conditions := \"cluster_operator_conditions\" | query}}{{range $value := .}}{{if and (eq (label \"name\" $value) \"version\") (eq (label \"condition\" $value) \"Upgradeable\") (eq (label \"endpoint\" $value) \"metrics\") (eq (value $value) 0.0) (ne (len (label \"reason\" $value)) 0) }}{{label \"reason\" $value}}.{{end}}{{end}}{{end}}"}}
+      For more information refer to 'oc adm upgrade'{{ "{{ with $console_url := \"console_url\" | query }}{{ if ne (len (label \"url\" (first $console_url ) ) ) 0}} or {{ label \"url\" (first $console_url ) }}/settings/cluster/{{ end }}{{ end }}" }}.
+    expr: |
+      max by (name, condition, endpoint) (cluster_operator_conditions{name="version", condition="Upgradeable", endpoint="metrics"} == 0)
+    for: 60m
+    labels:
+      severity: warning
+```
 
-#### Example 1: All machine-config-daemons are crashlooping
+This alert fires if one or more operators have not reported their `Upgradeable`
+condition as true in more than an hour.  The alert has a clear name and
+informative summary and description annotations.  The timeline is appropriate
+for allowing the operator a chance to resolve the issue automatically, avoiding
+the need to alert an administrator.
 
-That seems significant
-and it probably is, but nobody has to get out of bed to fix this **right now**.
-But, what if a machine dies, I won't be able to get a replacement?  Yeah, that
-is probably true, but how often does that happen?  Also, that's an entirely
-separate set of concerns.
+### Info Alerts
 
-#### Example 2:  I have an operator that needs at least 3 of something to work
-* With 2/3 replicas, warning alert after 60M.
-* With 1/3 replicas, warning alert after 10M.
-* With 0/3 replicas, warning alert after 5M.
+TL/DR: Info level alerts represent situations an administrator should be aware
+of, but that don't necessarily require any action.  Use these sparingly, and
+consider instead reporting this information via Kubernetes events.
 
-Q: How long should we wait until the above conditions rises to a 'critical'
-alert?
+Example info alert: [MultipleContainersOOMKilled][5]
 
-A: It should never rise to the level of a critical alert, it's not critical.  If
-it was, this section would not apply.
+```yaml
+- alert: MultipleContainersOOMKilled
+  annotations:
+    description: Multiple containers were out of memory killed within the past
+      15 minutes. There are many potential causes of OOM errors, however issues
+      on a specific node or containers breaching their limits is common.
+      summary: Containers are being killed due to OOM
+  expr: sum(max by(namespace, container, pod) (increase(kube_pod_container_status_restarts_total[12m]))
+    and max by(namespace, container, pod) (kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}) == 1) > 5
+  for: 15m
+  labels:
+    namespace: kube-system
+    severity: info
+```
 
-#### Example 3:  I have an operator that only needs 1 replica to function
-
-If the cluster can upgrade with only 1 replica, and the the service is
-available despite other replicas being unavailable, this can probably
-be just an info-level alert.
-
-#### Q: What if a particular condition will block upgrades?
-
-A: It's a warning level alert.
-
-
-### Alert Ownership
-
-Previously, the bulk of our alerting was handled directly by the monitoring
-team.  Initially, this gave use some indication into platform status without
-much effort by each component team.  As we mature our alerting system, we should
-ensure all teams take ownership of alerts for their individual components.
-
-Going forward, teams will be expected to own alerting rules within their own
-repositories.  This will reduce the burden on the monitoring team and better
-enable component owners to control their alerts.
-
-Additional responsibilities include:
-
-1. First in line to receive the bug for an alert firing
-1. Responsible for describing, "what does it mean" and "what does it do"
-1. Responsible for choosing the level of alert
-1. Responsible for deciding if the alert even matters
-
-
-### Documentation Required
-
-1. The name of the alerting rule should clearly identify the component impacted
-by the issue (for example etcdInsufficientMembers instead of
-InsufficientMembers, MachineConfigDaemonDrainError instead of MCDDrainError).
-It should camel case, without whitespace, starting with a capital letter. The
-first part of the alert name should be the same for all alerts originating from
-the same component.
-1. Alerting rules should have a "severity" label whose value is either info,
-warning or critical (matching what we have today and staying aside from the
-discussion whether we want minor or not).
-1. Alerting rules should have a description annotation providing details about
-what is happening and how to resolve the issue.
-1. Alerting rules should have a summary annotation providing a high-level
-description (similar to the first line of a commit message or email subject).
-1. If there's a runbook in https://github.com/openshift/runbooks, it should be
-linked in the runbook_url annotation.
-
-
-### Open Questions [optional]
-
-* Explore additional alerting severity (eg, 'minor') for triage purposes
+This alert fires if multiple containers have been terminated due to out of
+memory conditions in the last 15 minutes.  This is something the administrator
+should be aware of, but may not require immediate action.
 
 ### Test Plan
 
+Automated tests enforcing acceptance criteria for critical alerts, and basic
+style linting will be added to the [openshift/origin][6] end-to-end test suite.
+The monitoring team will work with anyone shipping existing critical alerts that
+don't meet these criteria in order to resolve the issue before enabling the
+tests.
+
 ## Implementation History
+None
 
 ## Drawbacks
 
@@ -251,3 +271,14 @@ None
 
 ### Version Skew Strategy"
 None
+
+
+[1]: https://github.com/openshift/cluster-monitoring-operator/blob/79cdf68/assets/control-plane/prometheus-rule.yaml#L235-L247
+[2]: https://github.com/openshift/runbooks
+[3]: https://github.com/openshift/cluster-monitoring-operator/blob/79cdf68/assets/control-plane/prometheus-rule.yaml#L412-L421
+[4]: https://github.com/openshift/cluster-version-operator/blob/513a2fc/install/0000_90_cluster-version-operator_02_servicemonitor.yaml#L68-L76
+[5]: https://github.com/openshift/cluster-monitoring-operator/blob/79cdf68/assets/cluster-monitoring-operator/prometheus-rule.yaml#L326-L338
+[6]: https://github.com/openshift/origin
+[7]: https://sre.google/sre-book/monitoring-distributed-systems/
+[8]: https://prometheus.io/docs/practices/alerting/
+[9]: https://www.usenix.org/sites/default/files/conference/protected-files/srecon16europe_slides_rabenstein.pdf

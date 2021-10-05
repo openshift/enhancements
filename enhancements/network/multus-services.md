@@ -31,21 +31,33 @@ superseded-by:
 
 ## Summary
 
-This proposal introduces an implemention of Kubernetes services for secondary network interfaces, which are created by multus CNI. Currently pods' secondary network interfaces made by multus a sidecar to the Kubernetes network, henceforth Kubernetes network functionality cannot be used, such as network policy and service. This proposal introduces several components into OpenShift in order to implement some of the Kubernetes service functionality for pods' secondary network interfaces.
+This proposal introduces an implemention of Kubernetes services for secondary network interfaces, which are created
+by multus CNI. Currently pods' secondary network interfaces made by multus a sidecar to the Kubernetes network,
+henceforth Kubernetes network functionality cannot be used, such as network policy and service. This proposal
+introduces several components into OpenShift in order to implement some of the Kubernetes service functionality
+for pods' secondary network interfaces.
 
 ## Motivation
 
-The Kubernetes Service object is a commonly used abstraction to access Pod workloads. Users can define services with label selectors and the service provides load-balancing mechanisms to access the pods. This is very useful for typical network services, such as HTTP servers. Kubernetes provides various service modes to access, such as ClusterIP, LoadBalancer, headless service, ExternalName and NodePort, not only for inside cluster as well as outside of clusters.
+The Kubernetes Service object is a commonly used abstraction to access Pod workloads. Users can define services with
+label selectors and the service provides load-balancing mechanisms to access the pods. This is very useful for
+typical network services, such as HTTP servers. Kubernetes provides various service modes to access, such as
+ClusterIP, LoadBalancer, headless service, ExternalName and NodePort, not only for inside cluster as well as
+outside of clusters.
 
-These functionality is implemented in various components (e.g. endpoint controller, kube-proxy, iptables/Open vSwitch) and that is the reason we cannot use it for pods' secondary network -- because secondary networks for pods are not under management of Kubernetes.
+These functionality is implemented in various components (e.g. endpoint controller, kube-proxy, iptables/Open vSwitch)
+and that is the reason we cannot use it for pods' secondary network -- because secondary networks for pods are not
+under management of Kubernetes.
 
 ### Goals
 
-- Provide a mechanism to access to endpoints (by virtual IP address, DNS names), which is organized by Kubernetes service objects, in phased approach.
+- Provide a mechanism to access to endpoints (by virtual IP address, DNS names), which is organized by Kubernetes
+service objects, in phased approach.
 
 ### Non-Goals
 
-Due to the variety of service types, this must be handled in a phased approach. Therefore this covers the initial implementation and the structural elements, some of which may share commonalities with future enhancements.
+Due to the variety of service types, this must be handled in a phased approach. Therefore this covers the initial
+implementation and the structural elements, some of which may share commonalities with future enhancements.
 
 - Provide all types of Kubernetes service functionality for secondary network interface.
 - Provide the exact same semantics for Kubernetes service mechanisms.
@@ -66,15 +78,21 @@ We are targeting the following functionality for services in this proposal:
 
 #### Service Reachability
 
-The service can be accessed from the pods that can access the target service network. For example, if `ServiceA` is created for `net-attach-def1`, then `ServiceA` can be accessed from the pods which has `net-attach-def1` network interface and we won't provide any gateway/routers for access from outside of network in this proposal.
+The service can be accessed from the pods that can access the target service network. For example, if `ServiceA` is
+created for `net-attach-def1`, then `ServiceA` can be accessed from the pods which has `net-attach-def1` network
+interface and we won't provide any gateway/routers for access from outside of network in this proposal.
 
 #### Cluster IP for Multus
 
-When the service is created with `type: ClusterIP`, then Kubernetes assign cluster virtual IP for the services. User can access the services with given virtual IP. The request to virtual IP is automatically replaced with actual pods' network interface IP and send to the target services. User needs to make sure reachability to the target network, otherwise the request packet will be dropped.
+When the service is created with `type: ClusterIP`, then Kubernetes assign cluster virtual IP for the services. User
+can access the services with given virtual IP. The request to virtual IP is automatically replaced with actual
+pods' network interface IP and send to the target services. User needs to make sure reachability to the target
+network, otherwise the request packet will be dropped.
 
 #### Headless service
 
-Headless services are implemented by CoreOS as round-robin DNS. This being the case, services are only reachable if pods can reach the IPs of headless services.
+Headless services are implemented by CoreOS as round-robin DNS. This being the case, services are only reachable if
+pods can reach the IPs of headless services.
 
 ### User Stories
 
@@ -90,9 +108,16 @@ In this enhancement, we will introduce following components (component names may
 - Multus Service Controller
 - Multus Proxy
 
-The Multus service controller watches all pods' secondary interfaces, services and network attachment definitions and it creates `EndpointSlice` for the service. `EndpointSlice` contains secondary network IP address whidch Multus proxy watches. Service and EndpointSlice have the label, `service.kubernetes.io/service-proxy-name`, which is defined at [kube-proxy APIs](https://pkg.go.dev/k8s.io/kubernetes/pkg/proxy/apis), to make target service out of Kubernetes management.
+The Multus service controller watches all pods' secondary interfaces, services and network attachment definitions and
+it creates `EndpointSlice` for the service. `EndpointSlice` contains secondary network IP address whidch Multus proxy
+watches. Service and EndpointSlice have the label, `service.kubernetes.io/service-proxy-name`, which is defined at
+[kube-proxy APIs](https://pkg.go.dev/k8s.io/kubernetes/pkg/proxy/apis), to make target service out of Kubernetes
+management.
 
-Multus proxy provides forwarding plane for multus-service with iptables at Pod's network namespace. It watches Service and EndpointSlice with 'service.kubernetes.io/service-proxy-name: multus-proxy' and creates changes destination to the service pods from Service VIP. It does not provide NAT (ip masquerade) for now because multus network is mainly for 'secondary network' and it assumes default route to primary Kubernetes cluster network.
+Multus proxy provides forwarding plane for multus-service with iptables at Pod's network namespace. It watches Service
+and EndpointSlice with 'service.kubernetes.io/service-proxy-name: multus-proxy' and creates changes destination to
+the service pods from Service VIP. It does not provide NAT (ip masquerade) for now because multus network is mainly
+for 'secondary network' and it assumes default route to primary Kubernetes cluster network.
 
 #### Create Service
 
@@ -102,28 +127,43 @@ User creates Kubernetes service object. At that time, user needs to add followin
 
 - `label: service.kubernetes.io/service-proxy-name` (well-known label, defined in kubernetes)
 
-Users will need to set the label `service.kubernetes.io/service-proxy-name`, with the value, `multus-proxy`. This label specifies the component that takes care of the service. Without this variable, upstream kubernetes (i.e. kube-proxy) will handle this service, then kube-proxy will create iptables rules. This label should be set to `multus-proxy`. For OpenShift, we should verify that this label is recognized by openshift-sdn as well as ovn-kubernetes. This enhancement should address openshift-sdn and ovn-kubernetes repositories.
+Users will need to set the label `service.kubernetes.io/service-proxy-name`, with the value, `multus-proxy`. This
+label specifies the component that takes care of the service. Without this variable, upstream kubernetes
+(i.e. kube-proxy) will handle this service, then kube-proxy will create iptables rules. This label should be set to
+`multus-proxy`. For OpenShift, we should verify that this label is recognized by openshift-sdn as well as
+ovn-kubernetes. This enhancement should address openshift-sdn and ovn-kubernetes repositories.
 
 - annotations: k8s.v1.cni.cncf.io/service-network (newly introduced)
 
-`k8s.v1.cni.cncf.io/service-network` specifies which network (i.e. net-attach-def) is the target for exposing the service.
-This label specifies only one net-attach-def in same namespace of the Service/Pods, hence Service/Network Attachment Definition/Pods should be in the same namespace. This annotation only allows users to specify one network, hence one Service VIP should match one of service/network mappings.
+`k8s.v1.cni.cncf.io/service-network` specifies which network (i.e. net-attach-def) is the target for exposing the
+service. This label specifies only one net-attach-def in same namespace of the Service/Pods, hence Service/Network
+Attachment Definition/Pods should be in the same namespace. This annotation only allows users to specify one network,
+hence one Service VIP should match one of service/network mappings.
 
 Then multus service controller will watch the service and pods.
 
 2. Pods are launched and multus service controller creates the endpointslices for the sevice.
 
-Once multus service controller finds pods associated with the service, then the controller will create EndpointSlices for the service. The EndpointSlices contains a pod's net-attach-def IP address from pod's network status annotation and the EndpointSlices has same label, `service.kubernetes.io/service-proxy-name`, and its value from corresponding service to avoid kube-proxy to add iptables rules for Kubernetes Service forwarding plane. When the pods/services is updated/removed, then multus service controller changes/removes the corresponding endpoitslices to track the changes.
+Once multus service controller finds pods associated with the service, then the controller will create EndpointSlices
+for the service. The EndpointSlices contains a pod's net-attach-def IP address from pod's network status annotation
+and the EndpointSlices has same label, `service.kubernetes.io/service-proxy-name`, and its value from corresponding
+service to avoid kube-proxy to add iptables rules for Kubernetes Service forwarding plane. When the pods/services
+is updated/removed, then multus service controller changes/removes the corresponding endpoitslices to track the
+changes.
 
 3. Multus proxy generates iptables rules for the service in Pod's network namespace.
 
-Multus proxy watches the endpointslices and services. Periodically multus proxy generates iptables rules for the pods and put it in a pod's network namespace (not host network namespace, as kube-proxy does). Multus proxy tracks the changes of service/endpoints, hence multus proxy update/remove iptables rules when service/endpoints are updated/removed.
+Multus proxy watches the endpointslices and services. Periodically multus proxy generates iptables rules for the pods
+and put it in a pod's network namespace (not host network namespace, as kube-proxy does). Multus proxy tracks the
+changes of service/endpoints, hence multus proxy update/remove iptables rules when service/endpoints are
+updated/removed.
 
 ### Risks and Mitigations
 
-#### Interworking service.kubernetes.io/service-proxy-name among other Kubernetes network:
+#### Interworking service.kubernetes.io/service-proxy-name among other Kubernetes network
 
-This feature depends on the well-known label, `service.kubernetes.io/service-proxy-name` implementation. If some Kubernetes network solution satisfies the following condition, then this feature does not work:
+This feature depends on the well-known label, `service.kubernetes.io/service-proxy-name` implementation. If some
+Kubernetes network solution satisfies the following condition, then this feature does not work:
 
 - The SDN solution provides forwarding plane for Kubernetes service (i.e. Cilium, ovn-kubernetes).
 - The SDN solution does not recognize the well-known label, `service.kubernetes.io/service-proxy-name`.
@@ -138,11 +178,16 @@ N/A
 
 ### Test Plan
 
-For upstream testing, we should address e2e test in upstream in some fashion, however, upstream test will be done with `kind`, hence we could cover some of primitive testing. More detailed testing should be done in baremetal CI job or SR-IOV CI job with SR-IOV devices.
+For upstream testing, we should address e2e test in upstream in some fashion, however, upstream test will be done
+with `kind`, hence we could cover some of primitive testing. More detailed testing should be done in baremetal CI
+job or SR-IOV CI job with SR-IOV devices.
 
 ### Graduation Criteria
 
-This feature, multus service abstraction, is fairly complicated because additional networks (i.e. network attachment definition) depend on customer environments, so each customer has each network and these are unlikely to be the same. So we require customer feedback not only about its quality also about their use-case and their experiences. We should watch customer feedback and carefully think about the current status of the feature and proceed to graduation.
+This feature, multus service abstraction, is fairly complicated because additional networks (i.e. network attachment
+definition) depend on customer environments, so each customer has each network and these are unlikely to be the same.
+So we require customer feedback not only about its quality also about their use-case and their experiences. We
+should watch customer feedback and carefully think about the current status of the feature and proceed to graduation.
 
 #### Dev Preview -> Tech Preview
 
