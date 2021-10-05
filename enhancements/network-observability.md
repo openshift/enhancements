@@ -271,7 +271,7 @@ fields (e.g. filter on a pod in the Src Pod or Dest Pod column).
 - Refresh rate - Determine if the table will update automatically after some time
 - Sort by column (ascending, descending)
 - Persistent selection - Remember the settings across sessions such
-as the selected columns 
+as the selected columns
 - Export data to CSV format - Exports the selected columns and what
 is currently filtered in that time range
 
