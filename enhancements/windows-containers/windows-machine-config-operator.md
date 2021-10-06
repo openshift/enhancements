@@ -158,9 +158,7 @@ We plan to maintain kubelet major version parity with the Linux counterpart.
 ## Implementation History
 
 We already have a working [prototype](https://github.com/openshift/windows-machine-config-operator)
-in place where use a custom [CRD](https://github.com/openshift/windows-machine-config-operator/blob/master/deploy/crds/wmc.openshift.io_windowsmachineconfigs_crd.yaml)
-and the [Windows Node Installer](https://github.com/openshift/windows-machine-config-bootstrapper/tree/master/tools/windows-node-installer)
-library to enable Windows workloads.
+in place where use a custom CRD and the Windows Node Installer library to enable Windows workloads.
 
 ## Drawbacks
 
