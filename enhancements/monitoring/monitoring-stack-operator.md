@@ -10,9 +10,9 @@ reviewers:
 - @pb82
 - @simonpasquier
 approvers:
-- TBD
+- @simonpasquier
 creation-date: 2021.08.12
-last-updated: 2021.08.12
+last-updated: 2021.10.07
 status: implementable
 ---
 
@@ -23,8 +23,8 @@ status: implementable
 - [X] Enhancement is `implementable`
 - [X] Design details are appropriately documented from clear requirements
 - [X] Test plan is defined
-- [ ] Operational readiness criteria is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [X] Operational readiness criteria is defined
+- [X] Graduation criteria for dev preview, tech preview, GA
 - [X] User-facing documentation is created in [openshift-docs]([https://github.com/openshift/openshift-docs/](https://github.com/openshift/openshift-docs/))
   - The project documentation will be part of the project itself. No documentation in openshift-docs will be needed.
   See [Documentation Required](#documentation-required) for further details.
@@ -33,7 +33,7 @@ status: implementable
 
 This document proposes a solution and a delivery plan for scraping, querying and alerting on metrics related to Red Hat Managed Services running in OSD clusters. The proposed solution is not intended to complement the existing monitoring stack managed by the Cluster Monitoring Operator, nor used directly by Customers at this moment.
 
-### Glossary
+## Glossary
 
 * MS-SRE/MT-SRE: Managed Service / Managed Tenant Site Reliability Engineer
 * MTO: Managed Tenant Owners - the teams that develop each Managed Service. The Kafka Team is one example of an MTO.
@@ -46,12 +46,11 @@ For additional acronyms, see [Red Hat Dictionary](https://source.redhat.com/grou
 
 OpenShift Monitoring is currently composed of two main systems - Platform Monitoring (PM) and User Workload Monitoring (UWM), both of which are part of OpenShift core.
 
-Platform Monitoring holds metrics about core system components running in `openshift-*` and `kube-*` namespaces. Platform Monitoring is enabled in all OpenShift installations and cannot be disabled. Some of the components scraped by PM include core-dns, etcd, kube-apiserver, image-registry, operator-lifecycle-manager etc.
-Platform Monitoring is by design an immutable stack, [which means that admins cannot extend it with additional metrics without losing the support.](https://docs.openshift.com/container-platform/4.7/monitoring/configuring-the-monitoring-stack.html#support-considerations_configuring-the-monitoring-stack)
+Platform Monitoring holds metrics about core system components running in `openshift-*` and `kube-*` namespaces. Platform Monitoring is enabled in all OpenShift installations and cannot be disabled. Components scraped by PM include core-dns, etcd, kube-apiserver, image-registry, operator-lifecycle-manager, etc.
+Platform Monitoring is by design an immutable stack, [which means that admins cannot extend it with additional metrics without losing support.](https://docs.openshift.com/container-platform/4.7/monitoring/configuring-the-monitoring-stack.html#support-considerations_configuring-the-monitoring-stack)
 
 User Workload Monitoring is an optional stack managed by Cluster Monitoring Operator (CMO) and is disabled by default. Once enabled by cluster admins, it allows users to monitor namespaces that are not part of OpenShift core. If enabled, only one stack can be deployed.
-The recommended way to get “platform” data is through Thanos Querier. Alternatively, the UWM stack can scrape the `/federate` endpoint expsed by the Platform Monitoring Prometheus to injest a subset of the available platform metrics.
-Please refer to the User Workload Monitoring [enhancement proposal](https://github.com/openshift/enhancements/blob/master/enhancements/monitoring/user-workload-monitoring.md) for more details.
+The recommended way to get “platform” data is through Thanos Querier. Please refer to the User Workload Monitoring [enhancement proposal](https://github.com/openshift/enhancements/blob/master/enhancements/monitoring/user-workload-monitoring.md) for more details.
 
 Recently an essential model of managing software for customers emerged at Red Hat, referred to as “Managed Services” or “Managed Tenants”. From an architectural point there are three types of such services:
 
@@ -91,8 +90,9 @@ In future it can be used to allow customers to define their monitoring stacks. U
 * Provide a way for managed services to create dashboards for monitoring their services.
 * Allow aggregating portions of managed service metrics at a multi-cluster level, e.g. for reporting SLOs.
 * Allow longer retention for portions of data (e.g. calculating 1 month burn down SLO budget).
-* Allow analytics on portion of managed service data in conjuction with Telemeter data at the aggregation level.
-* End customers using UWM should not see managed service metrics.
+* Allow analytics on portion of managed service data in conjunction with Telemeter data at the aggregation level.
+* UWM contains only customer metrics (no managed service metrics).
+* Ability to expose managed service metrics into the OpenShift console (ODF goal).
 * Soft Goal: A foundation for next iterations mentioned in ### Long term motivation.
 
 ### Long Term Motivation
@@ -101,16 +101,15 @@ To avoid maintaining multiple monitoring solutions, this proposal aims to be a f
 
 * Such a solution as a community project which is easy to use & contribute to.
 * Reduce Platform Monitoring overhead and its single point of failure (SPOF) property.
-* Auto-scaling metric scraping based on number of ServiceMonitors
+* Auto-scaling metric scraping based on number of ServiceMonitors.
 * Soft multi-tenancy for local storage (TSDB).
-* Opt-in for full forwarding mode.
-* Full architecture for Hypershift ([WIP](https://docs.google.com/document/d/1BJarERppgiJ8esc6d8anbJMOQ0AflFBQea-Zc9wAp0s/edit))
+* Opt-in for full forwarding mode (agent).
+* Full architecture for Hypershift ([WIP](https://docs.google.com/document/d/1BJarERppgiJ8esc6d8anbJMOQ0AflFBQea-Zc9wAp0s/edit)).
 
 ### Non-Goals
 
 * Access controls for managed service owners for metrics from different managed services. For example, there are currently no requirements for owners of managed services A to be prohibited from seeing metrics from managed service B, and vice versa.
 * Expose managed service metrics to end-users. We know e.g. OCS addon wants this, but this can be achieved on top of the proposed solution using client or backend side filtering for data isolation if needed (e.g. prom-label-proxy). The monitoring team can do this in the next iteration.
-* Integrate managed service metrics into the OpenShift console. We know OCS wants to integrate with OCP Console, but we assume the console team can help support switching between Prometheus-compatible data sources.
 * Solve Platform Monitoring SPOF, scalability and overhead. This will be targeted in a follow-up enhancement.
 * Allow logging and tracing capabilities. Other solutions should tackle this (designed by Logging and Tracing teams.)
 
@@ -154,9 +153,13 @@ As an MTO, I would like to create dashboards for certain metrics across all clus
 
 As a Customer, I can use UWM without seeing Addons metrics, alerting or recording configurations.
 
+#### Story 8
+
+As a Customer, I can see metrics from certain addons A, B, C from OpenShift Console , addons A, B, C, choose to expose those.
+
 ### Implementation Details/Notes/Constraints
 
-Since UWM and PM are part of Openshift Core, we would like to avoid increasing the complexity and introducing potential bugs for customers by extending those monitoring stacks. Because of this, we propose developing a new stack that will be able to support the managed service use-case while staying compatible with upcoming use-cases such as Hypershift or [KCP](https://github.com/kcp-dev/kcp).
+Since UWM and PM are part of Openshift Core, we would like to avoid increasing the complexity and introducing potential bugs for customers by extending those monitoring stacks. Because of this, we propose developing a new stack that will be able to support the managed service use-case while staying compatible with upcoming use-cases such as HyperShift or [KCP](https://github.com/kcp-dev/kcp).
 
 #### Overview
 
@@ -171,9 +174,11 @@ Once a `MonitoringStack` custom resource (CR) has been created, the operator wil
 * a Prometheus CR
 * an Alertmanager CR
 * a Grafana CR and a Grafana Data Source CR
-* a Thanos Querier if the stack is configured for high availability
+* a Thanos Querier if the stack is configured for high availability.
 
-In other cases, in next iterations of MonitoringStack Operator, with single option, it might deploy just a Prometheus Agent deployment (forwarding only capabilities). This will align with what will be needed in HyperShift, where we don't want or need a full-blown monitoring stack on every cluster.
+In other cases, in next iterations of MonitoringStack Operator, with single option, it might deploy:
+* Just a Prometheus Agent deployment (forwarding only capabilities). This will align with what will be needed in HyperShift, where we don't want or need a full-blown monitoring stack on every cluster.
+* Shared Prometheus stack across multiple tenants for soft multitenancy.
 
 The `MonitoringStack` CRD is meant to be an abstraction over monitoring needs and requirements for a single tenant that specifies their needs. The underlying implementation is up to the MonitoringStackOperator.
 
@@ -255,13 +260,21 @@ During the Monitoring Enablement Working Group meetings, we received feedback fr
 Moreover, Platform SRE expressed concerns that a shared Alertmanager configuration could lead to conflicts or misconfiguration that can impact alerting for every managed tenant running in the cluster.
 
 Based on these discussions, we suggest that a dedicated Alertmanager instance is deployed with each `MonitoringStack` CR in the same namespace as the CR itself.
-We can also take advantage of the recently added <code>[AlertmanagerConfig](https://github.com/prometheus-operator/prometheus-operator/blob/master/Documentation/api.md#alertmanagerconfig)</code> and allow MTO/MTSRE to create their own routing configuration in a centrally deployed Alertmanager instance.
+In next iteration we can focus on sharing AM across MonitoringStacks. We will take advantage of the recently added <code>[AlertmanagerConfig](https://github.com/prometheus-operator/prometheus-operator/blob/master/Documentation/api.md#alertmanagerconfig)</code> and allow MTO/MTSRE to create their own routing configuration in a centrally deployed Alertmanager instance.
+
+### Integrating with Console
+
+After discussions with console team we would like to avoid changing UX and add notion of data sources. Since OCS wants to integrate with OCP Console, we need to make sure Monitoring Stack addons can (opt-in) expose data to Platform Monitoring's Thanos Querier that is connected to Console.
+
+For this we added feature request for CMO recorded in [MON-1954](https://issues.redhat.com/browse/MON-1954). When implemented we will be able to deploy following architecture:
+
+![s](assets/monitoring-stack-exposing-addons-console.png)
 
 ### Creating Dashboards
 
 The OCP Console does not (yet) support querying different Prometheus instances, making it hard to use it for creating dashboards.
 
-For this reason, the monitoring operator will optionally deploy a Grafana operator that can manage Grafana instances in the namespaces where a MonitoringStack CR is present. Managed service SREs and owners will then be able to use the CRDs provided by the Grafana operator to create their own dashboards.
+For this reason, the monitoring operator will optionally deploy (or require) a Grafana operator that can manage Grafana instances in the namespaces where a MonitoringStack CR is present. Managed service SREs and owners will then be able to use the CRDs provided by the Grafana operator to create their own dashboards.
 
 ### Release Model
 
@@ -327,6 +340,8 @@ In all cases, MSO should not conflict with any other monitoring tool installed i
 * Onboarding RHOBS documentation
 
 ### Open Questions
+
+Unanswered questions, that can be answered later:
 
 * If customer can use both MSO and UWM in the future, which one should they use?
 * Should we allow customer to create MSO CRs? (MonitoringStacks).
@@ -481,23 +496,25 @@ New versions of the managed service monitoring stack will be published in OLM. U
 
 ### Graduation Criteria
 
-TBD
-
 #### Dev Preview -> Tech Preview
 
-TBD
+* Monitoring Stack Operator can deploy dedicated Prometheus, Grafana DataSource, Thanos Query and Alertmanager.
+* We are visible and installable from OperatorHub community catalog.
 
 #### Tech Preview -> GA
 
-TBD
+* More options exposed in Monitoring Stack resource
+* We have onboard at lease few Addons on this feature.
+* Our bundle is well documented on Operator Hub
+* We have few semver versions released, periodic release cycle defined.
 
 #### Removing a deprecated feature
 
-TBD
+Only new features are added through this enhancement.
 
 ### Version Skew Strategy
 
-TBD
+N/A
 
 ### Previous Docs
 
