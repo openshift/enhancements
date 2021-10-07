@@ -504,7 +504,7 @@ New versions of the managed service monitoring stack will be published in OLM. U
 #### Tech Preview -> GA
 
 * More options exposed in Monitoring Stack resource
-* We have onboard at lease few Addons on this feature.
+* We have onboard at least few Addons on this feature.
 * Our bundle is well documented on Operator Hub
 * We have few semver versions released, periodic release cycle defined.
 
