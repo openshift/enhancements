@@ -191,7 +191,7 @@ these decision.
 
 #### OVS
 Open vSwitch (OVS) is the NetFlow exporter in the OpenShift cluster.  When
-Network Observability is enabled, each OVS in the pod will be configured to
+Network Observability is enabled, each OVS in the node will be configured to
 send IPFIX data.  This is an all-or-none proposition, meaning there will
 not be an option to selectively choose some OVS to be exporters only.  There
 will be a configuration parameter to set the sampling rate.  Other parameters
@@ -219,14 +219,15 @@ See Network Observability Storage enhancement for more details.
 
 
 ### Operators
-Two new operators will be added to OCP.
+Two new operators will be required for network observability.  They are
+the Network Observability Operator and the Loki Operator.
 
 #### Network Observability Operator (NetObserv)
 The Network Observability Operator will need to be installed from OperatorHub
 to enable this feature.  This operator has a dependency on the Loki
-Operator.  It is a dynamic plugin that is responsible for defining resources
-similar to Red Hat OpenShift Logging and also enabling collection of NetFlow.
-This can be done from Web Console or CLI.
+Operator.  This is an OpenShift Console dynamic plugin that is responsible
+for defining resources and enabling collection of NetFlow similar to
+Red Hat OpenShift Logging.  This can be done from Web Console or CLI.
 
 The operator will follow the [Operator Lifecycle Manager](https://olm.operatorframework.io/)
 (OLM) model which is a component of the [Operator Framework](https://github.com/operator-framework).
@@ -243,11 +244,12 @@ OpenShift Logging Operator (formerly Cluster Logging Operator) will limit
 the ability to enable one and not the other.
 
 #### Loki Operator
-The Loki Operator manages Grafana Loki, which is the component that will be
+The Loki Operator is a separate project at
+https://github.com/ViaQ/loki-operator but is required for network
+observability.  It manages Grafana Loki, which is the component that will be
 used to store NetFlows.  It will be installed in its own namespace with the
 intention that if another component wants to use Loki, it should create its
-own instance.  See the enhancement on Network Observability - Loki for more
-details.
+own instance.
 
 ***Side note:***<br>
 This is a move away from Elasticsearch due to licensing restrictions.
