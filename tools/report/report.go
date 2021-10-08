@@ -88,7 +88,7 @@ func formatLabels(labels []string, indent string) string {
 
 const descriptionIndent = "  "
 
-func showOnePR(prd *stats.PullRequestDetails, withDescription bool, withLabels bool) {
+func showOnePR(summarizer *enhancements.Summarizer, prd *stats.PullRequestDetails, withDescription bool, withLabels bool) {
 	author := ""
 	if prd.Pull.User != nil {
 		for _, option := range []*string{prd.Pull.User.Name, prd.Pull.User.Login} {
@@ -124,7 +124,7 @@ func showOnePR(prd *stats.PullRequestDetails, withDescription bool, withLabels b
 		var err error
 
 		if isEnhancement {
-			summary, err = enhancements.GetSummary(*prd.Pull.Number)
+			summary, err = summarizer.GetSummary(*prd.Pull.Number)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "WARNING: failed to get summary of PR %d: %s\n",
 					*prd.Pull.Number, err)
@@ -148,7 +148,7 @@ func showOnePR(prd *stats.PullRequestDetails, withDescription bool, withLabels b
 
 // ShowPRs prints a section of the report by formatting the
 // PullRequestDetails as a list.
-func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool, withLabels bool) {
+func ShowPRs(summarizer *enhancements.Summarizer, name string, prds []*stats.PullRequestDetails, withDescription bool, withLabels bool) {
 	if len(prds) == 0 {
 		return
 	}
@@ -169,7 +169,7 @@ func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 			foundUpdate = true
 			continue
 		}
-		showOnePR(prd, withDescription, withLabels)
+		showOnePR(summarizer, prd, withDescription, withLabels)
 	}
 
 	if foundUpdate {
@@ -178,9 +178,11 @@ func ShowPRs(name string, prds []*stats.PullRequestDetails, withDescription bool
 			if prd.IsNew {
 				continue
 			}
-			showOnePR(prd, false, false)
+			showOnePR(summarizer, prd, false, false)
 		}
 	}
+
+	return
 }
 
 // SortByID reorders the slice of PullRequestDetails by the pull
