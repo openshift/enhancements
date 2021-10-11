@@ -65,11 +65,12 @@ from the location/image in each custom resource.
 CLIs could be installed in a similar manner to plugins through [krew](https://github.com/kubernetes-sigs/krew).
 CLI images would serve the artifacts to enable disconnected downloads, and OpenShift CLIs will be available as
 [krew plugins](https://github.com/kubernetes-sigs/krew-index/tree/master/plugins).
-    * Krew and Krew plugins are upstream projects that Kubernetes users are already familiar with
-    * The index will be served by the CRD controller with its contents managed by cluster-admins via CRs
-    * A Krew-compatible index can provide available CLIs and plugins for a cluster (similar to the current index) and can also provide an easy mechanism for installing through `oc tools`
-    * An openshift-krew-index with supported artifacts could hold information about CLIs supported by OpenShift. However, with `krew index add https://someother-third-party-index`
-    we won't limit cluster-admins from adding their own index with whatever plugins they want.  Only the openshift-krew-index will be supported.
+
+* Krew and Krew plugins are upstream projects that Kubernetes users are already familiar with
+* The index will be served by the CRD controller with its contents managed by cluster-admins via CRs
+* A Krew-compatible index can provide available CLIs and plugins for a cluster (similar to the current index) and can also provide an easy mechanism for installing through `oc tools`
+* An openshift-krew-index with supported artifacts could hold information about CLIs supported by OpenShift.
+* With `krew index add https://someother-third-party-index` we won't limit cluster-admins from adding their own index with whatever plugins they want. Only the openshift-krew-index will be supported.
 
 Users will continue to have the option to download binaries from either the central location where artifacts are published or from the console.
 This proposal adds the mechanism to install from images built from the same artifacts using `oc`. All options will offer the same binaries,
@@ -113,7 +114,7 @@ The user will invoke the following commands:
 * `oc tools install odo` will install `odo` to a user's home directory, as a standalone binary.
 
 #### Example
-```
+```text
 $ oc tools list
 NAME                 DESC                        LATEST       INSTALLED
 -----                -----                       -----        -----
@@ -161,7 +162,7 @@ to a cluster-admin for the creation of a CR:
 Each CLI will provide an image.
 Each CLI is responsible for creating a CR to hold metadata.  The CR will serve to deliver the metadata and description
 of its deliverable binary.  Initially, CRs will be accessed using `oc tools` command, and `oc tools install <cli>` will extract the binary to a user's home directory.
-Users will install OpenShift tools that are known compatible with each cluster version through `oc tools`.    
+Users will install OpenShift tools that are known compatible with each cluster version through `oc tools`.
 
 A CLI must provide a ClusterCLI CR.  The result of this proposal will be:
 * ClusterCLI Custom Resource Definition
