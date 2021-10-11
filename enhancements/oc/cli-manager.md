@@ -54,6 +54,26 @@ where to download them from and which version they should download.  We need to 
 of services on OpenShift.  We need a mechanism for providing and consuming tools that is simple to add on to as new CLIs are
 developed from a variety of sources - and this should be specific for each cluster and available with disconnected installs.
 
+### Goals
+
+* No new form of binary distribution or binary creation will be proposed, because we have an existing structure at Red Hat.
+RPMs or images are the only options, and images must be deployed by the RH pipeline via operators. This proposal is for delivering
+CLIs via images, because this will enable offering CLIs offline through an existing image registry.
+* CLI owners must be able to easily distribute their binaries
+* The version of the CLI a user is offered is appropriate for the version of the CLI controller installed on the cluster
+* Arbitrary binaries not delivered by the in-cluster CRD controller are not important or relevant because of requirement 1 and 2
+  * Anyone who wants such tools can download them outside of this mechanism
+* CRD controller for registering CRs with an API for listing, extracting and downloading artifacts
+  * Krew-compatible index that both krew and oc can consume where the download links are for cluster-local resources
+  * The index and artifcats will served from a single route and service within the cluster
+
+### Non-Goals
+
+* `oc tools` will not build or serve the binaries.  It will know where to find them.
+* This proposal is not concerned with _which_ binaries will be managed.  This proposal is meant to determine the mechanism only.  Consumers and publishers are clients of the mechanism.
+* `oc tools` will not create or update the ClusterCLI Custom Resources, that will be managed by individual CLIs. However, the CLIs that are
+currently available as `consoleclidownloads`, `oc, odo, and helm`, will be included in the reference implementation of this enhancement.
+
 ## Proposal
 
 Each component wishing to provide customers with their binaries will build and publish artifacts via an official channel to a central index.
@@ -83,29 +103,9 @@ oc binaries by running a webserver pod in the console namespace with a route.  T
 be included in the CRD controller that will create the core ClusterCLI custom resources (oc, odo, and helm, the 3 CLIs currently available
 through the consoleclidownloads mechansism).
 
-### Goals
+### User Stories
 
-* No new form of binary distribution or binary creation will be proposed, because we have an existing structure at Red Hat.
-RPMs or images are the only options, and images must be deployed by the RH pipeline via operators. This proposal is for delivering
-CLIs via images, because this will enable offering CLIs offline through an existing image registry.
-* CLI owners must be able to easily distribute their binaries
-* The version of the CLI a user is offered is appropriate for the version of the CLI controller installed on the cluster
-* Arbitrary binaries not delivered by the in-cluster CRD controller are not important or relevant because of requirement 1 and 2
-  * Anyone who wants such tools can download them outside of this mechanism
-* CRD controller for registering CRs with an API for listing, extracting and downloading artifacts
-  * Krew-compatible index that both krew and oc can consume where the download links are for cluster-local resources
-  * The index and artifcats will served from a single route and service within the cluster
-
-### Non-Goals
-
-* `oc tools` will not build or serve the binaries.  It will know where to find them.
-* This proposal is not concerned with _which_ binaries will be managed.  This proposal is meant to determine the mechanism only.  Consumers and publishers are clients of the mechanism.
-* `oc tools` will not create or update the ClusterCLI Custom Resources, that will be managed by individual CLIs. However, the CLIs that are
-currently available as `consoleclidownloads`, `oc, odo, and helm`, will be included in the reference implementation of this enhancement.
-
-## User Stories
-
-### Story 1
+#### Story 1
 
 As a user, I want a CLI manager for various CLIs available for OpenShift and related services so that I can discover, install and list them
 The user will invoke the following commands:
@@ -113,7 +113,7 @@ The user will invoke the following commands:
 * `oc tools list` will access the connected OpenShift cluster, if connected,  and will retrieve information about available CLIs (ClusterCLI CRs)
 * `oc tools install odo` will install `odo` to a user's home directory, as a standalone binary.
 
-#### Example
+##### Example
 ```text
 $ oc tools list
 NAME                 DESC                        LATEST       INSTALLED
@@ -126,7 +126,7 @@ tkn                  Tekton CLI                  1.0          Not Installed
 
 ```
 
-### Story 2
+#### Story 2
 
 As a user, I want to access various CLIs from the OpenShift Console Web Terminal so that I can use the
 services available in the cluster. The CLIs versions should match the those of the operators deployed
@@ -143,7 +143,7 @@ included in the reference implementation of this enhancement.
 
 The deployment of the CRD controller will have an API accessible to the console for future CLI list and download integration in the future.
 
-### Story 3
+#### Story 3
 
 As owner of a CLI tool, I want to publish my CLI tool to users of the cluster. I need to create a CR for my tool, or provide the required information about my tool
 to a cluster-admin for the creation of a CR:
@@ -157,7 +157,12 @@ to a cluster-admin for the creation of a CR:
 * The image:tag (and registry credentials if required)
 * The path within the image where the binary for the given platform/architecture can be found
 
-## Design Detals
+### Risks and Mitigations
+
+Distributing undesirable binaries is always a risk. Some mitigations include requiring cluster-admins to maintain the index, and the verification of downloaded
+binaries using SHA256 hashes.
+
+## Design Details
 
 Each CLI will provide an image.
 Each CLI is responsible for creating a CR to hold metadata.  The CR will serve to deliver the metadata and description
@@ -178,19 +183,31 @@ For making the controller host a krew-compatible API, there are some challenges.
 presents a few challenges as the git HTTP server protocol is not as straightforward as a traditional REST API serving JSON. The CRs would essentially need to be committed
 to a temporary git repo which is then served via HTTP by `git-upload-pack`.
 
-## References
-- [Krew: kubectl plugin manager](https://github.com/kubernetes-sigs/krew) - manages kubectl plugins from
-an [index](https://github.com/kubernetes-sigs/krew-index) of all known krew plugins.
-- [Git HTTP server protocol](https://www.git-scm.com/docs/http-protocol) - How git servers (i.e. GitHub) work, this is required for krew index compatibility.
-- ["Uc" PoC by Hiram](https://github.com/chirino/uc) - manages Kubernetes CLI clients with an online catalog of releases.  Installs to a user's
-home directory, $HOME/.uc/cache  and when the cluster version does not match a known version, will install latest (well 'latest' known for uc oc
-atm is 3.11)
+### Test Plan
 
-_notes on macOS binaries_
-[Signing binaries for macOS Catalina](https://developer.apple.com/news/?id=09032019a)
-[related to above, Go toolchain issue with macOS Catalina](https://github.com/golang/go/issues/34986)
+**Note:** Section not required until targeted at a release.
 
-## Version Skew Strategy
+### Graduation Criteria
+
+**Note:** Section not required until targeted at a release.
+
+#### Dev Preview -> Tech Preview
+
+**Note:** Section not required until targeted at a release.
+
+#### Tech Preview -> GA
+
+**Note:** Section not required until targeted at a release.
+
+#### Removing a deprecated feature
+
+**Note:** Section not required until targeted at a release.
+
+### Upgrade / Downgrade Strategy
+
+If possible, installation, upgrade, downgrade, and uninstallation should be handled by the Operator Lifecycle Manager (OLM).
+
+### Version Skew Strategy
 
 * CLIs are expected to be backwards compatible.  When working with multiple clusters, it's expected that CLI versions will work across cluster versions
   * If this is not the case, CLI owners will provide that information in the Custom Resource description
@@ -198,9 +215,38 @@ _notes on macOS binaries_
   * Will be good for multiple cluster versions
   * It is rare for an admin of multiple clusters to require different versions of a single CLI
 
+## Implementation History
+
+* 2019-12-03 - Originally proposed by @sallyom: https://github.com/openshift/enhancements/pull/137
+* 2021-10-06 - Modified and reproposed by @deejross
+
+## Drawbacks
+
+There are few restrictions on what can be distributed by the CLI manager. It expects to deal with single-file binaries approved by cluster-admins.
+However, it is possible for cluster-admins to allow the distribution of non-oc related tools and plugins which should be discouraged.
+
+## Alternatives
+
+* [Krew: kubectl plugin manager](https://github.com/kubernetes-sigs/krew) - manages kubectl plugins from an [index](https://github.com/kubernetes-sigs/krew-index) of all known krew plugins.
+  * Currently only usable in Internet-connected environments
+  * Could be made to work by introducing a Git server and a file server for artifacts into the environment, which increases complexity and is difficult to support
+* ["Uc" PoC by Hiram](https://github.com/chirino/uc) - manages Kubernetes CLI clients with an online catalog of releases.
+  * Installs to a user's home directory, $HOME/.uc/cache  and when the cluster version does not match a known version, will install latest
+  * 'latest' known for uc oc atm is 3.11
+  * No activity since 2019
+
 ## Infrastructure Needed
 
 * CRD and API [example](https://github.com/deejross/openshift-cli-manager/blob/main/config/crd/bases/config.openshift.io_clitools.yaml)
 * ClusterCLI controller: [concept](https://github.com/deejross/openshift-cli-manager)
 * ClusterCLI CR: [example](https://github.com/deejross/openshift-cli-manager/blob/main/config/samples/vault_clitool.yaml)
 * Each CLI will publish an image to package artifacts [example](https://github.com/openshift/oc/blob/master/images/cli-artifacts/Dockerfile.rhel)
+
+## References
+
+Notes on macOS binaries:
+
+* [Signing binaries for macOS Catalina](https://developer.apple.com/news/?id=09032019a)
+* [related to above, Go toolchain issue with macOS Catalina](https://github.com/golang/go/issues/34986)
+
+
