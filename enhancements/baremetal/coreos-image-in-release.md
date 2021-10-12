@@ -82,6 +82,11 @@ Following a similar approach to that currently used with the QCOW2 also
 effectively extends the limitation that we are not updating the provisioning OS
 image to include the deploy image as well.
 
+The assisted-service already uses a similar method to that being implemented
+for IPI, customising a RHCOS ISO to deploy with. To use the on-premises
+assisted-service to install clusters using ZTP, users must similarly mirror the
+ISO.
+
 The agent itself (IPA) is delivered separately, in a container image as part of
 the OpenShift release payload, so in any event we will continue to be able to
 update IPA.
