@@ -14,7 +14,7 @@ import (
 type Stats struct {
 	Query            *util.PullRequestQuery
 	EarliestDate     time.Time
-	ReviewCounts     map[string]int32
+	ReviewCounts     map[string]int
 	allPRs           map[int]*github.PullRequest
 	ReviewCountsByPR map[string]map[int]int
 }
@@ -31,7 +31,7 @@ func strInSlice(input string, slice []string) bool {
 func (s *Stats) ReviewersInOrder(ignore []string) []string {
 	type kv struct {
 		Key   string
-		Value int32
+		Value int
 	}
 
 	var sorted []kv
@@ -82,7 +82,7 @@ func getName(user *github.User) string {
 func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 
 	if s.ReviewCounts == nil {
-		s.ReviewCounts = make(map[string]int32)
+		s.ReviewCounts = make(map[string]int)
 	}
 	if s.ReviewCountsByPR == nil {
 		s.ReviewCountsByPR = make(map[string]map[int]int)
