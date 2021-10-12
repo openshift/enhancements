@@ -66,6 +66,7 @@ implementation and the structural elements, some of which may share commonalitie
 - Ingress and other functionalities related to Kubernetes service (this will be addressed in another enhancement).
 - Network verification for accesssing services (i.e. users need to ensure network targets are reachabile).
 - Services for universal forwarding mechanisms (e.g DPDK Pods are not supported), we only focus on the pods which uses Linux network stack (i.e. iptables).
+- Headless service (need to more discussion in community for its design)
 
 ## Proposal
 
@@ -74,7 +75,6 @@ implementation and the structural elements, some of which may share commonalitie
 We are targeting the following functionality for services in this proposal:
 
 - ClusterIP
-- Headless services
 
 #### Service Reachability
 
@@ -88,11 +88,6 @@ When the service is created with `type: ClusterIP`, then Kubernetes assign clust
 can access the services with given virtual IP. The request to virtual IP is automatically replaced with actual
 pods' network interface IP and send to the target services. User needs to make sure reachability to the target
 network, otherwise the request packet will be dropped.
-
-#### Headless service
-
-Headless services are implemented by CoreOS as round-robin DNS. This being the case, services are only reachable if
-pods can reach the IPs of headless services.
 
 ### User Stories
 
