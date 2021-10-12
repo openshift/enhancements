@@ -7,7 +7,7 @@ authors:
 reviewers:
   - "@russellb"
   - "@mcurry-rh"
-  - "@bbennett"
+  - "@knobunc"
   - "@amorenoz"
   - "@eraichst"
   - "@eparis"
@@ -15,9 +15,9 @@ reviewers:
 approvers:
   - "@russellb"
   - "@mcurry-rh"
-  - "@bbennett"
+  - "@knobunc"
 creation-date: 2021-09-22
-last-updated: 2021-09-22
+last-updated: 2021-10-11
 status: implementable
 see-also:
 replaces:
@@ -48,11 +48,11 @@ to help understand, diagnose, and troubleshoot networking issues.
 ## Motivation
 
 With Kubernetes, a layer of abstraction is added making it difficult for
-Red Hat and customers who managed their networks to be able to fully see
+Red Hat and customers who manage their networks to be able to fully see
 what's happening on their network.  Monitoring provides metrics and
 alerts to potential problems.  Network observability will then help you
 analyze, investigate and diagnose those problems by looking at it from
-a control plane perspective instead of device by device.  In addition,
+a centralized perspective instead of device by device.  In addition,
 it can assist in the areas of network planning, network policy validation,
 security, and others.
 
@@ -82,21 +82,25 @@ for tracing.
 
 ## Proposal
 
-Network Observability is an opt-in feature that needs to be enabled
-by a user with an admin or cluster-admin role.  This is done by installing
-the Network Observability Operator, which in turn, installs the dependency
-operators necessary for this feature.  The user can do this using the
-web console or the CLI.
+Network Observability covers a broad area.  In the first release,
+it will focus on obtaining and storing NetFlow data and providing
+visualization for this.  This is a logical first step in showing what is
+happening on your network.
 
-In the initial release, Open vSwitch (OVS) will be configured to export
-IPFIX data.  The data will be collected and combined with Kubernetes-related
-information (e.g. pod, services, namespaces) and then saved in internal or
-external storage.
+Network Observability will be an opt-in feature that needs to be enabled
+by a user with an admin or cluster-admin role.  This is done by installing
+the Network Observability Operator and Loki Operator.  The user can do this
+using the web console or the CLI.
+
+Open vSwitch (OVS) will be configured to export IPFIX data.  The data will be
+collected and combined with Kubernetes-related information (e.g. pod, services,
+namespaces) and then saved in local persistent storage or cloud storage such
+as Amazon S3.
 
 The web console will provide a NetFlow table showing traffic between
-pods.  In the future, more visualization and functionality will be
-provided including areas such as topology, network-related eBPF data,
-policy validation, security risks, and more.
+pods in a table format.  In the future, more visualization and functionality
+will be added to include areas such as topology, network data gathered using
+eBPF, policy validation, security risks, and more.
 
 ***Note:*** *The term "NetFlow" is used generically throughout this document and
 is synonymous with IPFIX, which is the IETF version of NetFlow.*
@@ -111,10 +115,12 @@ is synonymous with IPFIX, which is the IETF version of NetFlow.*
 2. As a cluster/network admin, I need basic search and filtering tools to analyze a subset of NetFlow data inside the OpenShift console.
     - Users can filter NetFlow based on traffic source or destination (ie, view all of the traffic associated with a particular node, service, namespace, pod, etc.).
 
+User story 1 will be partially address as it provides the data for debugging.
+However, the first release will not analyze why something went wrong.
 
 ### Implementation Details/Notes/Constraints
 
-Here are some of the limitations and constraints.
+Here are the limitations and constraints.
 
 1. CNI must be OVN-Kubernetes<br>
     The network type (CNI) has to be OVN-Kubernetes since configuring OVS to
@@ -146,30 +152,20 @@ can be controlled by the data retention policy or how long to keep the data.
 
     Nevertheless, in order to maintain the same performance that you have
 prior to enabling network observability, will require additional resources.
+The specific number of cores and the amount of memory and storage required
+will be finalized as more testing is done. 
 
 
 ### Risks and Mitigations
 
-1. Resource Risk<br>
-    Not having enough resources (e.g. CPU) can be disruptive to the system,
-and care must be taken to not jeopardize the health of the network by enabling
-network observability.
-
-2. Privacy<br>
-    Operators need to be aware of what data is being collected as it might
-expose customers to privacy issues.  In sensitive cases, storing IP addresses
-is problematic as it can reveal the user's general location and can be used
-to find out other information about the user, including possibly the user's
-identity.
-
-3. Cost<br>
-    It may not be clear how much additional cost the customer will incur,
-particularly if this is managed by Red Hat.  Additional nodes may need to
-be added to avoid the resource risk described above.
-
-4. Data accuracy<br>
-    If data sampling is turned on, then data accuracy cannot be relied on
-so using this for audit reports or criminal investigation are not viable.
+| Risk | Mitigation |
+| --- | --- |
+| Resource Risk<br> Not having enough resources (e.g. CPU) can be disruptive to the system, and care must be taken to not jeopardize the health of the network by enabling network observability.  | Minimum resource requirements will be documented for CPU, memory, storage, and bandwidth. |
+| Privacy<br> Operators need to be aware of what data is being collected as it might expose customers to privacy issues.  In sensitive cases, storing IP addresses is problematic as it can reveal the user's general location and can be used to find out other information about the user, including possibly the user's identity. | Mask out sensitive data.  This will prevent searching on this data. |
+| Cost<br> It may not be clear how much additional cost the customer will incur, particularly if this is managed by Red Hat.  Additional nodes may need to be added to avoid the resource risk described above. | Accounts managed by Red Hat can have an upper bound limit on how much can be spent on infrastructure. |
+| Data accuracy<br> If data sampling is turned on, then data accuracy cannot be relied on so using this for audit reports or criminal investigation are not viable. | Turn off sampling. |
+| Scalability<br> Need support for more than 20K NetFlows per second (which is the target for the first release) | The sampling rate can be increased.<br>In addition, the plan is add Apache Kafka to scale the flow collection and storage. |
+| Internal flows are not visible<br>Only the internal bridge athe OVN-Kubernetes layer is enabled so internal flows are not visible. | This is possible to do but will be deferred to a later release. |
 
 
 ## Design Details
@@ -208,7 +204,7 @@ information.  It watches for updates on pods, services and daemonsets
 using the Kubernetes API.  It merges data from Flow Collector and
 Kubernetes to be able to display pod-to-pod traffic.  It is also
 responsible for writing out the data to Storage.  See Network Observability
-Flow Enricher enhancement for more details.
+Flow Enricher enhancement for more details (TBD).
 
 #### Storage
 Storage stores the IPFIX/Kubernetes data.  It provides a REST API to
@@ -225,23 +221,16 @@ the Network Observability Operator and the Loki Operator.
 #### Network Observability Operator (NetObserv)
 The Network Observability Operator will need to be installed from OperatorHub
 to enable this feature.  This operator has a dependency on the Loki
-Operator.  This is an OpenShift Console dynamic plugin that is responsible
-for defining resources and enabling collection of NetFlow similar to
-Red Hat OpenShift Logging.  This can be done from Web Console or CLI.
+Operator.  The operator includes an [OpenShift Console dynamic plugin](https://github.com/openshift/console/tree/master/frontend/packages/console-dynamic-plugin-sdk)
+that is responsible for defining resources and enabling collection of
+NetFlow similar to Red Hat OpenShift Logging.  This can be done from
+Web Console or CLI.
 
 The operator will follow the [Operator Lifecycle Manager](https://olm.operatorframework.io/)
 (OLM) model which is a component of the [Operator Framework](https://github.com/operator-framework).
 This allows Network Observability to release on its own cycle, although the
 plan is to follow the OCP's release dates and leverage this benefit
 for hot fixes only.
-
-***Side note:***<br>
-Consideration was evaluated in terms of *not* introducing a new Network
-Observability Operator.  It didn't make sense to combine with Cluster
-Network Operator or Cluster Monitoring Operator since network observability
-is an opt-in feature that requires resources.  Combining with Red Hat
-OpenShift Logging Operator (formerly Cluster Logging Operator) will limit
-the ability to enable one and not the other.
 
 #### Loki Operator
 The Loki Operator is a separate project at
@@ -250,11 +239,6 @@ observability.  It manages Grafana Loki, which is the component that will be
 used to store NetFlows.  It will be installed in its own namespace with the
 intention that if another component wants to use Loki, it should create its
 own instance.
-
-***Side note:***<br>
-This is a move away from Elasticsearch due to licensing restrictions.
-Open Distro for Elasticsearch was considered, but Loki was favored due to other
-components that plan to ultimately use Loki.
 
 
 ### Visualization
@@ -292,7 +276,7 @@ can be updated independently.
 A few resource-related parameters can be changed, but all values will
 have some default so that enabling network observability will be as
 simple as possible.  For more details, see the enhancement on Network
-Observability - Installation and Packaging,
+Observability - Installation and Packaging (TBD).
 
 
 ### Test Plan
@@ -350,14 +334,28 @@ TBD
 
 Measuring ROI on network observability is difficult so it might be hard
 to justify the cost and resources to deploy this.  It attempts to find
-and resolve issues that you might not know exists.  The value you get
-may not be obvious because it is hard to know how much you saved by
-preventing ransomware or by allocating the right amount of resources
-for your network without causing failures.
+and resolve issues that you might not know exist.  The value you get
+may not be obvious because it is difficult to calculate how much you
+save by preventing something from happening such as a network failure.
 
 ## Alternatives
 
-Sticking with and enhancing traditional pinpoint tools.
+Rather than having network observability, the troubleshooting aspect
+can be done by creating scripts and standalone applications to enhance
+traditional pinpoint tools like pcap, traceroute, netstat, etc.  This
+does not provide a centralized solution nor address the non-troubleshooting
+issues, and would be difficult to make each tool GUI-based and consistent.
+
+Regarding introducing a new Network Observability Operator, alternatives
+were considered.  It didn't make sense to combine with Cluster Network
+Operator or Cluster Monitoring Operator since network observability
+is an opt-in feature that requires resources.  Combining with Red Hat
+OpenShift Logging Operator (formerly Cluster Logging Operator) will limit
+the ability to enable one and not the other.
+
+For storage, Elasticsearch was not chosen due to licensing restrictions.
+Open Distro for Elasticsearch was considered, but Loki was favored due to
+other components in Web Console that plan to ultimately use Loki.
 
 ## Infrastructure Needed
 
