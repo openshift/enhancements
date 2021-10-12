@@ -29,20 +29,12 @@ DAYSBACK ?= 7 # number of days to include in report
 REPORT_FILE=this-week/$(shell date +%F).md
 
 .PHONY: report report-gen
-report: report-gen lint report-upload  ## run weekly newsletter report tool
+report: report-gen lint  ## run weekly newsletter report tool
 
 report-gen:
 	(cd ./tools; go run ./main.go report --days-back $(DAYSBACK) > ../$(REPORT_FILE))
 
 HACKMD_IMAGE=enhancements-hackmd-cli:latest # hackmd-cli image
-
-.PHONY: report-upload
-report-upload: report-image  ## upload the current report to a new hackmd.io doc
-	$(RUNTIME) run --interactive --tty --rm=true \
-		-v $$(pwd):/workdir \
-		-v $$HOME:/home \
-		--entrypoint='["/workdir/hack/hackmd-cli.sh", "'$(REPORT_FILE)'"]' \
-		$(HACKMD_IMAGE)
 
 .PHONY: report-image
 report-image:

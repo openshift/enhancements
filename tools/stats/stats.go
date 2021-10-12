@@ -65,6 +65,7 @@ type Stats struct {
 	Query        *util.PullRequestQuery
 	EarliestDate time.Time
 	Buckets      []*Bucket
+	Summarizer   *enhancements.Summarizer
 }
 
 // Populate runs the query and filters requests into the appropriate
@@ -125,10 +126,11 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		}
 	}
 
-	modifiedFiles, err := enhancements.GetModifiedFiles(int(*pr.Number))
+	modifiedFiles, err := s.Summarizer.GetModifiedFiles(int(*pr.Number))
 	if err != nil {
 		return errors.Wrap(err,
-			fmt.Sprintf("could not determine group details for %s", *pr.HTMLURL))
+			fmt.Sprintf("could not determine group details from modified files for %s",
+				*pr.HTMLURL))
 	}
 
 	// Look for whether a file has been added in the PR to determine
