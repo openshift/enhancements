@@ -69,8 +69,13 @@ Afterwards, the users can then request their pods - and / VMs - to connect to
 those overlays as they would for any other secondary network.
 
 ### Implementation Details/Notes/Constraints
-A new CRD will be introduced, named `OverlayNetwork`. When this CRD is
-provisioned, a `NetworkAttachmentDefinition` object will be rendered.
+A new CRD will be introduced, named `OverlayNetwork`. The CNI implementing
+these use-cases (ovn-kubernetes) will then have to recognize and accept this
+CRD.
+
+For compatibility with other chained CNIs (and multus) that do not recognize
+this CRD, a mechanism to render `NetworkAttachmentDefinition` objects from it
+should be introduced.
 
 The new CRD will look like:
 
@@ -86,9 +91,10 @@ type OverlayNetwork struct {
 type OverlayNetworkSpec struct {
     // Subnet is a RFC 4632/4291-style array of strings that represents an IP
     // address and prefix length in CIDR notation for each IP family.
-    Subnet                     []string             `json:"subnet"`
-    ExternalConnectivityConfig ExternalConnectivity `json:"externalConnectivityConfig,omitempty"`
-    MTU                        uint16               `json:"mtu,omitempty"`
+    Subnet    []string               `json:"subnet"`
+
+    MTU       uint16                 `json:"mtu,omitempty"`
+    Topology  OverlayNetworkTopology `json:"topology,omitempty"`
 }
 
 type OverlayNetworkStatus struct {
@@ -118,21 +124,14 @@ const (
 	ConditionUnknown ConditionStatus = "Unknown"
 )
 
-type ExternalConnectivity string
+type OverlayNetworkTopology string
 
 const (
-    NoExternalConnectivity ExternalConnectivity = "NoExternalConnectivity"
-    NodeGatewayRouter      Externalconnectivity = "NodeGatewayRouter"
-    CentralizedGateway     ExternalConnectivity = "CentralizedGateway"
+    L3         OverlayNetworkTopology = "Layer3"
+    L2         OverlayNetworkTopology = "Layer2"
+    L2Localnet OverlayNetworkTopology = "Layer2WithLocalnet"
 )
 ```
-**Note:** the `NodeGatewayRouter` mentioned above only makes sense if this
-solution is implemented on ovn-kubernetes, which has the advantages / drawbacks
-described in the [alternatives](#alternatives) section.
-
-A controller will watch out for the creation / deletion of these
-`OverlayNetwork`s, and will render and provision the corresponding
-`NetworkAttachmentDefinition`s.
 
 **Note**: the subnet attribute is an array where the user can define a single
 CIDR for each IP familty (one for IPv4, another for IPv6).
@@ -153,10 +152,6 @@ addresses - which will only be used *if* the network has external connectivity.
   overlay network with which it conflicts should be listed, or, when the
   network features external connectivity, it should be indicated if it
   conflicts with the service or node CIDRs.
-
-#### External connectivity considerations
-When an overlay network with external connectivity is requested, the traffic
-will be directly dumped onto the host's underlay via a localnet port.
 
 #### Network-attachment-definition provisioning
 A removed `Network-Attachment-definition` with present attachment will
