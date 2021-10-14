@@ -171,7 +171,7 @@ will use it to configure the OVN pods. The CNO has to watch for any change in th
 
 See [diagrams](https://docs.google.com/document/d/1XxaFl4Gl1VbClfcPngkFCETv0anuFO6Klowh8MFZtJc/edit#) showing this interaction.
 
-The `ConfigMap` content sums up with any configuration that is already present in the Network CR. For example, if a user has configured an IP for netflow exports in the Network CR AND has configured a Netobs CR for the NOO, OvS will export to both destinations.
+The `ConfigMap` content adds up with any configuration that is already present in the Network CR. For example, if a user has configured an IP for netflow exports in the Network CR AND has configured a Netobs CR for the NOO, OvS will export to both destinations.
 
 Here is the new `ConfigMap` definition:
 
