@@ -167,7 +167,7 @@ the flows to the collector in its same node.
 While the above `Network` configuration is still valid for the current use cases, the NOO will generate a new `ConfigMap` that is exposed to the CNO, which
 will use it to configure the OVN pods. The CNO has to watch for any change in this configuration.
 
-![Interaction between CNO and NOO](./images/CNO-NOO.png)
+![Interaction between CNO and NOO](./ovs-flow-export-configuration-CNO-NOO.png)
 
 The `ConfigMap` content adds up with any configuration that is already present in the Network CR. For example, if a user has configured an IP for netflow exports in the Network CR AND has configured a Netobs CR for the NOO, OvS will export to both destinations.
 
