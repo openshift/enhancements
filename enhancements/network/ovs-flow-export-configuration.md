@@ -76,7 +76,7 @@ the new NOO can pursue its mission. More in details, it means:
 
 To discuss the architecture of the flow collection and processing pipeline. This
 has been already discussed and defined by the Network Observability Team
-[by another channel](https://docs.google.com/document/d/1kzNfTLXhMolu8VTcH0m9hmvFluN9yKMy7TSNIXJVTrA/edit?usp=sharing).
+by another channel and will potentially lead to other enhancement proposals later.
 
 This document does not define the work required to configure and deploy the
 flow collection and storage pipeline.
@@ -123,9 +123,7 @@ or `enable-tunnel-sampling`.
 In order to ensure an optimal usage of the network, we allow restricting flow's
 emission-collection traffic to the local node.
 
-According to the [architectural description of the flows' emitter/collectors pipeline](
-https://docs.google.com/document/d/1kzNfTLXhMolu8VTcH0m9hmvFluN9yKMy7TSNIXJVTrA/edit#heading=h.kulf936ct32p),
-the collector can be deployed as a DaemonSet, to ensure that there will be an
+The collector can be deployed as a DaemonSet, to ensure that there will be an
 instance of the collector for each node.
 
 Exposing the collector endpoint as a Kubernetes ClusterIP Service would cause the traffic
@@ -169,7 +167,7 @@ the flows to the collector in its same node.
 While the above `Network` configuration is still valid for the current use cases, the NOO will generate a new `ConfigMap` that is exposed to the CNO, which
 will use it to configure the OVN pods. The CNO has to watch for any change in this configuration.
 
-See [diagrams](https://docs.google.com/document/d/1XxaFl4Gl1VbClfcPngkFCETv0anuFO6Klowh8MFZtJc/edit#) showing this interaction.
+![Interaction between CNO and NOO](./images/CNO-NOO.png)
 
 The `ConfigMap` content adds up with any configuration that is already present in the Network CR. For example, if a user has configured an IP for netflow exports in the Network CR AND has configured a Netobs CR for the NOO, OvS will export to both destinations.
 
