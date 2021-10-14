@@ -61,8 +61,8 @@ Provisioning CR at install time and never updated automatically. The image
 itself is downloaded once and permanently cached on all of the master nodes.
 Never updating the image is tolerable because, upon booting, the CoreOS image
 will update itself to the version matching the cluster it is to join. It
-remains suboptimal because new Machines will take longer and longer (and more
-and more bandwidth) to join as the cluster ages. This issue exists on all
+remains suboptimal because new Machines will take longer (and use more
+bandwidth) to join once the cluster is upgraded. This issue exists on all
 platforms, and is the subject of a [long-standing enhancement
 proposal](https://github.com/openshift/enhancements/pull/201). Other issues
 specific to the baremetal platform are that boot times for bare metal servers
@@ -99,6 +99,12 @@ it in the release payload.
 * Ensure that no matter which version of OpenShift a cluster was installed
   with, we are able to deliver updates to IPA and the OS it runs on.
 * Stop maintaining and shipping the non-CoreOS, RHEL-based IPA PXE files.
+* Eliminate the need for users doing disconnected installations to mirror
+  anything other than the release payload.
+* Allow adding hardware to the cluster that is supported in RHCOS but may not
+  have been at the time the cluster was initially created.
+* Eliminate the window in which hosts run an out-of-date (and therefore
+  potentially buggy) OS image prior to joining the cluster.
 * Never break existing clusters, even if they are deployed in disconnected
   environments.
 
@@ -210,8 +216,10 @@ N/A
 
 The container registry will always contain an image with latest ISO. This will
 get rolled out to the `image-customization-controller` pod, and future boots of
-the deploy image will be based on the new ISO. The restart of ironic during the
-upgrade should ensure that any BaremetalHosts currently booted into the deploy
+the deploy image will be based on the new ISO. Because the same container image
+will need to be used in an init container for the Pod running ironic (in order
+to provide the PXE files), and changes to it will result in a restart of ironic
+that should ensure that any BaremetalHosts currently booted into the deploy
 image (i.e. not provisioned) will be rebooted into the new one.
 
 For the initial release, pre-existing clusters will continue to provision with
