@@ -179,14 +179,15 @@ Here is the new `ConfigMap` definition:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: ovs-ipfix-config
+  name: ovs-flows-config
   namespace: # CNO's namespace
 spec:
-  sharedTarget: <service ip+port>
-  nodePort: <int>
-  sampling: <int>
-  cacheActiveTimeout: <int (seconds)>
-  cacheMaxFlows: <int>
+  ipfix:
+    sharedTarget: <service ip+port>
+    nodePort: <int>
+    sampling: <int>
+    cacheActiveTimeout: <int (seconds)>
+    cacheMaxFlows: <int>
 ```
 
 Assuming that each OVS instance will forward flows to the same node (to minimize network traffic
