@@ -29,7 +29,7 @@ superseded-by:
 
 ## Summary
 
-This document describes configuration changes and requirements at the CNO/OVN level 
+This document describes configuration changes and requirements at the CNO/OVN level
 to enable network observability as depicted in the high level
 [Enhancement proposal for Network Observability](https://github.com/openshift/enhancements/pull/921).
 
@@ -85,7 +85,9 @@ It does not define the design and the goal of the Network Observability Operator
 
 ## Proposal
 
-### User story: tuning flows' emission parameters
+### User Stories
+
+#### Tuning flows' emission parameters
 
 Some setups might lead to an overcongestion of the cluster resources such as the network or the
 flows' ingestion/processing/storage pipeline (e.g. because the size and frequency of reported
@@ -161,7 +163,7 @@ spec:
       - 192.168.1.99:2056
 ```
 
-However, we need to set this address dynamically to ensure that each pod will forward 
+However, we need to set this address dynamically to ensure that each pod will forward
 the flows to the collector in its same node.
 
 While the above `Network` configuration is still valid for the current use cases, the NOO will generate a new `ConfigMap` that is exposed to the CNO, which
