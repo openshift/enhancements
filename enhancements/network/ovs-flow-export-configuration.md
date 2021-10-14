@@ -207,10 +207,17 @@ Before [OVN-Kubernetes invokes OpenVSwitch to enable flows](https://github.com/o
 if the collector's node port environment variable is present (provided by the CNO as described in the previous section), it needs to retrieve its host IP and pass ip+port to OpenVSwitch, in the `targets=` argument.
 
 
-
 ### Risks and Mitigations
 
-To be discussed.
+#### Conflicting configurations between the Network CR and the new shared ConfigMap
+
+At the moment there is no such direct conflict of settings, as there's no overlap. In Network CR, only the target IPs are configurable, and they would add to new IP configured by the NOO. However, two things are worth noting:
+
+1. The advanced settings offered via the NOO, like sampling and cache config, would impact all targets, including targets defined by the Network CR. This might not be expected by the user.
+
+There's no real mitigation for this, apart from documenting it as a limitation. We can however estimate that most users will not try to use concurrently flow exports (configured in the Network CR) and the NOO, as we can expect that those who manually configure flow exports already have their own monitoring infrastructure and dashboards in place for flows.
+
+2. It could slightly hinder future development precisely if new features are added in the Network CR related to IPFIX exports, that could possibly conflict with the ones defined in the `ConfigMap`. We would have then to find a way to prioritize or combine the two sources, or revisit this approach.
 
 ## Design Details
 
