@@ -137,6 +137,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 10302 | various CSI drivers | storage | 4.7 | healthz |
 | 10303 | various CSI drivers | storage | 4.9 | healthz |
 | 11443 | kube-scheduler | workloads || recovery-controller |
+| 29100 | openshift-sdn | sdn || metrics |
 | 29101 | openshift-sdn | sdn || metrics |
 | 29102 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
 | 29103 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
