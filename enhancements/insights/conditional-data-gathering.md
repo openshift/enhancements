@@ -66,7 +66,7 @@ and add it to the next archive.
 [{
   "conditions": [{
     "type": "alert_is_firing",
-    "params": {
+    "alert": {
       "name": "SamplesImagestreamImportFailing"
     }
   }],
@@ -81,6 +81,9 @@ and add it to the next archive.
   }
 }]
 ```
+
+The API for conditions definition is unified with 
+[Targeted Update Edge Blocking API](https://github.com/openshift/enhancements/pull/821)
 
 Conditions can have type and parameters, implemented types are:
 
