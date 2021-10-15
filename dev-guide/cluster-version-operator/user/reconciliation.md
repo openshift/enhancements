@@ -157,7 +157,7 @@ The ClusterOperator builder only monitors the in-cluster object and blocks until
     ```
 
     would block until the in-cluster ClusterOperator reported `operator` at version 4.1.0.
-* Not degraded (except during initialization, where we ignore the degraded status)
+* Not degraded (except during initialization, where we simply propagate the degraded status to the overall initialization status)
 
 ### CustomResourceDefinition
 
