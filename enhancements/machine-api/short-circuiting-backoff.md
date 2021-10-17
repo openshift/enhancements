@@ -47,7 +47,7 @@ This hot looping makes it difficult for users to find out why their Machines are
 Another side effect of machines constantly failing, is the risk of hitting the benchmark of machine failures percentage - thus triggering the "short-circuit" mechanism which will prevent all remediations.
 
 With this enhancement we propose a better mechanism.
-In case a machine enters the `Failed` state and does not have a NodeRef or a ProviderID it'll be remediated after a certain time period has passed - thus allowing a manual intervention in order to break to hot loop.
+In case a machine enters the `Failed` state and does not have a NodeRef or a ProviderID, it will not be remediated until after a certain time period has passed - thus allowing a manual intervention in order to break to hot loop.
 
 ## Motivation
 
