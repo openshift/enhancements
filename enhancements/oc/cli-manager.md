@@ -78,7 +78,7 @@ plugins via images, because this will enable offering plugins offline through an
 
 Each component wishing to provide customers with their plugins will build and publish images via a trusted image registry
 and create a Plugin CR to provide an image name and the file path within that image for the binaries.
-Clients (i.e. `krew`) will read the index and download binaries from the Controller. The Controller is responsible building the index from CRs, for pulling the images, 
+Clients (i.e. `krew`) will read the index and download binaries from the Controller. The Controller is responsible building the index from CRs, for pulling the images,
 extracting the binaries, and serving them to clients.
 
 * `krew` and `krew` plugins are upstream projects that Kubernetes users are already familiar with
