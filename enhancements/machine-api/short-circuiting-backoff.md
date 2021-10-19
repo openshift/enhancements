@@ -109,7 +109,7 @@ MachineHealthCheck:
 
 ### Risks and Mitigations
 In case `FailedNodeStartupTimeout` is undefined default behaviour is preserved (i.e. remediation is not postponed).
-The Pro is that naive users aren't being surprised with a new behavior however, the con is that naive users do benefit from the new behavior.
+The Pro is that naive users aren't being surprised with a new behavior however, the con is that naive users do not benefit from the new behavior.
 
 ## Design Details
 
