@@ -52,7 +52,7 @@ what to collect on which condition externally will help to do that faster.
 
 ### Non-Goals
 
-Empty
+It's NOT about running brand new code.
 
 ## Proposal
 
