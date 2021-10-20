@@ -74,6 +74,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 6080  | cluster-kube-apiserver-operator | apiserver || control plane only |
 | 6180  | httpd     | kni | 4.4 | baremetal provisioning server, control plane only |
 | 6181  | httpd     | kni | 4.7 | baremetal image cache, control plane only |
+| 6183  | httpd     | kni | 4.10 | baremetal provisioning server (TLS), control plane only |
 | 6385  | ironic-api   | kni | 4.4 | baremetal provisioning, control plane only |
 | 6443  | kube-apiserver | apiserver || control plane only |
 | 8089  | ironic-conductor | kni | 4.4 | baremetal provisioning, control plane only |
