@@ -51,8 +51,8 @@ under management of Kubernetes.
 
 ### Goals
 
-- Provide a mechanism to access to endpoints (by virtual IP address, DNS names), which is organized by Kubernetes
-service objects, in phased approach.
+- Provide a mechanism to access to the endpoints (by virtual IP address, DNS names), which is organized by Kubernetes
+service objects, in a phased approach.
 
 ### Non-Goals
 
@@ -60,13 +60,23 @@ Due to the variety of service types, this must be handled in a phased approach. 
 implementation and the structural elements, some of which may share commonalities with future enhancements.
 
 - Provide all types of Kubernetes service functionality for secondary network interface.
+  - In order to focus on quality of an initial subset of service functionality.
 - Provide the exact same semantics for Kubernetes service mechanisms.
+  - Which would increase the scope substantially for an initial feature.
 - LoadBalancer features for pods' secondary network interface (this requires more discussion in upstream community).
+  - The approach for which requires more discussion in upstream community, may use other external components.
+  - Which may also handle external traffic, this enhancement is for providing service functionality from traffic originating from Kubernetes pods.
 - NodePort feature (still in discusssion among upstream community).
+  - Still in discusssion among upstream community, and looking for input on use cases.
 - Ingress and other functionalities related to Kubernetes service (this will be addressed in another enhancement).
+  - This will be addressed in another enhancement.
 - Network verification for accesssing services (i.e. users need to ensure network targets are reachabile).
+  - This functionality would be separate from this enhancement and the scope is somewhat orthoganal.
+  - Additionally, there is on-going upstream discussion regarding secondary networks hierarchy which may also address which networks are reachable.
 - Services for universal forwarding mechanisms (e.g DPDK Pods are not supported), we only focus on the pods which uses Linux network stack (i.e. iptables).
-- Headless service (need to more discussion in community for its design)
+  - This makes the scope for this feature reasonable, and we may allow for extensibility which allows for pluggable modules which handle other forwarding mechanisms.
+- Headless service (need to do more discussion in community for its design)
+  - Due to assumptions of reachability to coreDNS, which may not be available to clients on isolated networks.
 
 ## Proposal
 
@@ -104,21 +114,22 @@ In this enhancement, we will introduce following components (component names may
 - Multus Proxy
 
 The Multus service controller watches all pods' secondary interfaces, services and network attachment definitions and
-it creates `EndpointSlice` for the service. `EndpointSlice` contains secondary network IP address whidch Multus proxy
+it creates `EndpointSlice` for the service. `EndpointSlice` contains secondary network IP address which Multus proxy
 watches. Service and EndpointSlice have the label, `service.kubernetes.io/service-proxy-name`, which is defined at
 [kube-proxy APIs](https://pkg.go.dev/k8s.io/kubernetes/pkg/proxy/apis), to make target service out of Kubernetes
 management.
 
 Multus proxy provides forwarding plane for multus-service with iptables at Pod's network namespace. It watches Service
-and EndpointSlice with 'service.kubernetes.io/service-proxy-name: multus-proxy' and creates changes destination to
-the service pods from Service VIP. It does not provide NAT (ip masquerade) for now because multus network is mainly
-for 'secondary network' and it assumes default route to primary Kubernetes cluster network.
+and EndpointSlice with 'service.kubernetes.io/service-proxy-name: multus-proxy' and it create iptables rules to
+change the packet's destination to the service pods from Service VIP. It does not provide NAT (ip masquerade) for now
+because multus network is mainly for 'secondary network' and it assumes default route to primary Kubernetes cluster
+network.
 
 #### Create Service
 
 1. Service is created
 
-User creates Kubernetes service object. At that time, user needs to add following annotation/label:
+User creates Kubernetes service object. At that time, user needs to add the following annotation/label:
 
 - `label: service.kubernetes.io/service-proxy-name` (well-known label, defined in kubernetes)
 
@@ -142,14 +153,14 @@ Then multus service controller will watch the service and pods.
 Once multus service controller finds pods associated with the service, then the controller will create EndpointSlices
 for the service. The EndpointSlices contains a pod's net-attach-def IP address from pod's network status annotation
 and the EndpointSlices has same label, `service.kubernetes.io/service-proxy-name`, and its value from corresponding
-service to avoid kube-proxy to add iptables rules for Kubernetes Service forwarding plane. When the pods/services
-is updated/removed, then multus service controller changes/removes the corresponding endpoitslices to track the
+service to avoid kube-proxy adding iptables rules for Kubernetes Service forwarding plane. When the pods/services
+is updated/removed, then multus service controller changes/removes the corresponding EndpointSlices to track the
 changes.
 
 3. Multus proxy generates iptables rules for the service in Pod's network namespace.
 
 Multus proxy watches the endpointslices and services. Periodically multus proxy generates iptables rules for the pods
-and put it in a pod's network namespace (not host network namespace, as kube-proxy does). Multus proxy tracks the
+and puts it in a pod's network namespace (not host network namespace, as kube-proxy does). Multus proxy tracks the
 changes of service/endpoints, hence multus proxy update/remove iptables rules when service/endpoints are
 updated/removed.
 
@@ -164,6 +175,24 @@ Kubernetes network solution satisfies the following condition, then this feature
 - The SDN solution does not recognize the well-known label, `service.kubernetes.io/service-proxy-name`.
 
 Hence we should mention which SDN solution supports this enhancement in documents.
+
+```
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+:MULTUS-SEP-LLWTBYDUBFR4XHIV - [0:0]
+:MULTUS-SEP-XVNAIRZXTXMCKBXF - [0:0]
+:MULTUS-SERVICES - [0:0]
+:MULTUS-SVC-HEXNTD6JIC42P6W2 - [0:0]
+-A OUTPUT -m comment --comment "multus service portals" -j MULTUS-SERVICES
+-A MULTUS-SEP-LLWTBYDUBFR4XHIV -p tcp -m comment --comment "default/multus-nginx-macvlan" -m tcp -j DNAT --to-destination 10.1.1.14:80
+-A MULTUS-SEP-XVNAIRZXTXMCKBXF -p tcp -m comment --comment "default/multus-nginx-macvlan" -m tcp -j DNAT --to-destination 10.1.1.15:80
+-A MULTUS-SERVICES -d 10.108.162.172/32 -p tcp -m comment --comment "default/multus-nginx-macvlan cluster IP" -m tcp --dport 80 -j MULTUS-SVC-HEXNTD6JIC42P6W2
+-A MULTUS-SVC-HEXNTD6JIC42P6W2 -m comment --comment "default/multus-nginx-macvlan" -m statistic --mode random --probability 0.50000000000 -j MULTUS-SEP-LLWTBYDUBFR4XHIV
+-A MULTUS-SVC-HEXNTD6JIC42P6W2 -m comment --comment "default/multus-nginx-macvlan" -m statistic --mode random --probability 1.00000000000 -j MULTUS-SEP-XVNAIRZXTXMCKBXF
+```
 
 ## Design Details
 
@@ -236,4 +265,4 @@ This is dependent on the provision of gaining consensus, customer feedback as we
 GA requires following testing infrastructure:
 
 - Baremetal OpenShift deployment (for scale testing), with multiple network (macvlan/ipvlan/sr-iov)
-- Baremetal OpenShift deployment (for CI e2e testing), with multiple network. It might be possible to implement in equinix metal. Need to work on.
+- Baremetal OpenShift deployment (for CI e2e testing), with multiple network. It might be possible to implement in equinix metal.
