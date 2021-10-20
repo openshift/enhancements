@@ -166,7 +166,7 @@ updated/removed.
 
 Here is the example of iptables rules in Pod's network namespace (1 service with 2 service Pods).
 
-```
+```text
 *nat
 :PREROUTING ACCEPT [0:0]
 :INPUT ACCEPT [0:0]
