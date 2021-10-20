@@ -164,17 +164,7 @@ and puts it in a pod's network namespace (not host network namespace, as kube-pr
 changes of service/endpoints, hence multus proxy update/remove iptables rules when service/endpoints are
 updated/removed.
 
-### Risks and Mitigations
-
-#### Interworking service.kubernetes.io/service-proxy-name among other Kubernetes network
-
-This feature depends on the well-known label, `service.kubernetes.io/service-proxy-name` implementation. If some
-Kubernetes network solution satisfies the following condition, then this feature does not work:
-
-- The SDN solution provides forwarding plane for Kubernetes service (i.e. Cilium, ovn-kubernetes).
-- The SDN solution does not recognize the well-known label, `service.kubernetes.io/service-proxy-name`.
-
-Hence we should mention which SDN solution supports this enhancement in documents.
+Here is the example of iptables rules in Pod's network namespace (1 service with 2 service Pods).
 
 ```
 *nat
@@ -193,6 +183,18 @@ Hence we should mention which SDN solution supports this enhancement in document
 -A MULTUS-SVC-HEXNTD6JIC42P6W2 -m comment --comment "default/multus-nginx-macvlan" -m statistic --mode random --probability 0.50000000000 -j MULTUS-SEP-LLWTBYDUBFR4XHIV
 -A MULTUS-SVC-HEXNTD6JIC42P6W2 -m comment --comment "default/multus-nginx-macvlan" -m statistic --mode random --probability 1.00000000000 -j MULTUS-SEP-XVNAIRZXTXMCKBXF
 ```
+
+### Risks and Mitigations
+
+#### Interworking service.kubernetes.io/service-proxy-name among other Kubernetes network
+
+This feature depends on the well-known label, `service.kubernetes.io/service-proxy-name` implementation. If some
+Kubernetes network solution satisfies the following condition, then this feature does not work:
+
+- The SDN solution provides forwarding plane for Kubernetes service (i.e. Cilium, ovn-kubernetes).
+- The SDN solution does not recognize the well-known label, `service.kubernetes.io/service-proxy-name`.
+
+Hence we should mention which SDN solution supports this enhancement in documents.
 
 ## Design Details
 
