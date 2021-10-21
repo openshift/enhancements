@@ -159,12 +159,15 @@ rebuild when the version changes.
 
 Because OpenShift container images are built in an offline environment, it is
 not possible to simply download the image from the public Internet at container
-build time. Instead this will be accomplished by *MAGIC*. Uploading the ISOs to
-the lookaside cache in Brew is one possibility.
+build time. Instead this will be accomplished by ART defining a "modifications"
+hook that, each time the source is updated before a build, checks whether
+`data/data/rhcos-stream.json` has changed. If it has, ISOs from the locations
+given there are downloaded and made available (via dist-git lookaside cache) in
+the build context with an arch-specific name, something like `rhcos.$arch.iso`
+so that the Dockerfile can select the appropriate arch.
 
 Different processor architectures require different ISOs (though all are
-represented in the stream metadata). It may make sense to have a separate
-Dockerfile for each architecture. For the foreseeable future, we only need to
+represented in the stream metadata). For the foreseeable future, we only need to
 be able to pull a container for the local architecture that contains an ISO for
 that same architecture. In the future, it is possible that the containers for
 each architecture's ISO may themselves need to be multi-architecture, so that
