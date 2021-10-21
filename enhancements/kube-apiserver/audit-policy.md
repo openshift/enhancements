@@ -7,12 +7,13 @@ reviewers:
   - "@soltysh"
   - "@deads2k"
   - "@stlaz"
+  - "@EmilyM1"
 approvers:
   - "@mfojtik"
-  - "@mcurry"
-creation-date: 2020-03-24
-last-updated: 2020-05-14
-status: provisional
+  - "@Anandnatraj"
+creation-date: 2021-03-24
+last-updated: 2021-06-30
+status: implementable
 see-also:
 replaces:
 superseded-by:
@@ -40,8 +41,15 @@ The API is meant to enable customers with stronger audit requirements than the a
 (from _metadata_-only level, over _request payloads_ to _request and response payload_ level) of audit
 logs, accepting the increased resource consumption of the API servers.
 
-This API is intentionally **not about filtering events**. Filtering is to be done via an external mechanism (post-filtering).
-It was proven through performance tests (compare alternatives section) that this trade-off is acceptable with small two-digit percent overhead.
+This API is intentionally **very limited in filtering events**. More
+advanced filtering is to be done via an external mechanism
+(post-filtering), e.g. via
+[jq](https://docs.openshift.com/container-platform/4.7/security/audit-log-view.html#security-audit-log-basic-filtering_audit-log-view).
+It was proven through performance tests (compare alternatives section)
+that even a uniform profile for all events is acceptable with small
+two-digit percent overhead.
+
+In addition to the uniform policy, we allow custom profiles by groups the request user is member of.
 
 The API is not meant to replace the [upstream dynamic audit](https://github.com/kubernetes/enhancements/blob/f1a799d5f4658ed29797c1fb9ceb7a4d0f538e93/keps/sig-auth/0014-dynamic-audit-configuration.md) API
 now and in the future. I.e. the API of this enhancement is only about the master node audit files on disk, not about webhooks or
@@ -84,16 +92,18 @@ resources right). Hence, this enhancement is about
 
 With performance tests we have proven that there is no strong reason to pre-filter audit logs before
 writing them to disk. Filtering can be done by custom solutions implemented by customers, or by
-using external log processing systems. Hence, we strictly separate filtering from setting the audit log
+using external log processing systems. Hence, we strictly separate any advanced filtering from setting the audit log
 depth using the new API.
+
+The only filtering we allow is by having by-group profiles.
 
 ### Goals
 
 1. add an abstract audit policy configuration to
    `apiservers.config.openshift.io/v1` with few predefined policies
-   - starting with different audit depths policies only,
+   - starting with different audit depths policies only, (a) uniformely for all events and (b) by group,
    - but stay extensible in the future if necessary.
-2. applied by kube-apiserver, openshift-apiserver (and soon oauth-apiserver).
+2. applied by kube-apiserver, openshift-apiserver and oauth-apiserver.
 
 ### Non-Goals
 
@@ -104,54 +114,73 @@ depth using the new API.
 
 ## Proposal
 
-We propose to add an `audit.profile` field to `apiservers.config.openshift.io/v1` which selects the
-audit policy to be deployed to all OpenShift-provided API servers in the cluster. From the beginning
-we provide the following profiles:
+We propose to add an `audit` struct to `apiservers.config.openshift.io/v1` with
+1. a `customRules` list for custom profiles matching requests by a group the requesting user is part of.
+2. a `profile` field for requests that don't match any rule in (1).
+This struct specifies the audit policy to be deployed to all OpenShift-provided API servers in the cluster.
 
-- `Default`: this is the existing default policy. `Default` is also the default value in the `APIServer` custom resource:
+The generated `audit.k8s.io/v1` has a constant preamble:
 
-  ```yaml
-    apiVersion: audit.k8s.io/v1beta1
-    kind: Policy
-    rules:
-    # Don't log requests for events
-    - level: None
-      resources:
-      - group: ""
-        resources: ["events"]
-    # Don't log oauth tokens as metadata.name is the secret
-    - level: None
-      resources:
-      - group: "oauth.openshift.io"
-        resources: ["oauthaccesstokens", "oauthauthorizetokens"]
-    # Don't log authenticated requests to certain non-resource URL paths.
-    - level: None
-      userGroups: ["system:authenticated", "system:unauthenticated"]
-      nonResourceURLs:
-      - "/api*" # Wildcard matching.
-      - "/version"
-      - "/healthz"
-      - "/readyz"
-    # Log the full Identity API resource object so that the audit trail
-    # allows us to match the username with the IDP identity.
-    - level: RequestResponse
-      verbs: ["create", "update", "patch"]
-      resources:
-      - group: "user.openshift.io"
-        resources: ["identities"]
+```yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+# Don't log requests for events
+- level: None
+  resources:
+  - group: ""
+    resources: ["events"]
+# Don't log requests to certain non-resource URL paths.
+- level: None
+  userGroups: ["system:authenticated", "system:unauthenticated"]
+  nonResourceURLs:
+  - "/api*" # Wildcard matching.
+  - "/version"
+  - "/healthz"
+  - "/readyz"
+```
 
-    # Here the tail begins which differs per profile:
+followed by per-group rules of (1):
 
-    # A catch-all rule to log all other requests at the Metadata level.
-    - level: Metadata
-      # Long-running requests like watches that fall under this rule will not
-      # generate an audit event in RequestReceived.
-      omitStages:
-      - RequestReceived
-   ```
+```yaml
+- level: ...
+  userGroups: [<group>]
+  resources: ...
+...
+```
+
+followed by the catch-all rule of (2):
+
+```yaml
+- level: ...
+  resources: ...
+```
+
+The `audit.k8s.io/v1` policy rules are evaluated from top to bottom (first matching rule applies), which matches the semantics of the API here.
+
+From the beginning we provide the following profiles (described as rules added as a block for (1) or (2) as described above):
+
+- `Default`: this is the default policy, logging everything on metadata level with the exception of oauthaccesstokens and oauthauthorizetokens to be logged on request to track logins and logouts to the system.
 
 - `WriteRequestBodies`: this is like `Default`, but it logs request and response HTTP payloads for write requests (create, update, patch).
 - `AllRequestBodies`: this is like `WriteRequestBodies`, but also logs request and response HTTP payloads for read requests (get, list).
+- `None`: this disables audit events.
+
+  With `None` set for (2), the cluster is only under limited support, i.e. for support cases, the customer will be asked to set this to one of the other three values. We will document this in the API documentation.
+
+  In addition, we add the following output to `oc adm must-gather -- /usr/bin/gather_audit_logs`:
+
+  ```shell
+  $ oc adm must-gather -- /usr/bin/gather_audit_logs
+
+     Warning: It is not recommended to disable audit logging by using the `None` profile unless you
+	 are fully aware of the risks of not logging data that can be beneficial when troubleshooting issues.
+	 If you disable audit logging and a support situation arises, you might need to enable audit logging
+	 and reproduce the issue in order to troubleshoot properly.
+  
+  ```
+
+  and the command will return with an error (non-zero exit code).
 
 All of the profiles have in common that security-sensitive resources, namely
 
@@ -159,19 +188,13 @@ All of the profiles have in common that security-sensitive resources, namely
 - `routes.route.openshift.io`
 - `oauthclients.oauth.openshift.io`
 
-are never logged beyond metadata level, and
-
-- `oauthaccesstokens.oauth.openshift.io`
-- `oauthauthorizetokens.oauth.openshift.io`.
-
-are not logged at all (because even their names are security-sensitive).
+are never logged beyond metadata level.
 
 Note: this is in line with [etcd-encryption enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/kube-apiserver/encrypting-data-at-datastore-layer.md#proposal)
 with the exception that payloads of configmaps are also audit logged in `WriteRequestBodies` and `AllRequestBodies` policies.
 
 Any kind of further, deeper policy configuration, e.g. that filters by API groups, user agents or namespaces
-is explicitly not part of this proposal and requires work on the [upstream dynamic audit](https://github.com/kubernetes/enhancements/blob/f1a799d5f4658ed29797c1fb9ceb7a4d0f538e93/keps/sig-auth/0014-dynamic-audit-configuration.md)
-mechanism and its promotion to beta eventually, or a post-processing mechanism of the audit logs.
+is explicitly not part of this proposal.
 
 ### Logging of Token with Secure OAuth Storage
 
@@ -196,7 +219,7 @@ New cluster deployed with 4.6 or later are identified through the `oauth-apiserv
 on the `apiservers.config.openshift.io/v1` resource. Old cluster upgraded from 4.5 or older, don't have this annotation and hence do not
 audit log `authaccesstokens` and `oauthauthorizetokens`, not even on metadata level as it is not known whether old, non-sha256 hashed tokens
 are in the system. In 4.8 or later, it is planned to remove old, non-sha256 tokens, forbid creation of new non-sha256 tokens, and add
-the annotation to switch over to the extended policies.  
+the annotation to switch over to the extended policies.
 
 ### User Stories
 
@@ -220,6 +243,11 @@ change up to request payload level detail, but accept increased resource usage.
 As an even more security and regulatory demanding customer, I want to log **every** non-sensitive request
 both for read **and** for write operations, but also accept even more increased resource usage.
 
+#### Story 5
+
+As a security and regulatory demanding customer, I want to persist audit logs in an external system
+and amount of transferred and stored data matters, e.g. for cost reasons.
+
 ### Implementation Details/Notes/Constraints
 
 The proposed API looks like this:
@@ -230,7 +258,10 @@ apiVersion: config.openshift.io/v1
 spec:
   ...
   audit:
-    profile: Default | WriteRequestBodies | AllRequestBodies
+    profile: None | Default | WriteRequestBodies | AllRequestBodies
+    customRules:
+    - group: system:authenticated:oauth
+      profile: None |Default | WriteRequestBodies | AllRequestBodies
 ```
 
 In the future, we could add more, even more detailed profiles of logging responses, if customers need this:
@@ -243,13 +274,6 @@ But we are not going to add these without a strong business case.
 
 ### Risks and Mitigations
 
-- going beyond the proposed profiles, e.g. by filtering of API groups, user agents or namespaces, yields the risk that the
-  defined semantics do not map to the future [upstream dynamic audit](https://github.com/kubernetes/enhancements/blob/f1a799d5f4658ed29797c1fb9ceb7a4d0f538e93/keps/sig-auth/0014-dynamic-audit-configuration.md)
-  API types. In the file-based API of kube-apiserver, which implements powerful, but controversial rule behaviour, this kind
-  filters are possible, but it also turned out as the biggest blocker for moving it towards the dynamic variant as part of
-  the Kubernetes REST API. We cannot and must not follow this failure as it is big risk to the maintainability and future
-  feasibility of this OpenShift API.
-
 ## Design Details
 
 The profile defined in the `APIServer` singleton instance named `cluster` will be translated into
@@ -261,61 +285,302 @@ the respective file-based audit policy of
 
 by their respective operators.
 
-The profile translate like this:
+The generated `audit.k8s.io/v1` policy has a constant preamble:
 
-- `Default` translates to the policy given above.
-- `WriteRequestBodies` translates to the following tail (with the head the same as the default policy):
+```yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+# Don't log requests for events
+- level: None
+  resources:
+  - group: ""
+    resources: ["events"]
+# Don't log requests to certain non-resource URL paths.
+- level: None
+  userGroups: ["system:authenticated", "system:unauthenticated"]
+  nonResourceURLs:
+  - "/api*" # Wildcard matching.
+  - "/version"
+  - "/healthz"
+  - "/readyz"
+```
+
+followed by per-group custom rules:
+
+```yaml
+- level: ...
+  userGroups: [<group>]
+  resources: ...
+...
+```
+
+followed by the catch-all top-level profile:
+
+```yaml
+- level: ...
+  resources: ...
+```
+
+The `audit.k8s.io/v1` policy rules are evaluated from top to bottom (first matching rule applies), which matches the semantics of the API here.
+
+The profiles are translated into:
+
+- `None`:
 
   ```yaml
-      ... # common head
-
-      # exclude resources where the body is security-sensitive
-      - level: Metadata
-        resources:
-        - group: "route.openshift.io"
-          resources: ["routes"]
-        - resources: ["secrets"]
-      - level: Metadata
-        resources:
-        - group: "oauth.openshift.io"
-          resources: ["oauthclients"]
-      # log request and response payloads for all write requests
-      - level: RequestResponse
-        verbs:
-        - update
-        - patch
-        - create
-        - delete
-        - deletecollection
-      # catch-all rule to log all other requests at the Metadata level.
-      - level: Metadata
-        # Long-running requests like watches that fall under this rule will not
-        # generate an audit event in RequestReceived.
-        omitStages:
-        - RequestReceived
+  - level: None
   ```
-- `AllRequestBodies`
 
-    ```yaml
-        ... # common head
+- `Default`:
 
-        # exclude resources where the body is security-sensitive
-        - level: Metadata
-          resources:
-          - group: "route.openshift.io"
-            resources: ["routes"]
-          - resources: ["secrets"]
-        - level: Metadata
-          resources:
-          - group: "oauth.openshift.io"
-            resources: ["oauthclients"]
-        # catch-all rule to log all other requests with request and response payloads
-        - level: RequestResponse
-    ```
-  
-With secure OAuth storage in-place (see "Logging of Token with Secure OAuth Storage" section) and
-therefore the `oauth-apiserver.openshift.io/secure-token-storage: true` annotation on the `apiservers.config.openshift.io/v1` resource,
-these policies are extended by allowing logging of `oauthaccesstokens` and `oauthauthorizetokens`.
+  ```yaml
+    # Log the full Identity API resource object so that the audit trail
+    # allows us to match the username with the IDP identity.
+    - level: RequestResponse
+      verbs: ["create", "update", "patch", "delete"]
+      resources:
+      - group: "user.openshift.io"
+        resources: ["identities"]
+      - group: "oauth.openshift.io"
+        resources: ["oauthaccesstokens", "oauthauthorizetokens"]
+    # A catch-all rule to log all other requests at the Metadata level.
+    - level: Metadata
+      # Long-running requests like watches that fall under this rule will not
+      # generate an audit event in RequestReceived.
+      omitStages:
+      - RequestReceived
+  ```
+
+- `WriteRequestBodies`:
+
+  ```yaml
+    # Log the full Identity API resource object so that the audit trail
+    # allows us to match the username with the IDP identity.
+    - level: RequestResponse
+      verbs: ["create", "update", "patch", "delete"]
+      resources:
+      - group: "user.openshift.io"
+        resources: ["identities"]
+      - group: "oauth.openshift.io"
+        resources: ["oauthaccesstokens", "oauthauthorizetokens"]
+    # exclude resources where the body is security-sensitive
+    - level: Metadata
+      resources:
+      - group: "route.openshift.io"
+        resources: ["routes"]
+      - resources: ["secrets"]
+    - level: Metadata
+      resources:
+      - group: "oauth.openshift.io"
+        resources: ["oauthclients"]
+    # log request and response payloads for all write requests
+    - level: RequestResponse
+      verbs:
+      - update
+      - patch
+      - create
+      - delete
+      - deletecollection
+    # catch-all rule to log all other requests at the Metadata level.
+    - level: Metadata
+      # Long-running requests like watches that fall under this rule will not
+      # generate an audit event in RequestReceived.
+      omitStages:
+      - RequestReceived
+  ```
+
+- `AllRequestBodies`:
+
+  ```yaml
+    # exclude resources where the body is security-sensitive
+    - level: Metadata
+      resources:
+      - group: "route.openshift.io"
+        resources: ["routes"]
+      - resources: ["secrets"]
+    - level: Metadata
+      resources:
+      - group: "oauth.openshift.io"
+        resources: ["oauthclients"]
+    # catch-all rule to log all other requests with request and response payloads
+    - level: RequestResponse
+  ```
+
+### API Details
+
+The YAML of the new API should look like this:
+
+```yaml
+kind: APIServer
+apiVersion: config.openshift.io/v1
+spec:
+  ...
+  audit:
+    profile: None | Default | WriteRequestBodies | AllRequestBodies
+    customRules:
+    - group: system:authenticated:oauth
+      profile: None |Default | WriteRequestBodies | AllRequestBodies
+```
+
+In Golang this translates to:
+
+```go
+type Audit struct {
+    // profile specifies the name of the desired top-level audit profile to be applied to all requests
+    // sent to any of the OpenShift-provided API servers in the cluster (kube-apiserver,
+    // openshift-apiserver and oauth-apiserver), with the exception of those requests that match
+    // one or more of the customRules.
+    //
+    // The following profiles are provided:
+    // - Default: default policy which means MetaData level logging with the exception of events
+    //   (not logged at all), oauthaccesstokens and oauthauthorizetokens (both logged at RequestBody
+    //   level).
+    // - WriteRequestBodies: like 'Default', but logs request and response HTTP payloads for
+    // write requests (create, update, patch).
+    // - AllRequestBodies: like 'WriteRequestBodies', but also logs request and response
+    // HTTP payloads for read requests (get, list).
+    // - None: no requests are logged at all, not even oauthaccesstokens and oauthauthorizetokens.
+    //
+    // Warning: to raise a Red Hat support request, it is required to set this to Default,
+    // WriteRequestBodies, or AllRequestBodies to generate audit log events that can be
+    // analyzed by support.
+    //
+    // If unset, the 'Default' profile is used as the default.
+    //
+    // +kubebuilder:default=Default
+    // +kubebuilder:Enum="",Default,WriteRequestBodies,AllRequestBodies,None
+    Profile AuditProfileType `json:"profile,omitempty"`
+
+    // customRules specify profiles per group. These profile take precedence over the
+    // top-level profile field if they apply. They are evaluation from top to bottom and
+    // the first one that matches, applies.
+    //
+    // +listType=map
+    // +listMapKey=group
+    // +optional
+    CustomRules []AuditCustomRule `json:"customRules,omitempty"`
+}
+
+// AuditCustomRule describes a custom rule for an audit profile that takes precedence over
+// the top-level profile.
+type AuditCustomRule struct {
+    // group is a name of group a request user must be member of in order to this profile to apply.
+    //
+    // +kubebuilder:validation:Required
+    // +kubebuilder:validation:MinLength=1
+    // +required
+    Group string `json:"group"`
+
+    // profile specifies the name of the desired audit policy configuration to be deployed to
+    // all OpenShift-provided API servers in the cluster.
+    //
+    // The following profiles are provided:
+    // - Default: the existing default policy.
+    // - WriteRequestBodies: like 'Default', but logs request and response HTTP payloads for
+    // write requests (create, update, patch).
+    // - AllRequestBodies: like 'WriteRequestBodies', but also logs request and response
+    // HTTP payloads for read requests (get, list).
+    // - None: no requests are logged at all, not even oauthaccesstokens and oauthauthorizetokens.
+    //
+    // If unset, the 'Default' profile is used as the default.
+    //
+    // +kubebuilder:Enum=Default,WriteRequestBodies,AllRequestBodies,None
+    // +kubebuilder:validation:Required
+    // +required
+    Profile AuditProfileType `json:"profile,omitempty"`
+}
+```
+
+### Library-go Implementation of CustomRules
+
+The library-go interface for audit policies before addition of `customRules` in `github.com/openshift/library-go/pkg/operator/apiserver/audit` looked like this:
+
+```go
+type AuditPolicyPathGetterFunc func(profile string) (string, error)
+
+func DefaultPolicy() ([]byte, error)
+func WithAuditPolicies(targetName string, targetNamespace string, assetDelegateFunc resourceapply.AssetFunc) resourceapply.AssetFunc
+func GetAuditPolicies(targetName, targetNamespace string) (*corev1.ConfigMap, error)
+func NewAuditPolicyPathGetter(path string) (AuditPolicyPathGetterFunc, error)
+```
+
+with a config observer in `github.com/openshift/library-go/pkg/operator/configobserver/apiserver`:
+
+```go
+func NewAuditObserver(pathGetter AuditPolicyPathGetterFunc) configobserver.ObserveConfigFunc
+```
+
+The asset func is wired into the static resource controller in our operators like this:
+
+```go
+apiservercontrollerset.NewAPIServerControllerSet(
+    ...
+).WithStaticResourcesController(
+    "APIServerStaticResources",
+    libgoassets.WithAuditPolicies("audit", operatorclient.TargetNamespace, v311_00_assets.Asset),
+    []string{
+	    ...,
+		libgoassets.AuditPoliciesConfigMapFileName,
+	},
+	...,
+).WithRevisionController(
+	operatorclient.TargetNamespace,
+	[]revision.RevisionResource{
+		{
+			Name: "audit",
+		},
+	},
+	...,
+)
+```
+
+As the audit policy file is not static anymore with the addition of
+custom rules, this approach will not work anymore. Instead, we need a
+dynamic audit policy controller in the apiserver operators that
+
+1. computes the policy depending on the apiserver configuration
+   resource
+2. and copies that as a `ConfigMap` into the operand namespace.
+
+Then the revision controller will notice it changing and assigns a new
+operand revision that causes a rollout. We will add the audit policy
+controller to the APIServer controller set in library-go, shared by
+our three apiserver operators:
+
+```go
+apiservercontrollerset.NewAPIServerControllerSet(
+    ...
+).WithAuditPolicyController(
+    operatorclient.TargetNamespace,
+    kubeInformersForNamespaces,
+    kubeClient.CoreV1(),
+	configClient.ConfigV1().APIServers(),
+).WithRevisionController(
+	operatorclient.TargetNamespace,
+	[]revision.RevisionResource{
+		{
+			Name: "audit",
+		},
+	},
+	...,
+)
+```
+
+In `github.com/openshift/library-go/pkg/operator/apiserver/audit` we replace `GetAuditPolicies` with
+
+```go
+import auditv1 "k8s.io/apiserver/pkg/apis/audit/v1"
+import configv1 "github.com/openshift/api/config/v1"
+
+func GetAuditPolicy(audit *configv1.Audit) (*auditv1.Policy, error)
+```
+
+We can keep `DefaultPolicy` for bootstrapping of the control-plane, but remove `AuditPolicyPathGetterFunc`, `WithAuditPolicies` and `NewAuditPolicyPathGetter`.
+
+The audit policy controller then will watch the `config.openshift/v1` APIServer resoure and compute the audit policy for the audit configuration. It applies the result to the `<operand-namespace>/audit` ConfigMap, to be picked up by the revision controller. In addition, the audit policy controller will watch the operand namespace ConfigMaps in order to notice external changes to that `audit` ConfigMap.
+
+The pod manifest for the apiserver will mount a constant audit policy filename pointed to the mounted audit policy. We will remove the audit observer from `github.com/openshift/library-go/pkg/operator/configobserver/apiserver`.
 
 ### Test Plan
 
@@ -334,7 +599,13 @@ expectations).
 
 ### Graduation Criteria
 
-None
+#### Dev Preview
+
+#### Dev Preview -> Tech Preview
+
+#### Tech Preview -> GA
+
+#### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 

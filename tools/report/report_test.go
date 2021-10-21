@@ -76,6 +76,36 @@ Fourth line
 	}
 }
 
+func TestFormatLabels(t *testing.T) {
+
+	for _, tc := range []struct {
+		Scenario string
+		Input    []string
+		Expected string
+	}{
+		{
+			Scenario: "None",
+			Input:    []string{},
+			Expected: "",
+		},
+		{
+			Scenario: "One",
+			Input:    []string{"label1"},
+			Expected: descriptionIndent + "`label1`",
+		},
+		{
+			Scenario: "Two",
+			Input:    []string{"label1", "label2"},
+			Expected: descriptionIndent + "`label1, label2`",
+		},
+	} {
+		t.Run(tc.Scenario, func(t *testing.T) {
+			actual := formatLabels(tc.Input, descriptionIndent)
+			assert.Equal(t, tc.Expected, actual)
+		})
+	}
+}
+
 func TestFindSplit(t *testing.T) {
 	for _, tc := range []struct {
 		Scenario string

@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
+	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/report"
 	"github.com/openshift/enhancements/tools/stats"
 	"github.com/openshift/enhancements/tools/util"
@@ -97,11 +98,6 @@ func newReportCommand() *cobra.Command {
 					return prd.Pull.CreatedAt.After(earliestDate)
 				},
 			}
-			otherOld := stats.Bucket{
-				Rule: func(prd *stats.PullRequestDetails) bool {
-					return prd.Stale && prd.RecentActivityCount > 0
-				},
-			}
 
 			// Define some extra buckets for older or lingering items
 			revived := stats.Bucket{
@@ -143,23 +139,28 @@ func newReportCommand() *cobra.Command {
 				&otherClosed,
 				&revived,
 				&otherNew,
-				&otherOld,
 
 				&stale,
 				&otherActive,
 				&idle,
 			}
 
+			summarizer, err := enhancements.NewSummarizer()
+			if err != nil {
+				return errors.Wrap(err, "unable to show PR summaries")
+			}
+
 			theStats := &stats.Stats{
 				Query:        query,
 				EarliestDate: earliestDate,
 				Buckets:      reportBuckets,
+				Summarizer:   summarizer,
 			}
 
 			fmt.Fprintf(os.Stderr, "finding pull requests for %s/%s\n", orgName, repoName)
 			fmt.Fprintf(os.Stderr, "ignoring items closed before %s\n", earliestDate)
 
-			err := theStats.Populate()
+			err = theStats.Populate()
 			if err != nil {
 				return errors.Wrap(err, "could not generate stats")
 			}
@@ -175,65 +176,61 @@ func newReportCommand() *cobra.Command {
 				fmt.Printf("\n## Enhancements for Release Priorities\n")
 
 				report.SortByID(prioritizedMerged.Requests)
-				report.ShowPRs("Prioritized Merged", prioritizedMerged.Requests, true)
+				report.ShowPRs(summarizer, "Prioritized Merged", prioritizedMerged.Requests, true, false)
 
 				report.SortByID(prioritizedNew.Requests)
-				report.ShowPRs("Prioritized New", prioritizedNew.Requests, true)
+				report.ShowPRs(summarizer, "Prioritized New", prioritizedNew.Requests, true, true)
 
 				report.SortByID(prioritizedRevived.Requests)
-				report.ShowPRs(
+				report.ShowPRs(summarizer,
 					"Prioritized Revived (discussion after PR was merged)",
 					prioritizedRevived.Requests,
+					false,
 					false,
 				)
 
 				report.SortByActivityCountDesc(prioritizedActive.Requests)
-				report.ShowPRs("Prioritized Active", prioritizedActive.Requests, true)
+				report.ShowPRs(summarizer, "Prioritized Active", prioritizedActive.Requests, true, true)
 
 				report.SortByID(prioritizedClosed.Requests)
-				report.ShowPRs("Prioritized Closed", prioritizedClosed.Requests, false)
+				report.ShowPRs(summarizer, "Prioritized Closed", prioritizedClosed.Requests, false, false)
 			}
 
 			fmt.Printf("\n## Other Enhancements\n")
 
 			report.SortByID(otherMerged.Requests)
-			report.ShowPRs("Other Merged", otherMerged.Requests, true)
+			report.ShowPRs(summarizer, "Other Merged", otherMerged.Requests, true, false)
 
 			report.SortByID(otherNew.Requests)
-			report.ShowPRs("Other New", otherNew.Requests, true)
+			report.ShowPRs(summarizer, "Other New", otherNew.Requests, true, true)
 
 			report.SortByActivityCountDesc(otherActive.Requests)
-			report.ShowPRs("Other Active", otherActive.Requests, false)
+			report.ShowPRs(summarizer, "Other Active", otherActive.Requests, false, false)
 
 			report.SortByID(otherClosed.Requests)
-			report.ShowPRs("Other Closed", otherClosed.Requests, false)
+			report.ShowPRs(summarizer, "Other Closed", otherClosed.Requests, false, false)
 
 			report.SortByID(revived.Requests)
-			report.ShowPRs(
+			report.ShowPRs(summarizer,
 				fmt.Sprintf("Revived (closed more than %d days ago, but with new comments)", daysBack),
 				revived.Requests,
 				false,
-			)
-
-			report.SortByID(otherOld.Requests)
-			report.ShowPRs(
-				fmt.Sprintf("Old (labeled as stale, but discussion in last %d days)",
-					daysBack),
-				otherOld.Requests,
-				false,
-			)
-
-			report.SortByID(stale.Requests)
-			report.ShowPRs(
-				"Other lifecycle/stale",
-				stale.Requests,
 				false,
 			)
 
 			report.SortByID(idle.Requests)
-			report.ShowPRs(
+			report.ShowPRs(summarizer,
 				fmt.Sprintf("Idle (no comments for at least %d days)", daysBack),
 				idle.Requests,
+				false,
+				false,
+			)
+
+			report.SortByID(stale.Requests)
+			report.ShowPRs(summarizer,
+				"Other lifecycle/stale or lifecycle/rotten",
+				stale.Requests,
+				false,
 				false,
 			)
 

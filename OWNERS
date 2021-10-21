@@ -4,18 +4,16 @@ approvers:
   - aravindhp
   - ashcrow
   - bparees
-  - brancz
   - celebdor
   - chancez
   - cooktheryan
-  - crawford
   - danehans
   - deads2k
   - derekwaynecarr
-  - dhellmann
   - dgoodwin
+  - dhellmann
+  - dtantsur
   - dustymabe
-  - ecordell
   - enxebre
   - eparis
   - ericavonb
@@ -24,6 +22,7 @@ approvers:
   - imcleod
   - ironcladlou
   - jcantrill
+  - jerpeter1
   - joelanford
   - joelspeed
   - josephschorr
@@ -33,6 +32,8 @@ approvers:
   - jwmatthews
   - kbsingh
   - knobunc
+  - lalatendumohanty
+  - mandre
   - markmc
   - mfojtik
   - Miciah
@@ -40,6 +41,8 @@ approvers:
   - pmorie
   - runcom
   - russellb
+  - rvanderp3
+  - sadasu
   - sdodson
   - shawn-hurley
   - sjenning
@@ -52,3 +55,5 @@ approvers:
   - stevekuznetsov
   - sttts
   - sudhaponnaganti
+  - s-urbaniak
+  - tjungblu

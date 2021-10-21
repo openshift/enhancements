@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
+	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/report"
 	"github.com/openshift/enhancements/tools/stats"
 	"github.com/openshift/enhancements/tools/util"
@@ -77,9 +78,16 @@ func newShowPRCommand() *cobra.Command {
 				return errors.Wrap(err, fmt.Sprintf("failed to fetch details for PR %d", prID))
 			}
 
+			summarizer, err := enhancements.NewSummarizer()
+			if err != nil {
+				return errors.Wrap(err, "unable to show PR summaries")
+			}
+
 			report.ShowPRs(
+				summarizer,
 				fmt.Sprintf("Pull Request %d", prID),
 				all.Requests,
+				true,
 				true,
 			)
 

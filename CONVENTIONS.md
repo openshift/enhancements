@@ -143,7 +143,51 @@ Please note that in case of [Single Node OpenShift](https://github.com/openshift
   * Set soft pod anti-affinity on the hostname so that pods prefer to land on separate nodes (will be violated on two node clusters)
   * Use maxSurge for deployments if possible since the spreading rules are soft
 
-In future, when we include the descheduler into OpenShift by default, it will periodically rebalance the cluster to ensure spreading for operand or operator is honored. At that time we will remove hard anti-affinity constraints, and recommend components move to a surge model during upgrades.
+In the future, when we include the descheduler into OpenShift by default, it will periodically rebalance the cluster to ensure spreading for operand or operator is honored. At that time we will remove hard anti-affinity constraints, and recommend components move to a surge model during upgrades.
+
+##### Handling kube-apiserver disruption
+
+kube-apiserver disruption can happen for multiple reasons, including
+1. kube-apiserver rollout on a non-HA cluster
+2. networking disruption on the host running the client
+3. networking disruption on the host running the server
+4. internal load balancer disruption
+5. external load balancer disruption
+
+We have seen all of these cases, and more, disrupt connections.
+Many workloads, controllers, and operators rely on the kube-apiserver for making authentication, authorization, and leader election.
+To avoid disruption and mass pod-death, it is important to
+1. /healthz, /readyz, /livez should not require authorization.
+   They are already open to unauthenticated, so the delegated authorization check presents a reliability risk without
+   a security benefit.
+   This is now the default in the delegated authorizer in k8s.io/apiserver based servers.
+   Controller-runtime does not protect these by default.
+2. Binaries should handle mTLS negotiation using the in-cluster client certificate configuration.
+   This allows for authentication without contacting the kube-apiserver.
+   The canonical case here is the metrics scraper.
+   In 4.9, the metrics scraper will support using in-cluster client-certificates to increase reliability of scraping
+   in cases of kube-apiserver disruption.
+   This is now the default in the delegated authenticator in k8s.io/apiserver based servers.
+   Controller-runtime is missing this feature, but it is critical for secure monitoring.
+   This gap in controller-runtime should be addressed, but in the short-term kube-rbac-proxy can honor client certificates.
+3. /metrics should use a hardcoded authorizer.
+   The metrics scraping identity is `system:serviceaccount:openshift-monitoring:prometheus-k8s`
+   In OCP, we know that the metrics-scraping identity will *always* have access to /metrics.
+   The delegated authorization check for that user on that endpoint presents a reliability risk without a security benefit.
+   You can use a construction like: https://github.com/openshift/library-go/blob/7a65fdb398e28782ee1650959a5e0419121e97ae/pkg/controller/controllercmd/builder.go#L254-L259 .
+   Controller-runtime missing this feature, but it is critical for reliability.
+   Again, in the short term, kube-rbac-proxy can provide static authorization policy.
+4. Leader election needs to be able to tolerate 60s worth of disruption.
+   The default in library-go has been upgaded to handle this case in 4.9: https://github.com/openshift/library-go/blob/4b9033d00d37b88393f837a88ff541a56fd13621/pkg/config/leaderelection/leaderelection.go#L84
+   In essence, the kube-apiserver downtime tolerance is `floor(renewDeadline/retryPeriod)*retryPeriod-retryPeriod`.
+   Recommended defaults are LeaseDuration=137s, RenewDealine=107s, RetryPeriod=26s.
+   These are the configurable values in k8s.io/client-go based leases and controller-runtime exposes them.
+   This gives us
+   1. clock skew tolerance == 30s
+   2. kube-apiserver downtime tolerance == 78s
+   3. worst non-graceful lease reacquisition == 163s
+   4. worst graceful lease reacquisition == 26s
+
 
 #### Upgrade and Reconfiguration
 
@@ -155,6 +199,17 @@ In future, when we include the descheduler into OpenShift by default, it will pe
   * Components that support workloads directly must not disrupt end-user workloads during upgrade or reconfiguration
     * E.g. the upgrade of a network plugin must serve pod traffic without disruption (although tiny increases in latency are allowed)
     * All components that currently disrupt end-user workloads must prioritize addressing those issues, and new components may not be introduced that add disruption
+* All dameonsets of OpenShift components should use the maxUnavailable rollout strategy, allowing up to 10% of instances to be taken down at once.
+Any bugs that block that should be fixed.
+`10%` is an arbitrary ratio that ensures that most of the cluster is up and
+serving clients, while a big-enough chunk of the cluster is upgradable.
+There wasn't a huge amount of analysis beyond the fact that it significantly
+improved upgrade times and hit our targets. Additionally, 10% is roughly in
+line with the minimum disruption experienced by the default sized cluster
+whenever we reboot nodes and that's mandatory in order to complete an upgrade.
+Keeping the default of `1` makes an operator upgrade unacceptably slowly on
+big clusters because only one host running the daemonset can be drained (and upgraded) at a time.
+
 
 #### Priority Classes
 
@@ -286,6 +341,22 @@ end-to-end job run and the component being tuned uses 350m on the same
 run, the request for the component being tuned should be set to
 100m/600m * 350m ~= 58m.
 
+The following PromQL query illustrates how to calculate the adequate CPU request
+for all containers in the `openshift-monitoring` namespace:
+
+```PromQL
+# CPU request / usage of the SDN container
+scalar(
+  max(kube_pod_container_resource_requests{namespace="openshift-sdn", container="sdn", resource="cpu"}) /
+  max(max_over_time(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate{namespace="openshift-sdn", container="sdn"}[120m]))) * 
+# CPU usage of each container in the openshift-monitoring namespace
+max by (pod, container) (node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate{namespace="openshift-monitoring"})
+```
+
+> Please note that pods which run on control-plane nodes must use the etcd container as their baseline.
+The example above uses the SDN container for all pods in the `openshift-monitoring` namespace in order to simplify the
+Prometheus query. Since the `cluster-monitoring-operator` runs on control plane nodes, its CPU request should be evaluated against the `etcd` container.
+
 Kubernetes resource requests for memory are [measured in
 bytes](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-memory).
 
@@ -305,6 +376,20 @@ end-to-end parallel conformance test job. After running the tests, use
 the Prometheus instance in the cluster to query the
 `kube_pod_resource_request` and `kube_pod_resource_limit` metrics and
 find numbers for the Pod(s) for the component being tuned.
+
+The following PromQL query illustrates how to calculate the difference
+between the requested memory and used memory for each container in the
+`openshift-monitoring` namespace:
+```PromQL
+(
+  # Calculate the 90th percentile of memory usage over the past hour and add 10% to that 
+  1.1 * (max by (pod, container) (
+    quantile_over_time(0.9, container_memory_working_set_bytes{namespace="openshift-monitoring", container != "POD", container!=""}[60m]))
+  ) -
+  # Calculate the maximum requested memory per pod and container
+  max by (pod, container) (kube_pod_container_resource_requests{namespace="openshift-monitoring", resource="memory", container!="", container!="POD"}) 
+) / 1024 / 1024
+```
 
 Resource requests should be reviewed regularly. Ideally we will build
 tools to help us recognize when the requests are far out of line with
@@ -350,6 +435,12 @@ following taints if doing so is necessary to form a functional Kubernetes node:
 Operators should not specify tolerations in their manifests for any of the taints in
 the above list without an explicit and credible justification.
 
+Operators should never specify the following toleration:
+* `node.kubernetes.io/unschedulable`
+
+Tolerating `node.kubernetes.io/unschedulable` may result in the inability to
+drain nodes for upgrade operations.
+
 When an operator configures its operand, the operator likewise may specify
 tolerations for the aforementioned taints but should do so only as necessary and only
 with explicit justification.
@@ -383,6 +474,10 @@ spec:
       - operator: Exists
 ```
 
+Tolerating all taints should be reserved for DaemonSets and static
+pods only.  Tolerating all taints on other types of pods may result in the
+inability to drain nodes for upgrade operations.
+
 An example of an operand that matches the first case is kube-proxy, which is required
 for services to work.  An example of an operand that matches the second case is the
 DNS node resolver, which adds an entry to the `/etc/hosts` file on all node hosts so
@@ -393,3 +488,59 @@ components.
 If an operand meets neither of the two conditions listed above, it must not tolerate
 all taints.  This constraint is enforced by [a CI test
 job](https://github.com/openshift/origin/blob/7d07adcf518a846b898cd0958b85f2daf624476a/test/extended/operators/tolerations.go).
+
+#### Runlevels
+
+Runlevels in OpenShift are used to help manage the startup of major API groups
+such as the kube-apiserver and openshift-apiserver. They indicate that a
+namespace contains pods that must be running before the openshift-apiserver.
+
+There are two main levels:
+
+* `openshift.io/run-level: 0` - starting the kube-apiserver
+* `openshift.io/run-level: 1` - starting the openshift-apiserver
+
+However, other than the kube-apiserver and openshift-apiserver API groups,
+runlevels *SHOULD NOT* be used. As they indicate pods that must be running
+before the openshift-apiserver's pods, no Security Context Constraints (SCCs)
+are applied.
+
+This is significant as if no SCC is set then any workload running in that
+namespace may be highly privileged, a level reserved for trusted workloads.
+Early runlevels are used for namespaces containing pods that provide admission
+webhooks for workload pods.
+
+Without the SCC restrictions enforced in these namespaces, the power to create
+pods in these namespaces are equivalent to root on the node. Security measures
+like requiring workloads to run as random uids (a good thing for multi-tenancy
+and helping to protect against container escapes) and dropping some capabilities
+are never applied.
+
+It is important to note that by
+[default](https://github.com/openshift/origin/blob/0104fb51cb31e1f5920b778b17eec8b3286eefee/vendor/k8s.io/kubernetes/openshift-kube-apiserver/admission/namespaceconditions/decorator.go#L11)
+there are a number of statically defined namespaces with runlevels set
+in OpenShift: `default`, `kube-system`, `kube-public`, `openshift`, `openshift-infra`
+and `openshift-node`. These are defined with either runlevel 0 or 1 specified, but as
+runlevel 1 is [inclusive](https://github.com/openshift/origin/blob/03a44ceb76961ad9f97df57367be3db1c8e8b792/vendor/k8s.io/kubernetes/openshift-kube-apiserver/admission/namespaceconditions/decorator.go#L16)
+ of 0, all don't receive an SCC.
+
+In addition a namespace can also be annotated with the label:
+
+```yaml
+labels:
+    openshift.io/run-level: "1"
+```
+
+Regardless of a given user's permissions, any pod created in these namespaces
+will not receive an SCC context. However, a user must be first granted
+permissions to create resources in these namespaces (or to create a namespace
+with a runlevel) as by default such requests are denied.
+
+*So why are runlevels still being used?*
+
+Historically, in older versions of OCP (4.4) there was a significant delay in
+the bootstrapping flow. Meaning that if a component existed in a namespace which
+used SCC there would be a delay before it could start. In recent versions of OCP
+(4.6+) this delay has been virtually eliminated, the usage of runlevels should
+not be required at all hence the primary alternative is to simply try the
+workload without any runlevel specified.

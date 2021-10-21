@@ -10,7 +10,7 @@ reviewers:
 approvers:
   - "@bparees"
 creation-date: 2020-08-18
-last-updated: 2020-09-01
+last-updated: 2021-07-22
 status: implementable
 ---
 
@@ -79,6 +79,23 @@ contributing to a single monorepo.
 
 ## Proposal
 
+### User Stories
+
+#### Story 1
+
+As a user of OpenShift, I should be able to utilize the currently installed operator
+APIs and features in console frontend via plugins delivered through these operators.
+
+#### Story 2
+
+As a developer of OpenShift, I should be able to develop, build and deploy plugins
+on the cluster to expose APIs and features of the given operator in console frontend.
+
+#### Story 3
+
+As an admin of an OpenShift cluster, I should be able to list plugins available on
+the cluster and enable/disable plugins upon operator install or at any point later.
+
 ### Module Federation
 
 Console will use [Webpack module federation](https://webpack.js.org/concepts/module-federation/)
@@ -87,10 +104,12 @@ to dynamically load code from another application while sharing dependencies.
 It also allows console to share its components with plugins built and bundled
 separately.
 
-Plugins will need to be built with Webpack 5 to use module federation.
+Plugins will need to be built with Webpack 5+ which includes native support for
+module federation.
 
-We have a pull request with a [working prototype](https://github.com/openshift/console/pull/6101)
-that uses module federation.
+Refer to
+[dynamic plugins](https://github.com/openshift/console/tree/master/frontend/packages/console-dynamic-plugin-sdk)
+README for technical details on module federation and plugin development.
 
 ### Shared Dependencies
 
@@ -105,14 +124,14 @@ Plugins will not be able to use legacy Patternfly 3 components.
 Plugins are delivered through operators. The operator will create a deployment
 on the platform with an HTTP server to host the plugin and expose it using a
 Kubernetes `Service`. The HTTP server serves all assets for the plugin,
-including JavaScript, CSS, and images. The `Service` must use HTTPS and a
+including JSON, JavaScript, CSS, and images. The `Service` must use HTTPS and a
 [service serving certificate](https://docs.openshift.com/container-platform/4.4/security/certificates/service-serving-certificate.html).
 The console backend will proxy the plugin assets from the `Service` using the
 service CA bundle.
 
 Operators declare that they have a console plugin available by creating a
 cluster-scoped `ConsolePlugin` resource that includes the service name, port,
-and path to the plugin manifest.
+and base path used to access all of the plugin's assets.
 
 ```yaml
 apiVersion: console.openshift.io/v1alpha1
@@ -120,12 +139,55 @@ kind: ConsolePlugin
 metadata:
   name: my-plugin
 spec:
-  displayName: My Plugin
+  displayName: 'My Plugin'
   service:
     name: my-console-plugin
     namespace: my-operator-namespace
     port: 8443
-    manifest: /manifest.json
+    basePath: '/'
+```
+
+In case the plugin needs to communicate with some in-cluster service, it can
+declare a service proxy in its `ConsolePlugin` resource using the
+`spec.proxy.services` array field. A service `name`, `namespace` and `port`
+needs to be specified.
+
+Console backend exposes following endpoint in order to proxy the communication
+between plugin and the service:
+`/api/proxy/namespace/<service-namespace>/service/<service-name>:<port-number>/<request-path>?<optional-query-parameters>`
+
+An example proxy request path from plugin to `helm-charts` service,
+in `helm` namespace to list ten helm releases:
+`/api/proxy/namespace/helm/service/helm-charts:8443/releases?limit=10`
+
+Proxied request will use [service CA bundle](https://docs.openshift.com/container-platform/4.8/security/certificate_types_descriptions/service-ca-certificates.html) by default. The service must use HTTPS.
+If the service uses a custom service CA, the `caCertificate` field
+must contain the certificate bundle. In case the service proxy request
+needs to contain logged-in user's OpenShift access token, the `authorize`
+field needs to be set to `true`. The user's OpenShift access token will be
+then passed in the HTTP `Authorization` request header, for example:
+
+`Authorization: Bearer sha256~kV46hPnEYhCWFnB85r5NrprAxggzgb6GOeLbgcKNsH0`
+
+```yaml
+apiVersion: console.openshift.io/v1alpha1
+kind: ConsolePlugin
+metadata:
+  name: my-plugin
+spec:
+  displayName: 'My Plugin'
+  service:
+    name: my-console-plugin
+    namespace: my-operator-namespace
+    port: 8443
+    basePath: '/'
+  proxy:
+    services:
+    - name: helm-charts
+      namespace: helm
+      port: 8443
+      caCertificate: '-----BEGIN CERTIFICATE-----\nMIID....'
+      authorize: true
 ```
 
 Plugins are disabled by default. They need to be manually enabled by a cluster
@@ -185,36 +247,31 @@ extension points will be available.
 
 ```json
 {
-  "$schema": "/path/to/schema/manifest.json",
-  "id": "my-plugin",
+  "name": "my-plugin",
   "version": "1.2.3",
-  "pluginAPI": "4.7.x",
   "displayName": "My Plugin",
+  "dependencies": {
+    "@console/pluginAPI": "4.8.x"
+  },
   "extensions": [
     {
       "type": "console.flag",
       "properties": {
-        "handler": {
-          "$codeRef": "example.testHandler"
-        }
+        "handler": { "$codeRef": "example.testHandler" }
       }
     },
     {
       "type": "console.flag/model",
       "properties": {
         "flag": "EXAMPLE",
-        "model": {
-          "group": "example.com",
-          "version": "v1",
-          "kind": "ExampleModel"
-        }
+        "model": { "group": "example.com", "version": "v1", "kind": "ExampleModel" }
       }
     }
   ]
 }
 ```
 
-An extension may contain code references, encoded as object literal
+An extension may contain code references, encoded as object literals
 `{ $codeRef: string }`. The value of `$codeRef` is `moduleName.exportName` or
 `moduleName` (equivalent to `moduleName.default`). Webpack itself will resolve
 the remote module when console calls `container.get` on the
@@ -222,26 +279,90 @@ the remote module when console calls `container.get` on the
 
 #### Plugin Manifest Properties
 
-| Property | Description |
-| ----- | -------- |
-| `name: string` | Used as a unique identifier. Each plugin must have a unique name. |
-| `version: string` | The version of the plugin. Version must be parsable by node-semver, eg. “1.2.3” |
-| `pluginAPI: string` | Semver range of compatible OpenShift console versions. |
-| `displayName?: string` | User friendly display name. |
-| `description?: string` | The description of the plugin. |
-| `extensions: Extension[]` | List of extensions contributed by the plugin. |
-| `dependencies?: { [pluginName: string]: string }` | A plugin which depends on other plugins must explicitly define their dependencies. The key of the map is the plugin name and the value is a semver version range. The plugin is not loaded if a dependency is not met. |
+<table>
+<colgroup>
+  <col style="width: 40%;">
+  <col>
+</colgroup>
+<tbody>
+  <tr>
+    <td><b>Property</b></td>
+    <td><b>Description</b></td>
+  </tr>
+  <tr>
+    <td><code>name: string</code></td>
+    <td>Used as a unique identifier. Each plugin must have a unique name.
+    Must be equal to the name of the corresponding <code>ConsolePlugin</code>
+    resource.</td>
+  </tr>
+  <tr>
+    <td><code>version: string</code></td>
+    <td>The version of the plugin. Version must be parsable by node-semver,
+    e.g. <code>1.2.3</code>.</td>
+  </tr>
+  <tr>
+    <td><code>displayName?: string</code></td>
+    <td>User friendly display name.</td>
+  </tr>
+  <tr>
+    <td><code>description?: string</code></td>
+    <td>The description of the plugin.</td>
+  </tr>
+  <tr>
+    <td><code>exposedModules?: { [moduleName: string]: string }</code></td>
+    <td>JavaScript modules exposed through the plugin's remote container.
+    These will be loaded by Console on demand to resolve code references.</td>
+  </tr>
+  <tr>
+    <td><pre>
+dependencies: {
+  '@console/pluginAPI': string;
+  [pluginName: string]: string;
+}
+</pre></td>
+    <td>Dependency values must be valid semver ranges.
+    The <code>@console/pluginAPI</code> dependency refers to compatible
+    OpenShift console versions. A plugin may also declare dependencies on
+    other plugins. The plugin is not loaded if its dependencies are not met.</td>
+  </tr>
+</tbody>
+</table>
 
 Property types are expressed as TypeScript types.
 
-##### Extension<P = JSON>
+#### `Extension<P = JSON>`
 
-| Property | Description |
-| ----- | -------- |
-| `id: string` | Unique identifier of this extension. |
-| `type: string` | The `type` identifies this extension of a particular extension type. |
-| `properties: P` | The extension properties JSON. |
-| `flags?: Partial<{ required: string[]; disallowed: string[]; }>` | Reference to the flags used to trigger the enablement of this extension. |
+<table>
+<colgroup>
+  <col style="width: 40%;">
+  <col>
+</colgroup>
+<tbody>
+  <tr>
+    <td><b>Property</b></td>
+    <td><b>Description</b></td>
+  </tr>
+  <tr>
+    <td><code>type: string</code></td>
+    <td>The <code>type</code> identifies this extension to be of a particular
+    extension type.</td>
+  </tr>
+  <tr>
+    <td><code>properties: P</code></td>
+    <td>The <code>properties</code> object contains static values and/or code
+    references necessary to interpret this extension at runtime.</td>
+  </tr>
+  <tr>
+    <td><pre>
+flags?: {
+  required?: string[];
+  disallowed?: string[];
+}
+</pre></td>
+    <td>Feature flags used to trigger the enablement of this extension.</td>
+  </tr>
+</tbody>
+</table>
 
 ### Lazy Loading
 
@@ -272,6 +393,33 @@ available and the user must refresh their browser to see the changes. (We won't
 refresh the page automatically to avoid possibly losing data if the user is
 entering something into a form or the YAML editor.)
 
+### Localization
+
+Info on how Console is handling i18n is in this [enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/console/internationalization.md).
+
+Console uses [react-i18next](https://github.com/i18next/react-i18next) for i18n,
+and dynamic plugins must use react-i18next as well.
+
+All dynamic plugins must use a single react-i18next [namespace](https://www.i18next.com/principles/namespaces),
+named after the plugin, e.g. for `kubevirt` the filename would be
+`plugin__kubevirt.json`. Localization resources need to be served
+by the plugin service under the `locales/{language}/{namespace}.json`
+path relative to the `basePath` defined in the `ConsolePlugin` resource.
+All dynamic plugins must use the `plugin__` namespace prefix, e.g.
+`plugin__knative` or `plugin__kubevirt`. The request for the dynamic
+plugin localization resources will be proxied by console backend.
+For example, the `kubevirt` plugin localization resource
+in the `en` language will be requested at path
+`/locales/en/plugin__kubevirt.json`
+
+Here's a code example of how the `kubevirt` plugin would translate a message:
+```js
+const VMHeading = () => {
+  const { t } = useTranslation();
+  return <h1>{t('plugin__kubevirt~Virtual Machine')}</h1>;
+};
+```
+
 ### Error Handling
 
 Console will guard against runtime errors in plugins. All plugin components
@@ -280,10 +428,10 @@ This prevents an uncaught error from causing the application to white-screen
 and break. If a plugin service is unavailable, console will not load the plugin
 and show a message in the notification drawer to let users know.
 
-Additionally, the console can contain a `?disable-plugins` query parameter with
-a comma separated list of plugin names. When this parameter is present, the
-corresponding dynamic plugins are not loaded. If `all` is passed, all dynamic
-plugins will be disabled.
+Additionally, console users can disable specific or all dynamic plugins that
+would normally get loaded by console via `?disable-plugins` query parameter.
+The value of this parameter is either a comma separated list of plugin names
+(disable specific plugins) or an empty string (disable all plugins).
 
 ### Risks and Mitigations
 
@@ -333,6 +481,18 @@ matures.
 Static plugins are already a supported feature. Any existing static plugin that
 is migrated to a dynamic plugin will need to have the same support level.
 
+#### Dev Preview -> Tech Preview
+
+None
+
+#### Tech Preview -> GA
+
+None
+
+#### Removing a deprecated feature
+
+None
+
 ### Upgrade / Downgrade Strategy
 
 We'll need to make sure any static plugin we remove has a dynamic plugin ready.
@@ -353,8 +513,8 @@ can also be helpful for operators who depend on new plugin APIs that are only
 available in certain OpenShift versions.
 
 Plugins can declare a compatible OpenShift semver version range in the plugin
-manifest using the `pluginAPI` property. The console will only load plugins for
-compatible OpenShift versions.
+manifest using the `@console/pluginAPI` property. The console will only load
+plugins for compatible OpenShift versions.
 
 An operator could contribute multiple plugins with different version ranges to
 support different OpenShift versions. If the version ranges don't overlap, the
@@ -363,6 +523,8 @@ console will only load the correct plugin.
 ## Implementation History
 
 * 2020-07-24 - Initial [dynamic plugin PR](https://github.com/openshift/console/pull/6101) opened.
+* 2020-11-26 - Allow static plugins to use new extension types with code references
+  ([console#7163](https://github.com/openshift/console/pull/7163)).
 
 ## Drawbacks
 

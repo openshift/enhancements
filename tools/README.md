@@ -1,5 +1,12 @@
 # Enhancement Tools
 
+## Local Repository
+
+The tools in this directory are designed to run out of a local clone
+of the `openshift/enhancements` git repository. The repository can be
+cloned from any source, but one of the remotes must point to the
+`openshift/enhancements` repo on GithHub.
+
 ## Configuring
 
 You need to create a `~/.config/ocp-enhancements/config.yml`

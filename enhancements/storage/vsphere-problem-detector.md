@@ -96,12 +96,9 @@ We want these metrics to be transferred via telemetry to us:
 * HW version of vSphere VMs.
 * vCenter version.
 * ESXi host version (of each host).
-* List of installed storage plugins (3rd party vendor VIBs) - if possible.
+* Count of each datastore types used in the cluster (vmfs, nfs, vsan or virtual volumes).
 * List of enabled features:
-  * HA
-  * DRS
-  * SDRS w/DatastoreCluster
-
+  * SDRS w/DatastoreCluster.
 
 ### User Stories
 
@@ -190,16 +187,16 @@ All these are subject of change, see Open Questions below.
 
 #### Examples
 
-##### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 
 * The operator is installed by default in all OCP vSphere clusters and documented in our docs.
 
-##### Tech Preview -> GA
+#### Tech Preview -> GA
 
 * More testing (upgrade, scale).
 * At least 2 releases passed since tech preview to get feedback from customers & support.
 
-##### Removing a deprecated feature
+#### Removing a deprecated feature
 
 The operator is mostly "invisible" to customers, we can remove it without breaking anything.
 

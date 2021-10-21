@@ -18,9 +18,9 @@ approvers:
 
 creation-date: 2021-03-08
 
-last-updated: 2021-03-26
+last-updated: 2021-06-28
 
-status: implementable
+status: superseded
 
 see-also:
   - https://bugzilla.redhat.com/show_bug.cgi?id=1512759
@@ -29,6 +29,7 @@ see-also:
 replaces:
 
 superseded-by:
+  - enhancements/ingress/global-admission-hsts.md
 
 ---
 
@@ -414,6 +415,10 @@ because it may not be clear to the user that a global setting cannot override a 
 Otherwise, it would not be possible to use a per-route setting.
 
 ## Design Details
+## Drawbacks
+N/A
+## Alternatives
+N/A
 
 ### Open Questions
 Version Skew Strategy - not clear to me if that is required here.
@@ -462,4 +467,14 @@ until the HSTS Policy expires.
 N/A (TBD)
 
 ## Implementation History
+N/A
+### Placeholder for lint
+N/A
+#### Dev Preview -> Tech Preview
+N/A
+#### Tech Preview -> QA
+N/A
+#### Tech Preview -> GA
+N/A
+#### Removing a deprecated feature
 N/A

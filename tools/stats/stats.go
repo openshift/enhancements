@@ -34,7 +34,7 @@ type PullRequestDetails struct {
 	State         string
 	LGTM          bool // lgtm
 	Prioritized   bool // priority-important/soon or priority/critical-urgent
-	Stale         bool // lifecycle/stake
+	Stale         bool // lifecycle/stale or lifecycle/rotten
 	Group         string
 	IsEnhancement bool
 	ModifiedFiles []enhancements.ModifiedFile
@@ -65,6 +65,7 @@ type Stats struct {
 	Query        *util.PullRequestQuery
 	EarliestDate time.Time
 	Buckets      []*Bucket
+	Summarizer   *enhancements.Summarizer
 }
 
 // Populate runs the query and filters requests into the appropriate
@@ -120,19 +121,23 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 		if *label.Name == "lifecycle/stale" {
 			stale = true
 		}
+		if *label.Name == "lifecycle/rotten" {
+			stale = true
+		}
 	}
 
-	modifiedFiles, err := enhancements.GetModifiedFiles(int(*pr.Number))
+	modifiedFiles, err := s.Summarizer.GetModifiedFiles(int(*pr.Number))
 	if err != nil {
 		return errors.Wrap(err,
-			fmt.Sprintf("could not determine group details for %s", *pr.HTMLURL))
+			fmt.Sprintf("could not determine group details from modified files for %s",
+				*pr.HTMLURL))
 	}
 
 	// Look for whether a file has been added in the PR to determine
 	// if this is a new enhancement.
 	var isNew bool
 	for _, f := range modifiedFiles {
-		if f.Mode == "A" {
+		if f.Mode == "A" || f.Mode == "?" {
 			isNew = true
 			break
 		}
