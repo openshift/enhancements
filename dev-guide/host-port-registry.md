@@ -78,6 +78,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 6385  | ironic-api   | kni | 4.4 | baremetal provisioning, control plane only |
 | 6443  | kube-apiserver | apiserver || control plane only |
 | 8089  | ironic-conductor | kni | 4.4 | baremetal provisioning, control plane only |
+| 8200-8219  | various CSI drivers | storage | 4.10 | metrics (upstream ports to proxy to) |
 | 9001  | machine-config-daemon oauth proxy | node || metrics |
 | 9100  | node-exporter | monitoring || metrics |
 | 9101  | openshift-sdn kube-rbac-proxy | sdn || metrics, openshift-sdn only |
