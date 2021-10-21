@@ -1,5 +1,5 @@
 ---
-title: alert-routing
+title: multi-tenant-alerting
 authors:
   - "@simonpasquier"
 reviewers:
@@ -14,7 +14,7 @@ see-also:
   - "/enhancements/monitoring/user-workload-monitoring.md"
 ---
 
-# alert-routing-for-user-workload monitoring
+# multi-tenant-alerting
 
 ## Release Signoff Checklist
 
@@ -31,6 +31,7 @@ This document describes a solution that allows OpenShift users to route alert
 notifications without cluster admin intervention. It complements the existing
 [user-workload monitoring stack][uwm-docs], enabling a full self-service experience for
 workload monitoring.
+
 
 ## Motivation
 
@@ -82,6 +83,8 @@ resources from user namespaces.
 * Support the configuration of alert notifications for platform alerts (e.g.
 alerts originating from namespaces with the `openshift.io/cluster-monitoring: "true"`
 label).
+* Share alert receivers and routes across tenants.
+* Deploy an additional UWM Alertmanager.
 
 ## Proposal
 
@@ -111,8 +114,8 @@ at the same time.
 #### Story 3
 
 As an application owner, I want to know if my AlertmanagerConfig custom
-resource is taken into account so that I am confident that I will receive alert
-notifications.
+resource has been reconciled on the target Alertmanager so that I am confident
+that I will receive alert notifications.
 
 #### Story 4
 
@@ -240,6 +243,20 @@ data:
 
 When this option is chosen, the OCP console can't be used to manage silences for user alerts.
 
+Summary of the different combinations:
+
+
+| `enableUserWorkload` | `enableUserAlertmanagerConfig` | `usePlatformAlertmanager` (UWM) | `additionalAlertmanagerConfigs` (UWM) | Outcome |
+|:--------------------:|:------------------------------:|:------------------------------------:|:-------------------------------------:|---------|
+| false | N/A | N/A | N/A | User worload monitoring not available. |
+| true | false | false | empty | User alerts evaluated but sent nowhere. |
+| true | false | true | empty | User alerts sent to Plaform Alertmanager. Configuration managed by cluster admins. |
+| true | false | true | not empty | User alerts sent to Plaform Alertmanager and external Alertmanager(s). Configuration of Platform Alertmanager managed by cluster admins. |
+| true | true | false | empty | User alerts evaluated but sent nowhere. |
+| true | true | true | empty | User alerts sent to Plaform Alertmanager. Configuration managed by application owners. |
+| true | true | true | not empty | User alerts sent to Plaform Alertmanager and external Alertmanager(s). Configuration of Plaform Alertmanager managed by application owners. |
+
+
 ### Tenancy
 
 By design, all alerts coming from UWM have a `namespace` label equal to the
@@ -249,6 +266,28 @@ invariant to generate an Alertmanager configuration that ensures that a given
 `namespace` value. This means that an `AlertmanagerConfig` resource from
 namespace `foo` only processes alerts with the `namespace="foo"` label (be it
 for routing or inhibiting purposes).
+
+Below is how the operator renders an AlertmanagerConfig resource in the final Alertmanager configuration.
+
+```yaml
+...
+route:
+# The next item is generated from an AlertmanagerConfig resource named alertmanagerconfig1 in namespace foo.
+- matchers: ['namespace="foo"']
+  receiver: foo-alertmanagerconfig1-my-receiver
+  continue: true
+  routes:
+  - ...
+inhibit_rules:
+# The next item is generated from an AlertmanagerConfig resource named alertmanagerconfig1 in namespace foo.
+- source_matchers: ['namespace="foo"', ...]
+  target_maTCHERS: ['namespace="foo"', ...]
+  equal: ['namespace', ...]
+receivers:
+# The next item is generated from an AlertmanagerConfig resource named alertmanagerconfig1 in namespace foo.
+- name: foo-alertmanagerconfig1-my-receiver
+  ...
+```
 
 ### RBAC
 
@@ -323,27 +362,33 @@ Mitigation
 
 #### AlertmanagerConfig resources not being reconciled
 
-An `AlertmanagerConfig` resource might require credentials (such as API keys)
-which are referenced by secrets. If the Platform Prometheus operator doesn't
-have permissions to read the secret or if the reference is incorrect (wrong
-name or key), the operator doesn't reconcile the resource in the final
-Alertmanager configuration.
+An `AlertmanagerConfig` resource might not be valid for various reasons:
+* An alerting route references a receiver which doesn't exist.
+* Credentials (such as API keys) are referenced by secrets, the
+  operator doesn't have permissions to read the secret or the reference
+  is incorrect (wrong name or key).
+
+In such cases, the Prometheus operator discards the resource which isn't
+reconciled in the final Alertmanager configuration.
+
+The operator might also be unable to reconcile the AlertmanagerConfig resources temporiraly.
 
 Mitigation
 * The Prometheus operator should expose a validating admission webhook that should prevent invalid configurations.
-* We can implement the `Status` subresource of the `AlertmanagerConfig` CRD to report whether or not the resource is reconciled or not (with a message).
+* The Prometheus operator implements the `Status` subresource of the `AlertmanagerConfig` CRD to report whether or not the resource is reconciled or not (with a message).
 * Users can validate that alerting routing works as expected by generating "fake" alerts triggering the notification system. _Users don't have permissions on the Alertmanager API endpoint so they would have to generate fake alerts from alerting rules themselves. We could also support the ability to craft an alert from the OCP console_.
 
 ## Design Details
 
 ### Open Questions
 
-* Should CMO allow UWM admins to deploy a separate Alertmanager cluster in the `openshift-user-workload-monitoring` namespace if the cluster admins don't want to share the Platform Alertmanager?
-  * Pros
-    * More flexibility.
-  * Cons
-    * Increased complexity.
-    * Redundancy with the upcoming Monitoring Stack operator.
+1. Should CMO allow UWM admins to deploy a separate UWM Alertmanager cluster in the `openshift-user-workload-monitoring` namespace if the cluster admins don't want to share the Platform Alertmanager?
+
+Pros
+* More flexibility.
+Cons
+* Increased complexity in the CMO codebase.
+* Redundancy with the upcoming [Monitoring Stack operator][monitoring-stack-operator].
 
 ### Test Plan
 
