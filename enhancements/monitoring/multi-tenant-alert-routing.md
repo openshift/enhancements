@@ -72,7 +72,7 @@ cluster admins.
 routing scoped to individual namespaces.
 * Namespace owners should be able to opt-out from Alertmanager
 configuration (similar to what exist for service/pod monitors and rules using the
-`"openshisft.io/user-monitoring: false"` label on the namespace).
+`"openshift.io/user-monitoring: false"` label on the namespace).
 * Cluster admins should be able to opt-out from supporting `AlertmanagerConfig`
 resources from user namespaces.
 
@@ -245,16 +245,13 @@ When this option is chosen, the OCP console can't be used to manage silences for
 
 Summary of the different combinations:
 
-
-| `enableUserWorkload` | `enableUserAlertmanagerConfig` | `usePlatformAlertmanager` (UWM) | `additionalAlertmanagerConfigs` (UWM) | Outcome |
-|:--------------------:|:------------------------------:|:------------------------------------:|:-------------------------------------:|---------|
-| false | N/A | N/A | N/A | User worload monitoring not available. |
-| true | false | false | empty | User alerts evaluated but sent nowhere. |
-| true | false | true | empty | User alerts sent to Plaform Alertmanager. Configuration managed by cluster admins. |
-| true | false | true | not empty | User alerts sent to Plaform Alertmanager and external Alertmanager(s). Configuration of Platform Alertmanager managed by cluster admins. |
-| true | true | false | empty | User alerts evaluated but sent nowhere. |
-| true | true | true | empty | User alerts sent to Plaform Alertmanager. Configuration managed by application owners. |
-| true | true | true | not empty | User alerts sent to Plaform Alertmanager and external Alertmanager(s). Configuration of Plaform Alertmanager managed by application owners. |
+| User alert destination | User notifications managed by | `enableUserWorkload` | `enableUserAlertmanagerConfig` | `usePlatformAlertmanager` (UWM) | `additionalAlertmanagerConfigs` (UWM) |
+|----|----|:--------------------:|:------------------------------:|:------------------------------------:|:-------------------------------------:|
+| Nowhere | No-one | true | &lt;any&gt; | false | empty |
+| Platform Alertmanager | Cluster admins | true | false | true | empty |
+| Platform Alertmanager<br/>External Alertmanager(s) | Cluster admins for the Platform Alertmanager | true | false | true | not empty |
+| Platform Alertmanager | Application owners | true | true | true | empty |
+| Platform Alertmanager<br/>External Alertmanager(s) | Application owners | true | true | true | not empty |
 
 
 ### Tenancy
@@ -382,13 +379,21 @@ Mitigation
 
 ### Open Questions
 
-1. Should CMO allow UWM admins to deploy a separate UWM Alertmanager cluster in the `openshift-user-workload-monitoring` namespace if the cluster admins don't want to share the Platform Alertmanager?
+1. Should CMO allow UWM admins to deploy a separate UWM Alertmanager cluster if the cluster admins don't want to share the Platform Alertmanager?
+
+While the UWM admins have the ability to configure external Alertmanager
+endpoints where user alerts should be sent, it requires someone to manage the
+deployment of this additional Alertmanager. We could add an option in the UWM
+config map to enable an Alertmanager instance running in the
+`openshift-user-workload-monitoring` namespace.
 
 Pros
-* More flexibility.
+* It provides a better experience for UWM admins: no need to maintain a standalone Alertmanager cluster, less likely to mess up the configuration of `additionalAlertmanagerConfigs`.
 Cons
-* Increased complexity in the CMO codebase.
-* Redundancy with the upcoming [Monitoring Stack operator][monitoring-stack-operator].
+* Increased complexity in the CMO codebase and in the UWM configuration options.
+* Additional resource overhead (though Alertmanager is usually light on resources).
+* Redundancy with the [Monitoring Stack operator][monitoring-stack-operator].
+* More work required for a proper integration in the OCP console.
 
 ### Test Plan
 
