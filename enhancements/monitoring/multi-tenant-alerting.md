@@ -126,8 +126,8 @@ on their behalf.
 
 #### Story 5
 
-As an OpenShift cluster admin, I don't want AlertmanagerConfig resources
-defined by application owners to interfere with the routing of platform alerts.
+As an OpenShift cluster admin, I want to distinguish between platform and user
+alerts so that my Alertmanager configuration can reliably handle all platform alerts.
 
 #### Story 6
 
@@ -141,7 +141,7 @@ As an OpenShift cluster admin, I don't want to support AlertmanagerConfig
 resources for application owners so that the configuration of the Platform
 Alertmanager cluster is completely under my control.
 
-### Story 8
+#### Story 8
 
 As a UWM admin, I don't want to send user alerts to the Platform Alertmanager
 cluster because these alerts are managed by an external system (off-cluster Alertmanager for
@@ -254,7 +254,38 @@ Summary of the different combinations:
 | Platform Alertmanager<br/>External Alertmanager(s) | Application owners | true | true | true | not empty |
 
 
-### Tenancy
+#### Distinction between platform and user alerts
+
+It is important that platform alerts can be clearly distinguished from user
+alerts because cluster admins want to ensure that:
+1. all alerts originating from platform components are dispatched to at least one default receiver which is owned by the admin team.
+2. they aren't notified about any user alert.
+
+To this effect, CMO configures the Platform Prometheus instances with a new
+external label: `openshift_io_alert_source="platform"`.
+
+The Alertmanager configuration can leverage the label's value to make the
+correct decision in the alert routing tree. For instance, the following
+configuration sends all user alerts which haven't been processed by a previous
+entry to an empty receiver.
+
+```yaml
+route:
+  receiver: default-platform-receiver
+  routes:
+  - ...
+  - matchers: ['openshift_io_alert_source!="platform"']
+    receiver: default-user-receiver
+receivers:
+- name: default-platform-receiver
+  ...
+- name: default-user-receiver
+```
+
+Note that a similar use case was already reported in [BZ 1933239][bz-1933239].
+
+
+#### Tenancy
 
 By design, all alerts coming from UWM have a `namespace` label equal to the
 `PrometheusRule` resource's namespace. The Prometheus operator relies on this
@@ -269,12 +300,13 @@ Below is how the operator renders an AlertmanagerConfig resource in the final Al
 ```yaml
 ...
 route:
-# The next item is generated from an AlertmanagerConfig resource named alertmanagerconfig1 in namespace foo.
-- matchers: ['namespace="foo"']
-  receiver: foo-alertmanagerconfig1-my-receiver
-  continue: true
   routes:
-  - ...
+  # The next item is generated from an AlertmanagerConfig resource named alertmanagerconfig1 in namespace foo.
+  - matchers: ['namespace="foo"']
+    receiver: foo-alertmanagerconfig1-my-receiver
+    continue: true
+    routes:
+    - ...
 inhibit_rules:
 # The next item is generated from an AlertmanagerConfig resource named alertmanagerconfig1 in namespace foo.
 - source_matchers: ['namespace="foo"', ...]
@@ -286,7 +318,7 @@ receivers:
   ...
 ```
 
-### RBAC
+#### RBAC
 
 The cluster monitoring operator ships a new cluster role
 `alertmanager-config-edit` so that cluster admins can bind it with a
@@ -459,3 +491,4 @@ model since cluster admins can decide to not reconcile user-defined
 [alertmanagerconfig-crd]: https://prometheus-operator.dev/docs/operator/api/#alertmanagerconfig
 [unsupported-resources]: https://docs.openshift.com/container-platform/4.8/monitoring/configuring-the-monitoring-stack.html#support-considerations_configuring-the-monitoring-stack
 [monitoring-stack-operator]: https://github.com/openshift/enhancements/pull/866
+[bz-1933239]: https://bugzilla.redhat.com/show_bug.cgi?id=1933239
