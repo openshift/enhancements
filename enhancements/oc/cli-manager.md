@@ -60,7 +60,6 @@ developed from a variety of sources - and this should be specific for each clust
 RPMs or images are the only options, and images must be deployed by the RH pipeline via operators. This proposal is for delivering
 plugins via images, because this will enable offering plugins offline through an existing image registry.
 * Plugin owners must be able to easily distribute their binaries
-* The version of a plugin that a user is offered is appropriate for the version of the cluster
 * Allow cluster-admins to control which plugins are offered to users
   * This proposal is not concerned with _which_ plugins will be managed, as that is decided by cluster-admins
 * Controller for registering CRs with an API for listing, extracting and downloading plugins
@@ -78,14 +77,14 @@ plugins via images, because this will enable offering plugins offline through an
 
 Each component wishing to provide customers with their plugins will build and publish images via a trusted image registry
 and create a Plugin CR to provide an image name and the file path within that image for the binaries.
-Clients (i.e. `krew`) will read the index and download binaries from the Controller. The Controller is responsible building the index from CRs, for pulling the images,
+Clients (i.e. `krew`) will read the index and download binaries from the Controller. The Controller is responsible for building the index from CRs, for pulling the images,
 extracting the binaries, and serving them to clients.
 
 * `krew` and `krew` plugins are upstream projects that Kubernetes users are already familiar with
 * A `krew`-compatible custom index can provide available plugins for a cluster in disconnected environments
 * The index will be served by a Controller with its contents managed by cluster-admins via CRs
 * The binaries will also be served by the Controller that will pull images from a trusted image registry and extract the binaries
-* With `krew index add https://someother-third-party-index` we won't limit cluster-admins from adding their own index with whatever plugins they want
+* With `krew index add https://someother-third-party-index` we won't limit users from adding their own index with whatever plugins they want
 * As `krew` itself is a `kubectl` plugin, it can be invoked using either using `kubectl krew` or `oc krew`
 
 Existing methods of downloading binaries (i.e. the console) will not be affected by this proposal. For the initial implementation, supported plugins will create Plugin CRs. The plugins will be downloaded and installed using `krew`.
@@ -178,7 +177,7 @@ If possible, installation, upgrade, downgrade, and uninstallation should be hand
 
 ## Drawbacks
 
-Being that `krew` is for distributing `kubectl` plugins rather than generic CLIs, one drawback is how a non-`kubeclt` plugin
+Being that `krew` is for distributing `kubectl` plugins rather than generic CLIs, one drawback is how a non-`kubectl` plugin
 is executed after being installed. The binary will always be prefixed with `kubectl-`, so for example, `odo` would be `kubectl-odo`.
 This is how `kubectl` plugins work. You can either execute it with that name, or through `kubectl` or `oc` as though it were a
 `kubectl` plugin. For example: `kubectl odo` or `oc odo`.
