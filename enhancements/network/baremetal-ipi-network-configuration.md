@@ -10,9 +10,10 @@ reviewers:
 - "@zaneb"
 approvers:
 - "@trozet"
+- "@staebler"
 creation-date: 2021-05-21
-last-updated: 2021-07-07
-status: provisional|implementable
+last-updated: 2021-10-27
+status: implementable
 
 see-also:
 - "/enhancements/host-network-configuration.md"
@@ -28,8 +29,8 @@ requirement.
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
+- [*] Enhancement is `implementable`
+- [*] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Operational readiness criteria is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
@@ -39,7 +40,7 @@ requirement.
 
 Currently in the IPI flow, there is no way to provide day-1 network configuration
 which is a common requirement, particularly for baremetal users.  We can build
-on the [UPI static networking enhancements](rhcos/static-networking-enhancements.md)
+on the [UPI static networking enhancements](https://github.com/openshift/enhancements/blob/master/enhancements/rhcos/static-networking-enhancements.md)
 to enable such configuration in the IPI flow.
 
 ## Motivation
@@ -117,15 +118,15 @@ and therefore need to provide a static configuration for my primary network.
 There is no way to provide [MachineSpecific Configuration in OpenShift](https://github.com/openshift/machine-config-operator/issues/1720) so I am
 forced to use the UPI flow which is less automated and more prone to errors.
 
+### API Extensions
+
+This does not modify the API of the cluster.
+
 ### Risks and Mitigations
 
-In some existing workflows, kubernetes-nmstate is used to do network configuration on day-2. Using a different interface for day-1 introduces the potential for mismatches and configuration errors when making day-2 changes. It should be possible to mitigate this by generating the NetworkManager keyfiles using the nmstatecli, which will allow the same nmstate config to be used directly in the day-2 configuration.
-
-An added benefit of writing nmstate configurations instead of NetworkManager
-keyfiles directly is that if/when a day-1 nmstate-based interface becomes
-available the config files can be directly inserted into the new interface.
-However, this is not a complete solution because it still requires manually copying
-configuration to multiple locations which introduces the potential for errors.
+In some existing workflows, kubernetes-nmstate is used to do network configuration on day-2. Using a different interface for day-1 introduces the potential for mismatches and configuration errors when making day-2 changes.
+However, this is mitigated by the fact that the exact same configuration data can be used for both interfaces. The nmstate configuration provided to the installer can be copied directly into a NodeNetworkConfigurationPolicy for kubernetes-nmstate.
+While there's still the potential for user error, the process is much simpler and less error-prone than if completely different formats were used.
 
 ## Design Details
 
@@ -143,7 +144,7 @@ RHCOS already provides a mechanism to specify NetworkManager keyfiles during dep
 * A new section in install-config.
 * A secret that contains base64-encoded content for the keyfiles.
 
-These are not mutually exclusive. If we implement the install-config option, we will still need to persist the configuration in a secret so it can be used for day-2. In fact, the initial implementation should likely be based on secrets, and then install-config integration can be added on top of that to improve the user experience. This way the install-config work won't block implementation of the feature.
+These are not mutually exclusive. If we implement the install-config option, we will still need to persist the configuration in a secret so it can be used for day-2.
 
 The data provided by the user will need to have the following structure:
 ```yaml
@@ -236,13 +237,26 @@ Any additions or deprecations in the keyfile interface would need to be handled 
 
 As this feature targets day-1 configuration there should be no version skew. Day-2 operation will be handled by other components which are outside the scope of this document.
 
+### Operational Aspects of API Extensions
+
+NA
+
+#### Failure Modes
+
+Improper network configuration may cause deployment failures for some or all nodes in the cluster, depending on the nature of the misconfiguration.
+
+#### Support Procedures
+
+Because a networking failure is likely to make a node inaccessible, it may be necessary to access the failed node via its BMC (iDRAC, iLO, etc.) to determine why the network config failed.
+
 ## Implementation History
 
 4.9: Initial implementation
 
 ## Drawbacks
 
-Using NetworkManager keyfiles as the user interface for network configuration makes day-2 configuration more problematic. The only existing mechanism for modifying keyfiles after initial deployment is machine-configs, which will trigger a reboot of all affected nodes when changes are made. It also provides no validation or rollback functionality.
+Adds a dependency on NMState. However, NMState provides a strong backward compatibility
+promise (much like NetworkManager itself), so this should be a stable interface.
 
 ## Alternatives
 
