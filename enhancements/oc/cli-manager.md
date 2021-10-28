@@ -176,7 +176,7 @@ If possible, installation, upgrade, downgrade, and uninstallation should be hand
 * Plugins are expected to be backwards compatible. When working with multiple clusters, it's expected that plugin versions will work across cluster versions
   * If this is not the case, plugin owners will provide that information in the CR description
 
-### Operationl Aspects of API Extensions
+### Operational Aspects of API Extensions
 
 New CRD for plugins, should not affect existing SLIs.
 
