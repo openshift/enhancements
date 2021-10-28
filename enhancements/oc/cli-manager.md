@@ -65,13 +65,13 @@ plugins via images, because this will enable offering plugins offline through an
 * Controller for registering CRs with an API for listing, extracting and downloading plugins
   * An API that generates an index that `krew` can consume via its custom index feature
   * The index and binaries will served from a single route and service within the cluster
+* The `krew` client package will be vendored into `oc` for usage as `oc krew install <plugin>`
 
 ### Non-Goals
 
 * The Controller will not build or package plugins
 * No recommending/limiting which plugins are served by the API
 * `krew` will not create or update the Plugin CRs, those will be managed by cluster-admins
-* No modifications to `oc` to support this functionality
 
 ## Proposal
 
@@ -85,6 +85,7 @@ extracting the binaries, and serving them to clients.
 * The index will be served by a Controller with its contents managed by cluster-admins via CRs
 * The binaries will also be served by the Controller that will pull images from a trusted image registry and extract the binaries
 * With `krew index add https://someother-third-party-index` we won't limit users from adding their own index with whatever plugins they want
+* The controller could be optional, since connected environments can use the default `krew` index out-of-the box
 * As `krew` itself is a `kubectl` plugin, it can be invoked using either using `kubectl krew` or `oc krew`
 
 Existing methods of downloading binaries (i.e. the console) will not be affected by this proposal. For the initial implementation, supported plugins will create Plugin CRs. The plugins will be downloaded and installed using `krew`.
@@ -181,6 +182,7 @@ Being that `krew` is for distributing `kubectl` plugins rather than generic CLIs
 is executed after being installed. The binary will always be prefixed with `kubectl-`, so for example, `odo` would be `kubectl-odo`.
 This is how `kubectl` plugins work. You can either execute it with that name, or through `kubectl` or `oc` as though it were a
 `kubectl` plugin. For example: `kubectl odo` or `oc odo`.
+Most modern shells include an alias feature that could be used to mitigate this, either as a future enhancement or documentation example.
 
 One major drawback is that Windows users will require administrative access to their machines to install plugins. See [this issue](https://github.com/kubernetes-sigs/krew/issues/378) for more information.
 
