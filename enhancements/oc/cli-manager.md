@@ -122,6 +122,12 @@ to a cluster-admin for the creation of a CR:
 * The image:tag (and registry credentials if required)
 * The path within the image where the binary for the given platform/architecture can be found
 
+### API Extensions
+
+A new CRD will be created:
+* API: `config.openshift.io/v1`
+* Kind: `Plugin`
+
 ### Risks and Mitigations
 
 Distributing undesirable binaries is always a risk. Some mitigations include requiring cluster-admins to maintain the index, and the verification of downloaded
@@ -169,6 +175,18 @@ If possible, installation, upgrade, downgrade, and uninstallation should be hand
 
 * Plugins are expected to be backwards compatible. When working with multiple clusters, it's expected that plugin versions will work across cluster versions
   * If this is not the case, plugin owners will provide that information in the CR description
+
+### Operationl Aspects of API Extensions
+
+New CRD for plugins, should not affect existing SLIs.
+
+#### Failure Modes
+
+If controller is not running, and `krew` is configured to use the custom index hosted by the controller, a connection failure will occur.
+
+#### Support Procedures
+
+If a connection failure occurs when using the custom index controller, ensure it is running, exposed, and that `krew` is configured to use the correct URL.
 
 ## Implementation History
 
