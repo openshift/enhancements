@@ -99,3 +99,24 @@ Ideally pull requests with enhancement proposals will be merged before
 significant coding work begins, since this avoids having to rework the
 implementation if the design changes as well as arguing in favor of
 accepting a design simply because it is already implemented.
+
+## Template Updates
+
+From time to time the template for enhancement proposals is modified
+as we refine our processes. When that happens, open pull requests may
+start failing the linter job that ensures that all documents include
+the required sections.
+
+If you are working on an enhancement and the linter job fails because
+of changes to the template (not other issues with the markdown
+formatting), handle it based on the maturity of the enhancement PR:
+
+* If the only reason to update your PR is to make the linter job
+  accept it after a template change and there are no substantive
+  content changes needed for approval, override the job to allow the
+  PR to merge.
+* If your enhancement is still a draft, and consensus hasn't been
+  reached, modify the PR so the new enhancement matches the updated
+  template.
+* If you are updating an existing (merged) document, go ahead and
+  override the job.
