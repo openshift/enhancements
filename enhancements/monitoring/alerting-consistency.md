@@ -193,11 +193,11 @@ Example warning alert: [ClusterNotUpgradeable][4]
     description: In most cases, you will still be able to apply patch releases.
       Reason {{ "{{ with $cluster_operator_conditions := \"cluster_operator_conditions\" | query}}{{range $value := .}}{{if and (eq (label \"name\" $value) \"version\") (eq (label \"condition\" $value) \"Upgradeable\") (eq (label \"endpoint\" $value) \"metrics\") (eq (value $value) 0.0) (ne (len (label \"reason\" $value)) 0) }}{{label \"reason\" $value}}.{{end}}{{end}}{{end}}"}}
       For more information refer to 'oc adm upgrade'{{ "{{ with $console_url := \"console_url\" | query }}{{ if ne (len (label \"url\" (first $console_url ) ) ) 0}} or {{ label \"url\" (first $console_url ) }}/settings/cluster/{{ end }}{{ end }}" }}.
-    expr: |
-      max by (name, condition, endpoint) (cluster_operator_conditions{name="version", condition="Upgradeable", endpoint="metrics"} == 0)
-    for: 60m
-    labels:
-      severity: warning
+  expr: |
+    max by (name, condition, endpoint) (cluster_operator_conditions{name="version", condition="Upgradeable", endpoint="metrics"} == 0)
+  for: 60m
+  labels:
+    severity: warning
 ```
 
 This alert fires if one or more operators have not reported their `Upgradeable`
