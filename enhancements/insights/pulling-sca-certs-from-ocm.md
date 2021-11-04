@@ -138,7 +138,7 @@ This feature is planned as a technical preview in OCP 4.9 and is planned to go G
 - this new functionality is documented in the Insights Operator documentation as tech preview
 
 #### Tech Preview -> GA
-- `Share` resource object is automatically created by the Insights Operator
+- ~~`Share` resource object is automatically created by the Insights Operator~~ - This is no longer the GA requirement. `Share` object will still be a tech preview and can be added later by different component (from Build team)
 - inform a cluster user about the error state (problem with pulling the certificates)
 - the documentation is revisited and updated
 - the use of SCA certs in the `Build` is documented in the Build API documentation
