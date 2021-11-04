@@ -11,6 +11,7 @@ reviewers:
   - "@hardys"
 approvers:
   - "@elmiko"
+  - "@enxebre"
   - "@asalkeld"
 creation-date: 2021-09-16
 last-updated: 2021-09-16
@@ -48,6 +49,7 @@ We would like to give users the ablility to use Cluster API for machine manageme
 - Deprecate or remove any existing APIs.
 - Stop providing support for Machine API in near future.
 - Provide any automated integration or migration between MAPI and CAPI resources.
+- Change current autoscaler behavior to use Cluster API. This will be handled after Technical Preview.
 
 ## Proposal
 
@@ -58,15 +60,15 @@ During the technical preview we will gather feedback on its usefulness as well a
 
 #### Story 1
 
-As an OpenShift developer, I would like to leverage the upstream community Cluster API infrastructure providers and reduce the barrier to OpenShift of supporting new platforms.
+As an OpenShift developer, I would like to leverage the upstream community Cluster API infrastructure providers and reduce the barrier to OpenShift of supporting new providers.
 
 #### Story 2
 
-As an OpenShift developer, I would like to collaborate with third parties who already have vested interests in maintaining Machine providers for various platforms and environments and benefit from their provider specific expertise as I try to add new features.
+As an OpenShift developer, I would like to collaborate with third parties who already have vested interests in maintaining Machine controllers for various infrastructure providers so that i can benefit from their expertise as I add new features.
 
 #### Story 3
 
-As a cloud developer, I would like to easily onboard new platforms as this process is well documented by CAPI community and any implementation will be able to be leveraged by both Kubernetes and OpenShift customers, increasing the value of implementing a new provider.
+As a cloud developer, I would like to easily onboard new infrastructure providers as this process is well documented by the CAPI community and any implementation will be able to be leveraged by both Kubernetes and OpenShift customers, increasing the value of implementing a new provider.
 
 #### Story 4
 
@@ -74,19 +76,20 @@ As a developer, I would like to be able to use the same set of tools for infrast
 
 #### Story 5
 
-As a cloud operator, I would like to be able to use infrastructure resource API for managing mixed platform clusters.
+As a cloud operator, I would like to be able to use the CAPI infrastructure resource API for managing mixed infrastructure provider clusters.
 
 #### Story 6
 
-As a developer, I would like to have support for hub-spoke openshift clusters. Where management cluster can manage workload clusters that are running on different platforms.
+As a developer, I would like to have support for hub-spoke OpenShift clusters. Where a management cluster can manage workload clusters that are running on different infrastructure providers.
 
 #### Story 7
 
-As a user, I would like to create new MachineSets using CAPI and be able to explore feature that are not available in MAPI.
+As a user, I would like to create new MachineSets using CAPI and be able to explore features that are not available in MAPI.
 
 ### Implementation Details
 
-First, we need to establish Cluster API resource management by ensuring all required components are successfully installed and running within the OpenShift cluster.
+First, we need to establish Cluster API resource management by ensuring all required components(CRDs, controllers,
+RBAC, secrets) are successfully installed and running within the OpenShift cluster.
 
 Cluster API will only be present in the cluster (installed by a new operator) if and when a user installs a feature gate.
 We will introduce a new, OpenShift specific, feature gate `ClusterAPIEnabled` and include it within the `TechPreviewNoUpgrade` FeatureSet.
@@ -112,8 +115,7 @@ The technical preview aims to support: AWS, Azure, GCP, Baremetal, Openstack.
 
 In order to maintain the lifecycle of Cluster API related resources, we will create a new operator `cluster-capi-operator`, this name was chosen for avoiding confusion with upstream Cluster API operator.
 This operator will be responsible for all administrative tasks related to the deployment of the Cluster API project within the cluster.
-During tech preview phase, the new operator will also manage all Cluster API related CRDs. All CRD manifests will placed in
-openshift forks of CAPI and will take from there with no changes.
+During tech preview phase, the new operator will leverage the new [CVO feature](https://github.com/openshift/enhancements/blob/master/enhancements/update/cvo-techpreview-manifests.md) for managing all Cluster API related CRDs.
 
 `cluster-capi-operator` and it's operands will be provisioned in a new `openshift-cluster-api` namespace.
 
@@ -127,12 +129,11 @@ The operator will procceed with Cluster API installation if and only if the requ
 ##### Deploy Cluster Machine Approver
 
 In order for Cluster API machines to succefully join the cluster, the Kubelet CSRs need to be approved.
-The operator will deploy a separate instance of the cluster-machine-approver, which will be configured to be used with Cluster API machines by providing [`--apigroup`](https://github.com/openshift/cluster-machine-approver/blob/master/main.go#L54) flag that was recently introduced.
+The operator will deploy a separate instance of the `cluster-machine-approver`, which will be configured to be used with Cluster API machines by providing [`--apigroup`](https://github.com/openshift/cluster-machine-approver/blob/master/main.go#L54) flag that was recently introduced.
 
 ##### Install upstream CAPI operator
 
-We will use the upstream [Cluster API operator](https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20201020-capi-provider-operator.md) for managing CRDs and deploying cloud providers.
-`cluster-capi-operator` should first install the [upstream operator CRDs](https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20201020-capi-provider-operator.md#new-api-types) and then run the upstream operator itself using a `Deployment`.
+We will use the upstream [Cluster API operator](https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20201020-capi-provider-operator.md) for managing CRDs and deploying infrastructure providers.
 
 ##### Deploy core Cluster API
 
@@ -170,12 +171,12 @@ A new `cluster-capi-operator` image will be built and included in every release 
 
 #### Credentials management
 
-The `cluster-capi-operator`'s manifests should contain an appropriate `CredentialsRequest` for each supported cloud provider.
+The `cluster-capi-operator`'s manifests should contain an appropriate `CredentialsRequest` for each supported infrastructure provider.
 This is similiar to [machine-api-operator](https://github.com/openshift/machine-api-operator/blob/6f629682b791a6f4992b78218bfc6e41a32abbe9/install/0000_30_machine-api-operator_00_credentials-request.yaml)
 
 #### Cluster API cloud providers
 
-Cluster API cloud providers will live in forks, similar to what is now done for Machine API. We now evaluating moving
+Cluster API infrastructure providers will live in forks, similar to what is now done for Machine API. We now evaluating moving
 current providers implementation to new repos that will be called `machine-api-provider-*` and reseting current
 `cluster-api-provider-*` to latest upstream.
 
@@ -251,7 +252,7 @@ If we want to not introduce this breaking change then we have to set prefered AP
 With `ClusterAPIEnabled` feature enabled, the following API extensions will be added:
 
 - Core Cluster API resources and webhooks, they can be found [here](https://github.com/kubernetes-sigs/cluster-api/tree/main/api/v1beta1)
-- Depending on a platform where cluster is running, infrastructure provider CRD and webhooks will be added, see
+- Depending on the provider where a cluster is running, infrastructure provider CRD and webhooks will be added, see
 [AWS](https://github.com/kubernetes-sigs/cluster-api-provider-aws/tree/main/api/v1beta1), [Azure](https://github.com/kubernetes-sigs/cluster-api-provider-azure/tree/main/api/v1beta1), [GCP](https://github.com/kubernetes-sigs/cluster-api-provider-gcp/tree/main/api/v1alpha4).
 - Cluster API Operator CRDs will be added, see [here](https://github.com/kubernetes-sigs/cluster-api/blob/main/docs/proposals/20201020-capi-provider-operator.md#new-api-types)
 
@@ -287,7 +288,7 @@ We will be working on making sure that similar or equivalent events, metrics and
 
 - Cluster API will be installed in all OpenShift clusters by default.
 - Bidirectional migration for MAPI and CAPI.
-- New cloud providers implemented as CAPI.
+- New infrastructure providers implemented as CAPI.
 
 #### Removing a deprecated feature
 
