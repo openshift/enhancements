@@ -24,6 +24,10 @@ superseded-by:
 
 Start by filling out this header template with metadata for this enhancement.
 
+* Enhancements should be related to work to be implemented in the near future.
+
+* Enhancements should have agreement from all stakeholders prior to merging.
+
 * `reviewers`: This can be anyone that has an interest in this work.
 
 * `approvers`: All enhancements must be approved, but the appropriate people to
@@ -71,16 +75,6 @@ To get started with this template:
 
 The `Metadata` section above is intended to support the creation of tooling
 around the enhancement process.
-
-## Release Signoff Checklist
-
-- [ ] Enhancement is `implementable`
-- [ ] Jira Feature or Epic ticket link is included
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Operational readiness criteria is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
