@@ -12,7 +12,8 @@ api-approvers: # in case of new or modified APIs or API extensions (CRDs, aggreg
   - TBD
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
-status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
+tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
+  - TBD
 see-also:
   - "/enhancements/this-other-neat-thing.md"
 replaces:
@@ -74,6 +75,7 @@ around the enhancement process.
 ## Release Signoff Checklist
 
 - [ ] Enhancement is `implementable`
+- [ ] Jira Feature or Epic ticket link is included
 - [ ] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Operational readiness criteria is defined
