@@ -5,6 +5,7 @@ authors:
 reviewers:
   - "@makentenza"
   - "@fabianofranz"
+  - "@elmiko"
 approvers:
   - "@makentenza"
   - "@fabianofranz"
@@ -32,17 +33,23 @@ This enhancement proposes adding support for OpenShift 4 Installer Provisioned I
 
 Red Hat and Nutanix have recently [announced](https://www.redhat.com/en/about/press-releases/red-hat-and-nutanix-announce-strategic-partnership-deliver-open-hybrid-multicloud-solutions) a strategic partnership to deliver open hybrid multicloud solutions. For OpenShift this means that it ​​becomes the preferred enterprise full-stack Kubernetes solution on Nutanix Cloud Platform with AHV.
 
-Today, OpenShift can be installed on the Nutanix AOS platform using the OpenShift platform [agnostic installer](https://github.com/nutanix/openshift/tree/main/docs/install/manual), but mutual customers have also requested a fully automated, integrated installer built using OpenShift 4's infrastructure level automation capabilities. This is particularly appealing for customers deploying in "hybrid cloud" scenarios where OpenShift should be deployed using common mechanisms across different clouds.
+Today, OpenShift can be installed on the Nutanix AOS platform using the OpenShift platform [agnostic installer](https://github.com/nutanix/openshift/tree/main/docs/install/manual), but mutual customers have also requested a fully automated, integrated installer built using OpenShift 4's infrastructure level automation capabilities.
+This is particularly appealing for customers deploying in "hybrid cloud" scenarios where OpenShift should be deployed using common mechanisms across different clouds.
 
 ### Goals
 
 The primary goal of Nutanix AHV IPI is to provide users with an easier path to running OpenShift 4 on Nutanix AOS with AHV.
 
 To achieve that goal, we will:
+
 - Enhance the installer, adding Nutanix AOS options.
+
 - Prepare Nutanix infrastructure using the [Nutanix Terraform (TF) provider](https://github.com/nutanix/terraform-provider-nutanix) for provisioning.
-- Integrate with the Nutanix cluster API provider [to-do] and enhance requisite operators to enable cluster functionality.
+
+- Integrate with the Nutanix machine API provider [to-do] and enhance requisite operators to enable cluster functionality.
+
 - Provide Nutanix AHV IPI user documentation [here](https://github.com/openshift/installer/tree/master/docs/user/nutanix/).
+
 - Provide CI artifacts required to test the Nutanix AHV IPI installer.
 
 ### Non-Goals
@@ -52,6 +59,7 @@ None at this time.
 ## Proposal
 
 - Implement installer CLI prompts to build a default/minimal `install-config.yaml` for Nutanix AHV:
+
   ```shell
   ? SSH Public Key /Users/someone/.ssh/id_rsa.pub
   ? Platform nutanix
@@ -109,22 +117,30 @@ As an OpenShift platform, I want OpenShift on Nutanix to be maintained and relea
 
 ## Design Details
 
+- Cloud Credential Operator (CCO) will operate in manual mode. Possible migration to passthrough mode in future enhancement.
+
+- Cloud Controller Manager (CCM) is not currently implemented. Node lifecycle handled via MAPI until standard AOS/AHV CCM is developed.
+
+- CSI Operator already publised [here](https://catalog.redhat.com/software/containers/nutanix/nutanix-csi-operator/60dfad1364002f2e99660a86). Installer to deploy CSI and provision PV for use by Internal Registry.
+
+- Internal Registry to utilize Nutanix Volumes (block) storage by default. Post-install configuration on Nutanix Files or Objects to be documented.
+
 ### Open Questions
 
 1. How should VM specifications be determined or specified?
 
-1. Are there any minimum host requirements to enforce? 
+1. Are there any minimum host requirements to enforce?
 
 1. Should the default install attempt to locate control plane VMs on different physical nodes?
 
-1. Should Nutanix CSI operator be installed by default? 
-
 1. Are unit-level tests recommended (required?). If so, is there preferred tooling / test structure? This is in addition to the required CI E2E testing.
+
 > We will follow what other supported platforms have done. Please advise with any suggestions/tips.
 
 ### Test Plan
 
 Will follow test plan design implemented by existing supported IPI platforms:
+
 - A new CI test suite with E2E test jobs will be established.
 
 ### Graduation Criteria
