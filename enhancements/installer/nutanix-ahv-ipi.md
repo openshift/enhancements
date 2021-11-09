@@ -77,7 +77,7 @@ None at this time.
   - prismCentralPass (required string): Password for Prism central access.
   - cluster (required string): Nutanix cluster (Prism Element) where the OpenShift cluster will be created.
   - container (required string): Nutanix container name for OS disk install.
-  - Subnet (required string): Nutanix subnet name (IPAM or DHCP Enabled).
+  - subnet (required string): Nutanix subnet name (IPAM or DHCP Enabled).
   
 - Provide documentation (in similar format to other supported IPI platforms) to help users use and customize the IPI installer on Nutanix:
   - Prerequisite instructions prior to invoking installer
@@ -101,7 +101,7 @@ As an OpenShift platform, I want OpenShift on Nutanix to be maintained and relea
 
 - It will be assumed the customer utilizes a subnet configured with Nutanix IPAM or will provide a properly configured DHCP server that is available on the configured L2 network.
 
-- Nutanix does not provide networking services like DNS or load balancing. With this in mind, we require the ability to automate DNS and load balancing services internal to the cluster. The a solution similar to the baremetal-networking enhancement can be utilized.
+- Nutanix does not provide networking services like DNS or load balancing. With this in mind, we require the ability to automate DNS and load balancing services internal to the cluster. A solution similar to the baremetal-networking enhancement can be utilized.
 
 ### Risks and Mitigations
 
