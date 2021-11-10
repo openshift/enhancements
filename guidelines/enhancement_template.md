@@ -198,6 +198,9 @@ In general, we try to use the same stages (alpha, beta, GA), regardless how the 
 [maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
 [deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
 
+**If this is a user facing change requiring new or updated documentation in [openshift-docs](https://github.com/openshift/openshift-docs/),
+please be sure to include in the graduation criteria.**
+
 **Examples**: These are generalized examples to consider, in addition
 to the aforementioned [maturity levels][maturity-levels].
 
@@ -218,6 +221,7 @@ to the aforementioned [maturity levels][maturity-levels].
 - Backhaul SLI telemetry
 - Document SLOs for the component
 - Conduct load testing
+- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
