@@ -13,7 +13,7 @@ approvers:
   - "@hexfusion"
   - "@deads2k"
 creation-date: 2021-08-10
-last-updated: 2021-09-28
+last-updated: 2021-11-11
 status: implementable
 see-also:
   - [Cluster API Upstream Equivalent](https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20200602-machine-deletion-phase-hooks.md)
@@ -39,7 +39,7 @@ normal machine-controller behaviour is paused or modified.
 ### Deletion Phase
 Describes when a machine has been marked for deletion but is still present
 in the API.  Various actions happen during this phase, such as draining a node,
-deleting an instance from a cloud provider, and deleting the node object.
+deleting an instance from an infrastructure provider, and deleting the node object.
 
 ### Hook Implementing Controller (HIC)
 The Hook Implementing Controller describes a controller, other than the
@@ -49,9 +49,9 @@ can optionally manage one or more hooks.
 
 ## Summary
 
-Defines a set of annotations that can be applied to a Machine which can be used
+Defines a set of lifecycle hooks that can be applied to a Machine which can be used
 to delay the actions taken by the Machine controller once a Machine has been marked
-for deletion. These annotations are optional and may be applied during Machine
+for deletion. These hooks are optional and may be applied during Machine
 creation, sometime after Machine creation by a user, or sometime after Machine
 creation by another controller or application, up until the Machine has been marked
 for deletion.
@@ -74,7 +74,7 @@ ensure safe detachment of volumes before the Machine is deleted.
 ### Goals
 
 - Define an initial set of hook points for the deletion phase.
-- Define an initial set and form of related annotations.
+- Define an initial set and form of related lifecycle hook API.
 - Define basic expectations for a controller or process that responds to a
 lifecycle hook.
 
@@ -90,11 +90,11 @@ strictly optional and for custom integrations only.
 
 ## Proposal
 
-- Utilize annotations to implement lifecycle hooks.
+- Utilize new Machine spec to implement lifecycle hooks.
 - Each lifecycle point can have 0 or more hooks.
 - Hooks do not enforce ordering.
 - Hooks found during machine reconciliation effectively pause reconciliation
-until all hooks for that lifecycle point are removed from a machine's annotations.
+until all hooks for that lifecycle point are removed from a machine's spec.
 
 ### User Stories
 
@@ -138,11 +138,86 @@ applications first to ensure that service interruptions are minimised in cases
 where cluster capacity is limited. Ordering is not supported today in drain
 libraries and as such, this would require a custom drain provider.
 
+### API Extensions
+
+The following changes will be made to the Machine API `MachineSpec` to allow
+users of this feature to implement the hooks.
+
+It is expected that each HIC is responsible for one or more `LifecycleHook`
+which will be added to the `MachineSpec` early in the Machine lifecycle and
+removed by the HIC after the Machine is terminated, or once the hook is no
+longer required.
+
+```go
+type MachineSpec struct {
+  ... // Existing fields
+
+  // lifecycleHooks allow users to pause operations on the machine at
+  // certain predefined points within the machine lifecycle
+  // +optional
+  lifecycleHooks LifecycleHooks `json:"lifecycleHooks,omitempty"`
+}
+
+type LifecycleHooks struct {
+  // +optional
+  PreDrain []LifecycleHook `json:"preDrain,omitempty"`
+
+  // +optional
+  PreTerminate []LifecycleHook `json:"preTerminate,omitempty"`
+}
+
+// LifecycleHook represents a single instance of a lifecycle hook
+type LifecycleHook struct {
+  // Name defines a unique name for the lifcycle hook.
+  // The name should be unique and descriptive, ideally 1-3 words, in camelCase with no spaces.
+  // Names must be unique and should only be managed by a single entity.
+  // +kubebuilder:validation:Pattern:="[A-Za-z]+"
+  // +required
+  Name string `json:"name"`
+
+  // Owner defines the owner of the lifecycle hook.
+  // This should be descriptive enough so that users can identify
+  // who/what is responsible for blocking the lifecycle.
+  // This could be the name of a controller (e.g. clusteroperator/etcd)
+  // or an administrator managing the hook.
+  // +required
+  Owner string `json:"owner"`
+}
+```
+
+The following new Machine `ConditionType` constants will be added:
+
+```go
+// MachineDrained is set on a machine to indicate that the machine has been drained. When an error occurs during
+// the drain process, the condition will be added with a false status and details of the error.
+MachineDrained ConditionType = "Drained"
+
+// MachineDrainable is set on a machine to indicate whether or not the machine can be drained, or, whether some
+// deletion hook is blocking the drain operation.
+MachineDrainable ConditionType = "Drainable"
+
+// MachineTerminable is set on a machine to indicate whether or not the machine can be terminated, or, whether some
+// deletion hook is blocking the termination operation.
+MachineTerminable ConditionType = "Terminable"
+```
+
+The following new Machine condition reasons will be added:
+
+```go
+// MachineHookPresent indicates that a machine lifecycle hook is blocking part of the lifecycle of the machine.
+// This should be used with the `Drainable` and `Terminable` machine condition types.
+MachineHookPresent = "HookPresent"
+
+// MachineDrainError indicates an error occurred when draining the machine.
+// This should be used with the `Drained` condition type.
+MachineDrainError = "DrainError"
+```
+
 ### Implementation Details/Notes/Constraints
 
-For each defined lifecycle point, one or more hooks may be applied as an annotation
-to the machine object. These annotations will pause reconciliation of a Machine object
-until all hooks are resolved for that lifecycle point.
+For each defined lifecycle point, one or more hooks may be applied within the spec
+of the machine object. These hooks will pause reconciliation of a Machine
+object until all hooks are resolved for that lifecycle point.
 The hooks should be managed by a Hook Implementing Controller or other external
 application, or manually created and removed by an administrator.
 
@@ -150,52 +225,49 @@ application, or manually created and removed by an administrator.
 
 ##### pre-drain
 
-`pre-drain.delete.hook.machine.cluster.x-k8s.io`
+```yaml
+lifecycleHooks:
+  preDrain:
+  - name: <hook-name>
+    owner: <hook-owner>
+```
 
 Hooks defined at this point will prevent the machine controller from draining a node
 after the machine object has been marked for deletion until the hooks are removed.
 
 ##### pre-terminate
 
-`pre-terminate.delete.hook.machine.cluster.x-k8s.io`
-
-Hooks defined at this point will prevent the machine-controller from
-removing/terminating the instance in the cloud provider until the hooks are
-removed.
-
-"pre-terminate" has been chosen over "pre-delete" because "terminate" is more
-easily associated with an instance being removed from the cloud or
-infrastructure, whereas "delete" is ambiguous as to the actual state of the
-Machine in its lifecycle.
-
-#### Annotation Form
 ```yaml
-<lifecycle-point>.delete.hook.machine.cluster-api.x-k8s.io/<hook-name>: <owner/creator>
+lifecycleHooks:
+  preTerminate:
+  - name: <hook-name>
+    owner: <hook-owner>
 ```
 
-##### lifecycle-point
-This is the point in the lifecycle of reconciling a machine the annotation will
-have effect and pause the machine-controller.
+Hooks defined at this point will prevent the machine-controller from
+removing/terminating the instance in the infrastructure provider until
+the hooks are removed.
 
-##### hook-name
-Each hook should have a unique and descriptive name that describes in 1-3 words
-what the intent/reason for the hook is.
-Each hook name should be unique and managed by a single entity.
+"pre-terminate" has been chosen over "pre-delete" because "terminate" is more
+easily associated with an instance being removed from the infrastructure,
+whereas "delete" is ambiguous as to the actual state of the Machine in its lifecycle.
 
-##### owner (Optional)
-Some information about who created or is otherwise in charge of managing the annotation.
-This might be a controller or a username to indicate an administrator applied the hook directly.
+##### Hook Examples
 
-##### Annotation Examples
+These examples are all hypothetical to illustrate what form hooks should
+take. The name of each hook and the respective controllers are fictional.
 
-These examples are all hypothetical to illustrate what form annotations should
-take. The names of each hook and the respective controllers are fictional.
-
-pre-drain.hook.machine.cluster-api.x-k8s.io/migrate-important-app: my-app-migration-controller
-
-pre-terminate.hook.machine.cluster-api.x-k8s.io/backup-files: my-backup-controller
-
-pre-terminate.hook.machine.cluster-api.x-k8s.io/wait-for-storage-detach: my-custom-storage-detach-controller
+```yaml
+lifecycleHooks:
+  preDrain:
+  - name: MigrateImportantApp
+    owner: my-app-migration-controller
+  preTerminate:
+  - name: BackupFileSytem
+    owner: my-backup-controller
+  - name: WaitForStorageDetach
+    owner: my-custom-storage-detach-controller
+```
 
 #### Changes to machine-controller
 
@@ -226,9 +298,8 @@ hooks. The hook implementing controller is expected to detect the deletion in pr
 and perform any clean up logic necessary.
 
 To prevent potential issues here, and to ensure users do not accidentally add hooks,
-we will leverage the existing Machine API webhooks to prevent new annotations of the
-deletion hook format from being added to Machines after they have been marked for
-deletion.
+we will leverage the existing Machine API webhooks to prevent new hooks of the
+from being added to Machines after they have been marked for deletion.
 
 ##### Hook failure
 
@@ -238,18 +309,25 @@ extenuating circumstances) may decide to remove a particular lifecycle hook
 to allow the machine controller to progress past the corresponding lifecycle-point.
 
 The Machine status will contain conditions identifying why the Machine controller
-has not progressed in removing the Machine. It is expected that hook implementing
-controllers should signal to users when they are having issues via some mechanism
-(eg. their `ClusterOperator` status) and that the conditions on the Machine should
-identify the components which the user should look at in order to determine any
-underlying issues.
+has not progressed in removing the Machine. This will be in the form of new `Drainable`
+and `Terminable` conditions.
 
-For example, the condition will contain the owner of the hook blocking the removal,
-the user should look towards the owner's own reporting to identify issues.
-Any OpenShift operator experiencing issues should already have a mechanism in which
-it can report errors and having these errors follow the normal mechanisms should
-place the failure reporting closer to the issue, as opposed to placing it directly
-onto the Machine.
+It is expected that hook implementing controllers should signal to users when they
+are having complete system issues via some mechanism (eg. their `ClusterOperator` status if the issue is endangering
+the cluster health) and that they should also use conditions on the Machine to
+identify issues with removing the hook from a particular Machine.
+
+When errors occur, hook implementing controllers are encouraged to add a condition
+to Machines with details of the error. The condition `Type` should be formed as the
+hook name, prefixed by the lifecycle point, followed by the word `Succeeded`.
+For example, for a `preDrain` hook with name `MigrateImportantApp`, the condition
+`Type` would be `PreDrainMigrateImportantAppSucceed`. This `Type` would then be used
+in a `False` condition to indicate a failure.
+
+For example, when an error has occured in a hook implementing controller with a `preDrain` hook.
+The `Drainable` condition will contain the name and owner of the hook blocking the removal.
+A user should then also expect to see another condition named based on the pattern described above.
+The user may also look towards the owner's own reporting to identify issues for wider system issues.
 
 We also encourage hook implementing controllers to use Event objects to add detail
 about the operations they are performing. For example if the hook implementing
@@ -276,12 +354,11 @@ lifecycle hook.
 ##### Hook Implementing Controllers must
 
 * Watch Machine objects and determine when an appropriate action must be taken.
-* After completing the desired hook action, remove the hook annotation.
+* After completing the desired hook action, remove the hook.
 
 ##### Hook Implementing Controllers may
 
-* Watch Machine objects and add a hook annotation as desired by the cluster
-administrator.
+* Watch Machine objects and add a hook as desired by the cluster administrator.
 * Coordinate with other Hook Implementing Controllers through any means
 possible, such as using common annotations, CRDs, etc. For example, one hook
 controller could set an annotation indicating it has finished its work, and
@@ -297,9 +374,11 @@ For example, if an HIC manages a lifecycle hook at the pre-drain lifecycle-point
 then that controller should take action immediately after a Machine has a
 DeletionTimestamp or enters the "Deleting" phase.
 
-Fine-tuned coordination is not possible at this time; eg, it's not
-possible to execute a pre-terminate hook only after a node has been drained.
-This is reserved for future work.
+To enable HICs which manage pre-terminate lifecycle hooks to identify when to operate,
+we will add a new `Drained` condition to the Machine status which will be set either
+when an error occurs during the drain process, or once the drain has completed.
+Pre-terminate hooks may not need the Machine to be drained, in which case they need
+not gate on this new condition and may ignore it.
 
 ##### Failure Mode
 
@@ -326,9 +405,16 @@ The terminable condition will reflect whether, when deleted, the Machine would
 be able to be terminated. If any pre-terminate hooks are present on the Machine,
 the condition will be marked false.
 
+##### Drained
+
+The drained condition will reflect whether or not the Machine controller has
+drained the Machine. It will only be added after the first attempt to drain
+the Machine and will be set `True` when the drain is successful. If any errors
+occur, the condition will be set `False` and appropriate error information
+will be included within the condition reason.
+
 ### Risks and Mitigations
 
-* Annotation keys must conform to length limits: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/#syntax-and-character-set
 * Requires well-behaved controllers and admins to keep things running
 smoothly. Would be easy to disrupt machines with poor configuration.
 * Troubleshooting problems may increase in complexity, but this is
@@ -375,8 +461,9 @@ Any new Hook Implementing Controller will be able to add the hooks at
 any point and they will be observed when the updated Machine controller
 is deployed via the CVO.
 
-On downgrades, HICs may wish to remove the annotations, but they are not
-harmful if left behind.
+On downgrades, the hooks will be removed as the API fields will no longer
+be recognised by the API server. This should not cause issues as we expect
+no controllers to be using this in version N-1.
 
 ### Version Skew Strategy
 
@@ -384,7 +471,7 @@ We do not expect any issues with version skew as this is a new feature.
 
 ## Implementation History
 
-* This has already been implemented in Cluster API
+* This has already been implemented in Cluster API using an annotation based approach.
 
 ## Drawbacks
 
@@ -459,10 +546,6 @@ Harder for users to modify or set hooks during machine creation.
 How would a user remove a hook if a controller that is supposed to remove it is misbehaving?
 We’d probably need an annotation like ‘skip-hook-xyz’ or similar and that seems redundant
 to just using annotations in the first place.
-
-### Spec Field
-We probably don’t want other controllers dynamically adding and removing spec fields on an object.
-It’s not very declarative to utilize spec fields in that way.
 
 ### CRDs
 Seems like we’d need to sync information to and from a CR.
