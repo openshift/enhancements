@@ -49,6 +49,8 @@ as part of the OpenShift platform in order to allow folks to:
 
 * Enable users to automatically generate profiles for their workloads
 
+At some later point:
+
 * Provide predefined profiles for existing default workloads in OpenShift
 
 
@@ -78,15 +80,22 @@ the need to run privileged containers
 
 ### Goals
 
-* Integrate the Security Profiles Operator into OpenShift by having it
-  installed by default via the Cluster Version Operator (CVO).
+* Enable application developers to ship their applications with
+  relevant security profiles
 
-* Integrate the SPO into OpenShift's SCCs.
+* Enable application developers to easily record the security profiles
+  for their application.
 
-* Enable application developers to ship their operators with
-  relevant security profiles (OLM integration)
+* Integrate the SPO into OpenShift's SCCs if possible. It is not strictly
+  required, but would increase the usefulness of SCCs and would be a good
+  security hardening in general. The backup plan is to ship some example
+  custom SCCs and add documentation for users.
 
 ### Non-Goals
+
+* Integrate the Security Profiles Operator into OpenShift by having it
+  installed by default via the Cluster Version Operator (CVO). While this is
+  a long-term goal, it is not what we're trying to do in the first iteration.
 
 * Developing of profiles for all OpenShift components. While having the OpenShift
   components locked down is a long-term goal and SPO might come with several profiles
@@ -95,10 +104,11 @@ the need to run privileged containers
 
 ## Proposal
 
-The Security Profiles Operator should be installed by default in OpenShift
-via the CVO as any other core component. As it is, its main function is to
-install security policies and ensure that they're attached to the appropriate
-pods which require them.
+The Security Profiles Operator should be available for installation as an
+add-on. Its main function is to install security policies and ensure that
+they're attached to the appropriate pods which require them. Additionally,
+the Security Profiles Operator enables recording of SELinux and seccomp
+profiles, which can be used e.g. in CI runs.
 
 The installation is managed by a DaemonSet workload (Security Profiles Operator Daemon
 or SPOD) that listens for security profiles (either `SeccompProfile` or
@@ -272,14 +282,13 @@ with the privileges that the application needs.
 
 The `SeccompProfile` objects rely on the [OCI Seccomp BPF Hook](https://github.com/containers/oci-seccomp-bpf-hook)
 to do the actual recording. So we'd need to ensure this hook is available in RHCOS
-before enabling this feature.
+before enabling this feature. Failing that, SPO allow to record `SeccompProfile`
+objects using its built-in BPF recorder or by tailing `audit.log`.
 
-There isn't currently support for `SelinuxProfile` recording, but
-the work is scheduled to start in the 4.9 cycle, and the intent
-is to leverage [Udica](https://github.com/containers/udica) to generate
-the profile.
+To record SELinux profiles, SPO tails `audit.log`, looking for AVC messages
+and transforms them into a `SelinuxProfile` objects.
 
-### SCC integration
+### SCC integration (non-blocking)
 
 Security Context Constraints allow a user to restrict the security settings
 that a workload may have. Given that the profile settings are in the pod's
@@ -387,6 +396,10 @@ This will prevent workloads trying to:
 
 * Maliciously gain privileges by using a profile installed from another
   namespace.
+
+NOTE: This was filed as [RFE-2204](https://issues.redhat.com/browse/RFE-2204)
+but so far not accepted. The backup plan is to just include an example
+SCC using the existing SCC capabilities and provide documentation to users.
 
 ### OLM integration
 
