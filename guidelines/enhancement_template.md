@@ -12,7 +12,8 @@ api-approvers: # in case of new or modified APIs or API extensions (CRDs, aggreg
   - TBD
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
-status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
+tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
+  - TBD
 see-also:
   - "/enhancements/this-other-neat-thing.md"
 replaces:
@@ -22,6 +23,10 @@ superseded-by:
 ---
 
 Start by filling out this header template with metadata for this enhancement.
+
+* Enhancements should be related to work to be implemented in the near future.
+
+* Enhancements should have agreement from all stakeholders prior to merging.
 
 * `reviewers`: This can be anyone that has an interest in this work.
 
@@ -70,15 +75,6 @@ To get started with this template:
 
 The `Metadata` section above is intended to support the creation of tooling
 around the enhancement process.
-
-## Release Signoff Checklist
-
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Operational readiness criteria is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
@@ -202,6 +198,9 @@ In general, we try to use the same stages (alpha, beta, GA), regardless how the 
 [maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
 [deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
 
+**If this is a user facing change requiring new or updated documentation in [openshift-docs](https://github.com/openshift/openshift-docs/),
+please be sure to include in the graduation criteria.**
+
 **Examples**: These are generalized examples to consider, in addition
 to the aforementioned [maturity levels][maturity-levels].
 
@@ -222,6 +221,7 @@ to the aforementioned [maturity levels][maturity-levels].
 - Backhaul SLI telemetry
 - Document SLOs for the component
 - Conduct load testing
+- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
