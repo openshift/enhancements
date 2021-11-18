@@ -127,32 +127,70 @@ As defined in [previous helm enhancement](https://github.com/openshift/enhanceme
 
 Then the chart repository proxy will use all configured chart repositories, including cluster-scoped and available namespace-scoped Helm repositories in the current namespace, and deliver to the UI an aggregated index file. The UI then renders the developer catalog with the aggregated index file.
 
+### Implementation Details
+
+[ODC-5713](https://issues.redhat.com/browse/ODC-5713): In the OpenShift Dev Console, add capabilities that allow developers to create Helm chart registries which are namespace scoped, to enable developers to pull in their own Helm charts to their namespace.
+
+![Namespaced Helm Repo Console UI](../helm3/assets/namespace_helm_repo_console_ui.png)
+
+[HELM-244](https://issues.redhat.com/browse/HELM-244): Extend the `/api/helm/charts/index.yaml` API endpoint in OpenShift Dev Console backend to support query parameter `namespace`. For example, a GET request to `/api/helm/charts/index.yaml?namespace=foo` will respond an aggregated `index.yaml` file with entities extracted from both cluster scoped Helm repository and Helm repositories in `foo` namespace.
+
 ### Risks and Mitigations
+
+N/A
 
 ## Design Details
 
+N/A
+
 ### Test Plan
+
+N/A
 
 ### Graduation Criteria
 
+N/A
+
 #### Dev Preview -> Tech Preview
+
+N/A
 
 #### Tech Preview -> GA
 
+N/A
+
 #### Removing a deprecated feature
+
+N/A
 
 ### Upgrade / Downgrade Strategy
 
+Upon downgrade, the namespace scoped Helm repository instances will not be deleted but the namespaced Helm repository CRD will be removed and OpenShift Dev Console will not consume/render the instances.
+
 ### Version Skew Strategy
+
+N/A
 
 ### Operational Aspects of API Extensions
 
+N/A
+
 #### Failure Modes
+
+N/A
 
 #### Support Procedures
 
+N/A
+
 ## Implementation History
+
+N/A
 
 ## Drawbacks
 
+N/A
+
 ## Alternatives
+
+N/A
