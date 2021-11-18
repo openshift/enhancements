@@ -3,7 +3,9 @@ title: namespace-scoped-helm-repository-crd
 authors:
   - "@zonggen"
 reviewers:
-  - TBD
+  - "@dperaza4dustbit"
+  - "@christianvogt on ODC content under 'Implementation Details'"
+  - "@rohitkrai03 on ODC content under 'Implementation Details'"
 approvers:
   - TBD
 creation-date: 2021-11-03
