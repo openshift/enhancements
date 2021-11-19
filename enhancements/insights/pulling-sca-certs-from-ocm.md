@@ -139,7 +139,7 @@ This feature is planned as a technical preview in OCP 4.9 and is planned to go G
 
 #### Tech Preview -> GA
 - ~~`Share` resource object is automatically created by the Insights Operator~~ - This is no longer the GA requirement. `Share` object will still be a tech preview and can be added later by different component (from Build team)
-- inform a cluster user about the error state (problem with pulling the certificates)
+- inform a cluster user about the error state (problem with pulling the certificates) - The OCM API returns HTTP 404 if the entitlement certificates are not enabled for the corresponding organization. To inform user/cluster admin about this fact, we can create a new ClusterOperator condition (e.g "SCANotAvailable") and create a new info alert based on this new condition.
 - the documentation is revisited and updated
 - the use of SCA certs in the `Build` is documented in the Build API documentation
 - the feature might be moved to a different OCP component - discussed after Tech preview with following points:
