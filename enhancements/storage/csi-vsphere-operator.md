@@ -105,32 +105,48 @@ Currently while deploying Openshift a user can configure datastore used by OCP v
 
 To solve this problem vsphere CSI operator is going to create a storagePolicy by tagging selected datastore in the installer. This will require OCP to have expanded permissions of creating storagePolicies. After creating the storagePolicy, the vSphere CSI operator will also create corresponding storageclass.
 
-If CSI operator can not create storage Policy for some reason:
+###### Error handling during creation of storage policy and storage class
 
-- The operator will mark itself as disabled and stop further driver installation.
-- It will periodically retry installation and wait for admin to grant permissions to create StoragePolicy.
-- Create a metric if storagePolicy and storageClass creation fails in 4.7.
+If CSI operator can not create storage Policy or storageClass for some reason:
+
+Cluster will be degraded when:
+- We can't talk to Kube API server and for some reason can't read secret or can't create storageclass etc.
+
+Cluster will be marked as un-upgradable when:
+- There are any vCenter related errors (connection refused, 503 errors or permission denied)
+
+In case operator is marked as un-upgradeable for some reason - detailed information will be added to `ClusterCSIDriver` object and an appropriate metric will be emitted.
 
 ##### Hardware and vCenter version handling
 
-When vSphere CSI operator starts, using credentials provided by cluster-storage-operator, it will first verifiy vCenter version and HW version of VMs. If vCenter version is not 6.7u3 or greater and HW version is not 15 or greater on all VMs and this is a fresh install(i.e there is no `CSIDriver` object already installed by this operator) - it will:
+When vSphere CSI operator starts, using credentials provided by cluster-storage-operator, it will first verifiy vCenter version and HW version of VMs.
+If vCenter version is not 6.7u3 or greater and HW version is not 15 or greater on all VMs and this is a fresh install(i.e there is no `CSIDriver` object
+already installed by this operator) - it will stop installation of vSphere CSI driver operator and periodically retry with exponential backoff.
+Since vsphere-problem-detector is going to mark cluster as un-upgradeable anyways, vsphere-csi-driver-operator need not add the same condition again.
 
-1. Mark itself as disabled, stop CSI driver installation.
-2. Add clear message to indicate the error.
-3. It will keep retrying installation with exponential backoff assuming admin manually fixes the HW version of VMs.
-
-
-If additional VMs are added later into the cluster and they do not have HW version 15 or greater, Operator will mark itself as `degraded` and nodes which don't have right HW version will have annotation `vsphere.driver.status.csi.openshift.io: degraded` added to them.
-
-Additionally vSphere CSI operator will report HW version of VMs that make up the cluster as a metric.
+However, if additional VMs are added later into the cluster and they do not have HW version 15 or greater, Operator will mark itself as `degraded` and
+nodes which don't have right HW version will have annotation `vsphere.driver.status.csi.openshift.io: degraded` added to them. The vSphere CSI
+driver operator will use presence of `CSIDriver` object with openshift annotation as indication that driver was installed previously.
 
 ##### Presence of existing drivers in the cluster being upgraded
 
-A customer may install vSphere driver from external sources. In 4.7 we will install the CSI driver operator but will not proceed with driver install if an existing install of CSI driver is detected. The operator will mark itself as disabled but it will not degrade overall CSO status.
+A customer may have installed vSphere driver from external sources. In 4.10 we will install the CSI driver operator but will not proceed with driver
+install if an existing install of CSI driver is detected. The mechanism for detecting existing upstream driver will be:
 
-We will additionally gather metrics for such installation and decide in 4.8 timeframe, if we need to mark such clusters as "unupgradable".
+1. Check if there is a `CSIDriver` object of type vSphere CSI driver.
+2. Next we will check there is one or more `CSINode` objects with vSphere CSI driver type.
+
+If we detect an existing driver present in the cluster then cluster will be marked "unupgradable". Following steps must be performed to migrate to red hat version of driver:
+
+1. Cluster Admin will delete CSI driver Deployment object.
+2. Cluster Admin will delete CSI driver Daemonset objects.
+3. In last step Cluster Admin will delete `CSIDriver` and any existing configmap, secrets objects that were installed previously for functioning of CSI driver.
+
+We will ensure that these steps are documented in 4.10 docs.
 
 #### Disabling the operator
+
+Currently disablng the operator is unsupported feature.
 
 #### API
 
