@@ -48,7 +48,10 @@ This enhancement proposes deployment of vSphere CSI driver on Openshift as a def
 
 ## Proposal
 
-OCP ships with a vmware-vsphere-csi-driver-operator by default which is managed by [cluster-storage-operator](https://github.com/openshift/cluster-storage-operator/).
+We propose that Openshift will ship with  vmware-vsphere-csi-driver-operator by default which is managed by [cluster-storage-operator](https://github.com/openshift/cluster-storage-operator/).
+
+## Design Details
+
 vSphere CSI driver has few dependencies on installer though and they are:
 
 ### Installer dependency
@@ -116,13 +119,17 @@ Cluster will be marked as un-upgradable when:
 - There are any vCenter related errors (connection refused, 503 errors or permission denied)
 
 In case operator is marked as un-upgradeable for some reason - detailed information will be added to `ClusterCSIDriver` object and an appropriate metric will be emitted.
+It should be noted that even though cluster is marked as un-upgradeable, cluster is still fully available and `Available=True` will be set for all cluster objects
+and cluster can still be upgraded between z-stream versions but upgrades to minor versions (such as `4.11`) will be blocked.
 
 ##### Hardware and vCenter version handling
 
 When vSphere CSI operator starts, using credentials provided by cluster-storage-operator, it will first verifiy vCenter version and HW version of VMs.
-If vCenter version is not 6.7u3 or greater and HW version is not 15 or greater on all VMs and this is a fresh install(i.e there is no `CSIDriver` object
+If vCenter version is not >= 6.7u3 or HW version is not 15 or greater on all VMs and this is a fresh install(i.e there is no `CSIDriver` object
 already installed by this operator) - it will stop installation of vSphere CSI driver operator and periodically retry with exponential backoff.
-Since vsphere-problem-detector is going to mark cluster as un-upgradeable anyways, vsphere-csi-driver-operator need not add the same condition again.
+
+Since vsphere-problem-detector also runs similar checks in 4.10 - our plan is to move those checks to CSI driver operator and if those checks fail
+mark cluster as un-upgradeable. In 4.11 we are considering removal of vsphere-problem-detector altogether and brining all checks in CSI driver operator.
 
 However, if additional VMs are added later into the cluster and they do not have HW version 15 or greater, Operator will mark itself as `degraded` and
 nodes which don't have right HW version will have annotation `vsphere.driver.status.csi.openshift.io: degraded` added to them. The vSphere CSI
@@ -146,13 +153,22 @@ We will ensure that these steps are documented in 4.10 docs.
 
 #### Disabling the operator
 
-Currently disablng the operator is unsupported feature.
+Currently disabling the operator is unsupported feature.
 
-#### API
+### API Extensions
 
 The operator will use https://github.com/openshift/api/blob/master/operator/v1/types_csi_cluster_driver.go for operator configuration and managment.
 
-### User stories
+### Operational Aspects of API Extensions
+
+The `ClusterCSIDriver` type is used for operator installation and reporting any errors. Please see [CSI driver installation](csi-driver-install.md) for
+more details.
+
+### Test Plan
+
+The operator will be tested via CSI driver e2e. We don't expect operator itself to have any e2e but it will have unit tests that validate specific behavior.
+
+### User Stories
 
 #### Story 1
 
@@ -163,11 +179,17 @@ The operator will use https://github.com/openshift/api/blob/master/operator/v1/t
 * We don't yet know state of vSphere CSI driver. We need to start running e2e tests with vSphere driver as early as possible, so as we can determine how stable it is.
 * We have some concerns about datastore not being supported in storageClass anymore. This means that in future when in-tree driver is removed, clusters without storagePolicy will become unupgradable.
 
-### Test plan
+#### Failure Modes
 
-* We plan to enable e2e for vSphere CSI driver.
+If operator is unable to install CSI driver or is failing for some reason, appropriate condition will be added to `ClusterCSIDriver` object.
+
+#### Support Procedures
+
+Supported by must-gather logs and metrics.
 
 ### Graduation Criteria
+
+#### Dev Preview -> Tech Preview
 
 There is no dev-preview phase.
 
