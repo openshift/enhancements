@@ -53,6 +53,8 @@ As an OpenShift developer, I would like to be able to add Helm repositories with
 
 ### API Extensions
 
+A new namespace-scoped CRD is introduced and no [cluster role aggregation](https://kubernetes.io/docs/reference/access-authn-authz/rbac/#aggregated-clusterroles) is added as part of this enhancement.
+
 #### Introducing a new namespace-scoped custom resource, ProjectHelmChartRepository
 
 Example definition:
@@ -127,7 +129,7 @@ incubator     1m
 
 As defined in [previous helm enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/helm3/console.md#how-would-the-ui-discover-the-charts), the UI will invoke the `/api/helm/charts/index.yaml` endpoint and the endpoint will proxy requests to the configured chart repositories.
 
-Then the chart repository proxy will use all configured chart repositories, including cluster-scoped and available namespace-scoped Helm repositories in the current namespace, and deliver to the UI an aggregated index file. The UI then renders the developer catalog with the aggregated index file.
+Then the chart repository proxy will use all configured chart repositories, including cluster-scoped and available namespace-scoped Helm repositories in the requested namespace, and deliver to the UI an aggregated index file. The UI then renders the developer catalog with the aggregated index file.
 
 ### Implementation Details
 
