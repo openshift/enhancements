@@ -151,6 +151,14 @@ instance).
 
 The `AlertmanagerConfig` CRD is exposed by the `coreos.monitoring.com/v1alpha1` API group.
 
+#### Deployment models
+
+##### Leveraging the Platform Alertmanager
+
+In this model, no additional Alertmanager is deployed and the user alerts are
+forwarded to the existing Platform Alertmanager. This is matching the current
+model.
+
 The `Alertmanager` custom resource defines 2 LabelSelector fields
 (`alertmanagerConfigSelector` and `alertmanagerConfigNamespaceSelector`) to
 select which `AlertmanagerConfig` resources should be reconciled by the
@@ -158,7 +166,7 @@ Prometheus operator and from which namespace(s). Before this proposal, the
 Plaform Alertmanager resource defines the 2 selectors as null, meaning that it
 doesn't select any `AlertmanagerConfig` resources.
 
-We propose to add a new field `enableUserAlertmanagerConfig` to the
+We propose to add a new boolean field `enableUserAlertmanagerConfig` to the
 `openshift-montoring/cluster-monitoring-config` configmap. If
 `enableUserAlertmanagerConfig` is missing, the default value is false.
 
@@ -175,7 +183,8 @@ data:
 ```
 
 When `enableUserAlertmanagerConfig` is true, the cluster monitoring operator
-configures the Platform Alertmanager as follows.
+configures the Platform Alertmanager to reconcile `AlertmanagerConfig`
+resources from user namespaces as follows.
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -200,12 +209,13 @@ spec:
 
 To be consistent with what exists already for service/pod monitors and rules,
 the Prometheus operator doesn't reconcile `AlertmanagerConfig` resources from
-namespaces with the `openshift.io/user-monitoring: "false"` label.  It allows
+namespaces with the `openshift.io/user-monitoring: "false"` label. It allows
 application owners to opt out completely from UWM in case they deploy and run
 their own monitoring infrastructure (for instance with the [Monitoring Stack
 operator][monitoring-stack-operator]).
 
-In addition, the cluster admins can exclude specific user namespace(s) from UWM with the new `excludeUserNamespaces` field.
+In addition, the cluster admins can exclude specific user namespace(s) from UWM
+with the new `excludeUserNamespaces` field.
 
 ```yaml
 apiVersion: v1
@@ -220,11 +230,19 @@ data:
     excludeUserNamespaces: [foo,bar]
 ```
 
-The UWM admins can also define that UWM alerts shouldn't be forwarded to the
-Platform Alertmanager. With this capability and the existing
-`additionalAlertmanagerConfigs`, it is possible to externalize the alert
-routing and notifications to an external Alertmanager instance when the cluster
-admins don't want to share the Plaform Alertmanager for instance.
+##### Dedicated UWM Alertmanager
+
+In some environments where cluster admins and UWM admins are different personas
+(e.g. OSD), it might not be acceptable for cluster admins to let users
+configure the Platform Alertmanager because:
+* User configurations may break the Alertmanager configuration.
+* Processing of user alerts may slow down the alert notification pipeline.
+* Cluster admins don't want to deal with delivery errors for user notifications.
+
+In this case, UWM admins have the possibility to deploy a dedicated
+Alertmanager. The configuration options will be equivalent to the options
+exposed for the Platform Alertmanager and exposed under the `alertmanager` key
+in the UWM configmap.
 
 ```yaml
 apiVersion: v1
@@ -234,24 +252,43 @@ metadata:
   namespace: openshift-user-workload-monitoring
 data:
   config.yaml: |-
-    thanosRuler:
-      usePlatformAlertmanager: false
-    prometheus:
-      usePlatformAlertmanager: false
-      additionalAlertmanagerConfigs: [...]
+    alertmanager:
+      enabled: true
+      logLevel: info
+      nodeSelector: {...}
+      tolerations: [...]
+      resources: {...}
+      volumeClaimTemplate: {...}
+    prometheus: {}
+    thanosRuler: {}
 ```
 
-When this option is chosen, the OCP console can't be used to manage silences for user alerts.
+The UWM Alertmanager will be automatically configured to reconcile
+`AlertmanagerConfig` resources from all user namespaces (just like for UWM
+service/pod monitors and rules). Again namespaces with the
+`openshift.io/user-monitoring: false` label will be excluded.
 
-Summary of the different combinations:
+When the UWM Alertmanager is enabled: 
+* The Platform Alertmanager will be configured to not reconcile
+  `AlertmanagerConfig` resources from user
+  namespaces.
+* The UWM Prometheus and Thanos Ruler will send alerts to
+  the UWM Alertmanager only.
 
-| User alert destination | User notifications managed by | `enableUserWorkload` | `enableUserAlertmanagerConfig` | `usePlatformAlertmanager` (UWM) | `additionalAlertmanagerConfigs` (UWM) |
+The UWM admins are responsible for provisioning the root configuration of the
+UWM Alertmanager in the
+`openshift-user-workload-monitoring/alertmanager-user-workload` secret.
+
+
+##### Summary
+
+| User alert destination | User notifications managed by | `enableUserWorkload` | `enableUserAlertmanagerConfig` | `alertmanager` (UWM) | `additionalAlertmanagerConfigs` (UWM) |
 |----|----|:--------------------:|:------------------------------:|:------------------------------------:|:-------------------------------------:|
 | Nowhere | No-one | true | &lt;any&gt; | false | empty |
-| Platform Alertmanager | Cluster admins | true | false | true | empty |
-| Platform Alertmanager<br/>External Alertmanager(s) | Cluster admins for the Platform Alertmanager | true | false | true | not empty |
-| Platform Alertmanager | Application owners | true | true | true | empty |
-| Platform Alertmanager<br/>External Alertmanager(s) | Application owners | true | true | true | not empty |
+| Platform Alertmanager | Cluster admins | true | false | empty | empty |
+| Platform Alertmanager<br/>External Alertmanager(s) | Cluster admins for the Platform Alertmanager | true | false | empty | not empty |
+| UWM Alertmanager | Application owners | true | true | not empty | empty |
+| UWM Alertmanager<br/>External Alertmanager(s) | Application owners | true | true | not empty | not empty |
 
 
 #### Distinction between platform and user alerts
@@ -259,7 +296,7 @@ Summary of the different combinations:
 It is important that platform alerts can be clearly distinguished from user
 alerts because cluster admins want to ensure that:
 1. all alerts originating from platform components are dispatched to at least one default receiver which is owned by the admin team.
-2. they aren't notified about any user alert.
+2. they aren't notified about any user alert and focus on platform alerts.
 
 To this effect, CMO configures the Platform Prometheus instances with a new
 external label: `openshift_io_alert_source="platform"`.
@@ -321,9 +358,8 @@ receivers:
 #### RBAC
 
 The cluster monitoring operator ships a new cluster role
-`alertmanager-config-edit` so that cluster admins can bind it with a
-`RoleBinding` to grant permissions to users or groups on `AlertmanagerConfig`
-custom resources within a given namespace.
+`alertmanager-config-edit` that grants all actions on `AlertmanagerConfig`
+custom resources.
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -337,6 +373,15 @@ rules:
   - alertmanagerconfigs
   verbs:
   - '*'
+```
+
+Cluster admins can bind the cluster role with a `RoleBinding` to grant
+permissions to users or groups on `AlertmanagerConfig` custom resources within
+a given namespace.
+
+```
+oc -n <namespace> adm policy add-role-to-user \
+  alertmanager-config-edit <user> --role-namespace <namespace>
 ```
 
 This role complements the existing `monitoring-edit`, `monitoring-rules-edit` and `monitoring-rules-view` roles.
@@ -411,21 +456,10 @@ Mitigation
 
 ### Open Questions
 
-1. Should CMO allow UWM admins to deploy a separate UWM Alertmanager cluster if the cluster admins don't want to share the Platform Alertmanager?
+1. How can the console support the UWM Alertmanager?
 
-While the UWM admins have the ability to configure external Alertmanager
-endpoints where user alerts should be sent, it requires someone to manage the
-deployment of this additional Alertmanager. We could add an option in the UWM
-config map to enable an Alertmanager instance running in the
-`openshift-user-workload-monitoring` namespace.
-
-Pros
-* It provides a better experience for UWM admins: no need to maintain a standalone Alertmanager cluster, less likely to mess up the configuration of `additionalAlertmanagerConfigs`.
-Cons
-* Increased complexity in the CMO codebase and in the UWM configuration options.
-* Additional resource overhead (though Alertmanager is usually light on resources).
-* Redundancy with the [Monitoring Stack operator][monitoring-stack-operator].
-* More work required for a proper integration in the OCP console.
+Right now the console backend manages the user-defined silences via the
+Platform Alertmanager API. It would need to be aware of the deployment model.
 
 ### Test Plan
 
@@ -480,10 +514,23 @@ N/A
 
 ## Alternatives
 
+### Status-quo
+
 An alternative is to keep the current status-quo and rely on cluster admins to
 configure alert routing for their users. This proposal doesn't forbid this
 model since cluster admins can decide to not reconcile user-defined
 `AlertmanagerConfig` resources within the Platform Alertmanager.
+
+### Don't support UWM Alertmanager
+
+We could decide that CMO doesn't offer the ability to deploy the UWM
+Alertmanager. In this case the responsibility of deploying an additional
+Alertmanager is delegated to the cluster admins which would leverage
+`additionalAlertmanagerConfigs` to point user alerts to this instance.
+
+The downsides are
+* Degraded user experience and overhead on the users.
+* The additional setup wouldn't be supported by Red Hat.
 
 [user-workload-monitoring-enhancement]: https://github.com/openshift/enhancements/blob/master/enhancements/monitoring/user-workload-monitoring.md
 [uwm-docs]: https://docs.openshift.com/container-platform/4.8/monitoring/enabling-monitoring-for-user-defined-projects.html
