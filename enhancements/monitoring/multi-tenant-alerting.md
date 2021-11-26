@@ -115,7 +115,7 @@ at the same time.
 
 As an application owner, I want to know if my AlertmanagerConfig custom
 resource has been reconciled on the target Alertmanager so that I am confident
-that I will receive alert notifications.
+that I receive alert notifications.
 
 #### Story 4
 
@@ -179,7 +179,8 @@ metadata:
 data:
   config.yaml: |-
     enableUserWorkload: true
-    enableUserAlertmanagerConfig: true
+    alertmanager:
+      enableUserAlertmanagerConfig: true
 ```
 
 When `enableUserAlertmanagerConfig` is true, the cluster monitoring operator
@@ -226,7 +227,8 @@ metadata:
 data:
   config.yaml: |-
     enableUserWorkload: true
-    enableUserAlertmanagerConfig: true
+    alertmanager:
+      enableUserAlertmanagerConfig: true
     excludeUserNamespaces: [foo,bar]
 ```
 
@@ -234,14 +236,17 @@ data:
 
 In some environments where cluster admins and UWM admins are different personas
 (e.g. OSD), it might not be acceptable for cluster admins to let users
-configure the Platform Alertmanager because:
+configure the Platform Alertmanager with `AlertmanagerConfig` resources because:
 * User configurations may break the Alertmanager configuration.
 * Processing of user alerts may slow down the alert notification pipeline.
 * Cluster admins don't want to deal with delivery errors for user notifications.
 
+At the same time, application owners want to configure their alert
+notifications without requesting external intervention.
+
 In this case, UWM admins have the possibility to deploy a dedicated
-Alertmanager. The configuration options will be equivalent to the options
-exposed for the Platform Alertmanager and exposed under the `alertmanager` key
+Alertmanager. The configuration options are to the options
+exposed for the Platform Alertmanager and live under the `alertmanager` key
 in the UWM configmap.
 
 ```yaml
@@ -254,6 +259,7 @@ data:
   config.yaml: |-
     alertmanager:
       enabled: true
+      enableUserAlertmanagerConfig: true
       logLevel: info
       nodeSelector: {...}
       tolerations: [...]
@@ -263,16 +269,16 @@ data:
     thanosRuler: {}
 ```
 
-The UWM Alertmanager will be automatically configured to reconcile
-`AlertmanagerConfig` resources from all user namespaces (just like for UWM
-service/pod monitors and rules). Again namespaces with the
-`openshift.io/user-monitoring: false` label will be excluded.
+When `enableUserAlertmanagerConfig` is true, the UWM Alertmanager is
+automatically configured to reconcile `AlertmanagerConfig` resources from all
+user namespaces (just like for UWM service/pod monitors and rules). Again
+namespaces with the `openshift.io/user-monitoring: false` label are
+excluded.
 
-When the UWM Alertmanager is enabled: 
-* The Platform Alertmanager will be configured to not reconcile
-  `AlertmanagerConfig` resources from user
-  namespaces.
-* The UWM Prometheus and Thanos Ruler will send alerts to
+When the UWM Alertmanager is enabled:
+* The Platform Alertmanager is configured to not reconcile
+  `AlertmanagerConfig` resources from user namespaces.
+* The UWM Prometheus and Thanos Ruler send alerts to
   the UWM Alertmanager only.
 
 The UWM admins are responsible for provisioning the root configuration of the
@@ -280,15 +286,15 @@ UWM Alertmanager in the
 `openshift-user-workload-monitoring/alertmanager-user-workload` secret.
 
 
-##### Summary
-
-| User alert destination | User notifications managed by | `enableUserWorkload` | `enableUserAlertmanagerConfig` | `alertmanager` (UWM) | `additionalAlertmanagerConfigs` (UWM) |
-|----|----|:--------------------:|:------------------------------:|:------------------------------------:|:-------------------------------------:|
-| Nowhere | No-one | true | &lt;any&gt; | false | empty |
-| Platform Alertmanager | Cluster admins | true | false | empty | empty |
-| Platform Alertmanager<br/>External Alertmanager(s) | Cluster admins for the Platform Alertmanager | true | false | empty | not empty |
-| UWM Alertmanager | Application owners | true | true | not empty | empty |
-| UWM Alertmanager<br/>External Alertmanager(s) | Application owners | true | true | not empty | not empty |
+| User alert destination | User notifications managed by | `enableUserAlertmanagerConfig` | `alertmanager` (UWM) | `additionalAlertmanagerConfigs` (UWM) |
+|------------------------|-------------------------------|:------------------------------:|:--------------------:|:-------------------------------------:|
+| Platform Alertmanager | Cluster admins | false | empty | empty |
+| Platform Alertmanager<br/>External Alertmanager(s) | Cluster admins | false | empty | not empty |
+| Platform Alertmanager | Application owners | true | empty | empty |
+| UWM Alertmanager | UWM admins | &lt;any&gt; | {enabled: true, enableUserAlertmanagerConfig: false} | empty |
+| UWM Alertmanager | Application owners | &lt;any&gt; | {enabled: true, enableUserAlertmanagerConfig: true} | empty |
+| UWM Alertmanager<br/>External Alertmanager(s) | UWM admins | &lt;any&gt; | {enabled: true, enableUserAlertmanagerConfig: false} | not empty |
+| UWM Alertmanager<br/>External Alertmanager(s) | Application owners | &lt;any&gt; | {enabled: true, enableUserAlertmanagerConfig: true} | not empty |
 
 
 #### Distinction between platform and user alerts
@@ -379,7 +385,7 @@ Cluster admins can bind the cluster role with a `RoleBinding` to grant
 permissions to users or groups on `AlertmanagerConfig` custom resources within
 a given namespace.
 
-```
+```bash
 oc -n <namespace> adm policy add-role-to-user \
   alertmanager-config-edit <user> --role-namespace <namespace>
 ```
@@ -456,10 +462,17 @@ Mitigation
 
 ### Open Questions
 
-1. How can the console support the UWM Alertmanager?
+1. How can the Dev Console support the UWM Alertmanager?
 
-Right now the console backend manages the user-defined silences via the
-Platform Alertmanager API. It would need to be aware of the deployment model.
+Users are able to silence alerts from the Dev Console and the console backend
+assumes that the API is served by the
+`alertmanager-main.openshift-monitoring.svc` service. To support the UWM
+Alertmanager configuration, CMO should provide to the console operator the name
+of the Alertmanager service managing user alerts (either
+`alertmanager-main.openshift-monitoring.svc` or
+`alertmanager.openshift-user-workload-monitoring.svc`). Based on the presence
+of the `openshift_io_alert_source` label, the console backend can decide which
+Alertmanager service should be queried.
 
 ### Test Plan
 
@@ -478,12 +491,13 @@ N/A
 
 #### Tech Preview -> GA
 
-- The `AlertmanagerConfig` CRD is exposed as `v1` API.
+- The `AlertmanagerConfig` CRD is exposed as `v1beta1` API.
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback including signals from telemetry about the customer adoption (e.g. number of `AlertmanagerConfig` resources across the fleet).
 - Counter-measures to avoid service degradation of the Platform Alertmanager.
+- Option to deploy UWM Alertmanager
 - Conduct load testing
-- Console integration?
+- Console integration
 
 #### Removing a deprecated feature
 
