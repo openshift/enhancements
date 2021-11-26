@@ -147,9 +147,16 @@ As a UWM admin, I don't want to send user alerts to the Platform Alertmanager
 cluster because these alerts are managed by an external system (off-cluster Alertmanager for
 instance).
 
-### Implementation Details/Notes/Constraints
+### API Extensions
 
-The `AlertmanagerConfig` CRD is exposed by the `coreos.monitoring.com/v1alpha1` API group.
+This enhancement proposal leverages the `AlertmanagerConfig` CRD which is
+exposed by the `coreos.monitoring.com/v1alpha1` API group and defined by the
+upstream Prometheus operator.
+
+The cluster monitoring operator deploys a `ValidatingWebhookConfiguration`
+resource to validate the `AlertmanagerConfig` resources.
+
+### Implementation Details/Notes/Constraints
 
 #### Deployment models
 
@@ -245,7 +252,7 @@ At the same time, application owners want to configure their alert
 notifications without requesting external intervention.
 
 In this case, UWM admins have the possibility to deploy a dedicated
-Alertmanager. The configuration options are to the options
+Alertmanager. The configuration options are equivalent to the options
 exposed for the Platform Alertmanager and live under the `alertmanager` key
 in the UWM configmap.
 
@@ -514,6 +521,17 @@ OpenShift release supporting `AlertmanagerConfig` doesn't change the behavior
 of the monitoring components.
 
 ### Version Skew Strategy
+
+N/A
+
+### Operational Aspects of API Extensions
+
+#### Failure Modes
+
+The validating webhook is configured with `failurePolicy: Ignore` to not block
+creations and updates when the operator is down.
+
+#### Support Procedures
 
 N/A
 
