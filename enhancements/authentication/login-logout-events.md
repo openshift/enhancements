@@ -102,6 +102,123 @@ const (
 )
 ```
 
+We propose to add additional information that helps to identify login and login failures to the audit log.
+
+In case that the authentication happens through the `oauth-server`, we suggest to add:
+
+- `authentication.openshift.io/username`, which is the username for the authentication attempt.
+- `authentication.openshift.io/decision`, which is an enum that can be `allow`, `deny` or `error`.
+
+An audit event for an unsuccesful authentication event would look like so:
+
+```JavaScript
+{
+  "kind": "Event",
+  "apiVersion": "audit.k8s.io/v1",
+  "level": "RequestResponse",
+  "auditID": "${ auditID }",
+  "stage": "ResponseComplete",
+  "requestURI": "${ requestURI }",
+  "verb": "get",
+  "user": {
+    "username": "system:anonymous",
+    "groups": [
+      "system:unauthenticated"
+    ]
+  },
+  "sourceIPs": [
+    "${ sourceIP1 }"
+  ],
+  "userAgent": "Go-http-client/1.1",
+  "responseStatus": {
+    "metadata": {},
+    "message": "Authentication failed, attempted: basic",
+    "code": 401
+  },
+  "requestReceivedTimestamp": "2021-11-29T13:32:05.798968Z",
+  "stageTimestamp": "2021-11-29T13:32:05.805280Z",
+  "annotations": {
+    "authorization.k8s.io/decision": "allow",
+    "authorization.k8s.io/reason": "",
+    "authentication.openshift.io/username": "kostrows",
+    "authentication.openshift.io/decision": "deny",
+  }
+}
+```
+
+An audit event for a successful authentication event would look like so:
+
+```JavaScript
+{
+  "kind": "Event",
+  "apiVersion": "audit.k8s.io/v1",
+  "level": "RequestResponse",
+  "auditID": "${ auditID }",
+  "stage": "ResponseComplete",
+  "requestURI": "${ requestURI }",
+  "verb": "get",
+  "user": {
+    "username": "system:anonymous",
+    "groups": [
+      "system:unauthenticated"
+    ]
+  },
+  "sourceIPs": [
+    "${ sourceIP1 }"
+  ],
+  "userAgent": "Go-http-client/1.1",
+  "responseStatus": {
+    "metadata": {},
+    "code": 302
+  },
+  "requestReceivedTimestamp": "2021-11-29T13:26:53.395635Z",
+  "stageTimestamp": "2021-11-29T13:26:53.550445Z",
+  "annotations": {
+    "authorization.k8s.io/decision": "allow",
+    "authorization.k8s.io/reason": "",
+    "authentication.openshift.io/username": "kostrows",
+    "authentication.openshift.io/decision": "allow",
+  }
+}
+```
+
+An audit event for an authentication event that failed in the process would look like so:
+
+```JavaScript
+{
+  "kind": "Event",
+  "apiVersion": "audit.k8s.io/v1",
+  "level": "RequestResponse",
+  "auditID": "${ auditID }",
+  "stage": "ResponseComplete",
+  "requestURI": "${ requestURI }",
+  "verb": "get",
+  "user": {
+    "username": "system:anonymous",
+    "groups": [
+      "system:unauthenticated"
+    ]
+  },
+  "sourceIPs": [
+    "${ sourceIP1 }"
+  ],
+  "userAgent": "Go-http-client/1.1",
+  "responseStatus": {
+    "metadata": {},
+    "message": "Authentication failed, attempted: basic",
+    "code": 400
+  },
+  "requestReceivedTimestamp": "2021-11-29T13:32:05.798968Z",
+  "stageTimestamp": "2021-11-29T13:32:05.805280Z",
+  "annotations": {
+    "authorization.k8s.io/decision": "allow",
+    "authorization.k8s.io/reason": "",
+    "authentication.openshift.io/username": "kostrows",
+    "authentication.openshift.io/decision": "error",
+  }
+}
+```
+
 ### User Stories
 
 #### As an administrator I want to inspect successful login and login failure attempts
