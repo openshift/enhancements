@@ -24,29 +24,54 @@ func UpdateGitRepo() error {
 	return nil
 }
 
-const desiredRefSetting = "+refs/pull/*/head:refs/remotes/origin/pr/*"
+// findOpenShiftRemote looks through the remotes for the current git
+// repository to find one with "openshift/enhancements" in the URL
+func findOpenShiftRemote() (string, error) {
+	rawRemotes, err := exec.Command("git", "remote").Output()
+	if err != nil {
+		return "", errors.Wrap(err, "fetching remotes failed")
+	}
 
-func prRef(pr int) string {
-	return fmt.Sprintf("origin/pr/%d", pr)
+	remotes := strings.Split(string(rawRemotes), "\n")
+	for _, r := range remotes {
+		rawURL, err := exec.Command("git", "remote", "get-url", r).Output()
+		if err != nil {
+			return "", errors.Wrap(err, fmt.Sprintf("fetching url for remote %q failed", r))
+		}
+		if strings.Contains(string(rawURL), "openshift/enhancements") {
+			return r, nil
+		}
+	}
+
+	return "", fmt.Errorf("unable to find remote for repo openshift/enhancements")
 }
 
 func ensureFetchSettings() error {
+	upstream, err := findOpenShiftRemote()
+	if err != nil {
+		return errors.Wrap(err, "unable to configure fetch settings")
+	}
+
+	configName := fmt.Sprintf("remote.%s.fetch", upstream)
 	out, err := exec.Command("git", "config", "--get-all", "--local",
-		"remote.origin.fetch").Output()
+		configName).Output()
 	if err != nil {
 		return errors.Wrap(err, "fetching config failed")
 	}
+
+	desiredRefSetting := fmt.Sprintf("+refs/pull/*/head:refs/remotes/%s/pr/*", upstream)
 
 	if strings.Contains(string(out), desiredRefSetting) {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "adding %s to remote.origin.fetch\n", desiredRefSetting)
+	fmt.Fprintf(os.Stderr, "adding %s to %s\n", desiredRefSetting, configName)
 	_, err = exec.Command("git", "config", "--add", "--local",
-		"remote.origin.fetch", desiredRefSetting).Output()
+		configName, desiredRefSetting).Output()
 	if err != nil {
 		return errors.Wrap(err, "failed to update git config")
 	}
+
 	return nil
 }
 
@@ -59,6 +84,25 @@ func stringSliceContains(slice []string, target string) bool {
 	return false
 }
 
+type Summarizer struct {
+	upstreamRemote string
+}
+
+func NewSummarizer() (*Summarizer, error) {
+	upstream, err := findOpenShiftRemote()
+	if err != nil {
+		return nil, errors.Wrap(err, "could not construct PR summarizer")
+	}
+	s := Summarizer{
+		upstreamRemote: upstream,
+	}
+	return &s, nil
+}
+
+func (s *Summarizer) prRef(pr int) string {
+	return fmt.Sprintf("%s/pr/%d", s.upstreamRemote, pr)
+}
+
 type ModifiedFile struct {
 	Name string
 	Mode string
@@ -66,8 +110,8 @@ type ModifiedFile struct {
 
 // GetModifiedFiles tries to determine which files have changed in a
 // pull request.
-func GetModifiedFiles(pr int) (files []ModifiedFile, err error) {
-	ref := prRef(pr)
+func (s *Summarizer) GetModifiedFiles(pr int) (files []ModifiedFile, err error) {
+	ref := s.prRef(pr)
 
 	// Find the list of files added or modified in the PR by starting
 	// from the oldest ancestor commit common with the origin/master
@@ -211,8 +255,8 @@ func DeriveGroup(files []ModifiedFile) (filename string, isEnhancement bool) {
 
 // GetSummary reads the files being changed in the pull request to
 // find the summary block.
-func GetSummary(pr int) (summary string, err error) {
-	files, err := GetModifiedFiles(pr)
+func (s *Summarizer) GetSummary(pr int) (summary string, err error) {
+	files, err := s.GetModifiedFiles(pr)
 	if err != nil {
 		return "", errors.Wrap(err, "could not determine the list of modified files")
 	}
@@ -230,7 +274,7 @@ func GetSummary(pr int) (summary string, err error) {
 		return "", fmt.Errorf("expected 1 modified file, found %v", enhancementFiles)
 	}
 	summary = fmt.Sprintf("(no '## Summary' section found in %s)", enhancementFiles[0])
-	fileRef := fmt.Sprintf("%s:%s", prRef(pr), enhancementFiles[0])
+	fileRef := fmt.Sprintf("%s:%s", s.prRef(pr), enhancementFiles[0])
 	content, err := getFileContents(fileRef)
 	if err != nil {
 		return summary, errors.Wrap(err, fmt.Sprintf("could not get content of %s", fileRef))

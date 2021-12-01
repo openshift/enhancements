@@ -74,6 +74,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 6080  | cluster-kube-apiserver-operator | apiserver || control plane only |
 | 6180  | httpd     | kni | 4.4 | baremetal provisioning server, control plane only |
 | 6181  | httpd     | kni | 4.7 | baremetal image cache, control plane only |
+| 6183  | httpd     | kni | 4.10 | baremetal provisioning server (TLS), control plane only |
 | 6385  | ironic-api   | kni | 4.4 | baremetal provisioning, control plane only |
 | 6443  | kube-apiserver | apiserver || control plane only |
 | 8089  | ironic-conductor | kni | 4.4 | baremetal provisioning, control plane only |
@@ -87,6 +88,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9200-9219  | various CSI drivers | storage | 4.8 | metrics |
 | 9258  | cluster-cloud-controller-manager-operator | cluster infra | 4.9 | metrics, control plane only |
 | 9446  | baremetal-operator | kni | 4.9 | healthz; baremetal provisioning, control plane only |
+| 9447  | baremetal-operator | kni | 4.10 | webhook; baremetal provisioning, control plane only |
 | 9537  | crio      | node || metrics |
 | 9641  | ovn-kubernetes northd | sdn | 4.3 | control plane only, ovn-kubernetes only |
 | 9642  | ovn-kubernetes southd | sdn | 4.3 | control plane only, ovn-kubernetes only |
@@ -137,6 +139,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 10302 | various CSI drivers | storage | 4.7 | healthz |
 | 10303 | various CSI drivers | storage | 4.9 | healthz |
 | 11443 | kube-scheduler | workloads || recovery-controller |
+| 29100 | openshift-sdn | sdn || metrics |
 | 29101 | openshift-sdn | sdn || metrics |
 | 29102 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
 | 29103 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |

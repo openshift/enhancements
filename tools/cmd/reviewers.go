@@ -43,8 +43,10 @@ func (m *multiStringArg) Set(value string) error {
 
 func newReviewersCommand() *cobra.Command {
 	var (
-		daysBack     int
-		numReviewers int
+		daysBack      int
+		numReviewers  int
+		summaryMode   bool
+		minNumReviews int
 	)
 	ignoreReviewers := multiStringArg{}
 
@@ -86,6 +88,9 @@ func newReviewersCommand() *cobra.Command {
 
 			for _, reviewer := range orderedReviewers {
 				count := reviewerStats.ReviewCounts[reviewer]
+				if count < minNumReviews {
+					continue
+				}
 				prs := reviewerStats.PRsForReviewer(reviewer)
 
 				fmt.Printf("%d/%d: %s\n", count, len(prs), reviewer)
@@ -93,10 +98,12 @@ func newReviewersCommand() *cobra.Command {
 				sort.Slice(prs, func(i, j int) bool {
 					return prs[i].ReviewCount > prs[j].ReviewCount
 				})
-				for _, prWithCount := range prs {
-					pr := prWithCount.PR
-					fmt.Printf("\t%3d: %s [%s] %q\n", prWithCount.ReviewCount,
-						*pr.HTMLURL, *pr.User.Login, *pr.Title)
+				if summaryMode != true {
+					for _, prWithCount := range prs {
+						pr := prWithCount.PR
+						fmt.Printf("\t%3d: %s [%s] %q\n", prWithCount.ReviewCount,
+							*pr.HTMLURL, *pr.User.Login, *pr.Title)
+					}
 				}
 			}
 
@@ -107,6 +114,8 @@ func newReviewersCommand() *cobra.Command {
 	cmd.Flags().IntVar(&daysBack, "days-back", 31, "how many days back to query, defaults to 31")
 	cmd.Flags().IntVar(&numReviewers, "num", 10, "number of reviewers to show, 0 is all")
 	cmd.Flags().Var(&ignoreReviewers, "ignore", "ignore a reviewer, can be repeated")
+	cmd.Flags().BoolVar(&summaryMode, "summary", false, "show only summary (reviewer identity and totals)")
+	cmd.Flags().IntVar(&minNumReviews, "min-reviews", 0, "show only reviewers with at least a minimum number of reviews")
 
 	return cmd
 }
