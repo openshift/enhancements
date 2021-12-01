@@ -153,7 +153,7 @@ can be controlled by the data retention policy or how long to keep the data.
     Nevertheless, in order to maintain the same performance that you have
 prior to enabling network observability, will require additional resources.
 The specific number of cores and the amount of memory and storage required
-will be finalized as more testing is done. 
+will be finalized as more testing is done.
 
 
 ### Risks and Mitigations
