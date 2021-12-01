@@ -65,7 +65,7 @@ and add it to the next archive.
 ```json
 [{
   "conditions": [{
-    "type": "alert_is_firing",
+    "type": "AlertIsFiring",
     "alert": {
       "name": "SamplesImagestreamImportFailing"
     }
@@ -87,7 +87,7 @@ The API for conditions definition is unified with
 
 Conditions can have type and parameters, implemented types are:
 
-- `alert_is_firing` which is met when the alert with the name from parameter `name` is firing
+- `AlertIsFiring` which is met when the alert with the name from parameter `name` is firing
 
 A gathering function consists of its name and parameters, implemented functions are:
 
@@ -97,7 +97,7 @@ limiting it to only last N lines from parameter `tail_lines`
 
 Conditions to be implemented:
 
-- `cluster_version_matches` with parameter `version` makes the rule to be applied on specific cluster version.
+- `ClusterVersionMatches` with parameter `version` makes the rule to be applied on specific cluster version.
 It will use semantic versioning so you can wildcards and ranges like here https://github.com/blang/semver#features
 
 The proposal is to implement the next process of adding new rules:
@@ -130,7 +130,7 @@ which check the next things:
 - The rules should not repeat
 - There can be up to 8 conditions in each rule
 - Only implemented conditions can be used
-- Alert name from `alert_is_firing` condition should be a string of length between 1 and 128
+- Alert name from `AlertIsFiring` condition should be a string of length between 1 and 128
 and consist of only alphanumeric characters
 - For each rule, there's at least one gathering function
 - Only implemented gathering functions can be used
