@@ -155,6 +155,10 @@ For OpenShift engineers it will be easier to get necessary information when some
 Getting such information now means changing operator's code which is especially painful with older versions of clusters.
 When the data is not needed anymore, the rule can be simply removed from the repo.
 
+### API Extensions
+
+Empty
+
 ### Implementation Details/Notes/Constraints [optional]
 
 Empty
@@ -219,6 +223,18 @@ are updated through the new process described above.
 ### Version Skew Strategy
 
 Out of scope.
+
+### Operational Aspects of API Extensions
+
+Empty
+
+#### Failure Modes
+
+Empty
+
+#### Support Procedures
+
+Empty
 
 ## Implementation History
 
