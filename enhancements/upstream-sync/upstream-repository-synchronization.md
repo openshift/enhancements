@@ -50,7 +50,7 @@ Automate the syncing of upstream projects with their downstreams following the 8
 * Automatically fetch upstream changes
 * Automate common tasks, such as dependency resolution
 * Create a pull request in downstream repository
-* When a change in upstream repository causes conflicts with downstream repository, notify downstream repository maintainers and resume once conflicts have been resolved by the maintainers. 
+* When a change in upstream repository causes conflicts with downstream repository, notify downstream repository maintainers and resume once conflicts have been resolved by the maintainers.
 
 ### Non-Goals
 
@@ -58,7 +58,7 @@ Automate the syncing of upstream projects with their downstreams following the 8
 
 ## Proposal
 
-Opinionated, yet configurable bot, that can follow resync plans and interact with downstream repository maintainers via Github Pull Requests. 
+Opinionated, yet configurable bot, that can follow resync plans and interact with downstream repository maintainers via Github Pull Requests.
 
 There are existing solutions within Openshift, each written to accommodate one team's approach, and are inspiration for this enhancement. These typically include hard-coded steps, such as running `git` or `go mod` commands.
 * [merge-bot](https://github.com/shiftstack/merge-bot/blob/main/src/merge_bot/merge_bot.py#L135)
@@ -74,7 +74,7 @@ As the downstream repository maintainer, I want a new upstream resync activity t
 
 As the downstream repository maintainer, I would like to define an upstream resync plan, with an ordered list of steps to run so that the bot executes these steps and updates the downstream.
 
-As the downstream repository maintainer, I would like to pick up a PR resulting from an upstream resync attempt, and resolve the conflicts so that the resync activity can resume. 
+As the downstream repository maintainer, I would like to pick up a PR resulting from an upstream resync attempt, and resolve the conflicts so that the resync activity can resume.
 
 As the CI administrator, I need to deploy pre-packaged manifests to the openshift CI so that upstream resync is installed in a simple manner and can be used on openshift dowstream repositories.
 
@@ -86,10 +86,10 @@ to be shipped outside this scope.
 
 CRDs and webhooks are described in detail below.
 
-### Implementation Details/Notes/Constraints 
+### Implementation Details/Notes/Constraints
 
-Teams handle synchronization activities in many ways, depending on the legacy of the project, on the types of changes that need to be imported to the downstream (patches, new versions, etc.) and other factors. 
-It is therefore not possible to propose a single recipe for syncrhonizing one repo with its upstream. 
+Teams handle synchronization activities in many ways, depending on the legacy of the project, on the types of changes that need to be imported to the downstream (patches, new versions, etc.) and other factors.
+It is therefore not possible to propose a single recipe for syncrhonizing one repo with its upstream.
 
 Rather, this proposal aims to allow the team to:
 * watch for changes in upstream repositories,
@@ -138,7 +138,7 @@ Example:
 kind: plan
 metadata:
   name: z-release-4.8
-spec: 
+spec:
   config:
     upstream:
       name: github.com/kubernetes/kubernetes
@@ -248,4 +248,4 @@ _TODO:_ bot's github credentials access scope
 ## Infrastructure Needed [optional]
 
 * GitHub App setup
-* Openshift CI cluster  
+* Openshift CI cluster
