@@ -118,6 +118,12 @@ is synonymous with IPFIX, which is the IETF version of NetFlow.*
 User story 1 will be partially address as it provides the data for debugging.
 However, the first release will not analyze why something went wrong.
 
+### API Extensions
+
+The OVS will be configured to enable NetFlows by using Cluster Network Operator
+(networks.operator.openshift.io) to make this change.  This will impact the
+performance of the OVS.
+
 ### Implementation Details/Notes/Constraints
 
 Here are the limitations and constraints.
@@ -349,7 +355,10 @@ N/A since this is the first release
 
 ### Operational Aspects of API Extensions
 
-N/A
+Because OVS is configured to export NetFlows, the performance impact
+will be related to the amount of traffic and the sampling rate.  This
+will be tested against a number of scenarios as described in the Test
+Plan section above.
 
 #### Failure Modes
 
