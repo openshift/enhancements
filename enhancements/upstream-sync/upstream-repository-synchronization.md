@@ -93,7 +93,7 @@ It is therefore not possible to propose a single recipe for syncrhonizing one re
 
 Rather, this proposal aims to allow the team to:
 * watch for changes in upstream repositories,
-* and to define recipe (plan), with specific steps, that would match this synchronization use case. 
+* and to define recipe (plan), with specific steps, that would match this synchronization use case.
 
 Both of these elements (tags and plans) become Custom Resources that are used to run a sync-run in Openshift CI, which results in creating Pull Request containing the synchronization changes.
 
@@ -107,7 +107,7 @@ the Tag is left as it is. If a Plan exists, the Tag is considered for syncing ba
 The re-sync graph follows the principles of semantic versioning. Older Tags have higher priority.
 
 Example:
-```
+```yaml
 kind: tag
 metadata:
   name: 1.21.2
@@ -127,14 +127,14 @@ status:
 
 #### Plan
 
-The Plan Custom Resource mainly defines the steps that the CI will perform in order to prepare a PR synchronizing the repository with its upstream for a certain tag. 
+The Plan Custom Resource mainly defines the steps that the CI will perform in order to prepare a PR synchronizing the repository with its upstream for a certain tag.
 
-It contains 2 major sections: 
+It contains 2 major sections:
 * config: defines, at minimum, the upstream tag, and the downstream branch as well as the container image that the plan will use
 * steps: lists the steps that will run sequentially  during the plan execution
 
 Example:
-```
+```yaml
 kind: plan
 metadata:
   name: z-release-4.8
