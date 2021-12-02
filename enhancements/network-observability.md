@@ -315,6 +315,27 @@ Similar criteria will be apply to Tech Preview and GA but with
 different metrics such as increased node support and NetFlows
 per second.
 
+#### Dev Preview -> Tech Preview
+
+The following are items to complete for Tech Preview:
+
+- Increase scalability targets
+- Performance testing
+- End user documentation
+- Gather feedback from customers
+
+#### Tech Preview -> GA
+
+The following are items to complete for GA:
+
+- Finalize end-to-end and performance testing
+- API stability
+- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+
+#### Removing a deprecated feature
+
+N/A
+
 ### Upgrade / Downgrade Strategy
 
 In a brown field scenario, if the customer is running OpenShift
@@ -325,6 +346,18 @@ more information, see [Migration to the OVN-Kubernetes network provider](https:/
 ### Version Skew Strategy
 
 N/A since this is the first release
+
+### Operational Aspects of API Extensions
+
+N/A
+
+#### Failure Modes
+
+N/A
+
+#### Support Procedures
+
+N/A
 
 ## Implementation History
 
