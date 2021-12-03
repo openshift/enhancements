@@ -16,7 +16,7 @@ metadata:
   annotations:
     release.openshift.io/delete: "true"
 ```
-Note, as explained [here](operators.md#specifying-a-cluster-profile-in-your-manifest), all CVO managed manifests must specify applicable cluster profiles.
+Note, as explained [here](operators.md#manifest-inclusion-annotations), you may also need additional annotations to have the CVO consider your manifest applicable to the current cluster.
 The existing CVO ordering scheme defined [here](operators.md) is also used for object removal.
 This provides a simple and familiar method of deleting multiple objects by reversing the order in which they were created.
 It is the developer's responsibility to ensure proper deletion ordering and to ensure that all items originally created by an object are deleted when that object is deleted.
