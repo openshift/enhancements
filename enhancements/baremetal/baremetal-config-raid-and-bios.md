@@ -65,6 +65,10 @@ has supported the process of RAID and BIOS for worker nodes).
 
 With the addition of this feature, the users can configure RAID and BIOS in IPI deployments.
 
+### API Extensions
+
+N/A
+
 ### Implementation Details/Notes/Constraints
 
 #### Fill two fields
@@ -132,6 +136,18 @@ N/A
 Older versions of the installer will ignore the *raid* and *firmware* fields.
 
 ### Version Skew Strategy
+
+N/A
+
+### Operational Aspects of API Extensions
+
+N/A
+
+#### Failure Modes
+
+N/A
+
+#### Support Procedures
 
 N/A
 
