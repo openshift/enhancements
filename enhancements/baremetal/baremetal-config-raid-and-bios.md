@@ -89,8 +89,10 @@ For control plane hosts, transform the *raid* and *firmware* fields into string 
 
 #### Process the fields in terraform-provider-ironic
 
-Add *raid_config* and *bios_settings* fields to terraform-provider-ironic API, transform them back to struct format, and then call the
-methods in **BMO** to process the two fields to perform [manual cleaning](https://docs.openstack.org/ironic/latest/admin/cleaning.html#manual-cleaning).
+Add *raid_config* and *bios_settings* fields to terraform-provider-ironic API, transform them back to struct format.
+For RAID processing, implement the same logic on the terraform-provider-ironic side as on the **BMO** side.
+For BIOS processing, call the related functions in BMC package from the module [hardwareutils](https://github.com/metal3-io/baremetal-operator/tree/master/pkg/hardwareutils).
+And then perform the [manual cleaning](https://docs.openstack.org/ironic/latest/admin/cleaning.html#manual-cleaning).
 
 #### Notes
 
