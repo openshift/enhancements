@@ -61,8 +61,9 @@ See [KEP-2400: User Stories](https://github.com/kubernetes/enhancements/blob/mas
 ### API Extensions
 
 No new API extensions are required. For tech preview, the only update required
-is the addition of a `NodeSwapNoUpgrade` feature set to the OpenShift API. See
-[Design Details](#design-details) for the specifics.
+is the addition of a `NodeSwap` feature gate to the OpenShift API
+`TechPreviewNoUpgrade` feature set. See [Design Details](#design-details) for
+the specifics.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -78,15 +79,12 @@ See [KEP-2400: Risks and Mitigations].
 
 ### Enable `NodeSwap` feature gate
 
-We will add a new FeatureSet `NodeSwapNoUpgrade` with feature gate `NodeSwap`
-enabled for [Tech Preview].
+We will add a new feature gate `NodeSwap` to the `TechPreviewNoUpgrade` feature
+set to enable it for [Tech Preview].
 
-Note that we will not add this to the existing `TechPreviewNoUpgrade` feature
-set list, as we do not wish to enable this feature simultaneously with other
-tech preview features. Note that swap cannot be enabled or used without
-additional configuration, so there isn't necessarily a risk of adding it to the
-existing Tech Preview feature set; rather, for testing swap, we do not want to
-require users to also turn on other features.
+Note that swap cannot be enabled or used without additional configuration, so
+there isn't a risk of it interfering with other features when adding it to the
+existing Tech Preview feature set.
 
 Without this change, it is possible to enable the feature gate on any 4.9+
 cluster by defining `NodeSwap` in a `customNoUpgrade` configuration:
