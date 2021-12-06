@@ -154,7 +154,14 @@ exposed by the `coreos.monitoring.com/v1alpha1` API group and defined by the
 upstream Prometheus operator.
 
 The cluster monitoring operator deploys a `ValidatingWebhookConfiguration`
-resource to validate the `AlertmanagerConfig` resources.
+resource to check the validity of `AlertmanagerConfig` resources for things
+that can't be enforced by the OpenAPI specification. In particular, the
+AlertmanagerConfig's `Route` struct is a recursive type which isn't supported
+right now by [controller-tools][controller-tools-issue]).
+
+The validating webhook points to
+the prometheus operator's service in the `openshift-user-workload-monitoring`
+namespace (path: `/admission-alertmanagerconfigs/validate`).
 
 ### Implementation Details/Notes/Constraints
 
@@ -528,8 +535,11 @@ N/A
 
 #### Failure Modes
 
-The validating webhook is configured with `failurePolicy: Ignore` to not block
-creations and updates when the operator is down.
+The validating webhook is configured with `failurePolicy: Fail`. Currently the
+validating webhook service is backed by a single prometheus-operator pod so
+there is a risk that users can't create/update AlertmanagerConfig resources
+when the pod isn't ready. We will address this limitation upstream by allowing
+the deployment of a highly-available webhook service ([issue][ha-webhook-service-issue]).
 
 #### Support Procedures
 
@@ -571,3 +581,5 @@ The downsides are
 [unsupported-resources]: https://docs.openshift.com/container-platform/4.8/monitoring/configuring-the-monitoring-stack.html#support-considerations_configuring-the-monitoring-stack
 [monitoring-stack-operator]: https://github.com/openshift/enhancements/pull/866
 [bz-1933239]: https://bugzilla.redhat.com/show_bug.cgi?id=1933239
+[controller-tools-issue]: https://github.com/kubernetes-sigs/controller-tools/issues/477
+[ha-webhook-service-issue]: https://github.com/prometheus-operator/prometheus-operator/issues/4437
