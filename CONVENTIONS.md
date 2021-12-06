@@ -325,17 +325,13 @@ To avoid disruption and mass pod-death, it is important to
   * Components that support workloads directly must not disrupt end-user workloads during upgrade or reconfiguration
     * E.g. the upgrade of a network plugin must serve pod traffic without disruption (although tiny increases in latency are allowed)
     * All components that currently disrupt end-user workloads must prioritize addressing those issues, and new components may not be introduced that add disruption
-* All dameonsets of OpenShift components should use the maxUnavailable rollout strategy, allowing up to 10% of instances to be taken down at once.
-Any bugs that block that should be fixed.
-`10%` is an arbitrary ratio that ensures that most of the cluster is up and
-serving clients, while a big-enough chunk of the cluster is upgradable.
-There wasn't a huge amount of analysis beyond the fact that it significantly
-improved upgrade times and hit our targets. Additionally, 10% is roughly in
-line with the minimum disruption experienced by the default sized cluster
-whenever we reboot nodes and that's mandatory in order to complete an upgrade.
-Keeping the default of `1` makes an operator upgrade unacceptably slowly on
-big clusters because only one host running the daemonset can be drained (and upgraded) at a time.
-
+* All daemonsets of OpenShift components, especially those which are not limited to control-plane nodes, should use the `maxUnavailable` rollout strategy to avoid slow updates over large numbers of compute nodes.
+  * Use 33% `maxUnavailable` if you are a workload that has no impact on other workload.
+    This ensure that if there is a bug in the newly rolled out workload, 2/3 of instances remain working.
+    Workloads in this category include the spot instance termination signal observer which listens for when the cloud signals a node that it will be shutdown in 30s.
+    At worst, only 1/3 of machines would be impacted by a bug and at best the new code would roll out that much faster in very large spot instance machine sets.
+  * Use 10% `maxUnavailable` in all other cases, most especially if you have ANY impact on user workloads.
+    This limits the additional load placed on the cluster to a more reasonable degree during an upgrade as new pods start and then establish connections.
 
 #### Priority Classes
 
