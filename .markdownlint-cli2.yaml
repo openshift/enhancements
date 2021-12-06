@@ -44,3 +44,7 @@ config:
   blanks-around-lists: false
   single-trailing-newline: false
   no-multiple-blanks: false
+
+  # Trailing spaces don't cause any known issues and are often introduced when 
+  # updating text to conform to max line length restrictions.
+  no-trailing-spaces: false
