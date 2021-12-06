@@ -318,8 +318,17 @@ alerts because cluster admins want to ensure that:
 1. all alerts originating from platform components are dispatched to at least one default receiver which is owned by the admin team.
 2. they aren't notified about any user alert and focus on platform alerts.
 
-To this effect, CMO configures the Platform Prometheus instances with a new
-external label: `openshift_io_alert_source="platform"`.
+To this effect, CMO configures the Platform Prometheus instances with an alert
+relabeling configuration adding the `openshift_io_alert_source="platform"`
+label:
+
+```yaml
+alerting:
+  relabel_configs:
+  - target_label: openshift_io_alert_source
+    action: replace
+    replacement: platform
+```
 
 The Alertmanager configuration can leverage the label's value to make the
 correct decision in the alert routing tree. For instance, the following
