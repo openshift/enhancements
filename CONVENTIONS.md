@@ -264,6 +264,11 @@ Please note that in case of [Single Node OpenShift](https://github.com/openshift
   * Two replicas
   * Hard pod [anti-affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#always-co-located-in-the-same-node) on hostname (no two pods on the same node)
   * Use the maxUnavailable rollout strategy on deployments (prefer 25% by default for a value)
+  * If the operator or operand requires persistent storage
+    * Operators should keep their state entirely in CustomResources, using PV's is discouraged.
+    * If and how persistent storage impacts high availability of an operand depends on the cluster configuration, the deployment resource used (e.g. Deployment vs StatefulSet) and available storage classes, e.g. whether [topology-aware volume provisioning](https://kubernetes.io/docs/concepts/storage/storage-classes/#volume-binding-mode) is available.
+    * Operands that are deployed as a StatefulSet, i.e. where replicas get a separate volume instead of all replicas sharing a volume, typically require code to sync state between replicas causing cross-zone traffic, which may be charged.
+    * Consider that even with a StatefulSet and node-level anti-affinity, persistent storage can create a single point of failure by either provisioning volumes in the same availability zone or preventing some replicas from getting scheduled (e.g. the scheduler finds one good node permutation, but one node can't access sufficient free storage).
   * This is the recommended approach for all the components unless the component needs 3 replicas
 * If the operator or operand requires >= 3 replicas and should be running on worker nodes
   * Set soft pod anti-affinity on the hostname so that pods prefer to land on separate nodes (will be violated on two node clusters)
