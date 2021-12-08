@@ -146,6 +146,8 @@ A plugin must provide a Plugin CR. The result of this proposal will be:
 * Use `krew` manage plugins made available via CRs
 * A Controller to manage plugins that will serve binaries from images
 * If possible, Controller should be distributed via OLM
+* Controller should be optional, but enabled by default as it will be replacing the existing mechanism which was intented to be temporary
+  * See: https://github.com/openshift/enhancements/pull/922
 
 ### Test Plan
 
