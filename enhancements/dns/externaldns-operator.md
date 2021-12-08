@@ -382,7 +382,7 @@ spec:
         - --provider=aws
         # can only have one zone at a time if domains are overlapping over zones
         - --domain-filter=my-cluster.my-domain.com
-        - --exlucde-domains=apps.my-cluster.my-domain.con
+        - --exclude-domains=apps.my-cluster.my-domain.con
         - --aws-zone-type=private
         - --registry=txt
         - --txt-owner-id=externalDNS-default
@@ -402,7 +402,7 @@ spec:
         - --provider=aws
         # can only have one zone at a time if domains are overlapping over zones
         - --domain-filter=my-cluster.my-domain.com
-        - --exlucde-domains=apps.my-cluster.my-domain.con
+        - --exclude-domains=apps.my-cluster.my-domain.con
         - --aws-zone-type=public
         - --registry=txt
         - --txt-owner-id=externalDNS-default
