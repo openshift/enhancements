@@ -44,7 +44,7 @@ For additional acronyms, see [Red Hat Dictionary](https://source.redhat.com/grou
 
 ## Background
 
-[HyperShift project](https://hypershift-docs.netlify.app/reference/controller-architecture/) brings some changes to how OpenShift clusters can be deployed. The 10,000 feet view is to decouple the OCP control plane from the data plane. Control plane components (e.g. etcd, API servers, …) run on an underlay cluster, while worker components run remote on a different infrastructure.
+[HyperShift project](https://github.com/openshift/hypershift) brings some changes to how OpenShift clusters can be deployed. The 10,000 feet view is to decouple the OCP control plane from the data plane. Control plane components (e.g. etcd, API servers, …) run on an underlay cluster, while worker components run remote on a different infrastructure.
 
 This is similar to how AWS, Google and so on run their managed Kubernetes service: You provide the worker nodes and they provide the control plane.
 
@@ -58,7 +58,7 @@ The core idea of HyperShift topology is that it allows sharing infrastructure on
 
 ## Motivation
 
-This document enhancement proposes potential solution for Admin and Customer metric monitoring within those new topologies, since we cannot apply easily our current platform monitoring products using within cluster monitoring operator (CMO) easily (see [Alternatives](#use-pure-platform-monitoring-solution) on why).
+This document enhancement proposes potential solution for Admin and Customer metric monitoring within those new topologies, since we cannot apply easily our current platform monitoring products using within cluster monitoring operator ([CMO](https://github.com/openshift/cluster-monitoring-operator)) easily (see [Alternatives](#use-pure-platform-monitoring-solution) on why).
 
 ### Goals
 
@@ -68,7 +68,7 @@ The goal is to provide a solution that maintains similar monitoring capabilities
 
 * HSRE can monitor management clusters and control planes running there.
   * Ability to use AlertManager and PagerDuty workflow
-  * Ability to monitor Tugboats themselves
+  * Ability to monitor Management Clusters
   * Ability to monitor Customer control planes
   * Ability to view fleet-level metrics and drill-downs in a single pane of glass
   * Ability to keep metrics in-region
