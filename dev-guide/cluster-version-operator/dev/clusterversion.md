@@ -58,7 +58,7 @@ $ cat <<EOF >version-patch-first-override.yaml
   path: /spec/overrides
   value:
   - kind: Deployment
-    group: apps/v1
+    group: apps
     name: network-operator
     namespace: openshift-network-operator
     unmanaged: true
@@ -71,7 +71,7 @@ $ cat <<EOF >version-patch-add-override.yaml
   path: /spec/overrides/-
   value:
     kind: Deployment
-    group: apps/v1
+    group: apps
     name: network-operator
     namespace: openshift-network-operator
     unmanaged: true
