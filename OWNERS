@@ -1,13 +1,10 @@
 approvers:
-  - abhinavdahiya
   - adambkaplan
   - aravindhp
   - ashcrow
   - bparees
   - celebdor
-  - chancez
   - cooktheryan
-  - danehans
   - deads2k
   - derekwaynecarr
   - dgoodwin
@@ -16,7 +13,6 @@ approvers:
   - dustymabe
   - enxebre
   - eparis
-  - ericavonb
   - frobware
   - hardys
   - imcleod
@@ -25,7 +21,6 @@ approvers:
   - jerpeter1
   - joelanford
   - joelspeed
-  - josephschorr
   - jsafrane
   - juliakreger
   - jwforres
@@ -38,12 +33,12 @@ approvers:
   - mfojtik
   - Miciah
   - mrunalp
-  - pmorie
   - runcom
   - russellb
   - rvanderp3
   - sadasu
   - sdodson
+  - selansen
   - shawn-hurley
   - sjenning
   - smarterclayton
