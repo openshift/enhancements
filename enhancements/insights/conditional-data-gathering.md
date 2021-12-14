@@ -187,7 +187,44 @@ the service.
 
 ## Design Details
 
-Empty
+On the initial start the conditional gatherer will try to fetch the config from the service
+by doing http(s) request to the appropriate endpoint `https://cloud.redhat.com/.../gathering_rules`.
+There is a timeout of one minute for the request. The response is then cached and sent again only when 12 hours pass
+since the last request. In case when Insights Operator can't get the new set of gathering rules,
+the old ones will be used. In case of an error the service returns non 200 response.
+In case of success, the service responds with the rules in the next format:
+
+```json
+{
+  "version": "1.0",
+  "rules": [
+    {
+      "conditions": [
+        {
+          "type": "alert_is_firing",
+          "alert": {
+            "name": "ClusterVersionOperatorIsDown"
+          }
+        },
+        {
+          "type": "cluster_version_matches",
+          "cluster_version": {
+            "version": "4.8.x"
+          }
+        }
+      ],
+      "gathering_functions": {
+        "gather_logs_of_namespace": {
+          "namespace": "openshift-cluster-version",
+          "keep_lines": 100
+        }
+      }
+    }
+  ]
+}
+```
+
+`version` fields shows the version of the rules. `rules` contains the rules for the conditional gatherer.
 
 ### Open Questions [optional]
 
