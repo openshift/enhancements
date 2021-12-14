@@ -86,7 +86,21 @@ extracting the binaries, and serving them to clients.
 * The binaries will also be served by the Controller that will pull images from a trusted image registry and extract the binaries
 * With `krew index add https://someother-third-party-index` we won't limit users from adding their own index with whatever plugins they want
 * The controller could be optional, since connected environments can use the default `krew` index out-of-the box
-* As `krew` itself is a `kubectl` plugin, it can be invoked using either using `kubectl krew` or `oc krew`
+  * We feel as though the controller should be installed by default so that we can replace the existing temporary solution with something more robust
+  * Pros for being installed by default:
+    * Available day one for all clusters
+    * All binaries can be served using single unified mechanism
+    * No user setup required to use in disconnected environments
+  * Cons:
+    * Additional controller running by default
+  * Pros for being optionally installed:
+    * Less resource utilization
+  * Cons:
+    * Another operator to manage and mirror for disconnected environments
+    * Separate mechanism for built-in and third-party binaries
+    * Missing plugin CRs for optional elements installed before controller is installed
+* As `krew` itself is a `kubectl` plugin, it can be invoked using either using `kubectl krew` or `oc krew`\
+* `krew` functionality baked into `oc` by default
 
 Existing methods of downloading binaries (i.e. the console) will not be affected by this proposal. For the initial implementation, supported plugins will create Plugin CRs. The plugins will be downloaded and installed using `krew`.
 
@@ -127,6 +141,22 @@ to a cluster-admin for the creation of a CR:
 A new CRD will be created:
 * API: `config.openshift.io/v1`
 * Kind: `Plugin`
+* Spec:
+  * `shortDescription`
+  * `longDescription`
+  * `caveats`
+  * `homepage`
+  * `version`
+  * `platforms`:
+    * `platform`
+    * `image`
+    * `imagePullSecret`
+    * `files`
+* Status:
+  * `digests`:
+    * `name`
+    * `digest`
+    * `calculated`
 
 ### Risks and Mitigations
 
@@ -148,6 +178,10 @@ A plugin must provide a Plugin CR. The result of this proposal will be:
 * If possible, Controller should be distributed via OLM
 * Controller should be optional, but enabled by default as it will be replacing the existing mechanism which was intented to be temporary
   * See: https://github.com/openshift/enhancements/pull/922
+* Indexes that should be included by default:
+  * Red Hat supported plugins
+  * Third-party ISV certified plugins
+  * Community (upstream) `krew` plugins
 
 ### Test Plan
 
@@ -219,6 +253,12 @@ One major drawback is that Windows users will require administrative access to t
 * Controller: [concept](https://github.com/deejross/openshift-cli-manager)
 * Custom Resource: [example](https://github.com/deejross/openshift-cli-manager/blob/main/config/samples/vault_clitool.yaml)
 * Each plugin will publish an image to package binaries [example](https://github.com/openshift/oc/blob/master/images/cli-artifacts/Dockerfile.rhel)
+
+## Followup
+
+* Plugin signature validation
+* Prevent non-krew plugins from being distributed
+* Alias functionality in modern shells could potentially remove the need to prefix plugin commands with `kubectgl` or `oc`
 
 ## References
 
