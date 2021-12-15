@@ -87,22 +87,22 @@ extracting the binaries, and serving them to clients.
 * With `krew index add https://someother-third-party-index` we won't limit users from adding their own index with whatever plugins they want
 * There are two possible approaches for this new controller:
   1. Controller should be installed by default:
-    * Pros for being installed by default:
-      * Available day one for all clusters
-      * All binaries can be served using single unified mechanism
-      * No user setup required to use in disconnected environments
-      * Replace existing, temporary download mechanism
-    * Cons:
-      * Additional controller running by default
+  * Pros for being installed by default:
+    * Available day one for all clusters
+    * All binaries can be served using single unified mechanism
+    * No user setup required to use in disconnected environments
+    * Replace existing, temporary download mechanism
+  * Cons:
+    * Additional controller running by default
   2. Controller being optional:
-    * Pros for being optionally installed:
-      * Less resource utilization
-    * Cons:
-      * Another operator to manage and mirror for disconnected environments
-      * Separate mechanism for built-in and third-party binaries
-      * Missing plugin CRs for optional elements installed before controller is installed
-      * Won't be able to replace existing, temporary system used by console which is serving some binaries
-  * Given above arguments it is reasonable to include the controller by default
+  * Pros for being optionally installed:
+    * Less resource utilization
+  * Cons:
+    * Another operator to manage and mirror for disconnected environments
+    * Separate mechanism for built-in and third-party binaries
+    * Missing plugin CRs for optional elements installed before controller is installed
+    * Won't be able to replace existing, temporary system used by console which is serving some binaries
+* Given above arguments it is reasonable to include the controller by default
 * As `krew` itself is a `kubectl` plugin, it can be invoked using either using `kubectl krew` or `oc krew`\
 * `krew` functionality baked into `oc` by default
 
