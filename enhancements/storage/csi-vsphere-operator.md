@@ -108,19 +108,6 @@ Currently while deploying Openshift a user can configure datastore used by OCP v
 
 To solve this problem vsphere CSI operator is going to create a storagePolicy by tagging selected datastore in the installer. This will require OCP to have expanded permissions of creating storagePolicies. After creating the storagePolicy, the vSphere CSI operator will also create corresponding storageclass.
 
-###### Error handling during creation of storage policy and storage class
-
-If CSI operator can not create storage Policy or storageClass for some reason:
-
-Cluster will be degraded when:
-- We can't talk to Kube API server and for some reason can't read secret or can't create storageclass etc.
-
-Cluster will be marked as un-upgradable when:
-- There are any vCenter related errors (connection refused, 503 errors or permission denied)
-
-In case operator is marked as un-upgradeable for some reason - detailed information will be added to `ClusterCSIDriver` object and an appropriate metric will be emitted.
-It should be noted that even though cluster is marked as un-upgradeable, cluster is still fully available and `Available=True` will be set for all cluster objects
-and cluster can still be upgraded between z-stream versions but upgrades to minor versions (such as `4.11`) will be blocked.
 
 ##### Hardware and vCenter version handling
 
@@ -131,9 +118,23 @@ already installed by this operator) - it will stop installation of vSphere CSI d
 Since vsphere-problem-detector also runs similar checks in 4.10 - our plan is to move those checks to CSI driver operator and if those checks fail
 mark cluster as un-upgradeable. In 4.11 we are considering removal of vsphere-problem-detector altogether and brining all checks in CSI driver operator.
 
-However, if additional VMs are added later into the cluster and they do not have HW version 15 or greater, Operator will mark itself as `degraded` and
-nodes which don't have right HW version will have annotation `vsphere.driver.status.csi.openshift.io: degraded` added to them. The vSphere CSI
+However, if additional VMs are added later into the cluster and they do not have HW version 15 or greater, Operator will mark itself as `degraded`. The vSphere CSI
 driver operator will use presence of `CSIDriver` object with openshift annotation as indication that driver was installed previously.
+
+###### Error handling during creation of storage policy and storage class
+
+If CSI operator can not create storage Policy or storageClass for some reason:
+
+Cluster will be degraded when:
+- We can't talk to Kube API server and for some reason can't read secret or can't create storageclass etc.
+- All errors that previously only marked cluster as "un-upgradeable" will be upgraded to *degrade* the cluster if we previously installed CSI driver (detected via presence of `CSIDriver` object).
+
+Cluster will be marked as un-upgradable when:
+- There are any vCenter related errors (connection refused, 503 errors or permission denied) or any of the checks fail (HW version, esxi verion checks).
+
+In case operator is marked as un-upgradeable for some reason - detailed information will be added to `ClusterCSIDriver` object and an appropriate metric will be emitted.
+It should be noted that even though cluster is marked as un-upgradeable, cluster is still fully available and `Available=True` will be set for all cluster objects
+and cluster can still be upgraded between z-stream versions but upgrades to minor versions (such as `4.11`) will be blocked.
 
 ##### Presence of existing drivers in the cluster being upgraded
 
