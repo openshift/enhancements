@@ -33,8 +33,8 @@ We propose to extract metric storage, alerting and querying to a separate servic
 
 ## Glossary
 
-* HSRE: HyperShift Admin SRE: People that will operate the Hypershift management cluster and its control planes. In practice, this means the SD org for ou managed solutions.
-* CUS: Customers. 
+* HSRE: HyperShift Admin SRE: People that will operate the Hypershift management cluster and its control planes.
+* CUS: Customers. People that create clusters that are managed by Hypershift.
 * BU: Business Unit. 
 * MS-SRE/MT-SRE: Managed Service / Managed Tenant Site Reliability Engineer.
 * RHOBS: Red Hat Observability Service.
@@ -90,11 +90,11 @@ The goal is to provide a solution that maintains similar monitoring capabilities
 * CUS can monitor / use HPA/VPA / vis with local console using metrics FROM their workloads on guest clusters or from nodes on guest clusters
   * Container metrics (about their containers).
   * This includes part of Kube State Metrics (Kubernetes metrics) that relate to their workloads.
-* BU can gather required telemetry using the Telemeter pipeline.
+* BU and DDIS can gather required telemetry using the Telemeter pipeline.
 
 ### Non-Goals
 
-* Solve Logging and Tracing needs.
+* Solve Logging and Tracing needs in this enhancement.
 * Provide scalable storage solution for customer metrics. We just want to ensure UWM, their DIY,
 console or vendor monitoring does not have major blockers when integrating with this
 architecture.
@@ -112,7 +112,7 @@ However, since HyperShift has no solution at all, for now starting from HyperShi
 ### Personas
 
 * HyperShift Admin SRE (HSRE): People that will operate the Hypershift management cluster and its control planes. In practice, this means the SD org on our managed solutions.
-* Customers (CUS) People that attach data planes to HyperShift and run workloads on data planes.
+* Customers (CUS) People that create clusters that are managed by Hypershift.
 * Business Unit (BU): Red Hat business unit who is interested in telemetry and data from OpenShift deployments.
 
 ### User Stories
@@ -149,7 +149,7 @@ We propose to send all relevant metrics to the "Centralized Observability Produc
 For example:
 
 * For our Managed HSRE, this can be our RHOBS service.
-* For CUS it can be locally deployed Observatorium or 3rd-party vendor like Grafana Cloud, Amazon or Google Managed Prometheus, Logz.io and others.
+* For HSRES other than SD members, it can be locally deployed Observatorium or 3rd-party vendor like Grafana Cloud, Amazon or Google Managed Prometheus, Logz.io and others.
 
 A high-level view would look like this:
 
@@ -176,9 +176,7 @@ Reasons:
 
 ## Design Details
 
-We don’t want anyone to wait years to achieve this. As the Observability group, we want to give immediate value. Let’s see how we all can look when deployed. We proposed exact solutions that will have the required functionality, the quickest readiness and optimal stability and efficiency.
-
-In details it looks as below:
+In details the design looks as follows:
 
 ![h](assets/hypershift-details.png)
 
@@ -188,7 +186,7 @@ Let’s take a look at all parts:
 
 Anyone can install Observatorium, and deploy this service on-premise, but Observability Group also provides [RHOBS](https://rhobs-handbook.netlify.app/projects/observability/rhobs/) as a managed instance of observatorium, that is currently only available to specific internal teams.
 
-Observability Product will be a central pane of view of observability data for SRE needs from multiple clusters. Long term, it will also run critical Prometheus Alerting rules and alert routing for notification purposes.
+Observability Product will be a central pane of view of observability data for SRE needs from multiple clusters, as well as alerting and alert routing for notification purposes.
 
 2. Since the Management cluster is like any other OCP/OSD, we can leverage Platform Monitoring. In near future, we plan to allow [MonitoringStack](https://github.com/openshift/enhancements/pull/866) project to allow scraping platform related metrics, but for the time being, this is done via Platform Monitoring that can remote write relevant metrics to Observability Product.
 
