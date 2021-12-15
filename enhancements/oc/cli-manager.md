@@ -20,8 +20,8 @@ status: implementable
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
+- [X] Enhancement is `implementable`
+- [X] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
@@ -85,24 +85,29 @@ extracting the binaries, and serving them to clients.
 * The index will be served by a Controller with its contents managed by cluster-admins via CRs
 * The binaries will also be served by the Controller that will pull images from a trusted image registry and extract the binaries
 * With `krew index add https://someother-third-party-index` we won't limit users from adding their own index with whatever plugins they want
-* The controller could be optional, since connected environments can use the default `krew` index out-of-the box
-  * We feel as though the controller should be installed by default so that we can replace the existing temporary solution with something more robust
-  * Pros for being installed by default:
-    * Available day one for all clusters
-    * All binaries can be served using single unified mechanism
-    * No user setup required to use in disconnected environments
-  * Cons:
-    * Additional controller running by default
-  * Pros for being optionally installed:
-    * Less resource utilization
-  * Cons:
-    * Another operator to manage and mirror for disconnected environments
-    * Separate mechanism for built-in and third-party binaries
-    * Missing plugin CRs for optional elements installed before controller is installed
+* There are two possible approaches for this new controller:
+  1. Controller should be installed by default:
+    * Pros for being installed by default:
+      * Available day one for all clusters
+      * All binaries can be served using single unified mechanism
+      * No user setup required to use in disconnected environments
+      * Replace existing, temporary download mechanism
+    * Cons:
+      * Additional controller running by default
+  2. Controller being optional:
+    * Pros for being optionally installed:
+      * Less resource utilization
+    * Cons:
+      * Another operator to manage and mirror for disconnected environments
+      * Separate mechanism for built-in and third-party binaries
+      * Missing plugin CRs for optional elements installed before controller is installed
+      * Won't be able to replace existing, temporary system used by console which is serving some binaries
+  * Given above arguments it is reasonable to include the controller by default
 * As `krew` itself is a `kubectl` plugin, it can be invoked using either using `kubectl krew` or `oc krew`\
 * `krew` functionality baked into `oc` by default
 
 Existing methods of downloading binaries (i.e. the console) will not be affected by this proposal. For the initial implementation, supported plugins will create Plugin CRs. The plugins will be downloaded and installed using `krew`.
+This transition should be transparent for consumers.
 
 ### User Stories
 
@@ -175,9 +180,8 @@ A plugin must provide a Plugin CR. The result of this proposal will be:
 * Must work with image registries that require image pull secrets
 * Use `krew` manage plugins made available via CRs
 * A Controller to manage plugins that will serve binaries from images
-* If possible, Controller should be distributed via OLM
 * Controller should be optional, but enabled by default as it will be replacing the existing mechanism which was intented to be temporary
-  * See: https://github.com/openshift/enhancements/pull/922
+  * See: https://github.com/openshift//enhancements/installer/component-selection.md
 * Indexes that should be included by default:
   * Red Hat supported plugins
   * Third-party ISV certified plugins
