@@ -190,7 +190,7 @@ the service.
 On the initial start the conditional gatherer will try to fetch the config from the service
 by doing http(s) request to the appropriate endpoint `https://cloud.redhat.com/.../gathering_rules`.
 There is a timeout of one minute for the request. The response is then cached and sent again only when 12 hours pass
-since the last request. In case when Insights Operator can't get the new set of gathering rules,
+since the last request, this value can be configured. In case when Insights Operator can't get the new set of gathering rules,
 the old ones will be used. In case of an error the service returns non 200 response.
 In case of success, the service responds with the rules in the next format:
 
