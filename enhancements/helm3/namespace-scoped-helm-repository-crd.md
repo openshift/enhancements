@@ -128,6 +128,7 @@ incubator     1m
 #### How would the UI render the namespace-scoped Helm repository
 
 As defined in [previous helm enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/helm3/console.md#how-would-the-ui-discover-the-charts), the UI will invoke the `/api/helm/charts/index.yaml` endpoint and the endpoint will proxy requests to the configured chart repositories.
+Enabling namespace-scoped Helm repository requires a new URL parameter `namespace` that specifies the namespace that contains the requested CRD.
 
 Then the chart repository proxy will use all configured chart repositories, including cluster-scoped and available namespace-scoped Helm repositories in the requested namespace, and deliver to the UI an aggregated index file. The UI then renders the developer catalog with the aggregated index file.
 
