@@ -171,6 +171,9 @@ func newReportCommand() *cobra.Command {
 			year, month, day := time.Now().Date()
 			fmt.Printf("# This Week in Enhancements - %d-%.2d-%.2d\n", year, month, day)
 
+			startYear, startMonth, startDay := earliestDate.Date()
+			fmt.Printf("\n*Updates since %d-%.2d-%.2d*\n\n", startYear, startMonth, startDay)
+
 			// Only print the priority section if there are prioritized pull requests
 			if anyRequests(prioritizedMerged, prioritizedClosed, prioritizedNew, prioritizedRevived, prioritizedActive) {
 				fmt.Printf("\n## Enhancements for Release Priorities\n")
