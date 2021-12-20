@@ -5,9 +5,12 @@ authors:
 reviewers:
   - "@elmiko"
   - "@deads2k"
-  - TBD
+  - "@sdodson"
+  - "@danwinship"
 approvers:
-  - TBD
+  - "@deads2k"
+  - "@sdodson"
+  - "@knobunc"
 api-approvers:
   - "@deads2k"
 creation-date: 2021-12-15
@@ -20,10 +23,10 @@ tracking-link:
 
 ## Summary
 
-AWS Elastic-Fabric-Adapter (EFA) is a feature within EC2 that allows for high throughput network adapters to be
-attached to certain instance types. With the presence of these network adapters and some additional drivers,
-workloads can take advantage of greatly improved network performance between nodes within the same AWS availability
-zone.
+AWS Elastic Fabric Adapter (EFA) is a feature within EC2 that allows for network adapters that provide high throughput
+for HPC applications communicating via MPI to be attached to certain instance types. With the presence of these network
+adapters and some additional drivers, workloads can take advantage of greatly improved network performance between
+nodes within the same AWS availability zone.
 
 ## Motivation
 
@@ -34,14 +37,21 @@ OpenShift. To enable this, we must provide support for the feature within the Ma
 
 ### Goals
 
-- Enable worker Machines to attach EFA network interfaces as their primary network interface
-- Enable autoscaling of Machines that leverage high performance network interfaces
+- Enable Non Control Plane Machines to attach EFA network interfaces as their primary network interface
+- Enable autoscaling of Machines that use EFA network interfaces
+- Ensure that RHCOS contains the required kernel module (efa) to support the new network interface type
+- Enable a mixture of MachineSet types for both EFA and non-EFA enabled instances
 
 ### Non-Goals
 
-- Support and or configuration of the prerequisite requirements for using EFA
+- Support and/or configuration of the prerequisite requirements for using EFA
   - Configuration of security groups to allow the inter-node traffic
   - Deployment of any Libfabric/MPI software prerequisites
+  - Configuration of Huge Pages
+- Allowing day 1 worker Machine configuration for EFA
+- Allowing Control Plane Machines to be configured for EFA
+- Support and/or configuration of other HPC related features in AWS
+  - Eg. Placing Machines into placement groups
 
 ## Proposal
 
@@ -57,8 +67,10 @@ workloads so that I do not have to manually create new EC2 instances when my clu
 ### API Extensions
 
 The following new field will be added to the AWSMachineProviderConfig struct.
-The interface will be an enum allowing two possible values, `efa` and `interface`.
-When no value is specified, we will use the `interface` type to maintain backwards compatibility.
+The interface will be an enum allowing two possible values, `EFA` and `ENA`.
+When no value is specified, we will use the `ENA` type to maintain backwards compatibility.
+
+`EFA` will map to the AWS `efa` value. `ENA` will map to the AWS `interface` value.
 
 ```go
 type AWSMachineProviderConfig struct {
@@ -67,12 +79,12 @@ type AWSMachineProviderConfig struct {
 
   // NetworkInterfaceType specifies the type of network interface to be used for the primary
   // network interface.
-  // Valid values are "interface", "efa", and omitted, which means no opinion and the platform
+  // Valid values are "ENA", "EFA", and omitted, which means no opinion and the platform
   // chooses a good default which may change over time.
-  // The current default value is "interface".
+  // The current default value is "ENA".
   // Please visit https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa.html to learn more
   // about the AWS Elastic Fabric Adapter interface option.
-  // +kubebuilder:validation:Enum:="interface";"efa"
+  // +kubebuilder:validation:Enum:="ENA";"EFA"
   // +optional
   NetworkInterfaceType AWSNetworkInterfaceType `json:"networkInterfaceType,omitempty"`
 }
@@ -82,9 +94,10 @@ type AWSMachineProviderConfig struct {
 type AWSNetworkInterfaceType string
 
 const (
-	// AWSInterfaceNetworkInterfaceType is the default network interface type.
+	// AWSENANetworkInterfaceType is the default network interface type,
+	// the EC2 Elastic Network Adapter commonly used with EC2 instances.
 	// This should be used for standard network operations.
-	AWSInterfaceNetworkInterfaceType AWSNetworkInterfaceType = "interface"
+	AWSENANetworkInterfaceType AWSNetworkInterfaceType = "interface"
 	// AWSEFANetworkInterfaceType is the Elastic Fabric Adapter network interface type.
 	AWSEFANetworkInterfaceType AWSNetworkInterfaceType = "efa"
 )
@@ -104,6 +117,7 @@ creating new instances.
 
 It is important to note that OpenShift only supports a single network interface on instances created by Machine API
 today, as such, the EFA network interface will be the primary network interface for the instance.
+AWS also only supports EFA on the primary network interface.
 
 #### What is EFA?
 
@@ -143,6 +157,50 @@ clusters making changes such as this already, so this kind of change must be con
 Additionally, IPI users are free to add additional security groups to their clusters post install and specify these
 additional groups within their Machine specs. We have no control over this today and again, this is something that must
 be planned for in the future security group management process.
+It is worth noting that today we do not guarantee the shape of security groups created by the installer and as such,
+any user automating changes to such security groups is already exposing themself to potential compatibility issues with
+future versions of OCP.
+
+#### Users will have to configure Huge Pages
+
+Huge Pages is a prerequisite requirement for deploying MPI workloads which leverage the EFA network interface.
+It is expected that users will be responsible for configuring this within their OpenShift clusters post installation.
+
+We [already document](https://docs.openshift.com/container-platform/4.9/post_installation_configuration/node-tasks.html#configuring-huge-pages_post-install-node-tasks)
+how to configure Huge Pages within OpenShift clusters as a day 2 operation and it is expected that users of this
+feature will follow the instructions linked above.
+
+For completeness, an example configuration is included below:
+
+```yaml
+apiVersion: tuned.openshift.io/v1
+kind: Tuned
+metadata:
+  name: hugepages
+  namespace: openshift-cluster-node-tuning-operator
+spec:
+  profile:
+  - data: |
+      [main]
+      summary=Boot time configuration for hugepages
+      include=openshift-node
+      [bootloader]
+      cmdline_openshift_node_hugepages=hugepagesz=2M hugepages=10256M
+    name: openshift-node-hugepages
+
+  recommend:
+  - machineConfigLabels:
+      machineconfiguration.openshift.io/role: "worker"
+    priority: 30
+    profile: openshift-node-hugepages
+```
+
+Note, as the Huge Pages configuration is tuned to the size of the instance types leveraged within the cluster,
+it is hard to predict an appropriate default. Due to this limitation, we leave this configuration as an exercise
+for the end user.
+
+A `2M` page size is the minimum requirement for the MPI operator.
+The number of Huge Pages must fit within the hosts memory.
 
 #### Using EFA requires additional software
 
@@ -155,6 +213,13 @@ To take advantage of the EFA performance benefits, additional libfabric software
 This software is currently [distributed by AWS](https://github.com/aws-samples/aws-efa-eks/blob/main/manifest/efa-k8s-device-plugin.yml)
 and it will be up to the end user to deploy this software within their clusters.
 Red Hat will not initially support the libfabric driver.
+
+Once the end user has correctly configured the software prerequisites, the Node Feature Discovery operator will
+configure the Node status to show the EFA interface as an allocatble resource.
+This then allows the MPI operator to start scheduling MPI workloads onto the Node.
+
+As far as we can tell, enabling processeses to take advantage of the libfabric networking is transparent to the
+standard networking stack and will not interrupt existing communication from user space.
 
 #### Only a subset of instance types are supported with EFA network interfaces
 
@@ -181,9 +246,34 @@ In the first phase, we are planning to just provide users the ability to create 
 We will run standard regression testing on the feature but we do not expect any special additional testing to be
 performed.
 
-In the future, if/when we introduce full support for this feature, we will need to introduce specific testing to check
-that the workloads can leverage the EFA feature and that their networking throughput is increased when leveraging the
-feature.
+There are two levels of testing that we can then automate within the origin test suite.
+
+#### Smoke test for basic networking
+
+To ensure that enabling an EFA interface does not break basic networking requirements,
+we will add a test performs the following steps:
+
+- Create a new MachineSet based on the existing MachineSets within the cluster
+  - Modify the MachineSet to enable EFA networking
+  - Set the MachineSet replicas to 1
+- Wait for the MachineSet to create a Machine
+- Wait for the Machine to become a Node
+- Remove the MachineSet once the Machine has a Node
+- Wait for the Machine to be removed
+
+This process will test whether the basic Node networking is affected by the introduction of the EFA adapter.
+As the EFA adapter requires a specific kernel module to provide basic networking, this will also provide signal as to
+the inclusion of the `efa` kernel module with the RHCOS image.
+
+#### Extended MPI testing
+
+Based on the [POC project](https://github.com/kwozyman/ocp-aws-efa-poc/tree/main/manifests/),
+we will deploy the Libfabric DaemonSet, MPI operator and an MPI latency job to determine whether or not the end to end
+flow of creating an HPC workload is successful.
+
+This process will rely on configuration of the preqrequisites for the feature which currently are non-trivial to
+perform within the test suite. This may delay the addition of this test as we work out how to, for example, set the
+correct security group configuration from within a test.
 
 ### Graduation Criteria
 
@@ -210,6 +300,8 @@ standard interface type.
 Once configured, on downgrade, the Machine API components will not know about the new fields, and as such, will ignore
 the interface type field if specified. The usage of an EFA interface type will not affect removal of Machines after a
 downgrade, there should be no detrimental effect of a downgrade on Machine API.
+Machines created with the new interface type will be unaffected and will persist within the cluster until an
+administrator decides to remove them.
 
 ### Version Skew Strategy
 
@@ -247,6 +339,18 @@ provide reasons for not implementing this feature, to summarise:
 The alternative to adding support for EFA interfaces on MAPI is to reject the RFE. In this case, the end user must use
 some method outside of OpenShift to attach new instances to their clusters. This prevents the user from leveraging the
 Machine API and the autoscaling integrations that we have built within the product.
+
+### Future implementation
+
+In the future, we may wish to implement a full `cluster-hpc-operator` to be responsible for the end to end
+configuration of the prerequisites for HPC workloads. This would include configuring EFA and it's prerequisites as well
+as possible other configuraiton such as placement groups.
+
+The solutions outlined in this enhancement are currently AWS specific, however, the problems are not unique to AWS and
+other platforms provide similar features which we will want to implement in the future.
+A generic operator would be expected to be able to handle this feature across multiple platforms (eg Azure and GCP).
+
+This is currently considered to be out of scope within this enhancement.
 
 ## Infrastructure Needed
 
