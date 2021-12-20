@@ -158,7 +158,7 @@ A new CRD will be generated based on the types:
 type PluginSpec struct {
 	// ShortDescription of the plugin.
 	// +required
-	ShortDescription string `json:"shortDescription,omitempty"`
+	ShortDescription string `json:"shortDescription"`
 
 	// Description of the plugin.
 	// +optional
@@ -174,21 +174,22 @@ type PluginSpec struct {
 
 	// Version of the plugin.
 	// +required
-	Version string `json:"versions,omitempty"`
+	Version string `json:"version"`
 
 	// Platforms the plugin supports.
-	Platforms []PluginPlatform `json:"platforms,omitempty"`
+	// +required
+	Platforms []PluginPlatform `json:"platforms"`
 }
 
 // PluginPlatform defines per-OS and per-Arch binaries for the given plugin.
 type PluginPlatform struct {
 	// Platform for the given binary (i.e. linux/amd64, darwin/amd64, windows/amd64).
 	// +required
-	Platform string `json:"platform,omitempty"`
+	Platform string `json:"platform"`
 
-	// Image containing CLI tool.
+	// Image containing plugin.
 	// +required
-	Image string `json:"image,omitempty"`
+	Image string `json:"image"`
 
 	// ImagePullSecret to use when connecting to an image registry that requires authentication.
 	// +optional
@@ -196,26 +197,26 @@ type PluginPlatform struct {
 
 	// Files is a list of file locations within the image that need to be extracted.
 	// +required
-	Files []FileOperation `json:"path,omitempty"`
+	Files []FileLocation `json:"files"`
 
 	// Bin specifies the path to the plugin executable.
 	// The path is relative to the root of the installation folder.
 	// The binary will be linked after all FileOperations are executed.
 	// +required
-	Bin string `json:"bin,omitempty"`
+	Bin string `json:"bin"`
 }
 
-// PluginFileOperation specifies a file copying operation from plugin archive to the
+// FileLocation specifies a file copying operation from plugin archive to the
 // installation directory.
-type FileOperation struct {
+type FileLocation struct {
 	// From is the absolute file path within the image to copy from.
 	// Directories and wildcards are not currently supported.
 	// +required
-	From string `json:"from,omitempty"`
+	From string `json:"from"`
 
 	// To is the relative path within the root of the installation folder to place the file.
 	// +required
-	To string `json:"to,omitempty"`
+	To string `json:"to"`
 }
 ```
 
