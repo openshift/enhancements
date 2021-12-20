@@ -129,6 +129,8 @@ incubator     1m
 
 As defined in [previous helm enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/helm3/console.md#how-would-the-ui-discover-the-charts), the UI will invoke the `/api/helm/charts/index.yaml` endpoint and the endpoint will proxy requests to the configured chart repositories.
 Enabling namespace-scoped Helm repository requires a new URL parameter `namespace` that specifies the namespace that contains the requested CRD.
+If a user does not have rights to access requested namespace, only available resouce will be returned, e.g. if the user does not have permission for the `namespace=foo`, then the default cluster-wise Helm repos will be returned, and if no cluster-wise repo is available, an empty list will be returned.
+We will log the error in the backend but will not explicitly return error to the frontend component.
 
 Then the chart repository proxy will use all configured chart repositories, including cluster-scoped and available namespace-scoped Helm repositories in the requested namespace, and deliver to the UI an aggregated index file. The UI then renders the developer catalog with the aggregated index file.
 
@@ -162,7 +164,7 @@ N/A
 
 #### Tech Preview -> GA
 
-N/A
+Changes will be applied immediately to the latest release, since this feature is fully backward compatible with cluster-scoped Helm chart repository and console APIs.
 
 #### Removing a deprecated feature
 
