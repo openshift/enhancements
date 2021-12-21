@@ -244,6 +244,12 @@ A plugin must provide a Plugin CR. The result of this proposal will be:
   * Third-party ISV certified plugins
   * Community (upstream) `krew` plugins
 
+The controller should consider the following:
+* Use cluster-scoped image pull secret by default
+* Respect ICSP rules when pulling images
+* Allow specifying certificates and CAs for image registries
+* Allow specifying of proxy configuration for image registries
+
 ### Test Plan
 
 **Note:** Section not required until targeted at a release.
