@@ -231,6 +231,45 @@ was invalid.
 
 > error launching instance: EFA interfaces are not supported on m5.2xlarge
 
+#### The Cluster Autoscaler has not been thoroughly tested with EFA instances
+
+We have performed basic testing of the Cluster Autoscaler with MPI workloads requesting EFA interfaces.
+We are now aware that the Cluster Autoscaler is aware of additional resource requests beyond the standard (CPU/Mem/GPU)
+and will correctly report that an MPI workload cannot be scheduled to a node if it does not have the EFA interface as
+an allocatable resource.
+
+```bash
+I1221 12:12:41.454239       1 scale_up.go:300] Pod osu-efa-test-intel-worker-1 can't be scheduled on MachineSet/openshift-machine-api/efa-test-n42zl-worker-us-east-1a, predicate checking error: Insufficient vpc.amazonaws.com/efa; predicateName=NodeResourcesFit; reasons: Insufficient vpc.amazonaws.com/efa; debugInfo=
+```
+
+When Machines with an EFA interface exist within the cluster, the Autoscaler can also correctly identify these (and
+their respective MachineSets) and scale up and scale down the MachineSet as expected.
+
+However, as we have seen with GPU autoscaling, there may be some issues that we need to fix within the autoscaler to
+make sure the autoscaling is smooth and works as expected. We have not yet tested whether these issues manifest, though
+these are the kind of issues we can expect given our experience with GPU resources.
+
+##### A need for a dedicated EFA processor
+
+As with GPUs, EFA allocatable resources are discoverd by the Node Feature Discovery operator.
+This operator adds the EFA device as an allocatable resource to Nodes some time after the Node is created.
+
+When there is a delay in adding this allocatable resource to the Node, and with certain configurations of the cluster
+autoscaler, this can cause the Autoscaler to scale the Node down as it thinks that the new Node doesn't satisfy the
+requirements of the unscheduled pods.
+
+To avoid this, users can either disable scale down on the ClusterAutoscaler resource or set a sufficiently long
+`delayAfterAdd` on the scale down configuration. We expect 10 minutes should be sufficient in most cases.
+
+##### Scaling from zero is not implemented
+
+To allow scale from zero, the Cluster Autoscaler Operator annotates MachineSets with information about the resources
+the Machines within the MachineSet provide when they are created. Currently we annotate the CPU, Memory and GPU count
+for instance types based on a mapping generated from the AWS API.
+
+To enable EFA scaling from zero, we will also need to come up with a new annotation to signal to the Cluster Autoscaler
+CAPI provider that the Machines within the Machineset can satisfy the EFA resource requirement.
+
 ## Design Details
 
 ### Open Questions
