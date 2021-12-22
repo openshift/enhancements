@@ -428,35 +428,37 @@ resources and measure the impact on notification delivery.
 
 ### Risks and Mitigations
 
-#### Disruption of the platform Alertmanager
+#### Disruption of Alertmanager
 
 Even though the Prometheus operator prevents it as much as it can, it may be
 possible for users to create an `AlertmanagerConfig` resource that triggers the
 Prometheus operator to generate an invalid Alertmanager configuration, leading
-to a potential outage of the Platform Alertmanager cluster.
+to a potential outage of the Alertmanager cluster.
 
 Mitigations
+* If cluster admins have configured an external notification provider coupled with the always firing `Watchdog` alert, they should receive an out-of-band notification about the alerting pipeline being broken.
 * The `AlertmanagerBadConfig` alert fires when Alertmanager can't reload its configuration.
-* Cluster admins can turn off the support for `AlertmanagerConfig` globally so that the Platform Alertmanager cluster can process platform alerts again and the cluster admins have time to identiy the "rogue" `AlertmanagerConfig` resource(s).
 * Cluster admins can exclude specific user namespaces (once the "rogue" `AlertmanagerConfig` resource(s) have been identified) to restore UWM functionality for good citizens.
+* When alerts are sent to the Platform Alertmanager, cluster admins can turn off the support for `AlertmanagerConfig` in the CMO configmap so that the Platform Alertmanager cluster can process platform alerts again and the cluster admins have time to identiy the "rogue" `AlertmanagerConfig` resource(s).
 
 #### Misconfiguration of receivers
 
 Users may provide bad credentials for the receivers, the system receiving the
-notifications might be unreachable or the system might be unable to process the requests. These
-situations would trigger the `AlertmanagerFailedToSendAlerts` and/or
-`AlertmanagerClusterFailedToSendAlerts` alerts. The cluster admins have to act
-on upon the alerts and understand where the problem comes from.
+notifications might be unreachable, or the system might be unable to process
+the requests. These situations would trigger the
+`AlertmanagerFailedToSendAlerts` and/or `AlertmanagerClusterFailedToSendAlerts`
+alerts. The cluster admins have to act on upon the alerts and understand where
+the problem comes from.
 
 Mitigations
 * Detailed runbook for the `AlertmanagerFailedToSendAlerts` and `AlertmanagerClusterFailedToSendAlerts` alerts.
-* Ability to use a separate Alertmanager cluster to avoid messing up with the platform Alertmanager cluster.
+* Ability to use a separate Alertmanager cluster to avoid messing up with the Platform Alertmanager cluster.
 
 #### Non-optimal Alertmanager settings
 
 Users may use non-optimal settings for their alert notifications (such as
 reevaluation of alert groups at high frequency). This may impede the
-performances of Alertmanager globally because it would consume more CPU. It can
+performances of Alertmanager since it would consume more resources. It can
 also trigger notification failures if an exteral integration limits the number
 of requests a client IP address can do.
 
@@ -465,20 +467,23 @@ Mitigation
 
 #### AlertmanagerConfig resources not being reconciled
 
-An `AlertmanagerConfig` resource might not be valid for various reasons:
-* An alerting route references a receiver which doesn't exist.
+The `AlertmanagerConfig` CRD implements schema validation for things that can
+be modeled with the OpenAPI specification. However a
+resource might still not be valid for various reasons:
+* An alerting route contains a sub-route that is invalid (the `route` field has a self-reference to itself which means that it can't be validated at the API level).
 * Credentials (such as API keys) are referenced by secrets, the
   operator doesn't have permissions to read the secret or the reference
   is incorrect (wrong name or key).
 
-In such cases, the Prometheus operator discards the resource which isn't
-reconciled in the final Alertmanager configuration.
+In such cases, the Prometheus operator discards the invalid
+`AlertmanagerConfig` resource which isn't reconciled in the final Alertmanager
+configuration.
 
 The operator might also be unable to reconcile the AlertmanagerConfig resources temporiraly.
 
 Mitigation
-* The Prometheus operator should expose a validating admission webhook that should prevent invalid configurations.
-* The Prometheus operator implements the `Status` subresource of the `AlertmanagerConfig` CRD to report whether or not the resource is reconciled or not (with a message).
+* The Prometheus operator exposes a validating admission webhook that prevents invalid resources.
+* The Prometheus operator implements the `Status` subresource of the `AlertmanagerConfig` CRD to report whether or not the resource is reconciled or not (see [upstream issue][status-subresource-issue])
 * Users can validate that alerting routing works as expected by generating "fake" alerts triggering the notification system. _Users don't have permissions on the Alertmanager API endpoint so they would have to generate fake alerts from alerting rules themselves. We could also support the ability to craft an alert from the OCP console_.
 
 ## Design Details
@@ -491,7 +496,7 @@ Users are able to silence alerts from the Dev Console and the console backend
 assumes that the API is served by the
 `alertmanager-main.openshift-monitoring.svc` service. To support the UWM
 Alertmanager configuration, CMO should provide to the console operator the name
-of the Alertmanager service managing user alerts (either
+of the Alertmanager service managing the user alerts (either
 `alertmanager-main.openshift-monitoring.svc` or
 `alertmanager.openshift-user-workload-monitoring.svc`). Based on the presence
 of the `openshift_io_alert_source` label, the console backend can decide which
@@ -515,12 +520,11 @@ N/A
 #### Tech Preview -> GA
 
 - The `AlertmanagerConfig` CRD is exposed as `v1beta1` API.
-- More testing (upgrade, downgrade, scale)
+- More testing (upgrade, downgrade, scale).
 - Sufficient time for feedback including signals from telemetry about the customer adoption (e.g. number of `AlertmanagerConfig` resources across the fleet).
 - Counter-measures to avoid service degradation of the Platform Alertmanager.
-- Option to deploy UWM Alertmanager
-- Conduct load testing
-- Console integration
+- Option to deploy UWM Alertmanager with Console integration.
+- Conduct load testing.
 
 #### Removing a deprecated feature
 
@@ -544,11 +548,12 @@ N/A
 
 #### Failure Modes
 
-The validating webhook is configured with `failurePolicy: Fail`. Currently the
-validating webhook service is backed by a single prometheus-operator pod so
-there is a risk that users can't create/update AlertmanagerConfig resources
-when the pod isn't ready. We will address this limitation upstream by allowing
-the deployment of a highly-available webhook service ([issue][ha-webhook-service-issue]).
+The validating webhook for `AlertmanagerConfig` resources is configured with
+`failurePolicy: Fail`. Currently the validating webhook service is backed by a
+single prometheus-operator pod so there is a risk that users can't
+create/update AlertmanagerConfig resources when the pod isn't ready. We will
+address this limitation upstream by allowing the deployment of a
+highly-available webhook service ([issue][ha-webhook-service-issue]).
 
 #### Support Procedures
 
@@ -580,7 +585,8 @@ Alertmanager is delegated to the cluster admins which would leverage
 `additionalAlertmanagerConfigs` to point user alerts to this instance.
 
 The downsides are
-* Degraded user experience and overhead on the users.
+* Degraded user experience and overhead on the cluster admins.
+* No console integration.
 * The additional setup wouldn't be supported by Red Hat.
 
 [user-workload-monitoring-enhancement]: https://github.com/openshift/enhancements/blob/master/enhancements/monitoring/user-workload-monitoring.md
@@ -592,3 +598,4 @@ The downsides are
 [bz-1933239]: https://bugzilla.redhat.com/show_bug.cgi?id=1933239
 [controller-tools-issue]: https://github.com/kubernetes-sigs/controller-tools/issues/477
 [ha-webhook-service-issue]: https://github.com/prometheus-operator/prometheus-operator/issues/4437
+[status-subresource-issue]: https://github.com/prometheus-operator/prometheus-operator/issues/3335
