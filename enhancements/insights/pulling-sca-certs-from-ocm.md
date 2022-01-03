@@ -97,7 +97,7 @@ The Insights Operator must provide a cluster ID as an identifier of the cluster.
 ### SCA certs in API
 
 The SCA certificate is available via the `etc-pki-entitlement` secret in the `openshift-config-managed` namespace.
-The type of the `etc-pki-entitlement` secret is the `kubernetes.io/tls` with standard `tls.key` and `tls.crt` attributes.
+The type of the `etc-pki-entitlement` secret is an `Opaque` secret with `entitlement-key.pem` attribute for the private key and `entitlement.pem` attribute for the certificate itself.
 The secret will be available for use in other namespaces by creating a cluster-scoped `Share` resource.
 Cluster admin creates a `clusterrolebinding` to allow a service account access to the `Share` resource.
 
@@ -138,11 +138,14 @@ This feature is planned as a technical preview in OCP 4.9 and is planned to go G
 - this new functionality is documented in the Insights Operator documentation as tech preview
 
 #### Tech Preview -> GA
-- `Share` resource object is automatically created by the Insights Operator
-- inform a cluster user about the error state (problem with pulling the certificates)
+- ~~`Share` resource object is automatically created by the Insights Operator~~ - This is no longer the GA requirement. `Share` object will still be a tech preview and can be added later by different component (from Build team)
+- inform a cluster user about the error state (problem with pulling the certificates) - The OCM API returns HTTP 404 if the entitlement certificates are not enabled for the corresponding organization. To inform user/cluster admin about this fact, we can create a new ClusterOperator condition (e.g "SCANotAvailable") and create a new info alert based on this new condition.
 - the documentation is revisited and updated
 - the use of SCA certs in the `Build` is documented in the Build API documentation
-- the feature might be moved to a different OCP component
+- the feature might be moved to a different OCP component - discussed after Tech preview with following points:
+  - there was a proposal to move it to `openshift-controller-manager`, but there is no desire or reason to do so and there is probably no advantage
+  - there was a concern about investigating/debugging image build failures in the Insights operator - the investigation path should be fairly clear (and probably would not be better if it were in the `openshift-controller-manager`)
+  - Insights operator has multiple responsibilities/purposes - it's OK for now, because there is no better commponent for this at the moment
 
 #### Removing a deprecated feature
 

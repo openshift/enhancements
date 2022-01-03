@@ -95,7 +95,133 @@ metal3-io](https://github.com/metal3-io/metal3-docs/blob/master/design/bare-meta
 
 ### API
 
-OpenShift APIs follow the [Kubernetes API conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md).
+OpenShift APIs follow the [Kubernetes API conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)
+with some exceptions, which are outlined below.
+
+#### Use JSON Field Names in Godoc
+
+Ensure that the godoc for a field name matches the JSON name, not the Go name,
+in Go definitions for API objects.  In particular, this means that the godoc for
+field names should use an initial lower-case letter.  For example, don't do the
+following:
+
+```go
+// Example is [...]
+type Example struct {
+	// ExampleFieldName specifies [...].
+	ExampleFieldName int32 `json:"exampleFieldName"`
+}
+```
+
+Instead, do the following:
+
+```go
+// Example is [...]
+type Example struct {
+	// exampleFieldName specifies [...].
+	ExampleFieldName int32 `json:"exampleFieldName"`
+}
+```
+
+The godoc for API objects appears in generated API documentation and `oc
+explain` output.  Following this convention has the disadvantage that the godoc
+does not match the Go definitions that developers use, but it has the advantage
+that generated API documentation and `oc explain` output show the correct field
+names that end users use, and the end-user experience is more important.
+
+#### Use Specific Types for Object References, and Omit "Ref" Suffix
+
+Use resource-specific types for object references.  For example, avoid using the
+generic `ObjectReference` type; instead, use a more specific type, such as
+`ConfigMapNameReference` or `ConfigMapFileReference` (defined in
+[github.com/openshift/api/config/v1](https://github.com/openshift/api/blob/master/config/v1/types.go)).
+If necessary, define a new type and use it.  Omit the "Ref" suffix in the field
+name.  For example, don't do the following:
+
+```go
+// Example is [...]
+type Example struct {
+	// FrobulatorConfigRef specifies [...].
+	FrobulatorConfigRef corev1.LocalObjectReference `json:"frobulatorConfigRef"`
+
+	// DefabulatorRef specifies [...].
+	DefabulatorRef corev1.LocalObjectReference `json:"defabulatorRef"`
+}
+```
+
+Instead, do the following:
+
+```go
+// Example is [...].
+type Example struct {
+	// frobulatorConfig specifies [...].
+	FrobulatorConfig configv1.ConfigMapNameReference `json:"frobulatorConfig"`
+	
+	// defabulator specifies [...].
+	Defabulator LocalDefabulatorReference `json:"defabulator"`
+}
+
+// LocalDefabulatorReference references a defabulator.
+type LocalDefabulatorReference struct {
+	// name is the metadata.name of the referenced defabulator object.
+	// +kubebuilder:validation:Required
+	// +required
+	Name string `json:"name"`
+}
+```
+
+Following this convention has the disadvantage that API developers may need to
+define additional types.  However, using custom types has the advantage that the
+types can have context-specific godoc that is more useful to the end-user than
+the generic boilerplate of the generic types.
+
+#### Use Resource Name Rather Than Kind in Object References
+
+Use resource names rather than kinds for object references.  For example, don't
+do the following:
+
+```go
+// DefabulatorReference references a defabulator.
+type DefabulatorReference struct {
+	// APIVersion is the API version of the referent.
+	APIVersion string `json:"apiVersion"`
+	// Kind of the referent.
+	Kind string `json:"kind"`
+	// Namespace of the referent.
+	Namespace string `json:"namespace"`
+	// Name of the referent.
+	Name string `json:"name"`
+}
+```
+
+Instead, do the following:
+
+```go
+// DefabulatorReference references a defabulator [...]
+type DefabulatorReference struct {
+	// group of the referent.
+	// +kubebuilder:validation:Required
+	// +required
+	Group string `json:"group"`
+	// resource of the referent.
+	// +kubebuilder:validation:Required
+	// +required
+	Resource string `json:"resource"`
+	// namespace of the referent.
+	// +kubebuilder:validation:Required
+	// +required
+	Namespace string `json:"namespace"`
+	// name of the referent.
+	// +kubebuilder:validation:Required
+	// +required
+	Name string `json:"name"`
+}
+```
+
+Following this convention has the disadvantage that it deviates from what users
+may be accustomed to from upstream APIs, but it has the advantage that it avoids
+ambiguity and the need for API consumers to resolve an API version and kind to
+the resource group and name that identify the resource.
 
 ### Cluster Conventions
 
@@ -199,17 +325,13 @@ To avoid disruption and mass pod-death, it is important to
   * Components that support workloads directly must not disrupt end-user workloads during upgrade or reconfiguration
     * E.g. the upgrade of a network plugin must serve pod traffic without disruption (although tiny increases in latency are allowed)
     * All components that currently disrupt end-user workloads must prioritize addressing those issues, and new components may not be introduced that add disruption
-* All dameonsets of OpenShift components should use the maxUnavailable rollout strategy, allowing up to 10% of instances to be taken down at once.
-Any bugs that block that should be fixed.
-`10%` is an arbitrary ratio that ensures that most of the cluster is up and
-serving clients, while a big-enough chunk of the cluster is upgradable.
-There wasn't a huge amount of analysis beyond the fact that it significantly
-improved upgrade times and hit our targets. Additionally, 10% is roughly in
-line with the minimum disruption experienced by the default sized cluster
-whenever we reboot nodes and that's mandatory in order to complete an upgrade.
-Keeping the default of `1` makes an operator upgrade unacceptably slowly on
-big clusters because only one host running the daemonset can be drained (and upgraded) at a time.
-
+* All daemonsets of OpenShift components, especially those which are not limited to control-plane nodes, should use the `maxUnavailable` rollout strategy to avoid slow updates over large numbers of compute nodes.
+  * Use 33% `maxUnavailable` if you are a workload that has no impact on other workload.
+    This ensure that if there is a bug in the newly rolled out workload, 2/3 of instances remain working.
+    Workloads in this category include the spot instance termination signal observer which listens for when the cloud signals a node that it will be shutdown in 30s.
+    At worst, only 1/3 of machines would be impacted by a bug and at best the new code would roll out that much faster in very large spot instance machine sets.
+  * Use 10% `maxUnavailable` in all other cases, most especially if you have ANY impact on user workloads.
+    This limits the additional load placed on the cluster to a more reasonable degree during an upgrade as new pods start and then establish connections.
 
 #### Priority Classes
 

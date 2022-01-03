@@ -23,7 +23,7 @@ replaces:
 
 creation-date: 2020-03-17
 
-last-updated: 2021-09-17
+last-updated: 2021-10-06
 
 <!-- status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced -->
 status: implementable
@@ -45,9 +45,7 @@ status: implementable
 
 ## Open Questions
 
-1. > There is still some debate on the group name to use for the `SharedResource` API object introduced with this enhancement.
-> Currently, Adam Kaplan and Jan Safranek are the folks in negotiation on getting to the final decision there.
-2. > There is one feature Gabe Montero really wanted working end to end, but has hit a roadblock.  The notion of making
+1. > There is one feature Gabe Montero really wanted working end to end, but has hit a roadblock.  The notion of making
 > a volume provided by our new CSI driver here read-only, so the consumer cannot modify it, but still allow the driver to
 > update the contents if it wants.  He got it working by defining multiple linux file systems layers on the mount when the
 > volume is initially provisioned.  The driver updates the intermediate file system layer.  The consuming `Pod` sees the update
@@ -56,9 +54,9 @@ status: implementable
 > before the restart in the same way.  That intermediate layer is lost.  The driver can still delete the data (say if permissions
 > are removed), but it can no longer update it.  Went as far as trying to update `/etc/fstab` on the host to preserve things?
 > Is there something at the linux or kubelet levels that can help here.
-3. > The assumption is that the "atomic reader/writer" support currently in [https://github.com/kubernetes/kubernetes/](https://github.com/kubernetes/kubernetes/)
+2. > The assumption is that the "atomic reader/writer" support currently in [https://github.com/kubernetes/kubernetes/](https://github.com/kubernetes/kubernetes/)
 > will be required for coordinating any updates to the `Secret` / `ConfigMap` data.  We have mitigated this for OpenShift
-> Builds and consuming entitlements by a) providing a mode where the `SharedResource` mount is *NOT* updated (that is sufficient
+> Builds and consuming entitlements by a) providing a mode where the `SharedConfigMap` / `SharedSecret` mount is *NOT* updated (that is sufficient
 > for the OpenShift Build consumption of enhancements scenario), but we are aware of additional scenarios that will want
 > to leverage this new enhancement and cannot fall back on that simplification.  For example, the management of rotating certificates in longer running `Pods`.
 > There are a couple of possibilities for exactly *how* we bring in the "atomic reader/writer" support.  Is the choice on
@@ -164,16 +162,28 @@ An admin creates a new cluster level custom resource for encapsulating the shara
 
 
 ```yaml
-kind: ShareResource
-apiVersion: storage.openshift.io/v1alpha1
+kind: SharedConfigMap
+apiVersion: sharedresource.openshift.io/v1alpha1
+metadata:
+  name: shared-cool-configmap
+spec:
+  configMapRef:
+    namespace: ns-one
+    name: cool-configmap
+status:
+  conditions:
+  ...
+```
+
+```yaml
+kind: SharedSecret
+apiVersion: sharedresource.openshift.io/v1alpha1
 metadata:
   name: shared-cool-secret
 spec:
-  resource:
-    type: Secret
-    secret:
-      namespace: ns-one
-      name: cool-secret
+  secretRef:
+    namespace: ns-one
+    name: cool-secret
 status:
   conditions:
   ...
@@ -184,44 +194,56 @@ And sets up ACL/RBAC to control which `ServiceAccounts` can use such objects to 
 ```yaml
 rules:
 - apiGroups:
-  - storage.openshift.io
+  - sharedresource.openshift.io
   resources:
-  - shareresources
+  - sharedsecrets
   resourceNames:
   - shared-cool-secret
   verbs:
   - use
-
 ```
-
-And for controlling which human users can list or inspect the `SharedResources` available on a cluster:
 
 ```yaml
 rules:
 - apiGroups:
-  - storage.openshift.io
+  - sharedresource.openshift.io
   resources:
-  - shareresources
+  - sharedconfigmaps
+  resourceNames:
+  - shared-cool-configmap
+  verbs:
+  - use
+```
+
+And for controlling which human users can list or inspect the `SharedConfigMap` and `SharedSecret` objects available on a cluster:
+
+```yaml
+rules:
+- apiGroups:
+  - sharedresource.openshift.io
+  resources:
+  - sharedsecrets
+  - sharedconfigmaps
   verbs:
   - list
   - get
-
+  - watch
 ```
 
 of course, additional filtering based on specific `resourceNames` can also make sense in defining what human users
-can and cannot inspect on the cluster with respect to `SharedResources`.
+can and cannot inspect on the cluster with respect to `SharedConfigMap` and `SharedSecret`.
 
 Either namespaced or clustered RBAC is supported for either human users and `ServiceAccounts` to view/list/use
-`SharedResources`.  
+`SharedConfigMaps` / `SharedSecrets`.  
 
-As `SharedResources` are cluster scoped objects, most likely cluster admins, or OCP operators, will create the
-`SharedResources`.  Cluster admins may create RBAC for anyone of course, but the expected standard operating procedure
+As `SharedConfigMaps` / `SharedSecrets` are cluster scoped objects, most likely cluster admins, or OCP operators, will create the
+`SharedConfigMaps` / `SharedSecrets`.  Cluster admins may create RBAC for anyone of course, but the expected standard operating procedure
 is that they will grant namespace administrators:
 
-- the ability to list and get/view `SharedResources`
-- the ability to create namespace scoped RBAC so that `ServiceAccounts` in their namespaces can utilize `SharedResources`
+- the ability to list and get/view `SharedConfigMaps` / `SharedSecrets`
+- the ability to create namespace scoped RBAC so that `ServiceAccounts` in their namespaces can utilize `SharedConfigMaps` / `SharedSecrets`
 in `Pods` that use said `ServiceAccounts`.
-- the ability to allow users in their namespaces the ability to list and possibly get/view `SharedResources`
+- the ability to allow users in their namespaces the ability to list and possibly get/view `SharedConfigMaps` / `SharedSecrets`
 
 With that, "observability" and "discoverability" requirments for our new API here are sufficiently met.
 
@@ -232,11 +254,19 @@ converted by a controller into a Pod, can directly add a volume of the CSI type 
 
 ```yaml
 csi:
-  driver: csi.shared-resources.openshift.io
+  driver: csi.sharedresource.openshift.io
     volumeAttributes:
-      share: the-shared-resource
+      sharedConfigMap: the-shared-configmap
 
 ```
+```yaml
+csi:
+  driver: csi.sharedresource.openshift.io
+    volumeAttributes:
+      sharedSecret: the-shared-secret
+
+```
+
 
 - with it as part of a Pod for example:
 
@@ -250,14 +280,21 @@ spec:
   containers:
     ...
      volumeMounts:
-        - name: shared-item-name
-          mountPath: /path/to/shared-item-data
+        - name: shared-item-name1
+          mountPath: /path/to/shared-item-data-2
+        - name: shared-item-name2
+          mountPath: /path/to/shared-item-data-2
   volumes:
-      - name: entitlement
+      - name: shared-secret
         csi:
-          driver: csi.shared-resources.openshift.io
+          driver: csi.sharedresource.openshift.io
           volumeAttributes:
-             share: the-shared-resource
+             sharedSecret: the-shared-secret
+      - name: shared-configmap
+        csi:
+          driver: csi-sharedresource.openshift.io
+          volumeAttributes:
+             sharedConfigMap: the-shared-configmap
 
 ```
 
@@ -267,12 +304,12 @@ a corresponding controller/operator translates their API into a Pod's volume arr
 #### CSI starting points and implementation details
 
 On startup:
-- Creates k8s watches for `SharedResources`
+- Creates k8s watches for `SharedConfigMaps` / `SharedSecrets`
 - Optionally for `Secret` / `ConfigMaps` in the namespaces listed in the drivers configuration if we support update after the provisioning of the volume
 
 
 Once started, the CSI Driver, when contacted by the kubelet because a Pod references the CSI driver it is registered under, performs the following:
-- reads the `SharedResource` object referenced in the `volumeMetadata` which is available in the `NodePublishVolumeRequest` that comes into `NodePublishVolume`.
+- reads the `SharedConfigMap` / `SharedSecret` object referenced in the `volumeMetadata` which is available in the `NodePublishVolumeRequest` that comes into `NodePublishVolume`.
 - the name, namespace, and `ServiceAccount` of the Pod wanting the volume is also included by the kubelet in the `NodePublishVolumeRequest` under the keys `csi.storage.k8s.io/pod.name`, `csi,storage.k8s.io/pod.namespace`, and `csi.storage.k8s.io/serviceAccount.name` in the map returned by the `GetVolumeContext()` call.
 - the `podInfoOnMount` field of the CSI Driver spec triggers the setting of these values
 
@@ -480,26 +517,6 @@ Research details and notes:
 - The CSI spec outlines lifecycle methods for create/provision/publish, destroy/unprovision/unpublish, resize, etc.
 - In the ephemeral case, the Pod spec lists a volume and is considered to originate or "inline" it.
 - The `csi` subfield still pertains, citing the storage provider's name, as with the PVC based approach.
-
-  ```yaml
-  apiVersion: v1
-  kind: Pod
-  metadata:
-    name: some-pod
-  spec:
-    containers:
-    ...
-      volumeMounts:
-      - name: shared-item-name
-        mountPath: /path/to/shared-item-data
-    volumes:
-    - name: entitlement
-      csi:
-        driver: projectedresources.storage.openshift.io
-        volumeAttributes:
-          share: the-projected-resource
-  ```
-
 - And then the [CSI plugin to the Kubelet](https://github.com/kubernetes/enhancements/blob/master/keps/sig-storage/20190122-csi-inline-volumes.md#ephemeral-inline-volume-proposal), performs the necessary steps to engage the CSI driver.
 - the [CSI spec](https://github.com/container-storage-interface/spec/blob/master/spec.md) details the CSI architecture, concepts, and protocol.
 

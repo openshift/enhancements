@@ -99,11 +99,18 @@ When your manifests are added to the release image, they’ll be given a prefix 
 
 Only manifests with the extensions `.yaml`, `.yml`, or `.json` will be applied, like `kubectl create -f DIR`.
 
-### Specifying a cluster profile in your manifest
+### Manifest inclusion annotations
+
+#### Cluster profiles
 
 Cluster profiles are a way to support different deployment models for OpenShift clusters.
 CVO uses the profile identifier to determine which manifests to apply therefore your manifest must contain one or more profile annotations specifying applicable profiles.
-See the [cluster-profiles enhancement](/enhancements/update/cluster-profiles.md) for details.
+See [the cluster-profiles enhancement](/enhancements/update/cluster-profiles.md) for details.
+
+#### TechPreview
+
+The CVO also considers feature-gate annotations when deciding whether to include a manifest.
+See [the TechPreview manifest enhancement](/enhancements/update/cvo-techpreview-manifests.md) for details.
 
 ### What if I only want the CVO to create my resource, but never update it?
 

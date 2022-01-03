@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
+	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/report"
 	"github.com/openshift/enhancements/tools/stats"
 	"github.com/openshift/enhancements/tools/util"
@@ -144,16 +145,22 @@ func newReportCommand() *cobra.Command {
 				&idle,
 			}
 
+			summarizer, err := enhancements.NewSummarizer()
+			if err != nil {
+				return errors.Wrap(err, "unable to show PR summaries")
+			}
+
 			theStats := &stats.Stats{
 				Query:        query,
 				EarliestDate: earliestDate,
 				Buckets:      reportBuckets,
+				Summarizer:   summarizer,
 			}
 
 			fmt.Fprintf(os.Stderr, "finding pull requests for %s/%s\n", orgName, repoName)
 			fmt.Fprintf(os.Stderr, "ignoring items closed before %s\n", earliestDate)
 
-			err := theStats.Populate()
+			err = theStats.Populate()
 			if err != nil {
 				return errors.Wrap(err, "could not generate stats")
 			}
@@ -164,18 +171,21 @@ func newReportCommand() *cobra.Command {
 			year, month, day := time.Now().Date()
 			fmt.Printf("# This Week in Enhancements - %d-%.2d-%.2d\n", year, month, day)
 
+			startYear, startMonth, startDay := earliestDate.Date()
+			fmt.Printf("\n*Updates since %d-%.2d-%.2d*\n\n", startYear, startMonth, startDay)
+
 			// Only print the priority section if there are prioritized pull requests
 			if anyRequests(prioritizedMerged, prioritizedClosed, prioritizedNew, prioritizedRevived, prioritizedActive) {
 				fmt.Printf("\n## Enhancements for Release Priorities\n")
 
 				report.SortByID(prioritizedMerged.Requests)
-				report.ShowPRs("Prioritized Merged", prioritizedMerged.Requests, true, false)
+				report.ShowPRs(summarizer, "Prioritized Merged", prioritizedMerged.Requests, true, false)
 
 				report.SortByID(prioritizedNew.Requests)
-				report.ShowPRs("Prioritized New", prioritizedNew.Requests, true, true)
+				report.ShowPRs(summarizer, "Prioritized New", prioritizedNew.Requests, true, true)
 
 				report.SortByID(prioritizedRevived.Requests)
-				report.ShowPRs(
+				report.ShowPRs(summarizer,
 					"Prioritized Revived (discussion after PR was merged)",
 					prioritizedRevived.Requests,
 					false,
@@ -183,28 +193,28 @@ func newReportCommand() *cobra.Command {
 				)
 
 				report.SortByActivityCountDesc(prioritizedActive.Requests)
-				report.ShowPRs("Prioritized Active", prioritizedActive.Requests, true, true)
+				report.ShowPRs(summarizer, "Prioritized Active", prioritizedActive.Requests, true, true)
 
 				report.SortByID(prioritizedClosed.Requests)
-				report.ShowPRs("Prioritized Closed", prioritizedClosed.Requests, false, false)
+				report.ShowPRs(summarizer, "Prioritized Closed", prioritizedClosed.Requests, false, false)
 			}
 
 			fmt.Printf("\n## Other Enhancements\n")
 
 			report.SortByID(otherMerged.Requests)
-			report.ShowPRs("Other Merged", otherMerged.Requests, true, false)
+			report.ShowPRs(summarizer, "Other Merged", otherMerged.Requests, true, false)
 
 			report.SortByID(otherNew.Requests)
-			report.ShowPRs("Other New", otherNew.Requests, true, true)
+			report.ShowPRs(summarizer, "Other New", otherNew.Requests, true, true)
 
 			report.SortByActivityCountDesc(otherActive.Requests)
-			report.ShowPRs("Other Active", otherActive.Requests, false, false)
+			report.ShowPRs(summarizer, "Other Active", otherActive.Requests, false, false)
 
 			report.SortByID(otherClosed.Requests)
-			report.ShowPRs("Other Closed", otherClosed.Requests, false, false)
+			report.ShowPRs(summarizer, "Other Closed", otherClosed.Requests, false, false)
 
 			report.SortByID(revived.Requests)
-			report.ShowPRs(
+			report.ShowPRs(summarizer,
 				fmt.Sprintf("Revived (closed more than %d days ago, but with new comments)", daysBack),
 				revived.Requests,
 				false,
@@ -212,7 +222,7 @@ func newReportCommand() *cobra.Command {
 			)
 
 			report.SortByID(idle.Requests)
-			report.ShowPRs(
+			report.ShowPRs(summarizer,
 				fmt.Sprintf("Idle (no comments for at least %d days)", daysBack),
 				idle.Requests,
 				false,
@@ -220,7 +230,7 @@ func newReportCommand() *cobra.Command {
 			)
 
 			report.SortByID(stale.Requests)
-			report.ShowPRs(
+			report.ShowPRs(summarizer,
 				"Other lifecycle/stale or lifecycle/rotten",
 				stale.Requests,
 				false,
