@@ -325,8 +325,9 @@ One major drawback is that Windows users will require administrative access to t
 
 * Plugin signature validation
 * Prevent non-krew plugins from being distributed
-* Alias functionality in modern shells could potentially remove the need to prefix plugin commands with `kubectgl` or `oc`
+* Alias functionality in modern shells could potentially remove the need to prefix plugin commands with `kubectl` or `oc`
 * While this initial proposal is only meant for plugins, general CLI distribution is something we want to address eventually
+* Console integration
 
 ## References
 
