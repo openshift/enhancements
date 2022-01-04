@@ -137,28 +137,38 @@ and base path used to access all of the plugin's assets.
 apiVersion: console.openshift.io/v1alpha1
 kind: ConsolePlugin
 metadata:
-  name: my-plugin
+  name: acm
 spec:
-  displayName: 'My Plugin'
+  displayName: 'Advanced Cluster Management'
   service:
-    name: my-console-plugin
-    namespace: my-operator-namespace
+    name: acm
+    namespace: open-cluster-management
     port: 8443
     basePath: '/'
 ```
 
 In case the plugin needs to communicate with some in-cluster service, it can
-declare a service proxy in its `ConsolePlugin` resource using the
-`spec.proxy.services` array field. A service `name`, `namespace` and `port`
-needs to be specified.
+declare a service proxy in its `ConsolePlugin` resource using the `spec.proxy` array.
+Each entry needs to specify type and alias of the proxy, under the `type` and `alias` field.
+For the `Service` proxy type, service `name`, `namespace` and `port` needs to be specified,
+to which the request will be proxied.
+
+```yaml
+spec:
+  proxy:
+  - type: Service
+    alias: <proxy-alias>
+    name: <service-name>
+    namespace: <service-namespace>
+    port: <service-port>
+```
 
 Console backend exposes following endpoint in order to proxy the communication
 between plugin and the service:
-`/api/proxy/namespace/<service-namespace>/service/<service-name>:<port-number>/<request-path>?<optional-query-parameters>`
+`/api/proxy/plugin/<plugin-name>/<proxy-alias>/<request-path>?<optional-query-parameters>`
 
-An example proxy request path from plugin to `helm-charts` service,
-in `helm` namespace to list ten helm releases:
-`/api/proxy/namespace/helm/service/helm-charts:8443/releases?limit=10`
+An example proxy request path from `acm` plugin with a `search` service is:
+`/api/proxy/plugin/acm/search/pods?namespace=openshift-apiserver`
 
 Proxied request will use [service CA bundle](https://docs.openshift.com/container-platform/4.8/security/certificate_types_descriptions/service-ca-certificates.html) by default. The service must use HTTPS.
 If the service uses a custom service CA, the `caCertificate` field
@@ -173,21 +183,22 @@ then passed in the HTTP `Authorization` request header, for example:
 apiVersion: console.openshift.io/v1alpha1
 kind: ConsolePlugin
 metadata:
-  name: my-plugin
+  name: acm
 spec:
-  displayName: 'My Plugin'
+  displayName: 'Advanced Cluster Management'
   service:
-    name: my-console-plugin
-    namespace: my-operator-namespace
+    name: acm
+    namespace: open-cluster-management
     port: 8443
     basePath: '/'
   proxy:
-    services:
-    - name: helm-charts
-      namespace: helm
-      port: 8443
-      caCertificate: '-----BEGIN CERTIFICATE-----\nMIID....'
-      authorize: true
+  - type: Service
+    alias: search
+    name: search
+    namespace: open-cluster-management
+    port: 8443
+    caCertificate: '-----BEGIN CERTIFICATE-----\nMIID....'
+    authorize: true
 ```
 
 Plugins are disabled by default. They need to be manually enabled by a cluster
