@@ -3,9 +3,11 @@ title: multi-tenant-alerting
 authors:
   - "@simonpasquier"
 reviewers:
+  - "@dofinn"
+  - "@jeremyeder"
   - "@openshift/openshift-team-monitoring"
 approvers:
-  - TBD
+  - "@jeremyeder"
   - "@openshift/openshift-team-monitoring"
 creation-date: 2021-10-11
 last-updated: 2021-10-11
