@@ -21,10 +21,10 @@ see-also:
 ## Release Signoff Checklist
 
 - [X] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Operational readiness criteria is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [X] Design details are appropriately documented from clear requirements
+- [X] Test plan is defined
+- [X] Operational readiness criteria is defined
+- [X] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
@@ -58,7 +58,7 @@ adjust the Alertmanager configuration.
 
 To streamline the process and avoid cluster admins being the bottleneck,
 application owners should be able to configure alert routing and notification
-receivers in the Plaform Alertmanager without cluster admin intervention.
+receivers by themselves.
 
 [AlertmanagerConfig][alertmanagerconfig-crd] CRD fullfills this requirement and
 is supported by the [Prometheus operator][prometheus-operator] since v0.43.0
@@ -76,7 +76,8 @@ routing scoped to individual namespaces.
 configuration (similar to what exist for service/pod monitors and rules using the
 `"openshift.io/user-monitoring: false"` label on the namespace).
 * Cluster admins should be able to opt-out from supporting `AlertmanagerConfig`
-resources from user namespaces.
+resources for user namespaces.
+* Cluster admins should be able to run a separated Alertmanager for user alerts.
 
 ### Non-Goals
 
@@ -86,7 +87,6 @@ resources from user namespaces.
 alerts originating from namespaces with the `openshift.io/cluster-monitoring: "true"`
 label).
 * Share alert receivers and routes across tenants.
-* Deploy an additional UWM Alertmanager.
 
 ## Proposal
 
@@ -195,7 +195,7 @@ metadata:
 data:
   config.yaml: |-
     enableUserWorkload: true
-    alertmanager:
+    alertmanagerMain:
       enableUserAlertmanagerConfig: true
 ```
 
@@ -243,7 +243,7 @@ metadata:
 data:
   config.yaml: |-
     enableUserWorkload: true
-    alertmanager:
+    alertmanagerMain:
       enableUserAlertmanagerConfig: true
     excludeUserNamespaces: [foo,bar]
 ```
@@ -304,13 +304,13 @@ UWM Alertmanager in the
 
 | User alert destination | User notifications managed by | `enableUserAlertmanagerConfig` | `alertmanager` (UWM) | `additionalAlertmanagerConfigs` (UWM) |
 |------------------------|-------------------------------|:------------------------------:|:--------------------:|:-------------------------------------:|
-| Platform Alertmanager | Cluster admins | false | empty | empty |
-| Platform Alertmanager<br/>External Alertmanager(s) | Cluster admins | false | empty | not empty |
-| Platform Alertmanager | Application owners | true | empty | empty |
-| UWM Alertmanager | UWM admins | &lt;any&gt; | {enabled: true, enableUserAlertmanagerConfig: false} | empty |
-| UWM Alertmanager | Application owners | &lt;any&gt; | {enabled: true, enableUserAlertmanagerConfig: true} | empty |
-| UWM Alertmanager<br/>External Alertmanager(s) | UWM admins | &lt;any&gt; | {enabled: true, enableUserAlertmanagerConfig: false} | not empty |
-| UWM Alertmanager<br/>External Alertmanager(s) | Application owners | &lt;any&gt; | {enabled: true, enableUserAlertmanagerConfig: true} | not empty |
+| Platform Alertmanager | Cluster admins | `false` | empty | empty |
+| Platform Alertmanager<br/>External Alertmanager(s) | Cluster admins | `false` | empty | not empty |
+| Platform Alertmanager | Application owners | `true` | empty | empty |
+| UWM Alertmanager | UWM admins | &lt;any&gt; | `{enabled: true, enableUserAlertmanagerConfig: false}` | empty |
+| UWM Alertmanager | Application owners | &lt;any&gt; | `{enabled: true, enableUserAlertmanagerConfig: true}` | empty |
+| UWM Alertmanager<br/>External Alertmanager(s) | UWM admins | &lt;any&gt; | `{enabled: true, enableUserAlertmanagerConfig: false}` | not empty |
+| UWM Alertmanager<br/>External Alertmanager(s) | Application owners | &lt;any&gt; | `{enabled: true, enableUserAlertmanagerConfig: true}` | not empty |
 
 
 #### Distinction between platform and user alerts
@@ -449,8 +449,11 @@ Users may provide bad credentials for the receivers, the system receiving the
 notifications might be unreachable, or the system might be unable to process
 the requests. These situations would trigger the
 `AlertmanagerFailedToSendAlerts` and/or `AlertmanagerClusterFailedToSendAlerts`
-alerts. The cluster admins have to act on upon the alerts and understand where
-the problem comes from.
+alerts. The cluster admins have to act upon these alerts and understand where
+the problem comes from by looking at the Alertmanager logs.
+
+Because these alerts are evaluated by the Platform Prometheus, they are routed
+to the Platform Alertmanager.
 
 Mitigations
 * Detailed runbook for the `AlertmanagerFailedToSendAlerts` and `AlertmanagerClusterFailedToSendAlerts` alerts.
