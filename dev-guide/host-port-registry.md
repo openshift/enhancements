@@ -9,7 +9,7 @@ reviewers:
 approvers:
   - "@russelb"
 creation-date: 2020-08-26
-last-updated: 2020-08-26
+last-updated: 2022-01-06
 status: informational
 ---
 
@@ -131,6 +131,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 4180  | machine-config-daemon oauth-proxy | node ||
 | 8797  | machine-config-daemon | node | 4.0 | metrics |
 | 9259  | cluster-cloud-controller-manager-operator | cluster infra | 4.9 | healthz, control plane only |
+| 9260  | cluster-cloud-controller-manager-operator-config-sync | cluster infra | 4.10 | healthz, control plane only |
 | 9443  | kube-controller-manager | workloads || recovery-controller |
 | 9977  | etcd | etcd || ? |
 | 10248 | kubelet | node || healthz |
