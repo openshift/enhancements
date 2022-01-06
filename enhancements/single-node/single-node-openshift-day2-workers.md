@@ -27,10 +27,10 @@ superseded-by:
 ## Summary
 
 This enhancemnet aims to enable adding workers to a single-node cluster by
-dealing with a "floating ingress" issue encountered in UPI-installed single
-control-plane node clusters which get worker nodes added to them. It does so by
-adjusting the installer to pin the default `IngressController` to the master
-pool when installing single-node bootstrap-in-place clusters.
+dealing with a "floating ingress" issue encountered "none"-platform single
+control-plane node clusters which have worker nodes added to them. It does so
+by adjusting the installer to pin the default `IngressController` to the master
+pool when installing single-node "none"-platform clusters.
 
 ## Motivation
 
@@ -41,14 +41,14 @@ This is currently easily done on (unsupported) cloud IPI-deployed single node
 clusters, by increasing the replica count of worker machinesets. Everything
 there works as expected.
 
-Even on Assisted Installer "UPI"-installed single-node clusters it's trivial to
-add more workers by leverging the Assisted Installer's day-2 worker
-installation capabilities (after some minor DNS configurations which
-will be improved by the Assisted-Installer team, separately from this
-enhancement).
+Even on Assisted Installer installed Single Node clusters it's trivial to add
+more workers by leverging the Assisted Installer's day-2 worker installation
+capabilities (after some minor DNS configurations issues which will be improved
+by the Assisted-Installer team, separately from this enhancement).
 
-The issue is that on UPI-installed single-node clusters, when adding workers, 
-the resulting cluster has a major issue that will be made clear in the paragraphs below.
+The issue is that on "none"-platform single-node clusters, when adding workers,
+the resulting cluster has a major issue that will be made clear in the
+paragraphs below.
 
 One of the benefits of installing single-node clusters is the simplicity of not
 having to deal with load-balancing and virtual IPs, as these don't provide much
@@ -58,9 +58,9 @@ As a result, current common ways of installing Single Node OpenShift today
 (mainly the Assisted Installer) avoid the usage of load balancers or virtual
 IPs for API and ingress.
 
-A user installing Single-Node OpenShift with UPI will be tempted to simply
-point their DNS entries directly at the IP address of the single node that they
-just installed.
+A user installing Single-Node OpenShift on "none"-platform will be tempted to
+simply point their DNS entries directly at the IP address of the single node
+that they just installed.
 
 Similarly, in the Assisted Installer, the user is able to complete the
 installation without needing to define any DNS entries. This is currently
@@ -119,15 +119,15 @@ We would like to avoid this complication.
 
 ## Proposal
 
-Modify the installer's behavior during Single Node bootstrap-in-place
-installation to create an `IngressController` CR installer manifest targetting
-control-plane nodes, which will prevent the OpenShift Ingress Operator from creating
-the default `IngressController` CR which targets worker nodes. This will ensure
-that the `router-default` deployment created by the OpenShift Cluster Ingress
-Operator will always run on the single control plane node, and as a result any
-`*.apps.<cluster>.<base>` DNS entries which originally pointed at the single
-control plane node will remain correct even in the face of newly added worker
-nodes.
+Modify the installer's behavior during Single Node "none"-platform installation
+to create an `IngressController` CR installer manifest targetting control-plane
+nodes rather than worker nodes, which will in turn prevent the OpenShift
+Ingress Operator from creating the default `IngressController` CR which targets
+worker nodes. This will ensure that the `router-default` deployment created by
+the OpenShift Cluster Ingress Operator will always run on the single control
+plane node, and as a result any `*.apps.<cluster>.<base>` DNS entries which
+originally pointed at the single control plane node will remain correct even in
+the face of newly added worker nodes.
 
 This is made possible due to [this](https://github.com/openshift/enhancements/blob/4938b44dc0373a032cae9a48dbe0f86e06f8a189/enhancements/ingress/user-defined-default-ingress-controller.md) previous enhancement.
 
@@ -144,16 +144,18 @@ This enhancement does not modify/add any API
 ### Implementation Details/Notes/Constraints
 
 This enhancement can be easily implemented by adjusting the installer's
-`generateDefaultIngressController` method such that when
-`config.BootstrapInPlace != nil`, it will return an `IngressController` CR
-struct with `.spec.nodePlacement.nodeSelector.matchLabels` targetting
+`generateDefaultIngressController` method such that when `config.platform.none
+!= nil`, it will return an `IngressController` CR struct with
+`.spec.nodePlacement.nodeSelector.matchLabels` targetting
 `node-role.kubernetes.io/master`. 
 
 ### Risks and Mitigations
 
 This should make no noticable difference on "regular" single-node installations
-which do not go through expansion, but will fix the issue described above for
-single-node installations which do go through expansion.
+which do not go through expansion (as the default node selector targets the
+worker pool, and the single control plane is already both in the master and
+worker pools), but it will fix the issue described above for single-node
+installations which do go through expansion.
 
 Users who *want* their traffic to not go through the single control-plane node
 can still do so by following the [existing](https://docs.openShift.com/container-platform/4.9/machine_management/creating-infrastructure-machinesets.html#moving-resources-to-infrastructure-machinesets) OpenShift documentation on moving
@@ -176,18 +178,18 @@ None that I can think of at the moment
   a few worker nodes to it, then run conformance tests to make sure we don't
   run into any problems not described in this enhancement.
 
-- Add periodic nightly tests which install a single-node BIP UPI cluster, add
-  worker nodes to it, and check that ingress traffic still works as expected
-  and recovers even after the `router-default` pod gets deleted and
+- Add periodic nightly tests which install a single-node "none"-platform
+  cluster, add worker nodes to it, and check that ingress traffic still works as
+  expected and recovers even after the `router-default` pod gets deleted and
   rescheduled. Make sure this is still true even after upgrades.
 
-- Add tests on both cloud / UPI that check that a single-node cluster with
-  additional workers recovers after the single control-plane node reboots
-  by running conformance tests post-reboot.
+- Add tests on both cloud / "none"-platform that check that a single-node
+  cluster with additional workers recovers after the single control-plane node
+  reboots by running conformance tests post-reboot.
 
-- Add tests on both cloud / UPI that check that a single-node cluster with
-  additional workers recovers after an upgrade by running conformance tests
-  post-upgrade.
+- Add tests on both cloud / "none"-platform that check that a single-node
+  cluster with additional workers recovers after an upgrade by running
+  conformance tests post-upgrade.
 
 ### Graduation Criteria
 
@@ -259,32 +261,30 @@ Not yet applicable
 
 ## Alternatives
 
-- Implement this change in the OpenShift Cluster Ingress Operator rather than the installer.
-  I'm not sure how trivial it is for the OpenShift Cluster Ingress Operator to know that we're
-  doing a single-node bootstrap-in-place installation. It couldn't just inspect the
-  control-plane and infrastructure topology fields, because those have the same value
-  whether you're on AWS (which doesn't suffer from the problems described in this enhancement)
-  or a UPI bootstrap-in-place installation. Maybe it could also look at the "platform"
-  field in the infrastructure CR, then only do this if the platform is "none".
-  Doing this in the OpenShift Cluster Ingress Operator would allow us to avoid 
-  the second drawback bullet mentioned above.
+- Implement this change in the OpenShift Cluster Ingress Operator rather than
+  the installer. It wouldn't be enough for the Ingress Operator to simply inspect
+  the control-plane and infrastructure topology fields, because those have the
+  same value whether you're on a cloud platform (which doesn't suffer from the
+  problems described in this enhancement) or a "none"-platform installation.
+  Maybe it could also look at the "platform" field in the infrastructure CR, then
+  only do this if the platform is "none". Doing this in the OpenShift Cluster
+  Ingress Operator would allow us to avoid the second drawback bullet mentioned
+  above. Otherwise, a choice between this alternative and doing it in the
+  installer seems rather arbitrary.
 
-- Adjust the baremetal platform to support single-node installations. The
-  baremetal platforms solves the issue described in this enhancement with virtual
-  IP addresses/keepalived. This approach was dismissed due to much higher
-  development efforts and additional processes that would need to run on the already
-  resource constrained single control-plane node. Furthermore, even once the
-  baremetal platform is adjusted to support single-node clusters, the Assisted
-  Installer which is currently the main supported way with which users install
-  Single Node Openshift would have to go through a lot of development effort in
-  order to make it use the baremetal platform rather than the "none" platform
-  currently used for single node installations. This may happen in the future.
+- Adjust the "baremetal" platform to support single-node installations. The
+  baremetal platform solves the issue described in this enhancement with
+  virtual IP addresses/keepalived. This approach was dismissed due to much
+  higher development efforts and additional processes that would need to run on
+  the already resource constrained single control-plane node. Furthermore, even
+  once the baremetal platform is adjusted to support single-node clusters, the
+  Assisted Installer which is currently the main supported way with which users
+  install Single Node Openshift would have to go through a lot of development
+  effort in order to make it use the baremetal platform rather than the "none"
+  platform currently used for single node installations. This may happen in the
+  future.
 
 
 ## Infrastructure Needed [optional]
 
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
-
-Listing these here allows the community to get the process for these resources
-started right away.
+N/A
