@@ -27,12 +27,19 @@ lint: image  ## run the markdown linter
 DAYSBACK ?= 7 # number of days to include in report
 
 REPORT_FILE=this-week/$(shell date +%F).md
+ANNUAL_SUMMARY_FILE=this-week/$(shell expr $$(date +%Y) - 1).md
 
 .PHONY: report report-gen
 report: report-gen lint  ## run weekly newsletter report tool
 
 report-gen:
 	(cd ./tools; go run ./main.go report --days-back $(DAYSBACK) > ../$(REPORT_FILE))
+
+.PHONY: annual-summary annual-summary-gen
+annual-summary: annual-summary-gen lint  ## run annual report tool
+
+annual-summary-gen:
+	(cd ./tools; go run ./main.go annual-summary > ../$(ANNUAL_SUMMARY_FILE))
 
 HACKMD_IMAGE=enhancements-hackmd-cli:latest # hackmd-cli image
 
