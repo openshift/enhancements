@@ -104,7 +104,7 @@ We would like to avoid this complication.
 
 - Deal with expansion of the single-node control-plane by adding more control-plane nodes
 - Deal with expansion of clusters that have been installed before the implementation
-  of this enhancement (they can be take ncare of with a simple documentation on how it can be
+  of this enhancement (they can be taken care of with a simple documentation on how it can be
   enabled with a few manual steps).
 - Deal with "day 1" UPI installation of single-node control plane clusters
   that have additional non-control plane worker nodes
