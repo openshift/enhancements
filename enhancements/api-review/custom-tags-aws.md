@@ -2,13 +2,14 @@
 title: apply-user-defined-tags-to-all-aws-resources-created-by-openshift
 authors:
   - "@gregsheremeta"
+  - "@tgeer"
 reviewers:
   - @decarr
   - @bparees
 approvers:
   - @decarr 
 creation-date: 2021-03-24
-last-updated: 2021-04-09
+last-updated: 2022-01-07
 status: implementable
 ---
 
@@ -16,11 +17,11 @@ status: implementable
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
+- [x] Enhancement is `implementable`
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
 - [ ] Operational readiness criteria is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [x] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
@@ -31,6 +32,7 @@ have the ability to apply user defined tags to many resources created by OpenShi
 Note: this enhancement is slightly retroactive. Work has already begun on this. See
 - https://github.com/openshift/api/pull/864
 - https://github.com/openshift/cluster-ingress-operator/pull/578
+- https://github.com/openshift/api/pull/1064/files
 
 ## Motivation
 
@@ -48,13 +50,11 @@ Motivations include but are not limited to:
 - the administrator or service (in the case of Managed OpenShift) installing OpenShift can pass an arbitrary
    list of user-defined tags to the OpenShift Installer, and everything created by the installer and all other
    bootstrapped components will apply those tags to all resources created in AWS, for the life of the cluster, and where supported by AWS.
-- tags must be applied at creation time, in an atomic operation. It isn't acceptable to create an object and,
-   after some period of time, apply the tags post-creation.
+- tags can be applied at creation time, in an atomic operation.
+- tags can be updated post creation.
 
 ### Non-Goals
 
-- to reduce initial scope, tags are applied only at creation time and not reconciled. If an administrator manually
-   changes the tags stored in the infrastructure resource, behavior is undefined. See below.
 - to reduce initial scope, we are not implementing this for clouds other than AWS. We will not take any actions
    to prohibit that later.
 
@@ -65,7 +65,7 @@ resources created by in-cluster operators.
 
 If `experimentalPropagateUserTags` is true, install validation will fail if there is any tag that starts with `kubernetes.io` or `openshift.io`.
 
-Add a new field `resourceTags` to `.status.aws` of the `infrastructure.config.openshift.io` type. Tags included in the
+Add a new field `resourceTags` to `.spec.aws` of the `infrastructure.config.openshift.io` type. Tags included in the
 `resourceTags` field will be applied to new resources created for the cluster. The `resourceTags` field will be populated by the installer only if the `experimentalPropagateUserTags` field is true.
 
 Note existing unchanged behavior: The installer will apply these tags to all AWS resources it creates with terraform (e.g. bootstrap and master EC2 instances) from the install config, not from infrastructure status, and regardless if the propagation option is set.
@@ -75,7 +75,13 @@ will apply these tags to all AWS resources they create.
 
 userTags that are specified in the infrastructure resource will merge with userTags specified in an individual component. In the case where a userTag is specified in the infrastructure resource and there is a tag with the same key specified in an individual component, the value from the individual component will have precedence and be used.
 
-The userTags field is intended to be set at install time and is considered immutable. Components that respect this field must only ever add tags that they retrieve from this field to cloud resources, they must never remove tags from the existing underlying cloud resource even if the tags are removed from this field(despite it being immutable).
+Users can update the `resourceTags` by editing `.spec.aws` of the `infrastructure.config.openshift.io` type. New addition of tags are always appended. Any update in the existing tags, which are added by installer or  by edit in `resourceTags`, will replace the previous tag value.
+
+`.status.platformStatus.aws.resourceTags` reflects the present set of userTags. In case when the userTags are created by installer or newly added in infrastructure resource is updated on the individual component directly using external tools, the value from infrastructure resource will have the precedence.
+
+The precedence helps to maintain creator/updator tool (in-case of external tool usage) remains same for user-defined tags which are created correspondingly.
+
+The userTags field is intended to be set at install time and updatable (not allowed to delete). Components that respect this field must only ever add tags that they retrieve from this field to cloud resources, they must never remove tags from the existing underlying cloud resource even if the tags are removed from this field.
 
 If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. However, if tags are removed from userTags, the tag will not be removed from the AWS resource.
 
@@ -91,19 +97,23 @@ AWS resource tags.
 
 ### Test Plan
 
-TBD
+Update the userTag testcases to check successful update from infrastructure resource.
 
 ### Graduation Criteria
 
-TBD
-
 #### Dev Preview -> Tech Preview
 
-TBD
+- Usability of enhancement end to end
+- User documentation
+- E2E test coverage for update and scaling scenarios
+- User/developer feedback
 
 #### Tech Preview -> GA
 
-TBD
+- Upgrade/downgrade testing
+- Sufficient time for feedback
+- Available by default
+- Stress testing for scaling and tag update scenarios
 
 #### Removing a deprecated feature
 
@@ -132,12 +142,9 @@ If a customer decides they do not want these tags applied to new resources, ther
 1. they would have to get help from support to edit the status field
 2. they would have to manually remove the undesired tags from any existing resources
 
-In the future we will want to introduce a spec field where a customer can specify and edit these tags, which will be reflected into status when changed, and we will expect consuming components to reconcile changes to the set of tags by applying net new tags to existing resources (but they will still not remove tags that are dropped from the list of tags).
+In spec field where a customer can specify and edit these tags, which will be reflected into status when changed, and we will expect consuming components to reconcile changes to the set of tags by applying net new tags to existing resources (but they will still not remove tags that are dropped from the list of tags).
 
 ## Alternatives
 
-TBD
-
 ## Infrastructure Needed [optional]
 
-TBD
