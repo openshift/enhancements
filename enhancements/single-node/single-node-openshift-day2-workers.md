@@ -144,8 +144,8 @@ This enhancement does not modify/add any API
 ### Implementation Details/Notes/Constraints
 
 This enhancement can be easily implemented by adjusting the installer's
-`generateDefaultIngressController` method such that when `config.platform.none
-!= nil && config.controlPlane.replicas == 1`, it will return an
+`generateDefaultIngressController` method such that when `config.Platform.None
+!= nil && config.ControlPlane.Replicas == 1`, it will return an
 `IngressController` CR struct with
 `.spec.nodePlacement.nodeSelector.matchLabels` targetting
 `node-role.kubernetes.io/master`. 
