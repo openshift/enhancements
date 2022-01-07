@@ -64,6 +64,7 @@ type Bucket struct {
 type Stats struct {
 	Query        *util.PullRequestQuery
 	EarliestDate time.Time
+	LatestDate   time.Time
 	Buckets      []*Bucket
 	Summarizer   *enhancements.Summarizer
 }
@@ -78,6 +79,11 @@ func (s *Stats) Populate() error {
 func (s *Stats) process(pr *github.PullRequest) error {
 	// Ignore old closed items
 	if !s.EarliestDate.IsZero() && *pr.State == "closed" && pr.UpdatedAt.Before(s.EarliestDate) {
+		return nil
+	}
+	// Ignore items created after the report window (used for
+	// annual-summary)
+	if !s.LatestDate.IsZero() && pr.CreatedAt.After(s.LatestDate) {
 		return nil
 	}
 	return s.ProcessOne(pr)
