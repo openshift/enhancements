@@ -85,6 +85,60 @@ The userTags field is intended to be set at install time and updatable (not allo
 
 If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. However, if tags are removed from userTags, the tag will not be removed from the AWS resource.
 
+The infrastructure resource example to involve spec for api changes
+
+```go
+// AWSPlatformSpec holds the desired state of the Amazon Web Services infrastructure provider.
+// This only includes fields that can be modified in the cluster.
+type AWSPlatformSpec struct {
+    // serviceEndpoints list contains custom endpoints which will override default
+    // service endpoint of AWS Services.
+    // There must be only one ServiceEndpoint for a service.
+    // +optional
+    ServiceEndpoints []AWSServiceEndpoint `json:"serviceEndpoints,omitempty"`
+
+    // ResourceTags is a list of additional tags to apply to AWS resources created for the cluster.
+    // See https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html for information on tagging AWS resources.
+    // AWS supports a maximum of 50 tags per resource. OpenShift reserves 25 tags for its use, leaving 25 tags
+    // available for the user.
+    // While ResourceTags field is mutable, items can not be removed.
+    // +kubebuilder:validation:MaxItems=25
+    // +optional
+    ResourceTags []AWSResourceTag `json:"resourceTags,omitempty"`
+}
+
+```
+
+```yaml
+spec:
+description: AWS contains settings specific to the Amazon Web Services infrastructure provider.
+type: object
+properties:
+    resourceTags:
+    description: ResourceTags is a list of additional tags to apply to AWS resources created for the cluster. See https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html for information on tagging AWS resources. AWS supports a maximum of 50 tags per resource. OpenShift reserves 25 tags for its use, leaving 25 tags available for the user. While ResourceTags field is mutable, items can not be removed.
+    type: array
+    maxItems: 25
+    items:
+        description: AWSResourceTag is a tag to apply to AWS resources created for the cluster.
+        type: object
+        required:
+            - key
+            - value
+        properties:
+            key:
+                description: key is the key of the tag
+                type: string
+                maxLength: 128
+                minLength: 1
+                pattern: ^[0-9A-Za-z_.:/=+-@]+$
+            value:
+                description: value is the value of the tag. Some AWS service do not support empty values. Since tags are added to resources in many services, the length of the tag value must meet the requirements of all services.
+                type: string
+                maxLength: 256
+                minLength: 1
+                pattern: ^[0-9A-Za-z_.:/=+-@]+$
+```
+
 ### User Stories
 
 https://issues.redhat.com/browse/SDE-1146 - IAM users and roles can only operate on resources with specific tags
