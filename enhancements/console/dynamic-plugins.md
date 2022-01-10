@@ -150,17 +150,18 @@ spec:
 In case the plugin needs to communicate with some in-cluster service, it can
 declare a service proxy in its `ConsolePlugin` resource using the `spec.proxy` array.
 Each entry needs to specify type and alias of the proxy, under the `type` and `alias` field.
-For the `Service` proxy type, service `name`, `namespace` and `port` needs to be specified,
-to which the request will be proxied.
+For the `Service` proxy type, a `service` field with `name`, `namespace` and `port` fields
+needs to be specified, to which the request will be proxied.
 
 ```yaml
 spec:
   proxy:
   - type: Service
     alias: <proxy-alias>
-    name: <service-name>
-    namespace: <service-namespace>
-    port: <service-port>
+    service:
+      name: <service-name>
+      namespace: <service-namespace>
+      port: <service-port>
 ```
 
 Console backend exposes following endpoint in order to proxy the communication
@@ -194,11 +195,12 @@ spec:
   proxy:
   - type: Service
     alias: search
-    name: search
-    namespace: open-cluster-management
-    port: 8443
     caCertificate: '-----BEGIN CERTIFICATE-----\nMIID....'
     authorize: true
+    service:
+      name: search
+      namespace: open-cluster-management
+      port: 8443
 ```
 
 Plugins are disabled by default. They need to be manually enabled by a cluster
