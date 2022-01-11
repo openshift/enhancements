@@ -29,7 +29,11 @@ status: implementable
 
 ## Summary
 
-We propose to extract metric storage, alerting and querying to a separate service that can be scaled, deployed and managed in a decoupled mode. This will allow robust multi-cluster, fleet monitoring with best experience possible for cluster admins. This means SD org, running managed HyperShift will use RHOBS managed by Observability Group and AppSRE. 
+This proposal aims to figure our monitoring case of HyperShift topology. There are three important parts of this proposal:
+
+For HyperShift Admin, we propose to extract metric storage, alerting and querying for Clusters managed by HyperShift to a separate service that can be scaled, deployed and managed in a decoupled mode. This will allow robust multi-cluster, fleet monitoring with best experience possible for cluster admins. This means SD org, running managed HyperShift will use the RHOBS managed by Observability Group and AppSRE. Metrics from control planes of hosted clusters will be shipped thanks to Monitoring Stacks.
+
+The data plane part of guest clusters requires changes too. In terms of feature parity for users custom or UWM monitoring and HPA we propose to deploy unchanged CMO for smallest changes possible. We also propose using CMO path to gather and send needed monitoring data for HyperShift Admin to RHOBs as well as data-plane telemetry through the usual path.
 
 ## Glossary
 
@@ -38,13 +42,12 @@ We propose to extract metric storage, alerting and querying to a separate servic
 * BU: Business Unit. 
 * MS-SRE/MT-SRE: Managed Service / Managed Tenant Site Reliability Engineer.
 * RHOBS: Red Hat Observability Service.
-* [Observatorium](http://observatorium.io/): Project for scalable SaaS based monitoring and observability.
 
 For additional acronyms, see [Red Hat Dictionary](https://source.redhat.com/groups/public/red-hat-dictionary-or-lexicon/red_hat_abbreviations_acronyms_and_initialisms_dictionary_wiki)
 
 ## Background
 
-[HyperShift project](https://github.com/openshift/hypershift) brings some changes to how OpenShift clusters can be deployed. The 10,000 feet view is to decouple the OCP control plane from the data plane. Control plane components (e.g. etcd, API servers, …) run on an underlay cluster, while worker components run remote on a different infrastructure.
+[HyperShift project](https://github.com/openshift/hypershift) brings certain changes to how OpenShift clusters can be deployed. The 10,000 feet view is to decouple the OCP control plane from the data plane. Control plane components (e.g. etcd, API servers, …) run on an underlay cluster, while worker components run remote on a different infrastructure.
 
 This is similar to how AWS, Google and so on run their managed Kubernetes service: You provide the worker nodes and they provide the control plane.
 
@@ -58,7 +61,7 @@ The core idea of HyperShift topology is that it allows sharing infrastructure on
 
 ## Motivation
 
-This document enhancement proposes potential solution for Admin and Customer metric monitoring within those new topologies, since we cannot apply easily our current platform monitoring products using within cluster monitoring operator ([CMO](https://github.com/openshift/cluster-monitoring-operator)) easily (see [Alternatives](#use-pure-platform-monitoring-solution) on why).
+This document enhancement proposes a potential solution for Admin and Customer metric monitoring within those new topologies, since we cannot easily apply our current platform monitoring products using cluster monitoring operator ([CMO](https://github.com/openshift/cluster-monitoring-operator)) (see [Alternatives](#use-pure-platform-monitoring-solution) on why).
 
 ### Goals
 
@@ -72,10 +75,10 @@ The goal is to provide a solution that maintains similar monitoring capabilities
   * Ability to monitor Customer control planes
   * Ability to view fleet-level metrics and drill-downs in a single pane of glass
   * Ability to keep metrics in-region
-* HSRE can monitor control-plane related (managed) software on guest clusters:
+* HSRE can monitor control-plane related (managed) software on data plane of guest clusters:
   * For example Ingress/Router/CNI/CSI 
   
-> Exact list of what is scraped on guest clusters for HSRE does not matter. All we need to know: some service monitors.
+> Exact list of what is scraped on guest clusters for HSRE is not important at the moment. All we need to know: some service monitors.
 
 * HSRE can query metrics data over SLO period (usually 28 days).
   * Longer durations nice to have, but technically not required. There is also option that allows HSRE to persist SLO from platform to [different backend if needed](https://docs.google.com/document/d/1BJarERppgiJ8esc6d8anbJMOQ0AflFBQea-Zc9wAp0s/edit?disco=AAAAQTFsbwM).
@@ -106,6 +109,7 @@ architecture.
 * Provide a solution for non-HyperShift OSD. In fact, the solution for OSD observability is planned to be really similar to HyperShift. 
 This is because OSD observability struggles on similar points--inability to aggregate observability data in a cheap way on a global view.
 However, since HyperShift has no solution at all, for now starting from HyperShift sounds like a great opportunity.
+* Define monitoring for Management Clusters.
 
 ## Proposal
 
@@ -121,35 +125,30 @@ TBD
 
 ### Implementation Details/Notes/Constraints
 
+
 #### Overview
 
+In terms of HSRE persona, we propose to decouple their observability for SRE / Devs for monitoring and troubleshooting purposes with a specific solution like HyperShift, OSD etc going forward. I explained some rationales in the [Observatorium: Product Agnostic Centralized Observability 2021.10](https://docs.google.com/presentation/d/1cPwac7iNmOFPbEMKE6lcesQCHa2UQXNSJrVo5cW5eRQ/edit) presentation. For those who don't have access or prefer written form, there are few benefits of this:
 
-We propose to decouple observability for SRE / Devs for monitoring and troubleshooting purposes with a specific solution like HyperShift, OSD etc going forward. I explained some rationales in the [Observatorium: Product Agnostic Centralized Observability 2021.10](https://docs.google.com/presentation/d/1cPwac7iNmOFPbEMKE6lcesQCHa2UQXNSJrVo5cW5eRQ/edit) presentation. For those who don't have access or prefer written form, here is the TL;DR here:
+* The most complex part of monitoring system (storage, querying, alerting) is decoupled from source cluster topology. Using separate "service" allows to avoid expensive integrations to ever-changing topologies and permutations on those, which has complex interactions and constraints.
+* Gathering data outside of source clusters allow easier federation, global view and alerting.
+* As SaaS, we as a RH, can provide better use experience.
+* We can focus on important features going forward (reliability, scalability, correlations etc)
 
-What can help us to achieve all goals (HyperShift Observability, but also KCP, single cluster ,edge clusters etc) is simplicity. Essentially, the observability teams can either focus on:
+In terms of CUS persona, we will discuss their monitoring in [customer monitoring section](#customer-monitoring-on-data-plane). 
 
-* Integrating bespoke Observability storage to ever-changing topologies and permutations on those, which has complex interactions and constraints.
-* Work on operators to make it easy for someone else to deploy and operate.
-* Work on complex release cadences, CVE, bug-porting, stability.
-
-OR we can instead focus on:
-
-* Scalability and performance so more information can be processed for monitoring and troubleshooting purposes.
-* Features (e.g aggregated view, correlations).
-* UX
-
-Let us examine how we can achieve the latter and how these principles can be applied to an example HyperShift topology.
+Let's examine how we can achieve such decoupling in HyperShift topology, given standard OCP clusters have local-only monitoring.
 
 > NOTE: We will focus on monitoring specific components in this document, but you will see logging parts on some diagrams. This is because logging can follow exactly the same pattern. Still, we will focus on monitoring (metrics) for now as it’s a bit unique (e.g. alerting part).
 
 #### The Big Picture
 
-We propose to send all relevant metrics to the "Centralized Observability Product” using well-defined and stable APIs. At this point we call it product because by design this is replaceable component that can be mixed and matched according to the needs.
+For HSRE persona, we propose to send all relevant metrics for HSRE to the "Centralized Observability Product” using well-defined and stable APIs. At this point we call it product because by design this is replaceable component that can be mixed and matched according to the needs.
 
 For example:
 
 * For our Managed HSRE, this can be our RHOBS service.
-* For HSRES other than SD members, it can be locally deployed Observatorium or 3rd-party vendor like Grafana Cloud, Amazon or Google Managed Prometheus, Logz.io and others.
+* For HSREs other than SD members, it can be locally deployed [Observatorium](http://observatorium.io/) or 3rd-party vendor like Grafana Cloud, Amazon or Google Managed Prometheus, Logz.io and others.
 
 A high-level view would look like this:
 
@@ -166,7 +165,7 @@ The model as above allows:
 
 > Note that this does not imply "Centralized Observability Product" to run in a separate cluster and be managed by a separate team. We can mix and match as needed, but strictly for Managed HyperShift use cases we would go for RHOBS service fully managed by Observability Group with AppSRE (SD).
 
-Reasons:
+Reasons for choosing RHOBS for our HSRE:
 
 * We can have tighter control on observability budget and spending
 * It’s our common, Red Hat responsibility to offer managed OpenShift. If Observability Group + AppSRE will not provide their support and time, the same (or more) effort and money has to be spent on OSD side (or vendor)
@@ -176,51 +175,27 @@ Reasons:
 
 ## Design Details
 
-In details the design looks as follows:
+In details the full design looks as follows:
 
 ![h](assets/hypershift-details.png)
 
 Let’s take a look at all parts:
 
-1. In terms of "Observability Product", we already have a growing open-source [Observatorium](http://observatorium.io/) project that packages and offers opinionated deployments of popular open-source projects for observability needs (e.g Thanos and Loki). What matters is that the Observability Group has a strong impact, deep knowledge and understanding of those projects. We also have ongoing production experience in running and scaling them.
-
-Anyone can install Observatorium, and deploy this service on-premise, but Observability Group also provides [RHOBS](https://rhobs-handbook.netlify.app/projects/observability/rhobs/) as a managed instance of observatorium, that is currently only available to specific internal teams.
-
-Observability Product will be a central pane of view of observability data for SRE needs from multiple clusters, as well as alerting and alert routing for notification purposes.
-
-2. Since the Management cluster is like any other OCP/OSD, we can leverage Platform Monitoring. In near future, we plan to allow [MonitoringStack](https://github.com/openshift/enhancements/pull/866) project to allow scraping platform related metrics, but for the time being, this is done via Platform Monitoring that can remote write relevant metrics to Observability Product.
-
-3. [MonitoringStack](https://github.com/openshift/enhancements/pull/866) project offer similar functionality as UWM, but it aims for more features, flexibility and scalability due to different support models (outside of OpenShift Core) and less tight integration to OpenShift itself. It’s being developed in https://github.com/rhobs/monitoring-stack-operator. We plan to add support to [the agent mode of Prometheus](https://twitter.com/bwplotka/status/1454146102240944134) for efficient metric forwarding.
-4. A similar pipeline can be used for a portion of HSRE owned components living in each data plane.
+1. Hosted control planes does not deploy any own monitoring, other than relevant Service Monitors to be scraped.
+2. For all control planes we propose to deploy [Monitoring Stack Operator](https://github.com/rhobs/monitoring-stack-operator) that will deploy set of Prometheus/Prometheus Agents that will be sending data off cluster to RHOBS. No local alerting and local querying will be allowed. This path will forward both monitoring data as well as part of telemetry relevant for Telemeter.
+3. On data-plane we propose running roughly unchanged CMO stack with platform monitoring and optional UWM. This allows feature parity for customers as well as ability to remote write few metrics interersting for HSRE use (as specified in Goal). The unique part is that Platform Monitoring will know nothing about master nodes and control plane resources (etcd, control plane operators, Kube services etc). It will only provide "platform" metrics for worker nodes and containers running there. Part of telemetry related to data-plane will be sent through Telemeter client as usual. We assume CMO can be deployed on Management cluster for easier maintenance.
 
 #### Customer Monitoring on Data Plane
 
 As per goals and non-goals we aim to give the CUS ability to scrape data related to their worklodads / hardware / Kubernetes state metrics that is on their data plane. As mentioned in [Non Goals](#non-goals) we don’t want to give or sell anything for scalable, centralized monitoring to customers (yet). Not beyond anything else w provide which is an opinionated UWM, CMO can deploy on normal OCP.
 
-What we have to do, is to enable and recommend them using existing workflows, which simply means providing the same data using the same protocols (Prometheus exposition format).
-
-The typical workflows:
-* HPA/VPA using Prometheus Adapter
-* Monitoring and alerting on kube-state metrics, node exporter, cadvisor and application metrics
-* Local console access with OCP metrics and dashboard
-
-We don’t see any blockers for the proposed model if we would follow the same path as GKE, EKS or any other Managed Kubernetes with hidden control plane offers. By design, HyperShift offers managed Kube API. This means that any metrics related to the things running in the data plane and around API can be obtained by Customers on their own. It could work like this:
-
-![h](assets/hypershift-cus.png)
-
-This is not different to GKE/EKS cases, where, the customer has to deploy on their own kube-state-metrics, node-exporter, cadvisor etc and configure Open Metrics compatible solution to scrape those.
-
-As the Red Hat data plane, we used to offer this out-of-the-box ,so we should maintain this practice. In simple form we could use CMO without PM, but with all exporters and optional UWM. There is a slight tweak where UWM has to know scrape those data-plane KSM, node exporter, cadvisor.
-
-Our team also develops [Monitoring Stacks](https://github.com/openshift/enhancements/pull/866) which aims to do similar yet allows greater scalability and flexibility due to independent versioning and OLM installation model.
-
-Yet, CUS can use any other DIY or just simple Prometheus/Prometheus Operator or vendor (e.g Grafana Cloud or anything else too) to do similar.
+We propose to use similar functionality as before by having CMO in ~unchanged form deploying its resources on data plane in similar fashion as in [OCP](https://docs.openshift.com/container-platform/4.9/monitoring/understanding-the-monitoring-stack.html#understanding-the-monitoring-stack_understanding-the-monitoring-stack). This allows less changed to already complex CMO, while providing exactly same functionality including HPA, out-of-box platform metircs, custom metrics, custom alerts to HyperShift guest clusters.
 
 ### Risks and Mitigations
 
-Let's describe the worst case. What if the Observability Team or/and AppSRE fail to Provide a Managed Observability Service with Required Scalability and reliability (in time)?
+#### What if RHOBS will not match required feature set, scalability and reliability (in time)?
 
-Let’s be honest, it’s not an easy job. We are aware of challenges here and the hardest things were presented many times:
+There are aware of challenges here and the hardest things were presented many times:
 
 ![h](assets/hypershift-chall.png)
 
@@ -235,7 +210,8 @@ To the best of our knowledge, we think we can do it. We were preparing the teams
 
 Mitigations:
 
-* We are growing the dev team even more.
+* We are growing the dev team.
+* We are introducing more devs on-call.
 * We are doubling down the development on performance and scalability. We already have designs to improve the biggest bottlenecks of Thanos.
 * In the extremely worst case: This design assumes API-driven workflows. This allows easy change of Observability Product if anything goes wrong. If our Observability Product effort totally collapses, OSD can within days (and millions $$) switch to any other vendors that support Loki APIs and Remote Write API and Prometheus/Loki read APIs. For example:
     * Our Grafana Cloud partner
@@ -259,6 +235,10 @@ Internal docs:
 * RHOBS entry-points and usage.
 
 ### Open Questions
+
+* Who will configure CMO to allow remote writing metrics to RHOBS?
+
+* Who is responsible for deploying Monitoring Stacks on Management Clusters for Control planes to use?
 
 ### FAQ
 
@@ -314,21 +294,41 @@ At further stage:
 
 ## Alternatives
 
+Let's look on various alternatives.
+
 #### Pay for Observability Vendor
 
 Pros:
 
-* They might have ready, proved scale, now.
+* They might have ready, proved scale.
 * They have existing cross-signal correlation capabilities.
 
 Cons:
 
-* Block/makes the on-premise case of Hypershift more difficult.
+* Block/makes the on-premise case of HyperShift more difficult.
 * The current ingestion (collector) tech we use and package, might not support them.
 * Not many solutions give both metrics and logging in a unified platform.
 * It costs a huge amount of $$$ (to be researched how much exactly vs our solution)
 * We are not their priority vs we have dedicated Observability Group that can react to import ant missing features.
 * Not helping open source community.
+
+#### Change CMO, so it does not deploy Platform Monitoring at all; only rely on UWM.
+
+In previous sessions and previous version of this document we proposed NOT deploying extra Prometheus and whole "Platform Monitoring" part.
+
+Such design could look as follows:
+
+![h](assets/hypershift-alternative.png)
+
+We would need to deploy CMO, somehow without Platform Monitoring. Then deploy some required exporters and enable scraping them directly by others (missing feature). Configure UWM to scrape them by default. Then ask user to enable UWM if they feature parity. 
+
+On top of that we would need separate pipeline for HSRE to forward metrics to RHOBS.
+
+After various discussions we found quite many disadvantages: 
+
+* CMO is not easily change-able. It's tied to OpenShift version and has many dependencies. Any significant changes would require longer dev time and maintainability.
+* Removing platform monitoring is not easy, since many customer and our workloads (e.g console) require its data.
+* Lack of platform monitoring causes us to deploy another stack anyway for HyperShift use.
 
 #### Use Pure Platform Monitoring Solution
 
@@ -355,7 +355,7 @@ Additionally, how telemetry would work in this casse?
 
 ### Upgrade / Downgrade Strategy
 
-TBD 
+N/A
 
 ### Graduation Criteria
 
@@ -369,7 +369,7 @@ TBD
 
 #### Removing a deprecated feature
 
-TBD
+N/A
 
 ### Version Skew Strategy
 
