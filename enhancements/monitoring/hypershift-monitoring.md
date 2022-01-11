@@ -271,26 +271,20 @@ TBD
 
 If all parties will agree on the proposed direction we need heavy focus on the actions required:
 
-1. Add Alerting on top of Observatorium, then deploy it on RHOBS.
-2. Host Grafana on RHOBS.
-3. Double down on the planned performance and efficiency work for Thanos Query path.
-4. Finalize Monitoring Stack development.
-5. Acceptance test and load test.
+1. Ensuring control plane service monitors: HOSTEDCP-169
+2. Ensuring forwarding mechanism (e.g using monitoring stack and Prometheus/Prometheus agent) on management cluster.
+3. Configuring it for each hosted control planes automatically, so it remote writes to RHOBS using correct credentials and correct whitelist for both monitoring and telemetry.
+4. Allowing deployment of CMO in data plane: MON-2143
+5. Configuring CMO and PM to send some OSD related data from data plane to RHOBS (OCPPLAN-8152/SDE-1590)
+6. Configuring RHOBS for OSD needs (alerting): SDE-1610 + OSD-9459
+7. Using AppSRE Grafana and configuring dashboards for OSD needs: SDE-1588
 
-We would also propose to join forces. E.g OSD SRE who are right now helping with solving the monitoring needs could contribute directly to Observatorium, RHOBS or Monitoring Stacks.
-
-At further stage:
-
-6. Deploying multiple regional RHOBS clusters. Things that needs to be figured out:
-  a. Federation of view for those clusters
-  b. Managing more deployments
-  c. Service Discovery of those on client (HyperShift side)
-7. Provide efficient forwarding metrics collection solution (aka Prometheus agent).
+NOTE: This list excludes RHOBS work items, which are managed by Observability team.
 
 ## Drawbacks
 
 * Different than OSD team effort to maintain critical Observability dependency with high SLO.
-* No native local storage solution
+* No local alerting and querying for HSRE.
 
 ## Alternatives
 
