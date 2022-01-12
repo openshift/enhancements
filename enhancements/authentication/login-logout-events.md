@@ -363,6 +363,22 @@ This will allow to introspect the deleted user:
   }
 ```
 
+### Protecting sensitive data
+
+The request URI in the OAuth2 flows contain a lot of information and therefore values of query parameters that are not an allow list will be masked. The allow list will be hardcoded and won't be configurable.
+
+For some OAuth2 flows, which are not regarded as best pratice, the exposed information could enable an attacker to try to impersonate a user.
+
+If it would be possible to configure that setting, an attacker could try to add sensible information to the allow list.
+
+### Verbosity
+
+The audit events are based on the audit framework given by kubernetes. The configuration for the verbosity should be set on the `ResponseComplete` stage and the `Metadata` level.
+
+The `username` is present on `RequestReceived`, but the decision happens during the response itself. So the logging stage is set to `ResponseComplete`.
+
+The focus is on who tried to authenticate and did it work, which is answered on `Metadata` level. It is not necessary and probably not compliant to log the body.
+
 ### Event construction
 
 In all cases above an [Info](https://github.com/openshift/oauth-server/blob/961295a3151da3fff9daa5ea0ab8c0bf92a7d7e6/vendor/k8s.io/apiserver/pkg/authentication/user/user.go#L20) entity is available with user information which can be used to fill audit event data.
