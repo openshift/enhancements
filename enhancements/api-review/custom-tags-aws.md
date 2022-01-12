@@ -32,7 +32,7 @@ have the ability to apply user defined tags to many resources created by OpenShi
 Note: this enhancement is slightly retroactive. Work has already begun on this. See
 - https://github.com/openshift/api/pull/864
 - https://github.com/openshift/cluster-ingress-operator/pull/578
-- https://github.com/openshift/api/pull/1064/files
+- https://github.com/openshift/api/pull/1064/
 
 ## Motivation
 
@@ -57,6 +57,10 @@ Motivations include but are not limited to:
 
 - to reduce initial scope, we are not implementing this for clouds other than AWS. We will not take any actions
    to prohibit that later.
+
+### Limitations
+
+- tags for PV volumes cannot be updated but only set during creation.
 
 ## Proposal
 
@@ -91,12 +95,8 @@ The infrastructure resource example to involve spec for api changes
 // AWSPlatformSpec holds the desired state of the Amazon Web Services infrastructure provider.
 // This only includes fields that can be modified in the cluster.
 type AWSPlatformSpec struct {
-    // serviceEndpoints list contains custom endpoints which will override default
-    // service endpoint of AWS Services.
-    // There must be only one ServiceEndpoint for a service.
-    // +optional
-    ServiceEndpoints []AWSServiceEndpoint `json:"serviceEndpoints,omitempty"`
-
+    // Existing fields
+    ...
     // ResourceTags is a list of additional tags to apply to AWS resources created for the cluster.
     // See https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html for information on tagging AWS resources.
     // AWS supports a maximum of 50 tags per resource. OpenShift reserves 25 tags for its use, leaving 25 tags
@@ -157,10 +157,7 @@ Update the userTag testcases to check successful update from infrastructure reso
 
 #### Dev Preview -> Tech Preview
 
-- Usability of enhancement end to end
-- User documentation
-- E2E test coverage for update and scaling scenarios
-- User/developer feedback
+NA
 
 #### Tech Preview -> GA
 
