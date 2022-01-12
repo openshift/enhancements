@@ -151,7 +151,7 @@ AWS resource tags.
 
 ### Test Plan
 
-Update the userTag testcases to check successful update from infrastructure resource.
+Update the `resourceTags` testcases to check successful update from infrastructure resource.
 
 ### Graduation Criteria
 
