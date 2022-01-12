@@ -145,7 +145,23 @@ https://issues.redhat.com/browse/SDE-1146 - IAM users and roles can only operate
 As a security-conscious ROSA customer, I want to restrict the permissions granted to Red Hat in my AWS account by using
 AWS resource tags.
 
+### API Extensions
+
+This proposal edits `Infrastructure.config.openshift.io/v1` type
+
+### Operational Aspects of API Extensions
+
+NA
+
 ### Risks and Mitigations
+
+#### Failure Modes
+
+NA
+
+#### Support Procedures
+
+NA
 
 ## Design Details
 
