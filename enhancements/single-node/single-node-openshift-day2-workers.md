@@ -438,6 +438,16 @@ development effort in order to make it use the baremetal platform rather than
 the "none" platform currently used for single node installations. This may
 happen in the future.
 
+- We may also decide to set the "Infrastrcture Topology" to "SingleReplica" even
+in cloud single control-plane node clusters which also have day-1 workers. The
+motivation for that is to make the value of this parameter consistent across
+all single control-plane node clusters. By doing that we're practically making
+its value always tied to the value of the "Control Plane Topology" paramater
+during installation. Then the only time in which the value of the two topology
+parameters will ever differ is when we some day make the "Infrastructure
+Topology" non-read only and allow the user to modify it (either during
+installation or post-installation).
+
 ## Infrastructure Needed [optional]
 
 N/A
