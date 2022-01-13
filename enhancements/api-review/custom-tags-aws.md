@@ -69,7 +69,7 @@ resources created by in-cluster operators.
 
 If `experimentalPropagateUserTags` is true, install validation will fail if there is any tag that starts with `kubernetes.io` or `openshift.io`.
 
-Add a new field `resourceTags` to `.spec.aws` of the `infrastructure.config.openshift.io` type. Tags included in the
+Add a new field `resourceTags` to `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io` type. Tags included in the
 `resourceTags` field will be applied to new resources created for the cluster. The `resourceTags` field will be populated by the installer only if the `experimentalPropagateUserTags` field is true.
 
 Note existing unchanged behavior: The installer will apply these tags to all AWS resources it creates with terraform (e.g. bootstrap and master EC2 instances) from the install config, not from infrastructure status, and regardless if the propagation option is set.
@@ -77,11 +77,11 @@ Note existing unchanged behavior: The installer will apply these tags to all AWS
 All operators that create AWS resources (ingress, cloud credential, storage, image registry, machine-api)
 will apply these tags to all AWS resources they create.
 
-userTags that are specified in the infrastructure resource will merge with userTags specified in an individual component. In the case where a userTag is specified in the infrastructure resource and there is a tag with the same key specified in an individual component, the value from the individual component will have precedence and be used.
+userTags that are specified in the Infrastructure resource will merge with userTags specified in an individual component. In the case where a userTag is specified in the Infrastructure resource and there is a tag with the same key specified in an individual component, the value from the individual component will have precedence and be used.
 
-Users can update the `resourceTags` by editing `.spec.aws` of the `infrastructure.config.openshift.io` type. New addition of tags are always appended. Any update in the existing tags, which are added by installer or  by edit in `resourceTags`, will replace the previous tag value.
+Users can update the `resourceTags` by editing `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io` type. New addition of tags are always appended. Any update in the existing tags, which are added by installer or  by edit in `resourceTags`, will replace the previous tag value.
 
-`.status.platformStatus.aws.resourceTags` reflects the present set of userTags. In case when the userTags are created by installer or newly added in infrastructure resource is updated on the individual component directly using external tools, the value from infrastructure resource will have the precedence.
+`.status.platformStatus.aws.resourceTags` reflects the present set of userTags. In case when the userTags are created by installer or newly added in Infrastructure resource is updated on the individual component directly using external tools, the value from Infrastructure resource will have the precedence.
 
 The precedence helps to maintain creator/updator tool (in-case of external tool usage) remains same for user-defined tags which are created correspondingly.
 
@@ -89,10 +89,10 @@ The userTags field is intended to be set at install time and updatable (not allo
 
 If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. However, if tags are removed from userTags, the tag will not be removed from the AWS resource.
 
-The infrastructure resource example to involve spec for api changes
+The Infrastructure resource example to involve spec for api changes
 
 ```go
-// AWSPlatformSpec holds the desired state of the Amazon Web Services infrastructure provider.
+// AWSPlatformSpec holds the desired state of the Amazon Web Services Infrastructure provider.
 // This only includes fields that can be modified in the cluster.
 type AWSPlatformSpec struct {
     // Existing fields
@@ -111,7 +111,7 @@ type AWSPlatformSpec struct {
 
 ```yaml
 spec:
-description: AWS contains settings specific to the Amazon Web Services infrastructure provider.
+description: AWS contains settings specific to the Amazon Web Services Infrastructure provider.
 type: object
 properties:
     resourceTags:
@@ -165,9 +165,19 @@ NA
 
 ## Design Details
 
+User can add tags during installation for creation of resources with tags. Installer creates infrastructure manifests with `resourceTags` to `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io`.
+Cluster config operator reconciles Infrastructure object, validates and updates `resourcesTags` from `.spec.platformSpec.aws` to  `.status.platformStatus.aws`.
+Operators that operate on aws resources must merge the tags from `.spec.platformSpec.aws`, `.status.platformStatus.aws` and individual component tags.
+
+The values from `status.platformStatus.aws` will used to only support downgrade.
+
+In case of precedence conflict or errors, the same will be reported using `Events` by the operators.
+
+`.status.platformStatus.aws` can be deprecated in the future versions when there is a CRD validation possible to avoid removal of userTags from `.spec.platformSpec.aws`.
+
 ### Test Plan
 
-Update the `resourceTags` testcases to check successful update from infrastructure resource.
+Update the `resourceTags` testcases to check successful update from Infrastructure resource.
 
 ### Graduation Criteria
 
