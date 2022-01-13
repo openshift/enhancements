@@ -49,7 +49,7 @@ control-plane node cluster with additional workers and that cluster works as
 expected without any known issues.
 
 Even on Assisted Installer installed single control-plane node clusters it's
-trivial to add more workers by leverging the Assisted Installer's day-2 worker
+trivial to add more workers by leveraging the Assisted Installer's day-2 worker
 installation capabilities (after some minor DNS configuration issues which will
 be improved by the Assisted-Installer team, separately from this enhancement).
 
@@ -60,7 +60,7 @@ as of today, may have one of three values:
 
 - SingleReplica
 - HighlyAvailable
-- External (this value is unrelated to this enhancement and is only mentioned here for completeness sake)
+- External (this value is unrelated to this enhancement and is only mentioned here for completeness' sake)
 
 (See "see-also" enhancements links for more information about the topology
 parameters and their possible values)
@@ -101,7 +101,7 @@ that they just installed.
 
 Similarly, in the Assisted Installer, the user is able to complete the
 installation without needing to define any DNS entries. This is currently made
-possible by injecting a `MachineConfig` manifest targetting the "master" pool.
+possible by injecting a `MachineConfig` manifest targeting the "master" pool.
 The node is also configured with `/etc/resolv.conf` to use that dnsmasq server
 for DNS resolution. The dnsmasq server is configured with DNS entries for
 `api.<cluster>.<base>`, `api-int.<cluster>.<base>` and
@@ -323,7 +323,7 @@ TBD
 
 This should make no noticable difference on "regular" single control-plane node
 clusters which do not have any day-1 or day-2 worker nodes. The only difference
-for those clusters would be the `IngressController` targetting the "master"
+for those clusters would be the `IngressController` targeting the "master"
 pool rather than the "worker" pool, but since the single control-plane node is
 already both in the "master" and "worker" pools, that should make no practical
 difference.
