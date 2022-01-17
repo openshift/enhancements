@@ -488,19 +488,19 @@ functionality of other APIs.
 #### Failure Modes
 
 - A new Machine fails to scale up
-    - In this scenario, we expect the operator to turn degraded to signal that there is an issue with the Control Plane
-      Machines
-    - We expect that the Machine will contain information identifying the issue with the launch request, which can be
-      rectified by the user before they then delete the Machine, once deleted, the ControlPlaneSet will attempt the
-      scale up again
-    - This process should be familiar from dealing with existing Failed Machines
-    - A MachineHealthCheck targeting ControlPlaneMachines could automatically resolve this issue
+  - In this scenario, we expect the operator to turn degraded to signal that there is an issue with the Control Plane
+    Machines
+  - We expect that the Machine will contain information identifying the issue with the launch request, which can be
+    rectified by the user before they then delete the Machine, once deleted, the ControlPlaneSet will attempt the
+    scale up again
+  - This process should be familiar from dealing with existing Failed Machines
+  - A MachineHealthCheck targeting ControlPlaneMachines could automatically resolve this issue
 - The ControlPlaneSet webhook is not operational
-    - This will prevent creation and update of ControlPlaneSets
-    - We expect these operations to be very infrequent within a cluster once established, so the impact should be
-      minimal
-    - The failure policy will be to fail closed, as such, when the webhook is down, no update operations will succeed
-    - The Kube API server operator already detects failing webhooks and as such will identify the issue early
+  - This will prevent creation and update of ControlPlaneSets
+  - We expect these operations to be very infrequent within a cluster once established, so the impact should be
+    minimal
+  - The failure policy will be to fail closed, as such, when the webhook is down, no update operations will succeed
+  - The Kube API server operator already detects failing webhooks and as such will identify the issue early
 
 #### Support Procedures
 
@@ -515,14 +515,14 @@ implemented.
 ## Drawbacks
 
 - Introduction of new CRDs complicates the user experience
-    - Users will have to learn about the new CRD and how it can be used
-    - Counter: The concepts are familiar from existing apps resources and CRDs
+  - Users will have to learn about the new CRD and how it can be used
+  - Counter: The concepts are familiar from existing apps resources and CRDs
 - We are making it easier for customers to put their clusters at risk
-    - If a scale up fails, this will then need manual intervention, the cluster will become degraded at this point
-    - Counter: The etcd protection mechanism should mean that the cluster is never at risk of losing quorum, clusters
-      should be recoverable
+  - If a scale up fails, this will then need manual intervention, the cluster will become degraded at this point
+  - Counter: The etcd protection mechanism should mean that the cluster is never at risk of losing quorum, clusters
+    should be recoverable
 - We will need confidence in the project before we can ship it
-    - We need to decide how to ship the project, will we ship it as GA or TP in the first instance?
+  - We need to decide how to ship the project, will we ship it as GA or TP in the first instance?
 
 ## Alternatives
 
@@ -540,28 +540,28 @@ poses in this situation.
 Exposing MachineSets within this mechanism exposes risk in a number of ways:
 
 - Users have the ability to scale the MachineSet
-    - We do not intend to support horizontal scaling initially, there's no easy way to prevent users scaling the
-      Control Plane MachineSets while not affecting workload MachineSets
-    - If a user were to scale up the MachineSet, something would need to sit on top to scale the MachineSet back to the
-      supported control plane replicas count. It is then difficult to ensure that the correct Machine is removed from
-      the cluster without jeopardising the etcd quorum. If a user attempted to use GitOps to manage the MachineSet,
-      this could cause issues as the higher level controller battles to scale the MachineSet.
+  - We do not intend to support horizontal scaling initially, there's no easy way to prevent users scaling the
+    Control Plane MachineSets while not affecting workload MachineSets
+  - If a user were to scale up the MachineSet, something would need to sit on top to scale the MachineSet back to the
+    supported control plane replicas count. It is then difficult to ensure that the correct Machine is removed from
+    the cluster without jeopardising the etcd quorum. If a user attempted to use GitOps to manage the MachineSet,
+    this could cause issues as the higher level controller battles to scale the MachineSet.
 - If no higher level object exists, difficult to ensure consistency across MachineSets
-    - We promote to users that their control plane should be consistent across availability zones, with separate
-      MachineSets, there is nothing to prevent users modifying the MachineSets between zones and having major
-      differences. Collating these differences for support issues could prove difficult. Users may also spread their
-      Machines in an undesirable manner.
-    - Users will have the ability to have inconsistency while using the OnDelete update strategy with ControlPlaneSets,
-      but this should be easy to track due to the updated replicas count within the ControlPlaneSet status. We may want
-      to degrade the operator if there are discrepancies to encourage users to keep their control plane consistent.
+  - We promote to users that their control plane should be consistent across availability zones, with separate
+    MachineSets, there is nothing to prevent users modifying the MachineSets between zones and having major
+    differences. Collating these differences for support issues could prove difficult. Users may also spread their
+    Machines in an undesirable manner.
+  - Users will have the ability to have inconsistency while using the OnDelete update strategy with ControlPlaneSets,
+    but this should be easy to track due to the updated replicas count within the ControlPlaneSet status. We may want
+    to degrade the operator if there are discrepancies to encourage users to keep their control plane consistent.
 - Users can delete intermediary MachineSets
-    - In this case, if a user were to delete the Control Plane MachineSet, it is hard to define a safe way to leave the
-      Control Plane Machine(s) behind without having to have very specific knowledge baked into the MachineSet
-      controller
-    - It becomes easier for users to mismanage their Control Plane Machines and put their cluster at risk
-    - Previous enhancements have discussed the use of webhooks to prevent the deletion of Control Plane MachineSets,
-      though these are not foolproof. The removal design of the ControlPlaneSet (being operator based) should be more
-      reliable than a webhook.
+  - In this case, if a user were to delete the Control Plane MachineSet, it is hard to define a safe way to leave the
+    Control Plane Machine(s) behind without having to have very specific knowledge baked into the MachineSet
+    controller
+  - It becomes easier for users to mismanage their Control Plane Machines and put their cluster at risk
+  - Previous enhancements have discussed the use of webhooks to prevent the deletion of Control Plane MachineSets,
+    though these are not foolproof. The removal design of the ControlPlaneSet (being operator based) should be more
+    reliable than a webhook.
 
 ## Infrastructure Needed
 
