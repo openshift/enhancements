@@ -4,10 +4,14 @@ authors:
   - "@gregsheremeta"
   - "@tgeer"
 reviewers:
-  - @decarr
-  - @bparees
+  - @joelspeed
+  - @Miciah
+  - @sinnykumari
+  - @dmage
+  - @staebler
 approvers:
-  - @decarr 
+  - @tjungblu
+
 creation-date: 2021-03-24
 last-updated: 2022-01-07
 status: implementable
@@ -60,17 +64,22 @@ Motivations include but are not limited to:
 
 ### Limitations
 
-- tags for PV volumes cannot be updated but only set during creation.
+- tags for PV volumes cannot be updated but only set during creation  of volume using `--extra-tags`.Present CSI spec does not support `UpdateVolume` to change the tags on the volume.
 
 ## Proposal
 
-New `experimentalPropagateUserTags` field added to `.platform.aws` of install config to indicate that the user tags should be applied to AWS
+New `propagateUserTags` field added to `.platform.aws` of install config to indicate that the user tags should be applied to AWS
 resources created by in-cluster operators.
 
-If `experimentalPropagateUserTags` is true, install validation will fail if there is any tag that starts with `kubernetes.io` or `openshift.io`.
+`propagateUserTags` field is by default set to true.
+`experimentalPropagateUserTags` field will be set for deprecation.
+
+If `propagateUserTags` is not set to false, install validation will fail if there is any tag that starts with `kubernetes.io` or `openshift.io`.
 
 Add a new field `resourceTags` to `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io` type. Tags included in the
-`resourceTags` field will be applied to new resources created for the cluster. The `resourceTags` field will be populated by the installer only if the `experimentalPropagateUserTags` field is true.
+`resourceTags` field will be applied to new resources created for the cluster. The `resourceTags` field will be populated by the installer only if the `propagateUserTags` field is not set to false.
+
+`.spec.platformSpec.aws` is a mutable field and `.status.platformStatus.aws` is immutable.
 
 Note existing unchanged behavior: The installer will apply these tags to all AWS resources it creates with terraform (e.g. bootstrap and master EC2 instances) from the install config, not from infrastructure status, and regardless if the propagation option is set.
 
@@ -80,6 +89,7 @@ will apply these tags to all AWS resources they create.
 userTags that are specified in the Infrastructure resource will merge with userTags specified in an individual component. In the case where a userTag is specified in the Infrastructure resource and there is a tag with the same key specified in an individual component, the value from the individual component will have precedence and be used.
 
 Users can update the `resourceTags` by editing `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io` type. New addition of tags are always appended. Any update in the existing tags, which are added by installer or  by edit in `resourceTags`, will replace the previous tag value.
+On update of `resourceTags`, AWS resource is not created or restarted.
 
 `.status.platformStatus.aws.resourceTags` reflects the present set of userTags. In case when the userTags are created by installer or newly added in Infrastructure resource is updated on the individual component directly using external tools, the value from Infrastructure resource will have the precedence.
 
@@ -194,13 +204,15 @@ NA
 
 #### Removing a deprecated feature
 
-This enhancement does not remove or deprecate any features.
+`experimentalPropagateUserTags` field will be set for deprecation.
+`.status.platformStatus.aws` will be set for deprecation.
 
 ### Upgrade / Downgrade Strategy
 
 On upgrade:
 
-The new status field won't be populated since it is only populated by the installer and that can't have happened if the cluster was installed from a prior version. Components that consume the new field should take no action since they will see no additional tags.
+On upgrade from version supporting `experimentalPropagateUserTags`, openshift components that consume the new field should merge `.status.platformStatus.aws` and `.spec.platformSpec.aws`.
+`.spec.platformSpec.aws` can be updated or changed which will override the values from status and a new `.status.platformStatus.aws` will be set.
 
 On downgrade:
 
