@@ -435,6 +435,22 @@ Users will be allowed to remove ControlPlaneSet resources should they so desire.
 control plane as the ControlPlaneSet will orphan Machines it manages before it is removed from the cluster. More detail
 is available in the [Removing/disabling the ControlPlaneSet](#Removingdisabling-the-ControlPlane) notes.
 
+#### The ControlPlaneSet spec may not match the existing Machines
+
+It is likely that in a number of scenarios, the spec attached to the ControlPlaneSet for creating new Machines may not
+match that of the existing Machines. In this case, we expect the ControlPlaneSet operator will attempt a rolling update
+when it is created. Apart from refreshing the Machines potentially needlessly, this shouldn't have a negative effect on
+the cluster assuming the new configuration is valid. If it is invalid, the cluster will degrade as the new Machines
+created by the ControlPlaneSet will fail to launch.
+
+We have designed this operator with IPI style clusters in mind. We expect that the Machine objects within the cluster
+should match the actual hosts on the infrastructure provider. In IPI clusters this is ensured by the installer.
+Users may have, out of band, then modified these instances, but unfortunately we have no way to deal with this at
+present. In these scenarios, when the Machines are replaced, they may not exactly match the previous iteration and
+therefore may cause issues for the customer.
+If a customer wishes to mitigate the chances of issues occurring, they may wish to manually control the roll out using
+the OnDelete update strategy.
+
 ## Design Details
 
 ### Open Questions
