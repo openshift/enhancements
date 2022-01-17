@@ -11,7 +11,6 @@ reviewers:
   - @staebler
 approvers:
   - @tjungblu
-
 creation-date: 2021-03-24
 last-updated: 2022-01-07
 status: implementable
