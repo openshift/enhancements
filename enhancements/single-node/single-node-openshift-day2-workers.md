@@ -206,7 +206,7 @@ circumstances where the "Control Plane Topology" is also "SingleReplica".
 
 Make sure the default `IngressController` CR created by the Cluster Ingress
 Operator targets the "master" pool rather than the "worker" pool whenever the
-"Infrastrcture Topology" is set to "SingleReplica". This will ensure that the
+"Infrastructure Topology" is set to "SingleReplica". This will ensure that the
 `router-default` deployment created by the Cluster Ingress Operator will always
 run on the single control plane node, and as a result any
 `*.apps.<cluster>.<base>` DNS entries which originally pointed at the single
