@@ -48,3 +48,9 @@ config:
   # Trailing spaces don't cause any known issues and are often introduced when 
   # updating text to conform to max line length restrictions.
   no-trailing-spaces: false
+
+  # Rules present in newer markdownlint versions that fail across almost all
+  # existing documents
+  emphasis-style: false
+  strong-style: false
+  no-space-in-emphasis: false
