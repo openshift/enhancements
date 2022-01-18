@@ -66,7 +66,7 @@ Motivations include but are not limited to:
 - tags for PV volumes cannot be updated but only set during creation  of volume using `--extra-tags`.Present CSI spec does not support `UpdateVolume` to update volume metadata.
    Restarting csi driver to initiate multiple `CreateVolume` will depend on underlying storage layer idempotency implementation for the operation. It is recommended to use a interface from CSI spec which enforces idempotency gurantees for volume metadata updates.
    In case of AWS EC2  `CreateVolume`, returns `IdempotentParameterMismatch` error when identical request is not found for the same client token.
-   Also, the CSI spec `https://github.com/container-storage-interface/spec/blob/master/spec.md` mentions grpc error code 
+   Also, the CSI spec `https://github.com/container-storage-interface/spec/blob/master/spec.md` mentions grpc error code
    `6 ALREADY_EXISTS` for `a volume corresponding to the specified volume name already exists but is incompatible with the specified capacity_range, volume_capabilities, parameters, accessibility_requirements or volume_content_source`.
 
 ## Proposal
@@ -217,9 +217,13 @@ On upgrade:
 On upgrade from version supporting `experimentalPropagateUserTags`, openshift components that consume the new field should merge `.status.platformStatus.aws` and `.spec.platformSpec.aws`.
 `.spec.platformSpec.aws` can be updated or changed which will override the values from status and a new `.status.platformStatus.aws` will be set.
 
+For installer configuration compatibility, configuration with `experimentalPropagateUserTags` should be supported.
+
 On downgrade:
 
 The status field may remain populated, components may or may not continue to tag newly created resources w/ the additional tags depending on whether or not a given component still has logic to respect the status tags, after the downgrade.
+
+`experimentalPropagateUserTags` field should be generated in installer configuration to support downgrade.
 
 ### Version Skew Strategy
 
