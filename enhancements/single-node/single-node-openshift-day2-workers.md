@@ -138,13 +138,16 @@ to prevent this floating altogether so these workarounds will not be needed.
 
 Finally, performing bootstrap-in-place installation of a "none"-platform single
 control-plane node cluster today using the OpenShift Installer does not provide
-the user with worker node ignition files. As a result, the user is not able to
+the user with a worker node ignition file. As a result, the user is not able to
 manually add worker nodes to the resulting cluster. All current official OCP
-documentation points the user to use "the worker ignition files that get
+documentation points the user to use "the worker ignition file that get
 generated during installation", but these are not currently generated in such
 bootstrap-in-place installation.
 
 ### Goals
+
+- Solve some of the current known problems related to adding few workers to a
+single control-plane node cluster.
 
 - Define a sensible value for the "Infrastructure Topology" parameter in the
 various configurations a single control-plane node cluster may be deployed in.
@@ -157,6 +160,16 @@ manifest, even when doing bootstrap-in-place "none"-platform single
 control-plane node cluster installation
 
 ### Non-Goals
+
+- Deal with the scalability of single control-plane node clusters that have
+additional workers added to them. The absence of multiple control plane nodes
+means that the number of workers/pods that can be supported on such topology is
+even more limited than in a regular 3 control-plane node cluster. Relevant
+documentation may have to point out that the pod limits (or other control-plane
+related limits) that apply to a single control-plane node cluster with no
+workers also apply globally across all additional added workers. If a large
+amount of workers/pods is desired the user would have to re-install the cluster
+as a regular multi control-plane node cluster.
 
 - Deal with clusters that have less nodes than they had during day-1
 installation. The rationale for this being a non-goal is that it seems that
@@ -172,9 +185,10 @@ and operators degrade. User intervention is required to fix this.
 - Deal with expansion of the single-node control-plane by adding more control-plane nodes
 
 - Deal with expansion of clusters that have been installed before the
-implementation of this enhancement (if possible, their expansion may addressed
-of with documentation outlining the steps that the user has to take to enable
-expansion).
+implementation of this enhancement (if possible, their expansion may be
+addressed with documentation outlining the steps that the user has to take to
+enable expansion, e.g. patch the default `IngressController` to have node
+selector targetting the master pool rather than the worker pool).
 
 - Adjust the baremetal platform to support single control-plane node
 installations. The baremetal platforms solves the "floating ingress" issue by
@@ -423,6 +437,21 @@ clusters, and any such difference is naturally not ideal.
 - TBD
 
 ## Alternatives
+
+- If just one worker is needed, require user to add yet another worker so they
+could form a compact 3-node cluster where all nodes are both workers and
+control-plane nodes. This kind of topology is already supported by OCP. This
+will avoid the need for OCP to support yet another topology. It has the obvious
+downside of requiring a "useless" node the user didn't really need. It also
+means the user now has to run more control-plane workloads to facilitate HA -
+for example, 2 extra replicas of the API server which consume a lot of memory
+resources. From an engineering perspective, it would require us to make the
+"Control-plane Topology" parameter dynamic and make sure all operators know to
+react to changes in that parameter (it will have to change from "SingleReplica"
+to "HighlyAvailable" once those 2 new control-plane nodes join the cluster). I
+am not aware of the other engineering difficulties we would encounter when
+attempting to support the expansion of a single-node control-plane into a
+three-node control-plane, but I think they would not be trivial.
 
 - Adjust the "baremetal" platform to support single-node installations and make
 users and the Assisted-Installer use that platform instead of the "none"
