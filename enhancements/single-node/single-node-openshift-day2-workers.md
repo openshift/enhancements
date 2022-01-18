@@ -404,9 +404,9 @@ In the non-goals section it's mentioned that this enhancement does not apply to
 clusters which have been installed prior to the enhancement, so their upgrade
 is not discussed.
 
-This enhancement, to the best of my knowledge, should have no problems persisting
-across any type cluster upgrades. The Test Plan section describes how this will be
-tested.
+This enhancement, to the best of my knowledge, should have no problems
+persisting across cluster upgrades. The Test Plan section describes how this
+will be tested.
 
 ### Version Skew Strategy
 
