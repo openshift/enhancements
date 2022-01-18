@@ -37,7 +37,8 @@ a new resource and controller that will manage Control Plane Machine instances.
 ## Motivation
 
 As OpenShift adoption increases and our managed services offerings become more popular, the manual effort required to
-scale Control Plane Machines as clusters grow or shrink is becoming a significant drain on the OpenShift Dedicated team.
+scale Control Plane Machines as clusters grow or shrink is becoming a significant drain on the SRE Platform team
+managing OpenShift Dedicated (OSD), Red Hat OpenShift on AWS (ROSA), and Azure Red Hat OpenShift (ARO).
 
 The procedure to resize a Control Plane today is lengthy and very involved. It takes a significant amount of time for
 an OpenShift expert to perform. We also document this process for our end users, however due to the complexity of the
@@ -45,6 +46,11 @@ procedure, there is discomfort in recommending this procedure to end users who m
 
 To ensure the long term usability of OpenShift, we must provide an automated way for users to scale their Control Plane
 as and when their cluster needs additional capacity.
+
+As HyperShift adoptions grows, HyperShift will solve the same issue by running hosted Control Planes within management
+clusters. However, HyperShift is not a suitable product for all OpenShift requirements (for example the first management
+cluster) and as such, we see that HA clusters will continue to be used and we must solve this problem to allow the
+continued adoption of HA clusters.
 
 ### Goals
 
@@ -69,10 +75,10 @@ as and when their cluster needs additional capacity.
 A new CRD `ControlPlaneSet` will be introduced into OpenShift and a respective `control-plane-set-operator` will be
 introduced as a new second level operator within OpenShift to perform the operations described in this proposal.
 
-The new CRD will define the specification for creating Machines for the Control Plane. The operator will be responsible
-for ensuring the desired number of Control Plane Machines are present within the cluster as well as providing update
-mechanisms akin to those seen in a StatefulSets and Deployments to allow rollouts of updated configuration to the
-Control Plane Machines.
+The new CRD will define the specification for managing (creating, adopting, updating) Machines for the Control Plane.
+The operator will be responsible for ensuring the desired number of Control Plane Machines are present within the
+cluster as well as providing update mechanisms akin to those seen in a StatefulSets and Deployments to allow rollouts
+of updated configuration to the Control Plane Machines.
 
 ### User Stories
 
@@ -114,7 +120,7 @@ type ControlPlaneSetSpec struct {
     // FailureDomains is the list of failure domains or
     // availability zones in which the ControlPlaneSet should
     // balance the Control Plane Machines.
-    // This will beinjected into the ProviderSpec in the
+    // This will be injected into the ProviderSpec in the
     // appropriate location for the particular provider.
     // +kubebuilder:validation:MinLength:=1
     // +kubebuilder:validation:Required
@@ -212,6 +218,16 @@ type ControlPlaneSetStatus struct {
     // created by the ControlPlaneSet controller that have the desired
     // provider spec.
     UpdatedReplicas int32 `json:"updatedReplicas,omitempty"`
+
+    // Conditions represents the observations of the ControlPlaneSet's current state.
+    // Known .status.conditions.type are: (TODO)
+    // TODO: Identify different condition types/reasons that will be needed.
+    // +patchMergeKey=type
+    // +patchStrategy=merge
+    // +listType=map
+    // +listMapKey=type
+    // +optional
+    Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 ```
 
@@ -458,6 +474,8 @@ the OnDelete update strategy.
 Some open questions currently exist, but are called out in the Recreate Update Strategy notes.
 
 1. How do we wish to introduce this feature into the cluster, should it be a Technical Preview in the first instance?
+2. Do we want this to be an optional add-on (delivered via OLM) or do we want this to be a default operator for future
+   clusters?
 
 ### Test Plan
 
