@@ -1,5 +1,5 @@
 ---
-title: single-node-openshift-day2-workers
+title: single-node-openshift-with-workers
 authors:
   - "@omertuc"
 reviewers:
@@ -23,7 +23,7 @@ replaces:
 superseded-by:
 ---
 
-# Single Node OpenShift Day-2 Workers
+# Single Node OpenShift With Workers
 
 ## Summary
 
