@@ -254,16 +254,16 @@ The following abbreviations are used to get a more compact table -
 
 - `SNO` = Single control-plane node cluster
 
-|Scenario                                |Platform|D1W|D2W|CIT|PIT|CTP|PTP|Is a load balancer currently needed?             |Will a load balancer be needed after proposal?|
-|----------------------------------------|--------|---|---|---|---|---|---|-------------------------------------------------|----------------------------------------------|
-|None platform SNO no workers            |None    |0  |0  |SR |SR |W  |M  |No                                               |No                                            |
-|Cloud platform SNO no workers           |Cloud   |0  |0  |SR |SR |W  |M  |No                                               |No                                            |
-|None platform SNO day1 single worker    |None    |1  |1  |-  |SR |-  |M  |Yes, ingress floats                              |No, ingress pinned to master pool             |
-|Cloud platform SNO day1 single worker   |Cloud   |1  |1  |SR |HA |W  |W  |Yes - provided, ingress floats                   |Yes - provided, there are two ingress replicas|
-|None platform SNO day1 multiple workers |None    |2+ |2+ |-  |SR |-  |M  |Yes, ingress is on two different nodes           |No, one ingress and is pinned to master pool  |
-|Cloud platform SNO day1 multiple workers|Cloud   |2+ |2+ |HA |HA |W  |W  |Yes - provided, ingress is on two different nodes|Yes - provided, there are two ingress replicas|
-|None platform SNO only day2 workers     |None    |0  |1+ |SR |SR |W  |M  |Yes, ingress floats                              |No, ingress pinned to master pool             |
-|Cloud platform SNO only day2 workers    |Cloud   |0  |1+ |SR |SR |W  |M  |Yes - provided, ingress floats                   |Yes - provided, ingress floats                |
+|Scenario                                |Platform|D1W|D2W|CIT|PIT|CTP|PTP|Is a load balancer currently needed?             |Will a load balancer be needed after proposal?|Current Support                     |
+|----------------------------------------|--------|---|---|---|---|---|---|-------------------------------------------------|----------------------------------------------|------------------------------------|
+|None platform SNO no workers            |None    |0  |0  |SR |SR |W  |M  |No                                               |No                                            |Works, supported, tested            |
+|Cloud platform SNO no workers           |Cloud   |0  |0  |SR |SR |W  |M  |No                                               |No                                            |Works, unsupported, tested          |
+|None platform SNO day1 single worker    |None    |1  |1  |-  |SR |-  |M  |Yes, ingress floats                              |No, ingress pinned to master pool             |Impossible to install               |
+|Cloud platform SNO day1 single worker   |Cloud   |1  |1  |SR |HA |W  |W  |Yes - provided, ingress floats                   |Yes - provided, there are two ingress replicas|Works, unsupported, untested        |
+|None platform SNO day1 multiple workers |None    |2+ |2+ |-  |SR |-  |M  |Yes, ingress is on two different nodes           |No, one ingress and is pinned to master pool  |Impossible to install               |
+|Cloud platform SNO day1 multiple workers|Cloud   |2+ |2+ |HA |HA |W  |W  |Yes - provided, ingress is on two different nodes|Yes - provided, there are two ingress replicas|Works, unsupported, untested        |
+|None platform SNO only day2 workers     |None    |0  |1+ |SR |SR |W  |M  |Yes, ingress floats                              |No, ingress pinned to master pool             |Ingress issue, unsupported, untested|
+|Cloud platform SNO only day2 workers    |Cloud   |0  |1+ |SR |SR |W  |M  |Yes - provided, ingress floats                   |Yes - provided, ingress floats                |Works, unsupported, untested        |
 
 Some notes about this table and the decisions made in it:
 
