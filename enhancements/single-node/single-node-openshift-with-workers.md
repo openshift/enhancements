@@ -303,15 +303,15 @@ consequence that non-ingress infrastructure workloads (such as monitoring, for
 example) can no longer benefit from spreading over the worker nodes - since
 they will all also have just 1 replica (as a result of the topology). It's
 worth mentioning that we don't bother pinning those non-ingress infra workloads
-to any particular node, as that would have no benefit. The reason the replica
-must be pinned specifically to the control plane node and not some other
-arbitrary worker node is because it has to be pinned to *some* node, and for
-the sake of simplicity and the sake of consistency with deployments that don't
-have any workers (those with potential to have more workers added to them), we
-choose the control-plane node as the node to which the ingress pod is being
-pinned. We also assume the worker nodes are possibly disposable but the single
-control-plane is "forever", so it wouldn't make sense to pin it to any
-particular worker.
+to any particular node, as that would have no benefit. The reason the
+router-default pod must be pinned specifically to the control plane node and
+not some other arbitrary worker node is because it has to be pinned to *some*
+node, and for the sake of simplicity and the sake of consistency with
+deployments that don't have any workers (those with potential to have more
+workers added to them), we choose the control-plane node as the node to which
+the ingress pod is being pinned. We also assume the worker nodes are possibly
+disposable but the single control-plane is "forever", so it wouldn't make sense
+to pin it to any particular worker.
 
 Looking at the PIT and PTP columns, you can see that under all circumstances
 where the proposed-"Infrastructure Topology" is "SingleReplica" it also makes
