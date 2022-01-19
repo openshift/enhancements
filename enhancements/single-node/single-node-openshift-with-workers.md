@@ -186,9 +186,10 @@ and operators degrade. User intervention is required to fix this.
 
 - Deal with expansion of clusters that have been installed before the
 implementation of this enhancement (if possible, their expansion may be
-addressed with documentation outlining the steps that the user has to take to
-enable expansion, e.g. patch the default `IngressController` to have node
-selector targetting the master pool rather than the worker pool).
+addressed by an upgrade followed with documentation outlining the steps that
+the user has to take to enable expansion, e.g. patch the default
+`IngressController` to have node selector targetting the master pool rather
+than the worker pool).
 
 - Adjust the baremetal platform to support single control-plane node
 installations. The baremetal platforms solves the "floating ingress" issue by
