@@ -146,18 +146,15 @@ bootstrap-in-place installation.
 
 ### Goals
 
-- Solve some of the current known problems related to adding few workers to a
-single control-plane node cluster.
-
-- Define a sensible value for the "Infrastructure Topology" parameter in the
-various configurations a single control-plane node cluster may be deployed in.
-
 - Deal with the "floating ingress" issue encountered in "none"-platform
 single control-plane node clusters which have worker nodes added to them.
 
 - Define how the installer may be modified to generate the worker ignition
 manifest, even when doing bootstrap-in-place "none"-platform single
 control-plane node cluster installation
+
+- Define a sensible value for the "Infrastructure Topology" parameter in the
+various configurations a single control-plane node cluster may be deployed in.
 
 ### Non-Goals
 
@@ -258,9 +255,9 @@ The following abbreviations are used to get a more compact table -
 |----------------------------------------|--------|---|---|---|---|---|---|-------------------------------------------------|----------------------------------------------|------------------------------------|
 |None platform SNO no workers            |None    |0  |0  |SR |SR |W  |M  |No                                               |No                                            |Works, supported, tested            |
 |Cloud platform SNO no workers           |Cloud   |0  |0  |SR |SR |W  |M  |No                                               |No                                            |Works, unsupported, tested          |
-|None platform SNO day1 single worker    |None    |1  |1  |-  |SR |-  |M  |Yes, ingress floats                              |No, ingress pinned to master pool             |Impossible to install               |
+|None platform SNO day1 single worker    |None    |1  |1  |SR |SR |W  |M  |Yes, ingress floats                              |No, ingress pinned to master pool             |Works (with bootstrap), unsupported |
 |Cloud platform SNO day1 single worker   |Cloud   |1  |1  |SR |HA |W  |W  |Yes - provided, ingress floats                   |Yes - provided, there are two ingress replicas|Works, unsupported, untested        |
-|None platform SNO day1 multiple workers |None    |2+ |2+ |-  |SR |-  |M  |Yes, ingress is on two different nodes           |No, one ingress and is pinned to master pool  |Impossible to install               |
+|None platform SNO day1 multiple workers |None    |2+ |2+ |HA |SR |W  |M  |Yes, ingress is on two different nodes           |No, one ingress and is pinned to master pool  |Works (with bootstrap), unsupported |
 |Cloud platform SNO day1 multiple workers|Cloud   |2+ |2+ |HA |HA |W  |W  |Yes - provided, ingress is on two different nodes|Yes - provided, there are two ingress replicas|Works, unsupported, untested        |
 |None platform SNO only day2 workers     |None    |0  |1+ |SR |SR |W  |M  |Yes, ingress floats                              |No, ingress pinned to master pool             |Ingress issue, unsupported, untested|
 |Cloud platform SNO only day2 workers    |Cloud   |0  |1+ |SR |SR |W  |M  |Yes - provided, ingress floats                   |Yes - provided, ingress floats                |Works, unsupported, untested        |
@@ -275,10 +272,6 @@ row of the table - even though we add workers in day 2 to the cluster, the
 benefit from the additional worker nodes for the purposes of highly-available
 infrastructure (as it's running in the cloud, so it has a load-balancer). In
 the future it may be worth revisiting making this value configurable.
-
-The "None platform SNO day1 single/multiple worker" scenario rows aren't really
-possible today as there is no real way to install this kind of cluster. That's
-why their CIT / CTP have been left empty.
 
 It's proposed that the only scenarios in which the "Infrastrcture Topology"
 parameter will be "HighlyAvailable" are when installing a single control-plane
