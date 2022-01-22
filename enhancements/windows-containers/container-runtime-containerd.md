@@ -58,9 +58,9 @@ containerd as the default runtime.
 
 ### Golden Image
 
-vSphere and BYOH use golden images to create Windows VMs. Customers can create a new Windows golden image excluding Docker
-runtime or continue to use the same Windows image with Docker. Once containerd becomes the default runtime, WMCO will
-support Windows golden image with or without Docker.
+vSphere and BYOH use golden images to create Windows VMs. Customers can create a new Windows golden image excluding
+Docker runtime or continue to use the same Windows image with Docker. Once containerd becomes the default runtime, WMCO
+will support Windows golden image with or without Docker.
 
 ### Containerd Migration plan
 
@@ -95,16 +95,17 @@ do business justification due to the high cost and time.
 ## Design Details
 
 We plan to ship containerd 1.6.0 with WMCO. Containerd will be built as a submodule and bundled into the WMCO package.
-As part of the WMCO Windows instance configuration workflow, Containerd service will be started before kubelet starts as kubelet
-requires containerd to be running. Once containerd is started as Windows service, the remaining services will start as the same
-way as they do today. Kubelet's dependency on Docker runtime will be removed and replaced by containerd. A separate folder will be
-created under C:\k\ to store containerd config and related files. In the BYOH case, even after containerd becomes the default
-runtime Docker will continue to run. Users can choose to uninstall Docker or use it for non-Kubernetes related requirements.
-As Docker service is handled by the user, it is up to the user to decide if Docker should continue to run or not.
-When it comes to MachineSet, the user can choose a VM image that doesn't have Docker and containerd will be the only runtime.
-If the MachineSet uses a VM image that comes with Docker, containerd will run along with Docker service. But Kubernetes will
-use only containerd. Customers can stop the Docker service if it is no longer needed. Even if Docker service gets started at any time,
-it can co-exist with containerd.
+As part of the WMCO Windows instance configuration workflow, Containerd service will be started before kubelet starts
+as kubelet requires containerd to be running. Once containerd is started as Windows service, the remaining services will
+start as the same way as they do today. Kubelet's dependency on Docker runtime will be removed and replaced by
+containerd. A separate folder will be created under C:\k\ to store containerd config and related files. In the BYOH
+case, even after containerd becomes the default runtime Docker will continue to run. Users can choose to uninstall
+Docker or use it for non-Kubernetes related requirements. As Docker service is handled by the user, it is up to the
+user to decide if Docker should continue to run or not. When it comes to MachineSet, the user can choose a VM image
+that doesn't have Docker and containerd will be the only runtime. If the MachineSet uses a VM image that comes with
+Docker, containerd will run along with Docker service. But Kubernetes will use only containerd. Customers can stop the
+Docker service if it is no longer needed. Even if Docker service gets started at any time, it can co-exist with
+containerd.
 
 Steps to install containerd as service:
 - scp containerd/related executables into Windows VM
@@ -119,11 +120,11 @@ Current CNI/IPAM will be used for containerd and no changes will be made to HNS-
 steps. The config file which will be used by containerd will point to the same CNI/IPAM executables.
 
 ## WMCO CLI option
-WMCO CLI option 'runtime' will be used to choose containerd as the runtime during the OpenShift 4.10 / WMCO 5.0.0
-development cycle.  In the 4.10 community operator, it will be specified as `--runtime containerd`. In the absence of
-this flag, Docker will become the default runtime and this is how we will release WMCO 5.0.0. We will remove this
-flag in 4.11 and make containerd the default runtime in WMCO 6.0.0. At any given point in time, we have one runtime
-support and will not allow switching between runtime.
+WMCO CLI option 'dockerRuntime' will be used to choose Docker or containerd as the runtime during the OpenShift
+4.10 / WMCO 5.0.0 development cycle.  In the 4.10 community operator, it will be specified as `--dockerRuntime false`.
+In the absence of this flag, Docker will become the default runtime and this is how we will release WMCO 5.0.0. We will
+remove this flag in 4.11 and make containerd the default runtime in WMCO 6.0.0. At any given point in time, we have one
+runtime support and will not allow switching between runtime.
 
 ## Containerd logging
 Containerd can be started with parameters in which we can enable logging and specify the file path to
@@ -162,12 +163,13 @@ The procedure for an upgrade that includes migration to containerd is as follows
   can be well tested before we make it default in WMCO 6.0 release. We will use two test jobs to test all e2e test cases
   in the 4.10 community branch(OKD) and 4.10 branch(ccm OCP)to capture any regression.
   This will help us to identify any issues well before containerd becomes default runtime.
-* containerd doesn't support image-pull-progress-deadline as of now. There is a work in progress PR, [support image pull progress timeout](https://github.com/containerd/containerd/pull/6150),
-  that addresses this shortcoming. Until this gets merged, if Windows image pull takes more time than the default value, we will
-  run into to image pull timeout error. To overcome this issue, Customers can bake required base container images into
-  Windows golden image. If customers still notice timeout error, they should log in to Windows VM and install `ctr or crictl`
-  command-line tool. Users can use one of these tools to pull the container image manually. Upon successful image download,
-  the user can create pods.
+* containerd doesn't support image-pull-progress-deadline as of now. There is a work in progress PR,
+  [support image pull progress timeout](https://github.com/containerd/containerd/pull/6150),
+  that addresses this shortcoming. Until this gets merged, if Windows image pull takes more time than the default value,
+  we will run into to image pull timeout error. To overcome this issue, Customers can bake required base container
+  images into Windows golden image. If customers still notice timeout error, they should log in to Windows VM and
+  install `ctr or crictl` command-line tool. Users can use one of these tools to pull the container image manually.
+  Upon successful image download, the user can create pods.
 * Currently Windows_exporter has been used to collect metrics from Windows node. We do
   have containerd support in [Windows exporter v0.16.0](https://github.com/prometheus-community/Windows_exporter/releases/tag/v0.16.0)
   As of now, there is no feature parity mismatch between Docker and containerd.
@@ -192,15 +194,16 @@ schedule any pods into the Windows node.
 #### Support Procedures
 
 If containerd service doesn't get started, kubelet will not be in ready state. Windows node will not be able to schedule
-any pods. Containerd logs should be collected via must-gather script. We will check containerd service status and update the
-WMCO event log if the service is not up and running. In addition, we will be generating a Kubernetes event.
+any pods. Containerd logs should be collected via must-gather script. We will check containerd service status and update
+the WMCO event log if the service is not up and running. In addition, we will be generating a Kubernetes event.
 
 ### Test Plan
 
-We will use one OKD job and one ccm OCP job to test WMCO with the containerd as the runtime using the --runtime CLI option.
-This is for Openshift 4.10 and in OpenShift 4.11 we will migrate all the jobs to containerd.
-All other e2e tests will run as is, covering the currently supported platforms with the Docker runtime. We should make sure
-there is no regression due to containerd runtime. Containerd is agnostic to the platform so testing on any platform should be fine.
+We will use one OKD job and one ccm OCP job to test WMCO with the containerd as the runtime using the `--dockerRuntime
+ false` CLI option. This is for Openshift 4.10 and in OpenShift 4.11 we will migrate all the jobs to containerd.
+All other e2e tests will run as is, covering the currently supported platforms with the Docker runtime. We should make
+sure there is no regression due to containerd runtime. Containerd is agnostic to the platform so testing on any platform
+should be fine.
 
 ### Graduation Criteria
 
@@ -208,11 +211,13 @@ This enhancement started as tech preview.
 
 #### Dev Preview -> Tech Preview
 
-The community WMCO 5.0.0 will be released with containerd as the runtime allowing customers to preview the feature using OKD / OCP 4.10.
+The community WMCO 5.0.0 will be released with containerd as the runtime allowing customers to preview the feature
+using OKD / OCP 4.10.
 
 #### Tech Preview -> GA
 
-Red Hat certified WMCO 6.0.0 will be released against OCP 4.11 with containerd as the default runtime removing all support for Docker.
+Red Hat certified WMCO 6.0.0 will be released against OCP 4.11 with containerd as the default runtime removing all
+support for Docker.
 
 ### Upgrade / Downgrade Strategy
 
