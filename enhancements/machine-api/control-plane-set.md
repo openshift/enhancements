@@ -5,12 +5,15 @@ authors:
 reviewers:
   - TBD
 approvers:
-  - TBD
+  - "@sttts"
+  - "@soltysh"
+  - "@tkashem"
+  - "@hasbro17"
 api-approvers:
   - TBD
 creation-date: 2022-01-11
 last-updated: 2022-01-17
-tracking-lin:
+tracking-link:
   - TBD
 replaces:
   - "[/enhancements/machine-api/control-plane-machinesets.md](https://github.com/openshift/enhancements/blob/master/enhancements/machine-api/control-plane-machinesets.md)"
@@ -114,12 +117,13 @@ type ControlPlaneSetSpec struct {
 
     // Strategy defines how the ControlPlaneSet will update
     // Machines when it detects a change to the ProviderSpec.
+    // +kubebuilder:default:={type: RollingUpdate}
     // +optional
     Strategy ControlPlaneSetStrategy `json:"strategy,omitempty"`
 
-    // FailureDomains is the list of failure domains or
-    // availability zones in which the ControlPlaneSet should
-    // balance the Control Plane Machines.
+    // FailureDomains is the list of failure domains (sometimes called
+    // availability zones) in which the ControlPlaneSet should balance
+    // the Control Plane Machines.
     // This will be injected into the ProviderSpec in the
     // appropriate location for the particular provider.
     // +kubebuilder:validation:MinLength:=1
@@ -146,13 +150,14 @@ type ControlPlaneSetTemplate struct {
     // +kubebuilder:validation:Required
     ObjectMeta metav1.ObjectMeta `json:"metadata"`
 
-    // ProviderSpec contains the platform specific details
+    // Spec contains the desired configuration of the Control Plane Machines.
+    // The ProviderSpec within contains platform specific details
     // for creating the Control Plane Machines.
-    // It should be complete apart from the platform specific
-    // failure domain field. This will be overriden when the
-    // Machines are created based on the FailureDomains field.
+    // The ProviderSe should be complete apart from the platform specific
+    // failure domain field. This will be overriden when the Machines
+    // are created based on the FailureDomains field.
     // +kubebuilder:validation:Required
-    ProviderSpec *runtime.RawExtension `json:"providerSpec"`
+    Spec machinev1beta1.MachineSpec `json:"spec"`
 }
 
 type ControlPlaneSetStrategy struct {
@@ -314,6 +319,10 @@ The RollingUpdate strategy will be the default. It mirrors the RollingUpdate str
 Deployments. When a change is required to be rolled out, the Machine controller will create a new Control Plane
 Machine, wait for this to become ready, and then remove the old Machine. It will repeat this process until all Machines
 are up to date.
+During this process the etcd membership will be protected by the mechanism described in a [separate enhancement](https://github.com/openshift/enhancements/pull/943),
+in particular it isn't essential that the Control Plane Machines are updated in a rolling fashion for etcd sakes, though
+to avoid potential issues with the spread of etcd members across availability zones during update, the ControlPlaneSet
+will perform a rolling update zone by zone.
 
 At first, we will not allow any configuration of the RollingUpdate (as you might see in a Deployment) and will pin the
 surge to 1 replica. We may wish to change this later once we have more data about the stability of this operator and
@@ -347,6 +356,7 @@ There are a number of open questions related to this update strategy:
 - Should we teach the etcd operator to remove the protection mechanism when the ControlPlaneSet is configured with this
   strategy?
 - To minimise risk, should we allow this strategy only on certain platforms? (Eg disallow the strategy on public clouds)
+- Do we want to name the update strategy in a way that highlights the risks associated, eg `RecreateUnsupported`?
 
 ##### The OnDelete update strategy
 
@@ -375,9 +385,8 @@ removed by the Machine controller in the normal way.
 
 #### Removing/disabling the ControlPlaneSet
 
-As some users may want to remove or disable the ControlPlaneSet, and we have no bulletproof way to prevent a user
-deleting the ControlPlaneSet, a finalizer will be placed on the ControlPlaneSet to allow the controller to ensure a
-safe removal of the ControlPlaneSet, while leaving the Control Plane Machines in place.
+As some users may want to remove or disable the ControlPlaneSet, a finalizer will be placed on the ControlPlaneSet to
+allow the controller to ensure a safe removal of the ControlPlaneSet, while leaving the Control Plane Machines in place.
 
 Notably it will need to ensure that there are no owner references on the Machines pointing to the ControlPlaneSet
 instances. This will prevent the garbage collector from removing the Control Plane Machines when the ControlPlaneSet is
@@ -535,6 +544,8 @@ functionality of other APIs.
     minimal
   - The failure policy will be to fail closed, as such, when the webhook is down, no update operations will succeed
   - The Kube API server operator already detects failing webhooks and as such will identify the issue early
+  - The ControlPlaneSet is not a critical cluster operator. Everything done by the operator described here can be
+    done manually to the machine(set) objects.
 
 #### Support Procedures
 
