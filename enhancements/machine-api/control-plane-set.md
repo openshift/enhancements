@@ -126,9 +126,12 @@ type ControlPlaneSetSpec struct {
     // the Control Plane Machines.
     // This will be injected into the ProviderSpec in the
     // appropriate location for the particular provider.
+    // This field is optional on platforms that do not require placement
+    // information, eg OpenStack.
     // +kubebuilder:validation:MinLength:=1
     // +kubebuilder:validation:Required
-    FailureDomains []string `json:"failureDomains"`
+    // +optional
+    FailureDomains []string `json:"failureDomains,omitempty"`
 
     // Label selector for Machines. Existing Machines selected by this
     // selector will be the ones affected by this ControlPlaneSet.
@@ -295,13 +298,55 @@ MachineSets have a single `ProviderSpec` which defines the configuration for the
 The failure domain (sometimes called availability zone) is a part of this provider spec and as such, defines that all
 Machines within the Machineset share a failure domain.
 
-This is undesirable for Control Plane Machines as we wish to have them spread across multiple avavailability zones to
+This is undesirable for Control Plane Machines as we wish to have them spread across multiple availability zones to
 reduce the likelihood of datacenter level faults degrading the control plane.
 To this end, the failure domains for the control plane will be set on the ControlPlaneSet spec directly.
 
 When creating Machines, the ControlPlaneSet controller will balance the Machines across these failure domains by
 injecting the desired failure domain for the new Machine into the provider spec based on the platform specific failure
 domain field.
+
+##### Failures domains
+
+The `FailureDomains` field is expected to be populated by the user/installer based on the topology of the Control Plane
+Machines. For example, we expect on AWS that this will contain a list of availability zones within a single region.
+Note, we are explicitly not expecting users to add different regions to the the `FailureDomains` as we do not support
+running OpenShift across multiple regions.
+
+The following table denotes the field on each platform into which the list of failure domains will be mapped:
+
+
+| Platform  | ProviderSpec Field          |
+| --------- | --------------------------- |
+| AWS       | .placement.availabilityZone |
+| Azure     | .zone                       |
+| GCP       | .zone                       |
+| vSphere   | .workspace.datacenter       |
+| OpenStack | .availabilityZone           |
+
+Note that on some platforms (eg OpenStack) the failure domain field is optional, as such, the `FailureDomains` field
+must also be optional.
+
+Open Questions:
+- Is varying a single field sufficient for balancing Machines across zones on all platforms, eg on vSphere do we need
+  to be able to vary the entire `.workspace`?
+  - We could include an overlays field that maps failure domain names to a subset of the `ProviderSpec`. In this case
+    rather than setting the fields as mapped above, we would overlay the fields from the overlay for each zone
+    - eg.
+    ```
+    failureDomains: ["myZone1", "myZone2"]
+    failureDomainOverlays:
+      myZone1:
+        workspace:
+          vCenter: my.vcenter.com:1234
+          datacenter: mydatacenter1
+          datastore: mydatastore1
+      myZone2:
+        workspace:
+          vCenter: my.vcenter.com:1234
+          datacenter: mydatacenter2
+          datastore: mydatastore2
+    ```
 
 #### Ensuring Machines match the desired state
 
