@@ -93,9 +93,9 @@ of updated configuration to the Control Plane Machines.
   underlying hardware of my control plane and have these changes safely applied using immutable hardware concepts
 - As a cluster administrator of OpenShift, I would like to be able to control rollout of changes to my Control Plane
   Machines such that I can test changes with a single replica before applying the change to all replicas
-- As a cluster administrator of OpenShift with restricted hardware capacity, I would like to be able to scale down my
-  control plane before adding new Control Plane Machines with newer configuration, notably, my environment does not
-  have capacity to add additional Machines during updates
+- (Future work) As a cluster administrator of OpenShift with restricted hardware capacity, I would like to be able to   
+  scale down my control plane before adding new Control Plane Machines with newer configuration, notably, my
+  environment does not have capacity to add additional Machines during updates
 
 ### API Extensions
 
@@ -366,7 +366,11 @@ the etcd protection mechanism it relies on.
 We expect this strategy to be used in most applications of the ControlPlaneSet, in particular it can only not be used
 in environments where capacity is very limited and a surge of any control plane capacity is unavailable.
 
-##### The Recreate update strategy
+##### The Recreate update strategy (FUTURE WORK)
+
+Note: This strategy is not planned for implementation in the initial phase of this project. There are a number of
+open questions that need to be ironed out and the use case is not immediately required with OpenShift.
+The details of the strategy are left here as a basis of the future work.
 
 The Recreate strategy mirrors the Recreate strategy familiar to users from Deployments.
 When a change is required to be rolled out, the Machine controller will first remove a Control Plane Machine, wait for
@@ -384,6 +388,9 @@ protection if the Machine is already marked for deletion.
 This strategy introduces risk into the update of the Machines. While the old Machine is being drained/removed and the
 new Machine is being provisioned, etcd quorum is at risk as a member has been removed from the cluster. In most
 circumstances this would leave the cluster with just 2 etcd members.
+This poses a similar risk to the etcd cluster as is present during a cluster upgrade when the Machine Config Daemon
+reboots the Control Plane Machines, however, in this case, the duration of the member being down is expected to be
+much longer than in the update process. For example baremetal clusters can take over an hour to reprovision a host.
 
 There are a number of open questions related to this update strategy:
 - Are we comfortable offering this strategy given the risks that it poses?
@@ -405,6 +412,11 @@ This strategy will allow for explicit control for end users to decide when their
 In particular it will also allow them to have different specs across their control plane.
 While in the normal case this is discouraged, this could be used for short periods to test new configuration before
 rolling the updated configuration to all Control Plane Machines.
+
+Note that the OnDelete strategy is similar to the RollingUpdate strategy in that it needs to be able to add new
+Machines to the cluster to function. It can be thought of as a slower, more controlled RollingUpdate strategy where the
+user decides when each Control Plane Machine is replaced, and marks it for replacement by deleting it.
+Otherwise the replacement is identical to the RollingUpdate strategy.
 
 #### Protecting etcd quorum during update operations
 
