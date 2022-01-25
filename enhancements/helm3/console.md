@@ -105,13 +105,10 @@ kind: HelmChartRepository
 metadata:
   name: my-enterprise-chart-repo
 spec:
-  url: https://my.chart-repo.org/stable
-
-  # optional and only needed for UI purposes
-  displayName: myChartRepo
-
-  # optional and only needed for UI purposes
-  description: my private chart repo
+  # Optional: human readable repository name, it is used by UI for displaying purposes
+  name: my-enterprise-chart-repo
+  connectionConfig:
+     url: https://my.chart-repo.org/stable
 ```
 
 An operator would watch for changes on them and reconfigure the chart repository proxy which is used to power the UI experience in OpenShift today..
@@ -144,20 +141,18 @@ kind: HelmChartRepository
 metadata:
   name: stable
 spec:
-  url: https://kubernetes-charts.storage.googleapis.com
-
-  displayName: Public Helm stable charts
-
-  description: Public Helm stable charts hosted on HelmHub
+  name: stable
+  connectionConfig:
+    url: https://kubernetes-charts.storage.googleapis.com
 ---
 apiVersion: helm.openshift.io/v1beta1
 kind: HelmChartRepository
 metadata:
   name: incubator
 spec:
-  url: https://kubernetes-charts-incubator.storage.googleapis.com
-
-  displayName: Public Helm charts in incubator state
+  name: incubator
+  connectionConfig:
+    url: https://kubernetes-charts-incubator.storage.googleapis.com
 EOF
 
 $ kubectl get helmchartrepositories
@@ -206,7 +201,7 @@ $ helm install mysql stable/mysql
 3) Similar changes would be proposed to all `helm` application lifecycle commands to honour the presence of in-cluster representations of chart repository configurations.
 
 
-#### Alternatives
+#### Alternative Methods
 
 #### 1. The configuration could be embedded into cluster-wide [`Console` config](https://github.com/openshift/api/blob/master/config/v1/types_console.go#L26)
 
