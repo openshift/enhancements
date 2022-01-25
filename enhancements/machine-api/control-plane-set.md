@@ -321,32 +321,22 @@ The following table denotes the field on each platform into which the list of fa
 | AWS       | .placement.availabilityZone |
 | Azure     | .zone                       |
 | GCP       | .zone                       |
-| vSphere   | .workspace.datacenter       |
+| vSphere   | TBD (see below)             |
 | OpenStack | .availabilityZone           |
 
 Note that on some platforms (eg OpenStack) the failure domain field is optional, as such, the `FailureDomains` field
 must also be optional.
 
-Open Questions:
-- Is varying a single field sufficient for balancing Machines across zones on all platforms, eg on vSphere do we need
-  to be able to vary the entire `.workspace`?
-  - We could include an overlays field that maps failure domain names to a subset of the `ProviderSpec`. In this case
-    rather than setting the fields as mapped above, we would overlay the fields from the overlay for each zone
-    - eg.
-    ```
-    failureDomains: ["myZone1", "myZone2"]
-    failureDomainOverlays:
-      myZone1:
-        workspace:
-          vCenter: my.vcenter.com:1234
-          datacenter: mydatacenter1
-          datastore: mydatastore1
-      myZone2:
-        workspace:
-          vCenter: my.vcenter.com:1234
-          datacenter: mydatacenter2
-          datastore: mydatastore2
-    ```
+###### Failure Domains on vSphere
+
+As of OpenShift 4.10, there is no concept of a zone within vSphere and as such we would expect that the `FailureDomains`
+would be omitted for vSphere.
+
+However, [there is future work](https://github.com/openshift/enhancements/pull/918) to include zone support for vSphere
+within 4.11. Once this is implemented, the Machine API provider for vSphere will understand the concept of zones,
+defined within the `Infrastructure` resource.
+The ControlPlaneSet will then be able to balance Machines across the different zones by setting the new zone information
+within the provider specs as it does on other platforms.
 
 #### Ensuring Machines match the desired state
 
