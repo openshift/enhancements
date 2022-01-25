@@ -25,9 +25,9 @@ status: implementable
 
 ## Summary
 
-The purpose of this enhancement is to ensure that all Windows nodes managed by the Windows Machine Config Operator (WMCO)
-maintain an expected state. With health management implemented, WMCO will automatically ensure that OpenShift related
-services running on the underlying Windows instances are configured, and have a state inline with the
+The purpose of this enhancement is to ensure that all Windows nodes managed by the Windows Machine Config Operator 
+(WMCO) maintain an expected state. With health management implemented, WMCO will automatically ensure that OpenShift 
+related services running on the underlying Windows instances are configured, and have a state inline with the
 expectations of the installed WMCO version.
 
 ## Motivation
@@ -43,7 +43,8 @@ and the node upgrade path from any WMCO version to another is codified through C
 ### Goals
 
 * Maintain the `Ready` state of Windows Nodes to ensure Windows workloads can be run without interruption.
-* Ensuring WMCO-managed Windows services on the instances associated with Windows Node objects are in the expected state and configured with the expected values:
+* Ensuring WMCO-managed Windows services on the instances associated with Windows Node objects are in the expected state
+  and configured with the expected values:
   + Kubernetes components
   + Node-level networking components
   + Container runtime
@@ -53,19 +54,21 @@ and the node upgrade path from any WMCO version to another is codified through C
 ### Non-Goals
 
 * Diagnosing or remediating generic Windows issues, unrelated to changes made by WMCO.
-* Cluster-level resource management, such as deleting or re-creating WMCO-configured Machines that enter an unrecoverable state (this is a responsibility of [MachineHealthChecks](https://docs.openshift.com/container-platform/latest/machine_management/deploying-machine-health-checks.html)).
+* Cluster-level resource management, such as deleting or re-creating WMCO-configured Machines that enter an 
+  unrecoverable state (this is a responsibility of [MachineHealthChecks](https://docs.openshift.com/container-platform/latest/machine_management/deploying-machine-health-checks.html)).
 
 
 ## Proposal
 
-Currently, Windows Node configuration process is split between two components, WMCO and [WMCB](https://github.com/openshift/windows-machine-config-bootstrapper/).
-WMCB is a program which performs a one-shot configuration of a Windows instance, to ensure that it can become a worker
-Node.
+Currently, Windows Node configuration process is split between two components, WMCO and 
+[WMCB](https://github.com/openshift/windows-machine-config-bootstrapper/). WMCB is a program which performs a one-shot 
+configuration of a Windows instance, to ensure that it can become a worker Node.
 
 To accomplish the goals listed in this enhancement, I am proposing that WMCB be converted into a daemon,
 Windows Instance Config Daemon (WICD). WICD will have the following responsibilities:
 * WICD maintains current responsibilities of bootstrapping kubelet through the `bootstrap` command.
-* Using the configuration provided by a ConfigMap created by WMCO, WICD maintains the state of Windows Services on the instance.
+* Using the configuration provided by a ConfigMap created by WMCO, WICD maintains the state of Windows Services on the 
+  instance.
 * WICD reverts all changes made to an instance when run with the `cleanup` command, and also deletes the Node
   object.
 
