@@ -28,7 +28,8 @@ status: implementable
 The purpose of this enhancement is to ensure that all Windows nodes managed by the Windows Machine Config Operator 
 (WMCO) maintain an expected state. With health management implemented, WMCO will automatically ensure that OpenShift 
 related services running on the underlying Windows instances are configured, and have a state inline with the
-expectations of the installed WMCO version.
+expectations of the installed WMCO version. As the shift to [containerd](container-runtime-containerd.md) is imminent,
+this enhancement is written considering containerd as the only supported container runtime.
 
 ## Motivation
 
@@ -66,7 +67,10 @@ configuration of a Windows instance, to ensure that it can become a worker Node.
 
 To accomplish the goals listed in this enhancement, I am proposing that WMCB be converted into a daemon,
 Windows Instance Config Daemon (WICD). WICD will have the following responsibilities:
-* WICD maintains current responsibilities of bootstrapping kubelet through the `bootstrap` command.
+* As part of the node `bootstrap` phase, WICD will configure the containerd runtime and start it as a Windows service
+  based on its definition in the services ConfigMap.
+* WICD will also maintain current responsibilities of starting kubelet as a service through the `bootstrap` command. 
+  WICD will fully configure kubelet in one shot, as everything required will be available in the services ConfigMap.
 * Using the configuration provided by a ConfigMap created by WMCO, WICD maintains the state of Windows Services on the 
   instance.
 * WICD reverts all changes made to an instance when run with the `cleanup` command, and also deletes the Node
@@ -74,10 +78,16 @@ Windows Instance Config Daemon (WICD). WICD will have the following responsibili
 
 To enable this, WMCO will have these changes in responsibility:
 * WMCO will no longer configure the Windows services on Windows instances, except for WICD.
+* WMCO will take over the parsing of the worker ignition file. This is because, as the maintainer of the services
+  ConfigMap, WMCO provide the expected state of the kubelet service to WICD. This requires information found within the
+  ignition file. Note that WMCO will be able to provide all the information needed to fully configure kubelet right away
+  since [CNI configuration is no longer provided to kubelet](https://github.com/kubernetes/kubernetes/pull/106907).
+* WMCO will copy files obtained from parsing the worker ignition onto Windows instances as part of the payload.
+  These files include the bootstrap kubeconfig and the client CA certificate needed to authenticate with the API server.
 * WMCO will create and maintain a ConfigMap which provides WICD with the specifications for each Windows service that
   must be created on a Windows instance.
-* WMCO will invoke the `bootstrap` command of WICD when initially adding a Windows instance to the cluster. This will
-  take the worker ignition file as an input, and will not involve the services ConfigMap.
+* WMCO will invoke the `bootstrap` command of WICD when initially adding a Windows instance to the cluster. 
+  This will involve the services ConfigMap in order to start the containerd runtime and kubelet services.
 * WMCO will invoke the `controller` command to run WICD as a Windows service on the instance.
 * WMCO will invoke the `cleanup` command of WICD when removing an instance from the cluster. WMCO will no longer
   delete the Node object.
@@ -112,6 +122,9 @@ N/A
   To reduce the risk of this, the `MaxConcurrentReconciles` option can be provided when initalizing the ConfigMap
   controller. This will enable the controller to process service ConfigMap events that occur while WMCO is handling
   its BYOH configuration responsibilities.
+* WMCO will not default to containerd as the container runtime until the 6.0.0 timeframe. Therefore, we will be using a 
+  runtime flag `dockerRuntime=false` introduced by the containerd enhancement to develop during the 5.y.z cycle.
+  This flag will be dropped in WMCO 6.0.0.
 
 ## Design Details
 
@@ -129,7 +142,6 @@ If an entity attempts to create a services ConfigMap with incorrect values, WMCO
 This will resolve a scenerio in which the ConfigMap controller is busy configuring Windows instances, and a user
 deletes and recreates the service ConfigMap with incorrect values, before the controller has a chance to re-create
 the ConfigMap.
-
 
 The services ConfigMap contains two keys: `services`, and `files`. The values for both keys are JSON objects.
 The `services` key contains all data required to configure the required Windows services on any instance that is to be
@@ -150,7 +162,8 @@ added to the cluster as a Node. The proposed schema is as follows:
       "name": "string within command field that will be substituted",
       "path": "location of the PowerShell script to be run, in order to get its output"
     },
-    "priority": "integer that will be used to order the creation of the services, priority 1 is created first"
+    "bootstrap": "boolean flag indicating whether this service should be handled as part of node bootstrapping",
+    "priority": "non-negative integer that will be used to order the creation of the services, priority 0 is created first"
   }
 ]
 ```
@@ -168,6 +181,11 @@ When making use of a PowerShell script, retries should be present within the scr
 is waiting for the HNS network to be created in order to create an HNS endpoint. In that specific case, the PowerShell
 script which creates the endpoint should include a retry period which waits for the needed Network to exist.
 
+Services marked with `bootstrap: true` will start before any others. Bootstrap services cannot depend on a non-bootstrap
+service; WICD will throw an error if this is detected. Similarly, each service that has the bootstrap flag set as true
+must have a higher priority than all non-bootstrap services. WICD will throw an error if this is not the case.
+There should be no overlap in the priorities of bootstrap services and controller services.
+
 For example, if the service ConfigMap had an entry with the following data:
 ```json
 {
@@ -182,6 +200,7 @@ For example, if the service ConfigMap had an entry with the following data:
     "path": "C:\k\scripts\get_net_ip.ps"
   },
   "dependencies": [],
+  "bootstrap": false,
   "priority": 2
 }
 ```
@@ -190,7 +209,8 @@ WICD would know to create the service named `new-service` with the value of the 
 name of the instance's Node, and the output of the PowerShell script located at `C:\k\scripts\get_net_ip.ps`, as the
 value of the argument --variable-arg2. WICD will be aware of the proper Node object, as it searching for a Node with an
 internal IP equivalent to the IP of the instance.
-This service has no dependencies, and should be created only after all services with priority 1 have been created.
+This service is not marked as a bootstrap service, so it will be started by WICD when run with the `controller` command.
+It should be created only after all bootstrap services and those with priorites 0 and 1 have been created.
 
 The `files` key contains the path and checksum of files copied to the instance by WMCO. This will be used by WICD to
 validate that essential files have not been tampered with.
@@ -224,8 +244,22 @@ For Node configuration WICD will have two separate responsibilities:
 
 #### Bootstrap command
 
-When run with the `bootstrap` command, WICD will do the steps required to ensure that Node is created
-for the instance. This functionality is currently implemented within WMCB with the `init-kubelet` command.
+When run with the `bootstrap` command, WICD will do the steps required to ensure that Node is created for the instance. 
+The `bootstrap` command will start all services that have a `bootstrap` value of true, and exclusively these services.
+
+The `bootstrap` command will have the responsibility of starting the containerd service. This is becuase the kubelet
+service has a dependency on the container runtime; the container runtime must have a reachable endpoint
+(i.e. `\\.\pipe\containerd-containerd` is open and usable) when kubelet is initialized (with the `container-runtime`
+and `container-runtime-endpoint` parameters supplied). The containerd service will be configured based on the
+information in the services ConfigMap, a priority 0 service with no dependencies that points to the location of
+CNI plug-ins on the instance. Although CNI config is populated later in the `bootstrap` phase after hybrid-overlay runs,
+pointing the containerd config to this location is enough to ensure that the service picks up networking config changes
+without erroring out on start-up or requiring a restart.
+
+The rest of the functionality is reading the kubelet configuration from the service ConfigMap and starting the kubelet 
+service. A key note is that, since networking configuration is now the container runtime's responsibility, kubelet can 
+be fully configured upon service creation, no longer requiring a separate intitialization stage then a later restart.
+
 WICD will wait for the Node to be created, and cordon it, as the Node is not ready for workloads at this point.
 
 #### Running as a Windows service
