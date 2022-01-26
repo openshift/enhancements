@@ -389,14 +389,14 @@ receivers:
 #### RBAC
 
 The cluster monitoring operator ships a new cluster role
-`alertmanager-config-edit` that grants all actions on `AlertmanagerConfig`
+`alert-routing-edit` that grants all actions on `AlertmanagerConfig`
 custom resources.
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: alertmanager-config-edit
+  name: alert-routing-edit
 rules:
 - apiGroups:
   - monitoring.coreos.com
@@ -412,7 +412,7 @@ a given namespace.
 
 ```bash
 oc -n <namespace> adm policy add-role-to-user \
-  alertmanager-config-edit <user> --role-namespace <namespace>
+  alert-routing-edit <user> --role-namespace <namespace>
 ```
 
 This role complements the existing `monitoring-edit`, `monitoring-rules-edit` and `monitoring-rules-view` roles.
