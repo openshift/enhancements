@@ -86,6 +86,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9102  | kube-proxy | sdn | 4.7 | metrics, third-party network plugins only |
 | 9103  | ovn-kubernetes node kube-rbac-proxy | sdn || metrics |
 | 9105  | ovn-kubernetes node kube-rbac-proxy-ovn-metrics | sdn | 4.10 | metrics |
+| 9106  | sdn controller kube-rbac-proxy | sdn | 4.10 | control plane only, sdn only |
 | 9200-9219  | various CSI drivers | storage | 4.8 | metrics |
 | 9258  | cluster-cloud-controller-manager-operator | cluster infra | 4.9 | metrics, control plane only |
 | 9446  | baremetal-operator | kni | 4.9 | healthz; baremetal provisioning, control plane only |
