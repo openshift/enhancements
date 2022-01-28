@@ -540,7 +540,36 @@ Some open questions currently exist, but are called out in the Recreate Update S
 
 ### Test Plan
 
-TBD
+As this project operates solely on resources within the Kubernetes environment, we will aim to leverage the controller
+runtime [envtest](https://book.kubebuilder.io/reference/envtest.html) project to write an extensive integration test
+suite for the main functionality of the new operator.
+
+In particular, tests should include:
+- Behaviour when there is no `ControlPlaneMachineSet` within the cluster
+- Behaviour when a new `ControlPlaneMachineSet` is created
+  - What happens with regard to the adoption of existing Control Plane Machines
+  - What happens if the configuration differs from the existing Machines within the cluster (per strategy)
+  - How does the ClusterOperator status present during the adoption
+  - What happens if the name is wrong or there are multiple `ControlPlaneMachineSets`
+  - How does the status get updated during this process
+- Behaviour during a configuration change
+  - How does the RollingUpdate strategy behave
+  - How does the OnDelete strategy behave
+  - How does the status get updated during rollouts
+- Behaviour when a `ControlPlaneMachineSet` is removed
+  - The effect on the Machines (removing owner references etc)
+  - Removal of the finalizer
+
+Notably, these tests will involve a large amount of simulation as we won't have a running Machine controller, nor will
+we have an etcd operator adding Machine deletion hooks. The functions of these two operators will be simulated to
+exercise the `ControlPlaneMachineSet` operator based on the behaviours that the operator relies on.
+
+As this isn't a true E2E test, we will also duplicate a number of the above tests into an E2E suite that can run on a
+real cluster. This E2E suite has the potential to be very disruptive, we expect that a sufficiently well written
+integration suite should prevent this however.
+
+We will ensure that the origin E2E suite is updated to include tests for this component to prevent regressions in either
+the etcd operator or Machine API ecosystem from breaking the functionality provided by this operator.
 
 ### Graduation Criteria
 
