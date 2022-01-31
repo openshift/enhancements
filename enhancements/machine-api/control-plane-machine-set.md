@@ -464,6 +464,20 @@ We do not recommend that UPI users attempt to adopt their control plane instance
 likelihood that they cannot create an accurate configuration to replicate the original control plane instances. This
 limitation also limits the `ControlPlaneMachineSet` operator to an IPI only operator.
 
+#### Naming of Control Plane Machines owned by the ControlPlaneMachineSet
+
+In an IPI OpenShift cluster, the Control Plane Machines are named after the cluster ID followed by an index, for example
+`my-openshift-cluster-abcde-master-0`. As we will need to create additional Machines during replacement operations, we
+cannot reuse the names of the existing Machines. Instead we will use the `generateName` field within the metadata to
+create a random suffix for the new Machines, replacing the index of current Machines. For example, Machines created
+by a `ControlPlaneMachineSet` may have a name such as `my-openshift-cluster-abcde-master-fghij`.
+
+As users can today replace their Machines with differently named Machines (eg as part of a recovery process), we do not
+expect other components to be relying on the index of the Machines for any function within OpenShift, but we may
+discover during testing something that is currently unknown to us. If we discover issues with other components relying
+on a particular naming scheme for the Control Plane Machines, we will need to solve this issue within the other
+component.
+
 #### Delivery via the core OpenShift payload
 
 This new operator will form part of the core OpenShift release payload for clusters installed on/upgrading to OpenShift
