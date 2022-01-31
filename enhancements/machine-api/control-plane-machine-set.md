@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - TBD
 creation-date: 2022-01-11
-last-updated: 2022-01-17
+last-updated: 2022-01-31
 tracking-link:
   - TBD
 replaces:
@@ -227,6 +227,12 @@ type ControlPlaneMachineSetStatus struct {
     // created by the ControlPlaneMachineSet controller that have the desired
     // provider spec.
     UpdatedReplicas int32 `json:"updatedReplicas,omitempty"`
+
+    // UnavailableReplicas is the number of Control Plane Machines that are
+    // still required before the ControlPlaneMachineSet reaches the desired
+    // available capacity. When this value is non-zero, the number of
+    // ReadyReplicas is less than the desired Replicas.
+    UnavailableReplicas int32 `json:"unavailableReplicas,omitempty"`
 
     // Conditions represents the observations of the ControlPlaneMachineSet's current state.
     // Known .status.conditions.type are: (TODO)
@@ -498,6 +504,49 @@ this new operator should be added to the core for the following reasons:
 - The operator adds a lot of value for recovery of failed Control Plane Machines in clusters using Machine API. If the
   operator is installed by default, users are more likely to be able to correctly create new Machines during the
   cluster recovery process.
+
+#### How does this new operator fit within the Cluster API landscape
+
+Within Cluster API, a concept exists known as a Control Plane Provider. This component, currently with a single upstream
+reference implementation based on KubeADM, is intended to instantiate and manage a control plane within for the
+Kubernetes guest cluster.
+
+The Control Plane Provider is responsible not only for creating the infrastructure for the Control Plane Machines but
+also etcd and the control plane Kubernetes components (API server, Controller Manager, Scheduler, Cloud Controller
+Manager). Within OpenShift, various different operators implement the management and responsibility of these components,
+however, to date we do not have a Machine Infrastructure operator that fits this role.
+
+In a future iteration of the `ControlPlaneMachineSet`, we could use it to satisfy the Cluster API Control Plane Provider
+contract and fill the role within OpenShift clusters running on CAPI. To ensure that this is a possibility, we are
+planning to make the `ControlPlaneMachineSet` compatible, as much as possible, with the
+[CRD contract](https://cluster-api.sigs.k8s.io/developer/architecture/controllers/control-plane.html#crd-contracts)
+for the Control Plane Provider in Cluster API.
+Importantly, we are designing the CRD API with the intention of making it API compatible in the future without making
+any breaking changes or needing to bump the API version of the `ControlPlaneMachineSet`.
+
+The notable exception to this, is that because Cluster API uses separate resources for Machine templates, and Machine
+API embeds these directly within the spec, we will follow the Machine API convention in the first iteration of this
+CRD and may evolve it at a later date by adding the additional fields required to satisfy the Machine template within
+Cluster API.
+
+As Cluster API expects a `machineTemplate` field within the Control Plane Provider, we are using `template` for the
+Machine API Machine template and will be able to add the Cluster API Machine template at a later date.
+We are aiming to implement the operator in a way such that it would be able to manage the Machines as either Machine
+API or Cluster API Machines.
+We expect that the `machineTemplate` and `template` (Cluster API and Machine API templates) will be mutually exclusive
+on the `ControlPlaneMachineSet` spec, in plain terms, a user is expected to configure their `ControlPlaneMachineSet` as
+either a Machine API or Cluster API `ControlPlaneMachineSet` and the operator will determine based on which template is
+present, how it should manage the Machines.
+
+The Control Plane Provider in Cluster API is also responsible for creating and maintaining a Kubeconfig file that the
+Cluster API components can use to manage resources within the guest cluster. Within the OpenShift Cluster API Technical
+Preview, we are handling this Kubeconfig generation with a separate component, we will continue to do this even if
+we make this new operator satisfy the Control Plane Provider contract.
+
+Alternatively, instead of making the `ControlPlaneMachineSet` satisfy the Control Plane Provider contract, we may
+introduce another CRD to act as a proxy, gathering information from the other components within the OpenShift cluster
+to satisfy the requirements of the Control Plane Provider contract. Further investigation will be required in the future
+to determine how exactly we want to handle this compatibility.
 
 ### Risks and Mitigations
 
