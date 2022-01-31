@@ -548,6 +548,28 @@ introduce another CRD to act as a proxy, gathering information from the other co
 to satisfy the requirements of the Control Plane Provider contract. Further investigation will be required in the future
 to determine how exactly we want to handle this compatibility.
 
+#### Interaction with Machine Health Check
+
+In OpenShift, customers may choose to use MachineHealthCheck resources to remove failed Machines from their clusters
+and have them replaced automatically by a MachineSet. MachineHealthCheck requires that a Machine has an Owner Reference
+before it will remove the Machine, this prevents the removal of a Machine that is not going to be replaced.
+
+As this Control Plane Machines will now be owned by the `ControlPlaneMachineSet`, MachineHealthChecks will now be
+compatible with Control Plane Machines. This we believe to be safe due to the design of the `ControlPlaneMachineSet`
+operator and the protection mechanism being implemented to protect etcd quorum. If at any point a Machine is deleted,
+the protection system will ensure no Machine is actually removed until a replacement has been brought in to replace it
+within the etcd cluster.
+
+We expect that if a user wants automated remediation for their Control Plane Machines, they will configure a
+MachineHealthCheck to point to the Control Plane Machines, but we will not configure this for them.
+
+Notably, if a user does with to use a MachineHealthCheck with the Control Plane Machines, we advise them to configure
+the MachineHealthCheck just to observe Control Plane Machines and to have the `maxUnhealthy` field set to 1.
+These recommendations will ensure that if more than one Control Plane Machine appears unhealthy at once, that the
+MachineHealthCheck will take no action on the Machines. It is likely that if more than one Control Plane Machine appears
+unhealthy that either the etcd cluster is degraded, or a scaling operation is taking place presently to replace a
+failed Machine.
+
 ### Risks and Mitigations
 
 #### etcd quorum must be preserved throughout scaling operations
