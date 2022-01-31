@@ -464,6 +464,27 @@ We do not recommend that UPI users attempt to adopt their control plane instance
 likelihood that they cannot create an accurate configuration to replicate the original control plane instances. This
 limitation also limits the `ControlPlaneMachineSet` operator to an IPI only operator.
 
+#### Delivery via the core OpenShift payload
+
+This new operator will form part of the core OpenShift release payload for clusters installed on/upgrading to OpenShift
+4.11. While there is a movement within OpenShift to stop adding new components to the release payload, we believe that
+this new operator should be added to the core for the following reasons:
+
+- The scaling operations enabled by this operator are often required when there is an imminent cluster failure due to
+  an overwhelmed control plane. Having the `ControlPlaneMachineSet` already installed means the users will be able to
+  scale their control plane without first having to learn that this project exists or installing/configuring it.
+- By having this installed by the installer, there is a lower likelihood of issues where configuration within the
+  `ControlPlaneMachineSet` is invalid, such that it wouldn't be able to create new Machines when required.
+  The installer already has logic for creating MachineSets, which will form a basis of the installation of the
+  `ControlPlaneMachineSet`.
+- Having this installed by default will make it easier for managed services to manage. The managed services team intend
+  to leverage this operator across thousands of clusters. Installing the operator and configuring it correctly for each
+  new cluster is a significant amount of work for them to automate. Including this within the installer would make this
+  easier to rollout to new clusters in the fleet.
+- The operator adds a lot of value for recovery of failed Control Plane Machines in clusters using Machine API. If the
+  operator is installed by default, users are more likely to be able to correctly create new Machines during the
+  cluster recovery process.
+
 ### Risks and Mitigations
 
 #### etcd quorum must be preserved throughout scaling operations
@@ -535,8 +556,6 @@ the OnDelete update strategy.
 Some open questions currently exist, but are called out in the Recreate Update Strategy notes.
 
 1. How do we wish to introduce this feature into the cluster, should it be a Technical Preview in the first instance?
-2. Do we want this to be an optional add-on (delivered via OLM) or do we want this to be a default operator for future
-   clusters?
 
 ### Test Plan
 
