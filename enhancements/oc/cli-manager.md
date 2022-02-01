@@ -324,7 +324,7 @@ One major drawback is that Windows users will require administrative access to t
 ## Roadmap
 
 * Add new CRD and controller to host binaries
-	* Console and `oc` unaware of controller
+  * Console and `oc` unaware of controller
 * `krew` integration into `oc`
 * Console integration, ability to download binaries
 * Controller becomes default download mechianism for CLI tools
