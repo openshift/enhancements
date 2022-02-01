@@ -62,7 +62,7 @@ the previous step as the target.
 
 ### aws-load-balancer-controller
 AWS maintains an out-of-tree controller with support for ALBs for Ingress and
-Service type resources. The in-tree Service controller only provisions [classic
+NLBs for Service type resources. The in-tree Service controller only provisions [classic
 load
 balancers](https://docs.aws.amazon.com/elasticloadbalancing/latest/classic/introduction.html)
 and
