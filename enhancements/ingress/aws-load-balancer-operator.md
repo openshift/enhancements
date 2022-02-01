@@ -93,7 +93,7 @@ distributed through Operator Hub.
 * Implement operator which can be installed and used in OCP/OKD.
 
 ### Non-Goals
-* Implementing support for ALB for Openshift Routes
+* Implementing support for ALB for OpenShift Routes
 * Support for multiple installations of the controller i.e. multiple custom
   resources.
 * Support for `ip` mode for Ingress resources
