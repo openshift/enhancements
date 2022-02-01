@@ -321,6 +321,15 @@ One major drawback is that Windows users will require administrative access to t
 * Custom Resource: [example](https://github.com/deejross/openshift-cli-manager/blob/main/config/samples/vault_clitool.yaml)
 * Each plugin will publish an image to package binaries [example](https://github.com/openshift/oc/blob/master/images/cli-artifacts/Dockerfile.rhel)
 
+## Roadmap
+
+* Add new CRD and controller to host binaries
+	* Console and `oc` unaware of controller
+* `krew` integration into `oc`
+* Console integration, ability to download binaries
+* Controller becomes default download mechianism for CLI tools
+* Existing `ConsoleCLIDownload` mechanism becomes deprecated and removed
+
 ## Followup
 
 * Plugin signature validation
