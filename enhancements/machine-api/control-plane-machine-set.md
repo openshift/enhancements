@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - TBD
 creation-date: 2022-01-11
-last-updated: 2022-01-31
+last-updated: 2022-02-02
 tracking-link:
   - TBD
 replaces:
@@ -102,6 +102,12 @@ of updated configuration to the Control Plane Machines.
 
 We will introduce a new `ControlPlaneMachineSet` CRD to the `machine.openshift.io/v1beta1` API group. It will be based
 on the spec and status structures defined below.
+
+We are intending to add this to the `v1beta1` API group as it is heavily tied to the existing `Machine` and `MachineSet`
+APIs within the `v1beta1` group. If we were to ever evolve the `Machine` to a `v1` API, the changes in that API version
+bump may mean that we also need to make changes to the spec of the `ControlPlaneMachineSet` as well. Additionally,
+as we currently unsure how we will handle Cluster API support, we may down the line need to make a breaking change to
+allow this project to work with Cluster API.
 
 ```go
 type ControlPlaneMachineSetSpec struct {
@@ -451,8 +457,8 @@ If users later wish to reinstall the `ControlPlaneMachineSet`, they are free to 
 
 #### Installing a ControlPlaneMachineSet within an existing cluster
 
-When adding a ControlPlaneMachineSet to a new cluster, the end user will need to define the `ControlPlaneMachineSet`
-resource by copying the existing Control Plane Machine ProviderSpecs.
+When adding a ControlPlaneMachineSet to a existing cluster, the end user will need to define the
+`ControlPlaneMachineSet` resource by copying the existing Control Plane Machine ProviderSpecs.
 Once this is copied, they should remove the failure domain and add the desired failure domains to the `FailureDomains`
 field within the ControlPlaneMachineSet spec.
 
@@ -470,13 +476,50 @@ We do not recommend that UPI users attempt to adopt their control plane instance
 likelihood that they cannot create an accurate configuration to replicate the original control plane instances. This
 limitation also limits the `ControlPlaneMachineSet` operator to an IPI only operator.
 
+##### Why not to populate the spec for the customer
+
+One idea posed, is to allow the `ControlPlaneMachineSet` to be automatically populated if the spec is left blank when it
+is created. This would improve the UX by allowing customers not to have to worry about the spec and allow it to be
+inferred from the existing Machines within the cluster. It would also make it easier for managed services to adopt
+`ControlPlaneMachineSets` throughout the fleet without having to manually check each cluster.
+
+There are however a few concerns about this idea which means we are planning to not implement this (at least for the
+first iteration of the project):
+- It may encourage users to attempt to use `ControlPlaneMachineSets` with UPI clusters which are incorrectly configured
+  - Some users have Machines in their cluster, that aren't actually configured correctly, therefore we would be creating
+    an incorrectly configured `ControlPlaneMachineSet` for them, it is then unclear who is at fault for this and we
+    could end up with an increased number of support tickets due to these misconfigurations
+  - As an example, this is particularly prevalent in UPI clusters where users can forget to remove the Machine manifests
+    from the install manifest directory, this has been the source of many bugs where users have had Machines stuck in
+    Provisioning for an extended period. Inferring the specs from these Machines would certainly make the
+    `ControlPlaneMachineSet` invalid.
+- Some users may have made out of band changes to their Control Plane Machines which are not reflected within the
+  Machine specs
+  - We document the procedure within product docs of replacing a Control Plane Machine, though it is a manual process
+    that doesn't involve using the Machine API. Within the process we instruct users to resize their VM within the
+    cloud, and then update their Machine `providerSpec` to match the changes in the cloud. We suspect that there are
+    a number of users who have made this change, or other similar changes that are not reflected in the `providerSpec`
+    and as such, inferring the configuration from these Machines would create an incorrect spec.
+
+If we do implement some adoption process in the future, we should also include a `paused` field within the spec, set to
+`true` by the adoption logic, that prevents the `ControlPlaneMachineSet` from taking any action until someone has
+reviewed the inferred spec and marked `paused: false`. This would allow a sanity check to be enforced before the
+`ControlPlaneMachineSet` takes any actions based on the inferred spec.
+
+An alternative way to populate the spec could be to build a plugin for `oc` which would inspect the Control Plane
+Machines and print out a `ControlPlaneMachineSet` for the customer to create. This would also allow the customer to
+inspect the resource before they create it within the cluster and would make it a very conscious decision on their part
+to create the `ControlPlaneMachineSet`.
+
 #### Naming of Control Plane Machines owned by the ControlPlaneMachineSet
 
 In an IPI OpenShift cluster, the Control Plane Machines are named after the cluster ID followed by an index, for example
 `my-openshift-cluster-abcde-master-0`. As we will need to create additional Machines during replacement operations, we
-cannot reuse the names of the existing Machines. Instead we will use the `generateName` field within the metadata to
-create a random suffix for the new Machines, replacing the index of current Machines. For example, Machines created
-by a `ControlPlaneMachineSet` may have a name such as `my-openshift-cluster-abcde-master-fghij`.
+cannot reuse the names of the existing Machines. Instead we will generate a random, 5 character string, and add this
+before the index of the Machine. For example, Machines created by a `ControlPlaneMachineSet` may have a name such as
+`my-openshift-cluster-abcde-master-fghij-0`. This should make it clear to the end user which Machine we are attempting
+to replace with the newer Machine. As we typically spread Machines across multiple availability zones, we will keep the
+indexes consistent with the availability zone that they were originally assigned.
 
 As users can today replace their Machines with differently named Machines (eg as part of a recovery process), we do not
 expect other components to be relying on the index of the Machines for any function within OpenShift, but we may
@@ -504,6 +547,10 @@ this new operator should be added to the core for the following reasons:
 - The operator adds a lot of value for recovery of failed Control Plane Machines in clusters using Machine API. If the
   operator is installed by default, users are more likely to be able to correctly create new Machines during the
   cluster recovery process.
+
+This operator however is not critical to the OpenShift cluster, and while we believe this should be installed by
+default, it should be be made optional via the install time [component-selection](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md)
+mechanism currently being implemented.
 
 #### How does this new operator fit within the Cluster API landscape
 
