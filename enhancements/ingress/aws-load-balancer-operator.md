@@ -328,7 +328,7 @@ resources.
 
 #### Parallel operation  of the Openshift Router and lb-controller
 
-The openshift Router manages ingresses which don’t have any ingress class value.
+The OpenShift router manages ingresses that don’t have any ingress class value.
 This is the expected behavior currently and the lb-controller should not attempt
 to reconcile Ingresses which don’t have an ingress class set. If the user wants
 to switch over to using the lb-controller as default they can create an
