@@ -47,7 +47,7 @@ AWS has three kinds of load balancers:
     route requests based on the HTTP path and host. It also integrates with other
     AWS services like DDoS protection and WAF.
 
-### Openshift Router
+### OpenShift Router
 In OCP/OKD Ingress resources are serviced by the Openshift
 [router](https://github.com/openshift/router). Routers are created by the
 [cluster-ingress-operator](https://github.com/openshift/cluster-ingress-operator/)(CIO)
