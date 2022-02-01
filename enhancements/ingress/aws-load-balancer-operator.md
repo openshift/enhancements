@@ -326,7 +326,7 @@ to restrict the features supported by the controller to only Ingresses the
 lb-controller will have to be modified so that it does not reconcile any Service
 resources.
 
-#### Parallel operation  of the Openshift Router and lb-controller
+#### Parallel operation  of the OpenShift router and lb-controller
 
 The OpenShift router manages ingresses that don’t have any ingress class value.
 This is the expected behavior currently and the lb-controller should not attempt
