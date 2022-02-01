@@ -388,7 +388,7 @@ TBD
 
 ## Alternatives
 
-The existing Openshift Router could be modified to provision ALBs for Ingresses
+The existing OpenShift router could be modified to provision ALBs for Ingresses
 which specify it through an annotation. The disadvantage would that the router
 would be replicating a lot of the functionality which is present in the
 lb-controller.
