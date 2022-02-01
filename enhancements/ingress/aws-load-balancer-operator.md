@@ -48,14 +48,14 @@ AWS has three kinds of load balancers:
     AWS services like DDoS protection and WAF.
 
 ### OpenShift Router
-In OCP/OKD Ingress resources are serviced by the Openshift
+In OCP/OKD, Ingress resources are serviced by the OpenShift
 [router](https://github.com/openshift/router). Routers are created by the
-[cluster-ingress-operator](https://github.com/openshift/cluster-ingress-operator/)(CIO)
+[cluster-ingress-operator](https://github.com/openshift/cluster-ingress-operator/) (CIO)
 for every
 _[IngressController](https://docs.openshift.com/container-platform/4.9/networking/configuring_ingress_cluster_traffic/configuring-ingress-cluster-traffic-ingress-controller.html)_
-resource. By default on AWS the CIO creates a Service of type
+resource. By default on AWS, the CIO creates a Service of type
 [LoadBalancer](https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer).
-The in-tree Service controller in turn provisions a Network Load
+The in-tree Service controller in turn provisions a classic Elastic Load
 Balancer with a TCP listener. The CIO then creates a DNS entry for the subdomain
 specified in the IngressController resource with the load balancer created in
 the previous step as the target. 
