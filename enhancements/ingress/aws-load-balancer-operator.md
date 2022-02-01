@@ -86,7 +86,7 @@ sake of brevity.
 ## Motivation
 
 Implement an operator, tentatively called `aws-load-balancer-operator`, which
-deploys and manages an instance of the lb-operator. The operator will be
+deploys and manages an instance of lb-controller. The operator will be
 distributed through Operator Hub.
 
 ### Goals
@@ -287,7 +287,7 @@ versions other fields from the
 [PodSpec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.19/#podspec-v1-core)
 could also be exposed here.
 
-Finally, WAFs and DDos prevent configurations are attached to the load balancer
+Finally, WAFs and DDoS prevention configurations are attached to the load balancer
 through annotations specified on the Ingress resource. But users might want to
 limit which features are available and the `DisabledAddons` array can be used to
 specify which features/addons have to be disabled. By default all the addons
