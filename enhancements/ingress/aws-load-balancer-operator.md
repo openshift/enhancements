@@ -276,7 +276,7 @@ an ingress class value is not passed to the controller it attempts to reconcile
 all Ingress resources which don’t have an ingress class annotation or where the
 ingress class field is empty. Passing the value of “alb” does not restrict the
 number of ingress classes which the controller can reconcile. This is described
-further in the [Parallel operation of Openshift
+further in the [Parallel operation of OpenShift
 Router](#parallel-operation-of-the-openshift-router-and-lb-controller) and
 lb-controller section.
 
