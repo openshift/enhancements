@@ -85,9 +85,9 @@ sake of brevity.
 
 ## Motivation
 
-Implement an operator, tentatively called `aws-load-balancer-operator`, which
-deploys and manages an instance of lb-controller. The operator will be
-distributed through Operator Hub.
+Implement an operator, tentatively called `aws-load-balancer-operator`, which deploys and manages an instance of
+lb-controller. The operator will be distributed through Operator Hub. The initial version of the operator will only
+support OCP/OKD. But in the future the operator may be extended to work on any Kubernetes compliant cluster.
 
 ### Goals
 * Implement operator which can be installed and used in OCP/OKD.
@@ -253,7 +253,7 @@ type AWSLoadBalancerControllerSpec struct {
   // +optional
   Config *DeploymentConfig
   // +optional
-  DisabledAddons []AWSAddon // indicates which AWS addons should be disabled.
+  EnabledAddons []AWSAddon // indicates which AWS addons should be disabled.
 }
 
 type AWSAddon string
@@ -307,19 +307,28 @@ versions other fields from the
 [PodSpec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.19/#podspec-v1-core)
 could also be exposed here.
 
-Finally, WAFs and DDoS prevention configurations are attached to the load balancer
-through annotations specified on the Ingress resource. But users might want to
-limit which features are available and the `DisabledAddons` array can be used to
-specify which features/addons have to be disabled. By default all the addons
-will be enabled. They are disabled by setting the addon CLI flag to false. When
-an addon which was previously enabled is disabled the controller does not remove
-the existing addon attachment from the provisioned load balancers.
+Finally, WAFs and DDoS prevention configurations are attached to the load
+balancer through annotations specified on the Ingress resource. But users might
+want to limit which features are available and the `EnabledAddons` array can be
+used to specify which features/addons have to be enabled. By default, all the
+addons will be enabled. They are disabled by setting the addon CLI flag to
+false. When an addon which was previously enabled is disabled the controller
+does not remove the existing addon attachment from the provisioned load
+balancers.
 
 The operator will also create a
 [CredentialRequest](https://docs.openshift.com/container-platform/4.9/rest_api/security_apis/credentialsrequest-cloudcredential-openshift-io-v1.html#credentialsrequest-cloudcredential-openshift-io-v1)
 on behalf of the lb-controller and mount the minted credentials in the
 _Deployment_ of the controller. This means that the operator will only work on
 OCP/OKD but this is sufficient for the initial release.
+
+The lb-controller requires a validating and mutating webhook for correct operation. The operator will have to create the
+webhooks along with the controller deployment. The webhook can be registered with a CA bundle which is used to verify
+the identity of webhook by the API server.
+The [service-ca controller](https://docs.openshift.com/container-platform/4.9/security/certificate_types_descriptions/service-ca-certificates.html)
+can be used to generate certificates and have then injected into the webhook configurations. The operator will also
+watch the secret with the certificates so that when the ceritificate is re-newed the pods of the deployment will be also
+updated so that they start using the new certificates.
 
 ### Risks and Mitigations
 
@@ -346,7 +355,7 @@ to restrict the features supported by the controller to only Ingresses the
 lb-controller will have to be modified so that it does not reconcile any Service
 resources.
 
-#### Parallel operation  of the OpenShift router and lb-controller
+#### Parallel operation of the OpenShift router and lb-controller
 
 The OpenShift router manages ingresses that don’t have any ingress class value.
 This is the expected behavior currently and the lb-controller should not attempt
@@ -373,7 +382,6 @@ Other than standard unit testing the operator will have end-to-end tests for som
 4. Test for when subnets are tagged manually. Verify that the load balancer is created only in the manually tagged subnet.
 
 ### Graduation Criteria
-TBD
 
 #### Dev Preview -> Tech Preview
 TBD
@@ -385,16 +393,26 @@ TBD
 NA
 
 ### Upgrade / Downgrade Strategy
-TBD
+NA
 
 ### Version Skew Strategy
-TBD
+NA
 
 ### Operational Aspects of API Extensions
-TBD
+
+The new Custom Resource will not affect any existing operations of the cluster. However the webhooks which have to be
+created for the lb-controller will impact the availability and performance and availability of Ingress resource _create_
+and _update_ operations. These webhooks are light-weight and do not perform any complex validation. So the performance
+impact should be minimal. Availability of the webhook is critical because if the webhook is unavailable operations on
+the Ingress resource will not be possible.
 
 #### Failure Modes
-TBD
+
+1. Operator is unable to determine the private and public subnets in the cluster. In this case the operator will be
+   marked as __Degraded__ in the status.
+2. lb-controller pods are not running. This would mean that the webhook are unavailable and all operations on _Ingress_
+   , _IngressClass_ and _IngressGroup_ would fail. The failure would include a message indicating that the webhook is
+   unavailable and the user would have to remediate this by examining the status of the lb-controller.
 
 #### Support Procedures
 TBD
@@ -404,7 +422,8 @@ TBD
 
 ## Drawbacks
 
-TBD
+Since we are reusing an existing upstream controller and restricting which of its features are enabled, some upstream
+documentation would not be applicable for this operator.
 
 ## Alternatives
 
