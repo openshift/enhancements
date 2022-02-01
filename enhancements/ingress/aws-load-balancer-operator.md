@@ -269,10 +269,7 @@ controllers cannot be started with different configurations.
 The lb-controller also requires that the subnets where the load balancers are
 provisioned have certain resource tags present on them. The operator can detect
 the subnets and tag them or the user can do this. This is specified with the
-_AutoTagSubnet_ field. This field could be dropped if the subnets are already
-tagged with the correct values. This is explained in further detail in the
-section [Changes in the Openshift
-Installer](#changes-in-the-openshift-installer).
+_AutoTagSubnet_ field.
 
 The user can also specify the Ingress class which the lb-controller will
 reconcile. This could default to **_“alb”_**. This value is required because if
@@ -303,21 +300,6 @@ The operator will also create a
 on behalf of the lb-controller and mount the minted credentials in the
 _Deployment_ of the controller. This means that the operator will only work on
 OCP/OKD but this is sufficient for the initial release.
-
-#### Changes in the OpenShift Installer
-
-The OpenShift Installer provisions a VPC and private and public subnets within
-it. It currently only tags the private subnets with
-`kubernetes.io/role/internal-elb` but does not tags the public subnets with
-`kubernetes.io/role/elb`. To reduce the functionality of the operator the
-installer could itself tag the public subnets with the appropriate tag. For
-clusters installed into existing VPC the installer could similarly add the tags
-to the subnets specified in the installation manifest.
-
-The VPC ID also has to be passed to the `lb-controller` as a CLI parameter.
-Currently, there is no resource which has the VPC ID. The installer could be
-modified to write the VPC id into the `Infrastructure` resource _Status_ for
-both provisioned and existing VPCs.
 
 ### Risks and Mitigations
 
