@@ -24,15 +24,15 @@ superseded-by:
 ## Summary
 
 Users would like to use [Application Load
-Balancers](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html)(ALBs)
+Balancers](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html) (ALBs)
 for their Ingress resources so that they can use [Amazon Certificate
-Manager](https://aws.amazon.com/certificate-manager/)(ACM) to manage
+Manager](https://aws.amazon.com/certificate-manager/) (ACM) to manage
 certificates for the Ingress domains and also attach [Web Application
-Firewalls](https://aws.amazon.com/waf/) to the ALB for security and traffic
-shaping. The Openshift [router](github.com/openshift/router) uses an NLB which
-passes through all traffic to the router. TLS termination is done on the router.
-A WAF cannot be attached to the NLB and the router cannot be configured to
-perform TLS termination at the NLB.
+Firewalls](https://aws.amazon.com/waf/) (WAFs) to the ALB for security and traffic
+shaping. The OpenShift [router](https://github.com/openshift/router) uses a classic ELB or an NLB, which
+passes through all traffic to the router. TLS termination is done on the router or backend pod.
+A WAF cannot be attached to the ELB or NLB, and the router cannot be configured to
+perform TLS termination at the ELB or NLB.
 
 ## Background
 
