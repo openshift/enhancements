@@ -108,8 +108,8 @@ distributed through Operator Hub.
 
 The user wants to route traffic for the domain example.com to pods of Service
 example-service and have TLS termination and DDoS protection on the load
-balancer. The user deploys the aws-alb-operator and creates an instance of the
-resource AWSLoadBalancerController as follows:
+balancer. The user deploys the operator and creates an instance of the
+resource `AWSLoadBalancerController` as follows:
 
 ```yaml
 kind: AWSLoadBalancerController
@@ -117,9 +117,21 @@ group: networking.openshift.io/v1beta1
 metadata:
   name: cluster
 spec:
-  autoTagSubnet: true
+  subnetTagging: auto
   ingressClass: tls-termination
 ```
+
+Then they create an `IngressClass` resource as follows:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: tls-termination
+spec:
+  controller: ingress.k8s.aws/alb
+```
+
 Then they create an ingress resource with the following schema:
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -144,10 +156,12 @@ spec:
                 port:
                   number: 80
 ```
-The controller then creates an application load balancer with an HTTPS listener
-which terminates the TLS connection with the certificate ARN which is specified
-in the annotation. If the certificate does not exist, the load balancer is not
-created. It also enables AWS Shield on the Elastic IP associated with the ALB.
+
+The controller then creates an application load balancer with an HTTPS listener.
+The ALB only has an HTTPS listener because a certificate has been specified
+explicitly through the annotations. If the certificate does not exist, the load
+balancer is not created. It also enables AWS Shield on the Elastic IP associated
+with the ALB.
 
 #### Multiple Ingress through single ALB
 
@@ -163,7 +177,7 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/group.name: example
-    alb.ingress.kubernetes.io/group.order: “1”
+    alb.ingress.kubernetes.io/group.order: "1"
 spec:
   ingressClass: alb
   rules:
@@ -173,9 +187,9 @@ spec:
         - path: /blog
           backend:
             service:
-        name: example-1
-        port:
-          number: 80
+              name: example-1
+              port:
+                number: 80
 —--
 kind: Ingress
 metadata:
@@ -183,7 +197,7 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/group.name: example
-    alb.ingress.kubernetes.io/group.order: “2”
+    alb.ingress.kubernetes.io/group.order: "2"
 spec:
   ingressClass: alb
   rules:
@@ -193,9 +207,9 @@ spec:
         - path: /store
           backend:
             service:
-        name: example-2
-        port:
-          number: 80
+              name: example-2
+              port:
+                number: 80
 —--
 kind: Ingress
 metadata:
@@ -203,7 +217,7 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/group.name: example
-    alb.ingress.kubernetes.io/group.order: “3”
+    alb.ingress.kubernetes.io/group.order: "3"
 spec:
   ingressClass: alb
   rules:
@@ -213,9 +227,9 @@ spec:
         - path: /
           backend:
             service:
-        name: example-3
-        port:
-          number: 80
+              name: example-3
+              port:
+                number: 80
 ```
 
 In this example the annotations `alb.ingress.kubernetes.io/group.name` specifies
@@ -231,7 +245,7 @@ lb-controller instance. The resource has the following _Spec_:
 
 ```golang
 type AWSLoadBalancerControllerSpec struct {
-  AutoTagSubnet bool // indicates if the operator should tag the subnets
+  SubnetTagging SubnetTaggingPolicy
   // +optional
   AdditionalResourceTags map[string]string // Default AWS Tags that will be applied to all AWS resources managed by this controller (default [])
   // +optional
@@ -254,6 +268,12 @@ type DeploymentConfig struct {
   // +optional
   Replicas int
 }
+
+type SubnetTaggingPolicy string
+const (
+    AutoSubnetTaggingPolicy SubnetTaggingPolicy = "Auto"
+    ManualSubnetTaggingPolicy SubnetTaggingPolicy = "Manual"
+)
 ```
 
 
@@ -268,8 +288,8 @@ controllers cannot be started with different configurations.
 
 The lb-controller also requires that the subnets where the load balancers are
 provisioned have certain resource tags present on them. The operator can detect
-the subnets and tag them or the user can do this. This is specified with the
-_AutoTagSubnet_ field.
+the subnets and tag them or the user can do this. This can be enabled by setting
+the `SubnetTagging` to `AutoSubnetTaggingPolicy`.
 
 The user can also specify the Ingress class which the lb-controller will
 reconcile. This could default to **_“alb”_**. This value is required because if
