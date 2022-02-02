@@ -842,6 +842,66 @@ Exposing MachineSets within this mechanism exposes risk in a number of ways:
     though these are not foolproof. The removal design of the `ControlPlaneMachineSet` (being operator based) should be
     more reliable than a webhook.
 
+### StatefulMachineSet
+
+The proposed `ControlPlaneMachineSet` is reasonably similar to a mixture between a `StatefulSet` and a `MachineSet`.
+The `ControlPlaneMachineSet` is targeted specifically at managing Control Plane Machines but we could also create a
+more generic `StatefulMachineSet` that covers this use case and others. The implementation would be very similar, though
+would most likely not have its own `ClusterOperator` to report status.
+
+To understand why we don't think a more generic `StatfeulMachineSet` is worth implementing, we must look at the promises
+that `StatefulSets` make and why users would want to use them.
+
+- Stable, unique network identifies: Users have applications that require stable IP addresses, eg. something like etcd
+- Stable, persistent storage: Users must reattach applications to the same storage disk as previously used when the
+  workload is rescheduled
+- Ordered, graceful deployment, scaling and rolling updates: Different applications must be updated in a certain and
+  controlled way
+
+In most Kubernetes environments and cloud applications, the IP address of the host does not matter and is not required
+to be stable. The application layer networking means that the host IP address is insignificant to the functionality of
+the cluster. The only use case we can consider where static IPs over a given set of hosts are required would be in a
+scenario where you have an external load balancer that requires reconfiguration if the host IPs change. However, for
+this example, it would most likely be more cloud-native to implement an operator that could reconfigure the load
+balancer on changes rather than trying to keep the IP addresses of the hosts static. Additionally, there are already
+projects tackling IPAM within Kubernetes which may resolve this issue without having to make pets of the Machines.
+
+For storage, we expect most users to use persistent volumes which can be, in most environments attached to multiple
+hosts, whether that be abstracted away as a cloud provider service (eg AWS EFS) or as an iSCSI storage network Within
+a datacenter. In certain applications these network storage provisions may not be suitable however and you may need
+access to a local disk or volume. In cloud environments this doesn't apply, in virtualized environments the the local
+volume would be represented as a persistent volume that is only able to be attached to VMs on a certain physical host,
+and in bare-metal environments, you would need to schedule to a single host, in which case, existing pod scheduling
+mechanisms would ensure this scheduling provided the Machine has some persistent labelling. In the bare metal case,
+this is already achieved through the hardware inventories provided by Metal3.
+
+For graceful ordered deployments, this isn't typically a property of the host but the applications running on top of
+them. If we want to provide users with the ability to apply updates to their Machines, we are likely better implementing
+a `MachineDeployment` concept similar to that of the Cluster API project. This allows automated updates by creating new
+Machines, as described within this document but does treat the Machines with any special consideration.
+When OpenShift 4 was conceived, the `MachineDeployment` concept was originally tabled because, although we promote
+immutable infrastructure within OpenShift, our OS level is updated automatically through the Machine Config Operator
+system. The two ideas would work together, but we didn't want to force users to redeploy every Machine to benefit from
+updates and so the value of the `MachineDeployment` was diminished.
+
+Aside from the above arguments, there are other higher level reasons we don't feel that a generic `StatefulMachineSet`
+is a valuable addition to OpenShift.
+- The concept of stateful Machines goes against the cattle not pets concept on which the rest of Machine API has been
+  build
+- Machines in OpenShift don't, in the majority of cases, have any state and, we shouldn't promote them to have state.
+  The state is handled at the application layer by adding additional abstractions such as persistent volumes.
+- A lot of the scenarios we could think of for having a stateful group of Machines, could also be solved by using a set
+  of well defined `MachineSets`.
+- To our knowledge, no customers have asked for a `StatefulMachineSet`
+- For the Control Plane case, we want additional monitoring on top of what a `StatefulMachineSet` might provide:
+  - The ability to track the Control Plane infrastructure state via a Cluster Operator and to block upgrades if the
+    Control Plane infrastructure is degraded for any reason
+  - The ability to restrict there to being a single point of truth for the Control Plane infrastructure definition
+  - Restricting the replica count of the set to a supported number for the Control Plane within OpenShift
+  - Ensuring that users aren't putting themselves in unsupported scenarios by trying to create additional Control Plane
+    Machines
+  - Ensuring Control Plane Machines are not removed when/if the `ControlPlaneMachineSet` is deleted
+
 ## Infrastructure Needed
 
 For a clean separation of code, we will introduce the new operator in a new repository,
