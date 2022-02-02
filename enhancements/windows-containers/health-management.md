@@ -110,9 +110,9 @@ N/A
   point. Events and alerts will ensure that a cluster administrator is made aware of the issue.
 * There is a possibility that a cluster admin could mistakenly remove the services ConfigMap for an older WMCO version,
   before Node upgrades are completed. This would result in WICD not knowing what services it has configured on the
-  instance. In order to prevent this, WICD can set the Windows service description to "openshift-managed", so that it
-  can search for services which were installed by WICD. As it is potentially possible for a user to remove this tag
-  from the services, when the expected service ConfigMap is missing, both the tag and the latest service ConfigMap
+  instance. In order to prevent this, WICD can set the Windows service description to contain "OpenShift managed", so
+  that it can search for services which were installed by WICD. As it is potentially possible for a user to remove this
+  tag from the services, when the expected service ConfigMap is missing, both the tag and the latest service ConfigMap
   should be used when deconfiguring the node. Using a combination of these two will allow for all the installed
   services to be removed, in most cases. Additionally, in order to facilitate upgrades from a version without
   WICD, this tag should be added to all existing services in 4.10, one major version ahead of WICD's target release.
@@ -351,7 +351,7 @@ This enhancement has the potential to reduce issues related to having Windows No
 older, now uninstalled WMCO version, on a more recent OpenShift cluster. When a compatible WMCO version is installed,
 the services ConfigMap provides a way for WICD to upgrade a Node cleanly from one version to another. This is true when
 upgrading only from WMCO 5.0.0 onwards, as WICD will have no way to cleanly upgrade without either a service ConfigMap
-from the previous version, or the `openshift-managed` label on the Windows services themselves. There should be no
+from the previous version, or the `OpenShift managed` label on the Windows services themselves. There should be no
 Windows Nodes configured with WMCO versions below 5.0.0, as WMCO does not support skipping a major version when
 upgrading.
 
