@@ -464,13 +464,15 @@ field within the ControlPlaneMachineSet spec.
 
 To ensure adding a `ControlPlaneMachineSet` to the cluster is safe, we will need to ensure via a validating webhook
 that the replica count defined in the spec is consistent with the actual size of the control plane within the cluster.
+We will also validate that the failure domains align with those within the cluster already, this will prevent users
+from accidentally migrating their Control Plane Machines from multiple availability zones to a single zone.
 
 If no Control Plane Machines exist, or they are in a non-Running state, the operator will report degraded until this
 issue is resolved. This creates a dependency for the `ControlPlaneMachineSet` operator on the Machine API. It will be
 required to run at a higher run-level than Machine API.
 
 In UPI or misconfigured clusters, a user adding a `ControlPlaneMachineSet` will result in a degraded cluster.
-Users will need to remove the invalid ControlPlaneMachineSet resource to restore their cluster to a healthy state.
+Users will need to remove the invalid `ControlPlaneMachineSet` resource to restore their cluster to a healthy state.
 
 We do not recommend that UPI users attempt to adopt their control plane instances into Machine API due to the high
 likelihood that they cannot create an accurate configuration to replicate the original control plane instances. This
