@@ -209,33 +209,11 @@ restrict use of volumes from these drivers to privileged namespaces.
 
 **TODO - more here? Is this sufficient?**
 
-> API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-> finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
->
-> - Name the API extensions this enhancement adds or modifies.
-> - Does this enhancement modify the behaviour of existing resources, especially those owned
->  by other parties than the authoring team (including upstream resources), and, if yes, how?
->   Please add those other parties as reviewers to the enhancement.
->
->  Examples:
->  - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
->  - Restricts the label format for objects to X.
->  - Defaults field Y on object kind Z.
->
-> Fill in the operational impact of these API Extensions in the "Operational Aspects
-> of API Extensions" section.
-
 ### Implementation Details/Notes/Constraints [optional]
 
 This admission plugin is being actively discussed upstream in a draft KEP.
 There is a chance that this admission plugin will be implemented upstream -
 either concurrently with OpenShift or in a subsequent Kubernetes release.
-
-**TODO - other bits here?**
-
-> What are the caveats to the implementation? What are some important details that
-> didn't come across above. Go in to as much detail as necessary here. This might
-> be a good place to talk about core concepts and how they relate.
 
 ### Risks and Mitigations
 
@@ -275,42 +253,10 @@ objects, and these objects do not change frequently.
 
 ### Graduation Criteria
 
-**TODO** - tech preview for 4.11?
-
 | OpenShift | Maturity |
 | --------- | -------- |
 | 4.11 | Tech Preview |
 | 4.12 | GA |
-
-**Note:** *Section not required until targeted at a release.*
-
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-
-- Maturity levels
-  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
-- [Deprecation policy][deprecation-policy]
-
-Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
-or by redefining what graduation means.
-
-In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
-
-[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
-[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
-
-**If this is a user facing change requiring new or updated documentation in [openshift-docs](https://github.com/openshift/openshift-docs/),
-please be sure to include in the graduation criteria.**
-
-**Examples**: These are generalized examples to consider, in addition
-to the aforementioned [maturity levels][maturity-levels].
 
 #### Dev Preview -> Tech Preview
 
@@ -329,9 +275,6 @@ to the aforementioned [maturity levels][maturity-levels].
 - Backhaul SLI telemetry - **TODO - what will these be?**
 - Document SLOs for the component - **TODO - how/what will we alert on?**
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
 
 #### Removing a deprecated feature
 
