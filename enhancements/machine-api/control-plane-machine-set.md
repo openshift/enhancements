@@ -135,8 +135,6 @@ type ControlPlaneMachineSetSpec struct {
     // appropriate location for the particular provider.
     // This field is optional on platforms that do not require placement
     // information, eg OpenStack.
-    // +kubebuilder:validation:MinLength:=1
-    // +kubebuilder:validation:Required
     // +optional
     FailureDomains []string `json:"failureDomains,omitempty"`
 
