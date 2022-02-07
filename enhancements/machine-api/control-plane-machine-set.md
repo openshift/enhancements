@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - TBD
 creation-date: 2022-01-11
-last-updated: 2022-02-02
+last-updated: 2022-02-07
 tracking-link:
   - TBD
 replaces:
@@ -299,8 +299,8 @@ plane nodes within the cluster.
 
 If there are any control plane nodes (identified by the node role) which do not have a Machine, the operator will mark
 itself degraded as this is an unexpected state.
-No further action will be taken until the unknown node has either been removed from the cluster or a Machine has been
-manually created for it.
+No further action (ie creating/deleting Control PlaneMachines, any rollouts or updates that need to be applied) will be
+taken until the unknown node has either been removed from the cluster or a Machine has been manually created for it.
 
 #### Providing high availability/fault tolerance within the control plane
 
@@ -367,15 +367,16 @@ Machine, wait for this to become ready, and then remove the old Machine. It will
 are up to date.
 During this process the etcd membership will be protected by the mechanism described in a [separate enhancement](https://github.com/openshift/enhancements/pull/943),
 in particular it isn't essential that the Control Plane Machines are updated in a rolling fashion for etcd sakes, though
-to avoid potential issues with the spread of etcd members across availability zones during update, the
-`ControlPlaneMachineSet` will perform a rolling update zone by zone.
+to avoid potential issues with the spread of etcd members across failure domains during update, the
+`ControlPlaneMachineSet` will perform a rolling update domain by domain.
 
 At first, we will not allow any configuration of the RollingUpdate (as you might see in a Deployment) and will pin the
 surge to 1 replica. We may wish to change this later once we have more data about the stability of this operator and
 the etcd protection mechanism it relies on.
 
-We expect this strategy to be used in most applications of the `ControlPlaneMachineSet`, in particular it can only not
-be used in environments where capacity is very limited and a surge of any control plane capacity is unavailable.
+We expect this strategy to be used in most applications of the `ControlPlaneMachineSet`, though it is not appropriate
+in all environments. For example, we expect this strategy to not be used in environments where capacity is very limited
+and a surge of any control plane capacity is unavailable.
 
 ##### The Recreate update strategy (FUTURE WORK)
 
@@ -469,12 +470,19 @@ If no Control Plane Machines exist, or they are in a non-Running state, the oper
 issue is resolved. This creates a dependency for the `ControlPlaneMachineSet` operator on the Machine API. It will be
 required to run at a higher run-level than Machine API.
 
-In UPI or misconfigured clusters, a user adding a `ControlPlaneMachineSet` will result in a degraded cluster.
-Users will need to remove the invalid `ControlPlaneMachineSet` resource to restore their cluster to a healthy state.
+This in turn means, that in a UPI (where typically Machine objects do not exist) or misconfigured clusters, a user
+adding a `ControlPlaneMachineSet` will result in a degraded cluster.
+Users will need to remove the invalid `ControlPlaneMachineSet` resource, or manually add correctly configured Control
+Plane Machines to their cluster to restore their cluster to a healthy state.
 
-We do not recommend that UPI users attempt to adopt their control plane instances into Machine API due to the high
-likelihood that they cannot create an accurate configuration to replicate the original control plane instances. This
-limitation also limits the `ControlPlaneMachineSet` operator to an IPI only operator.
+We do not recommend that UPI users attempt to adopt their control plane instances into Machine API due to the
+likelihood that the resulting spec does not match the existing Machines. Instead, we recommend that UPI users initially
+go through the process of replacing their control plane instances with Machines by creating new Control Plane Machines,
+allowing Machine API to create the instances, and then removing their old, manually created control plane instance.
+This effectively means migrating their entire control plane onto Machine API before the `ControlPlaneMachineSet` will
+take over the management.
+We enforce this recommendation so that users can be confident in the Machine `providerSpec` that they have configured
+and that Machine API will be able to create valid Machines from the spec before they then start using our automation.
 
 ##### Why not to populate the spec for the customer
 
@@ -869,7 +877,7 @@ projects tackling IPAM within Kubernetes which may resolve this issue without ha
 For storage, we expect most users to use persistent volumes which can be, in most environments attached to multiple
 hosts, whether that be abstracted away as a cloud provider service (eg AWS EFS) or as an iSCSI storage network Within
 a datacenter. In certain applications these network storage provisions may not be suitable however and you may need
-access to a local disk or volume. In cloud environments this doesn't apply, in virtualized environments the the local
+access to a local disk or volume. In cloud environments this doesn't apply, in virtualized environments the local
 volume would be represented as a persistent volume that is only able to be attached to VMs on a certain physical host,
 and in bare-metal environments, you would need to schedule to a single host, in which case, existing pod scheduling
 mechanisms would ensure this scheduling provided the Machine has some persistent labelling. In the bare metal case,
