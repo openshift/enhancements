@@ -3,6 +3,7 @@ title: Enabling ProjectRequestLimit on 4.x
  
 authors:
   - "@akashem"
+  - "@josefkarasek"
 
 reviewers:
   - "@sttts"
@@ -14,7 +15,7 @@ approvers:
 
 creation-date: 2020-03-03
 
-last-updated: 2020-03-03
+last-updated: 2022-02-07
 
 status: provisional
 
@@ -39,9 +40,9 @@ is about how we make it possible for a customer to enable it on a 4.x cluster.
 
 ## Summary
 The `requestlimit.project.openshift.io/ProjectRequestLimit` admission plugin is used to impose a limit on the number of
-self-provisioned project(s) requested by a given user. In 3.x, the limit can be specified via the master configuration file.
+self-provisioned project(s) requested by a given user/service account. In 3.x, the limit can be specified via the master configuration file.
 It doesn't fit well with our targeted configuration which aims to avoid adding lots of intricately documented knobs. 
-This is why this admission plug-in is disabled in OpenShift 4.x. 
+This is why this admission plug-in is disabled in OpenShift 4.x.
 
 Instead of wiring the admission plugin via the `openshift-apiserver` operator, we can create a validating admission webhook 
 based on the [generic-admission-server](https://github.com/openshift/generic-admission-server) and distribute it via
@@ -52,10 +53,10 @@ OperatorHub/OLM.
  it on 4.x will unblock these customers.
 * The `openshift-apiserver` (like any other apiserver in the system) is designed to be extended using validating/mutating 
   admission webhook(s), we have the technology to easily build one, and we have the ability to create a simple operator to manage it.
-* The cluster admin can optionally enable the validating webhook on a cluster and configure limits via a custom
-resource. This will sever the "legacy" link between the plugin and the `openshift-apiserver`.
+* The cluster admin can optionally enable the validating webhook on a cluster and configure limits via a Custom
+Resource. This will sever the "legacy" link between the plugin and the `openshift-apiserver`.
 * We can provide the customer with seamless install and automatic upgrades by shipping the operator via OperatorHub 
-  independent of OpenShift release cycle.   
+  independent of OpenShift release cycle.
 
 
 ### Goals
@@ -69,16 +70,15 @@ resource. This will sever the "legacy" link between the plugin and the `openshif
 3. Since `Project` type is owned by `openshift-apiserver`, rebootstrapping is not applicable.
 
 ### Open Questions
-1. How do we describe version skew limitations to OLM so our operator gets uninstalled *before* an illegal downgrade or
- upgrade? This is a concrete case of the API we want to use isn't available before 1.16 and after 1.18, the previous API could be gone.
 
 ## Proposal
 1. Create a `Validating` admission webhook server that provides `requestlimit.project.openshift.io/ProjectRequestLimit`.
 2. The admission webhook will be fronted by a `Service`.
-3. The webhook server is reachable through the `kube-apiserver` via the `kubernetes.default.svc` service. 
-2. Create an operator that manages all lifecycle aspects of the admission webhook via a custom resource.
-3. Productize the operator and ship it as a `RedHat operator` via `OperatorHub`. 
-4. Provide official documentation on how to interact with the `ProjectRequestLimit` operator.
+3. The webhook server is reachable through the `kube-apiserver` via the `kubernetes.default.svc` service.
+4. Create a cluster-scoped CRD, which the cluster admin can use to configure project limits.
+5. Create an operator that manages all lifecycle aspects of the admission webhook via a Custom Resource.
+6. Productize the operator and ship it as a `RedHat operator` via `OperatorHub`.
+7. Provide official documentation on how to interact with the `ProjectRequestLimit` operator.
 
 ### User Stories [optional]
 *Story 1*: As a cluster admin I want to enable `ProjectRequestLimit` on an OpenShift 4.x cluster so that I can limit creation of `Project`.
@@ -89,7 +89,7 @@ resource. This will sever the "legacy" link between the plugin and the `openshif
 
 *Story 4*: As a cluster admin I want my cluster to automatically upgrade to the new version of `ProjectRequestLimit` when available.
 
-*Story 5*: As a cluster admin I want to be able to specify (at any time) limits on the number of user provisioned `Project(s)`.
+*Story 5*: As a cluster admin I want to be able to specify (at any time) limits on the number of user/SA provisioned `Project(s)`.
 
 Notes:
 * Port `ProjectRequestLimit` plugin from 3.11 into a `Validating` admission webhook.
@@ -97,13 +97,41 @@ Notes:
 * Use  [generic-admission-server](https://github.com/openshift/generic-admission-server) to wire the validating admission webhook server. 
 * The operator is OLM enabled.
 * Ship `ProjectRequestLimit` as a RedHat operator via OperatorHub.
-* For productization, if we go through ART, integration work should target 4.5.
 * The operator should wire the OLM manifests accordingly to facilitate disconnected install (`relatedImages`).
 
 
 ### Implementation Details/Notes/Constraints
 
-#### The Operand
+#### API
+
+Cluster admins interact with the admission server using cluster-scope Custom Resource `ProjectRequestLimit`:
+
+```yaml
+apiVersion: operator.project.openshift.io/v1
+kind: ProjectRequestLimit
+metadata:
+  name: cluster
+spec:
+  limits:
+  // for selector level=admin, no maxProjects is specified. This means that users with this label 
+  // will not have a maximum of project requests.
+  - selector:
+      level: admin
+  
+  // for selector level=advanced, a maximum number of 10 projects will be allowed.
+  - selector:
+      level: advanced
+    maxProjects: 10
+  
+  // no selector is specified. This means that it will be applied to any user that doesn’t satisfy 
+  // the previous two rules. Because rules are evaluated in order, this rule should be specified last.
+  - maxProjects: 2
+
+  // global limit of three projects per service account
+  maxProjectsForServiceAccounts: 3
+```
+
+#### The Webhook Server
 We build the webhook admission server to also be an extension API server, thus it will enable us to aggregate it as a normal
 API server. An `APIService` object named `v1.projectrequestlimits.admission.project.openshift.io` makes the API group 
 `v1.projectrequestlimits.admission.project.openshift.io/v1` available within and outside of the cluster via API aggregation 
@@ -129,7 +157,7 @@ spec:
 ```
  
 * We define an `APIService` to register the aggregated API provided by the webhook:
-```
+```yaml
 apiVersion: apiregistration.k8s.io/v1
 kind: APIService
 metadata:
@@ -137,15 +165,14 @@ metadata:
 spec:
   group: projectrequestlimits.admission.project.openshift.io
   version: v1
-
   service:
     name: admission-server
     namespace: openshift-project-request-limit-operator
 ``` 
 
-* We define a `ValidatingWebhookConfiguration` that will allow other components  (`openshift-apiserver` for one) 
+* We define a `ValidatingWebhookConfiguration` that will allow other components (`openshift-apiserver` for one) 
   to reach the webhook via the registered aggregated API:
-```
+```yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 webhooks:
@@ -160,21 +187,19 @@ webhooks:
 `openshift-apiserver` reaches out to the admission webhook via `kubernetes.default.svc` as defined in the `ValidatingWebhookConfiguration`.
 `kube-apiserver` reaches out to the webhook via the `admission-server` service in the `openshift-project-request-limit-operator` 
 namespace. At a high level, the call chain looks as below:
-```
+```shell
     Project request -> openshift-apiserver -> kube-apiserver -> ProjectRequestLimit webhook.
 ```
 
 If we do a deep dive, the call chain to the admission webhook looks as below:
-```
+```shell
 Project request -> kube-apiserver -> kube aggregator layer inside the kube-apiserver ->
    openshift-apiserver -> admission layer in openshift-apiserver -> kube-apiserver -> 
      kube-aggregator layer inside the kube-apiserver -> ProjectRequestLimit webhook 
 ```
 
 The webhook server will have the following topology:
-* The webhook is deployed as a `DaemonSet` server.
-* We restrict the webhook server to the master nodes only. Apply appropriate `nodeSelector` and `tolerations` to the 
-  `PodSpec` so that the `Pods` are scheduled on to the master nodes.
+* The webhook is deployed as a `Deployment` server of N replica pods.
 
 
 #### The Operator
@@ -183,112 +208,32 @@ The operator will allow a cluster admin to:
 * Specify `limits` on `Project` create request(s) that the `ProjectRequestLimit` admission webhook can enforce.
 * Manage other lifecycle aspects of the operand.
 
-The operator will define a CRD to expose its API. The cluster admin will interact with the operator via a corresponding custom resource:
-* We treat the `ProjectRequestLimit` admission webhook (represented by a `DaemonSet`) as a cluster singleton. That means
-  the operator needs to manage a single deployment (specified via a `DaemonSet`) of the operand .
+The operator will define a CRD to expose its API. The cluster admin will interact with the operator via a corresponding Custom Resource:
+* We treat the `ProjectRequestLimit` admission webhook (represented by a `Deployment`) as a cluster singleton. That means
+  the operator needs to manage a single deployment (specified via a `Deployment`) of the operand .
 * For the above reason, the CRD will be defined as `cluster-scoped`, and
-* The operator will be reconciling a CR named `cluster`, it will ignore other custom resources.
+* The operator will be reconciling a CR named `cluster`, it will ignore other Custom Resources.
 
-```
-apiVersion: apiextensions.k8s.io/v1beta1
-kind: CustomResourceDefinition
-metadata:
-  name: projectrequestlimits.operator.project.openshift.io
-spec:
-  group: operator.project.openshift.io
-  version: v1
-  scope: Cluster
-  names:
-    plural: projectrequestlimits
-    singular: projectrequestlimit
-    kind: ProjectRequestLimit
-```  
 
-This is how a cluster-admin can enable the `ProjectRequestLimit` admission webhook on a cluster with `limits` to be enforced. 
-```
-apiVersion: operator.project.openshift.io/v1
-kind: ProjectRequestLimit
-metadata:
-  name: cluster
-spec:
-  limits:
-  // for selector level=admin, no maxProjects is specified. This means that users with this label 
-  // will not have a maximum of project requests.
-  - selector:
-      level: admin
-  
-  //  for selector level=advanced, a maximum number of 10 projects will be allowed.
-  - selector:
-      level: advanced
-    maxProjects: 10
-  
-  // no selector is specified. This means that it will be applied to any user that doesn’t satisfy 
-  // the previous two rules. Because rules are evaluated in order, this rule should be specified last.
-  - maxProjects: 2
-```
-
-##### Install:
-* The operator is installed into a predefined namespace by OLM: The predefined namespace `openshift-project-request-limit-operator` 
+##### Install
+* The operator is installed into a predefined namespace by OLM: The predefined namespace `openshift-project-request-limit-operator`
   will be wired in to the OLM manifests.
 * The operator will install the `ProjectRequestLimit` admission webhook into the same namespace as the operator. 
 
 
-##### Configuration:
-The operand is immutable, it loads the configuration from a file when it starts. A `ConfigMap` containing the configuration
-is mounted as a volume into the Pod at a certain file path.
-```
-apiVersion: apps/v1
-kind: DaemonSet
-spec:
-  template:
-    metadata:
-      annotations:
-        projectrequestlimits.operator.project.openshift.io/configuration.hash: abcdefgh
-    spec:
-      containers:
-        - name: project-request-limit-admission
-          command:
-            - /usr/bin/project-request-limit-admission
-          args:
-            - "--configuration=$(CONFIGURATION_PATH)"
-          env:
-            - name: CONFIGURATION_PATH
-              value: /etc/projectrequestlimit/config/limits.yaml
-          volumeMounts:
-            name: configuration
-            mountPath: /etc/projectrequestlimit/config/limits.yaml
-            subPath: limits.yaml
-      volumes:
-        - name: configuration
-          configMap:
-            name: project-request-limit-configuration
-``` 
-
-The operator will ensure that change(s) made to the configuration in the `cluster` custom resource are propagated to the 
-`ProjectRequestLimit` admission webhook immediately. So the wait interval is between the time an admin makes a change 
-and pod restart throughout the `DaemonSet`.  
-* The cluster admin changes the configuration inside the `cluster` custom resource.
-* The operator detects the change and compares the hash of the `desired` configuration with that of the `current` configuration.
-* If the configuration has changed, the operator updates the `ConfigMap` object and will set the annotation 
-  `projectrequestlimits.operator.project.openshift.io/configuration.hash` of the template `PodSpec` of the operand.
-
-Any change(s) to the secondary resources are detected and dealt with appropriately to maintain a functioning 
-`ProjectRequestLimit` webhook.
+##### Configuration
+The webhook server is immutable, it loads the configuration dynamically from `ProjectRequestLimit` Custom Resource.
+A shared informer is used to cache query results and improve the webhook server performance.
 
 ##### Certs
 The operator will leverage `service-ca` operator to populate the serving certs. `service-ca-operator` will rotate the 
-certs before they expire. 
-* The operator watches the corresponding `Secret` object that service-ca operator creates/updates.
-* The operator maintains a hash of the current cert keys. 
-* If the cert has changed the operator updates the annotation `projectrequestlimits.operator.project.openshift.io/cert.hash`
-  of the template `PodSpec` of the operand. This causes a pod restart throughout the `DaemonSet` and the new cert is loaded.
-
+certs before they expire.
 
 We will leverage `service-ca` operator to annotate the `APIService` and the `ValidatingWebhookConfiguration` object. 
 
 
 ##### Uninstall
-* When the `cluster` CR is deleted by a cluster-admin, he `ProjectRequestLimit` admission webhook and all secondary 
+* When the `cluster` CR is deleted by a cluster-admin, the `ProjectRequestLimit` admission webhook and all secondary 
   resource(s) associated with it should be removed. We can hang ownership of the operand resources off of the `cluster` 
   CR which will ensure that the garbage collector can claim all resources once the CR is removed.
 * Uninstalling the operator will leave the `ProjectRequestLimit` admission webhook intact. A cluster admin can uninstall 
@@ -297,13 +242,17 @@ We will leverage `service-ca` operator to annotate the `APIService` and the `Val
 
 
 ##### Repo
-The operand and the operaotr will have their own repo in github.
+The operand and the operator will have their own repo in github.
 * Operator: https://github.com/openshift/project-request-limit-operator
 * Operand: https://github.com/openshift/project-request-limit
 
-### Risks and Mitigations
-* Part of CPaaS pipeline that we depend on is being actively worked on (it's targeted for 4.5). This poses a risk if we want
-  to deliver the operator in the 4.5 timeline.
+### Risks and Mitigation
+Project creation is a core functionality of OpenShift. Faulty admission webhook can disable Project creation.
+To mitigate impact of a possible admission webhook failure, the above design proposes the webhook server to be:
+* installed on opt-in bases
+* easy to disable (by deleting the `ProjectRequestLimit` named `cluster`)
+
+As a drawback of this design, an operator with RBAC _create `ValidatingWebhookConfiguration`_ is present.
 
 ## Design Details
 
@@ -385,9 +334,7 @@ The idea is to find the best form of an argument why this enhancement should _no
 
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement.
+Can Resource Quotas be used on Projects? Project is not backed by a CRD, so likely not.
 
 ## Infrastructure Needed [optional]
 
