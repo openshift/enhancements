@@ -131,12 +131,11 @@ type ControlPlaneMachineSetSpec struct {
     // FailureDomains is the list of failure domains (sometimes called
     // availability zones) in which the ControlPlaneMachineSet should balance
     // the Control Plane Machines.
-    // This will be injected into the ProviderSpec in the
-    // appropriate location for the particular provider.
+    // This will be merged into the ProviderSpec given in the template.
     // This field is optional on platforms that do not require placement
     // information, eg OpenStack.
     // +optional
-    FailureDomains []string `json:"failureDomains,omitempty"`
+    FailureDomains []FailureDomain `json:"failureDomains,omitempty"`
 
     // Label selector for Machines. Existing Machines selected by this
     // selector will be the ones affected by this ControlPlaneMachineSet.
@@ -248,6 +247,73 @@ type ControlPlaneMachineSetStatus struct {
     // +optional
     Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
+
+// FailureDomain represents the different configurations required to spread Machines
+// across failure domains on different platforms.
+// +union
+type FailureDomain struct {
+  // Platform identifies the platform for which the FailureDomain represents
+  // +kubebuilder:validation:Enum:="aws";"azure";"gcp";"openstack"
+  // +unionDiscriminator
+  // +optional
+  Platform configv1.PlatformType `json:platform,omitempty`
+
+  // AWS configures failure domain information for the AWS platform
+  // +optional
+  AWS *AWSFailureDomain `json:aws,omitempty`
+
+  // Azure configures failure domain information for the Azure platform
+  // +optional
+  Azure *AzureFailureDomain `json:azure,omitempty`
+
+  // GCP configures failure domain information for the GCP platform
+  // +optional
+  GCP *GCPFailureDomain `json:gcp,omitempty`
+
+  // OpenStack configures failure domain information for the OpenStack platform
+  // +optional
+  OpenStack *OpenStackFailureDomain `json:openstack,omitempty`
+}
+
+// AWSFailureDomain configures failure domain information for the AWS platform
+type AWSFailureDomain struct {
+  // Subnet is a reference to the subnet to use for this instance
+  // +optional
+	Subnet AWSResourceReference `json:"subnet,omitempty"`
+
+  // Placement configures the placement information for this instance
+  // +optiona;
+  Placement AWSFailureDomainPlacement `json:placement,omitempty`
+}
+
+  // AWSFailureDomainPlacement configures the placement information for the AWSFailureDomain
+type AWSFailureDomainPlacement struct {
+  // AvailabilityZone is the availability zone of the instance
+	// +optional
+	AvailabilityZone string `json:"availabilityZone,omitempty"`
+}
+
+// AzureFailureDomain configures failure domain information for the Azure platform
+type AzureFailureDomain struct {
+  // Availability Zone for the virtual machine.
+	// If nil, the virtual machine should be deployed to no zone
+	// +optional
+	Zone *string `json:"zone,omitempty"`
+}
+
+// GCPFailureDomain configures failure domain information for the GCP platform
+type GCPFailureDomain struct {
+  // Zone is the zone in which the GCP machine provider will create the VM.
+  // +optional
+	Zone string `json:"zone"`
+}
+
+// OpenStackFailureDomain configures failure domain information for the OpenStack platform
+type OpenStackFailureDomain struct {
+  // The availability zone from which to launch the server.
+  // +optional
+  AvailabilityZone string `json:"availabilityZone,omitempty"`
+}
 ```
 
 ### Implementation Details/Notes/Constraints
@@ -324,19 +390,49 @@ Machines. For example, we expect on AWS that this will contain a list of availab
 Note, we are explicitly not expecting users to add different regions to the the `FailureDomains` as we do not support
 running OpenShift across multiple regions.
 
-The following table denotes the field on each platform into which the list of failure domains will be mapped:
+Note that the `FailureDomains` field is only supported on certain platforms, currently; AWS, Azure, GCP and OpenStack;
+other platforms may be supported in the future.
 
+The users will be allowed to override a small amount of configuration for the `providerSpec` based on the configuration
+required to spread Machines across different failure domains.
+For example, on AWS, both the `availabilityZone` and `subnets` differ depending on which failure domain is configured,
+on other platforms, eg Azure, GCP or OpenStack, only one field is required to vary the failure domain, in which case,
+this is all that will be allowed.
 
-| Platform  | ProviderSpec Field          |
-| --------- | --------------------------- |
-| AWS       | .placement.availabilityZone |
-| Azure     | .zone                       |
-| GCP       | .zone                       |
-| vSphere   | TBD (see below)             |
-| OpenStack | .availabilityZone           |
+The overrides will be injected into the given `providerSpec` before creating the Machines as part of the balancing logic
+within the `ControlPlaneMachineSet` operator.
 
-Note that on some platforms (eg OpenStack) the failure domain field is optional, as such, the `FailureDomains` field
-must also be optional.
+As an example, a user on AWS may set their `FailureDomains` as:
+
+```yaml
+failureDomains:
+- aws:
+    placement:
+      availabilityZone: us-east-1a
+    subnet:
+      filters:
+      - name: "tag:Name"
+        values:
+        - "my-cluster-subnet-1a"
+- aws:
+    placement:
+      availabilityZone: us-east-1b
+      subnet:
+        filters:
+        - name: "tag:Name"
+          values:
+          - "my-cluster-subnet-1b"
+```
+
+A user on Azure may set their `FailureDomains` as:
+
+```yaml
+failureDomains:
+- azure:
+    zone: us-central-1
+- azure:
+    zone: us-central-2
+```
 
 ###### Failure Domains on vSphere
 
