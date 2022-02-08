@@ -279,33 +279,33 @@ type FailureDomain struct {
 type AWSFailureDomain struct {
   // Subnet is a reference to the subnet to use for this instance
   // +optional
-	Subnet AWSResourceReference `json:"subnet,omitempty"`
+  Subnet AWSResourceReference `json:"subnet,omitempty"`
 
   // Placement configures the placement information for this instance
-  // +optiona;
+  // +optional
   Placement AWSFailureDomainPlacement `json:placement,omitempty`
 }
 
   // AWSFailureDomainPlacement configures the placement information for the AWSFailureDomain
 type AWSFailureDomainPlacement struct {
   // AvailabilityZone is the availability zone of the instance
-	// +optional
-	AvailabilityZone string `json:"availabilityZone,omitempty"`
+  // +optional
+  AvailabilityZone string `json:"availabilityZone,omitempty"`
 }
 
 // AzureFailureDomain configures failure domain information for the Azure platform
 type AzureFailureDomain struct {
   // Availability Zone for the virtual machine.
-	// If nil, the virtual machine should be deployed to no zone
-	// +optional
-	Zone *string `json:"zone,omitempty"`
+  // If nil, the virtual machine should be deployed to no zone
+  // +optional
+  Zone *string `json:"zone,omitempty"`
 }
 
 // GCPFailureDomain configures failure domain information for the GCP platform
 type GCPFailureDomain struct {
   // Zone is the zone in which the GCP machine provider will create the VM.
   // +optional
-	Zone string `json:"zone"`
+  Zone string `json:"zone"`
 }
 
 // OpenStackFailureDomain configures failure domain information for the OpenStack platform
