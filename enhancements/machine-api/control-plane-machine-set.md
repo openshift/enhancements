@@ -721,6 +721,26 @@ MachineHealthCheck will take no action on the Machines. It is likely that if mor
 unhealthy that either the etcd cluster is degraded, or a scaling operation is taking place presently to replace a
 failed Machine.
 
+#### Management of Control Plane load balancers
+
+In an OpenShift cluster, in general, there is a concept of an internal and external load balancer in front of the
+Kubernetes API. These load balancers are created by the installer on various cloud providers but are later considered
+for the most part to be unmanaged.
+
+To enable Control Plane Machine replacement, Machine API handles adding and removing Control Plane Machines from these
+load balancers on appropriate platforms (eg AWS, Azure and GCP). Therefore, when a customer today replaces their Control
+Plane Machine, they do not need to worry about the load balancer attachment as this is automated for them.
+
+As this is already a part of the Machine management directly, the `ControlPlaneMachineSet` does not need to be concerned
+about the load balancer management itself.
+
+On other platforms where virtual load balancers are employed (via Keepalived and HAProxy), such as vSphere or OpenStack,
+the Kubernetes API load balancing is all in cluster and therefore is not required to be modified during a Control Plane
+Machine replacement.
+
+On platforms that do not yet support load balancer management (eg IBM and Alibaba), this will need to be implemented in
+a similar manner to that of AWS, Azure and GCP before these platforms can be supported by `ControlPlaneMachineSets`.
+
 ### Risks and Mitigations
 
 #### etcd quorum must be preserved throughout scaling operations
