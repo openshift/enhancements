@@ -234,12 +234,10 @@ We will leverage `service-ca` operator to annotate the `APIService` and the `Val
 
 ##### Uninstall
 * When the `cluster` CR is deleted by a cluster-admin, the `ProjectRequestLimit` admission webhook and all secondary 
-  resource(s) associated with it should be removed. We can hang ownership of the operand resources off of the `cluster` 
-  CR which will ensure that the garbage collector can claim all resources once the CR is removed.
-* Uninstalling the operator will leave the `ProjectRequestLimit` admission webhook intact. A cluster admin can uninstall 
-  and reinstall the operator or an upgrade to the new version of the operator can happen. In neither case, should the 
-  operand be affected. 
-
+  resource(s) associated with it should be removed. The `cluster` CR owns the operand resources via
+  `metav1.OwnerReferece`, which will ensure that the garbage collector can claim all resources once the CR is removed.
+* Uninstalling the operator will also uninstall the `cluster` CR and the operand resources. This will be achieved
+  via a `metav1.OwnerReference` between _Operator Deployment <-> `cluster` CR_. (As opposite to a finalizer, for example)
 
 ##### Repo
 The operand and the operator will have their own repo in github.
