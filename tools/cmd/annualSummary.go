@@ -29,18 +29,20 @@ import (
 	"github.com/openshift/enhancements/tools/util"
 )
 
+// which year? (default to last year)
+// FIXME: Add some logic to figure out if we're running this
+// late in December and adjust earliestDate and latestDate
+// accordingly.
+var year = time.Now().Year() - 1
+
 // annualSummaryCmd represents the annualSummary command
 var annualSummaryCmd = &cobra.Command{
 	Use:   "annual-summary",
 	Short: "Summarize the enhancements work over the previous year",
 	// Long: ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// FIXME: Add some logic to figure out if we're running this
-		// late in December and adjust earliestDate and latestDate
-		// accordingly.
-		today := time.Now()
-		earliestDate := time.Date(today.Year()-1, time.January, 1, 0, 0, 0, 0, time.UTC)
-		latestDate := time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
+		earliestDate := time.Date(year, time.January, 1, 0, 0, 0, 0, time.UTC)
+		latestDate := time.Date(year+1, time.January, 1, 0, 0, 0, 0, time.UTC)
 
 		query := &util.PullRequestQuery{
 			Org:     orgName,
@@ -166,6 +168,8 @@ var annualSummaryCmd = &cobra.Command{
 }
 
 func init() {
+	annualSummaryCmd.Flags().IntVar(&year, "year", year, "which year")
+
 	rootCmd.AddCommand(annualSummaryCmd)
 
 	// Here you will define your flags and configuration settings.
