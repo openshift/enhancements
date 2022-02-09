@@ -135,7 +135,7 @@ type ControlPlaneMachineSetSpec struct {
     // This field is optional on platforms that do not require placement
     // information, eg OpenStack.
     // +optional
-    FailureDomains []FailureDomain `json:"failureDomains,omitempty"`
+    FailureDomains FailureDomains `json:"failureDomains,omitempty"`
 
     // Label selector for Machines. Existing Machines selected by this
     // selector will be the ones affected by this ControlPlaneMachineSet.
@@ -251,7 +251,7 @@ type ControlPlaneMachineSetStatus struct {
 // FailureDomain represents the different configurations required to spread Machines
 // across failure domains on different platforms.
 // +union
-type FailureDomain struct {
+type FailureDomains struct {
   // Platform identifies the platform for which the FailureDomain represents
   // +kubebuilder:validation:Enum:="aws";"azure";"gcp";"openstack"
   // +unionDiscriminator
@@ -260,19 +260,19 @@ type FailureDomain struct {
 
   // AWS configures failure domain information for the AWS platform
   // +optional
-  AWS *AWSFailureDomain `json:aws,omitempty`
+  AWS *[]AWSFailureDomain `json:aws,omitempty`
 
   // Azure configures failure domain information for the Azure platform
   // +optional
-  Azure *AzureFailureDomain `json:azure,omitempty`
+  Azure *[]AzureFailureDomain `json:azure,omitempty`
 
   // GCP configures failure domain information for the GCP platform
   // +optional
-  GCP *GCPFailureDomain `json:gcp,omitempty`
+  GCP *[]GCPFailureDomain `json:gcp,omitempty`
 
   // OpenStack configures failure domain information for the OpenStack platform
   // +optional
-  OpenStack *OpenStackFailureDomain `json:openstack,omitempty`
+  OpenStack *[]OpenStackFailureDomain `json:openstack,omitempty`
 }
 
 // AWSFailureDomain configures failure domain information for the AWS platform
@@ -406,16 +406,15 @@ As an example, a user on AWS may set their `FailureDomains` as:
 
 ```yaml
 failureDomains:
-- aws:
-    placement:
+  aws:
+  - placement:
       availabilityZone: us-east-1a
     subnet:
       filters:
       - name: "tag:Name"
         values:
         - "my-cluster-subnet-1a"
-- aws:
-    placement:
+  - placement:
       availabilityZone: us-east-1b
       subnet:
         filters:
@@ -428,10 +427,9 @@ A user on Azure may set their `FailureDomains` as:
 
 ```yaml
 failureDomains:
-- azure:
-    zone: us-central-1
-- azure:
-    zone: us-central-2
+  azure:
+  - zone: us-central-1
+  - zone: us-central-2
 ```
 
 ###### Failure Domains on vSphere
