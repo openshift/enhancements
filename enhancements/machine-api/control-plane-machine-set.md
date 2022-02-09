@@ -89,7 +89,7 @@ of updated configuration to the Control Plane Machines.
 - As a cluster administrator of OpenShift, I would like to be able to safely and automatically vertically resize my
   control plane as and when the demand on the control plane changes
 - As a cluster administrator of OpenShift, I would like to be able to automatically recover failed Control Plane
-  Machines
+  Machines (eg those that have been removed by the cloud provider, or those failing MachineHealthChecks)
 - As a cluster administrator of OpenShift, I would like to be able to make changes to the configuration of the
   underlying hardware of my control plane and have these changes safely applied using immutable hardware concepts
 - As a cluster administrator of OpenShift, I would like to be able to control rollout of changes to my Control Plane
