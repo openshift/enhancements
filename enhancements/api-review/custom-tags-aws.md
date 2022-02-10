@@ -12,7 +12,7 @@ reviewers:
 approvers:
   - @tjungblu
 creation-date: 2021-03-24
-last-updated: 2022-01-07
+last-updated: 2022-02-10
 status: implementable
 ---
 
@@ -41,68 +41,157 @@ Note: this enhancement is slightly retroactive. Work has already begun on this. 
 
 Motivations include but are not limited to:
 
-- allow admin, compliance, and security teams to keep track of assets and objects created by OpenShift,
+- Allow admin, compliance, and security teams to keep track of assets and objects created by OpenShift,
    both at install time and during continuous operation (Day 2)
-- in a Managed OpenShift environment such as Red Hat OpenShift on AWS (ROSA), allow easy differentiation
+- In a Managed OpenShift environment such as Red Hat OpenShift on AWS (ROSA), allow easy differentiation
    between Red Hat-managed AWS objects and customer-managed objects
-- *allow for the restriction of permissions granted to Red Hat in an AWS account by AWS resource tags.
+- *Allow for the restriction of permissions granted to Red Hat in an AWS account by AWS resource tags.
    For example, see https://issues.redhat.com/browse/SDE-1146 - "IAM users and roles can only operate on resources with specific tags"*
 
 ### Goals
 
-- the administrator or service (in the case of Managed OpenShift) installing OpenShift can pass an arbitrary
+- The administrator or service (in the case of Managed OpenShift) installing OpenShift can pass an arbitrary
    list of user-defined tags to the OpenShift Installer, and everything created by the installer and all other
    bootstrapped components will apply those tags to all resources created in AWS, for the life of the cluster, and where supported by AWS.
-- tags can be applied at creation time, in an atomic operation.
-- tags can be updated post creation.
+- User-define tags can be applied at creation time, in an atomic operation.
+- User-defined tags can be updated post creation.
 
 ### Non-Goals
 
-- to reduce initial scope, we are not implementing this for clouds other than AWS. We will not take any actions
-   to prohibit that later.
+- To reduce initial scope, the proposal does not apply for clouds other than AWS. There will be no actions taken to prohibit that later.
 
 ### Limitations
 
-- tags for PV volumes cannot be updated but only set during creation  of volume using `--extra-tags`.Present CSI spec does not support `UpdateVolume` to update volume metadata.
-   Restarting csi driver to initiate multiple `CreateVolume` will depend on underlying storage layer idempotency implementation for the operation. It is recommended to use a interface from CSI spec which enforces idempotency gurantees for volume metadata updates.
+- User-defined tags for PV volumes cannot be updated but only set during creation  of volume using `--extra-tags`.Present CSI spec does not support `UpdateVolume` to update volume metadata.
+   Restarting csi driver to initiate multiple `CreateVolume` will depend on underlying storage layer idempotency implementation for the operation. It is recommended to use a interface from CSI spec which enforces idempotency guarantees for volume metadata updates.
    In case of AWS EC2  `CreateVolume`, returns `IdempotentParameterMismatch` error when identical request is not found for the same client token.
    Also, the CSI spec `https://github.com/container-storage-interface/spec/blob/master/spec.md` mentions grpc error code
    `6 ALREADY_EXISTS` for `a volume corresponding to the specified volume name already exists but is incompatible with the specified capacity_range, volume_capabilities, parameters, accessibility_requirements or volume_content_source`.
+- User-defined tags cannot be updated for vpc, security groups, elb, route53, subnet resources as there is no operator managing the resources post installation.
+   User-defined tags cannot be updated to an AWS resource which is not managed by an operator in openshift-* namespace.
 
 ## Proposal
 
-New `propagateUserTags` field added to `.platform.aws` of install config to indicate that the user tags should be applied to AWS
+- Existing `experimentalPropagateUserTags` will be renamed to `propagateUserTags` in `.platform.aws` of install config to indicate that the user tags should be applied to AWS
 resources created by in-cluster operators.
+  `propagateUserTags` is mandatory field.
+  `experimentalPropagateUserTags` field will be set for deprecation.
 
-`propagateUserTags` field is by default set to true.
-`experimentalPropagateUserTags` field will be set for deprecation.
+  If `propagateUserTags` is set to true, install validation will fail if there is any tag that starts with `kubernetes.io` or `openshift.io`.
 
-If `propagateUserTags` is not set to false, install validation will fail if there is any tag that starts with `kubernetes.io` or `openshift.io`.
+- Add a new field `resourceTags` to `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io` type. Tags included in the
+  `resourceTags` field will be applied to new resources created for the cluster. The `resourceTags` field will be populated by the installer only if the `propagateUserTags` field is true.
 
-Add a new field `resourceTags` to `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io` type. Tags included in the
-`resourceTags` field will be applied to new resources created for the cluster. The `resourceTags` field will be populated by the installer only if the `propagateUserTags` field is not set to false.
+  `.spec.platformSpec.aws` is a mutable field and `.status.platformStatus.aws` is immutable.
+  `.status.platformStatus.aws` will have older version tags defined and is required for upgrade case.
 
-`.spec.platformSpec.aws` is a mutable field and `.status.platformStatus.aws` is immutable.
+- All operators that create AWS resources (ingress, cloud credential, storage, image registry, machine-api) will apply these tags to all AWS resources they create.
+  Operator must update the AWS resource within (5 minutes + cloud provide API response time).
+  Operator must update only when there is a change in `.spec.platformSpec.aws.resourceTags`.
+  Operator must consider `.status.platformStatus.aws` when AWS resource is created. `.status.platformStatus.aws` can be ignored for user-defined tag update/delete.
 
-Note existing unchanged behavior: The installer will apply these tags to all AWS resources it creates with terraform (e.g. bootstrap and master EC2 instances) from the install config, not from infrastructure status, and regardless if the propagation option is set.
+### Create tags scenarios
+`resourceTags` that are specified in  `.spec.platformSpec.aws` of the Infrastructure resource will merge with user-defined tags in an individual component.
 
-All operators that create AWS resources (ingress, cloud credential, storage, image registry, machine-api)
-will apply these tags to all AWS resources they create.
+In the case where a user-defined tag is specified in the Infrastructure resource and
+1) There is already user tag with the same key present for AWS resource, the value from the AWS resource will be replaced.
+   For example,
+   Existing tag for AWS resource = `key_infra1 = value_comp1`
+   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`
+   Action = Existing tag for AWS resource is updated to reflect new value.
+   Final tag set to AWS resource = `key_infra1 = value_infra1`
+   Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
 
-userTags that are specified in the Infrastructure resource will merge with userTags specified in an individual component. In the case where a userTag is specified in the Infrastructure resource and there is a tag with the same key specified in an individual component, the value from the individual component will have precedence and be used.
+2) There is no tag with same key present, new user-defined tag is created for the AWS resource. In case of limit reached, a validation error is generated.
+   For example,
+   Existing tag for AWS resource = `key_infra1 = value_comp1`
+   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`
+   Action = A new tag is created for AWS resource.
+   Final tag set to AWS resource = `key_infra1 = value_infra1`
+   Event action = An event is generated to notify user about the action status (success/failure) to create tags for the AWS resource.
 
-Users can update the `resourceTags` by editing `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io` type. New addition of tags are always appended. Any update in the existing tags, which are added by installer or  by edit in `resourceTags`, will replace the previous tag value.
+### Update tags scenarios
+Users can update the user-defined tags by editing `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io` type. New addition of tags are always appended.
 On update of `resourceTags`, AWS resource is not created or restarted.
 
-`.status.platformStatus.aws.resourceTags` reflects the present set of userTags. In case when the userTags are created by installer or newly added in Infrastructure resource is updated on the individual component directly using external tools, the value from Infrastructure resource will have the precedence.
+In the case where a user-defined tag is specified in the Infrastructure resource and
+1) There is already user-defined tag with the same key and value present for AWS resource, the user-define tag value for the AWS resource will not be updated.
+   For example,
+   Existing tag for AWS resource = `key_infra1 = value_update1`
+   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_update1`
+   Action = There is no update for AWS resource.
+   Final tag set to AWS resource = `key_infra1 = value_update1`
+   Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
 
-The precedence helps to maintain creator/updator tool (in-case of external tool usage) remains same for user-defined tags which are created correspondingly.
+2) There is already user-defined tag with the same key and different value present for AWS resource, the user-define tag value for the AWS resource will be updated.
+   For example,
+   Existing tag for AWS resource = `key_infra1 = value_old`
+   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_update1`
+   Action = Existing tag for AWS resource is updated to reflect new value.
+   Final tag set to AWS resource = `key_infra1 = value_update1`
+   Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
 
-The userTags field is intended to be set at install time and updatable (not allowed to delete). Components that respect this field must only ever add tags that they retrieve from this field to cloud resources, they must never remove tags from the existing underlying cloud resource even if the tags are removed from this field.
+3) The new user-defined tag request has empty string `""`, the user-defined tag value for the AWS resource will be updated. Please refer to the `Delete Scenarios` for more details on empty value string handling.
+   For example,
+   Existing tag for AWS resource = `key_infra1 = value_old`
+   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = `
+   Action = Existing tag for AWS resource is updated to reflect new value.
+   Final tag set to AWS resource = `key_infra1 = value_update1`
+   Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource. A warning also must be generated about user-defined tag being marked for deletion.
 
-If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. However, if tags are removed from userTags, the tag will not be removed from the AWS resource.
+### Delete tags scenarios
+User-defined tags are deleted in two-pass method to avoid accidental deletion of tags by the user.
+- In the first pass, the user sets the user-defined tag value to empty string.
+- In the second pass, the user-defined tag is deleted only when following conditions are met,
+  1) the user-defined tag set to AWS resource has empty string value.
+  2) the user-defined tag set in `.spec.platformSpec.aws.resourceTags` has empty string.
 
-The Infrastructure resource example to involve spec for api changes
+  For example,
+  First pass,
+  Existing tag for AWS resource = `key_infra1 = value_old`
+  New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = `
+  Action = Existing tag for AWS resource is updated to reflect new value.
+  Final tag set to AWS resource = `key_infra1 = value_update1`
+  Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource. A warning also should be generated that value is set for deletion.
+
+  Second pass,
+  Existing tag for AWS resource = `key_infra1 = `
+  New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = `
+  Action = Existing tag for AWS resource is deleted.
+  Final tag set to AWS resource = deleted
+  Event action = An event is generated to notify user about the action status (success/failure) to delete tags for the AWS resource.
+
+### Caveats
+1) User updates the user-defined tag from using external tools when there is an entry in `.spec.platformSpec.aws.resourceTags`
+   The user-defined tag which is updated from spec, will be reconciled by operators to set value from `.spec.platformSpec.aws.resourceTags`.
+   The user-defined tag will be overwritten with value from `.spec.platformSpec.aws.resourceTags` when there is an update to `.spec.platformSpec.aws.resourceTags` section as a whole.
+
+   User must handle inconsistencies in `.spec.platformSpec.aws.resourceTags` and user-defined tag value for AWS resource when using multiple tools to manage tags.
+
+   For example,
+   Edited existing tag using external tool for AWS resource = `key_infra1 = value_comp1`
+   Previous tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`
+   Action = Update existing tag with value from `.spec.platformSpec.aws.resourceTags`.
+   Final tag set to AWS resource = `key_infra1 = value_infra1`
+   Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
+
+2) User deletes the user-defined tag from `.spec.platformSpec.aws.resourceTags`
+   The user-defined tag which is removed from spec, will not be reconciled or managed by operators.
+   User can update user-defined tag key:value using external tool. The user-defined tag will not be overwritten.
+
+   For example,
+   Existing tag for AWS resource = `key_infra1 = value1`
+   New tag request = `.spec.platformSpec.aws.resourceTags` has ` `
+   Action = No change in existing user-defined tag.
+   Final tag set to AWS resource = `key_infra1 = value1`
+   Event action = No event
+
+3) User sets user-defined tag to delete which is created using external tools.
+   There is no validation check involved for creator of user-defined tag. Any user-defined tag added by user in `.spec.platformSpec.aws.resourceTags` is considered for create/update/delete accordingly.
+
+4) Any user-defined tag set using `.spec.platformSpec.aws.resourceTags` in `Infrastructure.config.openshift.io/v1` type has scope limited to cluster-level. Individual AWS resource-level user-defined tag management is not supported.
+
+The Infrastructure resource example to use spec for api changes
 
 ```go
 // AWSPlatformSpec holds the desired state of the Amazon Web Services Infrastructure provider.
@@ -115,7 +204,7 @@ type AWSPlatformSpec struct {
     // AWS supports a maximum of 10 tags per resource. OpenShift reserves 5 tags for its use, leaving 5 tags
     // available for the user.
     // While ResourceTags field is mutable, items can not be removed.
-    // +kubebuilder:validation:MaxItems=25
+    // +kubebuilder:validation:MaxItems=10
     // +optional
     ResourceTags []AWSResourceTag `json:"resourceTags,omitempty"`
 }
@@ -130,7 +219,7 @@ properties:
     resourceTags:
     description: ResourceTags is a list of additional tags to apply to AWS resources created for the cluster. See https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html for information on tagging AWS resources.
     type: array
-    maxItems: 25
+    maxItems: 10
     items:
         description: AWSResourceTag is a tag to apply to AWS resources created for the cluster.
         type: object
@@ -179,14 +268,11 @@ NA
 ## Design Details
 
 User can add tags during installation for creation of resources with tags. Installer creates infrastructure manifests with `resourceTags` to `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io`.
-Cluster config operator reconciles Infrastructure object, validates and updates `resourcesTags` from `.spec.platformSpec.aws` to  `.status.platformStatus.aws`.
-Operators that operate on aws resources must merge the tags from `.spec.platformSpec.aws`, `.status.platformStatus.aws` and individual component tags.
+Operators that operate on aws resources must consider the tags from `.spec.platformSpec.aws`, `.status.platformStatus.aws` and existing AWS resource tags.
 
-The values from `status.platformStatus.aws` will used to only support downgrade.
+The values from `status.platformStatus.aws` will used to only support older version.
 
-In case of precedence conflict or errors, the same will be reported using `Events` by the operators.
-
-`.status.platformStatus.aws` can be deprecated in the future versions when there is a CRD validation possible to avoid removal of userTags from `.spec.platformSpec.aws`.
+`.status.platformStatus.aws` will be deprecated in the future versions.
 
 ### Test Plan
 
@@ -215,7 +301,7 @@ NA
 On upgrade:
 
 On upgrade from version supporting `experimentalPropagateUserTags`, openshift components that consume the new field should merge `.status.platformStatus.aws` and `.spec.platformSpec.aws`.
-`.spec.platformSpec.aws` can be updated or changed which will override the values from status and a new `.status.platformStatus.aws` will be set.
+`.spec.platformSpec.aws` can be updated or changed which will override the values from status.
 
 For installer configuration compatibility, configuration with `experimentalPropagateUserTags` should be supported.
 
@@ -223,22 +309,18 @@ On downgrade:
 
 The status field may remain populated, components may or may not continue to tag newly created resources w/ the additional tags depending on whether or not a given component still has logic to respect the status tags, after the downgrade.
 
-`experimentalPropagateUserTags` field should be generated in installer configuration to support downgrade.
+`experimentalPropagateUserTags` field should be generated in installer configuration to support lower version installers.
 
 ### Version Skew Strategy
-
-TBD
 
 ## Implementation History
 
 ## Drawbacks
 
-If a customer decides they do not want these tags applied to new resources, there is no clean way to address that need:
+If a user decides that they do not want these tags applied to new resources, there is no clean way to address that need:
 
-1. they would have to get help from support to edit the status field
-2. they would have to manually remove the undesired tags from any existing resources
-
-In spec field where a customer can specify and edit these tags, which will be reflected into status when changed, and we will expect consuming components to reconcile changes to the set of tags by applying net new tags to existing resources (but they will still not remove tags that are dropped from the list of tags).
+1. User would have to get help from support to edit the status field for older version which uses `experimentalPropagateUserTags`.
+2. User would have to manually remove the undesired user-defined tags from some existing resources even though user-defined tags can be marked for deletion.
 
 ## Alternatives
 
