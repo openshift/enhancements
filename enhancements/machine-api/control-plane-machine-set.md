@@ -256,23 +256,23 @@ type FailureDomains struct {
   // +kubebuilder:validation:Enum:="aws";"azure";"gcp";"openstack"
   // +unionDiscriminator
   // +optional
-  Platform configv1.PlatformType `json:platform,omitempty`
+  Platform configv1.PlatformType `json:"platform,omitempty"`
 
   // AWS configures failure domain information for the AWS platform
   // +optional
-  AWS *[]AWSFailureDomain `json:aws,omitempty`
+  AWS *[]AWSFailureDomain `json:"aws,omitempty"`
 
   // Azure configures failure domain information for the Azure platform
   // +optional
-  Azure *[]AzureFailureDomain `json:azure,omitempty`
+  Azure *[]AzureFailureDomain `json:"azure,omitempty"`
 
   // GCP configures failure domain information for the GCP platform
   // +optional
-  GCP *[]GCPFailureDomain `json:gcp,omitempty`
+  GCP *[]GCPFailureDomain `json:"gcp,omitempty"`
 
   // OpenStack configures failure domain information for the OpenStack platform
   // +optional
-  OpenStack *[]OpenStackFailureDomain `json:openstack,omitempty`
+  OpenStack *[]OpenStackFailureDomain `json:"openstack,omitempty"`
 }
 
 // AWSFailureDomain configures failure domain information for the AWS platform
@@ -283,7 +283,7 @@ type AWSFailureDomain struct {
 
   // Placement configures the placement information for this instance
   // +optional
-  Placement AWSFailureDomainPlacement `json:placement,omitempty`
+  Placement AWSFailureDomainPlacement `json:"placement,omitempty"`
 }
 
   // AWSFailureDomainPlacement configures the placement information for the AWSFailureDomain
