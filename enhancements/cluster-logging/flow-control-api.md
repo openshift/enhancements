@@ -171,7 +171,7 @@ limits:
 	- application:
 		selector:
 		  matchLabels: { importance: low }
-	    limitRef: slow
+	 perContainerLimitRef: slow
     - application:
 	    selector:
 	  	  matchLabels: { importance: high }
