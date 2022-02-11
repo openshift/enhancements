@@ -195,8 +195,10 @@ The `limit` type has fields:
   If the inbound flow exceeds the limit, logs are dropped.
   See Non-Goals below for examples of possible future policy extensions.
 
-The forwarder `input` and `output` types gets a new optional field
-- `limitRef`: (limit, optional) to apply a flow control limit.
+The forwarder `input` type gets a new optional field: 
+- `perContainerLimitRef`: (limit optional) flow control limit to be applied _to each container_ selected by this input. No container selected by this input can exceed this limit.
+The forwarder `output` type gets a new optional field:
+- `limitRef`: (limit, optional) flow control limit to be applied _to the aggregated log flow to this output_. The total log flow to this output cannot exceed the limit.
 
 [LabelSelector]: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.18/#labelselector-v1-meta
 [quantity]: https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/
