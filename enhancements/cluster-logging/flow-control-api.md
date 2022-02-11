@@ -133,7 +133,7 @@ limits:
 	- application:
 		selector:
 		  matchLabels: { boring: true }
-	    limitRef: ignore
+	    perContainerLimitRef: ignore
 ```
 
 **Notes**
