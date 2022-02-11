@@ -156,7 +156,7 @@ limits:
 	    limitRef: slow
     - application:
 		namespaces: [ important, exciting ]
-		limitRef: fast
+		perContainerLimitRef: fast
 ```
 
 #### Set a per-container limit for containers with certain labels
