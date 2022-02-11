@@ -175,7 +175,7 @@ limits:
     - application:
 	    selector:
 	  	  matchLabels: { importance: high }
-	  limitRef: fast
+	  perContainerLimitRef: fast
 ```
 
 ### API Extensions
