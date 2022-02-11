@@ -185,11 +185,10 @@ Extend the `ClusterLogForwarder` API with an optional `limits` field (list of `l
 The `limit` type has fields:
 
 - `name`: Name used to identify this limit.
-- `maxBytesPerSecond`: ([Quantity][Quantity], optional) second in [k8s resource notation][memory].\
-  Maximum byte rate allowed. If the inbound rate exceeds this limit then the `policy` is applied to keep the outbound rate within the limit.
+- `maxRecordsPerSecond`: ([Quantity][Quantity], optional) Maximum number of log records per second rate allowed. If the inbound rate exceeds this limit then the `policy` is applied to keep the outbound rate within the limit.
   - Absent (default) means 'best effort' - go as fast as possible, drop records if forwarder cannot keep up.
-  - 0 means ignore - if possible the relevant logs are not even collected.
-  - > 0 is a limit in bytes per second.
+  - 0 means do not forward any logs - if possible the logs are not even collected.
+  - > 0 is a limit in log records per second (usually a log record corresponds to a line of log output)
 - `policy`: (enum: drop, default: drop)\
   Placeholder for future policy extensions.
   For the first iteration the only policy is `drop` and this field need not be specified.
