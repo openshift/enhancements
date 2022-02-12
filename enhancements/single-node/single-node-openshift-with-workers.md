@@ -188,7 +188,7 @@ the user has to take to enable expansion, e.g. patch the default
 than the worker pool).
 
 - Adjust the baremetal platform to support single control-plane node
-installations. The baremetal platforms solves the "floating ingress" issue by
+installations. The baremetal platform solves the "floating ingress" issue by
 using virtual IP addresses/keepalived.
 
 - Deal with users who want their ingress traffic to not go through the single
