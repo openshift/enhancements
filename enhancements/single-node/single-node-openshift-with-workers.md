@@ -73,8 +73,7 @@ parameters and their possible values)
 The "Control Plane Topology" parameter is used by control-plane operators (such
 as the Cluster etcd Operator) to determine how many replicas they should give
 their various Deployments / StatefulSets. The value of this parameter in single
-control-plane node clusters is always simply "SingleReplica" and it is not
-discussed further in this enhancement.
+control-plane node clusters is always simply "SingleReplica".
 
 The "Infrastructure Topology" parameter is used by infrastructure operators
 (such as the Cluster Ingress Operator or Cluster Monitoring Operator) to
@@ -144,7 +143,7 @@ control-plane node cluster today using the OpenShift Installer does not provide
 the user with a worker node ignition file. As a result, the user is not able to
 manually add worker nodes to the resulting cluster. All current official OCP
 documentation points the user to use "the worker ignition file that get
-generated during installation", but these are not currently generated in such
+generated during installation", but that is not currently generated in such
 bootstrap-in-place installation.
 
 ### Goals
