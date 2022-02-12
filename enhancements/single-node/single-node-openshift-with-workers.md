@@ -462,21 +462,21 @@ definitions and may confuse users.
 
 ## Alternatives
 
- - Even when users need to add just one extra worker, require them to add yet
- another worker so they could just form a compact 3-node cluster where all
- nodes are both workers and control-plane nodes. This kind of topology is
- already supported by OCP. This will avoid the need for OCP to support yet
- another topology. It has the obvious downside of requiring a "useless" node
- the user didn't really need. It also means the user now has to run more
- control-plane workloads to facilitate HA - for example, 2 extra replicas of
- the API server which consume a lot of memory resources. From an engineering
- perspective, it would require us to make the "Control-plane Topology"
- parameter dynamic and make sure all operators know to react to changes in that
- parameter (it will have to change from "SingleReplica" to "HighlyAvailable"
- once those 2 new control-plane nodes join the cluster). I am not aware of the
- other engineering difficulties we would encounter when attempting to support
- the expansion of a single-node control-plane into a three-node control-plane,
- but I think they would not be trivial.
+- Even when users need to add just one extra worker, require them to add yet
+another worker so they could just form a compact 3-node cluster where all
+nodes are both workers and control-plane nodes. This kind of topology is
+already supported by OCP. This will avoid the need for OCP to support yet
+another topology. It has the obvious downside of requiring a "useless" node
+the user didn't really need. It also means the user now has to run more
+control-plane workloads to facilitate HA - for example, 2 extra replicas of
+the API server which consume a lot of memory resources. From an engineering
+perspective, it would require us to make the "Control-plane Topology"
+parameter dynamic and make sure all operators know to react to changes in that
+parameter (it will have to change from "SingleReplica" to "HighlyAvailable"
+once those 2 new control-plane nodes join the cluster). I am not aware of the
+other engineering difficulties we would encounter when attempting to support
+the expansion of a single-node control-plane into a three-node control-plane,
+but I think they would not be trivial.
 
 - Adjust the "baremetal" platform to support single control-plane node
 installations and make users and the Assisted Installer (the current popular,
