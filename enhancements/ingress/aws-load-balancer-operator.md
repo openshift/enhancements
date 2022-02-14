@@ -326,7 +326,7 @@ The lb-controller requires a validating and mutating webhook for correct operati
 webhooks along with the controller deployment. The webhook can be registered with a CA bundle which is used to verify
 the identity of webhook by the API server.
 The [service-ca controller](https://docs.openshift.com/container-platform/4.9/security/certificate_types_descriptions/service-ca-certificates.html)
-can be used to generate certificates and have then injected into the webhook configurations. The operator will also
+can be used to generate certificates and have them injected into the webhook configurations. The operator will also
 watch the secret with the certificates so that when the ceritificate is re-newed the pods of the deployment will be also
 updated so that they start using the new certificates.
 
@@ -401,7 +401,7 @@ NA
 ### Operational Aspects of API Extensions
 
 The new Custom Resource will not affect any existing operations of the cluster. However the webhooks which have to be
-created for the lb-controller will impact the availability and performance and availability of Ingress resource _create_
+created for the lb-controller will impact the availability and performance of Ingress resource _create_
 and _update_ operations. These webhooks are light-weight and do not perform any complex validation. So the performance
 impact should be minimal. Availability of the webhook is critical because if the webhook is unavailable operations on
 the Ingress resource will not be possible.
@@ -410,7 +410,7 @@ the Ingress resource will not be possible.
 
 1. Operator is unable to determine the private and public subnets in the cluster. In this case the operator will be
    marked as __Degraded__ in the status.
-2. lb-controller pods are not running. This would mean that the webhook are unavailable and all operations on _Ingress_
+2. lb-controller pods are not running. This would mean that the webhook is unavailable and all operations on _Ingress_
    , _IngressClass_ and _IngressGroup_ would fail. The failure would include a message indicating that the webhook is
    unavailable and the user would have to remediate this by examining the status of the lb-controller.
 
