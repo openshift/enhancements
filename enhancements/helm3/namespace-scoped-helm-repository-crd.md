@@ -64,14 +64,36 @@ kind: ProjectHelmChartRepository
 metadata:
   name: my-enterprise-chart-repo
 spec:
-  url: https://my.chart-repo.org/stable
-
-  # optional and only needed for UI purposes
-  displayName: myChartRepo
-
-  # optional and only needed for UI purposes
-  description: my private chart repo
+  # Optional: human readable repository name, it is used by UI for displaying purposes
+  name: my-enterprise-chart-repo
+  connectionConfig:
+    url: https://my.chart-repo.org/stable
 ```
+
+Example `Role` definition:
+```yaml
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: ns-helm-role
+  namespace: default
+  annotations:
+    include.release.openshift.io/ibm-cloud-managed: "true"
+    include.release.openshift.io/self-managed-high-availability: "true"
+    include.release.openshift.io/single-node-developer: "true"
+rules:
+- apiGroups:
+  - helm.openshift.io
+  resources:
+  - projecthelmchartrepositories
+  verbs:
+  - get
+  - list
+  - create
+  - update
+  - delete
+```
+Before applying operations on the CR, make sure the user/service account has correct permission by with a desired `Role` and `RoleBinding`.
 
 To add a new namespace-scoped Helm repository to a desired namespace:
 ```shell
@@ -81,9 +103,9 @@ kind: ProjectHelmChartRepository
 metadata:
   name: stable
 spec:
-  url: https://kubernetes-charts-incubator.storage.googleapis.com
-  displayName: Public Helm stable charts
-  description: Public Helm stable charts hosted on HelmHub
+  name: stable
+  connectionConfig:
+    url: https://kubernetes-charts-incubator.storage.googleapis.com
 EOF
 
 $ kubectl get projecthelmchartrepositories --namespace my-namespace
@@ -100,9 +122,9 @@ kind: HelmChartRepository
 metadata:
   name: stable
 spec:
-  url: https://kubernetes-charts.storage.googleapis.com
-  displayName: Public Helm stable charts
-  description: Public Helm stable charts hosted on HelmHub
+  name: stable
+  connectionConfig:
+    url: https://kubernetes-charts.storage.googleapis.com
 EOF
 
 $ cat <<EOF | oc apply --namespace my-namespace -f -
@@ -111,8 +133,9 @@ kind: ProjectHelmChartRepository
 metadata:
   name: incubator
 spec:
-  url: https://kubernetes-charts-incubator.storage.googleapis.com
-  displayName: Public Helm charts in incubator state
+  name: incubator
+  connectionConfig:
+    url: https://kubernetes-charts-incubator.storage.googleapis.com
 EOF
 
 $ kubectl get helmchartrepositories
