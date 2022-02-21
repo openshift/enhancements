@@ -220,8 +220,7 @@ Introduce a new topology field in the Ingress config CR
 
 ### Implementation Details/Notes/Constraints
 
-Unlike the existing `config.openshift.io/v1/infrastructures` topology fields,
-this new field will have one of these values - `ControlPlane` or `Workers`. 
+This new field will have one of these values - `ControlPlane` or `Workers`. 
 
 In addition, allow the `.spec.replicas` and `.spec.nodePlacement` parameters in
 `operator.openshift.io/v1/ingresscontrollers` CRs to be ommitted.
