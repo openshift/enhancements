@@ -41,7 +41,7 @@ are added to such cluster.
 Today OCP supports deploying a cluster which only has a single control-plane
 node and no additional workers.
 
-There's been recent demand from OCP to also formally support deployment of
+There's been recent demand for OCP to also formally support deployment of
 single control-plane node clusters with additional (non control-plane) worker
 nodes.
 
