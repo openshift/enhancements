@@ -86,6 +86,21 @@ None at this time.
   - cluster (required string): Nutanix cluster (Prism Element) where the OpenShift cluster will be created.
   - container (required string): Nutanix container name for OS disk install.
   - subnet (required string): Nutanix subnet name (IPAM or DHCP Enabled).
+
+  Example install-config.yaml platform section:
+
+  ```
+    platform:
+      nutanix:
+        prismCentral: pc01.ocp.nutanix.com
+        prismCentralUser: admin@ocp.nutanix.com
+        prismCentralPass: password
+        cluster: nx01.ocp.nutanix.com
+        container: default-container-70593
+        subnet: vm-network
+        apiVIP: 192.168.1.5
+        ingressVIP: 192.168.1.6
+  ```
   
 - Provide documentation (in similar format to other supported IPI platforms) to help users use and customize the IPI installer on Nutanix:
   - Prerequisite instructions prior to invoking installer
@@ -109,7 +124,9 @@ As an OpenShift platform, I want OpenShift on Nutanix to be maintained and relea
 
 - It will be assumed the customer utilizes a subnet configured with Nutanix IPAM or will provide a properly configured DHCP server that is available on the configured L2 network.
 
-- Nutanix does not provide networking services like DNS or load balancing. With this in mind, we require the ability to automate DNS and load balancing services internal to the cluster. A solution similar to the baremetal-networking enhancement can be utilized.
+- Nutanix does not provide networking services like DNS or load balancing. With this in mind, we require the ability to automate DNS and load balancing services internal to the cluster and will leverage [on-prem infrastructure](https://github.com/openshift/machine-config-operator/tree/master/templates/common/on-prem).
+
+- Installer will target a Prism Central instance, but OpenShift cluster will be provisioned on a single Nutanix AOS cluster. 
 
 ### Risks and Mitigations
 
@@ -117,7 +134,7 @@ As an OpenShift platform, I want OpenShift on Nutanix to be maintained and relea
 
 ## Design Details
 
-- Cloud Credential Operator (CCO) will operate in manual mode. Possible migration to passthrough mode in future enhancement.
+- Cloud Credential Operator (CCO) will operate in manual mode.
 
 - Cloud Controller Manager (CCM) is not currently implemented. Node lifecycle handled via MAPI until standard AOS/AHV CCM is developed.
 
@@ -127,15 +144,7 @@ As an OpenShift platform, I want OpenShift on Nutanix to be maintained and relea
 
 ### Open Questions
 
-1. How should VM specifications be determined or specified?
-
-1. Are there any minimum host requirements to enforce?
-
 1. Should the default install attempt to locate control plane VMs on different physical nodes?
-
-1. Are unit-level tests recommended (required?). If so, is there preferred tooling / test structure? This is in addition to the required CI E2E testing.
-
-> We will follow what other supported platforms have done. Please advise with any suggestions/tips.
 
 ### Test Plan
 
@@ -176,7 +185,7 @@ None at this time.
 
 ## Alternatives
 
-Currently, there is no alternative. We intend to formalize and present a UPI proposal in the near future (which would be considered an alternative to IPI). Proof-of-concept work was performed following the [UPI plaform-agnostic instructions](https://docs.openshift.com/container-platform/4.7/installing/installing_platform_agnostic/installing-platform-agnostic.html).
+Currently, there is no alternative. Proof-of-concept work was performed following the [plaform-agnostic instructions](https://docs.openshift.com/container-platform/4.7/installing/installing_platform_agnostic/installing-platform-agnostic.html).
 
 ## Infrastructure Needed
 
