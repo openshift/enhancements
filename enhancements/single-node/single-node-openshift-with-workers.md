@@ -198,7 +198,7 @@ control-plane node.
 
 ## Proposal
 
-- Create a new `IngressTopology` API parameter.
+- Create a new `IngressPlacement` API parameter.
 
 - Make sure worker node ignition files are generated even in bootstrap-in-place
 single control-plane node "none"-platform installation.
@@ -216,27 +216,27 @@ growing computation demands.
 ### API Extensions
 
 Introduce a new topology field in the Ingress config CR
-(`config.openshift.io/v1/ingresses`) called `IngressTopology`.
+(`config.openshift.io/v1/ingresses`) called `IngressPlacement`.
 
 ### Implementation Details/Notes/Constraints
 
-Unlike the existing `config.openshift.io/v1/infrastructures` topology fields, this
-new field will have one of these values - `ControlPlane` or `Workers`. 
+Unlike the existing `config.openshift.io/v1/infrastructures` topology fields,
+this new field will have one of these values - `ControlPlane` or `Workers`. 
 
 In addition, allow the `.spec.replicas` and `.spec.nodePlacement` parameters in
 `operator.openshift.io/v1/ingresscontrollers` CRs to be ommitted.
 
-The value of the `IngressTopology` field will affect the defaulting behavior of
-the `IngressController`'s `.spec.replicas` and `.spec.nodePlacement`
+The value of the `IngressPlacement` field will affect the defaulting behavior
+of the `IngressController`'s `.spec.replicas` and `.spec.nodePlacement`
 parameters. i.e. in the absence of an `IngressController` resource created by
 the user/installer, or when the user/installer creates an `IngressController`
-with these two parameters ommited, the Cluster Ingress Operator will choose the default
-values for those parameters based on the value of `IngressTopology`.
+with these two parameters ommited, the Cluster Ingress Operator will choose the
+default values for those parameters based on the value of `IngressPlacement`.
 
-If the value of `IngressTopology` itself is ommited, it is defaulted to equal
+If the value of `IngressPlacement` itself is ommited, it is defaulted to equal
 to `Workers`.
 
-When the value of `IngressTopology` is `Workers`, the defaulting behavior of
+When the value of `IngressPlacement` is `Workers`, the defaulting behavior of
 `.spec.replicas` and `.spec.nodePlacement` will be the same as it is today:
 `.spec.replicas` will be chosen according to the value of
 `InfrastructureTopology` - `1` when `SingleReplica` or `2` when
@@ -250,10 +250,10 @@ nodePlacement:
       node-role.kubernetes.io/worker: ''
 ```
 
-However, if the value of `IngressTopology` is `ControlPlane`, the defaulting
-behavior will be different: `.spec.replicas` will be chosen according to the value
-of `ControlPlaneTopology` - `1` when `SingleReplica` or `2` when `HighlyAvailable`.
-`.spec.nodePlacement` will be always just be:
+However, if the value of `IngressPlacement` is `ControlPlane`, the defaulting
+behavior will be different: `.spec.replicas` will be chosen according to the
+value of `ControlPlaneTopology` - `1` when `SingleReplica` or `2` when
+`HighlyAvailable`. `.spec.nodePlacement` will be always just be:
 
 ```yaml
 nodePlacement:
@@ -271,7 +271,7 @@ to set up a load-balancer. Those situations currently include installation of
 single control-plane node cluster deployments on "on-prem" platforms such as
 "none" or "vSphere" (although today single control-plane node clusters are only
 possible on the "none" platform). In those situations, the installer will set
-`IngressTopology` to be `ControlPlane`. Since there's just a single
+`IngressPlacement` to be `ControlPlane`. Since there's just a single
 control-plane node, `ControlPlane` topology would be `SingleReplica` and the
 combined effect would be that the `IngressController` will have just a single
 replica and be pinned to the single control-plane node. This will then ensure
