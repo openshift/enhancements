@@ -92,7 +92,7 @@ resources created by in-cluster operators.\
 
 - All operators that create AWS resources (ingress, cloud credential, storage, image registry, machine-api) will apply these tags to all AWS resources they create.\
   Operator must update the AWS resource within (5 minutes + cloud provide API response time).\
-  Operator must update only when there is a change in `.spec.platformSpec.aws.resourceTags`.\
+  Operator must update AWS resource to match requested user-defined tags provided in `.spec.platformSpec.aws` (or `.status.platformStatus.aws`).\
   Operator must consider `.status.platformStatus.aws` when AWS resource is created. `.status.platformStatus.aws` can be ignored for user-defined tag update/delete.
 
 ### Create tags scenarios
@@ -196,7 +196,7 @@ Event action = An event is generated to notify user about the action status (suc
 3) User sets user-defined tag to delete which is created using external tools.\
    There is no validation check involved for creator of user-defined tag. Any user-defined tag added by user in `.spec.platformSpec.aws.resourceTags` is considered for create/update/delete accordingly.
 
-4) Any user-defined tag set using `.spec.platformSpec.aws.resourceTags` in `Infrastructure.config.openshift.io/v1` type has scope limited to cluster-level. Individual AWS resource-level user-defined tag management is not supported.
+4) Any user-defined tag set using `.spec.platformSpec.aws.resourceTags` in `Infrastructure.config.openshift.io/v1` type has scope limited to cluster-level.
 
 The Infrastructure resource example to use spec for api changes
 
@@ -314,7 +314,7 @@ For installer configuration compatibility, configuration with `experimentalPropa
 
 On downgrade:
 
-The status field may remain populated, components may or may not continue to tag newly created resources w/ the additional tags depending on whether or not a given component still has logic to respect the status tags, after the downgrade.
+The status field may remain populated, components may or may not continue to tag newly created resources with the additional tags depending on whether or not a given component still has logic to respect the status tags, after the downgrade.
 
 `experimentalPropagateUserTags` field should be generated in installer configuration to support lower version installers.
 
