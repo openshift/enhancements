@@ -171,7 +171,7 @@ Event action = An event is generated to notify user about the action status (suc
 ### Caveats
 1) User updates the user-defined tag from using external tools when there is an entry in `.spec.platformSpec.aws.resourceTags`
    The user-defined tag which is updated from spec, will be reconciled by operators to set value from `.spec.platformSpec.aws.resourceTags`.
-   The user-defined tag will be overwritten with value from `.spec.platformSpec.aws.resourceTags` when there is an update to `.spec.platformSpec.aws.resourceTags` section as a whole.
+   The user-defined tag will be overwritten with value from `.spec.platformSpec.aws.resourceTags` when there is an update to `.spec.platformSpec.aws.resourceTags`.
 
    User must handle inconsistencies in `.spec.platformSpec.aws.resourceTags` and user-defined tag value for AWS resource when using multiple tools to manage tags.
 
@@ -197,6 +197,15 @@ Event action = An event is generated to notify user about the action status (suc
    There is no validation check involved for creator of user-defined tag. Any user-defined tag added by user in `.spec.platformSpec.aws.resourceTags` is considered for create/update/delete accordingly.
 
 4) Any user-defined tag set using `.spec.platformSpec.aws.resourceTags` in `Infrastructure.config.openshift.io/v1` type has scope limited to cluster-level.
+
+5) User-defined tags are not synced from `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` for following reasons.
+- User-defined tags in `.spec.platformSpec.aws.resourceTags` can be "removed without delete", "delete", "update".
+  `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` sync is not required,
+  as there will be no versioning of the user-defined tags required to override the user-defined tags in Infrastructure CRD.
+  Instead, the user-defined tags (if supported in resource operator spec field, e.g: machine) can override the user-defined tags in Infrastructure CRD.
+- As `.spec.platformSpec.aws.resourceTags` has the actual values. Sync to `.status.platformStatus.aws.resourceTags` was required in earlier design to identify if the
+  user-defined tag was created using Infrastructure CRD or external tool. Identifying the creator tool was done to restrict user from editing the same user-tag kv pair using multiple tools.
+  This inherently poses many scenarios of conflict which will result in user-defined tag kv pair being inconsistent across cluster when applied using Infrastructure CRD. Hence, user will be confused which tool to be used to update tag.
 
 The Infrastructure resource example to use spec for api changes
 
@@ -250,9 +259,25 @@ properties:
 
 ### User Stories
 
-https://issues.redhat.com/browse/SDE-1146 - IAM users and roles can only operate on resources with specific tags
-As a security-conscious ROSA customer, I want to restrict the permissions granted to Red Hat in my AWS account by using
-AWS resource tags.
+- As a security-conscious ROSA customer, I want to restrict the permissions granted to Red Hat in my AWS account by using
+AWS resource tags.Refer to https://issues.redhat.com/browse/SDE-1146.
+
+- As a cluster administrator of OpenShift, I would like to be able to add user-defined tags for AWS resources provisioned by an OCP cluster.
+
+- As a cluster administrator of OpenShift, I would like to be able to delete user-defined tags managed by OpenShift for AWS resources.
+
+- As a cluster administrator of OpenShift, I would like to be able to update user-defined tags managed by OpenShift for AWS resources.
+
+- As a cluster administrator of OpenShift, I would like to be able to remove user-defined tags without delete for AWS resources.
+  This enables, user-defined tags to be modified on AWS without being overridden by OpenShift operators.
+
+- As a cluster administrator of OpenShift, I should be able to get events when update/delete action is successful or failed.
+
+- As a cluster administrator of OpenShift, I expect user-defined tags added in local objects must not be overridden by user-defined tags in install config.
+
+- As a cluster administrator of OpenShift, I expect user-defined tags added in local objects must not be overridden by update or delete actions.
+
+- As a cluster administrator of OpenShift, I expect user-defined tags added in Infrastructure CRD are reconciled and desired user-defined tags maintained on AWS resources.
 
 ### API Extensions
 
