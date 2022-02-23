@@ -196,7 +196,7 @@ Event action = An event is generated to notify user about the action status (suc
   as there will be no versioning of the user-defined tags required to override the user-defined tags in Infrastructure CRD.
   Instead, the user-defined tags (if supported in resource operator spec field, e.g: machine) can override the user-defined tags in Infrastructure CRD.
 - As `.spec.platformSpec.aws.resourceTags` has the actual values. Sync to `.status.platformStatus.aws.resourceTags` was required in earlier design to identify if the
-  user-defined tag was created using Infrastructure CRD or external tool. Identifying the creator tool was done to restrict user from editing the same user-tag kv pair using multiple tools.
+  tag on the resource was created using Infrastructure CRD or external tool. Identifying the creator tool was done to restrict user from editing the same user-tag kv pair using multiple tools.
   This inherently poses many scenarios of conflict which will result in user-defined tag kv pair being inconsistent across cluster when applied using Infrastructure CRD. Hence, user will be confused which tool to be used to update tag.
 
 6) User applies user-defined tag using `.spec.platformSpec.aws.resourceTags`. Later, user modifies the user-defined on AWS using external tool.
