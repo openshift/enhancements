@@ -32,9 +32,9 @@ superseded-by:
 
 ## Summary
 
-This enhancemnet aims to enable adding workers to a single control-plane node
+This enhancement aims to enable adding workers to a single control-plane node
 cluster by attempting to tackle multiple issues that arise when worker nodes
-are added to such cluster.
+are added to such clusters.
 
 ## Motivation
 
@@ -92,7 +92,7 @@ value when there's only a single node behind them.
 
 As a result, current common ways of installing single control-plane node
 clusters today (mainly the Assisted Installer) avoid the usage of load
-balancers or virtual IPs for API and ingress. There have also been some recent
+balancers or virtual IPs for API and ingress. There has also been some recent
 effort to determine how single control-plane node cluster deployments on clouds
 may be adjusted in order to reduce their costs, and one of the conclusions is
 that getting rid of the load balancer installed by default by the IPI installer
@@ -116,7 +116,7 @@ completed).
 
 The issue with those approaches is that they assume that
 `*.apps.<cluster>.<base>` should always point at the single control-plane
-node's IP address. This is of-course correct when there's just that single node
+node's IP address. This is of course correct when there's just that single node
 in the cluster, but once you start adding worker nodes to the cluster it starts
 causing a potential problem - the `router-default` deployment created by the
 Cluster Ingress Operator, which is responsible for load balancing ingress
@@ -132,7 +132,7 @@ This pod floating between the nodes is a problem because user ingress traffic
 has to be directed at the node currently holding the `router-default` pods, and
 since the DNS entries have been "naively" pointed at the original control-plane
 node's IP address (which may no longer be running those pods), ingress traffic
-can no longer work. This can be temporarily solved if DNS is adjusted to point
+may no longer work. This can be temporarily solved if DNS is adjusted to point
 at the correct node currently holding the pod or a load-balancer / some virtual
 IP solution is put in place and then the DNS entry can be directed at that
 load-balancer / virtual IP instead of at the node. This enhancement will try
@@ -158,8 +158,8 @@ control-plane node cluster installation
 ### Non-Goals
 
 - Deal with the scalability of single control-plane node clusters that have
-additional workers added to them. The absence of multiple control plane nodes
-means that the number of workers/pods that can be supported on such topology is
+additional workers added to them. The absence of multiple control-plane nodes
+means that the number of workers/pods that can be supported on such a topology is
 even more limited than in a regular 3 control-plane node cluster. Relevant
 documentation may have to point out that the pod limits (or other control-plane
 related limits) that apply to a single control-plane node cluster with no
