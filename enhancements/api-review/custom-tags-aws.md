@@ -99,7 +99,7 @@ resources created by in-cluster operators.\
 `resourceTags` that are specified in  `.spec.platformSpec.aws` of the Infrastructure resource will merge with user-defined tags in an individual component.
 
 In the case where a user-defined tag is specified in the Infrastructure resource and
-1) There is already user tag with the same key present for AWS resource, the value from the AWS resource will be replaced.\
+1) There is already a tag with the same key present for AWS resource, the value from the AWS resource will be replaced.\
    For example,\
    Existing tag for AWS resource = `key_infra1 = value_comp1`\
    New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`\
