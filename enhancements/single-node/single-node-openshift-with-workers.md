@@ -222,8 +222,8 @@ Introduce a new topology field in the Ingress config CR
 
 This new field will have one of these values - `ControlPlane` or `Workers`. 
 
-In addition, allow the `.spec.replicas` and `.spec.nodePlacement` parameters in
-`operator.openshift.io/v1/ingresscontrollers` CRs to be ommitted.
+In addition, continue to allow the `.spec.replicas` and `.spec.nodePlacement` parameters in
+`operator.openshift.io/v1/ingresscontrollers` CRs to be omitted, but change the defaulting behavior for these fields.
 
 The value of the `IngressPlacement` field will affect the defaulting behavior
 of the `IngressController`'s `.spec.replicas` and `.spec.nodePlacement`
