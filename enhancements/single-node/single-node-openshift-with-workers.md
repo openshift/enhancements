@@ -234,8 +234,10 @@ user/installer, or when the user/installer creates an `IngressController` with
 these two parameters omitted, the Cluster Ingress Operator will choose the
 default values for those parameters based on the value of `IngressPlacement`.
 
-If the value of `IngressPlacement` itself is omitted, it is defaulted to
-`Workers`.
+If the value of `IngressPlacement` itself is omitted by the installer, it
+is defaulted to `Workers`. This would be useful to maintain the current behavior
+if the API change is merged before the installer change to set this field, or if
+we want this newer OCP version to be backwards-compatible with older installers.
 
 When the value of `IngressPlacement` is `Workers`, the defaulting behavior of
 `.spec.replicas` and `.spec.nodePlacement` will be the same as it is today:
