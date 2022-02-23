@@ -136,7 +136,7 @@ In the case where a user-defined tag is specified in the Infrastructure resource
    Final tag set to AWS resource = `key_infra1 = value_update1`\
    Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
 
-3) The new user-defined tag request has empty string `""`, the user-defined tag value for the AWS resource will be updated. Please refer to the `Delete Scenarios` for more details on empty value string handling.\
+3) The new user-defined tag request has empty string `""`, the tag value for the AWS resource will be updated. Please refer to the `Delete Scenarios` for more details on empty value string handling.\
    For example,\
    Existing tag for AWS resource = `key_infra1 = value_old`\
    New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 =`\
