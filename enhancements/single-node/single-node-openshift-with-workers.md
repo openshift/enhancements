@@ -227,12 +227,12 @@ In addition, continue to allow the `.spec.replicas` and `.spec.nodePlacement` pa
 
 The value of the `IngressPlacement` field will affect the defaulting behavior
 of the `IngressController`'s `.spec.replicas` and `.spec.nodePlacement`
-parameters. i.e. in the absence of an `IngressController` resource created by
+parameters.  In the absence of an `IngressController` resource created by
 the user/installer, or when the user/installer creates an `IngressController`
-with these two parameters ommited, the Cluster Ingress Operator will choose the
+with these two parameters omitted, the Cluster Ingress Operator will choose the
 default values for those parameters based on the value of `IngressPlacement`.
 
-If the value of `IngressPlacement` itself is ommited, it is defaulted to equal
+If the value of `IngressPlacement` itself is omitted, it is defaulted
 to `Workers`.
 
 When the value of `IngressPlacement` is `Workers`, the defaulting behavior of
