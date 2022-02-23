@@ -159,7 +159,7 @@ Event action = An event is generated to notify user about the action status (suc
    A warning is generated to inform the user about action not being applied on the list of user tags.
 
    For example,\
-   Existing tag in local object like machine CRD = `key_infra1 = custom_value`\
+   Existing tag in local object like machine CR = `key_infra1 = custom_value`\
    New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value1`\
    Action = The tag for AWS resource is maintained to `key_infra1 = custom_value`.\
    Final tag set to AWS resource = `key_infra1 = custom_value`\
