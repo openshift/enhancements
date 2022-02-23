@@ -268,7 +268,7 @@ nodePlacement:
 the current behavior, it has no importance in this enhancement)
 
 The installer will detect situations in which it's unlikely the user will want
-to set up a load-balancer. Those situations currently include installation of
+to set up a load-balancer. For now, those situations include installation of
 single control-plane node cluster deployments on "on-prem" platforms such as
 "none" or "vSphere" (although today single control-plane node clusters are only
 possible on the "none" platform). In those situations, the installer will set
@@ -281,6 +281,15 @@ will always run on the single control-plane node, and as a result any
 `*.apps.<cluster>.<base>` DNS entries which originally pointed at the single
 control-plane node will remain correct even in the face of newly added worker
 nodes.
+
+In any other situations, the installer will set `IngressPlacement` to
+`Workers`, resulting in the same default behavior as before this enhancement,
+namely that `IngressController` pod replicas are scheduled on worker nodes and
+determined according to the `InfrastructureTopology`.
+
+In the future, when IPI-installed single control-plane node clusters in the
+cloud no longer provision a load-balancer by default, they would also benefit
+from having the installer set the `IngressPlacement` to `ControlPlane`.
 
 ### Risks and Mitigations
 
