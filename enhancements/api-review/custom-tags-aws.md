@@ -128,7 +128,7 @@ In the case where a user-defined tag is specified in the Infrastructure resource
    Final tag set to AWS resource = `key_infra1 = value_update1`\
    Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
 
-2) There is already user-defined tag with the same key and different value present for AWS resource, the user-define tag value for the AWS resource will be updated.\
+2) There is already a tag with the same key and different value present for AWS resource, the user-define tag value for the AWS resource will be updated.\
    For example,\
    Existing tag for AWS resource = `key_infra1 = value_old`\
    New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_update1`\
