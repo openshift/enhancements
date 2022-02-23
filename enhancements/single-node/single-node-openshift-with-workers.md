@@ -178,7 +178,8 @@ in unschedulable control-plane nodes. Scaling down the worker machine-sets from
 schedulable, and as a result a lot of infrastructure workloads fail to schedule
 and operators degrade. User intervention is required to fix this.
 
-- Deal with expansion of the single-node control-plane by adding more control-plane nodes
+- Deal with expansion of the single-node control-plane by adding more
+control-plane nodes
 
 - Deal with expansion of clusters that have been installed before the
 implementation of this enhancement (if possible, their expansion may be
@@ -222,18 +223,19 @@ Introduce a new topology field in the Ingress config CR
 
 This new field will have one of these values - `ControlPlane` or `Workers`. 
 
-In addition, continue to allow the `.spec.replicas` and `.spec.nodePlacement` parameters in
-`operator.openshift.io/v1/ingresscontrollers` CRs to be omitted, but change the defaulting behavior for these fields.
+In addition, continue to allow the `.spec.replicas` and `.spec.nodePlacement`
+parameters in `operator.openshift.io/v1/ingresscontrollers` CRs to be omitted,
+but change the defaulting behavior for these fields.
 
 The value of the `IngressPlacement` field will affect the defaulting behavior
 of the `IngressController`'s `.spec.replicas` and `.spec.nodePlacement`
-parameters.  In the absence of an `IngressController` resource created by
-the user/installer, or when the user/installer creates an `IngressController`
-with these two parameters omitted, the Cluster Ingress Operator will choose the
+parameters.  In the absence of an `IngressController` resource created by the
+user/installer, or when the user/installer creates an `IngressController` with
+these two parameters omitted, the Cluster Ingress Operator will choose the
 default values for those parameters based on the value of `IngressPlacement`.
 
-If the value of `IngressPlacement` itself is omitted, it is defaulted
-to `Workers`.
+If the value of `IngressPlacement` itself is omitted, it is defaulted to
+`Workers`.
 
 When the value of `IngressPlacement` is `Workers`, the defaulting behavior of
 `.spec.replicas` and `.spec.nodePlacement` will be the same as it is today:
@@ -250,9 +252,9 @@ nodePlacement:
 ```
 
 However, if the value of `IngressPlacement` is `ControlPlane`, the defaulting
-behavior will be different: `.spec.replicas` will be chosen instead according to the
-value of `ControlPlaneTopology`; again, `1` when `SingleReplica` or `2` when
-`HighlyAvailable`. `.spec.nodePlacement` will be always just be:
+behavior will be different: `.spec.replicas` will be chosen instead according
+to the value of `ControlPlaneTopology`; again, `1` when `SingleReplica` or `2`
+when `HighlyAvailable`. `.spec.nodePlacement` will be always just be:
 
 ```yaml
 nodePlacement:
@@ -284,8 +286,8 @@ nodes.
 
 This should make no noticable difference on "regular" single control-plane node
 clusters which do not have any day-1 or day-2 worker nodes. The only difference
-for those clusters would be the `IngressController` targeting the "master"
-pool rather than the "worker" pool, but since the single control-plane node is
+for those clusters would be the `IngressController` targeting the "master" pool
+rather than the "worker" pool, but since the single control-plane node is
 already both in the "master" and "worker" pools, that should make no practical
 difference.
 
