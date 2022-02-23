@@ -120,7 +120,7 @@ Users can update the user-defined tags by editing `.spec.platformSpec.aws` of th
 On update of `resourceTags`, AWS resource is not created or restarted.
 
 In the case where a user-defined tag is specified in the Infrastructure resource and
-1) There is already user-defined tag with the same key and value present for AWS resource, the user-define tag value for the AWS resource will not be updated.\
+1) There is already a tag with the same key and value present for AWS resource, the tag for the AWS resource will not be updated.\
    For example,\
    Existing tag for AWS resource = `key_infra1 = value_update1`\
    New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_update1`\
