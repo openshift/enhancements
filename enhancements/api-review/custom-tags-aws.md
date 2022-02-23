@@ -107,7 +107,7 @@ In the case where a user-defined tag is specified in the Infrastructure resource
    Final tag set to AWS resource = `key_infra1 = value_infra1`\
    Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
 
-2) There is no tag with same key present, new user-defined tag is created for the AWS resource. In case of limit reached, a validation error is generated.\
+2) There is no tag with same key present, new tag is created for the AWS resource. In case of limit reached, a validation error is generated.\
    For example,\
    Existing tag for AWS resource = `key_infra1 = value_comp1`\
    New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`\
