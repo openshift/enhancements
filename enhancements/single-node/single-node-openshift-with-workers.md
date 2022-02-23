@@ -277,7 +277,7 @@ replica and be pinned to the single control-plane node. This will then ensure
 that the `router-default` deployment created by the Cluster Ingress Operator
 will always run on the single control-plane node, and as a result any
 `*.apps.<cluster>.<base>` DNS entries which originally pointed at the single
-control plane node will remain correct even in the face of newly added worker
+control-plane node will remain correct even in the face of newly added worker
 nodes.
 
 ### Risks and Mitigations
