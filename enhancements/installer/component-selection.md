@@ -199,12 +199,12 @@ and the `default` setting is `exclude`.  In addition any explicitly included cap
 should be added, regardless of the [CLUSTER_PROFILE](https://github.com/openshift/enhancements/blob/7da960b98b2835022823f569efa1e18e9e410696/enhancements/update/cluster-profiles.md).
 
 If a resource participates in multiple capabilities, it should specify all capabilities as comma separated
-values in the annotation(e.g. `capability.openshift.io/name=console,monitoring`).  The resource will only be 
+values in the annotation(e.g. `capability.openshift.io/name=console+monitoring`).  The resource will only be 
 included if all the capabilities on the resource are enabled.  This allows a component
 to define a `ServiceMonitor` which is part of both the `Monitoring` capability and the `Foo` capability.  If
 either of those capabilities are excluded, the `ServiceMonitor` should not be created.  (If Monitoring is excluded
 then no ServiceMonitors should be created, if only Foo is excluded, then only Foo's ServiceMonitors should be
-excluded).
+excluded while ServiceMonitors associated with other capabilities would not be).
 
 Specifying the same capability as an `include` and an `exclude` is an error condition.  This avoids the need 
 to define behavior for what to do when a user specifies the same capability in both, and update a status field
