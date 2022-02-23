@@ -63,7 +63,7 @@ Motivations include but are not limited to:
 
 ### Limitations
 
-- User-defined tags for PV volumes cannot be updated but only set during creation  of volume using `--extra-tags`.Present CSI spec does not support `UpdateVolume` to update volume metadata.
+- User-defined tags for PV volumes cannot be updated but only set during creation of volumes using `--extra-tags`. Present CSI spec does not support `UpdateVolume` to update volume metadata.
    Restarting csi driver to initiate multiple `CreateVolume` will depend on underlying storage layer idempotency implementation for the operation. It is recommended to use a interface from CSI spec which enforces idempotency guarantees for volume metadata updates.
    In case of AWS EC2  `CreateVolume`, returns `IdempotentParameterMismatch` error when identical request is not found for the same client token.
    Also, the CSI spec `https://github.com/container-storage-interface/spec/blob/master/spec.md` mentions grpc error code
