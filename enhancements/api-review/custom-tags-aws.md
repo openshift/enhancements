@@ -193,14 +193,14 @@ Event action = An event is generated to notify user about the action status (suc
 5) User-defined tags are not synced from `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` for the following reasons.
 - User-defined tags in `.spec.platformSpec.aws.resourceTags` can be "removed without delete", "delete", "update".
   `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` sync is not required,
-  as there will be no versioning of the user-defined tags required to override the user-defined tags in Infrastructure CRD.
-  Instead, the user-defined tags (if supported in resource operator spec field, e.g: machine) can override the user-defined tags in Infrastructure CRD.
+  as there will be no versioning of the user-defined tags required to override the user-defined tags in Infrastructure CR.
+  Instead, the user-defined tags (if supported in resource operator spec field, e.g: machine) can override the user-defined tags in Infrastructure CR.
 - As `.spec.platformSpec.aws.resourceTags` has the actual values. Sync to `.status.platformStatus.aws.resourceTags` was required in earlier design to identify if the
-  tag on the resource was created using Infrastructure CRD or external tool. Identifying the creator tool was done to restrict user from editing the same user-tag kv pair using multiple tools.
-  This inherently poses many scenarios of conflict which will result in user-defined tag kv pair being inconsistent across cluster when applied using Infrastructure CRD. Hence, user will be confused which tool to be used to update tag.
+  tag on the resource was created using Infrastructure CR or external tool. Identifying the creator tool was done to restrict user from editing the same user-tag kv pair using multiple tools.
+  This inherently poses many scenarios of conflict which will result in user-defined tag kv pair being inconsistent across cluster when applied using Infrastructure CR. Hence, user will be confused which tool to be used to update tag.
 
-6) User applies user-defined tag using `.spec.platformSpec.aws.resourceTags`. Later, user modifies the user-defined on AWS using external tool.
-   In this case, the desired value is not set for AWS resource by the owning operator. The desired value is set only when there is an update in `.spec.platformSpec.aws.resourceTags` list.
+6) User applies user-defined tag using `.spec.platformSpec.aws.resourceTags`. Later, user modifies the user-defined for AWS resource using external tool.
+   In this case, the desired value is not set for AWS resource by the owning operator. The desired value is set when there is a new update in `.spec.platformSpec.aws.resourceTags` list.
 
 The Infrastructure resource example to use spec for api changes
 
@@ -270,7 +270,7 @@ AWS resource tags.
 
 - As a cluster administrator of OpenShift, I expect user-defined tags added in local objects must not be overridden by update or delete actions.
 
-- As a cluster administrator of OpenShift, I expect user-defined tags added in Infrastructure CRD are reconciled and desired user-defined tags maintained on AWS resources.
+- As a cluster administrator of OpenShift, I expect user-defined tags added in Infrastructure CR are reconciled and desired user-defined tags maintained on AWS resources.
 
 ### API Extensions
 
