@@ -190,7 +190,7 @@ Event action = An event is generated to notify user about the action status (suc
 
 4) Any user-defined tag set using `.spec.platformSpec.aws.resourceTags` in `Infrastructure.config.openshift.io/v1` type has scope limited to cluster-level.
 
-5) User-defined tags are not synced from `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` for following reasons.
+5) User-defined tags are not synced from `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` for the following reasons.
 - User-defined tags in `.spec.platformSpec.aws.resourceTags` can be "removed without delete", "delete", "update".
   `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` sync is not required,
   as there will be no versioning of the user-defined tags required to override the user-defined tags in Infrastructure CRD.
