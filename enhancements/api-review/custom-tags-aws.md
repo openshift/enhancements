@@ -169,7 +169,7 @@ Event action = An event is generated to notify user about the action status (suc
    On delete, user-defined must also be removed from `.status.platformStatus.aws`, if present.
 
 ### Caveats
-1) User updates the user-defined tag from using external tools when there is an entry in `.spec.platformSpec.aws.resourceTags`
+1) User updates a resource's tag using an external tool when there is an entry in `.spec.platformSpec.aws.resourceTags`
    The user-defined tag which is updated from spec, will be reconciled by operators to set value from `.spec.platformSpec.aws.resourceTags`.
    The user-defined tag will be overwritten with value from `.spec.platformSpec.aws.resourceTags` when there is an update to `.spec.platformSpec.aws.resourceTags`.
 
