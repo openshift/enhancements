@@ -189,7 +189,7 @@ Event action = An event is generated to notify user about the action status (suc
    For example,\
    Existing tag for AWS resource = `key_infra1 = value1`\
    New tag request = `.spec.platformSpec.aws.resourceTags` has no user-defined tag with key `key_infra1`\
-   Action = No change in existing user-defined tag.\
+   Action = No change in tags for the AWS resource.\
    Final tag set to AWS resource = `key_infra1 = value1`\
    Event action = No event
 
