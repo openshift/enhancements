@@ -162,7 +162,7 @@ Event action = An event is generated to notify user about the action status (suc
    Existing tag in local object like machine CRD = `key_infra1 = custom_value`\
    New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value1`\
    Action = The tag for AWS resource is maintained to `key_infra1 = custom_value`.\
-   Final tag set to AWS resource = `key_infra1 = value_update1`\
+   Final tag set to AWS resource = `key_infra1 = custom_value`\
    Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource. A warning also must be generated about list of user-defined tags on which action is not applicable.
 
 2) `.spec.platformSpec.aws` take precedence over `.status.platformStatus.aws`. User-defined tags must be merged from `.status.platformStatus.aws` and set to AWS resource.
