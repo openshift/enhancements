@@ -454,10 +454,11 @@ Not yet applicable
 which would make single-node clusters slightly different from multi-node
 clusters, and any such difference is naturally not ideal.
 
-- The proposed defaulting behavior for the discussed `IngressController` parameters is
-complicated and dependent on all three topology parameters (infra topology, control-plane, topology, and 
-ingress placement) - such complexity would probably have to be documented in the CRD
-definitions and may confuse users.
+- The proposed defaulting behavior for the discussed `IngressController`
+parameters is complicated and dependent on three different parameters (infra
+topology, control-plane topology, and ingress placement) - such complexity
+would probably have to be documented in the CRD definitions and may confuse
+users.
 
 ## Alternatives
 
