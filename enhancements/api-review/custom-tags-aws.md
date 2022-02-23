@@ -145,7 +145,7 @@ In the case where a user-defined tag is specified in the Infrastructure resource
    Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource. A warning also must be generated about user-defined tag being marked for deletion.
 
 ### Delete tags scenarios
-User-defined tags are deleted when the user sets the user-defined tag value to empty string in `.spec.platformSpec.aws.resourceTags`.
+Tags are deleted when the user sets the user-defined tag value to an empty string in `.spec.platformSpec.aws.resourceTags`.
 Also refer to `Precedence` scenario where delete of user-defined tag is not allowed to delete.\
 For example,\
 Existing tag for AWS resource = `key_infra1 = value_old`\
