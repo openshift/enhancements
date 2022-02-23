@@ -250,8 +250,8 @@ nodePlacement:
 ```
 
 However, if the value of `IngressPlacement` is `ControlPlane`, the defaulting
-behavior will be different: `.spec.replicas` will be chosen according to the
-value of `ControlPlaneTopology` - `1` when `SingleReplica` or `2` when
+behavior will be different: `.spec.replicas` will be chosen instead according to the
+value of `ControlPlaneTopology`; again, `1` when `SingleReplica` or `2` when
 `HighlyAvailable`. `.spec.nodePlacement` will be always just be:
 
 ```yaml
