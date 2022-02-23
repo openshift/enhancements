@@ -238,7 +238,7 @@ to `Workers`.
 When the value of `IngressPlacement` is `Workers`, the defaulting behavior of
 `.spec.replicas` and `.spec.nodePlacement` will be the same as it is today:
 `.spec.replicas` will be chosen according to the value of
-`InfrastructureTopology` - `1` when `SingleReplica` or `2` when
+`InfrastructureTopology`, namely `1` when `SingleReplica` or `2` when
 `HighlyAvailable`. `.spec.nodePlacement` will always just be:
 
 ```yaml
