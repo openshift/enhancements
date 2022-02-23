@@ -170,7 +170,7 @@ Event action = An event is generated to notify user about the action status (suc
 
 ### Caveats
 1) User updates a resource's tag using an external tool when there is an entry in `.spec.platformSpec.aws.resourceTags`
-   The user-defined tag which is updated from spec, will be reconciled by operators to set value from `.spec.platformSpec.aws.resourceTags`.
+   The resource's tag will be reconciled by its owning operator to the value from `.spec.platformSpec.aws.resourceTags`.
    The user-defined tag will be overwritten with value from `.spec.platformSpec.aws.resourceTags` when there is an update to `.spec.platformSpec.aws.resourceTags`.
 
    User must handle inconsistencies in `.spec.platformSpec.aws.resourceTags` and user-defined tag value for AWS resource when using multiple tools to manage tags.
