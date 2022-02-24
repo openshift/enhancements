@@ -91,11 +91,8 @@ resources created by in-cluster operators.\
   `.status.platformStatus.aws` will have older version tags defined and is required for upgrade case.
 
 - All operators that create AWS resources (ingress, cloud credential, storage, image registry, machine-api) will apply these tags to all AWS resources they create.\
-  Operator must update the AWS resource within time = (5 minutes + cloud provide API response time).\
   Operator must update AWS resource to match requested user-defined tags provided in `.spec.platformSpec.aws` (or `.status.platformStatus.aws`).\
   Operator must consider `.status.platformStatus.aws` to support upgrade scenarios.
-  Operator will not reconcile AWS resource if there is not update in user-defined tags listed in `.spec.platformSpec.aws`.
-  This avoids periodic API calls to cloud provider. 
 
 ### Create tags scenarios
 `resourceTags` that are specified in  `.spec.platformSpec.aws` of the Infrastructure resource will merge with user-defined tags in an individual component.
@@ -199,8 +196,9 @@ Event action = An event is generated to notify user about the action status (suc
   tag on the resource was created using Infrastructure CR or external tool. Identifying the creator tool was done to restrict user from editing the same user-tag kv pair using multiple tools.
   This inherently poses many scenarios of conflict which will result in user-defined tag kv pair being inconsistent across cluster when applied using Infrastructure CR. Hence, user will be confused which tool to be used to update tag.
 
-6) User applies user-defined tag using `.spec.platformSpec.aws.resourceTags`. Later, user modifies the user-defined for AWS resource using external tool.
-   In this case, the desired value is not set for AWS resource by the owning operator. The desired value is set when there is a new update in `.spec.platformSpec.aws.resourceTags` list.
+6) User applies user-defined tag using `.spec.platformSpec.aws.resourceTags`. Later, user modifies the user-defined tag for AWS resource using external tool.
+   In this case, the desired value is not set immediately for AWS resource by the owning operator. There is eventual consistency maintained by the owning operator.
+   The time taken to reconcile the modified user-defined tag on AWS resource to desired value vary across owning operators.
 
 The Infrastructure resource example to use spec for api changes
 
