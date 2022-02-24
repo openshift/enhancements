@@ -195,8 +195,7 @@ components will be listed in the [ClusterVersion](https://github.com/openshift/a
 
 The CVO will filter out(not apply/reconcile) resources that are annotated with key/value
 `capability.openshift.io/name=$exclusions` and listed in the `exclude` section, or are not listed
-and the `default` setting is `exclude`.  In addition any explicitly included capability
-should be added, regardless of the [CLUSTER_PROFILE](https://github.com/openshift/enhancements/blob/7da960b98b2835022823f569efa1e18e9e410696/enhancements/update/cluster-profiles.md).
+and the `default` setting is `exclude`.
 
 If a resource participates in multiple capabilities, it should specify all capabilities as comma separated
 values in the annotation(e.g. `capability.openshift.io/name=console+monitoring`).  The resource will only be 
