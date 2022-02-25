@@ -330,9 +330,7 @@ For installer configuration compatibility, configuration with `experimentalPropa
 
 On downgrade:
 
-The status field may remain populated, components may or may not continue to tag newly created resources with the additional tags depending on whether or not a given component still has logic to respect the status tags, after the downgrade.
-
-`experimentalPropagateUserTags` field should be generated in installer configuration to support lower version installers.
+The status/spec field may remain populated, components may or may not continue to tag newly created resources with the additional tags depending on whether or not a given component still has logic to respect the status tags, after the downgrade.
 
 ### Version Skew Strategy
 
