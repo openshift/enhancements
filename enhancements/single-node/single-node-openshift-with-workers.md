@@ -366,94 +366,33 @@ Does not apply, to the best of my understanding.
 
 ### Operational Aspects of API Extensions
 
-TBD
+- The "ControlPlane" IngressPlacement parameter value may not be used if the cluster's
+ControlPlaneTopology parameter is set to "External". 
 
-Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
-admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
-especially how they impact the OCP system architecture and operational aspects.
+- This API change only affects the defaulting behavior of the IngressController CR,
+it does not add any new capabilities to OCP, or gives any more flexibility than there
+already was.
 
-- For conversion/admission webhooks and aggregated apiservers: what are the SLIs (Service Level
-  Indicators) an administrator or support can use to determine the health of the API extensions
+- For administrators and support engineers, the IngressController is still the source
+of truth and where you need to look for understanding the router placement in practice.
+Nothing has changed in that regard.
 
-  Examples (metrics, alerts, operator conditions)
-  - authentication-operator condition `APIServerDegraded=False`
-  - authentication-operator condition `APIServerAvailable=True`
-  - openshift-authentication/oauth-apiserver deployment and pods health
-
-- What impact do these API extensions have on existing SLIs (e.g. scalability, API throughput,
-  API availability)
-
-  Examples:
-  - Adds 1s to every pod update in the system, slowing down pod scheduling by 5s on average.
-  - Fails creation of ConfigMap in the system when the webhook is not available.
-  - Adds a dependency on the SDN service network for all resources, risking API availability in case
-    of SDN issues.
-  - Expected use-cases require less than 1000 instances of the CRD, not impacting
-    general API throughput.
-
-- How is the impact on existing SLIs to be measured and when (e.g. every release by QE, or
-  automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
-  this enhancement)
+- New single control-plane node clusters with workers 
 
 #### Failure Modes
 
-TBD
-
-- Describe the possible failure modes of the API extensions.
-- Describe how a failure or behaviour of the extension will impact the overall cluster health
-  (e.g. which kube-controller-manager functionality will stop working), especially regarding
-  stability, availability, performance and security.
-- Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
-  and add them as reviewers to this enhancement.
+- The "ControlPlane" IngressPlacement parameter value may not be used if the cluster's
+ControlPlaneTopology parameter is set to "External". This should ideally be blocked by
+admission controllers for the Ingress config CR, if there are any. On top of that, the
+Ingress Operator should refuse to create an IngressController CR or reconcile an existing
+one while IngressPlacement is set to "ControlPlane" and the ControlPlaneTopology parameter
+is set to "External". This will harm cluster health and disable ingress traffic to the cluster.
 
 #### Support Procedures
 
-TBD
-
-Describe how to
-- detect the failure modes in a support situation, describe possible symptoms (events, metrics,
-  alerts, which log output in which component)
-
-  Examples:
-  - If the webhook is not running, kube-apiserver logs will show errors like "failed to call admission webhook xyz".
-  - Operator X will degrade with message "Failed to launch webhook server" and reason "WehhookServerFailed".
-  - The metric `webhook_admission_duration_seconds("openpolicyagent-admission", "mutating", "put", "false")`
-    will show >1s latency and alert `WebhookAdmissionLatencyHigh` will fire.
-
-- disable the API extension (e.g. remove MutatingWebhookConfiguration `xyz`, remove APIService `foo`)
-
-  - What consequences does it have on the cluster health?
-
-    Examples:
-    - Garbage collection in kube-controller-manager will stop working.
-    - Quota will be wrongly computed.
-    - Disabling/removing the CRD is not possible without removing the CR instances. Customer will lose data.
-      Disabling the conversion webhook will break garbage collection.
-
-  - What consequences does it have on existing, running workloads?
-
-    Examples:
-    - New namespaces won't get the finalizer "xyz" and hence might leak resource X
-      when deleted.
-    - SDN pod-to-pod routing will stop updating, potentially breaking pod-to-pod
-      communication after some minutes.
-
-  - What consequences does it have for newly created workloads?
-
-    Examples:
-    - New pods in namespace with Istio support will not get sidecars injected, breaking
-      their networking.
-
-- Does functionality fail gracefully and will work resume when re-enabled without risking
-  consistency?
-
-  Examples:
-  - The mutating admission webhook "xyz" has FailPolicy=Ignore and hence
-    will not block the creation or updates on objects when it fails. When the
-    webhook comes back online, there is a controller reconciling all objects, applying
-    labels that were not applied during admission webhook downtime.
-  - Namespaces deletion will not delete all objects in etcd, leading to zombie
-    objects when another namespace with the same name is created.
+- For administrators and support engineers, the IngressController is still the source
+of truth and where you need to look for understanding the router placement in practice.
+Nothing has changed in that regard.
 
 ## Implementation History
 
