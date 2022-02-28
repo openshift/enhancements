@@ -377,8 +377,6 @@ already was.
 of truth and where you need to look for understanding the router placement in practice.
 Nothing has changed in that regard.
 
-- New single control-plane node clusters with workers 
-
 #### Failure Modes
 
 - The "ControlPlane" IngressPlacement parameter value may not be used if the cluster's
