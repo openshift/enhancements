@@ -273,7 +273,7 @@ The installer will detect situations in which it's unlikely the user will want
 to set up a load-balancer. For now, those situations include installation of
 single control-plane node cluster deployments on "on-prem" platforms such as
 "none" or "vSphere" (although today single control-plane node clusters are only
-possible on the "none" platform). In those situations, the installer will set
+supported on the "none" platform). In those situations, the installer will set
 `IngressPlacement` to be `ControlPlane`. Since there's just a single
 control-plane node, `ControlPlane` topology would be `SingleReplica` and the
 combined effect would be that the `IngressController` will have just a single
