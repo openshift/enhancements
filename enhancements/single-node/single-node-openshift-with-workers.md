@@ -370,7 +370,7 @@ Does not apply, to the best of my understanding.
 ControlPlaneTopology parameter is set to "External". 
 
 - This API change only affects the defaulting behavior of the IngressController CR,
-it does not add any new capabilities to OCP, or gives any more flexibility than there
+it does not add any new capabilities to OCP, or give any more flexibility than there
 already was.
 
 - For administrators and support engineers, the IngressController is still the source
