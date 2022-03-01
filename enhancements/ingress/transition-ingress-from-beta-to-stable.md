@@ -15,8 +15,8 @@ approvers:
   - "@frobware"
   - "@knobunc"
 creation-date: 2021-03-09
-last-updated: 2021-03-09
-status: provisional
+last-updated: 2022-03-01
+status: implemented
 see-also:
 replaces:
 superseded-by:
@@ -29,9 +29,9 @@ This enhancement transitions OpenShift fully onto the stable
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
+- [X] Enhancement is `implementable`
+- [X] Design details are appropriately documented from clear requirements
+- [X] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
@@ -284,6 +284,9 @@ N/A.
 * 2020-04-20, leading up to OpenShift 4.5, the ingress-to-route controller was updated to use the Ingress `networking.k8s.io/v1beta1` API version, albeit without implementing the new `spec.pathType` or `spec.ingressClassName` fields (https://github.com/openshift/openshift-controller-manager/pull/83).
 * 2020-06-17, the Ingress API graduated to `networking.k8s.io/v1` (https://github.com/kubernetes/kubernetes/pull/89778).
 * 2020-06-25, leading up to Kubernetes 1.19, the v1beta1 versions of the Ingress API were deprecated (https://github.com/kubernetes/kubernetes/pull/92484).
+* 2021-04-05, the `openshift.io/ingress-to-route` ingressclass controller name was defined in openshift/api (https://github.com/openshift/api/pull/873).
+* 2021-04-06, logic was added to the ingress operator to create IngressClass objects corresponding to IngressControllers (https://github.com/openshift/cluster-ingress-operator/pull/574).
+* 2021-04-08, for OpenShift 4.8, the ingress-to-route controller was updated to respect IngressClass (https://github.com/openshift/openshift-controller-manager/pull/172).
 
 ## Alternatives
 
