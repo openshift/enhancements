@@ -63,9 +63,9 @@ automatically deployed by the installer. This CR has two topology parameters in
 its status called "Control Plane Topology" and "Infrastructure Topology" which,
 as of today, may have one of three values:
 
-- SingleReplica
-- HighlyAvailable
-- External (this value is unrelated to this enhancement and is only mentioned here for completeness' sake)
+- `SingleReplica`
+- `HighlyAvailable`
+- `External` (this value is unrelated to this enhancement and is only mentioned here for completeness' sake)
 
 (See "see-also" enhancements links for more information about the topology
 parameters and their possible values)
@@ -73,7 +73,7 @@ parameters and their possible values)
 The "Control Plane Topology" parameter is used by control-plane operators (such
 as the Cluster etcd Operator) to determine how many replicas they should give
 their various Deployments / StatefulSets. The value of this parameter in single
-control-plane node clusters is always simply "SingleReplica".
+control-plane node clusters is always simply `SingleReplica`.
 
 The "Infrastructure Topology" parameter is used by infrastructure operators
 (such as the Cluster Ingress Operator or Cluster Monitoring Operator) to
@@ -366,29 +366,29 @@ Does not apply, to the best of my understanding.
 
 ### Operational Aspects of API Extensions
 
-- The "ControlPlane" IngressPlacement parameter value may not be used if the cluster's
-ControlPlaneTopology parameter is set to "External". 
+- The `ControlPlane` value of the `IngressPlacement` parameter value may not be
+used when the cluster's `ControlPlaneTopology` parameter is set to `External`. 
 
-- This API change only affects the defaulting behavior of the IngressController CR,
+- This API change only affects the defaulting behavior of the `IngressController` CR,
 it does not add any new capabilities to OCP, or gives any more flexibility than there
 already was.
 
-- For administrators and support engineers, the IngressController is still the source
-of truth and where you need to look for understanding the router placement in practice.
-Nothing has changed in that regard.
+- For administrators and support engineers, the `IngressController` is still the
+source of truth and where you need to look if you seek to understand the router
+placement in practice. Nothing has changed in that regard.
 
 #### Failure Modes
 
-- The "ControlPlane" IngressPlacement parameter value may not be used if the cluster's
-ControlPlaneTopology parameter is set to "External". This should ideally be blocked by
-admission controllers for the Ingress config CR, if there are any. On top of that, the
-Ingress Operator should refuse to create an IngressController CR or reconcile an existing
-one while IngressPlacement is set to "ControlPlane" and the ControlPlaneTopology parameter
-is set to "External". This will harm cluster health and disable ingress traffic to the cluster.
+- The `ControlPlane` value of the  `IngressPlacement` parameter value may not be
+used if the cluster's `ControlPlaneTopology` parameter is set to `External`.
+The Ingress Operator would treat such combination as if the `IngressPlacement`
+value is actually `Workers` instead, and log a warning to indicate that this
+invalid combination has been detected. The Ingress Operator should not fail
+to reconcile `IngressController` CRs due to this invalid combination.
 
 #### Support Procedures
 
-- For administrators and support engineers, the IngressController is still the source
+- For administrators and support engineers, the `IngressController` is still the source
 of truth and where you need to look for understanding the router placement in practice.
 Nothing has changed in that regard.
 
@@ -420,7 +420,7 @@ control-plane workloads to facilitate HA - for example, 2 extra replicas of
 the API server which consume a lot of memory resources. From an engineering
 perspective, it would require us to make the "Control-plane Topology"
 parameter dynamic and make sure all operators know to react to changes in that
-parameter (it will have to change from "SingleReplica" to "HighlyAvailable"
+parameter (it will have to change from `SingleReplica` to `HighlyAvailable`
 once those 2 new control-plane nodes join the cluster). I am not aware of the
 other engineering difficulties we would encounter when attempting to support
 the expansion of a single-node control-plane into a three-node control-plane,
