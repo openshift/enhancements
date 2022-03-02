@@ -75,8 +75,8 @@ continued adoption of HA clusters.
 
 ## Proposal
 
-A new CRD `ControlPlaneMachineSet` will be introduced into OpenShift and a respective `control-plane-machine-set-
-operator` will be introduced as a new second level operator within OpenShift to perform the operations described in
+A new CRD `ControlPlaneMachineSet` will be introduced into OpenShift and a respective `control-plane-machine-set-operator`
+will be introduced as a new second level operator within OpenShift to perform the operations described in
 this proposal.
 
 The new CRD will define the specification for managing (creating, adopting, updating) Machines for the Control Plane.
@@ -548,6 +548,10 @@ instances. This will prevent the garbage collector from removing the Control Pla
 
 If users later wish to reinstall the `ControlPlaneMachineSet`, they are free to do so.
 
+Note: Owner references will be added to the Control Plane Machines to identify to other components that a controller is
+managing the state of these Machines. This allows other systems such as the MachineHealthCheck to identify that if they
+were to make an action on the Machine, the Control Plane Machine Set Operator will react to that action.
+
 #### Installing a ControlPlaneMachineSet within an existing cluster
 
 When adding a ControlPlaneMachineSet to a existing cluster, the end user will need to define the
@@ -703,7 +707,7 @@ In OpenShift, customers may choose to use MachineHealthCheck resources to remove
 and have them replaced automatically by a MachineSet. MachineHealthCheck requires that a Machine has an Owner Reference
 before it will remove the Machine, this prevents the removal of a Machine that is not going to be replaced.
 
-As this Control Plane Machines will now be owned by the `ControlPlaneMachineSet`, MachineHealthChecks will now be
+As the Control Plane Machines will now be owned by the `ControlPlaneMachineSet`, MachineHealthChecks will now be
 compatible with Control Plane Machines. This we believe to be safe due to the design of the `ControlPlaneMachineSet`
 operator and the protection mechanism being implemented to protect etcd quorum. If at any point a Machine is deleted,
 the protection system will ensure no Machine is actually removed until a replacement has been brought in to replace it
@@ -712,7 +716,7 @@ within the etcd cluster.
 We expect that if a user wants automated remediation for their Control Plane Machines, they will configure a
 MachineHealthCheck to point to the Control Plane Machines, but we will not configure this for them.
 
-Notably, if a user does with to use a MachineHealthCheck with the Control Plane Machines, we advise them to configure
+Notably, if a user does wish to use a MachineHealthCheck with the Control Plane Machines, we advise them to configure
 the MachineHealthCheck just to observe Control Plane Machines and to have the `maxUnhealthy` field set to 1.
 These recommendations will ensure that if more than one Control Plane Machine appears unhealthy at once, that the
 MachineHealthCheck will take no action on the Machines. It is likely that if more than one Control Plane Machine appears
@@ -1009,7 +1013,7 @@ updates and so the value of the `MachineDeployment` was diminished.
 Aside from the above arguments, there are other higher level reasons we don't feel that a generic `StatefulMachineSet`
 is a valuable addition to OpenShift.
 - The concept of stateful Machines goes against the cattle not pets concept on which the rest of Machine API has been
-  build
+  built
 - Machines in OpenShift don't, in the majority of cases, have any state and, we shouldn't promote them to have state.
   The state is handled at the application layer by adding additional abstractions such as persistent volumes.
 - A lot of the scenarios we could think of for having a stateful group of Machines, could also be solved by using a set
@@ -1018,7 +1022,7 @@ is a valuable addition to OpenShift.
 - For the Control Plane case, we want additional monitoring on top of what a `StatefulMachineSet` might provide:
   - The ability to track the Control Plane infrastructure state via a Cluster Operator and to block upgrades if the
     Control Plane infrastructure is degraded for any reason
-  - The ability to restrict there to being a single point of truth for the Control Plane infrastructure definition
+  - The ability to restrict there to being a single source of truth for the Control Plane infrastructure definition
   - Restricting the replica count of the set to a supported number for the Control Plane within OpenShift
   - Ensuring that users aren't putting themselves in unsupported scenarios by trying to create additional Control Plane
     Machines
@@ -1027,4 +1031,4 @@ is a valuable addition to OpenShift.
 ## Infrastructure Needed
 
 For a clean separation of code, we will introduce the new operator in a new repository,
-openshift/control-plane-machine-set-operator.
+openshift/cluster-control-plane-machine-set-operator.
