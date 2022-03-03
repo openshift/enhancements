@@ -86,9 +86,8 @@ The goal is to provide a solution that maintains similar monitoring capabilities
   * Ability to perform PromQL across fleet metrics
 
 > NOTE(Mariusz): Alerts can be region wide only, and query in different tab per region might be good enough for now.
-
-  * Ability to see logs across the fleet to see a pattern
-  * No need to tunnel to specific control plane to query metrics or see logs
+n
+  * No need to tunnel to specific control plane to query metrics
   * Centralized alerting
 * CUS can monitor / use HPA/VPA / vis with local console using metrics FROM their workloads on guest clusters or from nodes on guest clusters
   * Container metrics (about their containers).
@@ -121,7 +120,7 @@ However, since HyperShift has no solution at all, for now starting from HyperShi
 
 ### User Stories
 
-TBD
+[TBD](https://github.com/openshift/enhancements/pull/981#discussion_r765764204)
 
 ### Implementation Details/Notes/Constraints
 
@@ -181,9 +180,13 @@ In details the full design looks as follows:
 
 Let’s take a look at all parts:
 
-1. Hosted control planes does not deploy any own monitoring, other than relevant Service Monitors to be scraped.
-2. For all control planes we propose to deploy [Monitoring Stack Operator](https://github.com/rhobs/monitoring-stack-operator) that will deploy set of Prometheus/Prometheus Agents that will be sending data off cluster to RHOBS. No local alerting and local querying will be allowed. This path will forward both monitoring data as well as part of telemetry relevant for Telemeter.
-3. On data-plane we propose running roughly unchanged CMO stack with platform monitoring and optional UWM. This allows feature parity for customers as well as ability to remote write few metrics interersting for HSRE use (as specified in Goal). The unique part is that Platform Monitoring will know nothing about master nodes and control plane resources (etcd, control plane operators, Kube services etc). It will only provide "platform" metrics for worker nodes and containers running there. Part of telemetry related to data-plane will be sent through Telemeter client as usual. We assume CMO can be deployed on Management cluster for easier maintenance.
+1. We don't change the management cluster monitoring itself (out of scope).
+2. We propose introducing a new monitoring stack on the hosted control plane to collect metrics from the control plane components and forward them to RHOBS. In terms of implementation we propose to deploy [Monitoring Stack Operator](https://github.com/rhobs/monitoring-stack-operator) that will deploy set of Prometheus/Prometheus Agents that will be sending data off cluster to RHOBS. No local alerting and local querying will be allowed. Interaction with that data will be fully on RHOBS side. This path will forward both monitoring data as well as part of telemetry relevant for Telemeter to RHOBS.
+3. On data-plane we propose running unchanged CMO stack. This allows feature parity for customers. A selected number of platform metrics could be forwarded to RHOBS if needed via remote write (already supported), though proxy on Hosted Control plane. The unique part is that Platform Monitoring will know NOTHING about master nodes and control plane resources (etcd, control plane operators, Kube services etc). It will only provide "platform" metrics for worker nodes and containers running there. Part of telemetry related to data-plane will be sent through Telemeter client though Hosted Control plane proxy.
+
+#### Common Metadata
+
+TODO: Explain how cluster_id can be propagated (https://issues.redhat.com/browse/MON-2235)
 
 #### Customer Monitoring on Data Plane
 
@@ -236,9 +239,9 @@ Internal docs:
 
 ### Open Questions
 
-* Who will configure CMO to allow remote writing metrics to RHOBS?
-
-* Who is responsible for deploying Monitoring Stacks on Management Clusters for Control planes to use?
+* Who will configure CMO on worker node to allow remote writing metrics to RHOBS?
+* Who is responsible for deploying [Monitoring Stacks](https://github.com/rhobs/monitoring-stack-operator) on Management Clusters for Hosted Control planes to use?
+* Who is responsible for deploying proxy for forwarding remote write request from worker nodes.
 
 ### FAQ
 
