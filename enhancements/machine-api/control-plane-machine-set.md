@@ -380,6 +380,8 @@ The `ControlPlaneMachineSet` CRD will be limited to a singleton within a standar
 allowed name will be `cluster`. This matches other high level CRD concepts such as the `Infrastructure` object.
 The operator will operate solely on the `openshift-machine-api` namespace as with other Machine API components.
 Only `ControlPlaneMachineSets` in this namespace will be reconciled.
+The resource must be namespaced to ensure compatibility with future OpenShift projects such as Cluster API and
+centralised machine management patterns.
 
 The behaviour of such a controller is complex, and as such, various features of the controller and scenarios are
 outlined in the details below.
@@ -726,6 +728,8 @@ planning to make the `ControlPlaneMachineSet` compatible, as much as possible, w
 for the Control Plane Provider in Cluster API.
 Importantly, we are designing the CRD API with the intention of making it API compatible in the future without making
 any breaking changes or needing to bump the API version of the `ControlPlaneMachineSet`.
+Notably, an API restriction imposed by making this resource compatible with Cluster API is that the resource MUST be
+Namespaced, and not Cluster scoped.
 
 The notable exception to this, is that because Cluster API uses separate resources for Machine templates, and Machine
 API embeds these directly within the spec, we will follow the Machine API convention in the first iteration of this
