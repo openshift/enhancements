@@ -216,7 +216,7 @@ growing computation demands.
 
 ### API Extensions
 
-Introduce a new topology field in the Ingress config CR
+Introduce a new field in the Ingress config CR
 (`config.openshift.io/v1/ingresses`) called `IngressPlacement`.
 
 ### Implementation Details/Notes/Constraints
