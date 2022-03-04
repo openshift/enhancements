@@ -367,7 +367,8 @@ Does not apply, to the best of my understanding.
 ### Operational Aspects of API Extensions
 
 - The `ControlPlane` value of the `IngressPlacement` parameter value may not be
-used when the cluster's `ControlPlaneTopology` parameter is set to `External`. 
+used when the cluster's `ControlPlaneTopology` parameter is set to `External`,
+this combination is currently considered invalid. This may change in the future.
 
 - This API change only affects the defaulting behavior of the `IngressController` CR,
 it does not add any new capabilities to OCP, or give any more flexibility than there
