@@ -77,7 +77,8 @@ configuration (similar to what exist for service/pod monitors and rules using th
 `"openshift.io/user-monitoring: false"` label on the namespace).
 * Cluster admins should be able to opt-out from supporting `AlertmanagerConfig`
 resources for user namespaces.
-* Cluster admins should be able to run a separated Alertmanager for user alerts.
+* Cluster admins should be able to run a separated Alertmanager for user alerts
+and the integration with the OCP console should be seamless.
 
 ### Non-Goals
 
@@ -385,6 +386,45 @@ receivers:
 - name: foo-alertmanagerconfig1-my-receiver
   ...
 ```
+
+#### Console integration
+
+The OCP user interface leverages the Alertmanager API to display and manage
+alert silences.
+
+* Admin console
+  * In the "Observe > Alerting > Silences" page, the user can view and edit all silences.
+  * In the "Observe > Alerting > Alerts" and "Observe > Alerting > Alert details" pages, the user can create a silence for a pending or firing alert.
+* Developer console
+  * In the "Observe > Alerts" page, the user can view alerts in the selected namespace and create/expire silences for active alerts.
+
+Before this proposal, the console assumes that there's only one Alertmanager
+API available at the `alertmanager-main.openshift-monitoring.svc` service. Now
+it needs to deal with the possible existence of UWM Alertmanager.
+
+When a silence is associated to an active alert, the console already knows
+whether it comes from a "platform" or "user" alerting rule (platform rules have
+the `prometheus="openshift-monitoring/k8s"` label). Provided that CMO tells the
+console operator the name of the Alertmanager API service managing user alerts
+(e.g.  `alertmanager.openshift-user-workload-monitoring.svc` if UWM
+Alertmanager is enabled), the console backend can infer which API service it
+needs to request:
+
+* Admin console
+  * "Observe > Alerting > Silences"
+    * When listing the silences, the console backend queries both Alertmanager services, merges the results and adds a field identifying the "origin" of the silence (platform vs. user).
+    * When creating a silence, the user defines whether the silence is for platform or user alerts. The console backend uses the information to request the right Alertmanager API.
+    * When editing/expiring a silence, the console frontend knows the origin and can pass the information to the console backend.
+  * "Observe > Alerting > Alerts" and "Observe > Alerting > Alert details"
+    * The frontend knows the origin of the rule and can pass the information to the console backend.
+* Developer console
+  * "Observe > Alerts" page
+    * When editing/expiring a silence, the console frontend knows the origin of the rule and can pass the information to the console backend.
+
+Implementation-wise, CMO reuses the `monitoring-shared-config` ConfigMap in the
+`openshift-managed-config` namespace to communicate to the console operator the
+location of platform and user Alertmanager APIs. The operator passes down the
+configuration to the console backend.
 
 #### RBAC
 
