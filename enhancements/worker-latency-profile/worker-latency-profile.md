@@ -204,8 +204,8 @@ Pods with `NoExecute` taint will get executed as per [tolerationSeconds](https:/
 | -----------             | -----------                              | ----------- |
 | Kubelet                 | --node-status-update-frequency           |    10s      |
 | Kube Controller Manager | --node-monitor-grace-period              |    40s      |
-| Kube API Server         | --default-not-ready-toleration-seconds   |    300s     |
-| Kube API Server         | --default-unreachable-toleration-seconds |    300s     |
+| Kube API Server         | --default-not-ready-toleration-seconds   |    300      |
+| Kube API Server         | --default-unreachable-toleration-seconds |    300      |
 
 
 #### Medium Update And Average Reaction
@@ -221,8 +221,8 @@ In this scenario, we will reduce the frequency of `Kubelet` updates to every 20 
 | -----------             | -----------                              | ----------- |
 | Kubelet                 | --node-status-update-frequency           |    20s      |
 | Kube Controller Manager | --node-monitor-grace-period              |    2m       |
-| Kube API Server         | --default-not-ready-toleration-seconds   |    60s      |
-| Kube API Server         | --default-unreachable-toleration-seconds |    60s      |
+| Kube API Server         | --default-not-ready-toleration-seconds   |    60       |
+| Kube API Server         | --default-unreachable-toleration-seconds |    60       |
 
 #### Low Update and Slow reaction
 
@@ -236,8 +236,8 @@ In this scenario, we will reduce the frequency of `Kubelet` updates further to e
 | -----------             | -----------                              | ----------- |
 | Kubelet                 | --node-status-update-frequency           |    1m       |
 | Kube Controller Manager | --node-monitor-grace-period              |    5m       |
-| Kube API Server         | --default-not-ready-toleration-seconds   |    60s      |
-| Kube API Server         | --default-unreachable-toleration-seconds |    60s      |
+| Kube API Server         | --default-not-ready-toleration-seconds   |    60       |
+| Kube API Server         | --default-unreachable-toleration-seconds |    60       |
 
 
 #### Failure Modes
