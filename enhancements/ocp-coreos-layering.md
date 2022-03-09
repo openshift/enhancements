@@ -99,7 +99,7 @@ The OCP admins at example.corp get a copy of this hotfix RPM into their internal
 
 Later, a fixed kernel with a newer version is released in the main OCP channels.  The override continues to apply, and will currently require manual attention at some point later to remove the override when we can guarantee the non-hotfix kernel has the desired fix.
 
-A future enhancement will help automate the above.
+A future enhancement will help automate the above.  For example, we may support associating a Bugzilla number with the override.  Then, the system can more intelligently look at an upgrade and see whether a new kernel package that is chronologically/numerically higher actually fixes the BZ - and only drop the override once it does.
 
 #### Externally built image
 
