@@ -201,18 +201,54 @@ For now, updating kernel arguments will continue to happen via the MCD on each n
 
 Ignition will continue to handle the `disks` and `filesystem` sections - for example, LUKS will continue to be applied as it has been today.
 
-Further, it is likely that we will need to ship a targeted subset of the configuration via Ignition too - for example, the pull secret will be necessary to pull the build containers. 
+However, see below.
 
 ##### Per machine state, the pointer config
 
 See [MCO issue 1720 "machine-specific machineconfigs"](https://github.com/openshift/machine-config-operator/issues/1720).
 We need to support per machine/per node state like static IP addresses and hostname.
 
-##### 3 Ignition "levels"
+##### Transitioning existing systems
 
-- Pointer configuration: this stays unchanged
-- Firstboot ignition: Contains the bits needed to perform the switch to the custom image
-- Everything else: This all ends up in the `mco-coreos` container image, e.g. `kubelet.service` systemd unit.
+This is a complex and multi-faceted topic.  First, let's assume the node is already
+running a new enough host stack (most specifically rpm-ostree with container support).
+
+The system is running e.g. 4.11 and will be upgrading to e.g. 4.12 which will transition
+to the new format.  In this case, the user is not customizing the image at all, and we just
+want to perform a seamless transition.
+
+One key aspect we need to handle here is the "per machine state" above.
+
+- Node currently has a large set of files written to e.g. `/etc` and `/usr/local` via
+  Ignition.
+- The MCO asks the node to deploy the new format image
+- The MCD detects it is transitioning from old format to native container format, and
+  *does not perform any filesystem modifications at all*.
+- MCD simply runs `rpm-ostree rebase` + drain + `reboot`
+
+With this approach, any locally-modified files `/etc` will be preserved by this upgrade, such
+as static IP addresses, etc.  This means that e.g. rollback will still work in theory.
+
+However, there are two problems:
+
+First, we will need to be careful to keep e.g. `kubelet.service` in `/etc`, and not as
+part of the container build also migrate it to `/usr` (which we can do now!).  If we
+moved the unit, then we'd have *two* copies.
+
+This risk is greater for helper binaries (things in `/usr/local` i.e. `/var/usrlocal`).
+Those must be moved into `/usr/bin` in the image.  We will need to be careful to ensure
+that the binaries in `/usr/bin` are preferred by scripts.  In general, we should be
+able to handle that by using absolute paths.
+
+#### Ignition (pointer vs provisioning vs in-image)
+
+We will likely keep the pointer configuration as is.  Attempting to scope in
+changing that now brings its own risks.
+
+However, the MCS will need to serve a "provisioning configuration" for example,
+with at least a pull secret and other configuration sufficient to pull images.
+(Alternatively, we may be able to provide a "bootstrap pull secret" that allows
+ doing a pull-through from the in-cluster registry)
 
 #### Drain and reboot
 
