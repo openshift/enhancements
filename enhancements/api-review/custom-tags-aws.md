@@ -9,11 +9,12 @@ reviewers:
   - @sinnykumari
   - @dmage
   - @staebler
+  - @tkashem
   - @tjungblu
 approvers:
   - @tjungblu
 creation-date: 2021-03-24
-last-updated: 2022-02-10
+last-updated: 2022-03-10
 status: implementable
 ---
 
@@ -75,6 +76,7 @@ Motivations include but are not limited to:
   2. Image registry.
   3. Ingress LB.
   4. IAM credentials by CCO in mint mode of operation.
+- Openshift is bound by the AWS resource that allows the fewest number of tags. An AWS S3 bucket can only have at most 10 tags.
 
 ## Proposal
 
@@ -119,28 +121,41 @@ In the future we will want to introduce a spec field where a customer can specif
   `.spec.platformSpec.aws` is a mutable field and `.status.platformStatus.aws` is immutable.
   `.status.platformStatus.aws` will have older version tags defined and is required for upgrade case.
 
-- All operators that create AWS resources (ingress, cloud credential, storage, image registry, machine-api) will apply these tags to all AWS resources they create.\
-  Operator must update AWS resource to match requested user-defined tags provided in `.spec.platformSpec.aws` (or `.status.platformStatus.aws`).\
+- All operators that create AWS resources (ingress, cloud credential, storage, image registry, machine-api) will apply these tags to all AWS resources they create.
+  Operator must update AWS resource to match requested user-defined tags provided in `.spec.platformSpec.aws` (or `.status.platformStatus.aws`).
+
   Operator must consider `.status.platformStatus.aws` to support upgrade scenarios.
 
 #### Create tags scenarios
 `resourceTags` that are specified in  `.spec.platformSpec.aws` of the Infrastructure resource will merge with user-defined tags in an individual component.
 
 In the case where a user-defined tag is specified in the Infrastructure resource and
-1) There is already a tag with the same key present for AWS resource, the value from the AWS resource will be replaced.\
-   For example,\
-   Existing tag for AWS resource = `key_infra1 = value_comp1`\
-   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`\
-   Action = Existing tag for AWS resource is updated to reflect new value.\
-   Final tag set to AWS resource = `key_infra1 = value_infra1`\
+1) There is already a tag with the same key present for AWS resource, the value from the AWS resource will be replaced.
+
+   For example,
+
+   Existing tag for AWS resource = `key_infra1 = value_comp1`
+
+   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`
+
+   Action = Existing tag for AWS resource is updated to reflect new value.
+
+   Final tag set to AWS resource = `key_infra1 = value_infra1`
+
    Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
 
-2) There is no tag with same key present, new tag is created for the AWS resource. In case of limit reached, a validation error is generated.\
-   For example,\
-   Existing tag for AWS resource = `key_infra1 = value_comp1`\
-   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`\
-   Action = A new tag is created for AWS resource.\
-   Final tag set to AWS resource = `key_infra1 = value_infra1`\
+2) There is no tag with same key present, new tag is created for the AWS resource. In case of limit reached, a validation error is generated.
+
+   For example,
+
+   Existing tag for AWS resource = `key_infra1 = value_comp1`
+
+   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`
+
+   Action = A new tag is created for AWS resource.
+
+   Final tag set to AWS resource = `key_infra1 = value_infra1`
+
    Event action = An event is generated to notify user about the action status (success/failure) to create tags for the AWS resource.
 
 #### Update tags scenarios
@@ -148,51 +163,79 @@ Users can update the user-defined tags by editing `.spec.platformSpec.aws` of th
 On update of `resourceTags`, AWS resource is not created or restarted.
 
 In the case where a user-defined tag is specified in the Infrastructure resource and
-1) There is already a tag with the same key and value present for AWS resource, the tag for the AWS resource will not be updated.\
-   For example,\
-   Existing tag for AWS resource = `key_infra1 = value_update1`\
-   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_update1`\
-   Action = There is no update for AWS resource.\
-   Final tag set to AWS resource = `key_infra1 = value_update1`\
+1) There is already a tag with the same key and value present for AWS resource, the tag for the AWS resource will not be updated.
+
+   For example,
+
+   Existing tag for AWS resource = `key_infra1 = value_update1`
+
+   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_update1`
+
+   Action = There is no update for AWS resource.
+
+   Final tag set to AWS resource = `key_infra1 = value_update1`
+
    Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
 
-2) There is already a tag with the same key and different value present for AWS resource, the user-define tag value for the AWS resource will be updated.\
-   For example,\
-   Existing tag for AWS resource = `key_infra1 = value_old`\
-   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_update1`\
-   Action = Existing tag for AWS resource is updated to reflect new value.\
-   Final tag set to AWS resource = `key_infra1 = value_update1`\
+2) There is already a tag with the same key and different value present for AWS resource, the user-define tag value for the AWS resource will be updated.
+
+   For example,
+
+   Existing tag for AWS resource = `key_infra1 = value_old`
+
+   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_update1`
+
+   Action = Existing tag for AWS resource is updated to reflect new value.
+
+   Final tag set to AWS resource = `key_infra1 = value_update1`
+
    Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
 
 #### Delete tags scenarios
 Tags are deleted when the user sets the user-defined tag value to an empty string in `.spec.platformSpec.aws.resourceTags`.
-Also refer to `Precedence` scenario to understand cases where deletion of user-defined tags is not allowed .\
-For example,\
-Existing tag for AWS resource = `key_infra1 = value_old`\
-New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 =`\
-Action = Existing tag for AWS resource is deleted.\
-Final tag set to AWS resource = deleted\
+Also refer to `Precedence` scenario to understand cases where deletion of user-defined tags is not allowed .
+
+For example,
+
+Existing tag for AWS resource = `key_infra1 = value_old`
+
+New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 =`
+
+Action = Existing tag for AWS resource is deleted.
+
+Final tag set to AWS resource = deleted
+
 Event action = An event is generated to notify user about the action status (success/failure) to delete tags for the AWS resource.
 
 #### Precedence scenarios
 1) User-defined tags on kube resources MUST continue to take precedence during create and update. User-defined tags found on kube resources must not be deleted by methods described in `Delete tags scenarios`.
    A warning is generated to inform the user about action not being applied on the list of user tags.
 
-   For example,\
-   Existing tag in kube resource object like machine CR = `key_infra1 = custom_value`\
-   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value1`\
-   Action = The tag for AWS resource is maintained to `key_infra1 = custom_value`.\
-   Final tag set to AWS resource = `key_infra1 = custom_value`\
+   For example,
+
+   Existing tag in kube resource object like machine CR = `key_infra1 = custom_value`
+
+   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value1`
+
+   Action = The tag for AWS resource is maintained to `key_infra1 = custom_value`.
+
+   Final tag set to AWS resource = `key_infra1 = custom_value`
+
    Event action = An event is generated to notify user about the action status (failure) to update tags for the AWS resource. A warning also must be generated about list of user-defined tags on which action is not applicable.
 
 2) When a new user-defined tag is added on kube resources, it MUST override the tag in `.spec.platformSpec.aws`. User-defined tags found on kube resources must not be deleted by methods described in `Delete tags scenarios`.
    A warning is generated to inform the user about action not being applied on the list of user tags.
 
-   For example,\
-   Existing tag in Infrastructure CR = `key_infra1 = custom_value`\
-   New tag added in kube resource object like machine CR = `key_infra1 = value1`\
-   Action = The tag for AWS resource is maintained to `key_infra1 = value1`.\
-   Final tag set to AWS resource = `key_infra1 = custom_value`\
+   For example,
+
+   Existing tag in Infrastructure CR = `key_infra1 = custom_value`
+
+   New tag added in kube resource object like machine CR = `key_infra1 = value1`
+
+   Action = The tag for AWS resource is maintained to `key_infra1 = value1`.
+
+   Final tag set to AWS resource = `key_infra1 = custom_value`
+
    Event action = An event is generated to notify user about the action status (success) to update tags for the AWS resource. A warning also must be generated about list of user-defined tags on which action did a override.
 
 3) `.spec.platformSpec.aws` take precedence over `.status.platformStatus.aws`. User-defined tags must be merged from `.status.platformStatus.aws` and set to AWS resource.
@@ -205,34 +248,48 @@ Event action = An event is generated to notify user about the action status (suc
    The resource's tag will be reconciled by its owning operator to the value from `.spec.platformSpec.aws.resourceTags`.
    The user-defined tag will be overwritten with value from `.spec.platformSpec.aws.resourceTags` when there is an update to `.spec.platformSpec.aws.resourceTags`.
 
-   For example,\
-   Edited existing tag using external tool for AWS resource = `key_infra1 = value_comp1`\
-   Previous tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`\
-   Action = Update existing tag with value from `.spec.platformSpec.aws.resourceTags`.\
-   Final tag set to AWS resource = `key_infra1 = value_infra1`\
+   For example,
+
+   Edited existing tag using external tool for AWS resource = `key_infra1 = value_comp1`
+
+   Previous tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`
+
+   Action = Update existing tag with value from `.spec.platformSpec.aws.resourceTags`.
+
+   Final tag set to AWS resource = `key_infra1 = value_infra1`
+
    Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
 
 2) User deletes the user-defined tag from `.spec.platformSpec.aws.resourceTags`
-   The user-defined tag which is removed from spec, will not be reconciled or managed by operators.\
+   The user-defined tag which is removed from spec, will not be reconciled or managed by operators.
+
    User can update user-defined tag key:value using external tool. The user-defined tag will not be overwritten.
 
-   For example,\
-   Existing tag for AWS resource = `key_infra1 = value1`\
-   New tag request = `.spec.platformSpec.aws.resourceTags` has no user-defined tag with key `key_infra1`\
-   Action = No change in tags for the AWS resource.\
-   Final tag set to AWS resource = `key_infra1 = value1`\
+   For example,
+
+   Existing tag for AWS resource = `key_infra1 = value1`
+
+   New tag request = `.spec.platformSpec.aws.resourceTags` has no user-defined tag with key `key_infra1`
+
+   Action = No change in tags for the AWS resource.
+
+   Final tag set to AWS resource = `key_infra1 = value1`
+
    Event action = No event
 
-3) User sets user-defined tag created using external tools to empty string for deleting for AWS resource.\
+3) User sets user-defined tag created using external tools to empty string for deleting for AWS resource.
+
    There is no validation check involved for creator tool of user-defined tag. Any user-defined tag listed by user in `.spec.platformSpec.aws.resourceTags` is considered for create/update/delete accordingly.
 
-4) Any user-defined tag set using `.spec.platformSpec.aws.resourceTags` in `Infrastructure.config.openshift.io/v1` type has scope limited to cluster-level.
+4) Any user-defined tag set using `.spec.platformSpec.aws.resourceTags` in `Infrastructure.config.openshift.io/v1` type will affect all AWS resources managed.
 
 5) User-defined tags are not synced from `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` for the following reasons.
+
 - User-defined tags in `.spec.platformSpec.aws.resourceTags` can be "removed without delete", "delete", "update".
   `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` sync is not required,
   as there will be no versioning of the user-defined tags required to override the user-defined tags in Infrastructure CR.
   Instead, the user-defined tags (if supported in resource operator spec field, e.g: machine) can override the user-defined tags in Infrastructure CR.
+
 - As `.spec.platformSpec.aws.resourceTags` has the actual values. Sync to `.status.platformStatus.aws.resourceTags` was required in earlier design to identify if the
   tag on the resource was created using Infrastructure CR or external tool. Identifying the creator tool was done to restrict user from editing the same user-tag kv pair using multiple tools.
   This inherently poses many scenarios of conflict which will result in user-defined tag kv pair being inconsistent across cluster when applied using Infrastructure CR. Hence, user will be confused which tool to be used to update tag.
@@ -248,65 +305,11 @@ Event action = An event is generated to notify user about the action status (suc
 The developer must also carefully consider the upgrade and rollback ordering
 between the webhook and CRD.
 
-The Infrastructure resource example to use spec for api changes
-
-```go
-// AWSPlatformSpec holds the desired state of the Amazon Web Services Infrastructure provider.
-// This only includes fields that can be modified in the cluster.
-type AWSPlatformSpec struct {
-    // Existing fields
-    ...
-    // ResourceTags is a list of additional tags to apply to AWS resources created for the cluster.
-    // See https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html for information on tagging AWS resources.
-    // AWS supports a maximum of 10 tags per resource. OpenShift reserves 5 tags for its use, leaving 5 tags
-    // available for the user.
-    // ResourceTags field is mutable and items can be removed.
-    // +kubebuilder:validation:MaxItems=10
-    // +optional
-    ResourceTags []AWSResourceTag `json:"resourceTags,omitempty"`
-}
-
-```
-
-```yaml
-spec:
-description: AWS contains settings specific to the Amazon Web Services Infrastructure provider.
-type: object
-properties:
-    resourceTags:
-    description: ResourceTags is a list of additional tags to apply to AWS resources created for the cluster. See https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html for information on tagging AWS resources.
-    type: array
-    maxItems: 10
-    items:
-        description: AWSResourceTag is a tag to apply to AWS resources created for the cluster.
-        type: object
-        required:
-            - key
-            - value
-        properties:
-            key:
-                description: key is the key of the tag
-                type: string
-                maxLength: 128
-                minLength: 1
-                pattern: ^[0-9A-Za-z_.:/=+-@]+$
-            value:
-                description: value is the value of the tag. Some AWS service do not support empty values. Since tags are added to resources in many services, the length of the tag value must meet the requirements of all services.
-                type: string
-                maxLength: 256
-                minLength: 1
-                pattern: ^[0-9A-Za-z_.:/=+-@]+$
-```
-
 ### User Stories
 
 - As a security-conscious ROSA customer, I want to restrict the permissions granted to Red Hat in my AWS account by using AWS resource tags.
   Red Hat applies one well-known tag to all ROSA cluster resources to identify Red Hat-managed AWS resources (e.g. “red-hat-managed=true”).
   Customer can create AWS policies that restrict Red Hat access to tagged resource types based on tag (e.g. “RedHat role can only create/read/update/delete S3 buckets with a red-hat-managed=true tag”).
-
-
-- As a cluster administrator of OpenShift, I would like to be able to add a maximum of 10 user-defined tags for AWS resources provisioned by an OCP cluster.
-  Openshift is bound by the AWS resource that allows the fewest number of tags. An AWS S3 bucket can only have at most 10 tags.
 
 - As a cluster administrator of OpenShift, I would like to be able to delete user-defined tags managed by OpenShift for AWS resources.
   As there are limitations on the maximum number of user-defined tags that can be set on an AWS resource, the ability to delete user-defined tags enables user to replace and manage tags within limits allowed.
@@ -332,6 +335,57 @@ As the existing cluster might be configured with user-defined tags from kube res
 ### API Extensions
 
 This proposal edits `Infrastructure.config.openshift.io/v1` type
+
+The Infrastructure resource example to use spec for api changes
+
+```go
+// AWSPlatformSpec holds the desired state of the Amazon Web Services Infrastructure provider.
+// This only includes fields that can be modified in the cluster.
+type AWSPlatformSpec struct {
+    // Existing fields
+    ...
+    // ResourceTags is a list of additional tags to apply to AWS resources created for the cluster.
+    // See https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html for information on tagging AWS resources.
+    // AWS supports a maximum of 10 tags per resource. OpenShift reserves 5 tags for its use, leaving 5 tags
+    // available for the user.
+    // ResourceTags field is mutable and items can be removed.
+    // +kubebuilder:validation:MaxItems=10
+    // +optional
+    ResourceTags []AWSResourceTag `json:"resourceTags,omitempty"`
+}
+
+```
+
+```yaml
+spec:
+    description: AWS contains settings specific to the Amazon Web Services Infrastructure provider.
+    type: object
+    properties:
+    resourceTags:
+        description: ResourceTags is a list of additional tags to apply to AWS resources created for the cluster. See https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html for information on tagging AWS resources.
+        type: array
+        maxItems: 10
+        items:
+            description: AWSResourceTag is a tag to apply to AWS resources created for the cluster.
+            type: object
+            required:
+                - key
+                - value
+                properties:
+                    key:
+                        description: key is the key of the tag
+                        type: string
+                        maxLength: 128
+                        minLength: 1
+                        pattern: ^[0-9A-Za-z_.:/=+-@]+$
+                    value:
+                        description: value is the value of the tag. Some AWS service do not support empty values. Since tags are added to resources in many services, the length of the tag value must meet the requirements of all services.
+                        type: string
+                        maxLength: 256
+                        minLength: 1
+                        pattern: ^[0-9A-Za-z_.:/=+-@]+$
+```
+
 
 ### Operational Aspects of API Extensions
 
@@ -415,7 +469,5 @@ The operator would need to monitor multiple kube resources, infrastructure CR an
 
 ## Future Work
 
-1. Update the Infrastructture CRD to enable validation  to check if any tag that starts with `kubernetes.io` or `openshift.io using
+1. Update the Infrastructture CRD to enable validation  to check if any tag that starts with `kubernetes.io` or `openshift.io` using
    CRD Validation Expression Language proposed here : https://github.com/kubernetes/enhancements/pull/2877/files.
-
-
