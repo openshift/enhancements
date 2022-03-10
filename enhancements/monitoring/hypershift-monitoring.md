@@ -184,9 +184,20 @@ Let’s take a look at all parts:
 2. We propose introducing a new monitoring stack on the hosted control plane to collect metrics from the control plane components and forward them to RHOBS. In terms of implementation we propose to deploy [Monitoring Stack Operator](https://github.com/rhobs/monitoring-stack-operator) that will deploy set of Prometheus/Prometheus Agents that will be sending data off cluster to RHOBS. No local alerting and local querying will be allowed. Interaction with that data will be fully on RHOBS side. This path will forward both monitoring data as well as part of telemetry relevant for Telemeter to RHOBS.
 3. On data-plane we propose running unchanged CMO stack. This allows feature parity for customers. A selected number of platform metrics could be forwarded to RHOBS if needed via remote write (already supported), though proxy on Hosted Control plane. The unique part is that Platform Monitoring will know NOTHING about master nodes and control plane resources (etcd, control plane operators, Kube services etc). It will only provide "platform" metrics for worker nodes and containers running there. Part of telemetry related to data-plane will be sent through Telemeter client though Hosted Control plane proxy.
 
-#### Common Metadata
+#### Common Labels
 
-TODO: Explain how cluster_id can be propagated (https://issues.redhat.com/browse/MON-2235)
+RHOBs generally does not restrict the label semantics you want to use for the monitoring of your workloads. See [Metric Label Restriction page](https://rhobs-handbook.netlify.app/services/rhobs/#metric-label-restrictions) for list of label recommendations.
+
+Probably the most important label to ensure consistency across HyperShift metrics is a label indicating hosted cluster. This is because:
+
+* Telemeter uses `_id`. If we maintain same convention we have easier way to joining data across telemeter and other tenants if needed.
+* If we push metrics from both data plane and hosted control planes it is critical to associate those with same cluster, so we can join/view this data uniformly. 
+
+We propose reusing `_id` which is what Telemeter uses. This is also by default propagated in the in-cluster platform monitoring (it takes `_id` from [ClusterVersionSpec](https://github.com/openshift/api/blob/master/config/v1/types_cluster_version.go#L41)), so data from data plane should be already instrumented correctly.
+
+When it comes to hosted control planes we propose for hosted control plane service monitors (or pod monitors) to include relabeling that adds `_id` with corresponding cluster id to each metric. When scraped this label will be attached and propagated to RHOBS.
+
+Additionally, Prometheus/Prometheus Agent pipeline that scrapes and forwards data from Hosted control plane to RHOBS should have external label indicated HyperShift management cluster, so we know which management cluster collected and controlled that hosted cluster. We could add external label called `hypershift_cluster_id` with ID of HyperShift cluster. This label will be then injected in remote write request to RHOBS.
 
 #### Customer Monitoring on Data Plane
 
