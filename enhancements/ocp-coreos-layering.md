@@ -303,6 +303,17 @@ Image Builder would also be a natural place to use the underlying technology out
 
 Both of these things are out of scope of this enhancement at this time however.
 
+#### Heterogeneous clusters
+
+To support [Heterogeneous clusters](https://github.com/openshift/enhancements/pull/1014), we clearly now need to generate
+an image per supported node architecture.
+
+Today as noted, OCP native builds do not support this.  It seems likely that the MCO will need to
+generate a build per supported architecture itself, and handle rolling them out.  This is its
+own large topic, such as whether we try to use a fully-fledged solution for that or hand-craft
+something that just handles monitoring OCP native builds across multiple architectures.
+As of right now the internal registry doesn't support manifest lists either.
+
 #### Intersection with https://github.com/openshift/os/issues/498
 
 It would be very natural to split `machine-os-content` into `machine-coreos` and `machine-kubelet` for example, where the latter derives from the former.
