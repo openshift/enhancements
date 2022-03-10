@@ -295,7 +295,13 @@ There are other things that pull Ignition:
 
 #### Intersection with https://github.com/openshift/enhancements/pull/201
 
-In the future, we may also generate updated "bootimages" from the custom operating system container.
+In the future, we may also generate updated "bootimages" from the custom operating system container.  There is a lot to write about this, but a likely direction is that
+[RHEL Image Builder](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/8/html/composing_a_customized_rhel_system_image/composer-description_composing-a-customized-rhel-system-image)
+will gain the ability to take a CoreOS-derived container image, and generate a disk image (e.g. Azure image, ISO) which just "wraps" it.
+
+Image Builder would also be a natural place to use the underlying technology outside of OCP for RHEL.
+
+Both of these things are out of scope of this enhancement at this time however.
 
 #### Intersection with https://github.com/openshift/os/issues/498
 
