@@ -168,7 +168,7 @@ masters as well as other workloads. Depending on the amount of traffic, and the
 resources available to the cluster, this may result in degraded functionality
 in the masters, which finally affects the general health of the cluster.
 
-With this enhancement, we will be making it easier for users to create such a
+With this enhancement, we will be making it easier for users to create such
 4-nodes cluster deployments, which could make users believe it is supported or
 recommended.
 
