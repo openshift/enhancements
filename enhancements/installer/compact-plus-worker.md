@@ -22,20 +22,26 @@ superseded-by: []
 ## Summary
 
 This enhancement proposes to allow for deploying a 4-nodes cluster as a day 0
-operation. The 4-nodes cluster would be composed by 3 schedulable master nodes
-and a single worker, which provide users with a highly available cluster.
+operation, where the infrastructure workload can be deployed with HA enabled.
+The 4-nodes cluster would be composed by 3 schedulable master nodes and a
+single worker, which provide users with a highly available cluster.
 
 ## Motivation
 
 There are environments where only 4 nodes are available where 4-nodes clusters
 are being deployed. We could serve OpenShift cluster administrators of these
 environments better by allowing them to deploy a 4-nodes cluster as a day0
-operation.
+operation and make sure their infrastructure workload is highly available.
 
-Today, in such environments, OpenShift cluster administrators can only deploy a
-4-nodes clusters by first deploying a compact cluster (3 schedulable masters)
-and then adding a host as a day 2 operation. This provides the same results as
-aimed in this enhancement but with a poor and slower user experience.
+Today, it is possible to deploy a 4-nodes cluster. The resulting cluster will
+be functional but the infrastructure workload will be run as a SingleReplica
+topology, which won't allow the various services to run as HA.
+
+To achieve the desired topology described in this enhancement,OpenShift cluster
+administrators can only deploy a 4-nodes clusters by first deploying a compact
+cluster (3 schedulable masters) and then adding a host as a day 2 operation.
+Another option is for them to This provides the same results as aimed in this
+enhancement but with a poor and slower user experience.
 
 Today, because of the current limitations in the installer, it takes
 administrators significantly longer to achieve the desired topology, when only
