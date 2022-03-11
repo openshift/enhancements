@@ -63,8 +63,8 @@ List the specific goals of the proposal. How will we know that this has succeede
   ControlPlaneTopology when the number of workers is 1, instead of setting its
   value to SingleReplica as it's done today.
 
-- Use the `ControlPlaneTopology` topology when the number of workers is 1,
-  instead of the `SingleReplicaTopologyMode` as it's done today.
+- Set masters as schedulable when workers are less or equal to 1. Today,
+  masters are set to schedulable only when there are no workers available.
 
 ### User Stories
 
