@@ -219,17 +219,18 @@ const (
 While one of the goals for this enhancement is to provide automation for creating and attaching Azure Ultra Disks as Data Disks to Machines, there is one caveat.
 Once an Azure instance is created and a Data Disk (in this case of type Ultra Disk) is attached to said instance, the Disk will be seen as a _raw_ block device by the OS.
 
-This means that in order for the Data Disk to be usable by workloads it will require some form of initialization, which, given the high performing nature of Ultra Disks (and more generally of Data Disks) is best suited to be left to the cluster administrator. This way they will be able to decide how to best slice the disk in partitions, while also choosing how to format them and autonomously deciding where to have them mounted.
+This means that in order for the Data Disk to be usable by workloads it will require some form of initialization, which, given the high performing nature of Ultra Disks (and more generally of Data Disks) is best suited to be left to the cluster administrator.
+This way they will be able to decide how to best slice the disk in partitions, while also choosing how to format them and autonomously deciding where to have them mounted.
 
 For this reason, guidance will be provided on how a cluster administrator can specify flexible configuration to achieve so with the help of a supporting example.
 
 The following steps assume the Machine about to be launched to which the raw Data Disk will be attached, will be running RHEL CoreOS (RHCOS) or Fedora CoreOS (FCOS) and that [CoreOS Ignition](https://github.com/coreos/ignition) is set up and already performing first boot install and configuration:
-1.  _Custom user-data Secret creation_:
+1. _Custom user-data Secret creation_:
 
     In order to leverage CoreOS Ignition, which allows manipulation of disks during initramfs, the administrator needs to create a custom user-data configuration (in this example stored in a Secret object) where a desired extension of the Ignition configuration can be specified:
       - Create a new secret from the `worker-user-data` Secret
         - Export the userData section of the Secret to a text file:
-          ```
+          ```sh
           $ oc -n openshift-machine-api get secret worker-user-data --template='{{index .data.userData | base64decode}}' | jq > userData.txt
           ```
         - Edit the text file to add the storage, filesystems, and systemd stanzas for the partitions you want to use for the new node. The user can specify any Ignition configuration parameters as needed. For example if a Data Disk with `lun: 0` is planned to be added for the Machine, the Ingition config to partition, filesystem format and mount a device on `lun0` can be specified like so. Please note:
@@ -240,7 +241,7 @@ The following steps assume the Machine about to be launched to which the raw Dat
           - further paritions, filesystems and mounts can be added to the configuration provided they are compatible with the Ignition spec and version that the OS observes.
   
           Edit the `userData.txt`, and right after the `"ignition":{ ... }` block (and before the last closing bracket `}`) add comma `,`, then add these following blocks:
-          ```
+          ```json
           "storage": {
             "disks": [
               {
@@ -273,18 +274,18 @@ The following steps assume the Machine about to be launched to which the raw Dat
           }
           ```
         - Extract the `disableTemplating` section from the `worker-user-data` Secret to a text file:
-          ```
+          ```sh
           $ oc -n openshift-machine-api get secret worker-user-data --template='{{index .data.disableTemplating | base64decode}}' | jq > disableTemplating.txt
           ```
         - Create the new user data secret file from the two text files. This user data Secret passes the additional node partition information in the userData.txt file to the newly created node.
-          ```
+          ```sh
           $ oc -n openshift-machine-api create secret generic worker-user-data-x5 --from-file=userData=userData.txt --from-file=disableTemplating=disableTemplating.txt
           ```
 1. _MachineSet with Data Disk and custom user-data creation_:
 
     - Create a new MachineSet YAML where:
       - A new Data Disk is defined under `dataDisks` and the `name` under `userDataSecret` reference the name of the newly created user data Secret:
-        ```
+        ```yaml
         dataDisks:
         - nameSuffix: ultrassd
           lun: 0
@@ -296,18 +297,18 @@ The following steps assume the Machine about to be launched to which the raw Dat
           name: worker-user-data-x5
         ```
       - A label for identifiying Nodes originated from Machines spawned by this MachineSet is set by adding under `.spec.template.spec.metadata`:
-        ```
+        ```yaml
         labels:
           disktype: ultrassd
         ```
     - When a Machine belonging to the new MachineSet is `Running` and a Node is created and linked to it, the result of partitioning can be verified with:
-      ```
+      ```sh
       $ oc debug node/<node-name> -- chroot /host lsblk
       ```
 1. _Using of Data Disks with workloads_:
 
     The Data Disk is now available on the host Node at the desired mount point (in this example: `/var/lib/lun0p1`). Finally, to use it with workloads, for example in a Pod, the host path can be mounted via an `hostPath` share in a privileged Pod, like so:
-    ```
+    ```yaml
     kind: Pod
     apiVersion: v1
     metadata:
