@@ -291,6 +291,7 @@ Target="managedDisk.storageAccountType`
     "target": "managedDisk.storageAccountType"
   }
 }`
+  - An alert will also be triggered on this condition.
 
 ## Implementation History
 
