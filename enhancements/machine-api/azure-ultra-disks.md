@@ -32,7 +32,7 @@ Allow users running OCP clusters on Azure to leverage Ultra Disk Storage to achi
 
 ### Goals
 
-- Provide automation for creating and attaching Azure Ultra Disks as data disks to Machines
+- Provide automation for creating and attaching Azure Ultra Disks as Data Disks to Machines
 - Enable attaching Azure Ultra Disks via Persistent Volumes (PVs) to Machines
 
 ### Non-Goals
@@ -135,7 +135,6 @@ To give instances this ability an Azure _Additional Capability_ (`AdditionalCapa
 
 Furthermore the `UltraSSDEnabled` Azure _Additional Capability_ must be present on instances attaching Ultra Disks as Data Disks and the plan in that scenario is to pilot its toggling automatically when an Ultra Disk is specified as a Data Disk.
 
-
 So when coming up with a proposal for extending the API, the fact that the `UltraSSDEnabled` _Additional Capability_ has the ability to govern both features and how it must change depending on what features the user wants to use, must both be taken into account.
 
 For this purpose a new field will be added to the 
@@ -235,7 +234,7 @@ Failure sending request: StatusCode=400
 -- Original Error: Code="InvalidParameter" Message="StorageAccountType UltraSSD_LRS can be used only when additionalCapabilities.ultraSSDEnabled is set."
 Target="managedDisk.storageAccountType`
 - If the deletion of Ultra Disks as Data Disks is not working as expected, Machines will be deleted and the Data Disks will be orphaned. This will be visible in error logs of the provider with a message along the lines of: `failed to delete Data Disk: xyz`
-- If the creation and attachment of Ultra Disks as Data disks is not working as expected because the user has chosen a region, availability zone or instance size which are incompatible with Ultra Disks, the machine provisioning will fail.
+- If the creation and attachment of Ultra Disks as Data Disks is not working as expected because the user has chosen a region, availability zone or instance size which are incompatible with Ultra Disks, the machine provisioning will fail.
   This will be visibile in the error logs of the provider with a message along the lines of: `vm size xyz does not support ultra disks in location xyz. select a different vm size or disable ultra disks`
 - If the mounting of an Ultra Disk backed Persistent Volume Claim (PVC), as a Volume in a Pod, is not working and the the Pod is stuck in `ContainerCreating` mode the issue can be debugged by describing the Pod.
   An example of this could be an error caused by the absence of the `UltraSSDEnabled` additional capability on the Machine backing the Node that is hosting the aformentioned Pod. This will manifest with the following Event:
