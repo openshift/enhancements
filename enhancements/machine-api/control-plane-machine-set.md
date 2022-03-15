@@ -71,7 +71,8 @@ continued adoption of HA clusters.
   unsupported by OpenShift)
 * Management of the etcd cluster state (the etcd operator will handle this separately)
 * Automatic adoption of existing clusters (we will provide instructions to allow users to opt-in for existing cluster)
-* Management of anything that falls out of the scope of Machine API
+* Management of anything that falls out of the scope of Machine API (e.g. management of load balancers in front of
+  Control Plane Machine - only load balancer membership is managed by Machine API)
 
 ## Proposal
 
