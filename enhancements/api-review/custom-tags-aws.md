@@ -231,7 +231,7 @@ Event action = An event is generated to notify user about the action status (suc
 
    New tag added in kube resource object like machine CR = `key_infra1 = value1`
 
-   Action = The tag for AWS resource is maintained to `key_infra1 = value1`.
+   Action = The tag for AWS resource is updated to `key_infra1 = value1`.
 
    Final tag set to AWS resource = `key_infra1 = custom_value`
 
