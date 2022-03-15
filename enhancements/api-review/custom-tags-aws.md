@@ -365,8 +365,10 @@ type AWSPlatformSpec struct {
     // ResourceTags is a list of additional tags to apply to AWS resources created for the cluster.
     // See https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html for information on tagging AWS resources.
     // AWS supports a maximum of 10 tags per resource. OpenShift reserves 5 tags for its use, leaving 5 tags
-    // available for the user. When a tag is removed from ResourceTags, the tag still persists on AWS resources.
+    // available for the user.
     // ResourceTags field is mutable and items can be removed.
+    // When a tag is removed from ResourceTags, the tag still persists on AWS resources.
+    // To delete a tag on AWS resource, tag value must be set to empty string.
     // +kubebuilder:validation:MaxItems=10
     // +optional
     ResourceTags []AWSResourceTag `json:"resourceTags,omitempty"`
@@ -397,11 +399,12 @@ spec:
                         minLength: 1
                         pattern: ^[0-9A-Za-z_.:/=+-@]+$
                     value:
-                        description: value is the value of the tag. Some AWS service do not support empty values. Since tags are added to resources in many services, the length of the tag value must meet the requirements of all services.
+                        description: value is the value of the tag. Some AWS service do not support empty values. Since tags are added to resources in many services, the length of the tag value must meet the requirements of all services.\
+                                     To delete a tag on AWS resource, empty values are used.
                         type: string
                         maxLength: 256
-                        minLength: 1
-                        pattern: ^[0-9A-Za-z_.:/=+-@]+$
+                        minLength: 0
+                        pattern: ^[0-9A-Za-z_.:/=+-@]*$
 ```
 
 
