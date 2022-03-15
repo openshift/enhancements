@@ -280,7 +280,7 @@ Event action = An event is generated to notify user about the action status (suc
 
    There is no validation check involved for creator tool of user-defined tag. Any user-defined tag listed by user in `.spec.platformSpec.aws.resourceTags` is considered for create/update/delete accordingly.
 
-4) Any user-defined tag set using `.spec.platformSpec.aws.resourceTags` in `Infrastructure.config.openshift.io/v1` type will affect all AWS resources managed.
+4) Any user-defined tag set using `.spec.platformSpec.aws.resourceTags` in `Infrastructure.config.openshift.io/v1` type will affect all managed AWS resources.
 
 5) User-defined tags are not synced from `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` for the following reasons.
 
