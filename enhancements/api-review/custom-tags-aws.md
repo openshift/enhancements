@@ -177,7 +177,7 @@ In the case where a user-defined tag is specified in the Infrastructure resource
 
    Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
 
-2) There is already a tag with the same key and different value present for AWS resource, the user-define tag value for the AWS resource will be updated.
+2) There is already a tag with the same key and different value present for AWS resource, the AWS resource will be updated with the user-defined tag value.
 
    For example,
 
