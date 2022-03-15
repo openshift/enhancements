@@ -321,7 +321,7 @@ between the webhook and CRD.
 
 - As a cluster administrator of OpenShift, I expect user-defined tags added in Infrastructure CR are reconciled and desired user-defined tags maintained on AWS resources.
   The latest updates on `.spec.platformSpec.aws.resourceTags` field must be reconciled to AWS resources and desired user-defined tags maintained when being managed by Openshift.
-  Any modifications which are external to Openshift must be reconciled to desired user-defined tags from `.spec.platformSpec.aws.resourceTags`.
+  Any modifications which are external to OpenShift must be reconciled to desired user-defined tags from `.spec.platformSpec.aws.resourceTags`.
 
 The following user stories are added to support existing methods of updating user-defined tags which override `.spec.platformSpec.aws.resourceTags` to avoid breaking change.
 As the existing cluster might be configured with user-defined tags from kube resources, the precedence is given to user-defined tags in kube resources.
