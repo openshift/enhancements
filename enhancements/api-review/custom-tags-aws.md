@@ -233,7 +233,7 @@ Event action = An event is generated to notify user about the action status (suc
 
    Action = The tag for AWS resource is updated to `key_infra1 = value1`.
 
-   Final tag set to AWS resource = `key_infra1 = custom_value`
+   Final tag set to AWS resource = `key_infra1 = value1`
 
    Event action = An event is generated to notify user about the action status (success) to update tags for the AWS resource. A warning also must be generated about list of user-defined tags on which action did a override.
 
