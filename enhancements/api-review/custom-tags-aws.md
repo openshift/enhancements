@@ -76,7 +76,7 @@ Motivations include but are not limited to:
   2. Image registry.
   3. Ingress LB.
   4. IAM credentials by CCO in mint mode of operation.
-- Openshift is bound by the AWS resource that allows the fewest number of tags. An AWS S3 bucket can only have at most 10 tags.
+- OpenShift is bound by the AWS resource that allows the fewest number of tags. An AWS S3 bucket can have at most 10 tags.
 
 ## Proposal
 
