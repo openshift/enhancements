@@ -67,6 +67,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 80    | haproxy   | net edge    | 3.0 | HTTP routes; baremetal only; only on nodes running router pod replicas |
 | 443   | haproxy   | net edge    | 3.0 | HTTPS routes; baremetal only; only on nodes running router pod replicas |
 | 1936  | openshift-router | net edge | 3.0 | healthz/stats; baremetal only; only on nodes running router pod replicas |
+| 2041  | konnectivity-agent | hypershift | 4.10 | Only for Hypershift guest clusters not on IBM cloud |
 | 2379  | etcd      | etcd || control plane only |
 | 2380  | etcd      | etcd || control plane only |
 | 3306  | mariadb   | kni | 4.4 | baremetal ironic DB, control plane only |
