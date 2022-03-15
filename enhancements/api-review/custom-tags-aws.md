@@ -293,7 +293,7 @@ Event action = An event is generated to notify user about the request status (su
 
    Action = No change in tags for the AWS resource.
 
-   Final tag set to AWS resource = `deleted
+   Final tag set to AWS resource = deleted
 
    Event action = An event is generated to notify user about the request status (success/failure) to delete tags for the AWS resource.
 
