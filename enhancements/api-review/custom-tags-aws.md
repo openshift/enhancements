@@ -405,7 +405,7 @@ NA
 User can add tags during installation for creation of resources with tags. Installer creates infrastructure manifests with `resourceTags` to `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io`.
 Operators that operate on aws resources must consider the tags from `.spec.platformSpec.aws`, `.status.platformStatus.aws` and existing AWS resource tags.
 
-The values from `status.platformStatus.aws` will used to only support older version.
+The values from `status.platformStatus.aws` will be used to only support older version.
 
 `.status.platformStatus.aws` will be deprecated in the future versions.
 
