@@ -320,7 +320,7 @@ between the webhook and CRD.
   This enables, user-defined tags to be modified on AWS without being overridden by OpenShift operators. The user can adopt new 3rd party component to manage tags.
 
 - As a cluster administrator of OpenShift, I expect user-defined tags added in Infrastructure CR are reconciled and desired user-defined tags maintained on AWS resources.
-  The latest updates on `.spec.platformSpec.aws.resourceTags` field must be reconciled to AWS resources and desired user-defined tags maintained when being managed by Openshift.
+  The latest updates on `.spec.platformSpec.aws.resourceTags` field must be reconciled to AWS resources and desired user-defined tags maintained when being managed by OpenShift.
   Any modifications which are external to OpenShift must be reconciled to desired user-defined tags from `.spec.platformSpec.aws.resourceTags`.
 
 The following user stories are added to support existing methods of updating user-defined tags which override `.spec.platformSpec.aws.resourceTags` to avoid breaking change.
