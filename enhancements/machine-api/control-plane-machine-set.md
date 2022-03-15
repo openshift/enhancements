@@ -100,7 +100,7 @@ of updated configuration to the Control Plane Machines.
 
 ### API Extensions
 
-We will introduce a new `ControlPlaneMachineSet` CRD to the `machine.openshift.io/v1b` API group. It will be based
+We will introduce a new `ControlPlaneMachineSet` CRD to the `machine.openshift.io/v1` API group. It will be based
 on the spec and status structures defined below.
 
 ```go
@@ -146,26 +146,26 @@ type ControlPlaneMachineSetSpec struct {
 // + we plan to expand this to allow other Machine types such as Cluster API Machines or a
 // + future version of the Machine API Machine.
 type ControlPlaneMachineSetTemplate struct {
-	// MachineType determines the type of Machines that should be managed by the ControlPlaneMachineSet.
-	// Currently, the only valid value is machine.v1beta1.machine.openshift.io.
+  // MachineType determines the type of Machines that should be managed by the ControlPlaneMachineSet.
+	// Currently, the only valid value is machines_v1beta1_machine_openshift_io.
 	// +unionDiscriminator
-	// +kubebuilder:default:="machines.v1beta1.machine.openshift.io"
-	// +optional
+	// +kubebuilder:validation:Required
 	MachineType ControlPlaneMachineSetMachineType `json:"machineType"`
 
 	// OpenShiftMachineV1Beta1Machine defines the template for creating Machines
 	// from the v1beta1.machine.openshift.io API group.
 	// +kubebuilder:validation:Required
-	OpenShiftMachineV1Beta1Machine *OpenShiftMachineV1Beta1MachineTemplate `json:"machines.v1beta1.machine.openshift.io,omitempty"`
+	OpenShiftMachineV1Beta1Machine *OpenShiftMachineV1Beta1MachineTemplate `json:"machines_v1beta1_machine_openshift_io,omitempty"`
 }
 
 // ControlPlaneMachineSetMachineType is a enumeration of valid Machine types
 // supported by the ControlPlaneMachineSet.
+// +kubebuilder:validation:Enum:=machines_v1beta1_machine_openshift_io
 type ControlPlaneMachineSetMachineType string
 
 const (
 	// OpenShiftMachineV1Beta1MachineType is the OpenShift Machine API v1beta1 Machine type.
-	OpenShiftMachineV1Beta1MachineType ControlPlaneMachineSetMachineType = "machines.v1beta1.machine.openshift.io"
+	OpenShiftMachineV1Beta1MachineType ControlPlaneMachineSetMachineType = "machines_v1beta1_machine_openshift_io"
 )
 
 // OpenShiftMachineV1Beta1MachineTemplate is a template for the ControlPlaneMachineSet to create
@@ -285,10 +285,11 @@ type FailureDomains struct {
 }
 
 // AWSFailureDomain configures failure domain information for the AWS platform
+// +kubebuilder:validation:MinProperties:=1
 type AWSFailureDomain struct {
 	// Subnet is a reference to the subnet to use for this instance
 	// +optional
-	Subnet AWSResourceReference `json:"subnet,omitempty"`
+	Subnet *AWSResourceReference `json:"subnet,omitempty"`
 
 	// Placement configures the placement information for this instance
 	// +optional
@@ -298,34 +299,44 @@ type AWSFailureDomain struct {
 // AWSFailureDomainPlacement configures the placement information for the AWSFailureDomain
 type AWSFailureDomainPlacement struct {
 	// AvailabilityZone is the availability zone of the instance
-	// +optional
-	AvailabilityZone string `json:"availabilityZone,omitempty"`
+	// +kubebuilder:validation:Required
+	AvailabilityZone string `json:"availabilityZone"`
 }
 
 // AzureFailureDomain configures failure domain information for the Azure platform
 type AzureFailureDomain struct {
 	// Availability Zone for the virtual machine.
 	// If nil, the virtual machine should be deployed to no zone
-	// +optional
-	Zone *string `json:"zone,omitempty"`
+	// +kubebuilder:validation:Required
+	Zone string `json:"zone"`
 }
 
 // GCPFailureDomain configures failure domain information for the GCP platform
 type GCPFailureDomain struct {
 	// Zone is the zone in which the GCP machine provider will create the VM.
-	// +optional
+	// +kubebuilder:validation:Required
 	Zone string `json:"zone"`
 }
 
 // OpenStackFailureDomain configures failure domain information for the OpenStack platform
 type OpenStackFailureDomain struct {
 	// The availability zone from which to launch the server.
-	// +optional
-	AvailabilityZone string `json:"availabilityZone,omitempty"`
+	// +kubebuilder:validation:Required
+	AvailabilityZone string `json:"availabilityZone"`
 }
 
 // ControlPlaneMachineSetStatus represents the status of the ControlPlaneMachineSet CRD.
 type ControlPlaneMachineSetStatus struct {
+	// Conditions represents the observations of the ControlPlaneMachineSet's current state.
+	// Known .status.conditions.type are: (TODO)
+	// TODO: Identify different condition types/reasons that will be needed.
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
 	// ObservedGeneration is the most recent generation observed for this
 	// ControlPlaneMachineSet. It corresponds to the ControlPlaneMachineSets's generation,
 	// which is updated on mutation by the API Server.
@@ -336,32 +347,26 @@ type ControlPlaneMachineSetStatus struct {
 	// ControlPlaneMachineSet controller.
 	// Note that during update operations this value may differ from the
 	// desired replica count.
-	Replicas int32 `json:"replicas"`
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
 
 	// ReadyReplicas is the number of Control Plane Machines created by the
 	// ControlPlaneMachineSet controller which are ready.
+	// +optional
 	ReadyReplicas int32 `json:"readyReplicas,omitempty"`
 
 	// UpdatedReplicas is the number of non-terminated Control Plane Machines
 	// created by the ControlPlaneMachineSet controller that have the desired
 	// provider spec.
+	// +optional
 	UpdatedReplicas int32 `json:"updatedReplicas,omitempty"`
 
 	// UnavailableReplicas is the number of Control Plane Machines that are
 	// still required before the ControlPlaneMachineSet reaches the desired
 	// available capacity. When this value is non-zero, the number of
 	// ReadyReplicas is less than the desired Replicas.
-	UnavailableReplicas int32 `json:"unavailableReplicas,omitempty"`
-
-	// Conditions represents the observations of the ControlPlaneMachineSet's current state.
-	// Known .status.conditions.type are: (TODO)
-	// TODO: Identify different condition types/reasons that will be needed.
-	// +patchMergeKey=type
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	UnavailableReplicas int32 `json:"unavailableReplicas,omitempty"`
 }
 ```
 
