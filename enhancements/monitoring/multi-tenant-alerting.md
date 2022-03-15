@@ -535,17 +535,7 @@ Mitigation
 
 ### Open Questions
 
-1. How can the Dev Console support the UWM Alertmanager?
-
-Users are able to silence alerts from the Dev Console and the console backend
-assumes that the API is served by the
-`alertmanager-main.openshift-monitoring.svc` service. To support the UWM
-Alertmanager configuration, CMO should provide to the console operator the name
-of the Alertmanager service managing the user alerts (either
-`alertmanager-main.openshift-monitoring.svc` or
-`alertmanager.openshift-user-workload-monitoring.svc`). Based on the presence
-of the `openshift_io_alert_source` label, the console backend can decide which
-Alertmanager service should be queried.
+None.
 
 ### Test Plan
 
