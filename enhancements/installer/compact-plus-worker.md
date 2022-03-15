@@ -21,7 +21,7 @@ superseded-by: []
 
 ## Summary
 
-This enhancement proposes to allow for deploying a 4-nodes cluster as a day 0
+This enhancement proposes to allow for deploying a 4-node cluster as a day 0
 operation, where the infrastructure workload can be deployed with HA enabled.
 The 4-nodes cluster would be composed by 3 schedulable master nodes and a
 single worker, which provide users with a highly available cluster.
@@ -40,7 +40,7 @@ topology, which won't allow the various services to run as HA.
 To achieve the desired topology described in this enhancement,OpenShift cluster
 administrators can only deploy a 4-nodes clusters by first deploying a compact
 cluster (3 schedulable masters) and then adding a host as a day 2 operation.
-Another option is for them to This provides the same results as aimed in this
+Another option is for them to <missing text here> This provides the same results as aimed in this
 enhancement but with a poor and slower user experience.
 
 Today, because of the current limitations in the installer, it takes
@@ -65,8 +65,8 @@ List the specific goals of the proposal. How will we know that this has succeede
 
 ## Proposal
 
-- Set the `InfrastructureTopology` to have the same value as the
-  `ControlPlaneTopology` when the number of workers is 1, instead of setting its
+- Set the `infrastructureTopology` to have the same value as the
+  `controlPlaneTopology` when the number of workers is 1, instead of setting its
   value to `SingleReplica` as it's done today.
 
 - Set masters as schedulable when workers are less or equal to 1. Today,
@@ -81,7 +81,7 @@ List the specific goals of the proposal. How will we know that this has succeede
 
 ### API Extensions
 
-- Sets the `infrastructureTopology` field to the value of`ControlPlaneTopology` in the
+- Sets the `infrastructureTopology` field to the value of `controlPlaneTopology` in the
   `config.openshift.io/v1/infrastructure` CR called `cluster`, which is created
   during the install process, when the number of workers is 1.
 
