@@ -95,7 +95,7 @@ Note existing unchanged behavior: The installer will apply these tags to all AWS
 All operators that create AWS resources (ingress, cloud credential, storage, image registry, machine-api)
 will apply these tags to all AWS resources they create.
 
-userTags that are specified in the infrastructure resource will merge with userTags specified in an individual component. In the case where a userTag is specified in the infrastructure resource and there is a tag with the same key specified in an individual component, the value from the individual component will have precedence and be used.
+userTags that are specified in the infrastructure resource will merge with userTags specified in a kube resource. In the case where a userTag is specified in the infrastructure resource and there is a tag with the same key specified in a kube resource, the value from the kube resource will have precedence and be used.
 
 The userTags field is intended to be set at install time and is considered immutable. Components that respect this field must only ever add tags that they retrieve from this field to cloud resources, they must never remove tags from the existing underlying cloud resource even if the tags are removed from this field(despite it being immutable).
 
@@ -112,7 +112,7 @@ In the future we will want to introduce a spec field where a customer can specif
 
 ### New proposal to support update of user-defined tags (or userTags)
 
-- `experimentalPropagateUserTags` field will be set for deprecation in this proposal version. The values in `experimentalPropagateUserTags` are ignored in this version.
+- `experimentalPropagateUserTags` field will be set for deprecation in this proposal version.
 
   The install validation will fail if there is any tag that starts with `kubernetes.io` or `openshift.io` in `userTags`. In the existing design, kubernetes.io and openshift.io namespaces are not allowed as part of user-defined tags.
 
@@ -127,7 +127,7 @@ In the future we will want to introduce a spec field where a customer can specif
   Operator must consider `.status.platformStatus.aws` to support upgrade scenarios.
 
 #### Create tags scenarios
-`resourceTags` that are specified in  `.spec.platformSpec.aws` of the Infrastructure resource will merge with user-defined tags in an individual component.
+`resourceTags` that are specified in  `.spec.platformSpec.aws` of the Infrastructure resource will merge with user-defined tags in a kube resource.
 
 In the case where a user-defined tag is specified in the Infrastructure resource and
 1) There is already a tag with the same key present for AWS resource, the value from the AWS resource will be replaced.
@@ -142,7 +142,7 @@ In the case where a user-defined tag is specified in the Infrastructure resource
 
    Final tag set to AWS resource = `key_infra1 = value_infra1`
 
-   Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
+   Event action = An event is generated to notify user about the request status (success/failure) to update tags for the AWS resource.
 
 2) There is no tag with same key present, new tag is created for the AWS resource. In case of limit reached, a validation error is generated.
 
@@ -155,7 +155,7 @@ In the case where a user-defined tag is specified in the Infrastructure resource
 
    Final tag set to AWS resource = `key_infra1 = value_infra1`
 
-   Event action = An event is generated to notify user about the action status (success/failure) to create tags for the AWS resource.
+   Event action = An event is generated to notify user about the request status (success/failure) to create tags for the AWS resource.
 
 #### Update tags scenarios
 Users can update the user-defined tags by editing `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io` type.
@@ -174,7 +174,7 @@ In the case where a user-defined tag is specified in the Infrastructure resource
 
    Final tag set to AWS resource = `key_infra1 = value_update1`
 
-   Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
+   Event action = An event is generated to notify user about the request status (success/failure) to update tags for the AWS resource.
 
 2) There is already a tag with the same key and different value present for AWS resource, the AWS resource will be updated with the user-defined tag value.
 
@@ -188,7 +188,7 @@ In the case where a user-defined tag is specified in the Infrastructure resource
 
    Final tag set to AWS resource = `key_infra1 = value_update1`
 
-   Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
+   Event action = An event is generated to notify user about the request status (success/failure) to update tags for the AWS resource.
 
 #### Delete tags scenarios
 Tags are deleted when the user sets the user-defined tag value to an empty string in `.spec.platformSpec.aws.resourceTags`.
@@ -204,7 +204,7 @@ Action = Existing tag for AWS resource is deleted.
 
 Final tag set to AWS resource = deleted
 
-Event action = An event is generated to notify user about the action status (success/failure) to delete tags for the AWS resource.
+Event action = An event is generated to notify user about the request status (success/failure) to delete tags for the AWS resource.
 
 #### Precedence scenarios
 1) User-defined tags on kube resources MUST continue to take precedence during create and update. User-defined tags found on kube resources must not be deleted by methods described in `Delete tags scenarios`.
@@ -220,7 +220,7 @@ Event action = An event is generated to notify user about the action status (suc
 
    Final tag set to AWS resource = `key_infra1 = custom_value`
 
-   Event action = An event is generated to notify user about the action status (failure) to update tags for the AWS resource. A warning also must be generated about list of user-defined tags on which action is not applicable.
+   Event action = An event is generated to notify user about the request status (failure) to update tags for the AWS resource. A warning also must be generated about list of user-defined tags on which action is not applicable.
 
 2) When a new user-defined tag is added on kube resources, it MUST override the tag in `.spec.platformSpec.aws`. User-defined tags found on kube resources must not be deleted by methods described in `Delete tags scenarios`.
    A warning is generated to inform the user about action not being applied on the list of user tags.
@@ -235,17 +235,16 @@ Event action = An event is generated to notify user about the action status (suc
 
    Final tag set to AWS resource = `key_infra1 = value1`
 
-   Event action = An event is generated to notify user about the action status (success) to update tags for the AWS resource. A warning also must be generated about list of user-defined tags on which action did a override.
+   Event action = An event is generated to notify user about the request status (success) to update tags for the AWS resource. A warning also must be generated about list of user-defined tags on which action did a override.
 
 3) `.spec.platformSpec.aws` take precedence over `.status.platformStatus.aws`. User-defined tags must be merged from `.status.platformStatus.aws` and set to AWS resource.
 
-4) When `.status.platformStatus.aws` has a same user-defined tag as in `.spec.platformSpec.aws`,the entry must be removed from `.status.platformStatus.aws` before deleting user-defined tag from AWS resource.
+4) Before deleting user-defined tag from AWS resource, the entry must be removed from `.status.platformStatus.aws`, if any, as operator will reconcile user-defined tag to the AWS resource.
    Setting user-defined tag to empty string in `.spec.platformSpec.aws` will not override the user-defined tag in `.status.platformStatus.aws`.
 
 #### Caveats
 1) User updates a resource's tag using an external tool when there is an entry in `.spec.platformSpec.aws.resourceTags`
    The resource's tag will be reconciled by its owning operator to the value from `.spec.platformSpec.aws.resourceTags`.
-   The user-defined tag will be overwritten with value from `.spec.platformSpec.aws.resourceTags` when there is an update to `.spec.platformSpec.aws.resourceTags`.
 
    For example,
 
@@ -257,7 +256,7 @@ Event action = An event is generated to notify user about the action status (suc
 
    Final tag set to AWS resource = `key_infra1 = value_infra1`
 
-   Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
+   Event action = An event is generated to notify user about the request status (success/failure) to update tags for the AWS resource.
 
 2) User deletes the user-defined tag from `.spec.platformSpec.aws.resourceTags`
    The user-defined tag which is removed from spec will not be reconciled or managed by operators.
@@ -277,6 +276,26 @@ Event action = An event is generated to notify user about the action status (suc
    Event action = No event
 
 3) User sets user-defined tag created using external tools to empty string for deleting for AWS resource.
+
+   For example,
+
+   User add tag using external tools (or directly) on AWS resource = `key_infra1 = value1`
+
+   New tag request = None
+
+   Action = No update done for tags for the AWS resource by the owning operator.
+
+   Final tag set to AWS resource = `key_infra1 = value1`
+
+   Event action = No event
+
+   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 =`
+
+   Action = No change in tags for the AWS resource.
+
+   Final tag set to AWS resource = `deleted
+
+   Event action = An event is generated to notify user about the request status (success/failure) to delete tags for the AWS resource.
 
    There is no validation check involved for creator tool of user-defined tag. Any user-defined tag listed by user in `.spec.platformSpec.aws.resourceTags` is considered for create/update/delete accordingly.
 
