@@ -293,7 +293,7 @@ Event action = An event is generated to notify user about the action status (suc
   tag on the resource was created using Infrastructure CR or external tool. Identifying the creator tool was done to restrict user from editing the same user-tag kv pair using multiple tools.
   This inherently poses many scenarios of conflict which will result in user-defined tag kv pair being inconsistent across cluster when applied using Infrastructure CR. Hence, user will be confused which tool to be used to update tag.
 
-6) User applies user-defined tag using `.spec.platformSpec.aws.resourceTags`. Later, user modifies the user-defined tag for AWS resource using external tool.
+6) User applies user-defined tag using `.spec.platformSpec.aws.resourceTags`. Later, user modifies the tag on the AWS resource using external tool.
    In this case, the desired value is not set immediately for AWS resource by the owning operator. There is eventual consistency maintained by the owning operator.
    The time taken to reconcile the modified user-defined tag on AWS resource to desired value vary across owning operators.
 
