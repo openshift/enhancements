@@ -148,7 +148,6 @@ In the case where a user-defined tag is specified in the Infrastructure resource
 
    For example,
 
-   Existing tag for AWS resource = `key_infra1 = value_comp1`
 
    New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`
 
