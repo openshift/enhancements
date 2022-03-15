@@ -260,7 +260,7 @@ Event action = An event is generated to notify user about the action status (suc
    Event action = An event is generated to notify user about the action status (success/failure) to update tags for the AWS resource.
 
 2) User deletes the user-defined tag from `.spec.platformSpec.aws.resourceTags`
-   The user-defined tag which is removed from spec, will not be reconciled or managed by operators.
+   The user-defined tag which is removed from spec will not be reconciled or managed by operators.
 
    User can update user-defined tag key:value using external tool. The user-defined tag will not be overwritten.
 
