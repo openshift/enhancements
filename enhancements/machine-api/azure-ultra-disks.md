@@ -222,7 +222,7 @@ Once an Azure instance is created and a Data Disk (in this case of type Ultra Di
 This means that in order for the Data Disk to be usable by workloads it will require some form of initialization, which, given the high performing nature of Ultra Disks (and more generally of Data Disks) is best suited to be left to the cluster administrator.
 This way they will be able to decide how to best slice the disk in partitions, while also choosing how to format them and autonomously deciding where to have them mounted.
 
-For this reason, guidance will be provided on how a cluster administrator can specify flexible configuration to achieve so with the help of a supporting example.
+For this reason, the following example is provided as guidance on how a cluster administrator can specify flexible configurations for their Data Disks:
 
 The following steps assume the Machine about to be launched to which the raw Data Disk will be attached, will be running RHEL CoreOS (RHCOS) or Fedora CoreOS (FCOS) and that [CoreOS Ignition](https://github.com/coreos/ignition) is set up and already performing first boot install and configuration:
 1. _Custom user-data Secret creation_:
