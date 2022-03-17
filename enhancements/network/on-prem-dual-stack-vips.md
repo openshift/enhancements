@@ -8,11 +8,13 @@ approvers:
   - @patrickdillon
   - @kirankt
   - @shardy
-  - someone from MCO
+  - @cgwalters
+  - @kikisdeliveryservice
+  - @danwinship
 api-approvers:
   - ???
 creation-date: 2022-03-01
-last-updated: 2022-03-02
+last-updated: 2022-03-17
 tracking-link:
   - https://issues.redhat.com/browse/SDN-2213
 see-also:
@@ -30,11 +32,11 @@ ipv4 or ipv6 deployments. When dual stack support was added for the baremetal
 platform, we carried over the VIP configuration that only allowed for a single
 VIP to be specified. The thinking was that in dual stack clusters every node
 would have access to either ipv4 or ipv6 endpoints. While this is true of the
-nodes, it is not necessarily true of the applications that run in the cluster
-and may need to interact with the API or ingress services.
+nodes, it is not necessarily true of the applications that run in or out of
+the cluster and may need to interact with the API or ingress services.
 
-This design is proposing the addition of a second VIP for dual stack clusters
-so API and ingress are accessible from either ip version.
+This design is proposing the addition of a second pair of VIPs for dual stack
+clusters so API and ingress are accessible from either ip version.
 
 ## Motivation
 
@@ -49,8 +51,9 @@ applications have the connectivity they require.
 
 ### Non-Goals
 
-Nothing in particular. The problem being solved here is fairly contained, so
-scope creep should not be a problem.
+Making the `kubernetes.default` Service dual stack is not supported and will
+not be addressed by this work. We are only adding dual stack access to the
+API via the VIPs.
 
 ## Proposal
 
@@ -104,7 +107,7 @@ that. In addition, the render code will need the new values wired in.
 
 Currently the VIPs are specified as follows:
 
-```
+```yaml
 platform:
   baremetal:
     apiVIP: 192.168.111.5
@@ -115,7 +118,7 @@ There are a few options for how we could add the new VIPs (we need to pick
 one and move the others to the alternatives section).
 
 #### Just add v6 versions of the VIP fields
-```
+```yaml
 platform:
   baremetal:
     apiVIP: 192.168.111.5
@@ -140,7 +143,7 @@ logic on the backend in machine-config-operator and baremetal-runtimecfg to
 handle older cluster configs.
 
 #### Deprecate the old fields and add new v4 and v6 fields
-```
+```yaml
 platform:
   baremetal:
     # Deprecated
@@ -159,7 +162,7 @@ install-configs that set the deprecated fields, but having no overlap between
 the old and new-style configs might simplify the logic somewhat.
 
 #### Add plural fields that take a list of VIPs
-```
+```yaml
 platform:
   baremetal:
     # Deprecated
@@ -182,6 +185,10 @@ other options. This has the advantage of being extensible if we ever wanted
 to add more addresses, but I admit to having a hard time coming up with a use
 case where more than an ipv4 and ipv6 address would be needed.
 
+The list format could also help with processing of the VIPs. Instead of two
+distinct v4 and v6 sections for each VIP, we could loop over the list and
+use essentially the same configuration for both.
+
 ### openshift/api
 
 We will need to make changes to the
@@ -200,7 +207,7 @@ to the appropriate ip version.
 
 The new structure of platformStatus would look like this:
 
-```
+```yaml
 baremetal:
   description: BareMetal contains settings specific to the BareMetal platform.
   type: object
@@ -229,6 +236,69 @@ baremetal:
     ...
 ```
 
+#### Keep existing field and add secondary ones
+
+This has the benefit of not requiring any deprecations. It should also
+provide automatic backward compatibility with existing configuration -
+in existing clusters the VIP in the existing field will by definition
+be the primary, whether v4 or v6. One minor drawback is we would probably
+need an additional validation to ensure that in dual stack clusters the ipv4
+VIP is specified as the primary because that's what we support.
+
+```yaml
+baremetal:
+  description: BareMetal contains settings specific to the BareMetal platform.
+  type: object
+  properties:
+    apiServerInternalIP:
+      description: apiServerInternalIP is an IP address...
+      type: string
+    apiServerInternalIPSecondary:
+      description: apiServerInternalIPSecondary is an additional IP address...
+      type: string
+    ingressIP:
+      description: ingressIP is an external IP...
+      type: string
+    ingressIPSecondary:
+      description: ingressIPv4 is an additional external IP...
+      type: string
+    nodeDNSIP:
+    ...
+```
+
+#### Make the api an array too
+
+If we go with the array format for install-config, it likely makes sense to do
+the same in the api. That would look something like this:
+
+```yaml
+baremetal:
+  description: BareMetal contains settings specific to the BareMetal platform.
+  type: object
+  properties:
+    # Deprecated
+    apiServerInternalIP:
+      description: apiServerInternalIP is an IP address...
+      type: string
+    apiServerInternalIPs:
+      description: apiServerInternalIPs is a list of IP addresses...
+      type: array
+    # Deprecated
+    ingressIP:
+      description: ingressIP is an external IP...
+      type: string
+    ingressIPs:
+      description: ingressIPv4 is a list of  external IPs...
+      type: array
+    nodeDNSIP:
+    ...
+```
+
+If we don't have an array in install-config, it may still make sense for the
+api side to be an array so we can process the data in a loop. However, I lean
+toward having a consistent format from install-config to template rendering,
+so if we go with this I'd prefer to use the same format in install-config.
+
 ### machine-config-operator
 
 We will need to wire in the new VIPs to the manifests and configuration
@@ -237,17 +307,24 @@ so only the appropriate ones are enabled based on the provided VIPs.
 
 I believe haproxy already listens on both ipv4 and ipv6 so there should be no
 changes needed in that configuration. We'll need to verify that as part of
-this implementation though. Note that as of this writing, the apiserver
-does not support dual stack anyway so all traffic through haproxy will end
-up on one or the other ip version.
+this implementation though.
+
+We could also modify the apiserver configuration so it listens on both v4 and
+v6, but since there's currently no way to set up the `kubernetes.default`
+Service as dual stack this doesn't accomplish much. Traffic to the
+secondary IP version will have to come in via the VIP, which already has
+haproxy to handle both versions.
 
 As noted above, it would be best to migrate the existing VIP fields to the new
 v4 and v6 fields to simplify the logic in consumers. We may be able to do that
 in the
-[merge code run on upgrade](https://github.com/openshift/machine-config-operator/blob/080919dc992d600706b679eb118393ee293496f7/lib/resourcemerge/machineconfig.go#L68).
-I'm unsure whether that can modify the actual infrastructure object, but
-it can massage the data put into controllerconfig, which is where we actually
-get the values.
+[merge code run on upgrade](https://github.com/openshift/machine-config-operator/blob/080919dc992d600706b679eb118393ee293496f7/lib/resourcemerge/machineconfig.go#L68)
+or in
+[createDiscoveredControllerConfigSpec](https://github.com/openshift/machine-config-operator/blob/61159678d9bf051a5e8a017210a349f8c643b910/pkg/operator/render.go#L111).
+We probably can't modify the actual infrastructure object, but we can massage
+the data put into controllerconfig, which is where we actually get the values.
+This is conditional on which format we choose for the api data, however. Some
+of the designs proposed above continue using the existing fields.
 
 ### baremetal-runtimecfg
 
