@@ -220,7 +220,7 @@ Event action = An event is generated to notify user about the request status (su
 
    Final tag set to AWS resource = `key_infra1 = custom_value`
 
-   Event action = An event is generated to notify user about the request status (failure) to update tags for the AWS resource. A warning also must be generated about list of user-defined tags on which action is not applicable.
+   Event action = An event is generated to notify user about the request status (success) to update tags for the AWS resource. A warning also must be generated about list of user-defined tags on which action is not applicable.
 
 2) When a new user-defined tag is added on kube resources, it MUST override the tag in `.spec.platformSpec.aws`. User-defined tags found on kube resources must not be deleted by methods described in `Delete tags scenarios`.
    A warning is generated to inform the user about action not being applied on the list of user tags.
