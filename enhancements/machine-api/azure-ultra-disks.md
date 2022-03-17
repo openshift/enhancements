@@ -32,7 +32,7 @@ Allow users running OCP clusters on Azure to leverage Ultra Disk Storage to achi
 
 ### Goals
 
-- Provide automation for creating and attaching Azure Ultra Disks as data disks to Machines
+- Provide automation for creating and attaching Azure Ultra Disks as Data Disks to Machines
 - Enable attaching Azure Ultra Disks via Persistent Volumes (PVs) to Machines
 
 ### Non-Goals
@@ -72,46 +72,66 @@ The upstream design is followed as closely as possible to ensure smoother future
 
 A new field will be added to the `AzureMachineProviderSpec` struct `DataDisks`. The interface will be a slice of `DataDisk` structs allowing multiple Data Disks and various fields specific to them to be further specified.
 
-A `DataDisk` has one Composite type field, `ManagedDisk` of type `ManagedDiskParameters`, which is a type already defined in the Machine API spec, used for the `ManagedDisk` field in the `OSDisk` type struct, another `AzureMachineProviderSpec` field.
+`DataDisk` will need a slightly modified version of the `ManagedDiskParameters` type (due to an extra `UltraSSD_LRS` possible value) for its `ManagedDisk` field.
 
+For this reason a new Composite type field `DataDiskManagedDiskParameters` will be added and the original `ManagedDiskParameters`, used in `OSDisk`, will be renamed to `OSDiskManagedDiskParameters`.
+
+A new `StorageAccountType` type that describes the possible values for the `StorageAccountType` field on `DataDisk` will be added.
+
+A new `CachingTypeOption` type that describes the possible values for the `CachingType` field on `DataDisk` will also be added.
 
 ```go
 type AzureMachineProviderSpec struct {
   // Existing fields will not be modified
   ...
 
-  // DataDisk specifies the parameters that are used to add one or more data disks to the machine
+  // DataDisk specifies the parameters that are used to add one or more data disks to the machine.
   // +optional
   DataDisks []DataDisk `json:"dataDisks,omitempty"`
 }
 
 // DataDisk specifies the parameters that are used to add one or more data disks to the machine.
+// A Data Disk is a managed disk that's attached to a virtual machine to store application data.
+// It differs from an OS Disk as it doesn't come with a pre-installed OS, and it cannot contain the boot volume.
+// It is registered as SCSI drive and labeled with the chosen `lun`. e.g. for `lun: 0` the raw disk device will be available at `/dev/disk/azure/scsi1/lun0`.
+//
+// As the Data Disk disk device is attached raw to the virtual machine, it will need to be partitioned, formatted with a filesystem and mounted, in order for it to be usable.
+// This can be done by creating a custom userdata Secret with custom Ignition configuration to achieve the desired initialization.
+// At this stage the previously defined `lun` is to be used as the "device" key for referencing the raw disk device to be initialized.
+// Once the custom userdata Secret has been created, it can be referenced in the Machine's `.providerSpec.userDataSecret`.
+// For further guidance and examples, please refer to the official OpenShift docs.
 type DataDisk struct {
-  // NameSuffix is the suffix to be appended to the machine name to generate the disk name.
-  // Each disk name will be in format <machineName>_<nameSuffix>.
-  // NameSuffix name must start and finish with an alphanumeric character and can only contain letters, numbers, underscores, periods or hyphens.
-  // The overall disk name must not exceed 80 chars in length.
-  // +kubebuilder:validation:Pattern:="[a-zA-Z0-9](?:[\w\.-]*[a-zA-Z0-9])?"
-  // +kubebuilder:validation:MaxLength:=78
-  // +kubebuilder:validation:Required
-  NameSuffix string `json:"nameSuffix"`
-  // DiskSizeGB is the size in GB to assign to the data disk.
-  // +kubebuilder:validation:Minimum=4
-  // +kubebuilder:validation:Required
-  DiskSizeGB int32 `json:"diskSizeGB"`
-  // ManagedDisk specifies the Managed Disk parameters for the data disk.
-  // +optional
-  ManagedDisk ManagedDiskParameters `json:"managedDisk,omitempty"`
-  // Lun Specifies the logical unit number of the data disk. This value is used to identify data disks within the VM and therefore must be unique for each data disk attached to a VM.
-  // The value must be between 0 and 63.
-  // +optional
-  // +kubebuilder:validation:Minimum=0
-  // +kubebuilder:validation:Maximum=63
-  Lun *int32 `json:"lun,omitempty"`
-  // CachingType specifies the caching requirements.
-  // +optional
-  // +kubebuilder:validation:Enum=None;ReadOnly;ReadWrite
-  CachingType CachingTypeOption `json:"cachingType,omitempty"`
+	// NameSuffix is the suffix to be appended to the machine name to generate the disk name.
+	// Each disk name will be in format <machineName>_<nameSuffix>.
+	// NameSuffix name must start and finish with an alphanumeric character and can only contain letters, numbers, underscores, periods or hyphens.
+	// The overall disk name must not exceed 80 chars in length.
+	// +kubebuilder:validation:Pattern:=`^[a-zA-Z0-9](?:[\w\.-]*[a-zA-Z0-9])?$`
+	// +kubebuilder:validation:MaxLength:=78
+	// +kubebuilder:validation:Required
+	NameSuffix string `json:"nameSuffix"`
+	// DiskSizeGB is the size in GB to assign to the data disk.
+	// +kubebuilder:validation:Minimum=4
+	// +kubebuilder:validation:Required
+	DiskSizeGB int32 `json:"diskSizeGB"`
+	// ManagedDisk specifies the Managed Disk parameters for the data disk.
+	// Empty value means no opinion and the platform chooses a default, which is subject to change over time.
+	// Currently the default is a ManagedDisk with with storageAccountType: "Premium_LRS" and diskEncryptionSet.id: "Default".
+	// +optional
+	ManagedDisk DataDiskManagedDiskParameters `json:"managedDisk,omitempty"`
+	// Lun Specifies the logical unit number of the data disk.
+	// This value is used to identify data disks within the VM and therefore must be unique for each data disk attached to a VM.
+	// This value is also needed for referencing the data disks devices within userdata to perform disk initialization through Ignition (e.g. partition/format/mount).
+	// The value must be between 0 and 63.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=63
+	// +kubebuilder:validation:Required
+	Lun int32 `json:"lun,omitempty"`
+	// CachingType specifies the caching requirements.
+	// Empty value means no opinion and the platform chooses a default, which is subject to change over time.
+	// Currently the default is CachingTypeNone.
+	// +optional
+	// +kubebuilder:validation:Enum=None;ReadOnly;ReadWrite
+	CachingType CachingTypeOption `json:"cachingType,omitempty"`
 }
 
 // CachingTypeOption defines the different values for a CachingType.
@@ -119,12 +139,38 @@ type CachingTypeOption string
 
 // These are the valid CachingTypeOption values.
 const (
-  // CachingTypeReadOnly means the CachingType is "ReadOnly".
-  CachingTypeReadOnly CachingTypeOption = "ReadOnly"
-  // CachingTypeReadWrite means the CachingType is "ReadWrite".
-  CachingTypeReadWrite CachingTypeOption = "ReadWrite"
-  // CachingTypeNone means the CachingType is "None".
-  CachingTypeNone CachingTypeOption = "None"
+	// CachingTypeReadOnly means the CachingType is "ReadOnly".
+	CachingTypeReadOnly CachingTypeOption = "ReadOnly"
+	// CachingTypeReadWrite means the CachingType is "ReadWrite".
+	CachingTypeReadWrite CachingTypeOption = "ReadWrite"
+	// CachingTypeNone means the CachingType is "None".
+	CachingTypeNone CachingTypeOption = "None"
+)
+
+// DataDiskManagedDiskParameters is the parameters of a DataDisk managed disk.
+type DataDiskManagedDiskParameters struct {
+	// StorageAccountType is the storage account type to use.
+	// Possible values include "Standard_LRS", "Premium_LRS" and "UltraSSD_LRS".
+	// +kubebuilder:validation:Enum=Standard_LRS;Premium_LRS;UltraSSD_LRS
+	StorageAccountType StorageAccountType `json:"storageAccountType"`
+	// DiskEncryptionSet is the disk encryption set properties.
+	// Empty value means no opinion and the platform chooses a default, which is subject to change over time.
+	// Currently the default is a DiskEncryptionSet with id: "Default".
+	// +optional
+	DiskEncryptionSet *DiskEncryptionSetParameters `json:"diskEncryptionSet,omitempty"`
+}
+
+// StorageAccountType defines the different storage types to use for a ManagedDisk.
+type StorageAccountType string
+
+// These are the valid StorageAccountType types.
+const (
+	// "StorageAccountStandardLRS" means the Standard_LRS storage type.
+	StorageAccountStandardLRS StorageAccountType = "Standard_LRS"
+	// "StorageAccountPremiumLRS" means the Premium_LRS storage type.
+	StorageAccountPremiumLRS StorageAccountType = "Premium_LRS"
+	// "StorageAccountUltraSSDLRS" means the UltraSSD_LRS storage type.
+	StorageAccountUltraSSDLRS StorageAccountType = "UltraSSD_LRS"
 )
 ```
 
@@ -134,7 +180,6 @@ To allow the mounting of Persistent Volume Claims of StorageClass `UltraSSD_LRS`
 To give instances this ability an Azure _Additional Capability_ (`AdditionalCapabilities.UltraSSDEnabled`) must be specified on the instance. This will allow/disallow the attachment of Ultra Disks to it.
 
 Furthermore the `UltraSSDEnabled` Azure _Additional Capability_ must be present on instances attaching Ultra Disks as Data Disks and the plan in that scenario is to pilot its toggling automatically when an Ultra Disk is specified as a Data Disk.
-
 
 So when coming up with a proposal for extending the API, the fact that the `UltraSSDEnabled` _Additional Capability_ has the ability to govern both features and how it must change depending on what features the user wants to use, must both be taken into account.
 
@@ -170,7 +215,126 @@ const (
 
 ### Implementation Details/Notes/Constraints
 
-N/A
+#### Initializing Data Disks 
+While one of the goals for this enhancement is to provide automation for creating and attaching Azure Ultra Disks as Data Disks to Machines, there is one caveat.
+Once an Azure instance is created and a Data Disk (in this case of type Ultra Disk) is attached to said instance, the Disk will be seen as a _raw_ block device by the OS.
+
+This means that in order for the Data Disk to be usable by workloads it will require some form of initialization, which, given the high performing nature of Ultra Disks (and more generally of Data Disks) is best suited to be left to the cluster administrator.
+This way they will be able to decide how to best slice the disk in partitions, while also choosing how to format them and autonomously deciding where to have them mounted.
+
+For this reason, the following example is provided as guidance on how a cluster administrator can specify flexible configurations for their Data Disks:
+
+The following steps assume the Machine about to be launched to which the raw Data Disk will be attached, will be running RHEL CoreOS (RHCOS) or Fedora CoreOS (FCOS) and that [CoreOS Ignition](https://github.com/coreos/ignition) is set up and already performing first boot install and configuration:
+1. _Custom user-data Secret creation_:
+
+    In order to leverage CoreOS Ignition, which allows manipulation of disks during initramfs, the administrator needs to create a custom user-data configuration (in this example stored in a Secret object) where a desired extension of the Ignition configuration can be specified:
+      - Create a new secret from the `worker-user-data` Secret
+        - Export the userData section of the Secret to a text file:
+          ```sh
+          $ oc -n openshift-machine-api get secret worker-user-data --template='{{index .data.userData | base64decode}}' | jq > userData.txt
+          ```
+        - Edit the text file to add the storage, filesystems, and systemd stanzas for the partitions you want to use for the new node. The user can specify any Ignition configuration parameters as needed. For example if a Data Disk with `lun: 0` is planned to be added for the Machine, the Ingition config to partition, filesystem format and mount a device on `lun0` can be specified like so. Please note:
+          - if the `lun` specified on the Data Disk field on the Machine differs, `*lun0*` in this example will need to change accordingly. 
+          - `sizeMiB` and `startMiB` will need to change depending on the size of the disk and the desired partition size.
+          - `format` will need to change depending on the desired filesystem format (provided it is supported by Ignition).
+          - systemd unit mount `name` and `contents` will need to change to mirror the `path` and `device` values chosen in the `filesystems` section.
+          - further paritions, filesystems and mounts can be added to the configuration provided they are compatible with the Ignition spec and version that the OS observes.
+  
+          Edit the `userData.txt`, and right after the `"ignition":{ ... }` block (and before the last closing bracket `}`) add comma `,`, then add these following blocks:
+          ```json
+          "storage": {
+            "disks": [
+              {
+                "device": "/dev/disk/azure/scsi1/lun0",
+                "partitions": [
+                  {
+                    "label": "lun0p1",
+                    "sizeMiB": 1024,
+                    "startMiB": 0
+                  }
+                ]
+              }
+            ],
+            "filesystems": [
+              {
+                "device": "/dev/disk/by-partlabel/lun0p1",
+                "format": "xfs",
+                "path": "/var/lib/lun0p1"
+              }
+            ]
+          },
+          "systemd": {
+            "units": [
+              {
+                "contents": "[Unit]\nBefore=local-fs.target\n[Mount]\nWhere=/var/lib/lun0p1\nWhat=/dev/disk/by-partlabel/lun0p1\nOptions=defaults,pquota\n[Install]\nWantedBy=local-fs.target\n",
+                "enabled": true,
+                "name": "var-lib-lun0p1.mount"
+              }
+            ]
+          }
+          ```
+        - Extract the `disableTemplating` section from the `worker-user-data` Secret to a text file:
+          ```sh
+          $ oc -n openshift-machine-api get secret worker-user-data --template='{{index .data.disableTemplating | base64decode}}' | jq > disableTemplating.txt
+          ```
+        - Create the new user data secret file from the two text files. This user data Secret passes the additional node partition information in the userData.txt file to the newly created node.
+          ```sh
+          $ oc -n openshift-machine-api create secret generic worker-user-data-x5 --from-file=userData=userData.txt --from-file=disableTemplating=disableTemplating.txt
+          ```
+1. _MachineSet with Data Disk and custom user-data creation_:
+
+    - Create a new MachineSet YAML where:
+      - A new Data Disk is defined under `dataDisks` and the `name` under `userDataSecret` reference the name of the newly created user data Secret:
+        ```yaml
+        dataDisks:
+        - nameSuffix: ultrassd
+          lun: 0
+          diskSizeGB: 4
+          cachingType: None
+          managedDisk:
+            storageAccountType: UltraSSD_LRS
+        userDataSecret:
+          name: worker-user-data-x5
+        ```
+      - A label for identifiying Nodes originated from Machines spawned by this MachineSet is set by adding under `.spec.template.spec.metadata`:
+        ```yaml
+        labels:
+          disktype: ultrassd
+        ```
+    - When a Machine belonging to the new MachineSet is `Running` and a Node is created and linked to it, the result of partitioning can be verified with:
+      ```sh
+      $ oc debug node/<node-name> -- chroot /host lsblk
+      ```
+1. _Using of Data Disks with workloads_:
+
+    The Data Disk is now available on the host Node at the desired mount point (in this example: `/var/lib/lun0p1`). Finally, to use it with workloads, for example in a Pod, the host path can be mounted via an `hostPath` share in a privileged Pod, like so:
+    ```yaml
+    kind: Pod
+    apiVersion: v1
+    metadata:
+      name: ssd-benchmark
+    spec:
+      containers:
+      - name: ssd-benchmark
+        image: quay.io/ddonati/ssd-benchmark:1.1.7
+        securityContext:
+          privileged: true
+        command:
+          - "/bin/sh"
+          - "-c"
+          - "--"
+        args: ["while true; do /usr/bin/ssd-benchmark; sleep 30; done"]
+        volumeMounts:
+        - name: lun0p1
+          mountPath: "/tmp"
+      volumes:
+        - name: lun0p1
+          hostPath:
+            path: /var/lib/lun0p1
+            type: Directory
+      nodeSelector:
+        disktype: ultrassd
+    ```
 
 ### Risks and Mitigations
 
@@ -235,7 +399,7 @@ Failure sending request: StatusCode=400
 -- Original Error: Code="InvalidParameter" Message="StorageAccountType UltraSSD_LRS can be used only when additionalCapabilities.ultraSSDEnabled is set."
 Target="managedDisk.storageAccountType`
 - If the deletion of Ultra Disks as Data Disks is not working as expected, Machines will be deleted and the Data Disks will be orphaned. This will be visible in error logs of the provider with a message along the lines of: `failed to delete Data Disk: xyz`
-- If the creation and attachment of Ultra Disks as Data disks is not working as expected because the user has chosen a region, availability zone or instance size which are incompatible with Ultra Disks, the machine provisioning will fail.
+- If the creation and attachment of Ultra Disks as Data Disks is not working as expected because the user has chosen a region, availability zone or instance size which are incompatible with Ultra Disks, the machine provisioning will fail.
   This will be visibile in the error logs of the provider with a message along the lines of: `vm size xyz does not support ultra disks in location xyz. select a different vm size or disable ultra disks`
 - If the mounting of an Ultra Disk backed Persistent Volume Claim (PVC), as a Volume in a Pod, is not working and the the Pod is stuck in `ContainerCreating` mode the issue can be debugged by describing the Pod.
   An example of this could be an error caused by the absence of the `UltraSSDEnabled` additional capability on the Machine backing the Node that is hosting the aformentioned Pod. This will manifest with the following Event:
@@ -246,6 +410,7 @@ Target="managedDisk.storageAccountType`
     "target": "managedDisk.storageAccountType"
   }
 }`
+  - An alert will also be triggered on this condition.
 
 ## Implementation History
 
