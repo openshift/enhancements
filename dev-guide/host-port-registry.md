@@ -97,7 +97,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9643  | ovn-kubernetes northd | sdn | 4.3 | control plane only, ovn-kubernetes only |
 | 9644  | ovn-kubernetes southd | sdn | 4.3 | control plane only, ovn-kubernetes only |
 | 9978  | etcd      | etcd || metrics, control plane only |
-| 9979  | etcd      | etcd || ?, control plane only |
+| 9979  | etcd      | etcd || grpc-proxy metrics, control plane only |
+| 9980  | etcd      | etcd || healthz, control plane only |
 | 10010 | crio | node || stream port |
 | 10250 | kubelet | node || kubelet api |
 | 10251 | kube-scheduler | apiserver || healthz, control plane only |
