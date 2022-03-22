@@ -261,7 +261,7 @@ type IngressStatus struct {
 	DefaultRouterPlacement DefaultRouterPlacement `json:"defaultRouterPlacement"`
 }
 
-// TopologyMode defines the topology mode of the control/infra nodes.
+// DefaultRouterPlacement defines the default placement of ingress router pods.
 type DefaultRouterPlacement string
 
 const (
