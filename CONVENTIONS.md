@@ -129,6 +129,72 @@ does not match the Go definitions that developers use, but it has the advantage
 that generated API documentation and `oc explain` output show the correct field
 names that end users use, and the end-user experience is more important.
 
+### Write User Readable Documentation in Godoc
+
+Godoc text is generated into both Swagger and OpenAPI schemas which are then used
+in tools such as `oc explain` to provide users descriptions of how to use our products.
+
+The Godoc on any field in our API should be sufficiently explained such that an end user
+understands the following:
+* What is the purpose of this field? What does it allow them to achieve?
+* How does setting this field interact with other fields or features?
+* What are the limitations of this field?
+  * Does it have any maximum or minimum value?
+  * If it is a string value, are the values limited to a specific list or can it be free form,
+  must it meet a certain regex?
+  * See the [validation docs](https://book.kubebuilder.io/reference/markers/crd-validation.html) for inspiration on more validations to apply.
+* When optional, what happens when the field is omitted?
+  * You may choose to set a default value within the API or have a controller default the value
+    at runtime
+
+For example:
+
+```go
+// Example enables developers to understand how to write user facing documentation
+// within the Godoc of their API types.
+// Example is used within the wider Conventions to improve the end user experience
+// and is a required convention.
+// At least one value must be provided within the example and the type should be set
+// appropriately.
+// +kubebuilder:validation:Required
+// + ---
+// + Note that this comment line will not end up in the generated API schema as it is
+// + preceded by a `+`. The `---` also prevents anything after it from being added to
+// + the swagger docs.
+// + This can be used to add notes for developers that aren't intended for end users.
+type Example struct {
+  // Type allows the user to determine how to interpret the example given.
+  // It must be set to one of the following values: Documentation, Convention, or Mixed.
+  // +kubebuilder:validation:Enum:=Documentation;Convention;Mixed
+  // +kubebuilder:validation:Required
+  Type string `json:"type"`
+
+  // Documentation allows the user to define documentation for the example.
+  // When this value is provided, the `type` must be set to either `Documentation` or `Mixed`.
+  // The content of the documentation is free form text but must be no longer than 512 characters.
+  // +kubebuilder:validation:MaxLength:=512
+  // +optional
+  Documentation string `json:"documentation,omitempty"`
+
+  // Convention allows the user to define the configuration for this API convention.
+  // For example, it allows them to set the priority over other conventions and whether
+  // this policy should be strictly observed or weakly observed.
+  // When this value is provided, the `type` must be set to either `Convention` or `Mixed`.
+  // +optional
+  Convention ConventionSpec `json:"convention,omitempty"`
+
+  // Author allows the user to denote an author for the example convention.
+  // The author is not required. When omitted, this means the user has no opinion and the value is
+  // left to the platform to choose a reasonable default, which is subject to change over time.
+  // The current platform default is `OpenShift Engineering`.
+  // The Author field is free form text.
+  // +optional
+  // + Note: In this example, the `platform` refers to OpenShift Container Platform and not
+  // + a cloud provider (commonly referred to among engineers as platforms).
+  Author string `json:"author,omitempty"`
+}
+```
+
 #### Use Specific Types for Object References, and Omit "Ref" Suffix
 
 Use resource-specific types for object references.  For example, avoid using the
@@ -156,7 +222,7 @@ Instead, do the following:
 type Example struct {
 	// frobulatorConfig specifies [...].
 	FrobulatorConfig configv1.ConfigMapNameReference `json:"frobulatorConfig"`
-	
+
 	// defabulator specifies [...].
 	Defabulator LocalDefabulatorReference `json:"defabulator"`
 }
@@ -509,12 +575,12 @@ between the requested memory and used memory for each container in the
 `openshift-monitoring` namespace:
 ```PromQL
 (
-  # Calculate the 90th percentile of memory usage over the past hour and add 10% to that 
+  # Calculate the 90th percentile of memory usage over the past hour and add 10% to that
   1.1 * (max by (pod, container) (
     quantile_over_time(0.9, container_memory_working_set_bytes{namespace="openshift-monitoring", container != "POD", container!=""}[60m]))
   ) -
   # Calculate the maximum requested memory per pod and container
-  max by (pod, container) (kube_pod_container_resource_requests{namespace="openshift-monitoring", resource="memory", container!="", container!="POD"}) 
+  max by (pod, container) (kube_pod_container_resource_requests{namespace="openshift-monitoring", resource="memory", container!="", container!="POD"})
 ) / 1024 / 1024
 ```
 
