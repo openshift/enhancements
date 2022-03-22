@@ -256,7 +256,7 @@ type IngressStatus struct {
 	// "node-role.kubernetes.io/master" label will be added.
 	//
 	// +kubebuilder:validation:Enum:="ControlPlane";"Workers"
-	// +kubebuidler:default:="Workers"
+	// +kubebuilder:default:="Workers"
 	// +optional
 	DefaultRouterPlacement DefaultRouterPlacement `json:"defaultRouterPlacement"`
 }
