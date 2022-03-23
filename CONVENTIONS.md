@@ -132,17 +132,25 @@ names that end users use, and the end-user experience is more important.
 ### Write User Readable Documentation in Godoc
 
 Godoc text is generated into both Swagger and OpenAPI schemas which are then used
-in tools such as `oc explain` to provide users descriptions of how to use our products.
+in tools such as `oc explain` or the API reference section of the OpenShift product
+documentation to provide users descriptions of how to use and interact with our products.
+
+In general, Godoc comments should be complete sentences and as much as possible, should
+adhere to the OpenShift product docs [style guide](https://redhat-documentation.github.io/supplementary-style-guide/#style-guidelines).
 
 The Godoc on any field in our API should be sufficiently explained such that an end user
 understands the following:
+
 * What is the purpose of this field? What does it allow them to achieve?
 * How does setting this field interact with other fields or features?
 * What are the limitations of this field?
   * Does it have any maximum or minimum value?
   * If it is a string value, are the values limited to a specific list or can it be free form,
   must it meet a certain regex?
+  * Limitations should be written out within the Godoc as well as added within `kubebuilder` tags. Kubebuilder tags are
+  used for validation but are *not* included within any generated documentation.
   * See the [validation docs](https://book.kubebuilder.io/reference/markers/crd-validation.html) for inspiration on more validations to apply.
+* Is the field optional or required?
 * When optional, what happens when the field is omitted?
   * You may choose to set a default value within the API or have a controller default the value
     at runtime
@@ -194,6 +202,42 @@ type Example struct {
   Author string `json:"author,omitempty"`
 }
 ```
+
+This API is then explained by `oc explain` as:
+
+```shell
+RESOURCE: example <Object>
+
+DESCRIPTION:
+  Example enables developers to understand how to write user facing documentation within the Godoc of their API types.
+  Example is used within the wider Conventions to improve the end user experience and is a required convention. At
+  least one value must be provided within the example and the type should be set appropriately.
+
+FIELDS:
+  author <string>
+    Author allows the user to denote an author for the example convention. The author is not required. When omitted,
+    this means the user has no opinion and the value is left to the platform to choose a reasonable default, which is
+    subject to change over time. The current platform default is `OpenShift Engineering`. The Author field is free form
+    text.
+
+  convention <Object>
+    Convention allows the user to define the configuration for this API convention. For example, it allows them to set
+    the priority over other conventions and whether this policy should be strictly observed or weakly observed. When
+    this value is provided, the `type` must be set to either `Convention` or `Mixed`.
+
+  documentation <string>
+    Documentation allows the user to define documentation for the example. When this value is provided, the `type` must
+    be set to either `Documentation` or `Mixed`. The content of the documentation is free form text but must be no
+    longer than 512 characters.
+
+  type <string>
+    Type allows the user to determine how to interpret the example given. It must be set to one of the following
+    values: Documentation, Convention, or Mixed.
+```
+
+By providing quality documentation within the API itself, a number of generated API references
+benefit from the additional context provided which in turn makes it easier for end users to understand
+and use our products.
 
 #### Use Specific Types for Object References, and Omit "Ref" Suffix
 
