@@ -254,6 +254,8 @@ type IngressStatus struct {
 	// defaultPlacement is set to ControlPlane the "node-role.kubernetes.io/worker"
 	// label will be added. If defaultPlacement is set to Workers the
 	// "node-role.kubernetes.io/master" label will be added.
+    //
+    // When omitted, the default value is Workers
 	//
 	// +kubebuilder:validation:Enum:="ControlPlane";"Workers"
 	// +kubebuilder:default:="Workers"
@@ -266,10 +268,10 @@ type DefaultPlacement string
 
 const (
 	// "Workers" is for having router pods placed on worker nodes by default
-	Workers DefaultPlacement = "Workers"
+	DefaultPlacementWorkers DefaultPlacement = "Workers"
 
 	// "ControlPlane" is for having router pods placed on control-plane nodes by default
-	ControlPlane DefaultPlacement = "ControlPlane"
+	DefaultPlacementControlPlane DefaultPlacement = "ControlPlane"
 )
 ```
 
