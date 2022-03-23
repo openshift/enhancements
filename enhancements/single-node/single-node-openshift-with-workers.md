@@ -203,7 +203,7 @@ target that label).
 
 ## Proposal
 
-- Create a new `DefaultRouterPlacement` API field.
+- Create a new `DefaultPlacement` API field.
 
 - Make sure worker node ignition files are generated even in bootstrap-in-place
 single control-plane node "none"-platform installation.
@@ -221,7 +221,7 @@ growing computation demands.
 ### API Extensions
 
 Introduce a new status field in the Ingress config CR
-(`config.openshift.io/v1/ingresses`) called `DefaultRouterPlacement`.
+(`config.openshift.io/v1/ingresses`) called `DefaultPlacement`.
 
 In addition, continue to allow the `.spec.replicas` and `.spec.nodePlacement`
 fields in `operator.openshift.io/v1/ingresscontrollers` CRs to be omitted, but
@@ -235,7 +235,7 @@ addition to `openshift/api`'s `config/v1/types_ingress.go` file:
 type IngressStatus struct {
     // ... existing fields omitted
 
-	// defaultRouterPlacement is set by the installer and lets it control which
+	// defaultPlacement is set by the installer and lets it control which
 	// nodes will host the ingress router pods by default, the options being
 	// control-plane nodes or worker nodes.
 	//
@@ -244,32 +244,32 @@ type IngressStatus struct {
 	// fields.
 	//
 	// The value of replicas is set based on the value of a chosen field in the
-	// Infrastructure CR. If defaultRouterPlacement was set to ControlPlane, the
+	// Infrastructure CR. If defaultPlacement was set to ControlPlane, the
 	// chosen field will be controlPlaneTopology. If it was set to Workers the
 	// chosen field will be infrastructureTopology. Replicas will then be set to 1
 	// or 2 with respect to the chosen field's value (which can be either
 	// SingleReplica or HighlyAvailable).
 	//
-	// The value of nodePlacement is adjusted based on defaultRouterPlacement - If
-	// defaultRouterPlacement is set to ControlPlane the "node-role.kubernetes.io/worker"
-	// label will be added. If defaultRouterPlacement is set to Workers the
+	// The value of nodePlacement is adjusted based on defaultPlacement - If
+	// defaultPlacement is set to ControlPlane the "node-role.kubernetes.io/worker"
+	// label will be added. If defaultPlacement is set to Workers the
 	// "node-role.kubernetes.io/master" label will be added.
 	//
 	// +kubebuilder:validation:Enum:="ControlPlane";"Workers"
 	// +kubebuilder:default:="Workers"
 	// +optional
-	DefaultRouterPlacement DefaultRouterPlacement `json:"defaultRouterPlacement"`
+	DefaultPlacement DefaultPlacement `json:"defaultPlacement"`
 }
 
-// DefaultRouterPlacement defines the default placement of ingress router pods.
-type DefaultRouterPlacement string
+// DefaultPlacement defines the default placement of ingress router pods.
+type DefaultPlacement string
 
 const (
 	// "Workers" is for having router pods placed on worker nodes by default
-	Workers DefaultRouterPlacement = "Workers"
+	Workers DefaultPlacement = "Workers"
 
 	// "ControlPlane" is for having router pods placed on control-plane nodes by default
-	ControlPlane DefaultRouterPlacement = "ControlPlane"
+	ControlPlane DefaultPlacement = "ControlPlane"
 )
 ```
 
@@ -279,14 +279,14 @@ This new field will have one of these values - `ControlPlane` or `Workers`.
 There are no current plans for any more values, but more may be added in the
 future.
 
-The value of the `DefaultRouterPlacement` field will affect the defaulting
+The value of the `DefaultPlacement` field will affect the defaulting
 behavior of `IngressController`'s `.spec.replicas` and `.spec.nodePlacement`
 fields.  In the absence of an `IngressController` resource created by the
 user/installer, or when the user/installer creates an `IngressController` with
 these fields omitted, the Cluster Ingress Operator will choose the default
-values for those fields based on the value of `DefaultRouterPlacement`.
+values for those fields based on the value of `DefaultPlacement`.
 
-When the value of `DefaultRouterPlacement` is `Workers`, the defaulting
+When the value of `DefaultPlacement` is `Workers`, the defaulting
 behavior of `.spec.replicas` and `.spec.nodePlacement` will be the same as it
 is today: `.spec.replicas` will be chosen according to the value of
 `InfrastructureTopology`, namely `1` when `SingleReplica` or `2` when
@@ -300,7 +300,7 @@ nodePlacement:
       node-role.kubernetes.io/worker: ''
 ```
 
-However, if the value of `DefaultRouterPlacement` is `ControlPlane`, the
+However, if the value of `DefaultPlacement` is `ControlPlane`, the
 defaulting behavior will be different: `.spec.replicas` will be chosen instead
 according to the value of `ControlPlaneTopology`; again, `1` when
 `SingleReplica` or `2` when `HighlyAvailable`. `.spec.nodePlacement` will be
@@ -320,7 +320,7 @@ the current behavior, it has no importance in this enhancement)
 The installer will detect situations in which it's unlikely the user will want
 to set up a load-balancer. For now, those situations only include installation
 of single control-plane node cluster deployments on the "none" platform. In
-those situations, the installer will set `DefaultRouterPlacement` to be
+those situations, the installer will set `DefaultPlacement` to be
 `ControlPlane`. Since there's just a single control-plane node, `ControlPlane`
 topology would be `SingleReplica` and the combined effect would be that the
 `IngressController` will have just a single replica and be pinned to the single
@@ -330,21 +330,21 @@ control-plane node, and as a result any `*.apps.<cluster>.<base>` DNS entries
 which originally pointed at the single control-plane node will remain correct
 even in the face of newly added worker nodes.
 
-In any other situations, the installer will set `DefaultRouterPlacement` to
+In any other situations, the installer will set `DefaultPlacement` to
 `Workers`, resulting in the same default behavior as before this enhancement,
 namely that `IngressController` pods are scheduled on worker nodes and their
 number of replicas determined according to the `InfrastructureTopology`.
 
-If the value of `DefaultRouterPlacement` itself is omitted, it is defaulted to
+If the value of `DefaultPlacement` itself is omitted, it is defaulted to
 `Workers`. This would be useful in order to maintain the current behavior if
 the API/Ingress PR is merged before the installer PR to set this field.
 
-The installer may not set `DefaultRouterPlacement` to `ControlPlane` when the
+The installer may not set `DefaultPlacement` to `ControlPlane` when the
 cluster's `ControlPlaneTopology` is set to `External`.
 
 In the future, when IPI-installed single control-plane node clusters in the
 cloud no longer provision a load-balancer by default, they would also benefit
-from having the installer set the `DefaultRouterPlacement` to `ControlPlane`.
+from having the installer set the `DefaultPlacement` to `ControlPlane`.
 
 ### Risks and Mitigations
 
@@ -356,7 +356,7 @@ already both in the "master" and "worker" pools, that should make no practical
 difference.
 
 On multi-node clusters, the installer will never set the
-`DefaultRouterPlacement` field to `ControlPlane`, so there are no risks to
+`DefaultPlacement` field to `ControlPlane`, so there are no risks to
 discuss for multi-node clusters in this enhancement. However, any future
 enhancement that will consider making this field configurable by allowing
 the user to set it during installation, should take into account that the
@@ -416,15 +416,15 @@ N/A
 
 ### Upgrade / Downgrade Strategy
 
-The new `DefaultRouterPlacement` API field will have a default value of
+The new `DefaultPlacement` API field will have a default value of
 `Workers`. The behavior of the Ingress Operator when the
-`DefaultRouterPlacement` field has the value `Workers` should be identical
+`DefaultPlacement` field has the value `Workers` should be identical
 to its current behavior (before this enhancement). This means that clusters
 that go through an upgrade from a version before this enhancement to a later
 version which includes this enhancement will maintain their current behavior,
 this enhancement should not change anything for them.
 
-If the value of `DefaultRouterPlacement` is empty (TODO: Could this possibly
+If the value of `DefaultPlacement` is empty (TODO: Could this possibly
 happen if the the Ingress Operator reads a resource created according to the
 old Ingress CRD that didn't have this value? Not sure how defaults work in this
 scenario, in any case, it's not crucial) the Ingress Operator should make sure
@@ -436,7 +436,7 @@ Does not apply, to the best of my understanding.
 
 ### Operational Aspects of API Extensions
 
-- Since the `DefaultRouterPlacement` field is part of the status of the
+- Since the `DefaultPlacement` field is part of the status of the
 Ingress config CR, it is clear that users should not modify this field.
 
 - This API change only affects the defaulting behavior of the `IngressController`
@@ -449,10 +449,10 @@ placement in practice. Nothing has changed in that regard.
 
 #### Failure Modes
 
-- The `ControlPlane` value of the `DefaultRouterPlacement` field value may
+- The `ControlPlane` value of the `DefaultPlacement` field value may
 not be used if the cluster's `ControlPlaneTopology` field is set to
 `External`. The Ingress Operator would treat such combination as if the
-`DefaultRouterPlacement` value is actually `Workers` instead, and log a warning
+`DefaultPlacement` value is actually `Workers` instead, and log a warning
 to indicate that this invalid combination has been detected. The Ingress
 Operator should not fail to reconcile `IngressController` CRs due to this
 invalid combination. This should not happen under any circumstance since
