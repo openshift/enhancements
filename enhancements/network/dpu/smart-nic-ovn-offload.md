@@ -31,7 +31,7 @@ status: implementable
 
 ## Summary
 
-See [DPU Support in OCP (Overview)](https://github.com/openshift/enhancements/pull/738). This document describes the
+See [DPU Support in OCP (Overview)](.enhancements/network/dpu/ocp-on-dpu.md). This document describes the
 OCP modification in Tenant cluster in details.
 
 ## Terminology
@@ -63,7 +63,7 @@ See Overview doc.
 
 ### Non-Goals
 
-- DPU configuration management in Infrastructure cluster is discussed in [Introduce DPU OVNKube Operator](https://github.com/openshift/enhancements/pull/890)
+- DPU configuration management in Infrastructure cluster is discussed in [Introduce DPU OVNKube Operator](.enhancements/network/dpu/dpu-network-operator.md)
 - Support multiple DPUs on one OpenShift baremetal worker node
 - Support DPUs on OpenShift baremetal master nodes
 
