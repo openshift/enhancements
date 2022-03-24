@@ -232,11 +232,12 @@ adjust how it behaves in the absence of these parameters. The exact details of
 this behavior are described below.
 
 The goal of this new `DefaultPlacement` field is to give the installer a way to
-affect the general placement of the `IngressController`, regardless of whether
-an `IngressController` is created during installation with the `.spec.replicas`
-and `.spec.nodePlacement` omitted or whether no `IngressController` was created
-during an installation. When no `IngressController` is created during
-installation the Cluster Ingress Operator creates a default `IngressController`
+affect the general placement of the `IngressController`. This is regardless of
+whether an `IngressController` is created during installation with the
+`.spec.replicas` and `.spec.nodePlacement` omitted or whether no
+`IngressController` was created during an installation at all. Today, when no
+`IngressController` is created during installation, the Cluster Ingress Operator
+creates a default `IngressController`
 - in this case we can go one of two ways -
 
 - The Cluster Ingress Operator leaves those fields empty in the newly created
@@ -515,7 +516,10 @@ than there already was.
 
 - For administrators and support engineers, the `IngressController` is still the
 source of truth and where you need to look if you seek to understand the router
-placement in practice. Nothing has changed in that regard.
+placement in practice. However, now the `replicas` and `nodePlacement` on
+`IngressController` may be empty, so administrators and support engineers 
+can refer to the corresponding Deployment that got created if they wish to
+know the practical values.
 
 #### Failure Modes
 
