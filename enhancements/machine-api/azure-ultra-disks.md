@@ -48,7 +48,7 @@ Allow users running OCP clusters on Azure to leverage Ultra Disk Storage to achi
 ## Proposal
 
 The following requirements for integration will be necessary for adding Ultra Disks support:
-1. Required configuration for supporting Data Disk should be added to the `AzureMachineProviderSpec`. 
+1. Required configuration for supporting Data Disk should be added to the `AzureMachineProviderSpec`.
 This will allow users to set Ultra Disks as Data Disks for the Machine. This feature has been made available upstream in Cluster API Provider for Azure (CAPZ) by: https://github.com/kubernetes-sigs/cluster-api-provider-azure/pull/1478
 1. Required configuration for specifying the ability in `AzureMachineProviderSpec` to allow the Azure CSI driver to provision Ultra Disks as PVs for the Machine. See the issue tracking the implementation of this feature in the upstream Cluster API Provider for Azure (CAPZ): https://github.com/kubernetes-sigs/cluster-api-provider-azure/issues/1852
 
@@ -76,9 +76,13 @@ A new field will be added to the `AzureMachineProviderSpec` struct `DataDisks`. 
 
 For this reason a new Composite type field `DataDiskManagedDiskParameters` will be added and the original `ManagedDiskParameters`, used in `OSDisk`, will be renamed to `OSDiskManagedDiskParameters`.
 
+`DataDisk` will also need a `DeletionPolicy` field to instruct on how the Data Disk should be treated at machine deletion. In other words, it will describe whether to retain or delete the data disk when the machine is deleted from the cloud provider. This field will be marked as required in order to make it very clear with the user what the fate of the data disk is going to be.
+
 A new `StorageAccountType` type that describes the possible values for the `StorageAccountType` field on `DataDisk` will be added.
 
 A new `CachingTypeOption` type that describes the possible values for the `CachingType` field on `DataDisk` will also be added.
+
+A new `DiskDeletionPolicyType` type that describes the possible deletion policy types for the `DeletionPolicy` field on `DataDisk` will also be added.
 
 ```go
 type AzureMachineProviderSpec struct {
@@ -132,7 +136,25 @@ type DataDisk struct {
 	// +optional
 	// +kubebuilder:validation:Enum=None;ReadOnly;ReadWrite
 	CachingType CachingTypeOption `json:"cachingType,omitempty"`
+	// DeletionPolicy specifies the data disk deletion policy upon Machine deletion.
+	// Possible values are "Delete","Detach".
+	// When "Delete" is used the data disk is deleted when the Machine is deleted.
+	// When "Detach" is used the data disk is detached from the Machine and retained when the Machine is deleted.
+	// +kubebuilder:validation:Enum=Delete;Detach
+	// +kubebuilder:validation:Required
+	DeletionPolicy DiskDeletionPolicyType `json:"deletionPolicy"`
 }
+
+// DiskDeletionPolicyType defines the possible values for DeletionPolicy.
+type DiskDeletionPolicyType string
+
+// These are the valid DiskDeletionPolicyType values.
+const (
+	// DiskDeletionPolicyTypeDelete means the DiskDeletionPolicyType is "Delete".
+	DiskDeletionPolicyTypeDelete DiskDeletionPolicyType = "Delete"
+	// DiskDeletionPolicyTypeDetach means the DiskDeletionPolicyType is "Detach".
+	DiskDeletionPolicyTypeDetach DiskDeletionPolicyType = "Detach"
+)
 
 // CachingTypeOption defines the different values for a CachingType.
 type CachingTypeOption string
