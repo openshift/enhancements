@@ -235,7 +235,7 @@ addition to `openshift/api`'s `config/v1/types_ingress.go` file:
 type IngressStatus struct {
     // ... existing fields omitted
 
-	// defaultPlacement is set by the installer and lets it control which
+	// defaultPlacement is set at installation time to control which
 	// nodes will host the ingress router pods by default, the options being
 	// control-plane nodes or worker nodes.
 	//
