@@ -236,7 +236,7 @@ type IngressStatus struct {
     // ... existing fields omitted
 
 	// defaultPlacement is set at installation time to control which
-	// nodes will host the ingress router pods by default, the options being
+	// nodes will host the ingress router pods by default. The options are
 	// control-plane nodes or worker nodes.
 	//
 	// This field works by dictating how the Ingress Operator will set the default
