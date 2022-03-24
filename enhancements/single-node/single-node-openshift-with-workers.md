@@ -254,8 +254,8 @@ type IngressStatus struct {
 	// defaultPlacement is set to ControlPlane the "node-role.kubernetes.io/master"
 	// label will be added. If defaultPlacement is set to Workers the
 	// "node-role.kubernetes.io/worker" label will be added.
-    //
-    // When omitted, the default value is Workers
+	//
+	// When omitted, the default value is Workers
 	//
 	// +kubebuilder:validation:Enum:="ControlPlane";"Workers"
 	// +kubebuilder:default:="Workers"
