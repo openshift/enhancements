@@ -257,18 +257,18 @@ addition to `openshift/api`'s `config/v1/types_ingress.go` file:
 
 ```go
 type IngressStatus struct {
-    // ... existing fields omitted
+	// ... existing fields omitted
 
 	// defaultPlacement is set at installation time to control which
 	// nodes will host the ingress router pods by default. The options are
 	// control-plane nodes or worker nodes.
 	//
 	// This field works by dictating how the Cluster Ingress Operator will 
-    // consider unset replicas and nodePlacement fields in IngressController
-    // resources when creating the corresponding Deployments.
-    //
-    // See the documentation for the IngressController replicas and nodePlacement
-    // fields for more information.
+	// consider unset replicas and nodePlacement fields in IngressController
+	// resources when creating the corresponding Deployments.
+	//
+	// See the documentation for the IngressController replicas and nodePlacement
+	// fields for more information.
 	//
 	// When omitted, the default value is Workers
 	//
@@ -277,7 +277,7 @@ type IngressStatus struct {
 	// +optional
 	DefaultPlacement DefaultPlacement `json:"defaultPlacement"`
 
-    // ... existing fields omitted
+	// ... existing fields omitted
 }
 
 // DefaultPlacement defines the default placement of ingress router pods.
@@ -296,7 +296,7 @@ And the following documentation update to the `openshift/api`'s `operator/v1/typ
 
 ```go
 type IngressControllerSpec struct {
-    // ... existing fields omitted
+	// ... existing fields omitted
 
 	// replicas is the desired number of ingress controller replicas. If unset,
 	// the default depends on the value of the defaultPlacement field in the 
@@ -312,11 +312,11 @@ type IngressControllerSpec struct {
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
 
-    // ... existing fields omitted
+	// ... existing fields omitted
 }
 
 type NodePlacement struct {
-    // ... existing fields omitted
+	// ... existing fields omitted
 
 	// nodeSelector is the node selector applied to ingress controller
 	// deployments.
@@ -339,7 +339,7 @@ type NodePlacement struct {
 	// +optional
 	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
 
-    // ... existing fields omitted
+	// ... existing fields omitted
 }
 ```
 
