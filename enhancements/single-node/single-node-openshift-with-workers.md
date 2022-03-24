@@ -247,8 +247,8 @@ type IngressStatus struct {
 	// Infrastructure CR. If defaultPlacement was set to ControlPlane, the
 	// chosen field will be controlPlaneTopology. If it is set to Workers the
 	// chosen field will be infrastructureTopology. Replicas will then be set to 1
-	// or 2 with respect to the chosen field's value (which can be either
-	// SingleReplica or HighlyAvailable).
+	// or 2 based whether the chosen field's value is SingleReplica or
+	// HighlyAvailable, respectively.
 	//
 	// The value of nodePlacement is adjusted based on defaultPlacement - If
 	// defaultPlacement is set to ControlPlane the "node-role.kubernetes.io/worker"
