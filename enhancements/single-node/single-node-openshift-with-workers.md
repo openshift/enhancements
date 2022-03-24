@@ -349,16 +349,9 @@ This new field will have one of these values - `ControlPlane` or `Workers`.
 There are no current plans for any more values, but more may be added in the
 future.
 
-The value of the `DefaultPlacement` field will affect the defaulting
-behavior of `IngressController`'s `.spec.replicas` and `.spec.nodePlacement`
-fields.  In the absence of an `IngressController` resource created by the
-user/installer, or when the user/installer creates an `IngressController` with
-these fields omitted, the Cluster Ingress Operator will choose the default
-values for those fields based on the value of `DefaultPlacement`.
-
 When the value of `DefaultPlacement` is `Workers`, the defaulting
 behavior of `.spec.replicas` and `.spec.nodePlacement` will be the same as it
-is today: `.spec.replicas` will be chosen according to the value of
+is today: `.spec.replicas` will be treated according to the value of
 `InfrastructureTopology`, namely `1` when `SingleReplica` or `2` when
 `HighlyAvailable`. `.spec.nodePlacement` will always just be:
 
@@ -371,7 +364,7 @@ nodePlacement:
 ```
 
 However, if the value of `DefaultPlacement` is `ControlPlane`, the
-defaulting behavior will be different: `.spec.replicas` will be chosen instead
+defaulting behavior will be different: `.spec.replicas` will be treated instead
 according to the value of `ControlPlaneTopology`; again, `1` when
 `SingleReplica` or `2` when `HighlyAvailable`. `.spec.nodePlacement` will be
 always just be:
