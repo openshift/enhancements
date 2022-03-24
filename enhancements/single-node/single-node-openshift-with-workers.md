@@ -245,7 +245,7 @@ type IngressStatus struct {
 	//
 	// The value of replicas is set based on the value of a chosen field in the
 	// Infrastructure CR. If defaultPlacement was set to ControlPlane, the
-	// chosen field will be controlPlaneTopology. If it was set to Workers the
+	// chosen field will be controlPlaneTopology. If it is set to Workers the
 	// chosen field will be infrastructureTopology. Replicas will then be set to 1
 	// or 2 with respect to the chosen field's value (which can be either
 	// SingleReplica or HighlyAvailable).
