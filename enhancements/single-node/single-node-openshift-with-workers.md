@@ -237,8 +237,7 @@ whether an `IngressController` is created during installation with the
 `.spec.replicas` and `.spec.nodePlacement` omitted or whether no
 `IngressController` was created during an installation at all. Today, when no
 `IngressController` is created during installation, the Cluster Ingress Operator
-creates a default `IngressController`
-- in this case we can go one of two ways -
+creates a default `IngressController`, in this case we can go one of two ways -
 
 - The Cluster Ingress Operator leaves those fields empty in the newly created
 `IngressController`
