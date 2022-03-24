@@ -225,7 +225,31 @@ Introduce a new status field in the Ingress config CR
 
 In addition, continue to allow the `.spec.replicas` and `.spec.nodePlacement`
 fields in `operator.openshift.io/v1/ingresscontrollers` CRs to be omitted, but
-change the defaulting behavior for these fields based on the new status field.
+change the "controller-defaulting" behavior for these fields to be  based on
+this new status field. This means that when the Cluster Ingress Operator
+creates router `Deployments` out of `IngressController` resources it will
+adjust how it behaves in the absence of these parameters. The exact details of
+this behavior are described below.
+
+The goal of this new `DefaultPlacement` field is to give the installer a way to
+affect the general placement of the `IngressController`, regardless of whether
+an `IngressController` is created during installation with the `.spec.replicas`
+and `.spec.nodePlacement` omitted or whether no `IngressController` was created
+during an installation. When no `IngressController` is created during
+installation the Cluster Ingress Operator creates a default `IngressController`
+- in this case we can go one of two ways -
+
+- The Cluster Ingress Operator leaves those fields empty in the newly created
+`IngressController`
+
+- The cluster Ingress Operator populates these fields in the newly created
+`IngressController`
+
+Choosing one way or the other is arbitrary and shouldn't matter due to the
+immutable nature of this new field - the eventual `Deployment` that gets
+created would be identical in any case. I personally prefer the second option
+since it makes the fields explicit in the `IngressController` itself and not
+just in `Deployments` that get created.
 
 The sections below go into detail about the field, its possible values, and the
 behavior expected from each of them, but in practice following is the proposed
@@ -239,21 +263,12 @@ type IngressStatus struct {
 	// nodes will host the ingress router pods by default. The options are
 	// control-plane nodes or worker nodes.
 	//
-	// This field works by dictating how the Ingress Operator will set the default
-	// values of future IngressController resources' replicas and nodePlacement
-	// fields.
-	//
-	// The value of replicas is set based on the value of a chosen field in the
-	// Infrastructure CR. If defaultPlacement is set to ControlPlane, the
-	// chosen field will be controlPlaneTopology. If it is set to Workers the
-	// chosen field will be infrastructureTopology. Replicas will then be set to 1
-	// or 2 based whether the chosen field's value is SingleReplica or
-	// HighlyAvailable, respectively.
-	//
-	// The value of nodePlacement is adjusted based on defaultPlacement. If
-	// defaultPlacement is set to ControlPlane the "node-role.kubernetes.io/master"
-	// label will be added. If defaultPlacement is set to Workers the
-	// "node-role.kubernetes.io/worker" label will be added.
+	// This field works by dictating how the Cluster Ingress Operator will 
+    // consider unset replicas and nodePlacement fields in IngressController
+    // resources when creating the corresponding Deployments.
+    //
+    // See the documentation for the IngressController replicas and nodePlacement
+    // fields for more information.
 	//
 	// When omitted, the default value is Workers
 	//
@@ -261,6 +276,8 @@ type IngressStatus struct {
 	// +kubebuilder:default:="Workers"
 	// +optional
 	DefaultPlacement DefaultPlacement `json:"defaultPlacement"`
+
+    // ... existing fields omitted
 }
 
 // DefaultPlacement defines the default placement of ingress router pods.
@@ -273,6 +290,57 @@ const (
 	// "ControlPlane" is for having router pods placed on control-plane nodes by default
 	DefaultPlacementControlPlane DefaultPlacement = "ControlPlane"
 )
+```
+
+And the following documentation update to the `openshift/api`'s `operator/v1/types_ingress.go` file:
+
+```go
+type IngressControllerSpec struct {
+    // ... existing fields omitted
+
+	// replicas is the desired number of ingress controller replicas. If unset,
+	// the default depends on the value of the defaultPlacement field in the 
+	// cluster config.openshift.io/v1/ingresses status. 
+	//
+	// The value of replicas is set based on the value of a chosen field in the
+	// Infrastructure CR. If defaultPlacement is set to ControlPlane, the
+	// chosen field will be controlPlaneTopology. If it is set to Workers the
+	// chosen field will be infrastructureTopology. Replicas will then be set to 1
+	// or 2 based whether the chosen field's value is SingleReplica or
+	// HighlyAvailable, respectively.
+	//
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+    // ... existing fields omitted
+}
+
+type NodePlacement struct {
+    // ... existing fields omitted
+
+	// nodeSelector is the node selector applied to ingress controller
+	// deployments.
+	//
+	// If set, the specified selector is used and replaces the default.
+	// 
+	// If unset, the default depends on the value of the defaultPlacement
+    // field in the cluster config.openshift.io/v1/ingresses status.
+    // 
+    // When defaultPlacement is Workers, the default is:
+	//
+	//   kubernetes.io/os: linux
+	//   node-role.kubernetes.io/worker: ''
+    //
+    // When defaultPlacement is ControlPlane, the default is:
+    //
+    //   kubernetes.io/os: linux
+    //   node-role.kubernetes.io/master: ''
+	//
+	// +optional
+	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
+
+    // ... existing fields omitted
+}
 ```
 
 ### Implementation Details/Notes/Constraints
@@ -418,19 +486,19 @@ N/A
 
 ### Upgrade / Downgrade Strategy
 
-The new `DefaultPlacement` API field will have a default value of
-`Workers`. The behavior of the Ingress Operator when the
-`DefaultPlacement` field has the value `Workers` should be identical
-to its current behavior (before this enhancement). This means that clusters
-that go through an upgrade from a version before this enhancement to a later
-version which includes this enhancement will maintain their current behavior,
-this enhancement should not change anything for them.
+The new `DefaultPlacement` API field will have a default value of `Workers`.
+The behavior of the Cluster Ingress Operator when the `DefaultPlacement` field
+has the value `Workers` should be identical to its current behavior (before
+this enhancement). This means that clusters that go through an upgrade from a
+version before this enhancement to a later version which includes this
+enhancement will maintain their current behavior, this enhancement should not
+change anything for them.
 
-If the value of `DefaultPlacement` is empty (TODO: Could this possibly
-happen if the the Ingress Operator reads a resource created according to the
+If the value of `DefaultPlacement` is empty (TODO: Could this possibly happen
+if the the Cluster Ingress Operator reads a resource created according to the
 old Ingress CRD that didn't have this value? Not sure how defaults work in this
-scenario, in any case, it's not crucial) the Ingress Operator should make sure
-to treat it as if it were to have the value `Workers`.
+scenario, in any case, it's not crucial) the Cluster Ingress Operator should
+make sure to treat it as if it were to have the value `Workers`.
 
 ### Version Skew Strategy
 
@@ -452,13 +520,13 @@ placement in practice. Nothing has changed in that regard.
 #### Failure Modes
 
 - The `ControlPlane` value of the `DefaultPlacement` field value may
-not be used if the cluster's `ControlPlaneTopology` field is set to
-`External`. The Ingress Operator would treat such combination as if the
-`DefaultPlacement` value is actually `Workers` instead, and log a warning
-to indicate that this invalid combination has been detected. The Ingress
+not be used if the cluster's `ControlPlaneTopology` field is set to `External`.
+The Cluster Ingress Operator would treat such combination as if the
+`DefaultPlacement` value is actually `Workers` instead, and log a warning to
+indicate that this invalid combination has been detected. The Cluster Ingress
 Operator should not fail to reconcile `IngressController` CRs due to this
-invalid combination. This should not happen under any circumstance since
-the installer will never set this combination, but the Ingress Operator
+invalid combination. This should not happen under any circumstance since the
+installer will never set this combination, but the Cluster Ingress Operator
 should still handle it gracefully regardless.
 
 #### Support Procedures
