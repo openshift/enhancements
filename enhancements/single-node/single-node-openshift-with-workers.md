@@ -251,9 +251,9 @@ type IngressStatus struct {
 	// HighlyAvailable, respectively.
 	//
 	// The value of nodePlacement is adjusted based on defaultPlacement. If
-	// defaultPlacement is set to ControlPlane the "node-role.kubernetes.io/worker"
+	// defaultPlacement is set to ControlPlane the "node-role.kubernetes.io/master"
 	// label will be added. If defaultPlacement is set to Workers the
-	// "node-role.kubernetes.io/master" label will be added.
+	// "node-role.kubernetes.io/worker" label will be added.
     //
     // When omitted, the default value is Workers
 	//
