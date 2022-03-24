@@ -43,7 +43,9 @@ understands the following:
 * Is the field optional or required?
 * When optional, what happens when the field is omitted?
   * You may choose to set a default value within the API or have a controller default the value
-    at runtime
+    at runtime.
+  * If you believe the default value may change over time, the value must be defaulted at runtime and you should    
+    include a note in the Godoc which explains that the default value is subject to change. Typically this will look something like `When omitted, this means the user has no opinion and the value is left to the platform to choose a good default, which is subject to change over time. The current default is <default>.`
 
 For example:
 
@@ -68,7 +70,7 @@ type Example struct {
   Type string `json:"type"`
 
   // Documentation allows the user to define documentation for the example.
-  // When this value is provided, the `type` must be set to either `Documentation` or `Mixed`.
+  // When this value is provided, the type must be set to either Documentation or Mixed.
   // The content of the documentation is free form text but must be no longer than 512 characters.
   // +kubebuilder:validation:MaxLength:=512
   // +optional
@@ -77,18 +79,16 @@ type Example struct {
   // Convention allows the user to define the configuration for this API convention.
   // For example, it allows them to set the priority over other conventions and whether
   // this policy should be strictly observed or weakly observed.
-  // When this value is provided, the `type` must be set to either `Convention` or `Mixed`.
+  // When this value is provided, the type must be set to either Convention or Mixed.
   // +optional
   Convention ConventionSpec `json:"convention,omitempty"`
 
   // Author allows the user to denote an author for the example convention.
   // The author is not required. When omitted, this means the user has no opinion and the value is
-  // left to the platform to choose a reasonable default, which is subject to change over time.
-  // The current platform default is `OpenShift Engineering`.
+  // left to the platform to choose a good default, which is subject to change over time.
+  // The current platform default is OpenShift Engineering.
   // The Author field is free form text.
   // +optional
-  // + Note: In this example, the `platform` refers to OpenShift Container Platform and not
-  // + a cloud provider (commonly referred to among engineers as platforms).
   Author string `json:"author,omitempty"`
 }
 ```
@@ -107,17 +107,17 @@ FIELDS:
   author <string>
     Author allows the user to denote an author for the example convention. The author is not required. When omitted,
     this means the user has no opinion and the value is left to the platform to choose a reasonable default, which is
-    subject to change over time. The current platform default is `OpenShift Engineering`. The Author field is free form
+    subject to change over time. The current platform default is OpenShift Engineering. The Author field is free form
     text.
 
   convention <Object>
     Convention allows the user to define the configuration for this API convention. For example, it allows them to set
     the priority over other conventions and whether this policy should be strictly observed or weakly observed. When
-    this value is provided, the `type` must be set to either `Convention` or `Mixed`.
+    this value is provided, the type must be set to either Convention or Mixed.
 
   documentation <string>
-    Documentation allows the user to define documentation for the example. When this value is provided, the `type` must
-    be set to either `Documentation` or `Mixed`. The content of the documentation is free form text but must be no
+    Documentation allows the user to define documentation for the example. When this value is provided, the type must
+    be set to either Documentation or Mixed. The content of the documentation is free form text but must be no
     longer than 512 characters.
 
   type <string>
