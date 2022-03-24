@@ -250,7 +250,7 @@ type IngressStatus struct {
 	// or 2 based whether the chosen field's value is SingleReplica or
 	// HighlyAvailable, respectively.
 	//
-	// The value of nodePlacement is adjusted based on defaultPlacement - If
+	// The value of nodePlacement is adjusted based on defaultPlacement. If
 	// defaultPlacement is set to ControlPlane the "node-role.kubernetes.io/worker"
 	// label will be added. If defaultPlacement is set to Workers the
 	// "node-role.kubernetes.io/master" label will be added.
