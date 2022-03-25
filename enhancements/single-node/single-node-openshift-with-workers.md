@@ -324,9 +324,9 @@ type NodePlacement struct {
 	// If set, the specified selector is used and replaces the default.
 	// 
 	// If unset, the default depends on the value of the defaultPlacement
-    // field in the cluster config.openshift.io/v1/ingresses status.
-    // 
-    // When defaultPlacement is Workers, the default is:
+	// field in the cluster config.openshift.io/v1/ingresses status.
+	// 
+	// When defaultPlacement is Workers, the default is:
 	//
 	//   kubernetes.io/os: linux
 	//   node-role.kubernetes.io/worker: ''
