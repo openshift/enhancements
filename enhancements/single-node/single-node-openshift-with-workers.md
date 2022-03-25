@@ -330,11 +330,11 @@ type NodePlacement struct {
 	//
 	//   kubernetes.io/os: linux
 	//   node-role.kubernetes.io/worker: ''
-    //
-    // When defaultPlacement is ControlPlane, the default is:
-    //
-    //   kubernetes.io/os: linux
-    //   node-role.kubernetes.io/master: ''
+	//
+	// When defaultPlacement is ControlPlane, the default is:
+	//
+	//   kubernetes.io/os: linux
+	//   node-role.kubernetes.io/master: ''
 	//
 	// +optional
 	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
