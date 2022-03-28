@@ -501,10 +501,7 @@ version before this enhancement to a later version which includes this
 enhancement will maintain their current behavior, this enhancement should not
 change anything for them.
 
-If the value of `DefaultPlacement` is empty (TODO: Could this possibly happen
-if the the Cluster Ingress Operator reads a resource created according to the
-old Ingress CRD that didn't have this value? Not sure how defaults work in this
-scenario, in any case, it's not crucial) the Cluster Ingress Operator should
+If the value of `DefaultPlacement` is unset the Cluster Ingress Operator should
 make sure to treat it as if it were to have the value `Workers`.
 
 ### Version Skew Strategy
