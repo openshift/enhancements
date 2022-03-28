@@ -311,7 +311,8 @@ type AWSPlatformSpec struct {
     // AWS supports a maximum of 10 tags per resource. OpenShift reserves 5 tags for its use, leaving 5 tags
     // available for the user.
     // ResourceTags field is mutable and items can be removed.
-    // When a tag is removed from ResourceTags, the tag still persists on AWS resources.
+    // When a tag is removed from this list, management of the tag is stopped.
+    // The tag will remain in an unmanaged state on any existing resource.
     // +kubebuilder:validation:MaxItems=10
     // +optional
     ResourceTags []AWSResourceTag `json:"resourceTags,omitempty"`
