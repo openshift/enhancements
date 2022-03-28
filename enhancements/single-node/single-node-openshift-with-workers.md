@@ -560,6 +560,18 @@ users.
 
 ## Alternatives
 
+- Instead of adding this new `DefaultPlacement` field to the Ingress config CR,
+add two new status fields to the Ingress config CR, one for the `replicas`
+value recommended by the installation process and one for the `nodePlacement`
+value recommended by the installation process. This way instead of the
+installation process deciding on a generalized `defaultPlacement` with values
+of `Workers` and `ControlPlane` it would instead give more specific
+instructions to the Cluster Ingress Operator of how it thinks those unset
+parameters should be defaulted. Due to the complexity of the nodePlacement
+parameter, having the installation process dictate its value directly requires
+the installation process to be aware of things like the [Linux label](https://github.com/openshift/cluster-ingress-operator/blob/a6c16b7eefe6d7045f3109cd265c4e891f5791ef/pkg/operator/controller/ingress/deployment.go#L569)
+that the Ingress Operator would otherwise set by default on Deployments.
+
 - Even when users need to add just one extra worker, require them to add yet
 another worker so they could just form a compact 3-node cluster where all nodes
 are both workers and control-plane nodes. This kind of topology is already
