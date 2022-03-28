@@ -148,7 +148,6 @@ In the case where a user-defined tag is specified in the Infrastructure resource
 
    For example,
 
-
    New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`
 
    Action = A new tag is created for AWS resource.
@@ -190,24 +189,8 @@ In the case where a user-defined tag is specified in the Infrastructure resource
 
    Event action = An event is generated to notify user about the request status (success/failure) to update tags for the AWS resource.
 
-#### Delete tags scenarios
-Tags are deleted when the user sets the user-defined tag value to an empty string in `.spec.platformSpec.aws.resourceTags`.
-Also refer to `Precedence` scenario to understand cases where deletion of user-defined tags is not allowed .
-
-For example,
-
-Existing tag for AWS resource = `key_infra1 = value_old`
-
-New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 =`
-
-Action = Existing tag for AWS resource is deleted.
-
-Final tag set to AWS resource = deleted
-
-Event action = An event is generated to notify user about the request status (success/failure) to delete tags for the AWS resource.
-
 #### Precedence scenarios
-1) User-defined tags on kube resources MUST continue to take precedence during create and update. User-defined tags found on kube resources must not be deleted by methods described in `Delete tags scenarios`.
+1) User-defined tags on kube resources MUST continue to take precedence during create and update.
    A warning is generated to inform the user about action not being applied on the list of user tags.
 
    For example,
@@ -222,7 +205,7 @@ Event action = An event is generated to notify user about the request status (su
 
    Event action = An event is generated to notify user about the request status (success) to update tags for the AWS resource. A warning also must be generated about list of user-defined tags on which action is not applicable.
 
-2) When a new user-defined tag is added on kube resources, it MUST override the tag in `.spec.platformSpec.aws`. User-defined tags found on kube resources must not be deleted by methods described in `Delete tags scenarios`.
+2) When a new user-defined tag is added on kube resources, it MUST override the tag in `.spec.platformSpec.aws`.
    A warning is generated to inform the user about action not being applied on the list of user tags.
 
    For example,
@@ -239,18 +222,15 @@ Event action = An event is generated to notify user about the request status (su
 
 3) `.spec.platformSpec.aws` take precedence over `.status.platformStatus.aws`. User-defined tags must be merged from `.status.platformStatus.aws` and set to AWS resource.
 
-4) Before deleting user-defined tag from AWS resource, the entry must be removed from `.status.platformStatus.aws`, if any, as operator will reconcile user-defined tag to the AWS resource.
-   Setting user-defined tag to empty string in `.spec.platformSpec.aws` will not override the user-defined tag in `.status.platformStatus.aws`.
-
 #### Caveats
-1) User updates a resource's tag using an external tool when there is an entry in `.spec.platformSpec.aws.resourceTags`
-   The resource's tag will be reconciled by its owning operator to the value from `.spec.platformSpec.aws.resourceTags`.
+1) User updates a resource's tag using an external tool when there is an entry in `.spec.platformSpec.aws.resourceTags` or kube resource.
+   The resource's tag will be reconciled by its owning operator to the value from `.spec.platformSpec.aws.resourceTags` or kube resource.
 
    For example,
 
    Edited existing tag using external tool for AWS resource = `key_infra1 = value_comp1`
 
-   Previous tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value_infra1`
+   Previous tag request = `.spec.platformSpec.aws.resourceTags` or kube resource has `key_infra1 = value_infra1`
 
    Action = Update existing tag with value from `.spec.platformSpec.aws.resourceTags`.
 
@@ -258,10 +238,10 @@ Event action = An event is generated to notify user about the request status (su
 
    Event action = An event is generated to notify user about the request status (success/failure) to update tags for the AWS resource.
 
-2) User deletes the user-defined tag from `.spec.platformSpec.aws.resourceTags`
+2) User removes the user-defined tag from `.spec.platformSpec.aws.resourceTags` or kube resource.
    The user-defined tag which is removed from spec will not be reconciled or managed by operators.
 
-   User can update user-defined tag key:value using external tool. The user-defined tag will not be overwritten.
+   User can update user-defined tag key:value using external tool. The user-defined tag will not be overwritten by the operator.
 
    For example,
 
@@ -275,35 +255,11 @@ Event action = An event is generated to notify user about the request status (su
 
    Event action = No event
 
-3) User sets user-defined tag created using external tools to empty string for deleting for AWS resource.
+3) Any user-defined tag set using `.spec.platformSpec.aws.resourceTags` in `Infrastructure.config.openshift.io/v1` type will affect all managed AWS resources.
 
-   For example,
+4) User-defined tags are not synced from `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` for the following reasons.
 
-   User add tag using external tools (or directly) on AWS resource = `key_infra1 = value1`
-
-   New tag request = None
-
-   Action = No update done for tags for the AWS resource by the owning operator.
-
-   Final tag set to AWS resource = `key_infra1 = value1`
-
-   Event action = No event
-
-   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 =`
-
-   Action = No change in tags for the AWS resource.
-
-   Final tag set to AWS resource = deleted
-
-   Event action = An event is generated to notify user about the request status (success/failure) to delete tags for the AWS resource.
-
-   There is no validation check involved for creator tool of user-defined tag. Any user-defined tag listed by user in `.spec.platformSpec.aws.resourceTags` is considered for create/update/delete accordingly.
-
-4) Any user-defined tag set using `.spec.platformSpec.aws.resourceTags` in `Infrastructure.config.openshift.io/v1` type will affect all managed AWS resources.
-
-5) User-defined tags are not synced from `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` for the following reasons.
-
-- User-defined tags in `.spec.platformSpec.aws.resourceTags` can be "removed without delete", "delete", "update".
+- User-defined tags in `.spec.platformSpec.aws.resourceTags` can be "removed without delete" or "update".
   `.spec.platformSpec.aws.resourceTags` to `.status.platformStatus.aws.resourceTags` sync is not required,
   as there will be no versioning of the user-defined tags required to override the user-defined tags in Infrastructure CR.
   Instead, the user-defined tags (if supported in resource operator spec field, e.g: machine) can override the user-defined tags in Infrastructure CR.
@@ -316,23 +272,13 @@ Event action = An event is generated to notify user about the request status (su
    In this case, the desired value is not set immediately for AWS resource by the owning operator. There is eventual consistency maintained by the owning operator.
    The time taken to reconcile the modified user-defined tag on AWS resource to desired value vary across owning operators.
 
-7) Post-installation of the cluster, validation for kubernetes.io or openshift.io namespaced tags in the `.spec.platformSpec.aws.resourceTags` is not done by API server.
-   The individual AWS resource component operator fails to apply the user tags. Developing a production-ready webhook is a substantial task. To support webhook life-cycle management and monitoring, instrumentation, alerting and integration with the packaging/releases processes must be supported.
-   For validating fixed strings it is better to have an expression based check done by API server which is already part of upstream as alpha feature for CRD Validation Expression Language.
-
-The developer must also carefully consider the upgrade and rollback ordering
-between the webhook and CRD.
-
 ### User Stories
 
 - As a security-conscious ROSA customer, I want to restrict the permissions granted to Red Hat in my AWS account by using AWS resource tags.
   Red Hat applies one well-known tag to all ROSA cluster resources to identify Red Hat-managed AWS resources (e.g. “red-hat-managed=true”).
   Customer can create AWS policies that restrict Red Hat access to tagged resource types based on tag (e.g. “RedHat role can only create/read/update/delete S3 buckets with a red-hat-managed=true tag”).
 
-- As a cluster administrator of OpenShift, I would like to be able to delete user-defined tags managed by OpenShift for AWS resources.
-  As there are limitations on the maximum number of user-defined tags that can be set on an AWS resource, the ability to delete user-defined tags enables user to replace and manage tags within limits allowed.
-
-- As a cluster administrator of OpenShift, I would like to be able to update user-defined tags managed by OpenShift for AWS resources. User will need to update the user-defined tags to different set of values during ongoing operations.
+- As a cluster administrator of OpenShift, I would like to be able to update user-defined tags managed by OpenShift for AWS resources. User will need to update the user-defined tags to set different values during ongoing operations.
   This can be supported by allowing edit on mutable `.spec.platformSpec.aws.resourceTags` field in Infrastructure CR.
 
 - As a cluster administrator of OpenShift, I would like to be able to remove user-defined tags from `.spec.platformSpec.aws.resourceTags` without deleting for AWS resources.
@@ -346,9 +292,7 @@ The following user stories are added to support existing methods of updating use
 As the existing cluster might be configured with user-defined tags from kube resources, the precedence is given to user-defined tags in kube resources.
 - As a cluster administrator of OpenShift, I expect user-defined tags added in kube resources override the entries in `.spec.platformSpec.aws.resourceTags`.
 
-- As a cluster administrator of OpenShift, I expect user-defined tags added in kube resources must not be overridden by update or delete actions.
-
-
+- As a cluster administrator of OpenShift, I expect user-defined tags added in kube resources must not be overridden by update action or by removing user-defined tags from `.spec.platformSpec.aws.resourceTags`.
 
 ### API Extensions
 
@@ -368,12 +312,31 @@ type AWSPlatformSpec struct {
     // available for the user.
     // ResourceTags field is mutable and items can be removed.
     // When a tag is removed from ResourceTags, the tag still persists on AWS resources.
-    // To delete a tag on AWS resource, tag value must be set to empty string.
     // +kubebuilder:validation:MaxItems=10
     // +optional
     ResourceTags []AWSResourceTag `json:"resourceTags,omitempty"`
 }
 
+// Existing type
+// AWSResourceTag is a tag to apply to AWS resources created for the cluster.
+type AWSResourceTag struct {
+    // key is the key of the tag
+    // +kubebuilder:validation:Required
+    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=128
+    // +kubebuilder:validation:Pattern=`^(?!openshift.io)(?!kubernetes.io)([0-9A-Za-z_.:\/=+-@]+$)`
+    // +required
+    Key string `json:"key"`
+    // value is the value of the tag.
+    // Some AWS service do not support empty values. Since tags are added to resources in many services, the
+    // length of the tag value must meet the requirements of all services.
+    // +kubebuilder:validation:Required
+    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=256
+    // +kubebuilder:validation:Pattern=`^[0-9A-Za-z_.:/=+-@]+$`
+    // +required
+    Value string `json:"value"`
+}
 ```
 
 ```yaml
@@ -397,16 +360,14 @@ spec:
                         type: string
                         maxLength: 128
                         minLength: 1
-                        pattern: ^[0-9A-Za-z_.:/=+-@]+$
+                        pattern: ^(?!openshift.io)(?!kubernetes.io)([0-9A-Za-z_.:\/=+-@]+$)
                     value:
-                        description: value is the value of the tag. Some AWS service do not support empty values. Since tags are added to resources in many services, the length of the tag value must meet the requirements of all services.\
-                                     To delete a tag on AWS resource, empty values are used.
+                        description: value is the value of the tag. Some AWS service do not support empty values. Since tags are added to resources in many services, the length of the tag value must meet the requirements of all services.
                         type: string
                         maxLength: 256
-                        minLength: 0
-                        pattern: ^[0-9A-Za-z_.:/=+-@]*$
+                        minLength: 1
+                        pattern: ^[0-9A-Za-z_.:/=+-@]+$
 ```
-
 
 ### Operational Aspects of API Extensions
 
@@ -425,7 +386,7 @@ NA
 ## Design Details
 
 User can add tags during installation for creation of resources with tags. Installer creates infrastructure manifests with `resourceTags` to `.spec.platformSpec.aws` of the `Infrastructure.config.openshift.io`.
-Operators that operate on aws resources must consider the tags from `.spec.platformSpec.aws`, `.status.platformStatus.aws` and existing AWS resource tags.
+Operators that operate on aws resources must consider the tags from `.spec.platformSpec.aws`, `.status.platformStatus.aws`, kube resource and existing AWS resource tags.
 
 The values from `status.platformStatus.aws` will be used to only support older version.
 
@@ -475,20 +436,32 @@ The status/spec field may remain populated, components may or may not continue t
 If a user decides that they do not want these tags applied to new resources, there is no clean way to address that need:
 
 1. User would have to get help from support to edit the status field for older version which uses `experimentalPropagateUserTags`.
-2. User would have to manually remove the undesired user-defined tags from some existing resources even though user-defined tags can be marked for deletion by setting tag value to empty string.
+2. User would have to manually remove the undesired user-defined tags from some existing resources.
 3. User would have to manually update user-defined tags for AWS resources which are not managed by an operator.
 4. User would have to manually update user-defined tags for AWS resources where update logic is not supported by an operator.
 
 ## Alternatives
 
-An operator can be designed to behave similar to how the installer's destroy behaves, namely by using the resource tagging API to search for resources with the kubernetes.io/.../cluster=owned tag.
-The operator would reconcile on changes to the infrastructure CR to ensure that resources owned by the cluster have tags matching what is in the infrastructure CR.
-That would get tricky when it comes to resources owned by in-cluster operators, though, particularly with tags that may have different values in the corresponding kube resources.
-The operator would need to monitor multiple kube resources, infrastructure CR and multiple instances of different AWS resource types.
+1. An operator can be designed to behave similar to how the installer's destroy behaves, namely by using the resource tagging API to search for resources with the kubernetes.io/.../cluster=owned tag.
+   The operator would reconcile on changes to the infrastructure CR to ensure that resources owned by the cluster have tags matching what is in the infrastructure CR.
+   That would get tricky when it comes to resources owned by in-cluster operators, though, particularly with tags that may have different values in the corresponding kube resources.
+   The operator would need to monitor multiple kube resources, infrastructure CR and multiple instances of different AWS resource types.
+
+2. A way to delete tags was considered when the user sets the user-defined tag value to an empty string in `.spec.platformSpec.aws.resourceTags`.
+
+   For example,
+
+   Existing tag for AWS resource = `key_infra1 = value_old`
+
+   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 =`
+
+   Action = Existing tag for AWS resource is deleted.
+
+   Final tag set to AWS resource = deleted
+
+   Event action = An event is generated to notify user about the request status (success/failure) to delete tags for the AWS resource.
+
+   As AWS considers empty string as a valid tag value, the behaviour becomes ambiguous from the user perspective.
 
 ## Infrastructure Needed [optional]
 
-## Future Work
-
-1. Update the Infrastructture CRD to enable validation  to check if any tag that starts with `kubernetes.io` or `openshift.io` using
-   CRD Validation Expression Language proposed here : https://github.com/kubernetes/enhancements/pull/2877/files.
