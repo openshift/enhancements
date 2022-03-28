@@ -438,17 +438,11 @@ None that I can think of at the moment
 
 ### Test Plan
 
+#### General tests
+
 - Add unit tests to the Cluster Ingress Operator to make sure the
-IngressController resource is generated as exepected.
-
-- Add periodic nightly tests which install single-node in the cloud, add a few
-worker nodes to it, then run conformance tests to make sure we don't run into
-any problems not described in this enhancement.
-
-- Add periodic nightly tests which install a single-node "none"-platform cluster,
-add worker nodes to it, and check that ingress traffic still works as expected
-and recovers even after the `router-default` pod gets deleted and rescheduled.
-Make sure this is still true even after upgrades.
+IngressController resource and corresponding Deployment is generated as
+exepected.
 
 - Add tests on both cloud / "none"-platform that check that a single-node cluster
 with additional workers recovers after the single control-plane node reboots by
@@ -458,7 +452,26 @@ running conformance tests post-reboot.
 with additional workers recovers after an upgrade by running conformance tests
 post-upgrade.
 
-TODO: Describe day-1-workers tests?
+#### Day-2 workers tests
+
+- Add periodic nightly tests which install single-node in the cloud, add a few
+worker nodes to it, then run conformance tests to make sure we don't run into
+any problems not described in this enhancement.
+
+- Add periodic nightly tests which install a single-node "none"-platform cluster,
+add worker nodes to it, and check that ingress traffic still works as expected
+and recovers even after the `router-default` pod gets deleted and rescheduled.
+
+#### Day-1 workers tests
+
+- Add periodic nightly tests which install a single control-plane node cluster
+with a few additional workers in the cloud, then run conformance tests to make
+sure we don't run into any problems not described in this enhancement.
+
+- Add periodic nightly tests which install a single control-plane "none"-platform
+cluster with additional workers and check that ingress traffic still works as
+expected and recovers even after the `router-default` pod gets deleted and
+rescheduled. 
 
 ### Graduation Criteria
 
