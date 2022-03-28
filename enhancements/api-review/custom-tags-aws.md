@@ -308,12 +308,12 @@ type AWSPlatformSpec struct {
     ...
     // ResourceTags is a list of additional tags to apply to AWS resources created for the cluster.
     // See https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html for information on tagging AWS resources.
-    // AWS supports a maximum of 10 tags per resource. OpenShift reserves 5 tags for its use, leaving 5 tags
+    // AWS supports a minimum of 10 tags per resource. OpenShift reserves 5 tags for its use, leaving 5 tags
     // available for the user.
     // ResourceTags field is mutable and items can be removed.
     // When a tag is removed from this list, management of the tag is stopped.
     // The tag will remain in an unmanaged state on any existing resource.
-    // +kubebuilder:validation:MaxItems=10
+    // +kubebuilder:validation:MaxItems=5
     // +optional
     ResourceTags []AWSResourceTag `json:"resourceTags,omitempty"`
 }
@@ -348,7 +348,7 @@ spec:
     resourceTags:
         description: ResourceTags is a list of additional tags to apply to AWS resources created for the cluster. See https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html for information on tagging AWS resources.
         type: array
-        maxItems: 10
+        maxItems: 5
         items:
             description: AWSResourceTag is a tag to apply to AWS resources created for the cluster.
             type: object
