@@ -9,7 +9,7 @@ reviewers:
 approvers:
   - "@russelb"
 creation-date: 2020-08-26
-last-updated: 2022-01-06
+last-updated: 2022-05-09
 status: informational
 ---
 
@@ -89,6 +89,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9106  | sdn controller kube-rbac-proxy | sdn | 4.10 | control plane only, sdn only |
 | 9200-9219  | various CSI drivers | storage | 4.8 | metrics |
 | 9258  | cluster-cloud-controller-manager-operator | cluster infra | 4.9 | metrics, control plane only |
+| 9444  | haproxy | sdn | 4.7 | on-prem internal loadbalancer, healthcheck port |
+| 9445  | haproxy | sdn | 4.7 | on-prem internal loadbalancer |
 | 9446  | baremetal-operator | kni | 4.9 | healthz; baremetal provisioning, control plane only |
 | 9447  | baremetal-operator | kni | 4.10 | webhook; baremetal provisioning, control plane only |
 | 9537  | crio      | node || metrics |
@@ -147,6 +149,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 29105 | ovn-kubernetes | sdn |4.10| metrics, ovn-kubernetes only|
 | 29102 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
 | 29103 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
+| 29445 | haproxy | sdn | 4.7 | on-prem internal loadbalancer, stats port |
 
 
 ## Previously allocated
