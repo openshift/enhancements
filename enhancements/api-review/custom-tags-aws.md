@@ -319,8 +319,8 @@ type AWSPlatformSpec struct {
 }
 
 // Existing type
-// AWSResourceTag is a tag to apply to AWS resources created for the cluster.
-type AWSResourceTag struct {
+// AWSResourceTagSpec is a tag to apply to AWS resources created for the cluster.
+type AWSResourceTagSpec struct {
     // key is the key of the tag
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinLength=1
