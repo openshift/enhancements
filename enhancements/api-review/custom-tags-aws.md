@@ -321,14 +321,17 @@ type AWSPlatformSpec struct {
 // Existing type
 // AWSResourceTagSpec is a tag to apply to AWS resources created for the cluster.
 type AWSResourceTagSpec struct {
-    // key is the key of the tag
+    // key is the key of the AWS tag. The value must consist only of alphabets, numbers and special characters(_.:\/=+-@).
+    // key should not consist "openshift.io" and "kubernetes.io" which are reserved.
+    // key must be no more than 128 characters in length.
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=128
     // +kubebuilder:validation:Pattern=`^(?!openshift.io)(?!kubernetes.io)([0-9A-Za-z_.:\/=+-@]+$)`
     // +required
     Key string `json:"key"`
-    // value is the value of the tag.
+    // value is the value of the AWS tag. The value must consist only of alphabets, numbers and special characters(_.:\/=+-@).
+    // value must be no more than 256 characters in length.
     // Some AWS service do not support empty values. Since tags are added to resources in many services, the
     // length of the tag value must meet the requirements of all services.
     // +kubebuilder:validation:Required
