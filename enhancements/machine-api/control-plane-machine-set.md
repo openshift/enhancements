@@ -289,8 +289,8 @@ type FailureDomains struct {
 // +kubebuilder:validation:MinProperties:=1
 type AWSFailureDomain struct {
 	// Subnet is a reference to the subnet to use for this instance.
-  // If no subnet reference is provided, the Machine will be created in the first
-  // subnet returned by AWS when listing subnets within the provided availability zone.
+	// If no subnet reference is provided, the Machine will be created in the first
+	// subnet returned by AWS when listing subnets within the provided availability zone.
 	// +optional
 	Subnet *AWSResourceReference `json:"subnet,omitempty"`
 
