@@ -1,5 +1,5 @@
 ---
-title: ephemeral-agent-installer-e2e-tests
+title: development-environment
 authors:
   - "@lranjbar"
 reviewers:
