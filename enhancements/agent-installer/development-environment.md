@@ -52,7 +52,7 @@ development and for automating the flows in Openshift CI.
 * Create predefined configurations to deploy Openshift in HA, compact and SNO topologies.
 * Create predefined network configurations for Openshift including but not limited IP type 
 (IPv4, IPv6, dual-stack), L2 segments and DHCP configurations.
-* A reusable Ansible environment configuration for development and testing teams to use with
+* A reusable environment configuration for development and testing teams to use with
 predefined flows for quicker onboarding.
 * Convergence of the underlying scripts and environment setup code between Metal Platform (IPI) 
 team and the new Agent Installer teams.
