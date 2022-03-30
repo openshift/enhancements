@@ -11,9 +11,9 @@ approvers:
   - @shardy
   - @cgwalters
   - @kikisdeliveryservice
-  - @danwinship
 api-approvers:
-  - ???
+  - @danwinship
+  - @aojea
 creation-date: 2022-03-01
 last-updated: 2022-03-24
 tracking-link:
