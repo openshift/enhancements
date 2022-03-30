@@ -71,8 +71,8 @@ components as needed for the new project.
 
 ### User Stories
 
-* As a developer, I need to set up an environment so that I can simulate the installation of a 
-users first cluster using the ephemeral based agent installer image.
+* As a developer, I need to set up an environment so that I can install a 
+cluster locally using the agent-based installer for development and testing
 
 * As a developer, I need to launch the built ephemeral agent based installer image so that I can 
 test and validate this image during development.
