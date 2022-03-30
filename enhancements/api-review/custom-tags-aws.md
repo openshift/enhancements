@@ -113,10 +113,11 @@ In the future we will want to introduce a spec field where a customer can specif
 ### New proposal to support update of user-defined tags (or userTags)
 
 - `experimentalPropagateUserTags` field will be set for deprecation in this proposal version.
+  `experimentalPropagateUserTags` will be changed to a `*bool`, where an omitted value means that the user tags will be propagated to the cluster.
 
   The install validation will fail if there is any tag that starts with `kubernetes.io` or `openshift.io` in `userTags`. In the existing design, kubernetes.io and openshift.io namespaces are not allowed as part of user-defined tags.
 
-  The `resourceTags` field will be populated by the installer using the entries from `userTags` field.
+  The `resourceTags` field in `.spec.platformSpec.aws` will be populated by the installer using the entries from `userTags` field.
 
   `.spec.platformSpec.aws` is a mutable field and `.status.platformStatus.aws` is immutable.
   `.status.platformStatus.aws` will have older version tags defined and is required for upgrade case.
