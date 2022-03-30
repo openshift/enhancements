@@ -192,19 +192,19 @@ In the case where a user-defined tag is specified in the Infrastructure resource
 
 #### Precedence scenarios
 1) User-defined tags on kube resources MUST continue to take precedence during create and update.
-   A warning is generated to inform the user about action not being applied on the list of user tags.
+   When there is a conflict between the user tags specified in the Infrastructure resource and the kube resource, the event generated on updates to the AWS resource tags will include details about the conflict. Note that if the conflict does not cause an update to the AWS resource tags, then the conflict will not be registered in an event.
 
    For example,
 
-   Existing tag in kube resource object like machine CR = `key_infra1 = custom_value`
+   Existing tag in `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value1`
 
-   New tag request = `.spec.platformSpec.aws.resourceTags` has `key_infra1 = value1`
+   Tags specified in a kube resource updated to include a different value `key_infra1 = value2`
 
-   Action = The tag for AWS resource is maintained to `key_infra1 = custom_value`.
+   Action = The tag for AWS resource is updated to `key_infra1 = value2`.
 
-   Final tag set to AWS resource = `key_infra1 = custom_value`
+   Final tag set to AWS resource = `key_infra1 = value2`
 
-   Event action = An event is generated to notify user about the request status (success) to update tags for the AWS resource. A warning also must be generated about list of user-defined tags on which action is not applicable.
+   Event action = The event generated to notify the user about the request status (success) to update tags for the AWS resource will include details stipulating that the user tag specified for "key_infra1" in the Infrastructure resource was superseded by the tag specified for "key_infra1" in the kube resource.
 
 2) When a new user-defined tag is added on kube resources, it MUST override the tag in `.spec.platformSpec.aws`.
    A warning is generated to inform the user about action not being applied on the list of user tags.
