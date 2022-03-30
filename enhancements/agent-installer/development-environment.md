@@ -94,8 +94,8 @@ Not applicable.
 Which means the risk of breaking things in the central framework now is larger and
 has a larger "splash zone."
 
-We can mitigate this for the new ephemeral agent installer by adding e2e tests into the
-dev-scripts repository that run the agent flows. The purpose of this would be to find 
+We can mitigate this for the new ephemeral agent installer by running e2e tests using the agent flows for changes to the
+dev-scripts repository. The purpose of this would be to find 
 breakages in the tests across the different teams.
 
 ** The dev-scripts repository clones the [metal-dev-env](https://github.com/metal3-io/metal3-dev-env) 
