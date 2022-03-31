@@ -108,7 +108,8 @@ these alerts if they are not actionable.
 * Alert names MUST be CamelCase, e.g.: `PrometheusRuleFailures`
 * Alert names SHOULD be prefixed with a component, e.g.: `AlertmanagerFailedReload`
   * There may be exceptions for some broadly scoped alerts, e.g.: `TargetDown`
-* Alerts MUST include a `severity` label indicating the alert's urgency.
+* Alerts MUST include a `severity` label indicating the impact the alert has
+    on the operation of a component or the system.
   * Valid severities are: `critical`, `warning`, or `info` — see below for
     guidelines on writing alerts of each severity.
 * Alerts MUST include `summary` and `description` annotations.
@@ -123,6 +124,10 @@ these alerts if they are not actionable.
   * Runbook style documentation for resolving critical alerts is required.
     These runbooks are reviewed by OpenShift SREs and currently live in the
     [openshift/runbooks][2] repository.
+* Alerts CAN include a `priority` label indicationg the alert's level of importance and the order in which it should be fixed.
+  * Valid priorities are: `high`, `medium`, or `low`.
+    Higher the priority the sooner the alert should be resolved.
+  * If the alert doesn't include a `priority` label, we can assume it is a `medium` priority alert.
 
 ### Critical Alerts
 
@@ -228,7 +233,6 @@ Example info alert: [MultipleContainersOOMKilled][5]
     namespace: kube-system
     severity: info
 ```
-
 This alert fires if multiple containers have been terminated due to out of
 memory conditions in the last 15 minutes.  This is something the administrator
 should be aware of, but may not require immediate action.
