@@ -55,7 +55,7 @@ Motivations include but are not limited to:
 - The administrator or service (in the case of Managed OpenShift) installing OpenShift can pass an arbitrary
    list of user-defined tags to the OpenShift Installer, and everything created by the installer and all other
    bootstrapped components will apply those tags to all resources created in AWS, for the life of the cluster, and where supported by AWS.
-- User-defined tags can be applied at creation time, in an atomic operation.
+- User-defined tags can be applied at creation time, as an atomic operation.
 - User-defined tags can be updated post creation.
 
 ### Non-Goals
@@ -226,6 +226,8 @@ In the case where a user-defined tag is specified in the Infrastructure resource
 #### Caveats
 1) User updates a resource's tag using an external tool when there is an entry in `.spec.platformSpec.aws.resourceTags` or kube resource.
    The resource's tag will be reconciled by its owning operator to the value from `.spec.platformSpec.aws.resourceTags` or kube resource.
+   In this case, the desired value is not set immediately for AWS resource by the owning operator. There is eventual consistency maintained by the owning operator.
+   The time taken to reconcile the modified user-defined tag on AWS resource to desired value vary across owning operators.
 
    For example,
 
@@ -268,10 +270,6 @@ In the case where a user-defined tag is specified in the Infrastructure resource
 - As `.spec.platformSpec.aws.resourceTags` has the actual values. Sync to `.status.platformStatus.aws.resourceTags` was required in earlier design to identify if the
   tag on the resource was created using Infrastructure CR or external tool. Identifying the creator tool was done to restrict user from editing the same user-tag kv pair using multiple tools.
   This inherently poses many scenarios of conflict which will result in user-defined tag kv pair being inconsistent across cluster when applied using Infrastructure CR. Hence, user will be confused which tool to be used to update tag.
-
-6) User applies user-defined tag using `.spec.platformSpec.aws.resourceTags`. Later, user modifies the tag on the AWS resource using external tool.
-   In this case, the desired value is not set immediately for AWS resource by the owning operator. There is eventual consistency maintained by the owning operator.
-   The time taken to reconcile the modified user-defined tag on AWS resource to desired value vary across owning operators.
 
 ### User Stories
 
