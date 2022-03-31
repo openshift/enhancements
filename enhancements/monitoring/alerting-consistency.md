@@ -123,6 +123,10 @@ these alerts if they are not actionable.
   * Runbook style documentation for resolving critical alerts is required.
     These runbooks are reviewed by OpenShift SREs and currently live in the
     [openshift/runbooks][2] repository.
+* Operator Alerts are RECOMMENDED to include `kubernetes_operator_part_of` label
+  indicating the operator name the alert is related to.
+* Operator Alerts are RECOMMENDED to include `kubernetes_operator_component` label
+  indicating the operator component name that the alert is related to.
 
 ### Critical Alerts
 
