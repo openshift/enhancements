@@ -69,7 +69,8 @@ should be possible to collect this information before implementation begins in
 order to avoid requiring implementors to split their attention between writing
 release notes and implementing the feature itself.
 
-A good summary is probably at least a paragraph in length.
+A good summary is no more than one paragraph in length. More detail
+should go into the following sections.
 
 ## Motivation
 
