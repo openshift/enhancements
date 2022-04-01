@@ -26,22 +26,6 @@ Start by filling out this header template with metadata for this enhancement.
 
 * Enhancements should have agreement from all stakeholders prior to merging.
 
-* `reviewers`: This can be anyone that has an interest in this work or the expertise
-  to provide a useful input/assessment.  At a minimum it should include the lead for
-  any team that will need to do work for this EP, or whose team will own/support the
-  resulting implementation.  Please indicate what aspect of the EP you expect them
-  to be concerned with so they do not always need to review the entire EP in depth.
-
-* `approvers`: All enhancements must be approved, but the appropriate people to
-  approve a given enhancement depends on its scope.  If an enhancement is
-  limited in scope to a given team or component, then a peer or lead on that
-  team or pillar is an appropriate approver.  If an enhancement captures
-  something more broad in scope, then a member of the OpenShift staff engineers team
-  or someone they delegate would be appropriate.  Examples would be something
-  that changes the definition of OpenShift in some way, adds a new required
-  dependency, or changes the way customers are supported.  Use your best
-  judgement to determine the level of approval needed.  If you’re not sure,
-  just leave it blank and ask for input during review.
 
 # Neat Enhancement Idea
 

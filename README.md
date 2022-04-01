@@ -66,6 +66,44 @@ Create an enhancement here once you:
 - have identified people who agree to work on and maintain the enhancement
   - many enhancements will take several releases to complete
 
+## How are Enhancements Reviewed and Approved?
+
+The author of an enhancement is responsible for managing it through
+the review process, including soliciting feedback on the pull request
+and in meetings, if necessary.
+
+Each enhancement should have at least one "approver" and several
+reviewers designated in the header of the document.
+
+The approver assists authors who may not be familiar with the process,
+the project, or the maintainers. They may provide advice about who
+should review a specific proposal and point out deadlines or other
+time-based criteria for completing work. The approver is responsible
+for recognizing when consensus has been reached so that a proposal is
+ready to be approved, or formally rejected. In cases where consensus
+is not emerging on its own, the approver may also step in as a
+mediator. The approver might not be a subject-matter expert for the
+subject of the design, although it can help if they are.
+
+Choosing the appropriate approver depends on the scope of an
+enhancement. If it is limited in scope to a given team or component,
+then a peer or lead on that team or pillar is appropriate.  If an
+enhancement captures something more broad in scope, then a member of
+the OpenShift staff engineers team or someone they delegate would be
+appropriate.  Examples of broad scope are proposals that change the
+definition of OpenShift in some way, add a new required dependency, or
+change the way customers are supported.  Use your best judgement to
+determine the level of approval needed.  If you’re not sure, ask a
+staff engineer to help find a good approver.
+
+The set of reviewers for an enhancement proposal can be anyone that
+has an interest in this work or the expertise to provide a useful
+input/assessment.  At a minimum the reviewers should include the lead
+(or a delegate) for any team that will need to do work for this EP, or
+whose team will own/support the resulting implementation.  Please
+indicate what aspect of the EP you expect them to be concerned with so
+they do not always need to review the entire EP in depth.
+
 
 ## When to Comment on an Enhancement Issue
 
