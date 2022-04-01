@@ -15,7 +15,7 @@ api-approvers:
   - @danwinship
   - @aojea
 creation-date: 2022-03-01
-last-updated: 2022-03-24
+last-updated: 2022-04-01
 tracking-link:
   - https://issues.redhat.com/browse/SDN-2213
 see-also:
@@ -160,7 +160,7 @@ baremetal:
       description: ingressIP is an external IP...
       type: string
     ingressIPSecondary:
-      description: ingressIPv4 is an additional external IP...
+      description: ingressIPSecondary is an additional external IP...
       type: string
     nodeDNSIP:
     ...
@@ -405,7 +405,7 @@ baremetal:
       description: ingressIP is an external IP...
       type: string
     ingressIPs:
-      description: ingressIPv4 is a list of  external IPs...
+      description: ingressIPs is a list of  external IPs...
       type: array
     nodeDNSIP:
     ...
