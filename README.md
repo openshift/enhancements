@@ -84,8 +84,8 @@ time-based criteria for completing work. The approver is responsible
 for recognizing when consensus has been reached so that a proposal is
 ready to be approved, or formally rejected. In cases where consensus
 is not emerging on its own, the approver may also step in as a
-mediator. The approver might not be a subject-matter expert for the
-subject of the design, although it can help if they are.
+mediator. The approver do not need to be a subject-matter expert for
+the subject of the design, although it can help if they are.
 
 Choosing the appropriate approver depends on the scope of an
 enhancement. If it is limited in scope to a given team or component,
