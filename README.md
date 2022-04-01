@@ -104,6 +104,29 @@ whose team will own/support the resulting implementation.  Please
 indicate what aspect of the EP you expect them to be concerned with so
 they do not always need to review the entire EP in depth.
 
+## How Can an Author Help Speed Up the Review Process?
+
+Enhancements should have agreement from all stakeholders prior to
+being approved and merged. Reviews are not time-boxed (see Life-cycle
+below). We manage the rate of churn in the project by asking
+maintainers to include review work along with everything else that
+they do.  If it is not possible to attract the attention of enough of
+the right maintainers to act as reviewers, that is a signal that the
+project's rate of change is maxed out. With that said, there are a few
+things that authors can do to help keep the conversation moving along.
+
+1. Respond to comments quickly, so that a reviewer can tell you are
+   engaged.
+2. Push update patches, rather than force-pushing a replacement, to
+   make it easier for reviewers to see what you have changed.
+3. Do not rely solely on the enhancement for visibility of the
+   proposal. For high priority work, or if the conversation stalls
+   out, bring the enhancement to one of the weekly architecture review
+   meetings for discussion. If you aren't sure which meeting to use,
+   work with a staff engineer to find a good fit.
+4. Be mindful of the fact that reviewers have work other than reading
+   updates to your enhancement. Avoid overusing pings on Slack to get
+   their attention.
 
 ## When to Comment on an Enhancement Issue
 
