@@ -93,7 +93,13 @@ enhancement.
 
 ## Proposal
 
-This is where we get down to the nitty gritty of what the proposal actually is.
+This is where we get down to the nitty gritty of what the proposal
+actually is. Describe clearly what will be changed, including all of
+the components that need to be modified and how they will be
+different. Include the reason for each choice in the design and
+implementation that is proposed here, and expand on reasons for not
+choosing alternatives in the Alternatives section at the end of the
+document.
 
 ### User Stories
 
