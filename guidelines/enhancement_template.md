@@ -79,12 +79,17 @@ this proposal. Describe why the change is important and the benefits to users.
 
 ### Goals
 
-List the specific goals of the proposal. How will we know that this has succeeded?
+Summarize the specific goals of the proposal. How will we know that
+this has succeeded?  A good goal describes something a user wants from
+their perspective, and does not include the implementation details
+from the proposal.
 
 ### Non-Goals
 
-What is out of scope for this proposal? Listing non-goals helps to focus discussion
-and make progress.
+What is out of scope for this proposal? Listing non-goals helps to
+focus discussion and make progress. Highlight anything that is being
+deferred to a later phase of implementation that may call for its own
+enhancement.
 
 ## Proposal
 
