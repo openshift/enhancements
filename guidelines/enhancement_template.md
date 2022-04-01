@@ -2,7 +2,7 @@
 title: neat-enhancement-idea
 authors:
   - "@janedoe"
-reviewers:
+reviewers: # Include a comment about what domain expertise a reviewer is expected to bring. For example, "- @networkguru, for networking aspects"
   - TBD
   - "@alicedoe"
 approvers:
