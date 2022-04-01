@@ -19,7 +19,9 @@ community, but require consensus from domain specific project maintainers in
 order to implement and accept into the release.
 
 For an overview of the whole project, see [the roadmap](ROADMAP.md).
+
 For a quick-start, FAQ, and template references, see [the guidelines](guidelines/README.md).
+
 ## Why are Enhancements Tracked?
 
 As the project evolves, its important that the OKD community understands how we
@@ -148,7 +150,6 @@ top level release priority. These will be highlighted in the
 [this-week](this-week/) newsletters.
 
 ## Life-cycle
-
 
 Pull requests to this repository should be short-lived and merged as
 soon as there is consensus. Therefore, the normal life-cycle timeouts
