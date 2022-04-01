@@ -120,7 +120,10 @@ things that authors can do to help keep the conversation moving along.
 1. Respond to comments quickly, so that a reviewer can tell you are
    engaged.
 2. Push update patches, rather than force-pushing a replacement, to
-   make it easier for reviewers to see what you have changed.
+   make it easier for reviewers to see what you have changed. Use
+   descriptive commit messages on those updates, or plan to use
+   `/label tide/merge-method-squash` to have them squashed when the
+   pull request merges.
 3. Do not rely solely on the enhancement for visibility of the
    proposal. For high priority work, or if the conversation stalls
    out, bring the enhancement to one of the weekly architecture review
