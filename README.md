@@ -96,7 +96,9 @@ appropriate.  Examples of broad scope are proposals that change the
 definition of OpenShift in some way, add a new required dependency, or
 change the way customers are supported.  Use your best judgement to
 determine the level of approval needed.  If you’re not sure, ask a
-staff engineer to help find a good approver.
+staff engineer to help find a good approver by posting in
+`#forum-arch` on the CoreOS Slack server and tagging
+`@aos-staff-engineers`.
 
 The set of reviewers for an enhancement proposal can be anyone that
 has an interest in this work or the expertise to provide a useful
@@ -126,9 +128,10 @@ things that authors can do to help keep the conversation moving along.
    pull request merges.
 3. Do not rely solely on the enhancement for visibility of the
    proposal. For high priority work, or if the conversation stalls
-   out, bring the enhancement to one of the weekly architecture review
-   meetings for discussion. If you aren't sure which meeting to use,
-   work with a staff engineer to find a good fit.
+   out, you can start a thread in `#forum-arch` on the CoreOS Slack
+   server or bring the enhancement to one of the weekly architecture
+   review meetings for discussion. If you aren't sure which meeting to
+   use, work with a staff engineer to find a good fit.
 4. Be mindful of the fact that reviewers have work other than reading
    updates to your enhancement. Avoid overusing pings on Slack to get
    their attention.
