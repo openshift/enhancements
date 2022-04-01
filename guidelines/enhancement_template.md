@@ -22,20 +22,6 @@ superseded-by:
   - "/enhancements/our-past-effort.md"
 ---
 
-Start by filling out this header template with metadata for this enhancement.
-
-* Enhancements should have agreement from all stakeholders prior to merging.
-
-
-# Neat Enhancement Idea
-
-This is the title of the enhancement. Keep it simple and descriptive. A good
-title can help communicate what the enhancement is and should be considered as
-part of any review.
-
-The YAML `title` should be lowercased and spaces/punctuation should be
-replaced with `-`.
-
 To get started with this template:
 1. **Pick a domain.** Find the appropriate domain to discuss your enhancement.
 1. **Make a copy of this template.** Copy this template into the directory for
@@ -58,6 +44,19 @@ To get started with this template:
 1. **Keep all required headers.** If a section does not apply to an
    enhancement, explain why but do not remove the section. This part
    of the process is enforced by the linter CI job.
+
+See ../README.md for background behind these instructions.
+
+Start by filling out the header with the metadata for this enhancement.
+
+# Neat Enhancement Idea
+
+This is the title of the enhancement. Keep it simple and descriptive. A good
+title can help communicate what the enhancement is and should be considered as
+part of any review.
+
+The YAML `title` should be lowercased and spaces/punctuation should be
+replaced with `-`.
 
 The `Metadata` section above is intended to support the creation of tooling
 around the enhancement process.
