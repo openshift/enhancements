@@ -326,7 +326,7 @@ type AWSResourceTagSpec struct {
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=128
-    // +kubebuilder:validation:Pattern=`^(?!openshift.io)(?!kubernetes.io)([0-9A-Za-z_.:\/=+-@]+$)`
+    // +kubebuilder:validation:Pattern=`^[0-9A-Za-z_.:/=+-@]+$`
     // +required
     Key string `json:"key"`
     // value is the value of the AWS tag. The value must consist only of alphanumeric and certain special characters(_.:\/=+-@).
@@ -363,7 +363,7 @@ spec:
                         type: string
                         maxLength: 128
                         minLength: 1
-                        pattern: ^(?!openshift.io)(?!kubernetes.io)([0-9A-Za-z_.:\/=+-@]+$)
+                        pattern: ^[0-9A-Za-z_.:/=+-@]+$
                     value:
                         description: value is the value of the tag. Some AWS service do not support empty values. Since tags are added to resources in many services, the length of the tag value must meet the requirements of all services.
                         type: string
