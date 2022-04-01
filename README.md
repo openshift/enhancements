@@ -110,8 +110,8 @@ they do not always need to review the entire EP in depth.
 
 Enhancements should have agreement from all stakeholders prior to
 being approved and merged. Reviews are not time-boxed (see Life-cycle
-below). We manage the rate of churn in the project by asking
-maintainers to include review work along with everything else that
+below). We manage the rate of churn in OKD by asking component
+maintainers to act as reviewers in addition to everything else that
 they do.  If it is not possible to attract the attention of enough of
 the right maintainers to act as reviewers, that is a signal that the
 project's rate of change is maxed out. With that said, there are a few
