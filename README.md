@@ -141,8 +141,8 @@ Please comment on the enhancement issue to:
 - link to relevant issues in other repos
 
 Please do not comment on the enhancement issue to:
-- discuss a detail of the design, code or docs. Use a linked-to-issue or design PR
-  for that
+- discuss a detail of the design, code or docs. Use a linked-to-issue
+  or design pull request for that
 
 ## Using Labels
 
@@ -179,14 +179,15 @@ the required sections.
 
 If you are working on an enhancement and the linter job fails because
 of changes to the template (not other issues with the markdown
-formatting), handle it based on the maturity of the enhancement PR:
+formatting), handle it based on the maturity of the enhancement pull
+request:
 
-* If the only reason to update your PR is to make the linter job
+* If the only reason to update your pull request is to make the linter job
   accept it after a template change and there are no substantive
   content changes needed for approval, override the job to allow the
-  PR to merge.
+  pull request to merge.
 * If your enhancement is still a draft, and consensus hasn't been
-  reached, modify the PR so the new enhancement matches the updated
+  reached, modify the pull request so the new enhancement matches the updated
   template.
 * If you are updating an existing (merged) document, go ahead and
   override the job.
