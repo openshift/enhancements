@@ -20,6 +20,13 @@ order to implement and accept into the release.
 
 For an overview of the whole project, see [the roadmap](ROADMAP.md).
 For a quick-start, FAQ, and template references, see [the guidelines](guidelines/README.md).
+## Why are Enhancements Tracked?
+
+As the project evolves, its important that the OKD community understands how we
+build, test, and document our work.  Individually it is hard to understand how
+all parts of the system interact, but as a community we can lean on each other
+to build the right design and approach before getting too deep into an
+implementation.
 
 ## Is My Thing an Enhancement?
 
@@ -59,13 +66,6 @@ Create an enhancement here once you:
 - have identified people who agree to work on and maintain the enhancement
   - many enhancements will take several releases to complete
 
-## Why are Enhancements Tracked
-
-As the project evolves, its important that the OKD community understands how we
-build, test, and document our work.  Individually it is hard to understand how
-all parts of the system interact, but as a community we can lean on each other
-to build the right design and approach before getting too deep into an
-implementation.
 
 ## When to Comment on an Enhancement Issue
 
