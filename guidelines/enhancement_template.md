@@ -113,7 +113,7 @@ Include a story on how this proposal will be operationalized:  lifecycled, monit
 ### API Extensions
 
 API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
+and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
 
 - Name the API extensions this enhancement adds or modifies.
 - Does this enhancement modify the behaviour of existing resources, especially those owned
@@ -140,7 +140,9 @@ What are the risks of this proposal and how do we mitigate. Think broadly. For
 example, consider both security and how this will impact the larger OKD
 ecosystem.
 
-How will security be reviewed and by whom? How will UX be reviewed and by whom?
+How will security be reviewed and by whom?
+
+How will UX be reviewed and by whom?
 
 Consider including folks that also work outside your immediate sub-project.
 
