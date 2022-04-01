@@ -24,8 +24,6 @@ superseded-by:
 
 Start by filling out this header template with metadata for this enhancement.
 
-* Enhancements should be related to work to be implemented in the near future.
-
 * Enhancements should have agreement from all stakeholders prior to merging.
 
 * `reviewers`: This can be anyone that has an interest in this work or the expertise

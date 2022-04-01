@@ -47,6 +47,11 @@ and ask!
 
 ## When to Create a New Enhancement
 
+Enhancements should be related to work to be implemented in the near
+future. If you have an idea, but aren't planning to implement it right
+away, the conversation should start somewhere else like the aos-devel
+mailing list.
+
 Create an enhancement here once you:
 
 - have circulated your idea to see if there is interest
