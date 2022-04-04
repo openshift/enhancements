@@ -519,13 +519,15 @@ than there already was.
 
 For administrators and support engineers, the `IngressController` is still the
 source of truth and where you need to look if you seek to understand the router
-placement in practice. However, now the `replicas` and `nodePlacement` on
-`IngressController` may be empty, so administrators and support engineers can
-refer to the corresponding Deployment that got created if they wish to know the
-practical values. This could potentially be improved if the Cluster Ingress
-Operator would always strive to reconcile these defaults to also appear in the
-`IngressController` CRs themselves. The decision is left for the Cluster Ingress
-Operator's implementation.
+placement in practice. However, now the absence of `replicas` and
+`nodePlacement` in the `IngressController` resource has a different meaning
+(and that meaning depends on the new `DefaultPlacement` parameter), so
+administrators and support engineers can refer to the corresponding Deployment
+that got created if they wish to know the values in practice. This could
+potentially be improved if the Cluster Ingress Operator would always strive to
+reconcile these defaults to also appear in the `IngressController` CRs
+themselves. The decision is left for the Cluster Ingress Operator's
+implementation.
 
 #### Failure Modes
 
