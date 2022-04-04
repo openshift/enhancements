@@ -313,6 +313,7 @@ The following steps assume the Machine about to be launched to which the raw Dat
           lun: 0
           diskSizeGB: 4
           cachingType: None
+          deletionPolicy: Detach
           managedDisk:
             storageAccountType: UltraSSD_LRS
         userDataSecret:
