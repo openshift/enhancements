@@ -102,11 +102,13 @@ staff engineer to help find a good approver by posting in
 
 The set of reviewers for an enhancement proposal can be anyone that
 has an interest in this work or the expertise to provide a useful
-input/assessment.  At a minimum the reviewers should include the lead
-(or a delegate) for any team that will need to do work for this EP, or
-whose team will own/support the resulting implementation.  Please
-indicate what aspect of the EP you expect them to be concerned with so
-they do not always need to review the entire EP in depth.
+input/assessment.  At a minimum the reviewers should include a
+representative of any team that will need to do work for this EP, or
+whose team will own/support the resulting implementation. Be mindful
+of the workload of reviewers, however, and the challenge of finding
+consensus as the group of reviewers grows larger. Clearly indicating
+what aspect of the EP you expect each reviewer to be concerned with
+will allow them to focus their reviews.
 
 ## How Can an Author Help Speed Up the Review Process?
 
