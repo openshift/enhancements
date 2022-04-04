@@ -107,6 +107,11 @@ Cluster profiles are a way to support different deployment models for OpenShift 
 CVO uses the profile identifier to determine which manifests to apply therefore your manifest must contain one or more profile annotations specifying applicable profiles.
 See [the cluster-profiles enhancement](/enhancements/update/cluster-profiles.md) for details.
 
+#### Cluster capabilities
+
+Cluster capabilities support the inclusion or exclusion of optional OpenShift-core components.
+See [the capability enhancement](/enhancements/installer/component-selection.md).
+
 #### TechPreview
 
 The CVO also considers feature-gate annotations when deciding whether to include a manifest.
