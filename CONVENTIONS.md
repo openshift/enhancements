@@ -96,132 +96,7 @@ metal3-io](https://github.com/metal3-io/metal3-docs/blob/master/design/bare-meta
 ### API
 
 OpenShift APIs follow the [Kubernetes API conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)
-with some exceptions, which are outlined below.
-
-#### Use JSON Field Names in Godoc
-
-Ensure that the godoc for a field name matches the JSON name, not the Go name,
-in Go definitions for API objects.  In particular, this means that the godoc for
-field names should use an initial lower-case letter.  For example, don't do the
-following:
-
-```go
-// Example is [...]
-type Example struct {
-	// ExampleFieldName specifies [...].
-	ExampleFieldName int32 `json:"exampleFieldName"`
-}
-```
-
-Instead, do the following:
-
-```go
-// Example is [...]
-type Example struct {
-	// exampleFieldName specifies [...].
-	ExampleFieldName int32 `json:"exampleFieldName"`
-}
-```
-
-The godoc for API objects appears in generated API documentation and `oc
-explain` output.  Following this convention has the disadvantage that the godoc
-does not match the Go definitions that developers use, but it has the advantage
-that generated API documentation and `oc explain` output show the correct field
-names that end users use, and the end-user experience is more important.
-
-#### Use Specific Types for Object References, and Omit "Ref" Suffix
-
-Use resource-specific types for object references.  For example, avoid using the
-generic `ObjectReference` type; instead, use a more specific type, such as
-`ConfigMapNameReference` or `ConfigMapFileReference` (defined in
-[github.com/openshift/api/config/v1](https://github.com/openshift/api/blob/master/config/v1/types.go)).
-If necessary, define a new type and use it.  Omit the "Ref" suffix in the field
-name.  For example, don't do the following:
-
-```go
-// Example is [...]
-type Example struct {
-	// FrobulatorConfigRef specifies [...].
-	FrobulatorConfigRef corev1.LocalObjectReference `json:"frobulatorConfigRef"`
-
-	// DefabulatorRef specifies [...].
-	DefabulatorRef corev1.LocalObjectReference `json:"defabulatorRef"`
-}
-```
-
-Instead, do the following:
-
-```go
-// Example is [...].
-type Example struct {
-	// frobulatorConfig specifies [...].
-	FrobulatorConfig configv1.ConfigMapNameReference `json:"frobulatorConfig"`
-	
-	// defabulator specifies [...].
-	Defabulator LocalDefabulatorReference `json:"defabulator"`
-}
-
-// LocalDefabulatorReference references a defabulator.
-type LocalDefabulatorReference struct {
-	// name is the metadata.name of the referenced defabulator object.
-	// +kubebuilder:validation:Required
-	// +required
-	Name string `json:"name"`
-}
-```
-
-Following this convention has the disadvantage that API developers may need to
-define additional types.  However, using custom types has the advantage that the
-types can have context-specific godoc that is more useful to the end-user than
-the generic boilerplate of the generic types.
-
-#### Use Resource Name Rather Than Kind in Object References
-
-Use resource names rather than kinds for object references.  For example, don't
-do the following:
-
-```go
-// DefabulatorReference references a defabulator.
-type DefabulatorReference struct {
-	// APIVersion is the API version of the referent.
-	APIVersion string `json:"apiVersion"`
-	// Kind of the referent.
-	Kind string `json:"kind"`
-	// Namespace of the referent.
-	Namespace string `json:"namespace"`
-	// Name of the referent.
-	Name string `json:"name"`
-}
-```
-
-Instead, do the following:
-
-```go
-// DefabulatorReference references a defabulator [...]
-type DefabulatorReference struct {
-	// group of the referent.
-	// +kubebuilder:validation:Required
-	// +required
-	Group string `json:"group"`
-	// resource of the referent.
-	// +kubebuilder:validation:Required
-	// +required
-	Resource string `json:"resource"`
-	// namespace of the referent.
-	// +kubebuilder:validation:Required
-	// +required
-	Namespace string `json:"namespace"`
-	// name of the referent.
-	// +kubebuilder:validation:Required
-	// +required
-	Name string `json:"name"`
-}
-```
-
-Following this convention has the disadvantage that it deviates from what users
-may be accustomed to from upstream APIs, but it has the advantage that it avoids
-ambiguity and the need for API consumers to resolve an API version and kind to
-the resource group and name that identify the resource.
+with some exceptions and additional guidance outlined in the [OpenShift API conventions](./dev-guide/api-conventions.md).
 
 ### Cluster Conventions
 
@@ -509,12 +384,12 @@ between the requested memory and used memory for each container in the
 `openshift-monitoring` namespace:
 ```PromQL
 (
-  # Calculate the 90th percentile of memory usage over the past hour and add 10% to that 
+  # Calculate the 90th percentile of memory usage over the past hour and add 10% to that
   1.1 * (max by (pod, container) (
     quantile_over_time(0.9, container_memory_working_set_bytes{namespace="openshift-monitoring", container != "POD", container!=""}[60m]))
   ) -
   # Calculate the maximum requested memory per pod and container
-  max by (pod, container) (kube_pod_container_resource_requests{namespace="openshift-monitoring", resource="memory", container!="", container!="POD"}) 
+  max by (pod, container) (kube_pod_container_resource_requests{namespace="openshift-monitoring", resource="memory", container!="", container!="POD"})
 ) / 1024 / 1024
 ```
 
