@@ -71,7 +71,7 @@ Create an enhancement here once you:
 ## How are Enhancements Reviewed and Approved?
 
 The author of an enhancement is responsible for managing it through
-the review process, including soliciting feedback on the pull request
+the review and approval process, including soliciting feedback on the pull request
 and in meetings, if necessary.
 
 Each enhancement should have at least one "approver" and several
@@ -114,7 +114,7 @@ will allow them to focus their reviews.
 
 Enhancements should have agreement from all stakeholders prior to
 being approved and merged. Reviews are not time-boxed (see Life-cycle
-below). We manage the rate of churn in OKD by asking component
+below). We manage the rate of churn in OpenShift by asking component
 maintainers to act as reviewers in addition to everything else that
 they do.  If it is not possible to attract the attention of enough of
 the right maintainers to act as reviewers, that is a signal that the
