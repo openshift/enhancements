@@ -141,17 +141,6 @@ things that authors can do to help keep the conversation moving along.
    directly on Slack, so that they can manage their work queue and
    disruptions.
 
-## When to Comment on an Enhancement Issue
-
-Please comment on the enhancement issue to:
-- request a review or clarification on the process
-- update status of the enhancement effort
-- link to relevant issues in other repos
-
-Please do not comment on the enhancement issue to:
-- discuss a detail of the design, code or docs. Use a linked-to-issue
-  or design pull request for that
-
 ## Using Labels
 
 The following labels may be applied to enhancements to help categorize them:
