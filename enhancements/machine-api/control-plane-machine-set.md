@@ -3,14 +3,20 @@ title: control-plane-machine-set-controller
 authors:
   - "@JoelSpeed"
 reviewers:
-  - TBD
+  - "@jewzaam" - service delivery asks
+  - "@elmiko" - cluster infrastructure review
+  - "@enxebre" - authored previews works
+  - "@jstuever" - installer review
+  - "@staebler" - installer review
+  - "@jeana-redhat" - product docs review
 approvers:
-  - "@sttts"
-  - "@soltysh"
-  - "@tkashem"
-  - "@hasbro17"
+  - "@sttts" - impacts on control plane availability
+  - "@soltysh" - impacts on control plane availability
+  - "@tkashem" - impacts on etcd
+  - "@hasbro17" - impacts on etcd
+  - "@sdodson" - impacts on cluster lifecycle
 api-approvers:
-  - TBD
+  - "@deads2k"
 creation-date: 2022-01-11
 last-updated: 2022-02-07
 tracking-link:
