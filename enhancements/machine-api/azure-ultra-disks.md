@@ -228,10 +228,10 @@ type AzureUltraSSDCapabilityState string
 
 // These are the valid AzureUltraSSDCapabilityState states.
 const (
-  // "AzureUltraSSDCapabilityTrue" means the Azure UltraSSDCapability is Enabled
-  AzureUltraSSDCapabilityTrue AzureUltraSSDCapabilityState = "Enabled"
-  // "AzureUltraSSDCapabilityFalse" means the Azure UltraSSDCapability is Disabled
-  AzureUltraSSDCapabilityFalse AzureUltraSSDCapabilityState = "Disabled"
+  // "AzureUltraSSDCapabilityEnabled" means the Azure UltraSSDCapability is Enabled
+  AzureUltraSSDCapabilityEnabled AzureUltraSSDCapabilityState = "Enabled"
+  // "AzureUltraSSDCapabilityDisabled" means the Azure UltraSSDCapability is Disabled
+  AzureUltraSSDCapabilityDisabled AzureUltraSSDCapabilityState = "Disabled"
 )
 ```
 
