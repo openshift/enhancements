@@ -58,8 +58,8 @@ and ask!
 
 Enhancements should be related to work to be implemented in the near
 future. If you have an idea, but aren't planning to implement it right
-away, the conversation should start somewhere else like the aos-devel
-mailing list.
+away, the conversation should start somewhere else like the mailing
+list or Slack.
 
 Create an enhancement here once you:
 
