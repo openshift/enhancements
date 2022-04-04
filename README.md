@@ -134,9 +134,12 @@ things that authors can do to help keep the conversation moving along.
    server or bring the enhancement to one of the weekly architecture
    review meetings for discussion. If you aren't sure which meeting to
    use, work with a staff engineer to find a good fit.
-4. Be mindful of the fact that reviewers have work other than reading
-   updates to your enhancement. Avoid overusing pings on Slack to get
-   their attention.
+4. If the conversation otherwise seems stuck, pinging reviewers on
+   Slack can be used to remind them to look at updates. It's generally
+   appropriate to give people at least a business day or two to
+   respond in the GitHub thread first, before reaching out to them
+   directly on Slack, so that they can manage their work queue and
+   disruptions.
 
 ## When to Comment on an Enhancement Issue
 
