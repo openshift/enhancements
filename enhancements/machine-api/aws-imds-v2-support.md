@@ -9,7 +9,7 @@ approvers:
   - "@patrickdillon"
   - "@JoelSpeed"
 creation-date: 2022-03-28
-last-updated: 2022-03-28
+last-updated: 2022-04-05
 tracking-link: 
   - [OCPCLOUD-1436](https://issues.redhat.com/browse/OCPCLOUD-1436)
 ---
@@ -65,7 +65,7 @@ type AWSMachineProviderConfig struct {
     // If nothing specified, default AWS IMDS settings will be applied.
     // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_InstanceMetadataOptionsRequest.html
     // +optional
-    MetadataServiceOptions *MetadataServiceOptions `json:"metadataServiceOptions,omitempty"`
+    MetadataServiceOptions MetadataServiceOptions `json:"metadataServiceOptions,omitempty"`
 }
 ```
 
@@ -87,6 +87,7 @@ type MetadataServiceOptions struct {
     // HTTPTokens determines whether or not the host requires the use of authentication when interacting with the metadata service.
     // When using authentication, this enforces v2 interaction method (IMDSv2) with the metadata service.
     // When omitted, this means the user has no opinion and the value is left to the platform to choose a good
+    // default, which is subject to change over time. The current default is optional.
     // +kubebuilder:validation:Enum=required;optional
     // +optional
     HTTPTokens InstanceMetadataHTTPTokens `json:"httpTokens,omitempty"`
@@ -249,6 +250,7 @@ This already was discussed in the Risks section.
 
 - https://github.com/coreos/ignition/pull/1154
 - https://github.com/openshift/machine-config-operator/pull/2988
+- https://github.com/openshift/api/pull/1156
 
 ## Future Implementation
 
