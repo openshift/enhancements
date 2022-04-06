@@ -1,5 +1,5 @@
 ---
-title: output-parameter-templates
+title: Multi-container-structured-logging
 
 authors:
   - "@alanconway"
@@ -22,120 +22,144 @@ see-also:
   - "forwarding-json-structured-logs.md"
 ---
 
-# Output Parameter Templates
+# Multi-container structured logging
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
+- [X] Enhancement is `implementable`
+- [X] Design details are appropriately documented from clear requirements
+- [X] Test plan is defined
 - [ ] Operational readiness criteria is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
-Elasticsearch needs log messages with different formats to be directed to different indices.
-The ClusterLogForwarder API can direct logs from diffeent _pods_ to different Elasticsearch indices, based on namespace or labels, using the `structuredTypeKey` field.
+When JSON log records are forwarded to Elasticsearch, messages with different JSON formats must be directed to different indices.
 
-With sidecar services like ISTIO, it is common to have multiple _containers_ in a _single pod_ using different log formats.
-This proposal adds a single new field `structuredTypePattern` to direct logs from different _containers_ to different indices.
+The ClusterLogForwarder API can direct logs from different _Pods_ to different indices, using the `structuredTypeKey` and `structuredTypeName` fields.
 
-For example, to generate an index of the form "label_value+container_name":
-
-``` yaml
-  elasticsearch:
-    structuredTypePattern: '{.kubernetes.label.foo}+{.kubernetes.container_name}'
-```
-
-Note that if any field referenced in the template pattern is missing,
-the message will be treated as an unstructured message as described in
-[](forwarding-json-structured-logs.md)
-
-The template pattern is [JSONpath](https://goessner.net/articles/JsonPath/).
-JSONpath is used by [kubernetes](https://kubernetes.io/docs/reference/kubectl/jsonpath)
-and [fluentd](https://docs.fluentd.org/plugin-helper-overview/api-plugin-helper-record_accessor)
-and is relatively simple to learn.
-
-This proposal is only about forwarding structured JSON logs to Elasticsearch, but the pattern described here may be useful in other situations.
+This proposal extends `output.elasticsearch` to allow logs from different _containers_ within a single Pod to be sent to different indices using _annotations_.
 
 ## Motivation
 
-Initial motivation comes from [forwarding JSON to Elasticsearch](forwarding-json-structured-logs.md).
-The popularity of JSON logging means that an application container be deployed in a pod with a sidecar logging an incompatible JSON log format.
-Adding `elasticsearch.structuredTypePattern` allows JSON logs from different containers to be sent to separate indices.
-
-This feature can be used in any situation where per-log output parameters are derived from log record fields.
-For example `cloudwatch.groupPattern`, `loki.tenantPattern`, `kafka.topicPattern` and so on.
+- Sidecars are a common pattern in kubernetes and openshift clusters, which means there will be multiple containers in a Pod.
+- Many popular sidecars (for example ISTIO) use JSON logging.
+- The JSON log formats of sidecars and application containers may not be compatible, and must be separated to avoid index problems with Elasticsearch.
+- K8s annotations are used to [https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/](attach arbitrary non-identifying metadata to objects)
 
 ### Goals
 
-Implement `elasticsearch.structuredTypePattern` for the Elasticsearch output.
+When JSON log records are forwarded to Elasticsearch, direct messages with different JSON formats to different Elasticsearch indices.
 
 ### Non-Goals
 
-Other outputs may re-use this pattern, but are not required to complete this proposal.
+No other outputs will use this pattern initially, but may do in future if appropriate.
 
 ## Proposal
 
-Add field `output.elasticsearch.structuredTypePattern` of type string.
-Compute the index name for each log record by applying the `structuredTypePattern` expression to the log record.
+Per-container directives are specified as annotations like this:
+
+> `containerType.logging.openshift.io/`*container-name*: "*format-type*"
+
+1. Namespace prefix `containerType.logging.openshift.io/` indicates this is a logging directive for a named container.
+2. Namespace suffix *container-name* is the name of the container.
+3. Annotation value *format-type* is the name of the format to use for logs from thi container.
+
+If the `ClusterLogForwarder.elasticsearch` also has structured type configuration, the type is chosen by the first of the following rules that applies:
+
+1. `containerType` annotation if there is one that matches the container name.
+2. `elasticsearch.structuredTypeKey` if the key is present and non-empty on a log record.
+3. `elasticsearch.structuredTypeName` if specified.
+
+If no type is identified by the above rules, the logging data is indexed as *unstructured*.
+
+See also [forwarding-json-structured-logs.md](./forwarding-json-structured-logs.md)
+
+### Example
+
+An example will help.
+
+``` yaml
+apiVersion: "logging.openshift.io/v1"
+kind: "ClusterLogForwarder"
+metadata:
+  name: "instance"
+spec:
+  pipelines:
+  - name: JSONToElasticsearch
+    inputRefs: [ application ]
+	outputRefs: [ default ]
+	parse: json
+```
+
+This forwarder configuration parses and forwards JSON logs to the default Elasticsearch
+instance. The format names are specified as Pod annotations, for example:
+
+
+``` yaml
+apiversion: apps/v1
+kind: Pod
+metadata:
+  annotations:
+	containerType.logging.openshift.io/application-foo: format-v1
+	containerType.logging.openshift.io/sidecar-foo: format-v2
+	containerType.logging.openshift.io/istio-sidecar: istio-format-v1
+```
+
+For this Pod:
+- logs from a container named "application-foo" will be indexed under "format-v1"
+- logs from a container named ""sidecar-foo"  will be indexed under "format-v2"
+- logs from a container named "istio-sidecar" will be indexed under "istio-format-v1"
+- logs from a container with any other name will be treated as _unstructured_.
+
+### Details
+
+There are no new entries for `ClusterLogForwarder` configuration.
+The combination of `type: elasticsearch`, `parse: json` and a `containerType` annotation activates the feature.
+
+This proposal is only for forwarding structured JSON logs to Elasticsearch, but the pattern described here may be useful in other situations.
 
 ### User Stories
 
-#### Send JSON logs from pods labeled app=myApp to separate indices based on container name
+#### Send JSON logs from containers in the same Pod to different Elasticsearch indices
 
-``` yaml
-outputs:
-  - name: myApp
-    type: elasticsearch
-	structuredTypePattern: '{.kubernetes.label.app.myApp}-{.kubernetes.container_name}'
-```
+As described above.
 
-Note: if the JSONpath expression is invalid, or if any of the fields it referrs to are missing,
-log messages will be treated as _unstructued_ as described in [](forwarding-json-structured-logs.md)
+### API Extensions
+
+Introduces new labels.
 
 ### Implementation Details
 
-Need to research available libraries and fluentd plugins.
-We might implement a plugin similar to [fluentd record_transformer](https://docs.fluentd.org/filter/record_transformer) but using JSONpath, or there may be existing plugins we can re-use.
-
-The following links are relevant:
-
-- [JSONpath specification](https://goessner.net/articles/JsonPath/)
-- [JSONpath in Kubernetes](https://kubernetes.io/docs/reference/kubectl/jsonpath/)
-- [K8s Go library](https://pkg.go.dev/k8s.io/client-go/util/jsonpath)
-- [Ruby library](https://github.com/joshbuddy/jsonpath)
-- [LUA library](https://github.com/hy05190134/lua-jsonpath/blob/master/jsonpath.lua)
-
-The implementation should keep in mind that we will use this pattern again.
-Re-usable code should be packaged in re-usable libraries.
+None.
 
 ### Risks and Mitigations
 
-- JSONpath may be confusing to users
-  - It is used in common k8s tools and in other tools (fluentd)
-  - Any alternative is likely to be equally or more complex.
-- Potential to create too many indices if not used carefully.
-  - We already have this problem with `structuredTypeKey` but it may be exacerbated.
+Potential to create too many indices if not used carefully.
+This is somewhat mitigated because the user must create separate labels for each index, which makes accidentally creating large numbers of indices unlikely.
 
 ## Design Details
 
+None
+
 ### Test Plan
 
-- Sufficient unit test coverage
-- functional test with multi-container Pods, verify logs are indexed as expected.
-- functional test for error cases: invalid JSONpath, missing fields in patterns.
+- Unit test coverage to validate expected configuration for combinations of annotations and structuredType configuration.
+- functional test with multi-container Pods
+  - verify logs with an assigned type are indexed as expected.
+  - verify logs with no type are indexed as _unstructured_.
 
 ### Graduation Criteria
 #### Dev Preview -> Tech Preview
 #### Tech Preview -> GA
 #### Removing a deprecated feature
-
 ### Upgrade / Downgrade Strategy
 ### Version Skew Strategy
+### Operational Aspects of API Extensions
+#### Failure Modes
+#### Support Procedures
 ## Implementation History
-
 ## Drawbacks
 
 Additional complexity.
