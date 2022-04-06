@@ -84,7 +84,7 @@ time-based criteria for completing work. The approver is responsible
 for recognizing when consensus has been reached so that a proposal is
 ready to be approved, or formally rejected. In cases where consensus
 is not emerging on its own, the approver may also step in as a
-mediator. The approver do not need to be a subject-matter expert for
+mediator. The approver does not need to be a subject-matter expert for
 the subject of the design, although it can help if they are.
 
 Choosing the appropriate approver depends on the scope of an
@@ -102,7 +102,7 @@ staff engineer to help find a good approver by posting in
 
 The set of reviewers for an enhancement proposal can be anyone that
 has an interest in this work or the expertise to provide a useful
-input/assessment.  At a minimum the reviewers should include a
+input/assessment.  At a minimum, the reviewers must include a
 representative of any team that will need to do work for this EP, or
 whose team will own/support the resulting implementation. Be mindful
 of the workload of reviewers, however, and the challenge of finding
