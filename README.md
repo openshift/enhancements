@@ -81,7 +81,7 @@ The approver assists authors who may not be familiar with the process,
 the project, or the maintainers. They may provide advice about who
 should review a specific proposal and point out deadlines or other
 time-based criteria for completing work. The approver is responsible
-for recognizing when consensus has been reached so that a proposal is
+for recognizing when consensus among reviewers has been reached so that a proposal is
 ready to be approved, or formally rejected. In cases where consensus
 is not emerging on its own, the approver may also step in as a
 mediator. The approver does not need to be a subject-matter expert for
