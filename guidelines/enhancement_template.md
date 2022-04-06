@@ -2,7 +2,7 @@
 title: neat-enhancement-idea
 authors:
   - "@janedoe"
-reviewers:
+reviewers: # Include a comment about what domain expertise a reviewer is expected to bring. For example, "- @networkguru, for networking aspects"
   - TBD
   - "@alicedoe"
 approvers:
@@ -21,38 +21,6 @@ replaces:
 superseded-by:
   - "/enhancements/our-past-effort.md"
 ---
-
-Start by filling out this header template with metadata for this enhancement.
-
-* Enhancements should be related to work to be implemented in the near future.
-
-* Enhancements should have agreement from all stakeholders prior to merging.
-
-* `reviewers`: This can be anyone that has an interest in this work or the expertise
-  to provide a useful input/assessment.  At a minimum it should include the lead for
-  any team that will need to do work for this EP, or whose team will own/support the
-  resulting implementation.  Please indicate what aspect of the EP you expect them
-  to be concerned with so they do not always need to review the entire EP in depth.
-
-* `approvers`: All enhancements must be approved, but the appropriate people to
-  approve a given enhancement depends on its scope.  If an enhancement is
-  limited in scope to a given team or component, then a peer or lead on that
-  team or pillar is an appropriate approver.  If an enhancement captures
-  something more broad in scope, then a member of the OpenShift staff engineers team
-  or someone they delegate would be appropriate.  Examples would be something
-  that changes the definition of OpenShift in some way, adds a new required
-  dependency, or changes the way customers are supported.  Use your best
-  judgement to determine the level of approval needed.  If you’re not sure,
-  just leave it blank and ask for input during review.
-
-# Neat Enhancement Idea
-
-This is the title of the enhancement. Keep it simple and descriptive. A good
-title can help communicate what the enhancement is and should be considered as
-part of any review.
-
-The YAML `title` should be lowercased and spaces/punctuation should be
-replaced with `-`.
 
 To get started with this template:
 1. **Pick a domain.** Find the appropriate domain to discuss your enhancement.
@@ -77,6 +45,19 @@ To get started with this template:
    enhancement, explain why but do not remove the section. This part
    of the process is enforced by the linter CI job.
 
+See ../README.md for background behind these instructions.
+
+Start by filling out the header with the metadata for this enhancement.
+
+# Neat Enhancement Idea
+
+This is the title of the enhancement. Keep it simple and descriptive. A good
+title can help communicate what the enhancement is and should be considered as
+part of any review.
+
+The YAML `title` should be lowercased and spaces/punctuation should be
+replaced with `-`.
+
 The `Metadata` section above is intended to support the creation of tooling
 around the enhancement process.
 
@@ -88,7 +69,8 @@ should be possible to collect this information before implementation begins in
 order to avoid requiring implementors to split their attention between writing
 release notes and implementing the feature itself.
 
-A good summary is probably at least a paragraph in length.
+A good summary is no more than one paragraph in length. More detail
+should go into the following sections.
 
 ## Motivation
 
@@ -97,16 +79,27 @@ this proposal. Describe why the change is important and the benefits to users.
 
 ### Goals
 
-List the specific goals of the proposal. How will we know that this has succeeded?
+Summarize the specific goals of the proposal. How will we know that
+this has succeeded?  A good goal describes something a user wants from
+their perspective, and does not include the implementation details
+from the proposal.
 
 ### Non-Goals
 
-What is out of scope for this proposal? Listing non-goals helps to focus discussion
-and make progress.
+What is out of scope for this proposal? Listing non-goals helps to
+focus discussion and make progress. Highlight anything that is being
+deferred to a later phase of implementation that may call for its own
+enhancement.
 
 ## Proposal
 
-This is where we get down to the nitty gritty of what the proposal actually is.
+This is where we get down to the nitty gritty of what the proposal
+actually is. Describe clearly what will be changed, including all of
+the components that need to be modified and how they will be
+different. Include the reason for each choice in the design and
+implementation that is proposed here, and expand on reasons for not
+choosing alternatives in the Alternatives section at the end of the
+document.
 
 ### User Stories
 
@@ -120,7 +113,7 @@ Include a story on how this proposal will be operationalized:  lifecycled, monit
 ### API Extensions
 
 API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
+and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
 
 - Name the API extensions this enhancement adds or modifies.
 - Does this enhancement modify the behaviour of existing resources, especially those owned
@@ -147,7 +140,9 @@ What are the risks of this proposal and how do we mitigate. Think broadly. For
 example, consider both security and how this will impact the larger OKD
 ecosystem.
 
-How will security be reviewed and by whom? How will UX be reviewed and by whom?
+How will security be reviewed and by whom?
+
+How will UX be reviewed and by whom?
 
 Consider including folks that also work outside your immediate sub-project.
 
