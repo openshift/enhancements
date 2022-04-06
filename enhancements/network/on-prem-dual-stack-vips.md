@@ -52,9 +52,11 @@ applications have the connectivity they require.
 
 ### Non-Goals
 
-Making the `kubernetes.default` Service dual stack is not supported and will
-not be addressed by this work. We are only adding dual stack access to the
-API via the VIPs.
+* Making the `kubernetes.default` Service dual stack is not supported and will
+not be addressed by this work.
+
+* Configuration of any VIPs beyond a second ipv6 one for dual stack clusters.
+MetalLB is a better solution to creating arbitrary loadbalancers.
 
 ## Proposal
 
@@ -104,6 +106,8 @@ baremetal-runtimecfg - There is logic that depends on the ip version of the
 VIP. If there are multiple VIPs, this will have to be modified to account for
 that. In addition, the render code will need the new values wired in.
 
+assisted-service - the hive API extension is used for agent-based cluster creation as a stand-alone tool ("Infrastructure Operator") and as part of RHACM. It will need new API fields that correspond to the changes in the install-config.
+
 ### install-config
 
 Currently the VIPs are specified as follows:
@@ -120,21 +124,22 @@ After this change it will look more like this:
 ```yaml
 platform:
   baremetal:
+    # Deprecated
     apiVIP: 192.168.111.5
-    # Optional, and only for dual stack clusters
-    apiVIPSecondary: fd2e:6f44:5dd8:c956::5
+    # Deprecated
     ingressVIP: 192.168.111.4
-    # Optional, and only for dual stack clusters
-    ingressVIPSecondary: fd2e:6f44:5dd8:c956::4
+
+    apiVIPs:
+    - 192.168.111.5
+    - f00::5
+    ingressVIPs:
+    - 192.168.111.4
+    - f00::4
 ```
 
-This format allows us to keep backward compatibility with existing
-install-configs, and also allows us to specify that one VIP is primary and
-one is secondary for circumstances where that may be important. We will need
-validations to ensure that the VIP choices are sane - i.e. right now in a dual
-stack cluster the primary VIP must be ipv4, both VIPs should not be the same
-IP version, etc. Some amount of new validations are going to be required
-regardless of what format we pick though.
+The old single-value fields will be replaced by fields that take a list of
+VIPs. This allows us to have primary and secondary VIPs based on the order
+of the list and is also trivially extensible if we ever need more VIPs.
 
 
 ### openshift/api
@@ -150,33 +155,28 @@ baremetal:
   description: BareMetal contains settings specific to the BareMetal platform.
   type: object
   properties:
+    # Deprecated
     apiServerInternalIP:
       description: apiServerInternalIP is an IP address...
       type: string
-    apiServerInternalIPSecondary:
-      description: apiServerInternalIPSecondary is an additional IP address...
-      type: string
+    apiServerInternalIPs:
+      description: apiServerInternalIPs is a list of IP addresses...
+      type: array
+    # Deprecated
     ingressIP:
       description: ingressIP is an external IP...
       type: string
-    ingressIPSecondary:
-      description: ingressIPSecondary is an additional external IP...
-      type: string
+    ingressIPs:
+      description: ingressIPs is a list of  external IPs...
+      type: array
     nodeDNSIP:
     ...
 ```
 
-This has the benefit of not requiring any deprecations. It should also
-provide automatic backward compatibility with existing configuration -
-in existing clusters the VIP in the original field will by definition
-be the primary, whether v4 or v6. Any other proposed structure for these
-values would require some amount of migration for existing clusters. This
-one does not.
-
-While this does not explicitly state which address is v4 and which is v6,
-that shouldn't matter. All we need to do is make sure the ip versions for
-things like unicast keepalived match the associated VIP. It doesn't matter
-to the consuming code which version that is.
+If we go with the array format for install-config, it likely makes sense to do
+the same in the api. This way we can just loop over the specified VIPs and
+do configuration in one block rather than having a separate one for each IP
+version.
 
 ### machine-config-operator
 
@@ -205,7 +205,13 @@ Additionally, the new VIPs will need to be wired in to the rendering code.
 
 ### Open Questions [optional]
 
-Asked and answered.
+How do we add new VIPs to an existing dual stack cluster or to a cluster that
+is converted from single stack to dual? We will need to work with the
+machine-config-operator team to determine the right way to populate the
+necessary fields in the appropriate records. We can still get the feature
+implemented for new clusters without solving this, however. The method
+of modifying on-prem configuration values will be essentially the same
+regardless of what format we choose.
 
 ### Test Plan
 
@@ -301,7 +307,7 @@ Note that this assumes we replace the existing api fields with two new ones
 per VIP and do not reuse the existing ones at all. I think we're going to want
 to do that regardless of what install-config layout we use so we don't need
 logic on the backend in machine-config-operator and baremetal-runtimecfg to
-handle older cluster configs.
+handle older Infrastructure and ControllerConfigs.
 
 #### Deprecate the old fields and add new v4 and v6 fields
 ```yaml
@@ -322,33 +328,25 @@ will look like. We would still need compatibility logic to handle old-style
 install-configs that set the deprecated fields, but having no overlap between
 the old and new-style configs might simplify the logic somewhat.
 
-#### Add plural fields that take a list of VIPs
+#### Add Secondary fields
 ```yaml
 platform:
   baremetal:
-    # Deprecated
     apiVIP: 192.168.111.5
-    # Deprecated
+    # Optional, and only for dual stack clusters
+    apiVIPSecondary: fd2e:6f44:5dd8:c956::5
     ingressVIP: 192.168.111.4
-
-    apiVIPs:
-    - 192.168.111.5
-    - f00::5
-    ingressVIPs:
-    - 192.168.111.4
-    - f00::4
+    # Optional, and only for dual stack clusters
+    ingressVIPSecondary: fd2e:6f44:5dd8:c956::4
 ```
-This is essentially a variation on the previous option where the two separate
-fields per VIP are combined into a list field with a length of up to 2. In
-this case we'd need some logic to determine whether the VIPs in the list are
-v4 or v6, but I expect that would only be a little more complicated than the
-other options. This has the advantage of being extensible if we ever wanted
-to add more addresses, but I admit to having a hard time coming up with a use
-case where more than an ipv4 and ipv6 address would be needed.
 
-The list format could also help with processing of the VIPs. Instead of two
-distinct v4 and v6 sections for each VIP, we could loop over the list and
-use essentially the same configuration for both.
+This format allows us to keep backward compatibility with existing
+install-configs, and also allows us to specify that one VIP is primary and
+one is secondary for circumstances where that may be important. We will need
+validations to ensure that the VIP choices are sane - i.e. right now in a dual
+stack cluster the primary VIP must be ipv4, both VIPs should not be the same
+IP version, etc. Some amount of new validations are going to be required
+regardless of what format we pick though.
 
 ### Alternative api structures
 
@@ -383,38 +381,40 @@ baremetal:
     ...
 ```
 
-#### Make the api an array too
-
-If we go with the array format for install-config, it likely makes sense to do
-the same in the api. That would look something like this:
+#### Add Secondary field
 
 ```yaml
 baremetal:
   description: BareMetal contains settings specific to the BareMetal platform.
   type: object
   properties:
-    # Deprecated
     apiServerInternalIP:
       description: apiServerInternalIP is an IP address...
       type: string
-    apiServerInternalIPs:
-      description: apiServerInternalIPs is a list of IP addresses...
-      type: array
-    # Deprecated
+    apiServerInternalIPSecondary:
+      description: apiServerInternalIPSecondary is an additional IP address...
+      type: string
     ingressIP:
       description: ingressIP is an external IP...
       type: string
-    ingressIPs:
-      description: ingressIPs is a list of  external IPs...
-      type: array
+    ingressIPSecondary:
+      description: ingressIPSecondary is an additional external IP...
+      type: string
     nodeDNSIP:
     ...
 ```
 
-If we don't have an array in install-config, it may still make sense for the
-api side to be an array so we can process the data in a loop. However, I lean
-toward having a consistent format from install-config to template rendering,
-so if we go with this I'd prefer to use the same format in install-config.
+This has the benefit of not requiring any deprecations. It should also
+provide automatic backward compatibility with existing configuration -
+in existing clusters the VIP in the original field will by definition
+be the primary, whether v4 or v6. Any other proposed structure for these
+values would require some amount of migration for existing clusters. This
+one does not.
+
+While this does not explicitly state which address is v4 and which is v6,
+that shouldn't matter. All we need to do is make sure the ip versions for
+things like unicast keepalived match the associated VIP. It doesn't matter
+to the consuming code which version that is.
 
 ## Infrastructure Needed [optional]
 
