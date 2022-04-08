@@ -15,7 +15,7 @@ api-approvers:
   - @danwinship
   - @aojea
 creation-date: 2022-03-01
-last-updated: 2022-04-01
+last-updated: 2022-04-08
 tracking-link:
   - https://issues.redhat.com/browse/SDN-2213
 see-also:
@@ -202,6 +202,20 @@ or ipv6 addresses in the unicast_peer list). This logic will need to be
 updated to handle the fact that there may be both v4 and v6 VIPs.
 
 Additionally, the new VIPs will need to be wired in to the rendering code.
+
+### assisted-service
+
+The new fields in the REST and Kubernetes APIs will need to be handled.
+Like install-config and api, assisted will need backward compatibility logic
+to handle the migration from the deprecated fields to the new ones. A database
+migration will also be needed to deal with the fact that there will be a new
+structure for VIP entries. Currently for every cluster in the DB there is a
+single-value column in the DB for api_vip and ingress_vip. The new schema will
+require us to create a new table with the schema {cluster_id, api_vip}
+allowing for multiple entries with the same cluster_id but different IPs.
+
+These are all things that have been done before so they should not be a
+problem.
 
 ### Open Questions [optional]
 
