@@ -54,9 +54,12 @@ At this point, IMDSv2 enablement might be done manually via AWS console, but pro
 ### API Extensions
 
 #### AWSMachineProviderConfig changes
+A new optional field will be added to the `AWSMachineProviderConfig` struct `MetadataServiceOptions`.
 
-MachineAPI design mostly replicates parameters which [AWS API](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_InstanceMetadataOptionsRequest.html) consumes.
+`MetadataServiceOptions` will be a struct with single `Authentication` field at this point.
+Also, a new `MetadataServiceAuthentication` type that describes the possible values for the `Authentication` field on `MetadataServiceOptions` will be added.
 
+The concrete changes to the `AWSMachineProviderConfig` outlined below:
 ```go
 type AWSMachineProviderConfig struct {
     // Existing fields will not be modified
@@ -70,27 +73,28 @@ type AWSMachineProviderConfig struct {
 ```
 
 ```go
-
-type InstanceMetadataHTTPTokens string
+type MetadataServiceAuthentication string
 
 const (
-    // InstanceMetadataHTTPTokensRequired enforces sending of a signed token header with any instance metadata retrieval (GET) requests.
-    // Enforces IMDSv2 usage.
-    InstanceMetadataHTTPTokensRequired = "required"
-    // InstanceMetadataHTTPTokensOptional allows IMDSv1 usage along with IMDSv2
-    InstanceMetadataHTTPTokensOptional = "optional"
+	// MetadataServiceAuthenticationRequired enforces sending of a signed token header with any instance metadata retrieval (GET) requests.
+	// Enforces IMDSv2 usage.
+	MetadataServiceAuthenticationRequired = "Required"
+	// MetadataServiceAuthenticationOptional allows IMDSv1 usage along with IMDSv2
+	MetadataServiceAuthenticationOptional = "Optional"
 )
 
 // MetadataServiceOptions defines the options available to a user when configuring
 // Instance Metadata Service (IMDS) Options.
 type MetadataServiceOptions struct {
-    // HTTPTokens determines whether or not the host requires the use of authentication when interacting with the metadata service.
-    // When using authentication, this enforces v2 interaction method (IMDSv2) with the metadata service.
-    // When omitted, this means the user has no opinion and the value is left to the platform to choose a good
-    // default, which is subject to change over time. The current default is optional.
-    // +kubebuilder:validation:Enum=required;optional
-    // +optional
-    HTTPTokens InstanceMetadataHTTPTokens `json:"httpTokens,omitempty"`
+	// Authentication determines whether or not the host requires the use of authentication when interacting with the metadata service.
+	// When using authentication, this enforces v2 interaction method (IMDSv2) with the metadata service.
+	// When omitted, this means the user has no opinion and the value is left to the platform to choose a good
+	// default, which is subject to change over time. The current default is optional.
+	// At this point this field represents `HttpTokens` parameter from `InstanceMetadataOptionsRequest` structure in AWS EC2 API
+	// https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_InstanceMetadataOptionsRequest.html
+	// +kubebuilder:validation:Enum=Required;Optional
+	// +optional
+	Authentication MetadataServiceAuthentication `json:"authentication,omitempty"`
 }
 ```
 
@@ -119,7 +123,7 @@ controlPlane:
         size: 500
         type: io1
       metadataService: # proposed section
-        httpTokens: required
+        authentication: Required
       type: m5.xlarge
   replicas: 3
 compute: 
@@ -132,7 +136,7 @@ compute:
         size: 500
         type: io1
       metadataService: # proposed section
-        httpTokens: required
+        authentication: Required
       type: c5.4xlarge
       zones:
       - us-west-2c
