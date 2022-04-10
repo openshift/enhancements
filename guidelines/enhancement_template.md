@@ -6,7 +6,7 @@ reviewers: # Include a comment about what domain expertise a reviewer is expecte
   - TBD
 approvers:
   - TBD
-api-approvers: # in case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers)
+api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - TBD
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
