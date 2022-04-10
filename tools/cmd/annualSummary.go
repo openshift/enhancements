@@ -41,6 +41,8 @@ var annualSummaryCmd = &cobra.Command{
 	Short: "Summarize the enhancements work over the previous year",
 	// Long: ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		initConfig()
+
 		earliestDate := time.Date(year, time.January, 1, 0, 0, 0, 0, time.UTC)
 		latestDate := time.Date(year+1, time.January, 1, 0, 0, 0, 0, time.UTC)
 

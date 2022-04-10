@@ -32,8 +32,6 @@ func init() {
 
 	defaultConfigFilename := filepath.Join(configDir, "ocp-enhancements", "config.yml")
 
-	cobra.OnInitialize(initConfig)
-
 	rootCmd.PersistentFlags().BoolVar(&devMode, "dev", false, "dev mode, stop after first page of PRs")
 	rootCmd.PersistentFlags().StringVar(&configFilename, "config", defaultConfigFilename, "config file")
 	rootCmd.PersistentFlags().StringVar(&orgName, "org", "openshift", "github organization")

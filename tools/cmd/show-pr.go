@@ -33,6 +33,8 @@ func newShowPRCommand() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			initConfig()
+
 			prID, err := strconv.Atoi(args[0])
 			if err != nil {
 				return errors.Wrap(err,

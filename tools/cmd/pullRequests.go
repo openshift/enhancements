@@ -44,6 +44,7 @@ func newPullRequestsCommand() *cobra.Command {
 		Short: "List pull requests and some characteristics in CSV format",
 		Long:  `Produce a CSV list of pull requests suitable for import into a spreadsheet.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			initConfig()
 
 			earliestDate := time.Now().AddDate(0, 0, daysBack*-1)
 
