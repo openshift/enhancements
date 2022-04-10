@@ -1,13 +1,11 @@
 ---
 title: neat-enhancement-idea
 authors:
-  - "@janedoe"
-reviewers: # Include a comment about what domain expertise a reviewer is expected to bring. For example, "- @networkguru, for networking aspects"
   - TBD
-  - "@alicedoe"
+reviewers: # Include a comment about what domain expertise a reviewer is expected to bring. For example: - "@networkguru, for networking aspects"
+  - TBD
 approvers:
   - TBD
-  - "@oscardoe"
 api-approvers: # in case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers)
   - TBD
 creation-date: yyyy-mm-dd
