@@ -253,12 +253,12 @@ func DeriveGroup(files []ModifiedFile) (filename string, isEnhancement bool) {
 	return "general", false
 }
 
-// GetSummary reads the files being changed in the pull request to
-// find the summary block.
-func (s *Summarizer) GetSummary(pr int) (summary string, err error) {
+// getEnhancementFilenames looks for modified enhancement files in the
+// pull request.
+func (s *Summarizer) getEnhancementFilenames(pr int) ([]string, error) {
 	files, err := s.GetModifiedFiles(pr)
 	if err != nil {
-		return "", errors.Wrap(err, "could not determine the list of modified files")
+		return nil, errors.Wrap(err, "could not determine the list of modified files")
 	}
 	enhancementFiles := []string{}
 	for _, f := range files {
@@ -270,11 +270,30 @@ func (s *Summarizer) GetSummary(pr int) (summary string, err error) {
 		}
 		enhancementFiles = append(enhancementFiles, f.Name)
 	}
+	return enhancementFiles, nil
+}
+
+// GetEnhancementFilename returns the primary enhancement file in the PR.
+func (s *Summarizer) GetEnhancementFilename(pr int) (string, error) {
+	enhancementFiles, err := s.getEnhancementFilenames(pr)
+	if err != nil {
+		return "", errors.Wrap(err, "could not determine the list of enhancement files")
+	}
 	if len(enhancementFiles) != 1 {
 		return "", fmt.Errorf("expected 1 modified file, found %v", enhancementFiles)
 	}
-	summary = fmt.Sprintf("(no '## Summary' section found in %s)", enhancementFiles[0])
-	fileRef := fmt.Sprintf("%s:%s", s.prRef(pr), enhancementFiles[0])
+	return enhancementFiles[0], nil
+}
+
+// GetSummary reads the files being changed in the pull request to
+// find the summary block.
+func (s *Summarizer) GetSummary(pr int) (summary string, err error) {
+	enhancementFile, err := s.GetEnhancementFilename(pr)
+	if err != nil {
+		return "", errors.Wrap(err, "could not determine the enhancement file name")
+	}
+	summary = fmt.Sprintf("(no '## Summary' section found in %s)", enhancementFile)
+	fileRef := fmt.Sprintf("%s:%s", s.prRef(pr), enhancementFile)
 	content, err := getFileContents(fileRef)
 	if err != nil {
 		return summary, errors.Wrap(err, fmt.Sprintf("could not get content of %s", fileRef))
