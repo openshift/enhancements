@@ -110,7 +110,7 @@ func showOnePR(summarizer *enhancements.Summarizer, prd *stats.PullRequestDetail
 
 	title := enhancements.CleanTitle(*prd.Pull.Title)
 
-	fmt.Printf("- [%d](%s): (%d/%d) %s%s (%s)\n",
+	fmt.Printf("- [%d](%s): (%d/%d) %s%s (%s)",
 		*prd.Pull.Number,
 		*prd.Pull.HTMLURL,
 		prd.RecentActivityCount,
@@ -119,6 +119,30 @@ func showOnePR(summarizer *enhancements.Summarizer, prd *stats.PullRequestDetail
 		title,
 		author,
 	)
+
+	// Show any tracking links, if they are filled in.
+	metaData, err := summarizer.GetMetaData(*prd.Pull.Number)
+	if err == nil {
+		for _, linkURL := range metaData.TrackingLinks {
+			if linkURL == "TBD" {
+				continue
+			}
+			if linkURL[0] == '[' {
+				// emit the markdown link as-is
+				fmt.Printf(" %s", linkURL)
+				continue
+			}
+			// try to form a nicely formatted link from the URL, using
+			// the last part as a title with the assumption that it is
+			// a bug or jira ID
+			urlParts := strings.Split(linkURL, "/")
+			fmt.Printf(" ([%s](%s))", urlParts[len(urlParts)-1], linkURL)
+		}
+	}
+
+	// End the title line
+	fmt.Printf("\n")
+
 	if withDescription {
 		var summary string
 		var err error
