@@ -31,8 +31,8 @@ status: implementable
 This enhancement proposes converging two somewhat different bare-metal
 provisioning flows in OpenShift:
 
-- *Standard* Metal3 flow used in bare-metal IPI and [baremetal-operator][bmo].
-  Uses the [Ironic agent][ipa] (also known as ironic-python-agent or
+- *Standard* Metal3 flow used in bare-metal IPI and [baremetal-operator][bmo]
+  (BMO). Uses the [Ironic agent][ipa] (also known as ironic-python-agent or
   simply IPA) for writing the CoreOS image.
 
 - ZTP (Zero-Touch Provisioning) flow using the so-called *live ISO* Ironic and
@@ -89,32 +89,39 @@ development costs:
 ## Proposal
 
 - Building CoreOS images for the *standard* flow is handled by
-  [image-customization-controller][icc] (ICC). It will be updated to optionally
-  accept additional Ignition configuration via a new annotation
-  `baremetal.openshift.io/ignition-override-uri`.
+  [image-customization-controller][icc] (ICC). ICC will start ignoring all
+  `PreprovisioningImage`s that have the `infraenvs.agent-install.openshift.io`
+  label (copied from the corresponding `BareMetalHost` by BMO).
 
-- Additionally, ICC will recognize the label linking `BareMetalHost`s to
-  `InfraEnv` resources from the assisted service. When such a label is present,
-  ICC will wait for the Ignition override annotation to be provided.
-  Otherwise, it will proceed with the image building.
+- A new controller will be created as part of the assisted service to
+  handle `PreprovisioningImage`s that do have the InfraEnv label. Its exact
+  implementation will be defined by the assisted team. The assisted agent
+  configuration will be updated to not start the agent automatically in the
+  presence of the Ironic agent.
+
+- To boot CoreOS via network, three artifacts are required: the kernel, the
+  initramfs and the root filesystem. In the current ICC implementation, only
+  the initramfs is a dynamically generated artifact, while the kernel and the
+  rootfs are taken from the payload on the Metal3 pod start-up and used for
+  all nodes. Since ZTP supports installing clusters of a different version and
+  even architecture from the hub cluster, we will add separate fields
+  to the `PreprovisioningImage`'s `Status`:
+
+  `KernelURL` to store the matching kernel.
+
+  `ExtraKernelParams` to provide a link to the root file system. BMO will be
+  updated to pass the parameters to the node.
 
 - [Ironic agent][ironic-agent] currently contains a custom deployment plugin
   (*custom deploy method* in baremetal-operator terms, *custom deploy step* in
   Ironic terms) that invokes `coreos-installer` for the image installation.
   A new custom deploy method `start_assisted_install` will be added to start
-  the assisted agent at the right moment.
+  the assisted agent when BMO requests deployment.
 
 - The assisted service (more specifically, BMAC) will stop explicitly disabling
   *inspection* on `BareMetalHost`s it manages, will start using a different
-  process based on the  new `start_assisted_install` deploy method and stop
+  process based on the new `start_assisted_install` deploy method and stop
   rebooting the machine in the end of the process.
-
-- BMAC will also set the `baremetal.openshift.io/ignition-override-uri`
-  annotation with the URI of the assisted agent configuration on
-  any `PreprovisioningImage` objects linked to `BareMetalHost` objects it
-  manages. The assisted agent configuration will be updated to not start
-  the agent automatically in the presence of the Ironic agent (can be detected
-  e.g. by the presence of the `ironic-agent` systemd service).
 
 ### User Stories
 
@@ -133,10 +140,12 @@ features to work for ZTP:
 
 ### API Extensions
 
-All required API extensions are already present.
+The `PreprovisioningImage`'s `Status` will be updated with two new fields:
 
-A new annotation will be recognized on `PreprovisioningImage` resources:
-`baremetal.openshift.io/ignition-override-uri`.
+- `KernelURL` - the URL of a kernel image to use with (i)PXE boot.
+
+- `ExtraKernelParams` - additional kernel parameters to pass when booting
+  using (i)PXE.
 
 ### Implementation Details/Notes/Constraints
 
@@ -179,33 +188,15 @@ The `CustomDeploy` field can be set from the very beginning as well. Then BMO
 will conduct inspection, apply firmware settings (if any) and prepare for
 the installation immediately.
 
-### Minimal ISO
+### Ironic changes
 
-ICC is currently not capable of building a *mimimal ISO*, i.e. a CoreOS ISO
-without the root filesystems. The minimal ISO support should be implemented as
-part of this enhancement because
-- it improves compatibility with BMCs that do not accept large ISOs,
-- it reduces the resource footprint on the Ironic side.
+Two small tweaks will be required in Ironic:
 
-#### Notes
+- Allow deploy steps without a timeout, so that Ironic does not time out
+  the `start_assisted_install` deploy steps.
 
-- The new annotation with accept a URI instead of a full Ignition configuration
-  or a link to a secret because the configuration can be quite large when
-  many hosts are present.
-
-- ICC will replicate the graceful wait period logic from the assisted service:
-  the image will be built not earlier than 60 seconds from the creation
-  of the `PreprovisioningImage` object. This is done for two reasons: to give
-  the user enough time to apply all changes that may affect the build and to
-  reduce the probability of a race between BMAC and ICC.
-
-- Currently, BMO never deletes `PreprovisioningImage` resources. Since all
-  Ignition configurations are stored in memory, it may cause a significant
-  memory usage in the ZTP case. We will need to fix BMO to delete
-  `PreprovisioningImage` resources when the `BareMetalHost` becomes
-  `provisioned` or is deleted.
-
-- The same process will be applied to `initrd` images for (i)PXE booting.
+- Allow accepting additional kernel parameters instead of overriding the
+  parameters completely.
 
 ### Risks and Mitigations
 
@@ -224,6 +215,11 @@ part of this enhancement because
   time, the `BareMetalHost` state will be `provisioning`, and timeouts may
   apply. We may need a way to tell Ironic to never time out this operation,
   e.g. via custom timeouts per deploy step.
+
+- Is it possible (although rare) that the assisted agent restarts during its
+  normal operation. The Ironic agent may misinterpret that as a successful
+  exit. In the future, we may need to develop a more robust means of
+  communication between the two agents.
 
 ### Test Plan
 
@@ -262,16 +258,15 @@ Ironic, Metal3 or OpenShift.
 
 ### Version Skew Strategy
 
-The image-customization-controller will need to be updated before the new flow
-will be usable. Given that ZTP releases trail OpenShift releases (and are tied
-to them), it should not become an issue. As a safeguard, BMAC will check
+The baremetal-operator will need to be updated before the new flow will be
+usable with iPXE. Given that ZTP releases trail OpenShift releases (and are
+tied to them), it should not become an issue. As a safeguard, BMAC will check
 the version of cluster-baremetal-operator (with CVO) before using the new
 procedure.
 
-The version of CoreOS will always be the one shipped with the ZTP *hub*
-cluster, not necessarily the same version we expect the *spoke* cluster to run
-on. We think this is fine because MCO on the spoke will replace the ostree
-before starting the host as a node anyway.
+ZTP may be used to install clusters with an older version of OpenShift. In this
+case, the new Ironic agent image must still be used, otherwise the
+`start_assisted_agent` step will not be present.
 
 ### Operational Aspects of API Extensions
 
@@ -283,7 +278,7 @@ before starting the host as a node anyway.
 
 #### Support Procedures
 
-- The `image-customization-controller` logs will be the central place to
+- The new controller logs will be the central place to
   triage issues related to image building. Such issues will be highlighted
   by a failure condition on the `PreprovisioningImage` resource.
 - The Ironic ramdisk logs (published via a special container
@@ -292,28 +287,18 @@ before starting the host as a node anyway.
 
 ## Implementation History
 
-- [Updated image building
-  process](https://github.com/openshift/image-customization-controller/pull/42)
 - [Ironic agent
   plugin](https://github.com/openshift/ironic-agent-image/pull/40)
 
 ## Drawbacks
 
 - The converged flow is more complex than each of the old flows.
-- The image-customization-controller becomes aware of (although does not
-  require) the assisted service.
 
 ## Alternatives
 
 - Keep both flows separate, implement all required features (currently
-  firmware/BIOS settings and iPXE boot) twice.
-
-- The image-customization-controller could just ignore all CRs with an
-  `InfraEnv` link, and a separate controller (probably running in the same
-  process as BMAC) could reconcile those ones. A second place to vendor the
-  controller code just adds opportunities for it to get out of sync. The
-  image-customization-controller would still need to know about the `InfraEnv`
-  API anyway so it could ignore hosts with the label.
+  firmware (BIOS) settings and iPXE boot, potentially hardware RAID and
+  firmware upgrades) twice.
 
 - ICC could use the `InfraEnv` resources to ask the assisted service to build
   images. This would be a layering violation and cause a number of other
@@ -324,6 +309,13 @@ before starting the host as a node anyway.
   assisted agent to register itself and run validations before the provisioning
   is requested. This approach would avoid the timeout issue described above,
   but also requires deeper changes to how BMAC works.
+
+- The assisted agent could imitate the Ironic agent by providing a compatible
+  API and making the required internal calls. This will require the assisted
+  team to implement an internal API that has limited backward compatibility
+  promises. Additionally, it will prevent the ZTP flow from benefiting from
+  any future changes to the Ironic agent. Finally, the iPXE case will still
+  need solving.
 
 ## Infrastructure Needed
 
