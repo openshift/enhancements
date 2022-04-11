@@ -12,6 +12,7 @@ issue with the feature is up to you (but see below about doc+CEE training requir
 setting the upgradeable=false condition on your ClusterOperator and utilizing the TechPreviewNoUpgrade feature gate.
 * You still need to provide docs (which should make it clear the feature is tech preview)
 * You still need to provide education to CEE about the feature
+* You must also follow Red Hat's [support policy for tech preview](https://access.redhat.com/support/offerings/techpreview)
 
 
 
