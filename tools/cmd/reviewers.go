@@ -55,6 +55,8 @@ func newReviewersCommand() *cobra.Command {
 		Short: "List reviewers of PRs in a repo",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			initConfig()
+
 			earliestDate := time.Now().AddDate(0, 0, daysBack*-1)
 
 			query := &util.PullRequestQuery{

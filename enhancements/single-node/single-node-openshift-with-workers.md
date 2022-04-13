@@ -7,12 +7,12 @@ reviewers:
   - "@eranco74"
   - "@tsorya"
   - "@dhellmann"
-  - "@Miciah" - edge networking
+  - "@Miciah - edge networking"
   - "@bparees"
-  - "@JoelSpeed" - API
-  - "@staebler" - installer
+  - "@JoelSpeed - API"
+  - "@staebler - installer"
   - "@derekwaynecarr"
-  - "@cgwalters" - MCO
+  - "@cgwalters - MCO"
 approvers:
   - "@dhellmann"
 api-approvers: # in case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers)

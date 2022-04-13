@@ -60,3 +60,126 @@ superseded-by:
 		})
 	}
 }
+
+func TestValidateMetaData(t *testing.T) {
+	for _, tc := range []struct {
+		Scenario string
+		Input    MetaData
+		Expected []string
+	}{
+		{
+			Scenario: "empty",
+			Input:    MetaData{},
+			Expected: []string{
+				"tracking-link must contain at least one valid URL",
+				"authors must have at least one valid github id",
+				"reviewers must have at least one valid github id",
+				"approvers must have at least one valid github id",
+				"api-approvers must have at least one valid github id",
+			},
+		},
+		{
+			Scenario: "reviewers-tbd",
+			Input: MetaData{
+				Reviewers: []string{"TBD"},
+			},
+			Expected: []string{
+				"tracking-link must contain at least one valid URL",
+				"authors must have at least one valid github id",
+				"reviewers must not have TBD as value",
+				"reviewers must have at least one valid github id",
+				"approvers must have at least one valid github id",
+				"api-approvers must have at least one valid github id",
+			},
+		},
+		{
+			Scenario: "approvers-tbd",
+			Input: MetaData{
+				Approvers: []string{"TBD"},
+			},
+			Expected: []string{
+				"tracking-link must contain at least one valid URL",
+				"authors must have at least one valid github id",
+				"reviewers must have at least one valid github id",
+				"approvers must not have TBD as value",
+				"approvers must have at least one valid github id",
+				"api-approvers must have at least one valid github id",
+			},
+		},
+		{
+			Scenario: "reviewers-empty-string",
+			Input: MetaData{
+				Reviewers: []string{""},
+			},
+			Expected: []string{
+				"tracking-link must contain at least one valid URL",
+				"authors must have at least one valid github id",
+				"reviewers must not be an empty string",
+				"reviewers must have at least one valid github id",
+				"approvers must have at least one valid github id",
+				"api-approvers must have at least one valid github id",
+			},
+		},
+		{
+			Scenario: "approvers-empty-string",
+			Input: MetaData{
+				Approvers: []string{""},
+			},
+			Expected: []string{
+				"tracking-link must contain at least one valid URL",
+				"authors must have at least one valid github id",
+				"reviewers must have at least one valid github id",
+				"approvers must not be an empty string",
+				"approvers must have at least one valid github id",
+				"api-approvers must have at least one valid github id",
+			},
+		},
+		{
+			Scenario: "tracking-link-tbd",
+			Input: MetaData{
+				TrackingLinks: []string{"TBD"},
+			},
+			Expected: []string{
+				"'TBD' is not a valid value for tracking-link",
+				"tracking-link must contain at least one valid URL",
+				"authors must have at least one valid github id",
+				"reviewers must have at least one valid github id",
+				"approvers must have at least one valid github id",
+				"api-approvers must have at least one valid github id",
+			},
+		},
+		{
+			Scenario: "tracking-link-parse",
+			Input: MetaData{
+				TrackingLinks: []string{"https//blah/blah"},
+			},
+			Expected: []string{
+				"could not parse tracking-link \"https//blah/blah\"",
+				"tracking-link must contain at least one valid URL",
+				"authors must have at least one valid github id",
+				"reviewers must have at least one valid github id",
+				"approvers must have at least one valid github id",
+				"api-approvers must have at least one valid github id",
+			},
+		},
+		{
+			Scenario: "tracking-link-emtpy",
+			Input: MetaData{
+				TrackingLinks: []string{""},
+			},
+			Expected: []string{
+				"tracking-link must not be empty",
+				"tracking-link must contain at least one valid URL",
+				"authors must have at least one valid github id",
+				"reviewers must have at least one valid github id",
+				"approvers must have at least one valid github id",
+				"api-approvers must have at least one valid github id",
+			},
+		},
+	} {
+		t.Run(tc.Scenario, func(t *testing.T) {
+			actual := tc.Input.Validate()
+			assert.Equal(t, tc.Expected, actual)
+		})
+	}
+}

@@ -23,6 +23,7 @@ func newReportCommand() *cobra.Command {
 		Use:   "report",
 		Short: "Generate the weekly activity report",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			initConfig()
 
 			earliestDate := time.Now().AddDate(0, 0, daysBack*-1)
 
