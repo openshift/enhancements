@@ -9,15 +9,15 @@ approvers:
 api-approvers:
   - None
 creation-date: 2020-09-11
-last-updated: 2021-06-17
+last-updated: 2022-04-19
 status: implementable
 ---
 
 # Update-blocker Lifecycle
 
 We occasionally have bugs which impact update success or the stability of the target release.
-When that happens, we protect users by [removing the impacted updates from our update recommendations][graph-data-block].
-This enhancement describes the process used to identify these bugs and determine which edges should be blocked because of them.
+When that happens, we protect users by [removing update recommendations or qualifying recommendations them with conditional risks][graph-data-block].
+This enhancement describes the process used to identify these bugs and clarify the resulting update risks.
 
 ## Release Signoff Checklist
 
@@ -29,14 +29,14 @@ This enhancement describes the process used to identify these bugs and determine
 
 ## Summary
 
-The lifecycle for update blockers looks like:
+The lifecycle for recommendation changes looks like:
 
 <div style="text-align:center">
   <img src="flow.svg" width="100%" />
 </div>
 
 Currently all tracking through the lifecycle is manual, and it is tedious for graph-admins to audit bugs with `UpgradeBlocker` to see where they are in the lifecycle and, when necessary, poke component teams about outstanding impact statement requests.
-Having an explicit, machine-readable lifecycle reduces the chances that suspected update blockers fall through the cracks by clarifying the responsible parties for moving the bug to the next stage, which supports tracking and automated reminders.
+Having an explicit, machine-readable lifecycle reduces the chances that issues fall through the cracks by clarifying the responsible parties for moving the bug to the next stage, which supports tracking and automated reminders.
 
 With the changes from this enhancement, the queues become:
 
@@ -48,7 +48,7 @@ With the changes from this enhancement, the queues become:
 
 ### Goals
 
-* Clearly define, in a machine-readable fashion, the currently responsible party for bugs in the update-blocker lifecycle.
+* Clearly define, in a machine-readable fashion, the currently responsible party for bugs in the update-recommendation lifecycle.
 
 ### Non-Goals
 
@@ -56,7 +56,7 @@ This enhancement does not attempt to:
 
 * Cover issues which have not yet arrived in Bugzilla.
 * Cover bugs which do not have the `UpgradeBlocker` keyword.
-    For example, bugs with just the `Upgrades` keyword are not included in the update-blocker lifecycle.
+    For example, bugs with just the `Upgrades` keyword are not included in the update-recommendation lifecycle.
 * Remove the `UpgradeBlocker` keyword, because that might disrupt existing consumers.
 
 ## Proposal
@@ -71,35 +71,41 @@ Write tooling that automatically:
 
 The following statement (or a link to this section) can be pasted into bugs when adding `ImpactStatementRequested`:
 
-We're asking the following questions to evaluate whether or not this bug warrants blocking an upgrade edge from either the previous X.Y or X.Y.Z.
+We're asking the following questions to evaluate whether or not this bug warrants changing update recommendations from either the previous X.Y or X.Y.Z.
 The ultimate goal is to avoid delivering an update which introduces new risk or reduces cluster functionality in any way.
 Sample answers are provided to give more context and the ImpactStatementRequested label has been added to this bug.
 When responding, please remove ImpactStatementRequested and set the ImpactStatementProposed label.
 The expectation is that the assignee answers these questions.
 
-Who is impacted?  If we have to block upgrade edges based on this issue, which edges would need blocking?
-* example: Customers upgrading from 4.y.Z to 4.y+1.z running on GCP with thousands of namespaces, approximately 5% of the subscribed fleet
-* example: All customers upgrading from 4.y.z to 4.y+1.z fail approximately 10% of the time
+Which 4.y.z to 4.y'.z' updates increase vulnerability?  Which types of clusters?
+* reasoning: This allows us to populate [`from`, `to`, and `matchingRules` in conditional update recommendations][graph-data-block] for "the `$SOURCE_RELEASE` to `$TARGET_RELEASE` update is not recommended for clusters like `$THIS`".
+* example: Customers upgrading from 4.y.Z to 4.y+1.z running on GCP with thousands of namespaces, approximately 5% of the subscribed fleet.  Check your vulnerability with `oc ...` or the following PromQL `count (...) > 0`.
+* example: All customers upgrading from 4.y.z to 4.y+1.z fail.  Check your vulnerability with `oc adm upgrade` to show your current cluster version.
 
-What is the impact?  Is it serious enough to warrant blocking edges?
-* example: Up to 2 minute disruption in edge routing
-* example: Up to 90 seconds of API downtime
-* example: etcd loses quorum and you have to restore from backup
+What is the impact?  Is it serious enough to warrant removing update recommendations?
+* reasoning: This allows us to populate [`name` and `message` in conditional update recommendations][graph-data-block] for "...because if you update, `$THESE_CONDITIONS` may cause `$THESE_UNFORTUNATE_SYMPTOMS`".
+* example: Around 2 minute disruption in edge routing for 10% of clusters.  Check with `oc ...`.
+* example: Up to 90 seconds of API downtime.  Check with `curl ...`.
+* example: etcd loses quorum and you have to restore from backup.  Check with `ssh ...`.
 
-How involved is remediation (even moderately serious impacts might be acceptable if they are easy to mitigate)?
-* example: Issue resolves itself after five minutes
-* example: Admin uses oc to fix things
-* example: Admin must SSH to hosts, restore from backups, or other non standard admin activities
+How involved is remediation?
+* reasoning: This allows administrators who are already vulnerable, or who chose to waive conditional-update risks, to recover their cluster.
+  And even moderately serious impacts might be acceptable if they are easy to mitigate.
+* example: Issue resolves itself after five minutes.
+* example: Admin can run a single: `oc ...`.
+* example: Admin must SSH to hosts, restore from backups, or other non standard admin activities.
 
-Is this a regression (if all previous versions were also vulnerable, updating to the new, vulnerable version does not increase exposure)?
-* example: No, it has always been like this we just never noticed
-* example: Yes, from 4.y.z to 4.y+1.z Or 4.y.z to 4.y.z+1
+Is this a regression?
+* reasoning: Updating between two vulnerable releases may not increase exposure (unless rebooting during the update increases vulnerability, etc.).
+  We only qualify update recommendations if the update increases exposure.
+* example: No, it has always been like this we just never noticed.
+* example: Yes, from 4.y.z to 4.y+1.z Or 4.y.z to 4.y.z+1.
 
 ### User Stories
 
 #### A developer wondering about a serious bug
 
-Before this enhancement, the "is this an update blocker?" process was less discoverable.
+Before this enhancement, the "is this worth altering update recommendations?" process was less discoverable.
 With this enhancement, the concerned developer only needs to add the `UpgradeBlocker` keyword to initiate the process.
 And they also have access to this document to more easily understand the rest of the process, if they need to push the whole decision through before an update monitor is available to help out.
 
@@ -109,7 +115,7 @@ This enhancement adds labels to make it clear whether the bug assignee is curren
 
 #### An update monitor managing multiple bugs
 
-This enhancement formalizes the various steps in the decision process, allowing for some steps to be automated, and giving a clear `ImpactStatementProposed` queue for final block-or-not considertion.
+This enhancement formalizes the various steps in the decision process, allowing for some steps to be automated, and giving a clear `ImpactStatementProposed` queue for final graph-data management decisions.
 
 ### API Extensions
 
@@ -186,7 +192,7 @@ This would avoid the need for tooling to add `UpgradeBlocker` when missing, and 
 However, removing `UpgradeBlocker` would break folks who are expecting the current keyword.
 But it's not clear to me who would want to keep consuming that keyword after we grow the fine-grained labeling, but we have been trying to train developers to set `UpgradeBlocker` on potential blockers, and retraining developers is hard.
 
-[graph-data-block]: https://github.com/openshift/cincinnati-graph-data/tree/50e5eb7ebb123f584bcdb5dbc5cab0cfcedd82ea#block-edges
+[graph-data-block]: https://github.com/openshift/cincinnati-graph-data/tree/0335e56cde6b17230106f137382cbbd9aa5038ed#block-edges
 [suspect-queue]: https://bugzilla.redhat.com/buglist.cgi?order=Last%20Changed&product=OpenShift%20Container%20Platform&query_format=advanced&f1=keywords&o1=casesubstring&v1=UpgradeBlocker&f2=status_whiteboard&o2=nowordssubstr&v2=ImpactStatementRequested%20ImpactStatementProposed%20UpdateRecommendationsBlocked
 [component-dev-queue]: https://bugzilla.redhat.com/buglist.cgi?order=Last%20Changed&product=OpenShift%20Container%20Platform&query_format=advanced&status_whiteboard=ImpactStatementRequested&status_whiteboard_type=casesubstring
 [graph-admin-queue]: https://bugzilla.redhat.com/buglist.cgi?order=Last%20Changed&product=OpenShift%20Container%20Platform&query_format=advanced&status_whiteboard=ImpactStatementProposed&status_whiteboard_type=casesubstring
