@@ -34,7 +34,7 @@ see-also:
 
 ## Summary
 
-Enable administrators to tune the maximum number of simultaneous
+Enable cluster administrators to tune the maximum number of simultaneous
 connections for OpenShift router deployments.
 
 OpenShift router currently hard-codes the maximum number of
