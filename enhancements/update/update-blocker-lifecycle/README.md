@@ -5,7 +5,7 @@ authors:
 reviewers:
   - "@LalatenduMohanty"
 approvers:
-  - TBD
+  - "@sdodson"
 creation-date: 2020-09-11
 last-updated: 2021-06-17
 status: implementable
