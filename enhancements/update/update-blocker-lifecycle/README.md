@@ -6,6 +6,8 @@ reviewers:
   - "@LalatenduMohanty"
 approvers:
   - "@sdodson"
+api-approvers:
+  - None
 creation-date: 2020-09-11
 last-updated: 2021-06-17
 status: implementable
