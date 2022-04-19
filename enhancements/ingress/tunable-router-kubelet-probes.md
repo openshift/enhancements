@@ -7,9 +7,11 @@ reviewers:
 approvers:
   - "@frobware"
 api-approvers:
+  - "@Miciah"
 creation-date: 2022-02-21
 last-updated: 2022-02-21
 tracking-link:
+  - "https://issues.redhat.com/browse/NE-683"
 see-also:
 replaces:
 superseded-by:
