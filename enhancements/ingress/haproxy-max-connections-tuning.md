@@ -232,7 +232,7 @@ It's possible that an administrator could set too high a value, given
 the node's configuration, causing other pods on the same node to
 become resource starved.
 
-Websocket connections or, more generally, long-lived connections can
+WebSocket connections or, more generally, long-lived connections can
 exacerbate memory usage for OpenShift router pods. As OpenShift router
 reloads, a new HAProxy process is created to run the new
 configuration. The current process will not terminate until the
