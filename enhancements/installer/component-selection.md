@@ -3,12 +3,12 @@ title: component-selection-during-install
 authors:
   - "@bparees"
 reviewers:
-  - @staebler - install team - need agreement on install-config api updates and CVO config rendering
-  - @LalatenduMohanty - ota/cvo team - need agreement on CVO resource filtering api and new behavior
-  - @soltysh - oc adm release team - need agreement on how the list of valid capabilities will be generated and embedded in the release payload image.
+  - "@staebler - install team - need agreement on install-config api updates and CVO config rendering"
+  - "@LalatenduMohanty - ota/cvo team - need agreement on CVO resource filtering api and new behavior"
+  - "@soltysh - oc adm release team - need agreement on how the list of valid capabilities will be generated and embedded in the release payload image."
 approvers:
-  - @decarr - support for configurable CVO-managed content set feature
-  - @sdodson - as the staff engineer most closely tied to install experience
+  - "@decarr - support for configurable CVO-managed content set feature"
+  - "@sdodson - as the staff engineer most closely tied to install experience"
 creation-date: 2021-05-04
 last-updated: 2021-05-04
 status: provisional
@@ -197,7 +197,7 @@ The CVO will filter out(not apply/reconcile) resources that are annotated with k
 `capability.openshift.io/name=$exclusions` and listed in the `exclude` section, or are not listed
 and the `default` setting is `exclude`.
 
-If a resource participates in multiple capabilities, it should specify all capabilities as comma separated
+If a resource participates in multiple capabilities, it should specify all capabilities as plus-sign separated
 values in the annotation(e.g. `capability.openshift.io/name=console+monitoring`).  The resource will only be 
 included if all the capabilities on the resource are enabled.  This allows a component
 to define a `ServiceMonitor` which is part of both the `Monitoring` capability and the `Foo` capability.  If
