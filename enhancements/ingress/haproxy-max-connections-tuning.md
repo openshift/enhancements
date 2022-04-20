@@ -57,8 +57,7 @@ Route to the appropriate backend servers. OpenShift hard-codes each
 HAProxy instance to a maximum of 20000 simultaneous connections. New
 connections above this threshold are queued until existing connections
 are closed. If connections don't close and the maximum is reached then
-queued clients will time out; 20000 is likely too small a value for
-the majority of deployments.
+queued clients will time out.
 
 The capacity and capability of hardware (i.e., RAM and CPU) that
 OpenShift is deployed onto has steadily increased yet the value of
