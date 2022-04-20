@@ -165,7 +165,10 @@ Ingress controller pods will roll out with `maxconn` set to 150000.
 
 To do this, the administrator can configure
 `spec.nodePlacement.nodeSelector` with labels that match the intended
-node, as well as configuring `spec.tuningOptions.maxConnections`.
+node, as well as configuring `spec.tuningOptions.maxConnections`. If
+there are a large number of cores available, the administrator can
+increase the the number the threads by configuring
+`spec.tuningOptions.threadCount`.
 
 Specifying `spec.tuningOptions.maxConnections: -1` instructs HAProxy
 to dynamically compute the largest possible value based on the ulimits
