@@ -173,8 +173,19 @@ increase the the number the threads by configuring
 Specifying `spec.tuningOptions.maxConnections: -1` instructs HAProxy
 to dynamically compute the largest possible value based on the ulimits
 within the container when HAProxy starts. The nature of HAProxy's
-dynamic computation also takes into consideration what is configured
-in `haproxy.config` at that time.
+dynamic computation at runtime takes into consideration the number of
+frontends enabled in its configuration file (`haproxy.config`). For
+example, if there was only 1 frontend configured then with
+`maxconn=1000` HAProxy would allocate a file descriptor table of size
+2071. The file descriptor table is internally known as `maxsock`. If
+there are 100 frontends listed (and `maxconn=1000`) then `maxsock`
+would be to 2170. Without enumerating too many internal implementation
+details because they are subject to change, HAProxy requires two
+sockets per connection, 2 file descriptors per `frontend` stanza; a
+pipe needs 2 file descriptors (e.g., the stats socket), an additional
+file descriptor is added to the tally based on the number of
+configured threads, each thread require 2 file descriptors for its own
+wake-up pipe, and so on.
 
 Additionally, if these are dedicated infrastructure nodes the `ulimit
 -n` value (i.e., maximum number of open files) can be increased by
