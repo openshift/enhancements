@@ -8,12 +8,12 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
 # We only look at the files that have changed in the current PR, to
 # avoid problems when the template is changed in a way that is
 # incompatible with existing documents.
-CHANGED_FILES=$(git log --name-only --pretty= "${PULL_BASE_SHA:-origin/master}.." -- \
-                    | (grep '^enhancements.*\.md$' || true) \
-                    | sort -u)
+CHANGED_FILES=$(${SCRIPTDIR}/find_changed.sh)
 
 (cd tools && go build -o ../enhancement-tool -mod=mod ./main.go)
 
