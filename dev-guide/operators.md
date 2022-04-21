@@ -74,7 +74,7 @@ At any time the staus of a CO may be:
 - Degraded
 - Progressing
 
-[CVO Cluster Operator Status Conditions Overview](https://github.com/openshift/cluster-version-operator/blob/master/docs/dev/clusteroperator.md#conditions)
+[CVO Cluster Operator Status Conditions Overview](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/clusteroperator.md#conditions)
 
 ## Metrics
 By default, an OpenShift ClusterOperator exposes [Prometheus](https://prometheus.io) metrics via `metrics` service.
@@ -186,7 +186,7 @@ laid out in its resource definitions.  You cannot edit a deployment without firs
 (Well, you can, but the CVO will reconcile and stomp on any changes you make).
 There are 2 paths to working around CVO, you'll need to either:
     * Set your operator in umanaged state.
-    See [here](https://github.com/openshift/cluster-version-operator/blob/master/docs/dev/clusterversion.md#setting-objects-unmanaged)
+    See [here](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/clusterversion.md#setting-objects-unmanaged)
     for how to patch clusterversion/version object.
     or
     * Scale down CVO and edit a deployment in a running cluster like so:
