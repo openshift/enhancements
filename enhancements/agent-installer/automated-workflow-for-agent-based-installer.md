@@ -241,7 +241,7 @@ possible.
 When bootstrapping completes and node0 reboots, progress monitoring
 will need to shift to the OpenShift APIs (`ClusterVersion` and
 `ClusterOperator`). We will extend the `openshift-install` binary with
-a new sub-command, `agent wait-for-install-complete`, to use both APIs for monitoring
+a new sub-command, `agent wait-for install-complete`, to use both APIs for monitoring
 and [progress
 reporting](https://github.com/openshift/assisted-service/blob/master/docs/enhancements/installation-progress-bar.md)
 in that case, including reporting when steps like validation fail and
@@ -321,7 +321,7 @@ to automate the deployment.
     virtual media interface. For vSphere or other hypervisors, similar
     settings of the VM need to be adjusted.
 12. The orchestration tool boots the hosts.
-13. The orchestration tool uses `openshift-install agent wait-for-install-complete` to
+13. The orchestration tool uses `openshift-install agent wait-for install-complete` to
     watch the deployment progress and wait for it to complete.
 14. On each host, the startup script in the image selects the correct
     network settings based on the MAC addresses visible and applies
@@ -350,7 +350,7 @@ to automate the deployment.
     way, except that the nodes will use the ISOs they booted from to
     install RHCOS instead of fetching a new image from the assisted
     service.
-22. The `openshift-install agent wait-for-install-complete` process sees the OpenShift
+22. The `openshift-install agent wait-for install-complete` process sees the OpenShift
     API become available and starts using it to watch the cluster
     complete deployment, combining the information provided by
     `ClusterVersion` and `ClusterOperator` resources with the assisted
@@ -359,10 +359,10 @@ to automate the deployment.
     bootstrapping is complete, the agent reboots node0.
 24. node0 boots from its internal storage and joins the cluster as a
     control plane node.
-25. The `openshift-install agent wait-for-install-complete` process loses
+25. The `openshift-install agent wait-for install-complete` process loses
     the connection to the assisted service REST API and starts relying
     entirely on the OpenShift API for data.
-26. The `openshift-install agent wait-for-install-complete` process sees that the
+26. The `openshift-install agent wait-for install-complete` process sees that the
     `ClusterVersion` API in the cluster shows that the deployment has
     completed, and reports success then exits.
 27. The orchestration tool may take steps to clean up (removing the
@@ -380,7 +380,7 @@ source of the error.
 #### Variation for Agent Failing to Register
 
 If any of the expected agents fail to register with the assisted
-service, deployment will not progress. The `agent wait-for-install-complete` command
+service, deployment will not progress. The `agent wait-for install-complete` command
 will time out after a suitable period (duration to be determined),
 report that deployment has failed, and exit with an error code so that
 the calling orchestration tool can handle the error.
@@ -398,16 +398,16 @@ debugging the failure.
 
 If any of the expected agents fail validation after registering with
 the assisted service, deployment will not progress. The `agent
-wait-for-install-complete` command will recognize the error condition and report
+wait-for install-complete` command will recognize the error condition and report
 it. After all expected agents have completed validation, the `agent
-wait-for-install-complete` command will exit with an error code.
+wait-for install-complete` command will exit with an error code.
 
 Customers integrating directly with the assisted service REST API are
 responsible for recognizing this error state themselves and handling
 it accordingly.
 
 Logs for the agents that have failed validation will be collected
-automatically and downloaded by the `agent wait-for-install-complete` command.
+automatically and downloaded by the `agent wait-for install-complete` command.
 
 ### User Stories
 
