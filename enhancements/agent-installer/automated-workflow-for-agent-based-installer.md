@@ -493,14 +493,6 @@ us to bring the installer up to date without significant impact.
 2. Is the workflow different for single-node? Do we need to start the
    service and go through the orchestration steps for one node? If we
    don't, how do we handle the validations?
-3. How do we implement a feature flag in the installer?
-
-    - A build flag, like what we do for ARO and OKD today
-    - An environment variable that enables the commands under the
-      `agent` prefix, which are otherwise completely disabled and
-      inactive
-    - Hide the commands under the `agent` prefix from the `--help`
-      output, but otherwise leave them fully active and operational
 
 ### Test Plan
 
