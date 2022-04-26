@@ -98,16 +98,6 @@ focus discussion and make progress. Highlight anything that is being
 deferred to a later phase of implementation that may call for its own
 enhancement.
 
-## Drawbacks
-
-The idea is to find the best form of an argument why this enhancement should
-_not_ be implemented.
-
-What are the reasons we might not want to undertake this proposal, and how do 
-we overcome them?  Does this proposal implement a behavior that's new/unique/novel?
-Is it poorly aligned with existing user expectations?  Will it be a significant
-maintenance burden?  Is it likely to be superceded by something else in the near future?
-
 ## Proposal
 
 This is where we get down to the nitty gritty of what the proposal
@@ -154,6 +144,20 @@ How will security be reviewed and by whom?
 How will UX be reviewed and by whom?
 
 Consider including folks that also work outside your immediate sub-project.
+
+### Drawbacks
+
+The idea is to find the best form of an argument why this enhancement should
+_not_ be implemented.  
+
+What trade-offs (technical/efficiency cost, user experience, flexibility, 
+supportability, etc) must be made in order to implement this? What are the reasons
+we might not want to undertake this proposal, and how do we overcome them?  
+
+Does this proposal implement a behavior that's new/unique/novel? Is it poorly
+aligned with existing user expectations?  Will it be a significant maintenance
+burden?  Is it likely to be superceded by something else in the near future?
+
 
 ## Design Details
 
