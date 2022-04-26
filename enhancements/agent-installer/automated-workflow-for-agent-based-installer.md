@@ -39,7 +39,7 @@ associated with automated provisioning for on-premises use
 cases. Nevertheless, users and partners want to automate these
 deployments. The assisted installer GUI provides an excellent user
 experience for deploying connected clusters. This enhancement covers
-the *automation* use case for disconnected clusters.
+the *user-provided automation* use case for disconnected clusters.
 
 ## Motivation
 
