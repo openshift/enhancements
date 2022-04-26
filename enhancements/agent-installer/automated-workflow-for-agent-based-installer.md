@@ -114,7 +114,7 @@ the *user-provided automation* use case for disconnected clusters.
   assisted installer SaaS.
 - Describing an end-to-end solution for users without their own
   orchestration tool is left to a future enhancement.
-- Collecting telemetry data for connected deployments is left to a
+- Collecting telemetry data for deployments is left to a
   future enhancement.
 - Details of securing the communication between agents and services to
   ensure only desired hosts join the cluster are left to a future
