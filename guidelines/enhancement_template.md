@@ -115,6 +115,41 @@ implementation that is proposed here, and expand on reasons for not
 choosing alternatives in the Alternatives section at the end of the
 document.
 
+### Workflow Description
+
+Explain how the user will use the feature. Be detailed and explicit.
+Describe all of the actors, their roles, and the APIs or interfaces
+involved. Define a starting state and then list the steps that the
+user would need to go through to trigger the feature described in the
+enhancement. Optionally add a
+[mermaid](https://github.com/mermaid-js/mermaid#readme) sequence
+diagram.
+
+Use sub-sections to explain variations, such as for error handling,
+failure recovery, or alternative outcomes.
+
+For example:
+
+**cluster creator** is a human user responsible for deploying a
+cluster.
+
+**application administrator** is a human user responsible for
+deploying an application in a cluster.
+
+1. The cluster creator sits down at their keyboard...
+2. ...
+3. The cluster creator sees that their cluster is ready to receive
+   applications, and gives the application administrator their
+   credentials.
+
+#### Variation [optional]
+
+If the cluster creator uses a standing desk, in step 1 above they can
+stand instead of sitting down.
+
+See
+https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md#high-level-end-to-end-workflow
+and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples.
 
 ### API Extensions
 
