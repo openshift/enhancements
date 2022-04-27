@@ -15,6 +15,8 @@ SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # incompatible with existing documents.
 CHANGED_FILES=$(${SCRIPTDIR}/find_changed.sh)
 
-(cd tools && go build -o ../enhancement-tool -mod=mod ./main.go)
+if [ -n "$CHANGED_FILES" ]; then
+    (cd tools && go build -o ../enhancement-tool -mod=mod ./main.go)
 
-./enhancement-tool metadata-lint ${CHANGED_FILES}
+    ./enhancement-tool metadata-lint ${CHANGED_FILES}
+fi
