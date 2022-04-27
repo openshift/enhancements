@@ -298,28 +298,43 @@ Please raise 'ulimit-n' to 2097208 or more to avoid any trouble.
 This will fail in >= v2.3
 ```
 
-Here we see HAProxy's computation as "maxsock = 2 * maxconn + 56". The
-additional 56 are based on internal HAProxy housekeeping requirements
-(e.g., stats port) and the set of configured frontend/backends in the
-`haproxy.config` file.
+Here we see HAProxy's actual computation. We asked for 1048576 but, as
+shown, that actually requires 2097208 file descriptors, and in this
+case exceeds the operating system limit. The computation for `maxsock`
+is `2*maxconn` but here we see an additional 56 file descriptors are
+also required. The additions come from what is actually configured in
+the `haproxy.config` file; the number of listening frontends, the
+number of other listeners (e.g., stats socket), the number chosen for
+`nbthreads`—all of these add to the final tally.
 
 There are two mitigation paths for this scenario:
 
 1. If you are setting extremely large values, always elect to use `-1`
    (i.e., auto) and let HAProxy compute the value based on actual
-   ulimits within the running container, its own housekeeping
-   requirements, and the `frontend/backend/listen` entries specified
-   in `haproxy.config`.
-
-2. If you want an exact value then set a value that is improbably
-   large, heed the warning and the suggested fix, then configure a
-   tuned profile that would support the suggested `ulimit -n` value.
-
+   ulimits within the running container. That dynamic computation will
+   automatically include requirements listed in the `haproxy.config`
+   with respect to frontend listeners, the stats socket, the number of
+   configured threads, and so on.
+   
+2. Explicitly set `spec.tuniningOptions.maxConnections` to 1048576 and
+   observe the HAProxy warning/alert messages in the router's pod
+   logs. The alert message explicitly lists the computed value that is
+   required (e.g., Please raise 'ulimit-n' to 2097208 or more to avoid
+   any trouble). A specific tuned profile would have to be created
+   that raises `nofile` (i.e., max number of open file descriptors) to
+   2097152 to support the desired value of 1048576.
+   
 If, in later releases of OpenShift, we switch to HAProxy v2.4 then
 values for `spec.tuningOptions.maxConnections` that cannot be
 satisfied at runtime will prevent the router pods from starting until
 a compatible value is selected. We are currently using HAProxy 2.2 and
 exceeding the limit in the 2.2 series is just a warning.
+
+If you manually select a large value and the pod is migrated to
+another node there's no guarantee that the new node has identical
+ulimit settings. If you use auto (i.e., `-1`) it would adapt without
+requiring manual intervention. If the new node has smaller ulimits
+then the router pod will fail to start.
 
 ## Design Details
 
