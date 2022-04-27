@@ -75,6 +75,15 @@ should go into the following sections.
 This section is for explicitly listing the motivation, goals and non-goals of
 this proposal. Describe why the change is important and the benefits to users.
 
+### User Stories
+
+Detail the things that people will be able to do if this is implemented.
+Include as much detail as possible so that people can understand the "how" of
+the system. The goal here is to make this feel real for users without getting
+bogged down.
+
+Include a story on how this proposal will be operationalized:  lifecycled, monitored and remediated at scale.
+
 ### Goals
 
 Summarize the specific goals of the proposal. How will we know that
@@ -99,14 +108,6 @@ implementation that is proposed here, and expand on reasons for not
 choosing alternatives in the Alternatives section at the end of the
 document.
 
-### User Stories
-
-Detail the things that people will be able to do if this is implemented.
-Include as much detail as possible so that people can understand the "how" of
-the system. The goal here is to make this feel real for users without getting
-bogged down.
-
-Include a story on how this proposal will be operationalized:  lifecycled, monitored and remediated at scale.
 
 ### API Extensions
 
@@ -143,6 +144,20 @@ How will security be reviewed and by whom?
 How will UX be reviewed and by whom?
 
 Consider including folks that also work outside your immediate sub-project.
+
+### Drawbacks
+
+The idea is to find the best form of an argument why this enhancement should
+_not_ be implemented.  
+
+What trade-offs (technical/efficiency cost, user experience, flexibility, 
+supportability, etc) must be made in order to implement this? What are the reasons
+we might not want to undertake this proposal, and how do we overcome them?  
+
+Does this proposal implement a behavior that's new/unique/novel? Is it poorly
+aligned with existing user expectations?  Will it be a significant maintenance
+burden?  Is it likely to be superceded by something else in the near future?
+
 
 ## Design Details
 
@@ -372,10 +387,6 @@ Describe how to
 
 Major milestones in the life cycle of a proposal should be tracked in `Implementation
 History`.
-
-## Drawbacks
-
-The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
 
 ## Alternatives
 
