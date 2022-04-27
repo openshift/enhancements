@@ -77,12 +77,19 @@ this proposal. Describe why the change is important and the benefits to users.
 
 ### User Stories
 
-Detail the things that people will be able to do if this is implemented.
-Include as much detail as possible so that people can understand the "how" of
-the system. The goal here is to make this feel real for users without getting
-bogged down.
+Detail the things that people will be able to do if this is
+implemented. In each story, explain who the actor is based on their
+role, explain what they want to do with the system, and explain the
+underlying goal they have. Use the standard three part formula:
 
-Include a story on how this proposal will be operationalized:  lifecycled, monitored and remediated at scale.
+"As a <role>, I want to <take some action> so that I can <accomplish a
+goal>."
+
+Make the change feel real for users, without getting bogged down in
+implementation details.
+
+Include a story on how this proposal will be operationalized:
+life-cycled, monitored and remediated at scale.
 
 ### Goals
 
