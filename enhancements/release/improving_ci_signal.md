@@ -1,12 +1,11 @@
 ---
 title: improving-ci-signal
 authors:
-  - @deads2k
+  - "@deads2k"
 reviewers:
-  - @dgoodwin
-  - @stbenjam
-  - @wking
-  - ...
+  - "@dgoodwin"
+  - "@stbenjam"
+  - "@wking"
 approvers:
    - TBD
 creation-date: 2021-08-16
@@ -214,7 +213,13 @@ by X%”
 
 These are the things that we can start doing to achieve these objectives. Most of these actions have independent value.
 
-### Run the same Job multiple times on a single payload
+### API Extensions
+
+None
+
+### User Stories
+
+#### Run the same Job multiple times on a single payload
 
 POC done!
 
@@ -223,7 +228,7 @@ been using it to test the JobAggregator. Thanks to Brad Williams for his quick w
 
 Immediate value: increased signal for TRT on the job we enable this on.
 
-### Track historical test run data in queryable way
+#### Track historical test run data in queryable way
 
 In progress in openshift/ci-tools#2166.
 
@@ -233,12 +238,12 @@ openshift-ci-data-analysis, dataset: ci_data. Right now only a subset of jobs ar
 Immediate value: ability to manually inspect Job,Test reliability. We used this to detect a kubernetes update regression
 even in its current state.
 
-### Endpoint availability needs special handling
+#### Endpoint availability needs special handling
 
 An additional value-add is the ability to detect per-endpoint, per-platform availability numbers for API and ingress
 endpoints. The information is now present, but some bugs in calculation need addressing first: openshift/origin#26373.
 
-### Build a JobAggregator binary
+#### Build a JobAggregator binary
 
 In progress in openshift/ci-tools#2166, but may split off.
 
@@ -248,14 +253,14 @@ The historical data querying is not yet complete.
 Immediate value: ability to manually inspect PR Job,Test reliability. We used a partially working version of this to
 catch a kubernetes update regression in its current state.
 
-### Add payload promotion blocking job for JobAggregator
+#### Add payload promotion blocking job for JobAggregator
 
 Blocked by Building a JobAggregator binary.
 
 Immediate value: the signal on the jobs we apply against this against becomes more reliable and faster even if we do not
 make the per PR payload promotion tests work. We’ll be better at detection, but we will be no better at reacting.
 
-### Run any payload promotion job against a PR in any repo
+#### Run any payload promotion job against a PR in any repo
 
 WIP in openshift/release#20463
 
@@ -266,7 +271,7 @@ Immediate value: a change to any repo can test any job. This commonly comes up f
 openshift/origin, openshift/kube-*-operators, openshift/cluster-etcd-operator. It occasionally comes up for other repos,
 but I’m not an approver on those, so I don’t see all the one-offs.
 
-### Run all payload promotion jobs against a PR
+#### Run all payload promotion jobs against a PR
 
 Blocked by running any payload promotion job against a PR in any repo.
 
@@ -277,6 +282,50 @@ a way to codify it.
 Immediate value: risky changes can be manually checked. Some changes are inherently risky and those merging know it. The
 kubernetes update is a good example, but there are others as new features are brought online and may impact esoteric
 platforms.
+
+### Risks and Mitigations
+
+N/A
+
+### Test Plan
+
+N/A
+
+### Graduation Criteria
+
+N/A
+
+#### Dev Preview -> Tech Preview
+
+N/A
+
+#### Tech Preview -> GA
+
+N/A
+
+#### Removing a deprecated feature
+
+N/A
+
+### Upgrade / Downgrade Strategy
+
+N/A
+
+### Version Skew Strategy
+
+N/A
+
+### Operational Aspects of API Extensions
+
+N/A
+
+#### Failure Modes
+
+N/A
+
+#### Support Procedures
+
+\#forum-release-oversight on Slack
 
 ### Questions
 
@@ -362,6 +411,19 @@ your team to the no-feature-freeze process!
 The capabilities to perform these checks (run jobs multiple times, aggregate test results, gate acceptance, run this
 check on PRs, etc) are still being built. We are communicating this now to get feedback on the proposed changes.
 Additional communication will be sent when we’re ready to turn on this functionality.
+
+## Implementation History
+
+- Job aggregation has been implemented
+- TRT revert policy has been implemented
+
+## Drawbacks
+
+N/A
+
+## Alternatives
+
+N/A
 
 ## Appendix
 
