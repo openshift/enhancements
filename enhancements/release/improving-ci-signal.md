@@ -7,7 +7,11 @@ reviewers:
   - "@stbenjam"
   - "@wking"
 approvers:
-   - TBD
+   - "@deads2k"
+api-approvers:
+   - "@deads2k"
+tracking-link:
+   - "https://docs.google.com/document/d/16E0dLFLbLBTe0J4fUd_55I-8bJc9t22BwsdWqFuutaQ/edit"
 creation-date: 2021-08-16
 last-updated: 2022-04-26
 ---
