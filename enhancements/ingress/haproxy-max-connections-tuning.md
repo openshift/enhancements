@@ -114,50 +114,50 @@ Add a new field `maxConnections` to the IngressController API:
 type IngressControllerTuningOptions struct {
     ...
 
-	// maxConnections defines the maximum number of simultaneous
-	// connections that can be established per HAProxy process.
-	// Increasing this value allows each ingress controller pod to
-	// handle more connections but at the cost of additional
-	// system resources being consumed.
-	//
-	// Permitted values are: empty, 0, -1, and the range
-	// 2000-2000000.
-	//
-	// If this field is empty or 0, the IngressController will use
-	// the default value of 20000, but the default is subject to
-	// change in future releases.
-	//
-	// If the value is -1 then HAProxy will dynamically compute a
-	// maximum value based on the available ulimits in the running
-	// container. Selecting -1 (i.e., auto) will result in a large
-	// value being computed (~520000 on OpenShift >=4.10 clusters)
-	// and therefore each HAProxy process will incur significant
-	// memory usage compared to the current default of 20000.
-	//
-	// Setting a value that is greater than the current operating
-	// system limit will prevent the HAProxy process from
-	// starting.
-	//
-	// If you choose a discrete value (e.g., 750000) and the
-	// router pod is migrated to a new node, there's no guarantee
-	// that that new node has identical ulimits configured. In
-	// such a scenario the pod would fail to start. If you have
-	// nodes with different ulimits configured (e.g., different
-	// tuned profiles) and you choose a discrete value then the
-	// guidance is to use -1 and let the value be computed
-	// dynamically at runtime.
-	//
-	// You can monitor memory usage for router containers with the
-	// following metric:
-	// 'container_memory_working_set_bytes{container="router",namespace="openshift-ingress"}'.
-	//
-	// You can monitor memory usage of individual HAProxy
-	// processes in router containers with the following metric:
-	// 'container_memory_working_set_bytes{container="router",namespace="openshift-ingress"}/container_processes{container="router",namespace="openshift-ingress"}'.
-	//
-	// +kubebuilder:validation:Optional
-	// +optional
-	MaxConnections int32 `json:"maxConnections,omitempty"`
+    // maxConnections defines the maximum number of simultaneous
+    // connections that can be established per HAProxy process.
+    // Increasing this value allows each ingress controller pod to
+    // handle more connections but at the cost of additional
+    // system resources being consumed.
+    //
+    // Permitted values are: empty, 0, -1, and the range
+    // 2000-2000000.
+    //
+    // If this field is empty or 0, the IngressController will use
+    // the default value of 20000, but the default is subject to
+    // change in future releases.
+    //
+    // If the value is -1 then HAProxy will dynamically compute a
+    // maximum value based on the available ulimits in the running
+    // container. Selecting -1 (i.e., auto) will result in a large
+    // value being computed (~520000 on OpenShift >=4.10 clusters)
+    // and therefore each HAProxy process will incur significant
+    // memory usage compared to the current default of 20000.
+    //
+    // Setting a value that is greater than the current operating
+    // system limit will prevent the HAProxy process from
+    // starting.
+    //
+    // If you choose a discrete value (e.g., 750000) and the
+    // router pod is migrated to a new node, there's no guarantee
+    // that that new node has identical ulimits configured. In
+    // such a scenario the pod would fail to start. If you have
+    // nodes with different ulimits configured (e.g., different
+    // tuned profiles) and you choose a discrete value then the
+    // guidance is to use -1 and let the value be computed
+    // dynamically at runtime.
+    //
+    // You can monitor memory usage for router containers with the
+    // following metric:
+    // 'container_memory_working_set_bytes{container="router",namespace="openshift-ingress"}'.
+    //
+    // You can monitor memory usage of individual HAProxy
+    // processes in router containers with the following metric:
+    // 'container_memory_working_set_bytes{container="router",namespace="openshift-ingress"}/container_processes{container="router",namespace="openshift-ingress"}'.
+    //
+    // +kubebuilder:validation:Optional
+    // +optional
+    MaxConnections int32 `json:"maxConnections,omitempty"`
 }
 ```
 
@@ -170,7 +170,7 @@ type IngressControllerTuningOptions struct {
 > IngressController sharding.
 
 The administrator can patch their existing ingress controllers to
-increase the number of simultaneous connections. 
+increase the number of simultaneous connections.
 
 For example, patching the `default` ingresscontroller to support
 150000 simultaneous connections.
@@ -276,9 +276,83 @@ configuration. The current process will not terminate until the
 connections it is serving are all closed. In a busy cluster reloads
 could occur every 5 seconds and this has the potential to leave a
 long-tail of haproxy processes each consuming a significant amount of
-memory. This is particularly concerning when the auto-computed value
-(i.e., `-1`) is specified. In this scenario the additional memory used
-can be as much as 250MB per process.
+memory.
+
+The following tables shows the increased memory requirements as we
+step through various values of `spec.tuningOptions.maxConnections`:
+
+##### algorithm=random weight=1 backends=1000 threads=4
+```
+maxconn  maxconn (HAProxy)  maxsock (HAProxy)  Process Size (MB)
+-------  -----------------  -----------------  -----------------
+   2000               2000               4054                 53
+  20000              20000              40054                 56
+  50000              50000             100054                 59
+ 100000             100000             200054                 66
+ 200000             200000             400054                 78
+   auto             524261            1048576                119
+```
+
+##### algorithm=random weight=1 backends=1000 threads=64
+```
+maxconn  maxconn (HAProxy)  maxsock (HAProxy)  Process Size (MB)
+-------  -----------------  -----------------  -----------------
+   2000               2000               4234                 90
+  20000              20000              40234                 91
+  50000              50000             100234                 95
+ 100000             100000             200234                101
+ 200000             200000             400234                114
+   auto             524171            1048576                154
+```
+
+The difference between 20000 and `auto` is 63MB in each table despite
+varying the number of threads. And if we vary the algorithm we see the
+same 63MB growth.
+
+##### algorithm=roundrobin weight=1 backends=1000 threads=64
+```
+maxconn  maxconn (HAProxy)  maxsock (HAProxy)  Process Size (MB)
+-------  -----------------  -----------------  -----------------
+   2000               2000               4234                 82
+  20000              20000              40234                 84
+  50000              50000             100234                 87
+ 100000             100000             200234                 94
+ 200000             200000             400234                106
+   auto             524171            1048576                147
+```
+
+And if we vary the number of backends then we see the same 63MB
+growth.
+
+##### algorithm=leastconn weight=1 backends=4000 threads=64
+```
+maxconn  maxconn (HAProxy)  maxsock (HAProxy)  Process Size (MB)
+-------  -----------------  -----------------  -----------------
+   2000               2000               4234                307
+  20000              20000              40234                308
+  50000              50000             100234                312
+ 100000             100000             200234                318
+ 200000             200000             400234                331
+   auto             524171            1048576                371
+```
+
+It should be noted that this represents static growth (i.e., the
+result of parsing the configuration file); haproxy will require
+additional memory beyond at runtime to handle connections, serve
+traffic, etc.
+
+The following gists detail memory usage where we vary the balancing
+algorithm across `roundrobin`, `leastconn`, and `random`:
+
+- [`spec.tuningOptions.maxConnections` = 1 million](https://gist.github.com/frobware/bca059598333b76fdd77c29e176b559b)
+- [`spec.tuningOptions.maxConnections` = 2 million](https://gist.github.com/frobware/821365a59e81a8d4bc7cc667d1392b3a)
+
+The script that computes memory usage and the script that drives the
+analysis and produces the table output can be found in the following
+two gists:
+
+- [maxconn-stats.pl](https://gist.github.com/frobware/e349980270c7c25d5f753cab450aa9e5)
+- [maxconn-analysis.sh](https://gist.github.com/frobware/0d1478bac6ba7cd87dd5db0ba1fa9c78)
 
 #### Unsupportable runtime limits
 
@@ -287,7 +361,7 @@ An administrator can set a large value for
 the computation taken by HAProxy doubles the asked-for-value to allow
 connections to queue up when the maximum has been reached. This is
 known internally to HAProxy as `maxsock`. Specifying
-`spec.tuniningOptions.maxConnections: 1048576` yields the following
+`spec.tuningOptions.maxConnections: 1048576` yields the following
 alert when the OpenShift router pod starts:
 
 ```console
@@ -315,15 +389,15 @@ There are two mitigation paths for this scenario:
    automatically include requirements listed in the `haproxy.config`
    with respect to frontend listeners, the stats socket, the number of
    configured threads, and so on.
-   
-2. Explicitly set `spec.tuniningOptions.maxConnections` to 1048576 and
+
+2. Explicitly set `spec.tuningOptions.maxConnections` to 1048576 and
    observe the HAProxy warning/alert messages in the router's pod
    logs. The alert message explicitly lists the computed value that is
    required (e.g., Please raise 'ulimit-n' to 2097208 or more to avoid
    any trouble). A specific tuned profile would have to be created
    that raises `nofile` (i.e., max number of open file descriptors) to
    2097152 to support the desired value of 1048576.
-   
+
 If, in later releases of OpenShift, we switch to HAProxy v2.4 then
 values for `spec.tuningOptions.maxConnections` that cannot be
 satisfied at runtime will prevent the router pods from starting until
@@ -332,9 +406,9 @@ exceeding the limit in the 2.2 series is just a warning.
 
 If you manually select a large value and the pod is migrated to
 another node there's no guarantee that the new node has identical
-ulimit settings. If you use auto (i.e., `-1`) it would adapt without
-requiring manual intervention. If the new node has smaller ulimits
-then the router pod will fail to start.
+ulimit settings. If the new node has smaller ulimits then the router
+pod will fail to start. If you use auto (i.e., `-1`) it would adapt
+without requiring manual intervention.
 
 ## Design Details
 
@@ -352,7 +426,7 @@ then the router pod will fail to start.
    `spec.tuningOptions.maxConnections` to 42000. Wait for the ingress
    controller pod to be updated. Verify the router deployment has the
    environment variable `ROUTER_MAX_CONNECTIONS` set to 42000.
-   
+
 3. Patch the IngressController to remove
    `spec.tuningOptions.maxConnections`. Wait for the ingress
    controller pod to be updated. Verify the router deployment does not
