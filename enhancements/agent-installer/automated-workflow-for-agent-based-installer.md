@@ -523,7 +523,7 @@ supported).
 #### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
-- The minimum viable version of the new installer may only work in
+- The tech preview version of the new installer may only work in
   connected settings
 - End user documentation, relative API stability
 - Sufficient test coverage
