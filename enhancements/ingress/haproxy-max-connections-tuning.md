@@ -13,7 +13,7 @@ approvers:
   - "@knobunc"
   - "@miciah"
 api-approvers:
-  - TBD
+  - "@deads2k"
 creation-date: 2021-04-05
 last-updated: 2021-04-05
 tracking-link:
@@ -22,7 +22,7 @@ see-also:
   - https://github.com/openshift/enhancements/blob/master/enhancements/ingress/haproxy-thread-tuning.md
 ---
 
-# HAProxy max connection tuning
+# HAProxy max connections tuning
 
 ## Release Signoff Checklist
 
@@ -258,6 +258,11 @@ $ oc rsh -n openshift-ingress <ROUTER-POD> bash -c 'echo "show info" | socat /va
 Maxconn: 524260
 ```
 
+### API Extensions
+
+This enhancement adds a new field `maxConnections` to the
+IngressController's `spec.tuningOptions`.
+
 ### Risks and Mitigations
 
 #### Increased Resource Usage
@@ -282,7 +287,8 @@ The following tables shows the increased memory requirements as we
 step through various values of `spec.tuningOptions.maxConnections`:
 
 ##### algorithm=random weight=1 backends=1000 threads=4
-```
+
+```console
 maxconn  maxconn (HAProxy)  maxsock (HAProxy)  Process Size (MB)
 -------  -----------------  -----------------  -----------------
    2000               2000               4054                 53
@@ -294,7 +300,8 @@ maxconn  maxconn (HAProxy)  maxsock (HAProxy)  Process Size (MB)
 ```
 
 ##### algorithm=random weight=1 backends=1000 threads=64
-```
+
+```console
 maxconn  maxconn (HAProxy)  maxsock (HAProxy)  Process Size (MB)
 -------  -----------------  -----------------  -----------------
    2000               2000               4234                 90
@@ -310,7 +317,8 @@ varying the number of threads. And if we vary the algorithm we see the
 same 63MB growth.
 
 ##### algorithm=roundrobin weight=1 backends=1000 threads=64
-```
+
+```console
 maxconn  maxconn (HAProxy)  maxsock (HAProxy)  Process Size (MB)
 -------  -----------------  -----------------  -----------------
    2000               2000               4234                 82
@@ -325,7 +333,8 @@ And if we vary the number of backends then we see the same 63MB
 growth.
 
 ##### algorithm=leastconn weight=1 backends=4000 threads=64
-```
+
+```console
 maxconn  maxconn (HAProxy)  maxsock (HAProxy)  Process Size (MB)
 -------  -----------------  -----------------  -----------------
    2000               2000               4234                307
@@ -338,7 +347,7 @@ maxconn  maxconn (HAProxy)  maxsock (HAProxy)  Process Size (MB)
 
 It should be noted that this represents static growth (i.e., the
 result of parsing the configuration file); haproxy will require
-additional memory beyond at runtime to handle connections, serve
+additional memory beyond that at runtime to handle connections, serve
 traffic, etc.
 
 The following gists detail memory usage where we vary the balancing
@@ -410,7 +419,11 @@ ulimit settings. If the new node has smaller ulimits then the router
 pod will fail to start. If you use auto (i.e., `-1`) it would adapt
 without requiring manual intervention.
 
+### Drawbacks
+
 ## Design Details
+
+### Open Questions
 
 ### Test Plan
 
@@ -448,7 +461,19 @@ without requiring manual intervention.
 
 ### Graduation Criteria
 
-N/A
+This enhancement does not require graduation milestones.
+
+#### Dev Preview -> Tech Preview
+
+N/A.  This feature will go directly to GA.
+
+#### Tech Preview -> GA
+
+N/A.  This feature will go directly to GA.
+
+#### Removing a deprecated feature
+
+N/A.  We do not plan to deprecate this feature.
 
 ### Upgrade / Downgrade Strategy
 
@@ -467,10 +492,16 @@ ingress controller will revert to the previous default of 20000.
 
 N/A
 
-## Implementation History
+### Operational Aspects of API Extensions
 
-## Drawbacks
+#### Failure Modes
+
+#### Support Procedures
+
+## Implementation History
 
 ## Alternatives
 
 [IngressController sharding](https://docs.openshift.com/container-platform/4.10/networking/configuring_ingress_cluster_traffic/configuring-ingress-cluster-traffic-ingress-controller.html#nw-ingress-sharding-route-labels_configuring-ingress-cluster-traffic-ingress-controller)
+
+## Infrastructure Needed [optional]
