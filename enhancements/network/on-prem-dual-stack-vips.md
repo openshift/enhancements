@@ -2,6 +2,7 @@
 title: dual-stack-vips
 authors:
   - @cybertron
+  - @creydr
 reviewers:
   - @creydr
   - @dougsland
@@ -15,7 +16,7 @@ api-approvers:
   - @danwinship
   - @aojea
 creation-date: 2022-03-01
-last-updated: 2022-04-08
+last-updated: 2022-08-02
 tracking-link:
   - https://issues.redhat.com/browse/SDN-2213
 see-also:
@@ -257,6 +258,21 @@ internal loadbalancer implementation. On upgrade, existing VIP configurations
 will be maintained. We will not (and cannot) automatically add new VIPs to a
 cluster on upgrade. If a deployer of an older dual stack cluster wants the new
 VIP functionality that will have to be a separate operation from upgrade.
+
+CNO takes care updating the new fields (`apiServerInternalIPs` &
+`ingressInternalIPs`) and old fields (`apiServerInternalIP` &
+`ingressInternalIP`) in [openshift/api](#openshiftapi) to have a consistent API
+between versions and therefore keeping clients consuming the old API functional.
+
+The following table shows the rules how the fields are set:
+
+| Case | Initial value of new field | Initial value of old field | Resulting value of new field | Resulting value of old field | Description |
+| ---- | -------------------------- | -------------------------- | ---------------------------- | ---------------------------- | ----------- |
+| 1    | _empty_                    | foo                        | [0]: foo                     | foo                          | `new` field is empty, `old` with value: set `new[0]` to value from `old` |
+| 2    | [0]: foo <br />[1]: bar    | _empty_                    | [0]: foo <br />[1]: bar      | foo                          | `new` contains values, `old` is empty: set `old` to value from `new[0]` |
+| 3    | [0]: foo <br />[1]: bar    | foo                        | [0]: foo <br />[1]: bar      | foo                          | `new` field contains values, `old` contains `new[0]`: we are fine, as `old` is part of `new` |
+| 4    | [0]: foo <br />[1]: bar    | bar                        | [0]: foo <br />[1]: bar      | bar                          | `new` contains values, `old` contains `new[1]`: we are fine, as `old` is part of `new` |
+| 5    | [0]: foo <br />[1]: bar    | baz                        | [0]: foo <br />[1]: bar      | foo                          | `new` contains values, `old` contains a value which is not included in `new`: new values take precedence over old values, so set `old` to value from `new[0]` (and log a warning) |
 
 ### Version Skew Strategy
 
