@@ -1,5 +1,5 @@
 ---
-title: haproxy-max-connection-tuning
+title: haproxy-max-connections-tuning
 authors:
   - "@frobware"
 reviewers:
