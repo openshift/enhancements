@@ -22,7 +22,7 @@ see-also:
   - https://github.com/openshift/enhancements/blob/master/enhancements/ingress/haproxy-thread-tuning.md
 ---
 
-# HAProxy max connections tuning
+# HAProxy Max Connections Tuning
 
 ## Release Signoff Checklist
 
