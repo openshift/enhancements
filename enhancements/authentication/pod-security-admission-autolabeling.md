@@ -10,7 +10,7 @@ approvers:
   - "@sttts"
   - "@mfojtik"
 api-approvers: # in case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers)
-  - @sttts"
+  - "@sttts"
 creation-date: 2022-02-04
 last-updated: 2022-02-04
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
@@ -278,6 +278,10 @@ PSa label synchronization controller and this `Namespace` and its workloads
 will be reconciled according to the [PSa Label Synchronization Controller](#psa-label-synchronization-controller)
 section.
 
+### Workflow Description
+
+Described in the sections above.
+
 ### Risks and Mitigations
 
 #### PSa Label Synchronization Risks
@@ -308,6 +312,10 @@ should be rather rare as modern restricted workloads should not be susceptible t
 the *setuid* bits and should tolerate dropped capabilities. Nevertheless, the
 documentation should state how to fix such workloads by modifying the `dropCapabilities`
 to match the previous `restricted` SCC.
+
+### Drawbacks
+
+Everything was already described elsewhere.
 
 ## Design Details
 
@@ -412,10 +420,6 @@ Describe how to
 
 Major milestones in the life cycle of a proposal should be tracked in `Implementation
 History`.
-
-## Drawbacks
-
-Everything was already described elsewhere.
 
 ## Alternatives
 
