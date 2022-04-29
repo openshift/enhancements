@@ -1,20 +1,20 @@
 ---
-title: dual-stack-vips
+title: on-prem-dual-stack-vips
 authors:
-  - @cybertron
-  - @creydr
+  - "@cybertron"
+  - "@creydr"
 reviewers:
-  - @creydr
-  - @dougsland
+  - "@creydr"
+  - "@dougsland"
 approvers:
-  - @patrickdillon
-  - @kirankt
-  - @shardy
-  - @cgwalters
-  - @kikisdeliveryservice
+  - "@patrickdillon"
+  - "@kirankt"
+  - "@shardy"
+  - "@cgwalters"
+  - "@kikisdeliveryservice"
 api-approvers:
-  - @danwinship
-  - @aojea
+  - "@danwinship"
+  - "@aojea"
 creation-date: 2022-03-01
 last-updated: 2022-08-02
 tracking-link:
@@ -89,6 +89,12 @@ Minimal risk. This is just adding another VIP, something we already have in
 our deployments. The main concern would be logic errors arising out of
 the need to handle multiple VIPs, which (if they happen) will need to be
 addressed as bugs.
+
+### Drawbacks
+
+Nothing significant. A very small amount of compute resources will be used
+to manage the new VIPs. Even this can be avoided by simply not specifying
+the second VIP if it is not needed.
 
 ## Design Details
 
@@ -297,12 +303,6 @@ NA
 ## Implementation History
 
 4.11: Initial implementation
-
-## Drawbacks
-
-Nothing significant. A very small amount of compute resources will be used
-to manage the new VIPs. Even this can be avoided by simply not specifying
-the second VIP if it is not needed.
 
 ## Alternatives
 
