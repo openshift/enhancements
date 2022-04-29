@@ -13,7 +13,7 @@ api-approvers:
 tracking-link:
    - "https://docs.google.com/document/d/16E0dLFLbLBTe0J4fUd_55I-8bJc9t22BwsdWqFuutaQ/edit"
 creation-date: 2021-08-16
-last-updated: 2022-04-26
+last-updated: 2022-05-31
 ---
 
 # Improving CI Signal
@@ -144,15 +144,17 @@ results in a JobFooAggregate Job that can pass or fail based on historical crite
 
 #### Ok, What then? We’re already busted
 
-Fast-forward to a point where we actually built this mechanism. We’ve now got a broken payload. It’s good that we know
-it’s broken, but it’s still broken.
+Once we know we have a broken payload, TRT must revert the breaking change. Regardless if a likely fix is identified,
+the revert must land first. A clean revert is nearly always guaranteed to fix the problem immediately, while a proposed
+fix PR is not. Additionally, it is a negligible amount of additional effort to build your fix on top of unreverting the
+revert.
 
 ### Quick Revert
 
-TRT is expected to watch payload promotion for master (not historical releases). Given a broken payload that TRT
-detected quickly, provide a way to quickly and definitively identify the regressing change. Merge a nearly immediate
-revert after proving the revert resolves the problem. Provide a way for the un-revert to prove that it is no longer
-regressing before it merges.
+TRT is expected to watch payload promotion for the main branch (not historical releases). Given a broken payload that
+TRT detected quickly, quickly and definitively identify the regressing change. Once identified, merge an immediate
+revert. The original author and/or the author's team lead should be given notice and criteria to reintroduce their
+change.
 
 #### Why revert?
 
