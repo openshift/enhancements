@@ -8,7 +8,7 @@ reviewers:
 approvers:
   - "@Miciah"
 api-approvers:
-  - TBD
+  - N/A
 creation-date: 2022-01-27
 last-updated: 2022-01-27
 tracking-link:
@@ -333,11 +333,33 @@ The operator will have to create the webhooks along with the controller deployme
 The webhook can be registered with a CA bundle which is used to verify the identity 
 of webhook by the API server. The [service-ca controller](https://docs.openshift.com/container-platform/4.10/security/certificate_types_descriptions/service-ca-certificates.html)
 can be used to generate certificates and have them injected into the webhook
-configurations. The operator will also watch the secret with the certificates so
-that when the ceritificate is re-newed the pods of the deployment will be also
-updated so that they start using the new certificates.
+configurations. The operator does not manage the lifecycle of the certificates
+in the associated secret. Additional details mentioned in [Drawbacks](#drawbacks).
 
 ### Risks and Mitigations
+
+The annotation `alb.ingress.kubernetes.io/target-type` can be set to the
+value **_ip_** or **_instance_**. When the value is set to _instance_ (default)
+the created load balancer will be configured to route traffic through a NodePort
+service. Setting the annotation to _ip_ is not huge risk, since it only works when
+the cluster uses the Amazon VPC CNI and hence will not work on OCP/OKD clusters.
+
+### Drawbacks
+
+Since we are reusing an existing upstream controller and restricting which of its
+features are enabled, some upstream documentation would not be applicable for this
+operator.
+
+The _lb-controller_ currently has support for _Service_ type resources as well.
+When the annotation `service.beta.kubernetes.io/aws-load-balancer-type: "external"`
+is specified on a _Service_ resource of type _LoadBalancer_ the in-tree controller
+ignores this resource and the lb-controller instead provisions a Network Load
+Balancer with the correct configuration.
+
+The operator utilises the `service-ca-controller` to generate and inject certificates
+using the associated secret. Currently upon renewal of these certificates, the operator
+does not reload the deployment. Dynamic reload of the deployment isn't supported in
+the initial release.
 
 #### Parallel operation of the OpenShift router and lb-controller
 
@@ -408,12 +430,11 @@ the Ingress resource will not be possible.
 TBD
 
 ## Implementation History
-TBD
 
-## Drawbacks
-
-Since we are reusing an existing upstream controller and restricting which of its features are enabled, some upstream
-documentation would not be applicable for this operator.
+- Update enhancement for aws-load-balancer-operator [#1099](https://github.com/openshift/enhancements/pull/1099)
+  - Updates some implementation details
+  - Updates test plan and current caveats in testing
+  - Removes non-applicable details for initial release
 
 ## Alternatives
 
