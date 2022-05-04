@@ -130,7 +130,7 @@ it is used to manage all elements of the cluster.
 #### High Availability
 
 We focus on minimizing the impact of a failure of individual nodes in a cluster by ensuring operators or operands are spread across multiple nodes.
-When OpenShift runs in [cluster high availability mode](https://github.com/openshift/enhancements/pull/555), the supported cluster topologies are 3 control-plane nodes and 2 workers, or 3 control-plane nodes that also run workloads (compact clusters).  The following scenarios are intended to support the minimum 2 worker node configuration.  
+When OpenShift runs in [cluster high availability mode](https://github.com/openshift/enhancements/blob/master/enhancements/single-node/cluster-high-availability-mode-api.md), the supported cluster topologies are 3 control-plane nodes and 2 workers, or 3 control-plane nodes that also run workloads (compact clusters).  The following scenarios are intended to support the minimum 2 worker node configuration.
 Please note that in case of [Single Node OpenShift](https://github.com/openshift/enhancements/blob/master/enhancements/single-node/production-deployment-approach.md), since the replicas needed are always 1, there is no need to have affinities set.
 
 
