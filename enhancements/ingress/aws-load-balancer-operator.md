@@ -8,7 +8,7 @@ reviewers:
 approvers:
   - "@Miciah"
 api-approvers:
-  - TBD
+  - N/A
 creation-date: 2022-01-27
 last-updated: 2022-01-27
 tracking-link:
@@ -279,12 +279,12 @@ const (
 
 ### Implementation Details/Notes/Constraints
 
-The operator only reconciles a single instance of the custom resource because
+The operator only reconciles a single instance of the custom resource named `"cluster"` because
 only [one
 instance](https://github.com/kubernetes-sigs/aws-load-balancer-controller/issues/2185)
-of the lb-controller can be run in a cluster. There can be multiple replicas
-with the same configuration with leader-election enabled. But multiple
-controllers cannot be started with different configurations.
+of the lb-controller can be run in a cluster. There can be multiple replicas with the same
+configuration with leader-election enabled. But multiple controllers cannot be started with
+different configurations.
 
 The lb-controller also requires that the subnets where the load balancers are
 provisioned have certain resource tags present on them. The operator can detect
@@ -292,14 +292,15 @@ the subnets and tag them or the user can do this. This can be enabled by setting
 the `SubnetTagging` to `AutoSubnetTaggingPolicy`.
 
 The user can also specify the Ingress class which the lb-controller will
-reconcile. This could default to **_“alb”_**. This value is required because if
+reconcile. This defaults to **_“alb”_**. This value is required because if
 an ingress class value is not passed to the controller it attempts to reconcile
 all Ingress resources which don’t have an ingress class annotation or where the
-ingress class field is empty. Passing the value of “alb” does not restrict the
-number of ingress classes which the controller can reconcile. This is described
-further in the [Parallel operation of OpenShift
-Router](#parallel-operation-of-the-openshift-router-and-lb-controller) and
-lb-controller section.
+ingress class field is empty. In order to prevent this, the operator creates an
+**IngressClass** if it cannot find any **IngressClass**  with the name mentioned
+in `.Spec.IngressClass` field. Passing the value of **_“alb”_** does not restrict
+the number of ingress classes which the controller can reconcile. This is
+described further in the [Parallel operation of OpenShift Router](#parallel-operation-of-the-openshift-router-and-lb-controller)
+and lb-controller section.
 
 The _DeploymentConfig_ field contains any configuration required for the
 deployment. The number of replicas is the only field for now. But in future
@@ -317,43 +318,47 @@ does not remove the existing addon attachment from the provisioned load
 balancers.
 
 The operator will also create a
-[CredentialRequest](https://docs.openshift.com/container-platform/4.9/rest_api/security_apis/credentialsrequest-cloudcredential-openshift-io-v1.html#credentialsrequest-cloudcredential-openshift-io-v1)
+[CredentialRequest](https://docs.openshift.com/container-platform/4.10/rest_api/security_apis/credentialsrequest-cloudcredential-openshift-io-v1.html#credentialsrequest-cloudcredential-openshift-io-v1)
 on behalf of the lb-controller and mount the minted credentials in the
 _Deployment_ of the controller. This means that the operator will only work on
-OCP/OKD but this is sufficient for the initial release.
+OCP/OKD but this is sufficient for the initial release. There is a variation in
+this flow when it comes to OCP/OKD clusters running in STS or Manual Mode. Since
+the `cloud-credentials-operator` will be running in `manual mode`, the credentials
+for the lb-controller won't be provisioned automatically, and will require manual
+intervention to do so. The required manual steps will be documented within the
+operator docs. Additional documentation for STS mode/manual mode can be found [here](https://docs.openshift.com/container-platform/4.10/authentication/managing_cloud_provider_credentials/cco-mode-sts.html)
 
-The lb-controller requires a validating and mutating webhook for correct operation. The operator will have to create the
-webhooks along with the controller deployment. The webhook can be registered with a CA bundle which is used to verify
-the identity of webhook by the API server.
-The [service-ca controller](https://docs.openshift.com/container-platform/4.9/security/certificate_types_descriptions/service-ca-certificates.html)
-can be used to generate certificates and have them injected into the webhook configurations. The operator will also
-watch the secret with the certificates so that when the ceritificate is re-newed the pods of the deployment will be also
-updated so that they start using the new certificates.
+The lb-controller requires a validating and mutating webhook for correct operation.
+The operator will have to create the webhooks along with the controller deployment. 
+The webhook can be registered with a CA bundle which is used to verify the identity 
+of webhook by the API server. The [service-ca controller](https://docs.openshift.com/container-platform/4.10/security/certificate_types_descriptions/service-ca-certificates.html)
+can be used to generate certificates and have them injected into the webhook
+configurations. The operator does not manage the lifecycle of the certificates
+in the associated secret. It utilises the `service-ca-controller` to generate and
+inject certificates using the associated secret. Upon renewal of these certificates,
+the operator and the controller reloads the updated certificates.
 
 ### Risks and Mitigations
 
-#### Restricting features in the lb-controller
+The user can set the `alb.ingress.kubernetes.io/target-type` annotation to the
+value **_ip_** or **_instance_**. When the value is set to _instance_,
+the created load balancer will be configured to route traffic through a NodePort
+service.  This is also the default behavior when the annotation is not set.
+However, when the value is set to _ip_, the lb-controller requires that
+the cluster use the Amazon VPC CNI, and hence the lb-controller fails to properly
+route traffic to the destination pods and will error.
 
-Some changes will have to be made in the lb-controller to ensure that the users
-only use features which are supported on OCP and only those features which
-target Ingress resources. These changes may also be contributed back upstream
-since it may benefit other users.
+### Drawbacks
 
-1. The annotation `alb.ingress.kubernetes.io/target-type` can be set to the
-value **_ip_** or **_instance_**. When the value is set to _instance_ the
-created load balancer will be configured to route traffic through a NodePort
-service. The _ip_ value only works when the cluster uses the Amazon VPC CNI and
-hence will not work on OCP/OKD clusters. The controller has to be modified so
-that this annotation is ignored and the controller always uses routing through
-_NodePort_ services.
-2. The _lb-controller_ has support for _Service_ type resources as
-well. When the annotation `service.beta.kubernetes.io/aws-load-balancer-type:
-"external"` is specified on a _Service_ resource of type _LoadBalancer_ the
-in-tree controller ignores this resource and the lb-controller instead
-provisions a Network Load Balancer with the correct configuration. Since we want
-to restrict the features supported by the controller to only Ingresses the
-lb-controller will have to be modified so that it does not reconcile any Service
-resources.
+Since we are reusing an existing upstream controller and restricting which of its
+features are enabled, some upstream documentation would not be applicable for this
+operator.
+
+The _lb-controller_ currently has support for _Service_ type resources as well.
+When the annotation `service.beta.kubernetes.io/aws-load-balancer-type: "external"`
+is specified on a _Service_ resource of type _LoadBalancer_ the in-tree controller
+ignores this resource and the lb-controller instead provisions a Network Load
+Balancer with the correct configuration.
 
 #### Parallel operation of the OpenShift router and lb-controller
 
@@ -377,9 +382,15 @@ to these classes will be reconciled by the lb-controller.
 Other than standard unit testing the operator will have end-to-end tests for some common usage scenarios:
 
 1. Test which ensures that sufficient replicas are running and up-to-date.
-2. Test for Ingress with addon annotations but with the addons disabled.
-3. Test for Ingress with non-matching Ingress class. Verify that no load balancer is created.
-4. Test for when subnets are tagged manually. Verify that the load balancer is created only in the manually tagged subnet.
+2. Test for provisioning of both internal and external load balancers.
+3. Test controller integrations with available addons.
+
+The operator will need to be tested with external AWS Services such as WAFs and AWS Shield.
+Testing the operator with WAFs is rather straight forward whereas testing with AWS Shield 
+as a part of the operator's e2e test suite isn't easily feasible due to limitations in
+enabling the AWS Shield service on the AWS accout (AWS Shield is priced as $3000/month).
+
+***Note:***: The operator has been tested with both Classic WAF (WAFv1) and WAFv2.
 
 ### Graduation Criteria
 
@@ -419,11 +430,6 @@ TBD
 
 ## Implementation History
 TBD
-
-## Drawbacks
-
-Since we are reusing an existing upstream controller and restricting which of its features are enabled, some upstream
-documentation would not be applicable for this operator.
 
 ## Alternatives
 
