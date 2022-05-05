@@ -1,14 +1,15 @@
 ---
-title: OpenStack Cloud Provider Config Upgrade
+title: cloud-provider-config-upgrade
 authors:
   - "@stephenfin"
   - "@mdbooth"
 reviewers:
-  - TBD
+  - "@jspeed"
+  - "@mandre"
 approvers:
   - "@jspeed"
-  - TBD
 api-approvers:
+  - None
 creation-date: 2022-01-18
 last-updated: 2022-05-03
 tracking-link:
