@@ -25,9 +25,9 @@ superseded-by:
 
 Cloud configuration is stored in the user-managed config map
 `cloud-provider-config` in `openshift-config`.  In 4.11 we want to switch
-OpenStack clusters from the legacy cloud provider to the external Cloud
-Controller Manager (CCM). The configuration for the legacy and external cloud
-providers are similar, but not identical.
+OpenStack clusters from the legacy cloud provider (part of KCM) to the external
+Cloud Controller Manager (CCM). The configuration for the legacy and external
+cloud providers are similar, but not identical.
 
 This enhancement will describe how we can ensure correct configuration is passed
 to the cloud provider in use during and after an upgrade, and how we can prevent
@@ -94,8 +94,12 @@ configuration from `openshift-cloud-controller-manager/cloud-conf`.
 In a future release, we can deprecate and remove CCO's management of
 `openshift-config-managed/kube-cloud-config` and eventually the config map
 itself. We can also remove the `openstack-credentials/openstack-credentials`
-secret, which will no longer be used by anything. We will immediately deprecate
-this in the 4.11 release and remove it in the 4.12 release.
+secret, which will no longer be used by anything. However, we need to keep the
+in-tree cloud provider running to detach volumes created with the in-tree
+provisioner. Similarly, because we need to support EUS to EUS upgrade (skipping
+odd release numbers), we'll need to have it in 4.12 as well to detach 4.10
+volumes. As a result, while we can immediately deprecate this in the 4.11
+release, we cannot remove it until at least the 4.13 release.
 
 ### Preventing upgrade when config cannot be upgraded
 
@@ -111,15 +115,30 @@ in OCP 4.10.
 
 This has implications for the user-managed configuration:
 
-In 4.10, the user-managed configuration **must** be compatible with the legacy
-cloud provider. The user **must not** specify config options which cannot be
-transformed to config for the external cloud provider. If either of these are
-not satisfied we will mark CCCMO as not upgradeable.
+- In 4.10 the user-managed configuration **must** be compatible with the legacy
+  cloud provider. The user **must not** specify config options which cannot be
+  transformed to config for the external cloud provider. If either of these are
+  not satisfied we will mark CCCMO as not upgradeable.
 
-In 4.11, the base `cloud-provider-config` **may** include config options which
-are not compatible with the legacy cloud provider. We will have removed the
-legacy cloud provider and related config map so we no longer need to be
-concerned with this.
+- In 4.11 and 4.12 the user-managed configuration **must** remain compatible
+  with both the legacy and external cloud providers. Even though we will be
+  running with external CCM, we will still initialize some parts of the in-tree
+  cloud provider to support things like volume attach/detach on older (e.g. 4.9
+  or 4.10) kubelets, in line with the [Kubernetes version skew
+  policy][k8s-skew-policy].
+
+- In 4.13 the user-managed configuration *may* contain configuration that is
+  incompatible with the legacy cloud provider. We will no longer need to worry
+  about the legacy cloud provider or the in-tree Cinder volume plugin. We can
+  remove the legacy cloud provider and related config map.
+
+Note that the in-tree OpenStack cloud provider is currently quite picky about
+the options it accepts and it will return an error when it sees an option it
+doesn't know about. This will prevent KCM from starting. We are working to
+improve this via [kubernetes/kubernetes#109709][k8s-issue-109709].
+
+[k8s-skew-policy]: https://kubernetes.io/releases/version-skew-policy/
+[k8s-issue-109709]: https://github.com/kubernetes/kubernetes/pull/109709
 
 ### User Stories
 
