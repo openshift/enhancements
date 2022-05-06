@@ -8,7 +8,7 @@ approvers:
   - "@aravindhp"
   - "@mrunalp"
 creation-date: 2021-11-19
-last-updated: 2021-12-05
+last-updated: 2022-05-05
 status: implementable
 ---
 
@@ -64,10 +64,8 @@ will support Windows golden image with or without Docker.
 
 ### Containerd Migration plan
 
-Containerd will be the default runtime in OpenShift 4.11 for Windows. For development and testing during the
-OpenShift 4.10 / WMCO 5.0.0 cycle, we plan to introduce a WMCO CLI option which allows us to choose the runtime.
-This CLI option will be used in the release of the WMCO community operator for OpenShift 4.10 to allow customers
-to try out Windows nodes with containerd.
+Containerd will be the default runtime in OpenShift 4.11 for Windows. WMCO community operator for OpenShift 4.10 will
+have containerd as the default runtime to allow customers to deploy Windows nodes with containerd.
 
 ### User Stories
 
@@ -106,6 +104,11 @@ that doesn't have Docker and containerd will be the only runtime. If the Machine
 Docker, containerd will run along with Docker service. But Kubernetes will use only containerd. Customers can stop the
 Docker service if it is no longer needed. Even if Docker service gets started at any time, it can co-exist with
 containerd.
+Microsoft Containers feature must be installed for any Windows server to support containers. From Windows server 2022
+onward, Microsoft is not planning to enable it by default. WMCO needs to take care of this during Windows instance
+bootstrap process. After enabling Containers feature, WMCO must reboot Windows instance and then continue bootstrap
+process. In Windows Server 2019, OneGet Docker installation command takes care of enabling required features. When we
+upgrade to WMCO 6.0, WMCO should check for Containers feature and install if it is not enabled.
 
 Steps to install containerd as service:
 - scp containerd/related executables into Windows VM
@@ -118,13 +121,11 @@ Steps to install containerd as service:
 ## Network changes
 Current CNI/IPAM will be used for containerd and no changes will be made to HNS-Network and HNS-Endpoint creation
 steps. The config file which will be used by containerd will point to the same CNI/IPAM executables.
+As the current CNI V1 APIs don't support containerd in Windows, V2 API support has to be implemented in CNI.
+This has been addressed by [Win-Overlay V2 API support](https://github.com/containernetworking/plugins/pull/725)
 
 ## WMCO CLI option
-WMCO CLI option 'dockerRuntime' will be used to choose Docker or containerd as the runtime during the OpenShift
-4.10 / WMCO 5.0.0 development cycle.  In the 4.10 community operator, it will be specified as `--dockerRuntime false`.
-In the absence of this flag, Docker will become the default runtime and this is how we will release WMCO 5.0.0. We will
-remove this flag in 4.11 and make containerd the default runtime in WMCO 6.0.0. At any given point in time, we have one
-runtime support and will not allow switching between runtime.
+Containerd will be the only runtime so there is no CLI option provided to switch between container runtimes.
 
 ## Containerd logging
 Containerd can be started with parameters in which we can enable logging and specify the file path to
@@ -160,15 +161,15 @@ The procedure for an upgrade that includes migration to containerd is as follows
   follow up with upstream.
 * As we don't support downgrade, reverting to an older version is not possible. To overcome
   any issues, we introduce this feature as part of the 5.0 community operator so that this feature
-  can be well tested before we make it default in WMCO 6.0 release. We will use two test jobs to test all e2e test cases
-  in the 4.10 community branch(OKD) and 4.10 branch(ccm OCP)to capture any regression.
-  This will help us to identify any issues well before containerd becomes default runtime.
-* containerd doesn't support image-pull-progress-deadline as of now. There is a work in progress PR,
+  can be well tested before we make it default in WMCO 6.0 release. As containerd becomes the default runtime
+  in the 4.10 community branch(OKD) and current Master branch, all e2e test cases run as part of the CI will
+  help us to identify any issues well before containerd becomes default runtime in 4.11.
+* containerd doesn't support image-pull-progress-deadline as of now. The PR
   [support image pull progress timeout](https://github.com/containerd/containerd/pull/6150),
-  that addresses this shortcoming. Until this gets merged, if Windows image pull takes more time than the default value,
-  we will run into to image pull timeout error. To overcome this issue, Customers can bake required base container
-  images into Windows golden image. If customers still notice timeout error, they should log in to Windows VM and
-  install `ctr or crictl` command-line tool. Users can use one of these tools to pull the container image manually.
+  that addresses this shortcoming. Until this gets merged into a release branch, if Windows image pull takes more time than
+  the default value, we will run into to image pull timeout error. To overcome this issue, Customers can bake required
+  base container images into Windows golden image. If customers still notice timeout error, they should log in to Windows
+  VM and install `ctr or crictl` command-line tool. Users can use one of these tools to pull the container image manually.
   Upon successful image download, the user can create pods.
 * Currently Windows_exporter has been used to collect metrics from Windows node. We do
   have containerd support in [Windows exporter v0.16.0](https://github.com/prometheus-community/Windows_exporter/releases/tag/v0.16.0)
@@ -199,11 +200,10 @@ the WMCO event log if the service is not up and running. In addition, we will be
 
 ### Test Plan
 
-We will use one OKD job and one ccm OCP job to test WMCO with the containerd as the runtime using the `--dockerRuntime
- false` CLI option. This is for Openshift 4.10 and in OpenShift 4.11 we will migrate all the jobs to containerd.
-All other e2e tests will run as is, covering the currently supported platforms with the Docker runtime. We should make
-sure there is no regression due to containerd runtime. Containerd is agnostic to the platform so testing on any platform
-should be fine.
+We will use 4.10 OKD jobs and  master branch all CI jobs to test WMCO with the containerd as the runtime.
+All other branch e2e tests will run as is, covering the currently supported platforms with the Docker runtime. We should
+make sure there is no regression due to containerd runtime. Containerd is agnostic to the platform so testing on any
+platform should be fine.
 
 ### Graduation Criteria
 
