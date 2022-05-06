@@ -150,6 +150,9 @@ In order to achieve that, these are the main changes introduced in OCP 4.11 with
 
 * The *defaultstorageclasscontroller* from CSO will be completely removed and we will not create any new in-tree SCs.
   * SCs that were previously created by this controller will not be owned by any operator and may very well be deleted by the user.
+* CSO will now monitor storage classes
+  * This operator will now produce metric about default storage class count in the cluster.
+  * Also it will add a PrometheusRule that will create an alert if there is more than one default storage class configured asking users to make amendments.
 * A new special-purpose controller will be added to the CSI Driver Operator.
   * This controller will make sure that a CSI SC always exists.
   * And it will set that SC as the default one when appropriate.
@@ -160,7 +163,6 @@ In a more detailed way, this is how the new controller will operate and determin
 * On every sync, this controller fetches all existing SCs.
 * If there are **no** pre-existing **default** SCs in the cluster, then it creates a CSI SC **and** set it as the default.
   * Otherwise, create the CSI SC but do not make it default.
-* If there are pre-existing SCs in the cluster and more than one is set as default, it will set an appropriate message in the CR asking the user to make amendments.
 
 ### Post-GA
 
