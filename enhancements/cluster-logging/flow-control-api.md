@@ -33,12 +33,13 @@ superseded-by:
 
 ## Summary
 
-If the log collector cannot keep up with the rate that logs are written, some logging data will be lost.
-Lack of  flow control these problems:
+"Flow control" refers to how the logging system behaves when logs are produced faster than they can be collected or forwarded.
+A lack of planned flow control creates the following problems:
+
 * Hard to predict and impossible to control the volume of logs.
 * No control over which logs get lost.
 * During an outage, log buffers build up without user control.
-  This can cause long recovery times and very high latency when the connection is restored.
+  This can cause long recovery times and high latency when the connection is restored.
 
 This proposal defines an API to let cluster administrators to limit logging rates, or ignore some logs entirely.
 Logs may still be lost if the collector cannot keep up, but administrators have more control over *what* is lost,
@@ -66,59 +67,50 @@ Control log rates and overflow policy at *two* points in the log forwarder:
 
 ### Non-Goals
 
-The following are *not* goals for this proposal but *may* be addressed in future proposals:
+#### Limits in records, not bytes
 
-- `priority` rules: extends the `drop` policy so that lower-priority logs are dropped before higher-priority ones if possible.
-- `block` policy (back-pressure): containers that exceed their rate limit are back-pressured, forcing them to block on stout/std err and slow down to keep within the target rate.\
-  **Note**: This will impact application performance, is only appropriate if log loss is a bigger problem than a slow application.
+The limits in this proposal are specified in "records".
+A record corresponds to a single log entry - typically a single line in a log file.
 
-Examples of these possible future policies:
+Disk capacity and network bandwidth are specified in _bytes_.
+For admins managing these resources, it would be easier if log rate limits were also in bytes.
 
-``` yaml
-limits:
-  - name: future-priority
-    policy: drop
-    priority:
-    - { level: critical }         # Prefer critical logs from anywhere
-    - { namespaces: [ importantApp, veryImportantApp } # Next prefer logs from these NS.
-    - TODO syntax, re-use input selector syntax and features???
+Unfortunately most log collectors and similar tools use _records_ as the unit for counting.
+This is because it is easy to count records internally in such tools, but the exact byte size of
+the record as written to some output can vary due to transformations, different encodings etc.
 
-  - name: future-backpressure
-    policy: block                 # Best-effort with back-pressure.
+Our API assumes that limits are expressed in records.
+Users must estimate the average size of a record in their system to make byte-size predictions.
+This is less convenient than giving byte limits, but still feasible.
 
-  - name: future-backpressure-limit
-    maxRate: 1000Kbi              # Rate limit with back-pressure.
-    policy: block
-```
+#### Blocking flow control
+
+This proposal does not include a `block` policy, which would back-pressure containers that exceed rate limits, forcing them to block on stout/std err and slow down to keep within the rate limit.
+This may be added as a feature in future proposals.
 
 ## Proposal
 
 ### User Stories
 
-#### Limit rate to remote Kafka output to 1GiB/s to avoid saturating network link
+#### Limit rate to remote Kafka output to 10,000,000 records/s to avoid saturating network link
 
 ``` yaml
-  limits:
-	- name: oneGig
-	  maxBytesPerSecond: 1Gi
   outputs:
-    - name: kafka
+    - name: offsite
 	  type: kafka
-	  ... details
-	  limitRef: oneGig
+	  limit:
+        maxRecordsPerSecond: 10M
 ```
 
 **Note**: flow rules applied to *outputs* specify a *per destination* limit.
 
-#### Limit for default output to 10GiB/s to respect local store limits
+#### Limit for default output to 10,000,000 records/s to respect local store limits
 
 ``` yaml
-  limits:
-	- name: oneGig
-	  maxBytesPerSecond: 10Gi
   outputs:
     - name: default
-	  limitRef: oneGig
+	  limit:
+        maxRecordsPerSecond: 10M
 ```
 
 **Note**: we need to add the ability to set a flow rule on the special "default" output.
@@ -126,79 +118,70 @@ limits:
 #### Ignore (don't collect) logs from containers with certain labels
 
 ``` yaml
-  limits:
-    - name: ignore
-      maxBytesPerSecond: 0
   inputs:
 	- application:
 		selector:
 		  matchLabels: { boring: true }
-	    perContainerLimitRef: ignore
+	    limitPerContainer:
+          maxRecordsPerSecond: 0
 ```
 
 **Notes**
 * Flow rules applied to *inputs* specify a *per container* limit.
 * Inputs and input selectors are already part of the ClusterLogForwarder API.
-* If multiple input limits apply to a container, the first limit listed in the `limits` list applies.\
+* If multiple input limits apply to a container, the _lowest_ limit is applied.
   Example: the same container is selected by two inputs, one by namespace and one by label.
 
 #### Set a per-container limit for containers in selected namespaces
 
 ``` yaml
-  limits:
-    - name: slow
-      maxBytesPerSecond: 1Ki
-    - name: fast
-      maxBytesPerSecond: 10Ki
   inputs:
 	- application:
 		namespaces: [ boring, tedious, tiresome ]
-	    limitRef: slow
+	    limitPerContainer:
+		  maxRecordsPerSecond: 10
     - application:
 		namespaces: [ important, exciting ]
-		perContainerLimitRef: fast
+	    limitPerContainer:
+		  maxRecordsPerSecond: 1000
 ```
 
 #### Set a per-container limit for containers with certain labels
 
 ``` yaml
-  limits:
-    - name: slow
-      maxBytesPerSecond: 1Ki
-    - name: fast
-      maxBytesPerSecond: 10Ki
   inputs:
 	- application:
 		selector:
 		  matchLabels: { importance: low }
-	 perContainerLimitRef: slow
+        limitPerContainer:
+		  maxRecordsPerSecond: 10
     - application:
 	    selector:
 	  	  matchLabels: { importance: high }
-	  perContainerLimitRef: fast
+        limitPerContainer:
+		  maxRecordsPerSecond: 1000
 ```
 
 ### API Extensions
 
-Extend the `ClusterLogForwarder` API with an optional `limits` field (list of `limit`)
-
-The `limit` type has fields:
-
-- `name`: Name used to identify this limit.
-- `maxRecordsPerSecond`: ([Quantity][Quantity], optional) Maximum number of log records per second rate allowed. If the inbound rate exceeds this limit then the `policy` is applied to keep the outbound rate within the limit.
-  - Absent (default) means 'best effort' - go as fast as possible, drop records if forwarder cannot keep up.
-  - 0 means do not forward any logs - if possible the logs are not even collected.
-  - > 0 is a limit in log records per second (usually a log record corresponds to a line of log output)
-- `policy`: (enum: drop, default: drop)\
-  Placeholder for future policy extensions.
+New API struct type `RateLimit` with fields:
+- `maxRecordsPerSecond`: ([Quantity][Quantity], optional) Maximum log records per second allowed.\
+  If the inbound rate exceeds this limit then the `policy` is applied to keep the outbound rate within the limit.
+  - Absent (default): best effort, drop records only if the forwarder cannot keep up.
+  - 0: means do not forward any logs - if possible the logs are not even collected.
+  - greater than 0: is a limit in log records per second.
+- `policy`: (enum: drop, default: drop) Placeholder for future policy extensions.\
   For the first iteration the only policy is `drop` and this field need not be specified.
   If the inbound flow exceeds the limit, logs are dropped.
-  See Non-Goals below for examples of possible future policy extensions.
+  See Non-Goals for examples of possible future policy extensions.
 
-The forwarder `input` type gets a new optional field: 
-- `perContainerLimitRef`: (limit optional) flow control limit to be applied _to each container_ selected by this input. No container selected by this input can exceed this limit.
-The forwarder `output` type gets a new optional field:
-- `limitRef`: (limit, optional) flow control limit to be applied _to the aggregated log flow to this output_. The total log flow to this output cannot exceed the limit.
+`ClusterLogForwarder.input` new optional field:
+- `perContainerLimit`: (RateLimit, optional) limit applied to _each container_ selected by this input.
+  No container selected by this input can exceed this limit.
+
+`ClusterLogForwarder.output` new optional field:
+- `limit`: (RateLimit, optional) flow control limit to be applied _to the aggregated log flow to this output_.
+  The total log flow to this output cannot exceed the limit.
 
 [LabelSelector]: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.18/#labelselector-v1-meta
 [quantity]: https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/
@@ -209,6 +192,7 @@ The forwarder `output` type gets a new optional field:
 Risks:
 * Complexity added to forwarder.
 * Performance impact of enforcing limits (beyond the limit itself)
+* Well supported by vector, not clear if this can easily be implemented by fluentd.
 
 Mitigations:
 * Benchmarking of performance to verify impacts.
