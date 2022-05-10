@@ -525,7 +525,7 @@ The RollingUpdate strategy will be the default. It mirrors the RollingUpdate str
 Deployments. When a change is required to be rolled out, the Machine controller will create a new Control Plane
 Machine, wait for this to become ready, and then remove the old Machine. It will repeat this process until all Machines
 are up to date.
-During this process the etcd membership will be protected by the mechanism described in a [separate enhancement](https://github.com/openshift/enhancements/pull/943),
+During this process the etcd membership will be protected by the mechanism described in a [separate enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/protecting-etcd-quorum-during-control-plane-scaling.md),
 in particular it isn't essential that the Control Plane Machines are updated in a rolling fashion for etcd sakes, though
 to avoid potential issues with the spread of etcd members across failure domains during update, the
 `ControlPlaneMachineSet` will perform a rolling update domain by domain.
@@ -592,7 +592,7 @@ Otherwise the replacement is identical to the RollingUpdate strategy.
 
 #### Protecting etcd quorum during update operations
 
-With the introduction of the [etcd protection enhancement](https://github.com/openshift/enhancements/pull/943), the
+With the introduction of the [etcd protection enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/protecting-etcd-quorum-during-control-plane-scaling.md), the
 ControlPlaneMachineSet does not need to observe anything etcd related during scaling operations.
 In particular, it is the etcd operators responsibility to add Machine deletion hooks to prevent Control Plane Machines
 from being removed until they are no longer needed.
@@ -819,7 +819,7 @@ a similar manner to that of AWS, Azure and GCP before these platforms can be sup
 
 As we are planning to scale up/down Control Plane Machines in an automated fashion, scaling operations will inevitably
 effect the stability of the etcd cluster.
-To prevent disruption, we have an [existing mechanism](https://github.com/openshift/enhancements/pull/943) that was
+To prevent disruption, we have an [existing mechanism](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/protecting-etcd-quorum-during-control-plane-scaling.md) that was
 designed to allow the etcd operator to protect etcd quorum without other systems, such as Machine API, having any
 knowledge of the state of the etcd cluster.
 
@@ -982,7 +982,7 @@ TBD
 ## Implementation History
 
 There is not current implementation of this enhancement, however, it will depend on the
-[etcd quorum protection mechanism](https://github.com/openshift/enhancements/pull/943) which is currently being
+[etcd quorum protection mechanism](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/protecting-etcd-quorum-during-control-plane-scaling.md) which is currently being
 implemented.
 
 ## Drawbacks
