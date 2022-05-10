@@ -215,7 +215,7 @@ networking:
 platform:
   powervs:
     userid: clnperez@us.ibm.com
-    serviceInstance: "some-id-string-here"
+    serviceInstanceID: "some-id-string-here"
     powervsResourceGroup: "powervs-ipi-resource-group"
     region: lon
     zone: lon04
