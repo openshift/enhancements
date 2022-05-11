@@ -14,7 +14,12 @@ TEMPLATE=${SCRIPTDIR}/../guidelines/enhancement_template.md
 # We only look at the files that have changed in the current PR, to
 # avoid problems when the template is changed in a way that is
 # incompatible with existing documents.
-CHANGED_FILES=$(${SCRIPTDIR}/find_changed.sh)
+CHANGED_FILES=$(${SCRIPTDIR}/find_new.sh)
+
+if [ -z "$CHANGED_FILES" ]; then
+    echo "OK, no new enhancement files found"
+    exit 0
+fi
 
 RC=0
 for file in $CHANGED_FILES
