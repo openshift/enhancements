@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -x
-
 # Ensure the enhancement metadata includes the required information
 
 set -o errexit
@@ -15,8 +13,11 @@ SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # incompatible with existing documents.
 CHANGED_FILES=$(${SCRIPTDIR}/find_changed.sh)
 
-if [ -n "$CHANGED_FILES" ]; then
-    (cd tools && go build -o ../enhancement-tool -mod=mod ./main.go)
-
-    ./enhancement-tool metadata-lint ${CHANGED_FILES}
+if [ -z "$CHANGED_FILES" ]; then
+    echo "OK, no changed enhancements found"
+    exit 0
 fi
+
+(cd tools && go build -o ../enhancement-tool -mod=mod ./main.go)
+
+./enhancement-tool metadata-lint ${CHANGED_FILES}
