@@ -65,8 +65,6 @@ The main motivation of this enhancement is to allow setting relevant arguments f
 
 ### API Extensions
 
-The [existing proposed node object](https://github.com/openshift/enhancements/blob/master/enhancements/machine-config/mco-cgroupsv2-support.md#api-extensions) needs to be updated to include `NodeStatus` to track the progress of `WorkerLatencyProfile` rollout.
-
 ```go
 type Node struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -90,10 +88,7 @@ type NodeSpec struct {
   // CrunEnabled bool ...
 }
 
-type NodeStatus struct {
-  // WorkerLatencyProfileStatus provides the current status of WorkerLatencyProfile
-  WorkerLatencyProfileStatus WorkerLatencyProfileStatus `json:"workerLatencyProfileStatus,omitempty"`
-}
+type NodeStatus struct {}
 
 type WorkerLatencyProfileType string
 
@@ -107,89 +102,13 @@ const (
     // Default values of relavent Kubelet, Kube Controller Manager and Kube API Server
     Default WorkerLatencyProfileType = "Default"
 )
-
-// WorkerLatencyProfileStatus provides status information about the WorkerLatencyProfile rollout
-type WorkerLatencyProfileStatus struct {
-  // conditions describes the state of the WorkerLatencyProfile and related components
-  // (Kubelet or Controller Manager or Kube API Server)
-  // +patchMergeKey=type
-  // +patchStrategy=merge
-  // +optional
-  Conditions []WorkerLatencyStatusCondition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
-
-  // relatedObjects is a list of objects that are "interesting" or related to this WorkerLatencyProfile. e.g. KubeletConfig object used for updating Kubelet arguments
-  // +optional
-  RelatedObjects []ObjectReference `json:"relatedObjects,omitempty"`
-}
-
-// WorkerLatencyStatusConditionType is an aspect of WorkerLatencyProfile state.
-type WorkerLatencyStatusConditionType string
-
-const (
-  // Progressing indicates that the updates to component (Kubelet or Controller
-  // Manager or Kube API Server) is actively rolling out, propagating changes to the
-  // respective arguments.
-  WorkerLatencyProfileProgressing WorkerLatencyStatusConditionType = "Progressing"
-
-  // Complete indicates whether the component (Kubelet or Controller Manager or Kube API Server)
-  // is successfully updated the respective arguments.
-  WorkerLatencyProfileComplete WorkerLatencyStatusConditionType = "Complete"
-
-  // Degraded indicates that the component (Kubelet or Controller Manager or Kube API Server)
-  // does not reach the state 'Complete' over a period of time
-  // resulting in either a lower quality or absence of service.
-  // If the component enters in this state, "Default" WorkerLatencyProfileType
-  // rollout will be initiated to restore the respective default arguments of all
-  // components.
-  WorkerLatencyProfileDegraded WorkerLatencyStatusConditionType = "Degraded"
-)
-
-type WorkerLatencyStatusConditionOwner string
-
-const (
-  // Machine Config Operator will update condition status by setting this as owner
-  MachineConfigOperator WorkerLatencyStatusConditionOwner = "MachineConfigOperator"
-
-  // Kube Controller Manager Operator will update condition status  by setting this as owner
-  KubeControllerManagerOperator WorkerLatencyStatusConditionOwner = "KubeControllerManagerOperator"
-
-  // Kube API Server Operator will update condition status by setting this as owner
-  KubeAPIServerOperator WorkerLatencyStatusConditionOwner = "KubeAPIServerOperator"
-)
-
-type WorkerLatencyStatusCondition struct {
-	// Owner specifies the operator that is updating this condition
-	// +kubebuilder:validation:Required
-	// +required
-	Owner WorkerLatencyStatusConditionOwner string `json:"owner"`
-
-	// type specifies the aspect reported by this condition.
-	// +kubebuilder:validation:Required
-	// +required
-	Type WorkerLatencyStatusConditionType `json:"type"`
-
-	// status of the condition, one of True, False, Unknown.
-	// +kubebuilder:validation:Required
-	// +required
-	Status ConditionStatus `json:"status"`
-
-	// lastTransitionTime is the time of the last update to the current status property.
-	// +kubebuilder:validation:Required
-	// +required
-	LastTransitionTime metav1.Time `json:"lastTransitionTime"`
-
-	// reason is the CamelCase reason for the condition's current status.
-	// +optional
-	Reason string `json:"reason,omitempty"`
-
-	// message provides additional information about the current condition.
-	// This is only to be consumed by humans.  It may contain Line Feed
-	// characters (U+000A), which should be rendered as new lines.
-	// +optional
-	Message string `json:"message,omitempty"`
-}
 ```
 
+### Status Updates
+
+The progress of the WorkerLatencyProfile rollout can be tracked in the following ways.
+* The Machine Config Operator generates events in case of any rollout failures. The "worker" machine config pool gets updated in case of a successful WorkerLatencyProfile rollout.
+* Each of the KubeAPIServer and the KubeControllerManager operators will report the status of the WorkerLatencyProfile in its own status.
 ### Operational Aspects of API Extensions
 
 
@@ -241,7 +160,6 @@ In this scenario, we will reduce the frequency of `Kubelet` updates further to e
 
 
 #### Failure Modes
-1. In case of failure `WorkerLatencyProfileStatus` should point towards failed component(s)
 
 
 ### Cluster Stability Analysis
