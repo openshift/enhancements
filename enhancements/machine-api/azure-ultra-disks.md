@@ -228,10 +228,10 @@ type AzureUltraSSDCapabilityState string
 
 // These are the valid AzureUltraSSDCapabilityState states.
 const (
-  // "AzureUltraSSDCapabilityTrue" means the Azure UltraSSDCapability is Enabled
-  AzureUltraSSDCapabilityTrue AzureUltraSSDCapabilityState = "Enabled"
-  // "AzureUltraSSDCapabilityFalse" means the Azure UltraSSDCapability is Disabled
-  AzureUltraSSDCapabilityFalse AzureUltraSSDCapabilityState = "Disabled"
+  // "AzureUltraSSDCapabilityEnabled" means the Azure UltraSSDCapability is Enabled
+  AzureUltraSSDCapabilityEnabled AzureUltraSSDCapabilityState = "Enabled"
+  // "AzureUltraSSDCapabilityDisabled" means the Azure UltraSSDCapability is Disabled
+  AzureUltraSSDCapabilityDisabled AzureUltraSSDCapabilityState = "Disabled"
 )
 ```
 
@@ -313,6 +313,7 @@ The following steps assume the Machine about to be launched to which the raw Dat
           lun: 0
           diskSizeGB: 4
           cachingType: None
+          deletionPolicy: Detach
           managedDisk:
             storageAccountType: UltraSSD_LRS
         userDataSecret:
