@@ -29,16 +29,11 @@ To get started with this template:
    should desire this enhancement.
 1. **Create a PR.** Assign it to folks with expertise in that domain to help
    sponsor the process.
-1. **Merge at each milestone.** Merge when the design is able to transition to a
-   new status (provisional, implementable, implemented, etc.). View anything
-   marked as `provisional` as an idea worth exploring in the future, but not
-   accepted as ready to execute. Anything marked as `implementable` should
-   clearly communicate how an enhancement is coded up and delivered. If an
-   enhancement describes a new deployment topology or platform, include a
-   logical description for the deployment, and how it handles the unique aspects
-   of the platform. Aim for single topic PRs to keep discussions focused. If you
-   disagree with what is already in a document, open a new PR with suggested
-   changes.
+1. **Merge after reaching consensus.** Merge when there is consensus
+   that the design is complete and all reviewer questions have been
+   answered so that work can begin.  Come back and update the document
+   if important details (API field names, workflow, etc.) change
+   during code review.
 1. **Keep all required headers.** If a section does not apply to an
    enhancement, explain why but do not remove the section. This part
    of the process is enforced by the linter CI job.
