@@ -24,14 +24,14 @@ superseded-by:
 ## Summary
 
 Cloud configuration is stored in the user-managed config map
-`cloud-provider-config` in `openshift-config`.  In 4.11 we want to switch
+`cloud-provider-config` in `openshift-config`.  In 4.12 we want to switch
 OpenStack clusters from the legacy cloud provider (part of KCM) to the external
 Cloud Controller Manager (CCM). The configuration for the legacy and external
 cloud providers are similar, but not identical.
 
 This enhancement will describe how we can ensure correct configuration is passed
 to the cloud provider in use during and after an upgrade, and how we can prevent
-an upgrade to 4.11 if the configuration cannot be upgraded.
+an upgrade to 4.12 if the configuration cannot be upgraded.
 
 ## Motivation
 
@@ -97,9 +97,9 @@ itself. We can also remove the `openstack-credentials/openstack-credentials`
 secret, which will no longer be used by anything. However, we need to keep the
 in-tree cloud provider running to detach volumes created with the in-tree
 provisioner. Similarly, because we need to support EUS to EUS upgrade (skipping
-odd release numbers), we'll need to have it in 4.12 as well to detach 4.10
-volumes. As a result, while we can immediately deprecate this in the 4.11
-release, we cannot remove it until at least the 4.13 release.
+odd release numbers), we'll need to have it in 4.13 as well to detach 4.11
+volumes. As a result, while we can immediately deprecate this in the 4.12
+release, we cannot remove it until at least the 4.14 release.
 
 ### Preventing upgrade when config cannot be upgraded
 
@@ -108,26 +108,26 @@ If CCCMO is not able to generate `cloud-controller-manager-config` from
 with a user-actionable error message explaining how
 `openshift-config/cloud-provider-config` is incompatible.
 
-As we intend to switch to external CCM in 4.11, this change will be implemented
-in OCP 4.10.
+As we intend to switch to external CCM in 4.12, this change was already
+implemented in OCP 4.11.
 
 ### Compatibility constraints on user-managed config
 
 This has implications for the user-managed configuration:
 
-- In 4.10 the user-managed configuration **must** be compatible with the legacy
+- In 4.11 the user-managed configuration **must** be compatible with the legacy
   cloud provider. The user **must not** specify config options which cannot be
   transformed to config for the external cloud provider. If either of these are
   not satisfied we will mark CCCMO as not upgradeable.
 
-- In 4.11 and 4.12 the user-managed configuration **must** remain compatible
+- In 4.12 and 4.13 the user-managed configuration **must** remain compatible
   with both the legacy and external cloud providers. Even though we will be
   running with external CCM, we will still initialize some parts of the in-tree
   cloud provider to support things like volume attach/detach on older (e.g. 4.9
-  or 4.10) kubelets, in line with the [Kubernetes version skew
+  or 4.11) kubelets, in line with the [Kubernetes version skew
   policy][k8s-skew-policy].
 
-- In 4.13 the user-managed configuration *may* contain configuration that is
+- In 4.14 the user-managed configuration *may* contain configuration that is
   incompatible with the legacy cloud provider. We will no longer need to worry
   about the legacy cloud provider or the in-tree Cinder volume plugin. We can
   remove the legacy cloud provider and related config map.
@@ -144,20 +144,20 @@ improve this via [kubernetes/kubernetes#109709][k8s-issue-109709].
 
 #### Story 1 - Fresh install
 
-The Tyrell Corporation wants to deploy OCP 4.11 on their OSP cloud. OCP
+The Tyrell Corporation wants to deploy OCP 4.12 on their OSP cloud. OCP
 automatically configures external CCM out-of-the-box with configuration native
 to external OpenStack CCM.
 
 #### Story 2 - Upgrade with default configuration
 
-The Wallace Corporation wants to upgrade their OCP 4.10 cluster to OCP 4.11.
+The Wallace Corporation wants to upgrade their OCP 4.11 cluster to OCP 4.12.
 They are using the default cloud provider configuration. Upon upgrading, their
 cluster should automatically use CCM following the upgrade, and the upgrade
 should require no additional user input.
 
 #### Story 3 - Upgrade with non-default compatible configuration
 
-The Acme Corporation wants to upgrade their OCP 4.10 cluster to OCP 4.11.
+The Acme Corporation wants to upgrade their OCP 4.11 cluster to OCP 4.12.
 Following the user documentation [here][cloud-provider-options], they have
 configured a specific floating network ID.
 `openshift-config/cloud-provider-config` contains:
@@ -193,7 +193,7 @@ floating-network-id="d3deb660-4190-40a3-91f1-37326fe6ec4a"
 
 #### Story 4 - Upgrade with non-default incompatible configuration
 
-Omni Consumer Products wants to upgrade their OCP 4.10 cluster to OCP 4.11.
+Omni Consumer Products wants to upgrade their OCP 4.11 cluster to OCP 4.12.
 They have configured a separate secret containing their cloud credentials as
 well as additional config directives. Specifically, `openshift-config/cloud-provider-config` contains:
 
@@ -294,7 +294,7 @@ configuration.
 
 ### Open Questions [optional]
 
-1. After the upgrade to 4.11, we should give the user a warning if their
+1. After the upgrade to 4.12, we should give the user a warning if their
    configuration is being transformed. The user should get a warning if they
    are using static configuration such as `secret-name` and `secret-namespace`
    and should be advised to remove this configuration. They should also see
@@ -347,19 +347,19 @@ configurations changes, as can be seen in the [test code][cloud-cm-gerrit].
 #### Dev Preview -> Tech Preview
 
 N/A. This feature is part of CCM, which is already tech preview. It will become
-the default for OpenStack-based clusters in 4.11.
+the default for OpenStack-based clusters in 4.12.
 
 #### Tech Preview -> GA
 
 QE's test coverage of TechPreview is limited, but it has been sufficient to
-discover this omission. When we enable CCM by default in 4.11 we will be covered
+discover this omission. When we enable CCM by default in 4.12 we will be covered
 by QE's full test matrix detailed above. This feature will graduate to GA if
 these tests are passing.
 
 Additionally:
-- We will land the feature as early as possible in the 4.11 development cycle
+- We will land the feature as early as possible in the 4.12 development cycle
 - User facing documentation is updated to highlight configuration options which
-  are deprecated between 4.10 and 4.11
+  are deprecated between 4.11 and 4.12
 - User facing documentation is updated to show the new configuration
 
 #### Removing a deprecated feature
@@ -395,8 +395,8 @@ use the previous configuration until the failure of CCCMO is resolved.
 #### Support Procedures
 
 If CCCMO has failed it will be evident because it will be marked as
-`Upgradable=False`. If running 4.10 this will prevent an upgrade to 4.11. If
-running 4.11, a valid `cloud-controller-manager-config` will already exist, but
+`Upgradable=False`. If running 4.11 this will prevent an upgrade to 4.12. If
+running 4.12, a valid `cloud-controller-manager-config` will already exist, but
 will not be updated to reflect new changes to
 `openshift-config/cloud-provider-config`.
 
@@ -425,7 +425,7 @@ less robust.
 - Instead of using CCCMO, we could write the config map in a sidecar container to
   CCM. This is what Azure is doing.
 
-  This does not give us an opportunity to validate the transformation in 4.10
+  This does not give us an opportunity to validate the transformation in 4.11
   and prevent upgrade if required. Additionally, given that CCCMO exists and is
   apparently intended to be used for exactly this purpose, implementing the
   feature elsewhere would violate the principal of least surprise.
@@ -442,7 +442,7 @@ less robust.
   well-documented upstream configuration wrapped in product-specific
   configuration), we are significantly prejudiced against it by design.
 
-  Most significantly for the 4.11 release it would be a large and complex
+  Most significantly for the 4.12 release it would be a large and complex
   user-facing design change. If we were to consider something like this in the
   future, it would make more sense not to try to do it at the same time as the
   change to external CCM.
