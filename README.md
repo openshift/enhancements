@@ -144,10 +144,19 @@ things that authors can do to help keep the conversation moving along.
 ## Using Labels
 
 The following labels may be applied to enhancements to help categorize them:
+- `priority/important-soon` indicates that the enhancement pull request is related to a
+top level release priority. These will be highlighted in the [this-week](this-week/)
+- `priority/high`  indicates that relative priority of the enhancement as compared
+ to the other enhancement pull requests
+- `priority/medium`  indicates that relative priority of the enhancement as compared
+ to the other enhancement pull requests
+- `priority/low` indicates that relative priority of the enhancement as compared
+ to the other enhancement pull requests
+- `priority/unspecified`  indicates that the enhancement needs to go through triage
 
-- `priority/important-soon` indicates that the enhancement is related to a
-top level release priority. These will be highlighted in the
-[this-week](this-week/) newsletters.
+*Note*: The priority of the enhancment will help creating the queue of PRs that needs
+ to get merged for OCP releases. It will also help to set expectation around how soon
+ the enhancment needs to get merged.
 
 ## Life-cycle
 
