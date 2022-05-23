@@ -38,6 +38,10 @@ The lifecycle for recommendation changes looks like:
 Currently all tracking through the lifecycle is manual, and it is tedious for graph-admins to audit bugs with `UpgradeBlocker` to see where they are in the lifecycle and, when necessary, poke component teams about outstanding impact statement requests.
 Having an explicit, machine-readable lifecycle reduces the chances that issues fall through the cracks by clarifying the responsible parties for moving the bug to the next stage, which supports tracking and automated reminders.
 
+*Note:*
+* `UpgradeBlocker` is added to the `Keywords` but the labels are added to the `whiteboard` field of bugzilla.
+* In general when we add a label we remove the old label. For example when we add `ImpactStatementProposed` label we remove the `ImpactStatementRequested` label.
+
 With the changes from this enhancement, the queues become:
 
 * [Suspect queue][suspect-queue].
