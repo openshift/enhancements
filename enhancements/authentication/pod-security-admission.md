@@ -51,7 +51,7 @@ Note that PodSecurity admission is validating only while SCC is mutating admissi
 
 ### Goals
 
-[1] Enable PodSecurity admission
+[1] Enable PodSecurity admission with "restricted" pod security profile by default
 [2] Design an architecture that lets PodSecurity coexist with SCC logic
 
 ### Non-Goals
@@ -66,7 +66,7 @@ We propose introducing PodSecurity admission in a multi-step process. We suggest
 
 For OpenShift, the following high level migration plan is envisioned:
 
-1. (DONE) Enable the PodSecurity admission plugin in no-op mode but with the ability to audit policy violations.
+1. Enable the PodSecurity admission plugin in no-op mode but with the ability to audit policy violations.
 
 Initially, PodSecurity is configured with the following settings:
 
@@ -84,6 +84,12 @@ From existing CI e2e runs we can introspect the amount of workloads that violate
 This gives us an indicator what workloads need to be annotated as privileged to pass PodSecurity admission.
 
 3. Increase warn and audit profile to "restricted"
+
+| Policy  | Profile |
+| --------| --------|
+| enforce | privileged |
+| warn    | restricted |
+| audit   | restricted |
 
 Similar to step 2. we will reiterate on existing workloads and asses if there is necessary action to readjust Pod Security annotations.
 
@@ -110,6 +116,16 @@ spec:
               warn: restricted
               warn-version: latest
 ```
+
+4. Increase enforce profile to "restricted"
+
+Finally, after iterating over and adjusting workloads the "restricted" pod security profile is going to be enabled with the following settings:
+
+| Policy  | Profile |
+| --------| --------|
+| enforce | restricted |
+
+The pod security label syncer mechanism (https://github.com/openshift/enhancements/blob/master/enhancements/authentication/pod-security-admission-autolabeling.md) ensures that customer workloads won't break.
 
 ### User Stories
 
