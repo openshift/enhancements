@@ -116,7 +116,8 @@ When the migration window is closed, the OCM API returns another HTTP status cod
 
 ### Monitoring
 
-The OCM API will return time information providing the remaining time until the end of the current migration window. There will be an alert triggered when a certain number of days (1-2) remain in the current migration window.
+The OCM API will return time information providing the remaining time until the end of the current migration window.
+We decided to not introduce a new in-cluster alert because the main user interaction will happen in the OCM UI (where the alert for pending cluster transfers will be) and mainly because this alert would be displayed to the cluster owner and not to the recipient (who can accept the pending cluster transfer).
 
 There is also plan to create an alert about pending `ClusterTransfer` on the OCM side - see https://issues.redhat.com/browse/SDB-2506,
 
