@@ -433,6 +433,35 @@ const VMHeading = () => {
 };
 ```
 
+In the `v1` API version, an additional field is introduced for enabling and loading i18n namespace that
+given dynamic plugin contains. The i18n namespace name follows `plugin__{plugin-name}` naming convention.
+If i18n is not enabled in the `ConsolePlugin` resource, no i18n namespaces will be loaded for the plugin.
+
+```yaml
+apiVersion: console.openshift.io/v1
+kind: ConsolePlugin
+metadata:
+  name: acm
+spec:
+  displayName: 'Advanced Cluster Management'
+  i18n:
+    enabled: true
+```
+
+In the 4.11 release, a `console.openshift.io/default-i18next-namespace` annotation
+is being introduced. The annotation indicates whether the `ConsolePlugin` contains
+localization resources. If the annotation is set to `"true"`, the localization
+resources from the i18n namespace named after the dynamic plugin (e.g. `plugin__kubevirt`),
+are loaded. If the annotation is set to any other value or is missing on the `ConsolePlugin`
+resource, localization resources are not loaded.
+Note: All API versions of `ConsolePlugin` are checked for this annotation. The annotation
+should only be used by plugins that need to work with 4.10 and 4.11. This annotation will
+be removed when 4.10 goes out of support in favor of the proper API.
+
+Prior to 4.11 release, localization resources are being loaded by default. In case these
+resources are not present in the dynamic plugin, the initial console load will be slowed 
+down. For more info check [BZ#2015654](https://bugzilla.redhat.com/show_bug.cgi?id=2015654)
+
 ### Error Handling
 
 Console will guard against runtime errors in plugins. All plugin components
@@ -487,9 +516,10 @@ dynamic.
 
 ### Graduation Criteria
 
-Initially, this will be an internal API. We will reevaluate as we receive
-implementation feedback from plugin teams and as the dynamic plugin model
-matures.
+| OpenShift | Maturity     | API version   |
+|-|-|-|
+| 4.8       | Alpha        | v1alpha1      |
+| 4.11      | GA (planned) | v1            |
 
 Static plugins are already a supported feature. Any existing static plugin that
 is migrated to a dynamic plugin will need to have the same support level.
@@ -538,6 +568,9 @@ console will only load the correct plugin.
 * 2020-07-24 - Initial [dynamic plugin PR](https://github.com/openshift/console/pull/6101) opened.
 * 2020-11-26 - Allow static plugins to use new extension types with code references
   ([console#7163](https://github.com/openshift/console/pull/7163)).
+* 2021-06-22 - Support localization of dynamic plugins
+* 2021-10-06 - Allow dynamic plugins to proxy to services on the cluster
+* 2022-05-13 - API enhancements for GA
 
 ## Drawbacks
 
