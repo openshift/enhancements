@@ -240,6 +240,9 @@ func DeriveGroup(files []ModifiedFile) (filename string, isEnhancement bool) {
 		if strings.HasPrefix(f.Name, "hack/") {
 			return "tools", false
 		}
+		if strings.HasPrefix(f.Name, ".github/") {
+			return "tools", false
+		}
 	}
 	// If there was no enhancement, take the root directory of the
 	// first file that has a directory.
