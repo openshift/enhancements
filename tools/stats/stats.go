@@ -177,17 +177,17 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 	}
 	if !s.EarliestDate.IsZero() {
 		for _, r := range reviews {
-			if r.SubmittedAt.After(s.EarliestDate) {
+			if r.SubmittedAt != nil && r.SubmittedAt.After(s.EarliestDate) {
 				details.RecentReviewCount++
 			}
 		}
 		for _, c := range issueComments {
-			if c.CreatedAt.After(s.EarliestDate) {
+			if c.CreatedAt != nil && c.CreatedAt.After(s.EarliestDate) {
 				details.RecentIssueCommentCount++
 			}
 		}
 		for _, c := range prComments {
-			if c.CreatedAt.After(s.EarliestDate) {
+			if c.CreatedAt != nil && c.CreatedAt.After(s.EarliestDate) {
 				details.RecentPRCommentCount++
 			}
 		}
