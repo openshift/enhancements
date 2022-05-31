@@ -295,8 +295,8 @@ operator.
    (eg `my-cluster-master-3`)
 1. Take a copy of the Machine resource: `oc get machine -n openshift-machine-api my-cluster-master-0 -o yaml > my-
    cluster-master-3.yaml`
-1. Modify the Machine YAML to update the `name` and the size of the instance (eg. changing
-   `spec.providerSpec.value.instanceType` from `c5.xlarge` to `c5.2xlarge`) and remove `providerID`.
+1. Modify the Machine YAML to update the `metadata.name` field and the size of the instance (eg. changing
+   `spec.providerSpec.value.instanceType` from `c5.xlarge` to `c5.2xlarge`). The following fields will also need to be removed: `spec.providerID`, the entire `status` section, `metadata.generation`, `metadata.resourceVersion` and `metadata.uid`.
 1. Create the new Machine: `oc create -f my-cluster-master-3.yaml`
 1. Delete the old Machine: `oc delete machine -n openshift-machine-api my-cluster-master-0`
 1. Wait until the process described in [Operational flow during a resize operation](#Operational-flow-during-a-resize-operation)
