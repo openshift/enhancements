@@ -2,6 +2,7 @@
 title: improving-ci-signal
 authors:
   - "@deads2k"
+  - "@stbenjam"
 reviewers:
   - "@dgoodwin"
   - "@stbenjam"
@@ -55,8 +56,7 @@ Undetected, or detected but unresolved regressions in payload health have a numb
 
 - Faster detection when we regress the health of our payload
 
-- Faster reaction to regressions (either delivering a fix to restore the health immediately, or reverting a change to
-  provide more time to debug)
+- Faster reaction to regressions (reverting a change to provide more time to debug)
 
 - Ability to add more semi-reliable tests to our gating bucket and slowly ratchet up their pass rate while ensuring they
   do not regress further
@@ -83,14 +83,14 @@ Undetected, or detected but unresolved regressions in payload health have a numb
 
 Upon detection of a pass rate regression (As observed via attempted payload acceptance):
 
-- Try to find the PR that introduced the regression by opening revert PRs for all PRs that went in since the last
-  good payload and running the payload acceptance check against each revert-PR. The PR that passes the check will
-  tell us which change was the source of the regression
+- Try to find the PR that introduced the regression by opening revert PRs for all PRs that went in since the last good
+  payload and running the payload acceptance check against each revert-PR. The PR that passes the check will tell us
+  which change was the source of the regression
 - While waiting for test results, contact all teams (via bot PR comments) who own one of the PRs in question to make
   them aware their PR may be the source of a regression so they can begin investigating
 - If at the time we have identified the source of the regression (the PR for which a revert resolves the issue), the
-  team in question does not have an identified fix in hand, we will work with the team to merge the revert PR in
-  order to restore payload health, and the team will be responsible for landing the un-revert along w/ their fix.
+  team in question does not have an identified fix in hand, we will work with the team to merge the revert PR in order
+  to restore payload health, and the team will be responsible for landing the un-revert along w/ their fix.
 - Un-reverts and fixes will need to pass the same payload acceptance checks before being merged.
 
 ## Implementation Details/Notes/Constraints
@@ -162,9 +162,44 @@ Blocking payload promotion for an extended period of time has impacts across a l
 of multiple, largely independent pieces, we don’t want a regression in one component to block accepting changes from
 other components.
 
+The choices are either
+
+1. Leave the main branch broken during debugging, PR authoring, PR review, PR testing to prove it fixes it, PR merging.
+   During this time, we would have no new payloads for QE and degraded/slow ability to merge new code for anything in
+   the payload
+
+2. Revert quickly. Debugging happens in the unrevert PR and the PR authoring, review, testing, and merge are still on
+   the fix PR. During this time, we would have new payloads for QE and normal merging for the rest of the org.
+
+Option 1 blocks hundreds of people (developers, QE, downstream teams) by leaving broken code in the main branch. Option
+2 unblocks hundreds of people (everyone except the reverted repo) and the work for the reverted repo is identical.
+
+We should be biased towards reversion.
+
+Because our org is distributed amongst multiple repositories, it is relatively easy to revert a single piece of
+functionality without interdependencies. No one actually has to diagnose the failure in order to revert the regressing
+change. And only a repo is impacted by the revert.
+
 #### How should I revert?
 
-The approach requires new per-PR capabilities.
+Mechanically, a person who notices the payload is blocked can...
+
+1. Find all the changes made to the payload. The set is small for single payloads.
+2. Manually open reverts of the PRs that have changed.
+3. /hold the revert PRs and manually request payload promotion jobs on each of the revert PRs.
+4. If one of the revert PRs shows the payload promotion problem is fixed, the revert can be immediately merged.
+
+#### So I’m reverted, but my functionality is important, how do I come back in?
+
+We don’t revert just for fun. The PR that was reverted is important to someone for some reason, and the decision to
+revert is not expressing a view that the change is not worthwhile. In order to be merged back in:
+
+1. Open the unrevert+fix PR
+2. Manually /hold the unrevert+fix
+3. Request the payload promotion jobs by running the `/payload` command
+4. Demonstrate that the payload promotion jobs passed
+
+The approach requires using new per-PR capabilities.
 
 1. We need a way to run all payload promotion jobs against a single, manually chosen PR and visualize the results on a
    separate page. It needs to be separate due to the large quantity of jobs running against it. These jobs won’t be run
@@ -174,41 +209,6 @@ The approach requires new per-PR capabilities.
 2. We do NOT need a way to auto-prevent a PR from merging based on the result of these promotion jobs running. This is
    exceptional enough that a manual /hold on a PR and manual inspection of the summary is sufficient for us to start
    trying to use the system.
-
-Mechanically, a person who notices the payload is blocked can...
-
-1. Find all the changes made to the payload. The set is small for single payloads.
-2. Manually open reverts of the PRs that have changed.
-3. /hold the revert PRs and manually request payload promotion jobs on each of the revert PRs.
-4. If one of the revert PRs shows the payload promotion problem is fixed, the revert can be immediately merged.
-
-The choices are either
-
-1. Leave master broken during debugging, PR authoring, PR review, PR testing to prove it fixes it, PR merging. During
-   this time, we would have no new payloads for QE and degraded/slow ability to merge new code for anything in the
-   payload
-
-2. Revert quickly. Debugging happens in the unrevert PR and the PR authoring, review, testing, and merge are still on
-   the fix PR. During this time, we would have new payloads for QE and normal merging for the rest of the org.
-
-Option 1 blocks hundreds of people (developers, QE, downstream teams) by leaving broken code in master. Option 2
-unblocks hundreds of people (everyone except the reverted repo) and the work for the reverted repo is identical.
-
-We should be biased towards reversion.
-
-Because our org is distributed amongst multiple repositories, it is relatively easy to revert a single piece of
-functionality without interdependencies. No one actually has to diagnose the failure in order to revert the regressing
-change. And only a repo is impacted by the revert.
-
-#### So I’m reverted, but my functionality is important, how do I come back in?
-
-We don’t merge changes just for fun. The PR that was reverted is important to someone for some reason. In order to be
-merged back in:
-
-1. Open the unrevert+fix PR
-2. Manually /hold the unrevert+fix
-3. Manually request the payload promotion jobs
-4. Demonstrate that the payload promotion jobs passed
 
 The payload promotion jobs from 3 also provide a fairly precise signal for someone to decide to intentionally regress
 our product’s stability in order to merge a feature. I’m not saying it’s a thing that I would encourage, but it is a
@@ -365,26 +365,12 @@ to directly comment in a PR and say, “this feature makes our product X% less r
 QE, partner, and customer, but this feature is so important that we will knowingly impact all of them to have feature X”
 and it can merge.
 
-#### What does an “identified fix” look like?
-
-To avoid merging the revert, teams will need to be able to point to an open PR that contains a fix, and which has passed
-the payload acceptance checks.
-
-The payload acceptance check aggregates the result of N runs into a pass/fail percentage and compares it against the
-baseline. We are going to start by only failing overall when there is a 95% confidence that the PR is worse than the
-baseline. Here is a chart showing the calculation. The exact pass/fail counts vary depending on how bad the baseline is.
-
-We are biased toward passing and only fail when we are 95% confident (mathematically, not gut feel) that the PR is worse
-than the baseline.
-
 #### How can we possibly identify a fix before our PR is reverted? Can’t you just give us more time?
 
 Given the timing of these events, it’s understandable that many teams aren’t going to bother investigating if it was
 their PR that caused the issue until there is definitive proof (in the form of a revert PR that passes the check). And
 even if they do immediately investigate and open a fix PR, they will be racing against the checks being run against the
-revert PRs. We will allow some small amount of flexibility here: if the team has a fix PR open, we’ll wait for the check
-to finish against that PR before merging the revert. But if the checks on the fix PR fail, the team will need to merge
-the revert and then land the unrevert along with their fix.
+revert PRs. 
 
 Remember, anytime our payloads are regressed, the entire org is being impacted. While there may be a small cost to a
 single team to land an un-revert, it avoids a greater cost to the org as a whole. We want to get back to green as
@@ -423,7 +409,7 @@ Additional communication will be sent when we’re ready to turn on this functio
 - Job aggregation has been implemented
 - TRT revert policy has been implemented
 
-## Drawbacks
+### Drawbacks
 
 N/A
 
@@ -460,9 +446,9 @@ This graph shows us that if the corpus (history) is passing a job,test tuple at 
 We often refer to these concepts with an imprecise vernacular, let’s try to codify a couple to make what follows easier
 to understand.
 
-1. Job -- example: periodic-ci-openshift-release-master-ci-4.9-e2e-gcp-upgrade. Jobs are a description of what set of the
-   environment a cluster is installed into and which Tests will run and how. Jobs have multiple JobRuns associated with
-   them.
+1. Job -- example: periodic-ci-openshift-release-master-ci-4.9-e2e-gcp-upgrade. Jobs are a description of what set of
+   the environment a cluster is installed into and which Tests will run and how. Jobs have multiple JobRuns associated
+   with them.
 
 2. JobRun -- example periodic-ci-openshift-release-master-ci-4.9-e2e-gcp-upgrade #1423633387024814080. JobRuns are each
    an instance of a Job. They will have N-payloads associated with them (one to install, N to change versions to).
