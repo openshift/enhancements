@@ -448,7 +448,7 @@ spec:
     enabled: true
 ```
 
-In the 4.11 release, a `console.openshift.io/default-i18next-namespace` annotation
+In the 4.11 release, a `console.openshift.io/use-i18next` annotation
 is being introduced. The annotation indicates whether the `ConsolePlugin` contains
 localization resources. If the annotation is set to `"true"`, the localization
 resources from the i18n namespace named after the dynamic plugin (e.g. `plugin__kubevirt`),
