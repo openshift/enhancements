@@ -47,21 +47,22 @@ on the `cluster-ingress-operator`. This is quite a common requirement where
 
 With no support for such scenarios currently, customers end up with having the
 `cluster-ingress-operator` in degraded state. The solution is to add support
-in the operator to be able to optionally manage DNS record lifecycle. 
+in the operator to be able to optionally manage DNS record lifecycle on the
+cloud provider. 
 
 ### User Stories
 
-#### As a cluster admin, when configuring an ingresscontroller, I want to specify whether a DNS record should or should not be created for this ingress 
+#### As a cluster admin, when configuring an ingresscontroller, I want to specify whether a DNS record should or should not be created on the cloud provider for this ingress 
 
 The cluster admin has the option to modify/create ingresscontroller to 
-specify whether a DNS record should or should not be created. This is 
+specify whether a DNS record on the cloud provider should or should not be created. This is 
 available as a Day-2 operation to the cluster admin.
 
-#### As a cluster admin, when updating an ingresscontroller from managed DNS to unmanaged DNS, should reflect the same on the previous DNS Record
+#### As a cluster admin, when updating an ingresscontroller from managed DNS to unmanaged DNS, should reflect the same on the *DNSRecord* CR
 
-Upon updating `.loadbalancer.dnsManagementPolicy` to `Unmanaged` the older DNS records must 
+Upon updating `.loadbalancer.dnsManagementPolicy` to `Unmanaged` the older *DNSRecord* CR must 
 denote the same using the `dnsManagementPolicy` field. The cluster admin can 
-choose to retain or delete the DNS record at his discretion. 
+choose to retain or delete the DNS record in the cloud provider at his discretion. 
 
 ### Goals
 
@@ -85,12 +86,12 @@ The proposed solution adds support for more fine-grained control over specific
 ingresscontrollers on how they manage the wildcard DNS records associated with them.
 Introduce `dnsManagementPolicy` to indicate current state of DNS management,
 - `Managed`: It is the default state and behaves the same as the existing
-  implementation. The ingresscontroller manages create/update/delete actions
-  on the *DNSRecord* CR and the actual DNS records on the DNS provider.
-- `Unmanaged`: In this state, the ingresscontroller will not create/update/delete
-  the *DNSRecord* associated with it, nor does it create/update/delete
-  the actual DNS record on the cloud provider. This responsibility entirely falls
-  on the cluster admin.
+  implementation. The ingresscontroller manages the DNS record lifecycle on the
+  cloud provider.
+- `Unmanaged`: In this state, the ingresscontroller will not manage (create/update/delete)
+  the DNS record on the cloud provider. This responsibility entirely falls
+  on the cluster admin. The *DNSRecord* CR is retained with the field `dnsManagementPolicy`
+  set to `Unmanaged`.
 
 ### Workflow Description
 
@@ -120,15 +121,10 @@ defined below is sufficient,
   will be updated,
   - `DNSReady` condition will be set to true and reason updated to
     UnmanagedDNS.
-- Post successfully updating the ingresscontroller, the associated *DNSRecord*
-  must be deleted at the discretion of the cluster admin.
+- Post successfully updating the ingresscontroller, the associated DNS record in the
+  cloud provider must be deleted at the discretion of the cluster admin.
   - Since it is in the `Unmanaged` state, the complete clean-up of resources
     is the responsibility of the cluster admin.
-  - The finalizer on the *DNSRecord* isn't deleted by the operator when in `Unmanaged`
-    state, so the cluster admin needs to manually delete the finalizer.
-  - The DNS record on the DNS provider is also not deleted by the operator since
-    currently it is in `Unmanaged` state and needs to be manually deleted by the
-    cluster admin.
    
     
 __Note__: Similarly, to create a new ingresscontroller where DNS is managed
@@ -176,7 +172,9 @@ type DNSRecordSpec struct {
 
   // dnsManagementPolicy denotes the current policy applied on the dns record.
   // Records that have policy set as "Unmanaged" are ignored by the ingress
-  // operator and should be managed at the discretion of the cluster admin.
+  // operator and the DNS record on the cloud provider is not managed by the
+  // operator. This record on the cloud provider can be deleted at the
+  // discretion of the cluster admin.
   //
   // +kubebuilder:default:="Managed"
   // +kubebuilder:validation:Optional
@@ -195,7 +193,8 @@ const (
     // dns record on the appropriate platform.
     ManagedDNS DNSManagementPolicy = "Managed"
     // UnmanagedDNS configures the dns controller to ignore the dns record
-    // and allows to be manually managed by the cluster admin.
+    // and allows the DNS record on the cloud provider to be managed
+    // by the cluster admin.
     UnmanagedDNS DNSManagementPolicy = "Unmanaged"
 )
 ```
@@ -219,14 +218,10 @@ Once the *DNSRecord* is set to `Unmanaged`, any updates done to it will be ignor
 by the operator, but it is to be noted that if the ingresscontroller is updated from
 `Unmanaged` to `Managed` any changes done will be lost during re-sync.
 
-If the ingresscontroller is deleted, and the associated *DNSRecord* still exists
-it will also be marked for deletion and finalizer on the *DNSRecord* will not be
-removed by the operator, so the cluster admin will need to manually remove the
-finalizer on the *DNSRecord* to ensure it is deleted along with the ingresscontroller.
-This ensures we don't have any orphaned *DNSRecords* (records that don't have an associated
-ingresscontroller). The operator also will not delete the DNS records on the DNS provider
-that are associated with the *DNSRecord* CR, this will need to be manually deleted
-by the cluster admin.
+If the ingresscontroller is deleted when `.loadbalancer.dnsManagementPolicy` is set to
+`Unmanaged`, the *DNSRecord* CR will be deleted as per current implementation but the
+DNS record on the cloud provider will not be deleted by the operator and will require
+the cluster admin to manually delete it. 
 
 The support provided by the installer and this new field aren't entirely
 mutually exclusive, i.e. if customer has opted to disable DNS management cluster
@@ -277,10 +272,10 @@ the wildcard *DNSRecord*.
   and `.loadbalancer.dnsManagementPolicy` set to `Unmanaged`. Ensure proper conditions
   and connectivity.
 - Test deletion of ingresscontrollers to ensure correct behaviour of the associated
-  *DNSRecord*.  
+  *DNSRecord* CR and the DNS record on the cloud provider.  
 - Test the following update paths on a custom ingresscontroller
   - Updating `.loadbalancer.dnsManagementPolicy` from `Managed` -> `Unmanaged` -> `Managed` and
-    to ensure no conflicts during creation/recreation of *DNSRecord*.
+    to ensure no conflicts during creation/recreation of DNS record on the cloud provider.
   - Updating `Unmanaged` -> `Managed` and to ensure creation of new *DNSRecord*
     and correct conditions.
 
