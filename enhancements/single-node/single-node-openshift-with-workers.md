@@ -409,10 +409,13 @@ be explicitly `Workers`. Doing this means that after upgrading a cluster
 matching the above criteria from an older version that doesn't contain this
 enhancement to a newer version that does, the `DefaultPlacement` field will go
 from being empty (implying `Workers`) to being `ControlPlane`. This in turn, in
-most default configuratoins, will trigger a reconciliation of the default
+most default configurations, will trigger a reconciliation of the default
 ingress Deployment, as the `nodePlacement` in the default `IngressController`
 is empty. This reconcilliation will trigger a rollout of the default Ingress
-pods with node selectors targetting the "master" node label.
+pods with node selectors targetting the "master" node label, as desired. This
+rollout will cause a slight period of ingress downtime, but this is not a
+problem and is expected behavior in single control-plane node clusters,
+especially during an upgrade.
 
 The installer may not set `DefaultPlacement` to `ControlPlane` when the
 cluster's `ControlPlaneTopology` is set to `External`.
