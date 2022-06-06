@@ -13,7 +13,7 @@ api-approvers:
   - "@sttts"
   - "@oscardoe"
 creation-date: 2021-03-10
-last-updated: 2022-03-14
+last-updated: 2022-06-03
 status: implementable
 ---
 
@@ -311,8 +311,20 @@ to the cluster.
 - [openshift/runtime-utils/pkg/registries](https://github.com/openshift/runtime-utils/tree/master/pkg/registries): helper functions to edit registries.conf.
 - [openshift/machine-config-operator](https://github.com/openshift/machine-config-operator): the container runtime config controller that currently watches ICSP will
 also need to watch for the ImageDigestMirrorSet and ImageTagMirrorSet. The machine-config-operator/pkg/controller/container-runtime-config controller needs to operate the ImageDigestMirrorSet and ImageTagMirrorSet CRDs.
-Converts the existing ImageContentSourcePolicy objects to objects of new CRD.
+- A new controller will be implemented to convert the existing ImageContentSourcePolicy objects to objects of new ImageDigestMirrorSet.
+- [openshift/kubernetes/openshift-kube-apiserver/admission](https://github.com/openshift/kubernetes/tree/master/openshift-kube-apiserver/admission): add a webhook to convert from ImageConentSourcePolicy API to ImageDigestMirrorSet API
 - This [document](https://docs.google.com/document/d/11FJPpIYAQLj5EcYiJtbi_bNkAcJa2hCLV63WvoDsrcQ/edit?usp=sharing) keeps a list of components that use operator.openshift.io/v1alpha1 ImageContentSourcePolicy. Need to change those repositories to upgrade to ImageDigestMirrorSet.
+
+Phase 1： 
+- Add ImageDigestMirrorSet, ImageTagMirrorSet to openshift/api
+- Finish underlying implementation to support the per-mirror level tag/digest pull configuration.
+
+Phase 2: 
+- implement the migration path: 
+  - implement a controller that can copy existing ImageContentSourcePolicy objects to ImageDigestMirrorSet objects. 
+  - implement the webhook to do the conversion from operator.openshift.io/v1alpha1/imagecontentsourcepolicies to config.openshift.io/v1/imagedigestmirrorsets
+- components listed in the above [document](https://docs.google.com/document/d/11FJPpIYAQLj5EcYiJtbi_bNkAcJa2hCLV63WvoDsrcQ/edit?usp=sharing) migrate to new APIs ImageDigestMirrorSet, ImageTagMirrorSet
+- register and expose the CRDs.
 
 #### Notes
 
@@ -366,7 +378,7 @@ the primary registry of the mirrors.
 
 #### Removing a deprecated feature
 
-- A Jira card [OCPNODE-717](https://issues.redhat.com/browse/OCPNODE-717) was created to record the upgrade of ImageDigestMirrorSet, and ImageTagMirrorSet. The [repositories](https://docs.google.com/document/d/11FJPpIYAQLj5EcYiJtbi_bNkAcJa2hCLV63WvoDsrcQ/edit) currently rely on operator/v1alpha1 ImageContentSourcePolicy(ICSP) will be migrated to config/v1 ImageDigestMirrorSet.
+- A Jira card [OCPNODE-717](https://issues.redhat.com/browse/OCPNODE-717) was created to record the upgrade of ImageDigestMirrorSet, and ImageTagMirrorSet. The [repositories](https://docs.google.com/document/d/11FJPpIYAQLj5EcYiJtbi_bNkAcJa2hCLV63WvoDsrcQ/edit?usp=sharing) currently rely on operator/v1alpha1 ImageContentSourcePolicy(ICSP) will be migrated to config/v1 ImageDigestMirrorSet.
 
 - The ImageContentSourcePolicy(ICSP) will follow the rules from [Deprecating an entire component](https://docs.openshift.com/container-platform/4.8/rest_api/understanding-api-support-tiers.html#deprecating-entire-component_understanding-api-tiers). The duration is
 12 months or 3 releases from the announcement of deprecation, whichever is longer.  
@@ -375,21 +387,16 @@ the primary registry of the mirrors.
 
 #### Upgrade Strategy
 
-An existing cluster is required to make an upgrade to 4.11 in order to make use of the allow mirror by tags feature. Before the deprecation of ImageContentSourcePolicy, MCO needs to watch for both ImageContentSourcePolicy, and ImageDigestMirrorSet and create objects.
+An existing cluster is required to make an upgrade to 4.12 in order to make use of the allow mirror by tags feature.
 
-Tier 1 component `imagecontentsourcepolicy.operator.openshift.io/v1alpha1` will stay 12 months or 3 releases from the announcement of deprecation.
-During the development on the release that one release ahead of deprecating `imagecontentsourcepolicy.operator.openshift.io/v1alpha1`,
-MCO will copy existing ImageContentSourcePolicy objects to ImageDigestMirrorSet and create new objects, and delete the
-ImageContentSourcePolicy objects. If any errors appear during the process, MCO should report `Upgradeable=False`.
-
-On the release that the ImageContentSourcePolicy CRD is removed from the API, the MCO will update its clusteroperator object to reflect a degraded state if it still finds objects of
-ImageContentSourcePolicy. The MCO should report that the ImageContentSourcePolicy is orphaned and let the user know they should create new objects
-using the new ImageDigestMirrorSet or ImageTagMirrorSet CRDs.
+Migration path: 
+- a controller will copy existing ImageContentSourcePolicy objects to create new ImageDigestMirrorSet objects. 
+- a webhook will do the conversion from operator.openshift.io/v1alpha1/imagecontentsourcepolicies to config.openshift.io/v1/imagedigestmirrorsets.
 
 #### Downgrade Strategy
 According to [Deprecating an entire component](https://docs.openshift.com/container-platform/4.8/rest_api/understanding-api-support-tiers.html#deprecating-entire-component_understanding-api-tiers), Tier 1 component
 `imagecontentsourcepolicy.operator.openshift.io/v1alpha1` will stay 12 months or 3 releases from the announcement of deprecation, whichever is longer. During the upgrade path,
-if an 4.11 upgrade fails mid-way through, or if the 4.11 cluster is
+if an 4.12 upgrade fails mid-way through, or if the 4.12 cluster is
 misbehaving, the user can rollback to the version that supports `ImageContentSourcePolicy`.
 Their `ImageDigestMirrorSet` and `ImageTagMirrorSet` dependent workflows will be clobbered and broken if rollback to a version
 that lacks support for these CRDs. They can still configure the `ImageContentSourcePolicy` to use mirrors and keep previous behavior.
@@ -401,18 +408,30 @@ Upgrade skew will not impact this feature. The MCO does not require skew check.
 ### Operational Aspects of API Extensions
 
 Impacts of API extensions:
-- Components that must be upgraded to use ImageDigestMirrorSet:
-  - [Installer](https://github.com/openshift/installer/blob/6d778f911e79afad8ba2ff4301eda5b5cf4d8e9e/pkg/asset/manifests/imagesourcepolicy.go#L18)
-  - [Hypershift](https://github.com/openshift/hypershift/blob/baceec23098d39af089b06c503425c3bbee554d3/control-plane-operator/controllers/hostedcontrolplane/manifests/imagecontentsource.go)
-  - [MCO](https://github.com/openshift/machine-config-operator) The machine-config-operator/pkg/controller/container-runtime-config controller needs to operate the ImageDigestMirrorSet and ImageTagMirrorSet CRDs.
-  - [Image-registry](https://github.com/openshift/image-registry/blob/a87e6c50cd973723de8b5471453de7c345403d56/pkg/dockerregistry/server/simplelookupicsp.go#L60)
-  - [Cluster-config-operator](https://github.com/openshift/cluster-config-operator)
-  - [Openshift-api-server](https://github.com/openshift/openshift-apiserver/blob/98786f917ffc7d3dc3b05893f405970b87a419b9/pkg/image/apiserver/registries/registries.go)
-  - [Runtime utils](https://github.com/openshift/runtime-utils/blob/8b8348d80d1d1e7b6cf06fb009d5965e0b55baa2/pkg/registries/registries.go#L50)
-  - [Openshift-controller-manager](https://github.com/openshift/openshift-controller-manager/blob/2a11f145ad7fcf3e92460800de1d13ba7fbb90b0/pkg/build/controller/build/build_controller.go#L20943)
 
-The Node team will be making changes to the above impacted components to enable the new CRDs. Planning target CY21Q4
+This [document](https://docs.google.com/document/d/11FJPpIYAQLj5EcYiJtbi_bNkAcJa2hCLV63WvoDsrcQ/edit?usp=sharing) keeps a list of components that use operator.openshift.io/v1alpha1 ImageContentSourcePolicy.
+Components must be upgraded to use ImageDigestMirrorSet before the exposure of ImageDigestMirrorSet, ImageTagMirrorSet CRDs.
 Jira card  [OCPNODE-717](https://issues.redhat.com/browse/OCPNODE-717) will record the upgrade of ImageDigestMirrorSet.
+- [openshift/machine-config-operator](https://github.com/openshift/machine-config-operator/search?q=imagecontentsourcepolicy)
+- [openshift/runtime-utils](https://github.com/openshift/runtime-utils/search?q=imagecontentsourcepolicy)
+- [openshift/installer](https://github.com/openshift/installer/search?q=imagecontentsourcepolicy)
+- [openshift/hypershift](https://github.com/openshift/hypershift/search?q=imagecontentsourcepolicy)
+- [openshift/image-registry](https://github.com/openshift/image-registry/search?q=imagecontentsourcepolicy)
+- [openshift/cluster-config-operator](https://github.com/openshift/cluster-config-operator/search?q=imagecontentsourcepolicy)
+- [openshift/openshift-apiserver](https://github.com/openshift/openshift-apiserver/search?q=imagecontentsourcepolicy)
+- [openshift/openshift-controller-manager](https://github.com/openshift/openshift-controller-manager/search?q=imagecontentsourcepolicy)
+- [openshift/oc](https://github.com/openshift/oc/search?q=imagecontentsourcepolicy)
+- [openshift/oc-mirror](https://github.com/openshift/oc-mirror/search?q=imagecontentsourcepolicy)
+- [openshift/verification-tests](https://github.com/openshift/verification-tests/search?q=imagecontentsourcepolicy)
+- [openshift/release](https://github.com/openshift/release/search?q=imagecontentsourcepolicy)
+- [openshift/assisted-service](https://github.com/openshift/assisted-service/search?q=imagecontentsourcepolicy)
+- [openshift/cincinnati-operator](https://github.com/openshift/cincinnati-operator/search?q=imagecontentsourcepolicy)
+- [openshift/openshift-tests-private](https://github.com/openshift/openshift-tests-private/search?q=imagecontentsourcepolicy)
+- [openshift/console](https://github.com/openshift/console/search?q=imagecontentsourcepolicy)
+- [openshift/assisted-service](https://github.com/openshift/assisted-service/search?q=imagecontentsourcepolicy)
+
+
+
 
 #### Failure Modes
 
@@ -431,7 +450,11 @@ Failure can be caused by getting unexpected images when using tag pull specifica
 
 ## Implementation History
 
-- [openshift/api#874: Create ImageContentPolicy CRD to config/v1 and allowMirrorByTags support](https://github.com/openshift/api/pull/874) PR was merged.
+- [openshift/api#874: Create ImageContentPolicy CRD to config/v1 and allowMirrorByTags support](https://github.com/openshift/api/pull/874)
+- [openshift/api#1126: Add CRD ImageDigestMirrorSet and ImageTagMirrorSet](https://github.com/openshift/api/pull/1126)
+- [openshift/api#1164: Do not register new ICSP CRDs, yet](https://github.com/openshift/api/pull/1164)
+- [containers/image#1411: Add pull-from-mirror for adding per-mirror level restrictions](https://github.com/containers/image/pull/1411)
+
 ## Drawbacks
 
 See [Risks and Mitigations](###risks-and-mitigations)
