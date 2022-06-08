@@ -1,15 +1,15 @@
 ---
 title: HyperShift Metrics Monitoring
 authors:
-- @bwplotka
+  - "@bwplotka"
 reviewers:
-- @jeremyeder
-- @smarterclayton
-- @kbsingh
-- @openshift/openshift-team-monitoring
-- @maorfr
+  - "@jeremyeder"
+  - "@smarterclayton"
+  - "@kbsingh"
+  - "@openshift/openshift-team-monitoring"
+  - "@maorfr"
 approvers:
-- @dofinn
+  - "@dofinn"
 creation-date: 2021.12.08
 last-updated: 2022.05.10
 status: implementable
