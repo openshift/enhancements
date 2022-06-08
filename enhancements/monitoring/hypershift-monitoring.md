@@ -324,6 +324,10 @@ N/A technical detail.
 
 N/A technical detail.
 
+### Upgrade / Downgrade Strategy
+
+N/A
+
 ## Implementation History
 
 If all parties will agree on the proposed direction we need heavy focus on the actions required:
@@ -406,11 +410,7 @@ As the consequences:
 3. Similarly to the above: Thanos Ruler from UWM won’t be able to access Thanos Querier and potential Alertmanager on the Control plane.
 4. Naively we would have multiple CMOs per control plane on the management cluster. While this will work, there is an opportunity to do it better.
 
-Additionally, how telemetry would work in this casse?
-
-## Upgrade / Downgrade Strategy
-
-N/A
+Additionally, how telemetry would work in this case?
 
 ## Previous Docs
 
