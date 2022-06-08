@@ -24,8 +24,7 @@ status: implementable
 - [X] Test plan is defined
 - [X] Operational readiness criteria is defined
 - [X] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created.
-  - See [Documentation Required](#documentation-required) for further details.
+- [X] User-facing documentation is created. See [Documentation Required](#documentation-required) for further details.
 
 ## Summary
 
@@ -228,11 +227,11 @@ Mitigations:
 * We are introducing more devs on-call.
 * We are doubling down the development on performance and scalability. We already have designs to improve the biggest bottlenecks of Thanos.
 * In the extremely worst case: This design assumes API-driven workflows. This allows easy change of Observability Product if anything goes wrong. If our Observability Product effort totally collapses, OSD can within days (and millions $$) switch to any other vendors that support Loki APIs and Remote Write API and Prometheus/Loki read APIs. For example:
-    * Our Grafana Cloud partner
-    * Amazon Managed Prometheus and Grafana
-    * Google Managed Prometheus
-    * Logz.io
-    * … many more
+  * Our Grafana Cloud partner
+  * Amazon Managed Prometheus and Grafana
+  * Google Managed Prometheus
+  * Logz.io
+  * … many more
 
 ### Migration
 
@@ -272,7 +271,8 @@ They manage multiple clusters in HyperShift topology, so multiple control planes
 
 As mentioned in [Big picture](#the-big-picture), for CUS local use, metrics can be shipped to many different solutions. For example:
 
-* Data can land to locally deployed Observatorium. Obsevatorium is our open-source project that can already be installed anywhere to fulfil the proposed architecture. The first time user onboarding experience is certainly less than optimal, though a decent level of investment in better documentation, reusable dashboards and alerts and the operator deployment model would make this a drastically better experience.
+* Data can land to locally deployed Observatorium. Observatorium is our open-source project that can already be installed anywhere to fulfil the proposed architecture.
+The first time user onboarding experience is certainly less than optimal, though a decent level of investment in better documentation, reusable dashboards and alerts and the operator deployment model would make this a drastically better experience.
 * 3rd-party vendor like Grafana Cloud, Amazon or Google Managed Prometheus, Logz.io and others.
 
 Exact offering is still to be discussed, but we need to acknowledged that managing monitoring is and expensive business.
@@ -304,7 +304,7 @@ NOTE: This list excludes RHOBS work items, which are managed by Observability te
 
 Let's look on various alternatives.
 
-#### Pay for Observability Vendor
+### Pay for Observability Vendor
 
 Pros:
 
@@ -320,7 +320,7 @@ Cons:
 * We are not their priority vs we have dedicated Observability Group that can react to import ant missing features.
 * Not helping open source community.
 
-#### Change CMO, so it does not deploy Platform Monitoring at all; only rely on UWM.
+### Change CMO, so it does not deploy Platform Monitoring at all; only rely on UWM
 
 In previous sessions and previous version of this document we proposed NOT deploying extra Prometheus and whole "Platform Monitoring" part.
 
@@ -338,7 +338,7 @@ After various discussions we found quite many disadvantages:
 * Removing platform monitoring is not easy, since many customer and our workloads (e.g console) require its data.
 * Lack of platform monitoring causes us to deploy another stack anyway for HyperShift use.
 
-#### Use Pure Platform Monitoring Solution
+### Use Pure Platform Monitoring Solution
 
 ![h](assets/hypershift-cmo.png)
 
@@ -346,56 +346,57 @@ Similarly to how the control plane is decoupled to the data plane in the HyperSh
 
 1. Platform Monitoring won’t be able to scrape data plane resources like it used to do.
 Why: Scrape is not reliable across networks (you cannot retry scrape without losing information). Consequences:
-  * Violated requirement “Ability to monitor system components on guest clusters”
+
+* Violated requirement “Ability to monitor system components on guest clusters”
 
 2. OpenShift Console for Customers used to talk to Thanos Querier, which could get metrics, rules, and scrape targets from both Platform and User Workload Prometheus-es. UWM used to talk to PM because customers want to see and alert on the performance / kube state metrics that are only available through PM.
 However, in this naive solution, Thanos Querier won’t be able (easily) to access User Workload Monitoring. Why?
  
-  * Querying/StoreAPI through WAN can have larger latency and cost
-  * There should be no connections initiated by data plane to control plane
+* Querying/StoreAPI through WAN can have larger latency and cost
+* There should be no connections initiated by data plane to control plane
 
 As the consequences:
 
-  * It violates requirement “Ability to monitor user-workload-related metrics from the system components on guest clusters”
-  * It violates requirement  “Ability to monitor user-workload-related metrics from Kube API (kube state metrics)”.
+* It violates requirement “Ability to monitor user-workload-related metrics from the system components on guest clusters”
+* It violates requirement  “Ability to monitor user-workload-related metrics from Kube API (kube state metrics)”.
 
 3. Similarly to the above: Thanos Ruler from UWM won’t be able to access Thanos Querier and potential Alertmanager on the Control plane.
 4. Naively we would have multiple CMOs per control plane on the management cluster. While this will work, there is an opportunity to do it better.
 
 Additionally, how telemetry would work in this casse?
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
 N/A
 
-### Graduation Criteria
+## Graduation Criteria
 
-#### Dev Preview -> Tech Preview
+### Dev Preview -> Tech Preview
 
 * HyperShift Team can send subset of metrics to RHOBS and query them. Grafana Dashboarding is installed.
 * Minimal amount of telemetry is shipped to Telemeter.
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 
 * HyperShift Team can monitor (that includes alerting) their management workloads in the RHOBS.
 * All required Red Hat telemetry is shipped to Telemeter, including those from data plane clusters.
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
 N/A
 
-### Version Skew Strategy
+## Version Skew Strategy
 
 N/A
 
-### Previous Docs
+## Previous Docs
 
 * Initial proposal and discussion on [Google Docs](https://docs.google.com/document/d/1BJarERppgiJ8esc6d8anbJMOQ0AflFBQea-Zc9wAp0s/edit#heading=h.bupciudrwmna)
 * [HyperShift Monitoring Meeting Notes](https://docs.google.com/document/d/1crLlWZ9iefuayIcCb3Cwjb2rZrSm-xji9o3c98uEJe4/edit#)
 * [Product Agnostic Centralized Observability](https://docs.google.com/presentation/d/1cPwac7iNmOFPbEMKE6lcesQCHa2UQXNSJrVo5cW5eRQ/edit)
 * [Guest Cluster Telemetry](https://docs.google.com/document/d/1TQxmy_1zgPLIrLrbjWV4HlEZ8MTMKP7iXESJJEzoC9o/edit#)
 
-#### Related Enhancements
+### Related Enhancements
 
 * [Monitoring Stacks](monitoring-stack-operator.md)
 * [Precursor of HyperShift](../update/ibm-public-cloud-support.md)
