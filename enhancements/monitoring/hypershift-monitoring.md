@@ -109,6 +109,14 @@ However, since HyperShift has no solution at all, for now starting from HyperShi
 
 ## Proposal
 
+### Workflow Description
+
+Workflow is mentioned in Goals above.
+
+### API Extensions
+
+N/A
+
 ### Personas
 
 * HyperShift Admin SRE (HSRE): People that will operate the Hypershift management cluster and its control planes. In practice, this means the SD org on our managed solutions.
@@ -284,6 +292,38 @@ Exact offering is still to be discussed, but we need to acknowledged that managi
 
 TBD
 
+### Graduation Criteria
+
+#### Dev Preview -> Tech Preview
+
+* HyperShift Team can send subset of metrics to RHOBS and query them. Grafana Dashboarding is installed.
+* Minimal amount of telemetry is shipped to Telemeter.
+
+#### Tech Preview -> GA
+
+* HyperShift Team can monitor (that includes alerting) their management workloads in the RHOBS.
+* All required Red Hat telemetry is shipped to Telemeter, including those from data plane clusters.
+
+#### Removing a deprecated feature
+
+N/A
+
+### Version Skew Strategy
+
+N/A
+
+### Operational Aspects of API Extensions
+
+N/A
+
+#### Failure Modes
+
+N/A technical detail.
+
+#### Support Procedures
+
+N/A technical detail.
+
 ## Implementation History
 
 If all parties will agree on the proposed direction we need heavy focus on the actions required:
@@ -298,7 +338,7 @@ If all parties will agree on the proposed direction we need heavy focus on the a
 
 NOTE: This list excludes RHOBS work items, which are managed by Observability team.
 
-## Drawbacks
+### Drawbacks
 
 * Different than OSD team effort to maintain critical Observability dependency with high SLO.
 * No local alerting and querying for HSRE.
@@ -369,26 +409,6 @@ As the consequences:
 Additionally, how telemetry would work in this casse?
 
 ## Upgrade / Downgrade Strategy
-
-N/A
-
-## Graduation Criteria
-
-### Dev Preview -> Tech Preview
-
-* HyperShift Team can send subset of metrics to RHOBS and query them. Grafana Dashboarding is installed.
-* Minimal amount of telemetry is shipped to Telemeter.
-
-### Tech Preview -> GA
-
-* HyperShift Team can monitor (that includes alerting) their management workloads in the RHOBS.
-* All required Red Hat telemetry is shipped to Telemeter, including those from data plane clusters.
-
-### Removing a deprecated feature
-
-N/A
-
-## Version Skew Strategy
 
 N/A
 
