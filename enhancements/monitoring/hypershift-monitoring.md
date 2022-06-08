@@ -9,9 +9,9 @@ reviewers:
 - @openshift/openshift-team-monitoring
 - @maorfr
 approvers:
-- .
+- @dofinn
 creation-date: 2021.12.08
-last-updated: 2021.12.08
+last-updated: 2022.05.10
 status: implementable
 ---
 
@@ -348,13 +348,16 @@ Similarly to how the control plane is decoupled to the data plane in the HyperSh
 Why: Scrape is not reliable across networks (you cannot retry scrape without losing information). Consequences:
   * Violated requirement “Ability to monitor system components on guest clusters”
 
-2. OpenShift Console for Customers used to talk to Thanos Querier, which could get metrics, rules, and scrape targets from both Platform and User Workload Prometheus-es. UWM used to talk to PM because customers want to see and alert on the performance / kube state metrics that are only available through PM. However, in this naive solution, Thanos Querier won’t be able (easily) to access User Workload Monitoring. Why?
+2. OpenShift Console for Customers used to talk to Thanos Querier, which could get metrics, rules, and scrape targets from both Platform and User Workload Prometheus-es. UWM used to talk to PM because customers want to see and alert on the performance / kube state metrics that are only available through PM.
+However, in this naive solution, Thanos Querier won’t be able (easily) to access User Workload Monitoring. Why?
+ 
   * Querying/StoreAPI through WAN can have larger latency and cost
   * There should be no connections initiated by data plane to control plane
 
-  Consequences:
-  * Violated requirement “Ability to monitor user-workload-related metrics from the system components on guest clusters”
-  * Violated requirement  “Ability to monitor user-workload-related metrics from Kube API (kube state metrics)”.
+As the consequences:
+
+  * It violates requirement “Ability to monitor user-workload-related metrics from the system components on guest clusters”
+  * It violates requirement  “Ability to monitor user-workload-related metrics from Kube API (kube state metrics)”.
 
 3. Similarly to the above: Thanos Ruler from UWM won’t be able to access Thanos Querier and potential Alertmanager on the Control plane.
 4. Naively we would have multiple CMOs per control plane on the management cluster. While this will work, there is an opportunity to do it better.
@@ -369,11 +372,13 @@ N/A
 
 #### Dev Preview -> Tech Preview
 
-TBD
+* HyperShift Team can send subset of metrics to RHOBS and query them. Grafana Dashboarding is installed.
+* Minimal amount of telemetry is shipped to Telemeter.
 
 #### Tech Preview -> GA
 
-TBD
+* HyperShift Team can monitor (that includes alerting) their management workloads in the RHOBS.
+* All required Red Hat telemetry is shipped to Telemeter, including those from data plane clusters.
 
 #### Removing a deprecated feature
 
