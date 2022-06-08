@@ -30,7 +30,8 @@ status: implementable
 
 This proposal aims to figure our monitoring case of HyperShift topology. There are three important parts of this proposal:
 
-For HyperShift Admin, we propose to extract metric storage, alerting and querying for Clusters managed by HyperShift to a separate service that can be scaled, deployed and managed in a decoupled mode. This will allow robust multi-cluster, fleet monitoring with best experience possible for cluster admins. This means SD org, running managed HyperShift will use the RHOBS managed by Observability Group and AppSRE. Metrics from control planes of hosted clusters will be shipped thanks to Monitoring Stacks.
+For HyperShift Admin, we propose to extract metric storage, alerting and querying for Clusters managed by HyperShift to a separate service that can be scaled, deployed and managed in a decoupled mode. This will allow robust multi-cluster, fleet monitoring with best experience possible for cluster admins.
+This means SD org, running managed HyperShift will use the RHOBS managed by Observability Group and AppSRE. Metrics from control planes of hosted clusters will be shipped thanks to Monitoring Stacks.
 
 The data plane part of guest clusters requires changes too. In terms of feature parity for users custom or UWM monitoring and HPA we propose to deploy unchanged CMO for smallest changes possible. We also propose using CMO path to gather and send needed monitoring data for HyperShift Admin to RHOBs as well as data-plane telemetry through the usual path.
 
@@ -83,9 +84,6 @@ The goal is to provide a solution that maintains similar monitoring capabilities
   * Longer durations nice to have, but technically not required. There is also option that allows HSRE to persist SLO from platform to [different backend if needed](https://docs.google.com/document/d/1BJarERppgiJ8esc6d8anbJMOQ0AflFBQea-Zc9wAp0s/edit?disco=AAAAQTFsbwM).
 * HSRE have an easy way to monitor dozens of HyperShift clusters in multiple geo regions and thousands of control planes in total. This means in particular:
   * Ability to perform PromQL across fleet metrics
-
-> NOTE(Mariusz): Alerts can be region wide only, and query in different tab per region might be good enough for now.
-n
   * No need to tunnel to specific control plane to query metrics
   * Centralized alerting
 * CUS can monitor / use HPA/VPA / vis with local console using metrics FROM their workloads on guest clusters or from nodes on guest clusters
@@ -126,7 +124,8 @@ However, since HyperShift has no solution at all, for now starting from HyperShi
 
 #### Overview
 
-In terms of HSRE persona, we propose to decouple their observability for SRE / Devs for monitoring and troubleshooting purposes with a specific solution like HyperShift, OSD etc going forward. I explained some rationales in the [Observatorium: Product Agnostic Centralized Observability 2021.10](https://docs.google.com/presentation/d/1cPwac7iNmOFPbEMKE6lcesQCHa2UQXNSJrVo5cW5eRQ/edit) presentation. For those who don't have access or prefer written form, there are few benefits of this:
+In terms of HSRE persona, we propose to decouple their observability for SRE / Devs for monitoring and troubleshooting purposes with a specific solution like HyperShift, OSD etc going forward.
+I explained some rationales in the [Observatorium: Product Agnostic Centralized Observability 2021.10](https://docs.google.com/presentation/d/1cPwac7iNmOFPbEMKE6lcesQCHa2UQXNSJrVo5cW5eRQ/edit) presentation. For those who don't have access or prefer written form, there are few benefits of this:
 
 * The most complex part of monitoring system (storage, querying, alerting) is decoupled from source cluster topology. Using separate "service" allows to avoid expensive integrations to ever-changing topologies and permutations on those, which has complex interactions and constraints.
 * Gathering data outside of source clusters allow easier federation, global view and alerting.
@@ -180,10 +179,12 @@ In details the full design looks as follows:
 Let’s take a look at all parts:
 
 1. We don't change the management cluster monitoring itself (out of scope).
-2. We propose introducing a new monitoring stack on the hosted control plane to collect metrics from the control plane components and forward them to RHOBS. In terms of implementation we propose to deploy [Monitoring Stack Operator](https://github.com/rhobs/monitoring-stack-operator) that will deploy set of Prometheus/Prometheus Agents that will be sending data off cluster to RHOBS. No local alerting and local querying will be allowed. Interaction with that data will be fully on RHOBS side. This path will forward both monitoring data as well as part of telemetry relevant for Telemeter to RHOBS.
-3. On data-plane we propose running unchanged CMO stack. This allows feature parity for customers. A selected number of platform metrics could be forwarded to RHOBS if needed via remote write (already supported), though proxy on Hosted Control plane. The unique part is that Platform Monitoring will know NOTHING about master nodes and control plane resources (etcd, control plane operators, Kube services etc). It will only provide "platform" metrics for worker nodes and containers running there. Part of telemetry related to data-plane will be sent through Telemeter client though Hosted Control plane proxy.
+2. We propose introducing a new monitoring stack on the hosted control plane to collect metrics from the control plane components and forward them to RHOBS. In terms of implementation we propose to deploy [Monitoring Stack Operator](https://github.com/rhobs/monitoring-stack-operator) that will deploy set of Prometheus/Prometheus Agents that will be sending data off cluster to RHOBS.
+No local alerting and local querying will be allowed. Interaction with that data will be fully on RHOBS side. This path will forward both monitoring data as well as part of telemetry relevant for Telemeter to RHOBS.
+3. On data-plane we propose running unchanged CMO stack. This allows feature parity for customers. A selected number of platform metrics could be forwarded to RHOBS if needed via remote write (already supported), though proxy on Hosted Control plane.
+The unique part is that Platform Monitoring will know NOTHING about master nodes and control plane resources (etcd, control plane operators, Kube services etc). It will only provide "platform" metrics for worker nodes and containers running there. Part of telemetry related to data-plane will be sent through Telemeter client though Hosted Control plane proxy.
 
-#### Common Labels
+### Common Labels
 
 RHOBs generally does not restrict the label semantics you want to use for the monitoring of your workloads. See [Metric Label Restriction page](https://rhobs-handbook.netlify.app/services/rhobs/#metric-label-restrictions) for list of label recommendations.
 
@@ -196,13 +197,15 @@ We propose reusing `_id` which is what Telemeter uses. This is also by default p
 
 When it comes to hosted control planes we propose for hosted control plane service monitors (or pod monitors) to include relabeling that adds `_id` with corresponding cluster id to each metric. When scraped this label will be attached and propagated to RHOBS.
 
-Additionally, Prometheus/Prometheus Agent pipeline that scrapes and forwards data from Hosted control plane to RHOBS should have external label indicated HyperShift management cluster, so we know which management cluster collected and controlled that hosted cluster. We could add external label called `hypershift_cluster_id` with ID of HyperShift cluster. This label will be then injected in remote write request to RHOBS.
+Additionally, Prometheus/Prometheus Agent pipeline that scrapes and forwards data from Hosted control plane to RHOBS should have external label indicated HyperShift management cluster, so we know which management cluster collected and controlled that hosted cluster. We could add external label called `hypershift_cluster_id` with ID of HyperShift cluster.
+This label will be then injected in remote write request to RHOBS.
 
-#### Customer Monitoring on Data Plane
+### Customer Monitoring on Data Plane
 
 As per goals and non-goals we aim to give the CUS ability to scrape data related to their worklodads / hardware / Kubernetes state metrics that is on their data plane. As mentioned in [Non Goals](#non-goals) we don’t want to give or sell anything for scalable, centralized monitoring to customers (yet). Not beyond anything else w provide which is an opinionated UWM, CMO can deploy on normal OCP.
 
-We propose to use similar functionality as before by having CMO in ~unchanged form deploying its resources on data plane in similar fashion as in [OCP](https://docs.openshift.com/container-platform/4.9/monitoring/understanding-the-monitoring-stack.html#understanding-the-monitoring-stack_understanding-the-monitoring-stack). This allows less changed to already complex CMO, while providing exactly same functionality including HPA, out-of-box platform metircs, custom metrics, custom alerts to HyperShift guest clusters.
+We propose to use similar functionality as before by having CMO in ~unchanged form deploying its resources on data plane in similar fashion as in [OCP](https://docs.openshift.com/container-platform/4.9/monitoring/understanding-the-monitoring-stack.html#understanding-the-monitoring-stack_understanding-the-monitoring-stack).
+This allows less changed to already complex CMO, while providing exactly same functionality including HPA, out-of-box platform metircs, custom metrics, custom alerts to HyperShift guest clusters.
 
 ### Risks and Mitigations
 
