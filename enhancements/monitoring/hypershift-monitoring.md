@@ -1,5 +1,5 @@
 ---
-title: HyperShift Monitoring
+title: hypershift-monitoring
 authors:
   - "@bwplotka"
 tracking-link:
