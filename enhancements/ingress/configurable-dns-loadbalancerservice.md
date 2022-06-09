@@ -30,7 +30,7 @@ The ingress operator currently assumes that it's going to create and
 manage DNS using the required cloud provider integration. But in some
 circumstances, the required DNS zone may be different from the cluster
 DNS zone and may not even be hosted in the cloud provider. In such scenarios,
-the operator reports a degraded state after provisioning the required
+the operator reports a degraded state after attempting to provision the required
 resources in the cloud provider because the provided DNS can't be created.
 
 This enhancement aims to provide the end-user the ability to completely disable
@@ -54,33 +54,30 @@ cloud provider.
 
 #### As a cluster admin, when configuring an ingresscontroller, I want to specify whether a DNS record should or should not be created on the cloud provider for this ingress 
 
-The cluster admin has the option to modify/create ingresscontroller to 
+The cluster admin has the option to modify/create the ingresscontroller to 
 specify whether a DNS record on the cloud provider should or should not be created. This is 
 available as a Day-2 operation to the cluster admin.
 
-#### As a cluster admin, when updating an ingresscontroller from managed DNS to unmanaged DNS, should reflect the same on the *DNSRecord* CR
+#### As a cluster admin, when updating an ingresscontroller from managed DNS to unmanaged DNS, I want confirmation that the operator is not managing DNS
 
-Upon updating `.loadbalancer.dnsManagementPolicy` to `Unmanaged` the older *DNSRecord* CR must 
-denote the same using the `dnsManagementPolicy` field. The cluster admin can 
-choose to retain or delete the DNS record in the cloud provider at his discretion. 
+Upon updating the IngressController CR's `.spec.endpointPublishingStrategy.loadBalancer.dnsManagementPolicy`
+field to `Unmanaged`, the existing *DNSRecord* CR must denote the same using the
+`dnsManagementPolicy` field. The cluster admin can  choose to retain or delete the
+DNS record in the cloud provider at his discretion. 
 
 ### Goals
 
-- Provide the ability to opt out of DNS management by the `cluster-ingress-operator`.
-- Recover from degraded state of the `cluster-ingress-operator` during upgrades
-  from OCP 3.x to 4.x where DNS was being managed externally.
+- Provide the ability to opt out of DNS management by the `cluster-ingress-operator` for 
+  an individual ingresscontroller.
+- Enable migration from OCP 3.x to 4.x where DNS was being managed externally.
 
 ### Non-Goals
 
 - Provide a day-0 solution for cluster installations involving external DNS
   management by the customer.
-- Traffic management during DNS management policy migration from managed to unmanaged.
+- DNS traffic management during DNS management policy migration from managed to unmanaged.
 
 ## Proposal
-
-Currently, there is partial support provided by the `installer` (in UPI installations)
-to disable the `cluster-ingress-operator` from managing the DNS cluster-wide as documented
-[here](https://github.com/openshift/installer/blob/master/docs/user/aws/install_upi.md#remove-dns-zones). 
 
 The proposed solution adds support for more fine-grained control over specific
 ingresscontrollers on how they manage the wildcard DNS records associated with them.
@@ -95,7 +92,7 @@ Introduce `dnsManagementPolicy` to indicate current state of DNS management,
 
 ### Workflow Description
 
-This feature is designed as Day-2 solution and is geared towards cluster
+This feature is designed as a Day-2 solution and is geared towards cluster
 admins. It mainly applies to scenarios where specific ingresscontrollers
 need to be configured to not manage DNS records associated with them.
 
@@ -105,22 +102,21 @@ the cluster admin.
 
 #### Modifying/Updating an ingresscontroller
 
-The ingresscontroller will need to be deleted and recreated with the updated domain
-present in if required domain is _not_ the same as cluster domain configured at
-*ingress.config.openshift.io/cluster* `.spec.domain`. If not needed, the workflow
-defined below is sufficient,
-- The new domain that needs to be associated with the ingresscontroller
-  must be created prior to making any changes.
-- The ingresscontroller must be edited to set `.loadbalancer.dnsManagementPolicy` to `Unmanaged`.
+- A valid DNS record must be created in advance either on a cloud provider or any
+  external provider so that it can be associated with an ingresscontroller.
+- If the ingresscontroller already exists it must be updated to set 
+  `.loadbalancer.dnsManagementPolicy` to `Unmanaged`.
+  - ```bash
+    oc -n openshift-ingress-operator patch ingresscontrollers/<name> --type=merge --patch='{"spec":{"endpointPublishingStrategy":{"loadBalancer":{"dnsManagementPolicy":"Unmanaged"}}}}'
+    ```
 - This will trigger a reconcile of the controller, resulting in updating
   the following conditions on the ingress operator
-  - `DNSManaged` condition will be set to false and reason updated to
+  - `DNSManaged` condition will be set to `False` and reason updated to
     UnmanagedDNS.
+  - `DNSReady` condition will be set to `Unknown` and reason updated to
+    UnmanagedDNS.    
 - The DNSRecord will also be updated as part of the same reconcile, 
-  `.spec.dnsManagementPolicy` will be set to `Unmanaged` and the following conditions
-  will be updated,
-  - `DNSReady` condition will be set to true and reason updated to
-    UnmanagedDNS.
+  `.spec.dnsManagementPolicy` will be set to `Unmanaged`.
 - Post successfully updating the ingresscontroller, the associated DNS record in the
   cloud provider must be deleted at the discretion of the cluster admin.
   - Since it is in the `Unmanaged` state, the complete clean-up of resources
@@ -128,8 +124,7 @@ defined below is sufficient,
    
     
 __Note__: Similarly, to create a new ingresscontroller where DNS is managed
-          externally, the same workflow can be followed. No *DNSRecord*s will be
-          created in the flow.
+          externally, the same workflow can be followed.
 
 ### API Extensions
 
@@ -143,11 +138,11 @@ type LoadBalancerStrategy struct {
 
     // dnsManagementPolicy indicates if the lifecyle of the wildcard DNS record
     // associated with the load balancer service will be managed by
-    // the ingress operator.
+    // the ingress operator. It defaults to Managed.
+    // Valid values are: Managed and Unmanaged. 
     //
     // +kubebuilder:default:="Managed"
     // +kubebuilder:validation:Optional
-    // +kubebuilder:validation:Enum=Managed;Unmanaged
     DNSManagementPolicy LoadBalancerDNSManagementPolicy `json:"dnsManagementPolicy"`
 }
 
@@ -158,14 +153,20 @@ type LoadBalancerStrategy struct {
 type LoadBalancerDNSManagementPolicy string
 
 const (
-    // ManagedLoadBalancerDNS configures the ingresscontroller to manage
-    // the wildcard DNS records associated with it.
+    // ManagedLoadBalancerDNS specifies that the operator manages
+    // a wildcard DNS record for the ingresscontroller.
     ManagedLoadBalancerDNS LoadBalancerDNSManagementPolicy = "Managed"
-    // UnmanagedLoadBalancerDNS configures the ingresscontroller to not
-    // manage the wildcard DNS records associated with it.
+    // UnmanagedLoadBalancerDNS specifies that the operator does not manage
+    // any wildcard DNS record for the ingresscontroller.
     UnmanagedLoadBalancerDNS LoadBalancerDNSManagementPolicy = "Unmanaged"
 )
+```
 
+The DNSRecord CRD is similarly extended by adding an optional field
+`DNSManagementPolicy` of type `DNSManagementPolicy`. This field's value
+will default to `Managed`.
+
+```go
 // DNSRecordSpec contains the details of a DNS record.
 type DNSRecordSpec struct {
   // <snip>
@@ -174,11 +175,11 @@ type DNSRecordSpec struct {
   // Records that have policy set as "Unmanaged" are ignored by the ingress
   // operator and the DNS record on the cloud provider is not managed by the
   // operator. This record on the cloud provider can be deleted at the
-  // discretion of the cluster admin.
+  // discretion of the cluster admin. It defaults to Managed.
+  // Valid values are: Managed and Unmanaged.
   //
   // +kubebuilder:default:="Managed"
   // +kubebuilder:validation:Optional
-  // +kubebuilder:validation:Enum=Managed;Unmanaged
   DNSManagementPolicy DNSManagementPolicy `json:"dnsManagementPolicy"`
 }
 
@@ -189,37 +190,40 @@ type DNSRecordSpec struct {
 type DNSManagementPolicy string
 
 const (
-    // ManagedDNS configures the dns controller manage the lifecyle of the
-    // dns record on the appropriate platform.
+    // ManagedDNS configures the dns controller to manage the lifecycle of the
+    // DNS record on the cloud platform.
     ManagedDNS DNSManagementPolicy = "Managed"
-    // UnmanagedDNS configures the dns controller to ignore the dns record
-    // and allows the DNS record on the cloud provider to be managed
-    // by the cluster admin.
+    // UnmanagedDNS configures the dns controller not to create a DNS record or 
+    // manage any existing DNS record and allows the DNS record on the cloud 
+    // provider to be managed by the cluster admin.
     UnmanagedDNS DNSManagementPolicy = "Unmanaged"
 )
 ```
 
-Re-uses existing condition `DNSManaged` of the controller to denote if
-the wildcard *DNSRecord* associated with the controller is managed/unmanaged. 
+This enhancement re-uses the IngressController's existing `DNSManaged` status condition to denote if
+the wildcard *DNSRecord* associated with the IngressController is managed/unmanaged. 
 
 ### Implementation Details/Notes/Constraints
 
-Based on `.loadbalancer.dnsManagementPolicy`, the controller decides whether to ensure creating
-a wildcard *DNSRecord*. If the customer is updating `.loadbalancer.dnsManagementPolicy` from 
-`"Managed"` to `"Unmanaged"` the previously created *DNSRecord* will be updated
+With this enhancement, the ingress operator creates the wildcard *DNSRecord* CR under
+the same conditions as before this enhancement, but the operator now sets the
+`spec.dnsManagementPolicy` field on the DNSRecord CR.  
+If the user is updating the IngressController's `dnsManagementPolicy` field from 
+`"Managed"` to `"Unmanaged"`, the previously created *DNSRecord* CR will be updated
 appropriately.
 
 The existing `.loadbalancer.dnsManagementPolicy` value of the ingresscontroller
 will be replicated to the *DNSRecord*'s `.spec.dnsManagementPolicy` as well, to
-clearly state which dns record is unmanaged. The cluster admin can choose to delete
-the *DNSRecord* at his own discretion (this will involve also manually removing the finalizer).
+clearly state which dns record is unmanaged. If the cluster admin were to delete
+the *DNSRecord* CR, the operator would recreate it (again reflecting and respecting the 
+IngressController's `spec.endpointPublishingStrategy.loadBalancer.dnsManagementPolicy` field).
 
 Once the *DNSRecord* is set to `Unmanaged`, any updates done to it will be ignored
 by the operator, but it is to be noted that if the ingresscontroller is updated from
 `Unmanaged` to `Managed` any changes done will be lost during re-sync.
 
 If the ingresscontroller is deleted when `.loadbalancer.dnsManagementPolicy` is set to
-`Unmanaged`, the *DNSRecord* CR will be deleted as per current implementation but the
+`Unmanaged`, the *DNSRecord* CR will be deleted as per the current implementation, but the
 DNS record on the cloud provider will not be deleted by the operator and will require
 the cluster admin to manually delete it. 
 
@@ -227,12 +231,12 @@ The support provided by the installer and this new field aren't entirely
 mutually exclusive, i.e. if customer has opted to disable DNS management cluster
 wide (as documented
 [here](https://github.com/openshift/installer/blob/master/docs/user/aws/install_upi.md#remove-dns-zones)),
-this field is of no value and need not be set since *DNSRecord* created is silently
-reconciled by the DNS controller.
+this field is of no value and need not be set since reconciliation of the *DNSRecord*
+CR is a no-op when no DNS zones are configured.
 
 __Note:__ Appropriate logging is a must on all controllers clearly indicating the
 current DNS management policy set on both ingresscontroller and DNSRecord and any
-subsquent effects such as skipping reconciliation, etc must also be logged.
+subsequent effects, such as skipping reconciliation etc., must also be logged.
 
 ### Risks and Mitigations
 
@@ -276,8 +280,8 @@ the wildcard *DNSRecord*.
 - Test the following update paths on a custom ingresscontroller
   - Updating `.loadbalancer.dnsManagementPolicy` from `Managed` -> `Unmanaged` -> `Managed` and
     to ensure no conflicts during creation/recreation of DNS record on the cloud provider.
-  - Updating `Unmanaged` -> `Managed` and to ensure creation of new *DNSRecord*
-    and correct conditions.
+  - Updating `Unmanaged` -> `Managed` and to ensure creation of new DNS record on the cloud
+    provider and the correct status.
 
 ### Graduation Criteria
 
@@ -301,15 +305,15 @@ On upgrades, `.loadbalancer.dnsManagementPolicy` will default to `Managed` which
 older versions of the ingress operator.
 
 On downgrades, there are 2 possible variations
-* When downgrading to an unsupported version, having the `.loadbalancer.dnsManagementPolicy` set to
+* When downgrading to a version of OpenShift without this enhancement, having the `.loadbalancer.dnsManagementPolicy` set to
   `Unmanaged`,
   * If the cluster domain is not the same as the domain in the ingresscontroller,
-    could result in failing to create the wildcard *DNSRecord* associated on the 
+    could result in failing to create the wildcard DNS record that is associated on the 
     ingresscontroller and thereby result in the `cluster-ingress-operator` entering 
     a degraded state. To recover DNS management will have to be disabled cluster 
     wide ([docs](https://github.com/openshift/installer/blob/master/docs/user/aws/install_upi.md#remove-dns-zones)).
   * When the cluster domain is the same as the domain in the ingresscontroller,
-    this will not cause any issues during downgrades, but a new wildcard *DNSRecord*
+    this will not cause any issues during downgrades, but a new wildcard DNS record
     will be created by the operator. 
 * When downgrading to an unsupported version, having the `.loadbalancer.dnsManagementPolicy` set to
   `Managed` or leaving it as the default in the ingresscontroller will not result
@@ -325,10 +329,11 @@ N/A.
 
 #### Failure Modes
 
-- Application workloads will experiance connectivity issues, when replacing/re-creating
-  an ingresscontroller from `Managed` to `Unmanaged` since the associated deployment,
-  routes, loadbalancer will be recreated/reconfigured. Eventually, once all components
-  reach stable conditions, workload connectivity should be restored.
+- Application workloads will experience connectivity issues, when replacing/re-creating
+  an ingresscontroller from `Managed` to `Unmanaged` since the operator must recreate
+  the associated deployment and loadbalancer and the cluster administrator must
+  reconfigure DNS. Eventually, once all components reach stable conditions, workload
+  connectivity should be restored.
 
 #### Support Procedures
 
