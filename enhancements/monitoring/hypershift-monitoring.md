@@ -1,15 +1,21 @@
 ---
-title: HyperShift Metrics Monitoring
+title: HyperShift Monitoring
 authors:
   - "@bwplotka"
+tracking-link:
+  - "https://issues.redhat.com/browse/MON-1877"
 reviewers:
   - "@jeremyeder"
   - "@smarterclayton"
   - "@kbsingh"
   - "@openshift/openshift-team-monitoring"
   - "@maorfr"
+api-approvers:
+  - "@dofinn"
+  - "@jeremyeder"
 approvers:
   - "@dofinn"
+  - "@jeremyeder"
 creation-date: 2021.12.08
 last-updated: 2022.05.10
 status: implementable
