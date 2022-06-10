@@ -176,6 +176,30 @@ Upgrade from 4.5 with Manila CSI driver (GA in 4.5) works as follows:
 In case there was no AWS / Manila CSI driver operator running during the update, CSO installs the corresponding operator
 as during installation, so user has a CSI driver running after update.
 
+### Disabling creation of storageclass
+Starting with OCP 4.12, we are allowing users to disable creation of StorageClass in case they need CSI driver but don't
+necessarily need dynamic provisioning in the cluster.
+
+A cluster admin can edit and set `disableStorageClass` field to `true` in `ClusterCSIDriver` object of that driver to disable
+creation of storageclass. This can be done as day-2 operation which will result in deletion of any previously created
+storageclasses by the CSI operator.
+
+```golang
+type ClusterCSIDriverSpec struct {
+    OperatorSpec `json:",inline"`
+    // DisableStorageClass determines if creation of storageclass for this driver
+    // should be skipped. By default Openshift creates storageclass for every CSI
+    // driver it installs via CSI operator. Setting this value to true will skip
+    // automatic creation of storageclass for driver being installed.
+    // Defaults to false.
+    // +kubebuilder:default=false
+    DisableStorageClass bool `json:"disableStorageClass,omitempty"`
+}
+```
+
+Similarly setting `disableStorageClass` field to `false` should result in recreation of StorageClass installed by CSI driver
+operator.
+
 ### Un-installation
 
 It is not possible to un-install a CSI driver / operator installed by cluster-storage-operator. Similarly to in-tree
