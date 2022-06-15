@@ -88,9 +88,10 @@ The userTags field is intended to be set at install time and is considered immut
 
 If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. However, if tags are removed from userTags, the tag will not be removed from the AWS resource.
 
-### Update design details
+### Updated design details
 
-The `experimentalPropagateUserTags` field is changed to `propagateUserTags` for GA version.
+A new field `propagateUserTags` is added in GA version. The `experimentalPropagateUserTags` field will be deprecated in future release versions.
+When both fields are set, `experimentalPropagateUserTags` takes precedence.
 
 ### User Stories
 
@@ -144,7 +145,8 @@ This enhancement updates `experimentalPropagateUserTags` field.
 
 On upgrade:
 
-The new status field won't be populated since it is only populated by the installer and that can't have happened if the cluster was installed from a prior version. Components that consume the new field should take no action since they will see no additional tags.
+- The new status field won't be populated since it is only populated by the installer and that can't have happened if the cluster was installed from a prior version. Components that consume the new field should take no action since they will see no additional tags.
+- The `experimentalPropagateUserTags` field will be deprecated in the GA release version to support updates to existing usages in scripts or configs and will be removed in the version after the GA release version.
 
 On downgrade:
 
