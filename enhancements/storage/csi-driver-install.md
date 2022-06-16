@@ -180,6 +180,9 @@ as during installation, so user has a CSI driver running after update.
 Starting with OCP 4.12, we are allowing users to disable creation of StorageClass in case they need CSI driver but don't
 necessarily need dynamic provisioning in the cluster.
 
+Another use case is - an admin may not necessarily like how we configure StorageClass in the cluster and hence wants to use
+their own instead.
+
 A cluster admin can edit and set `disableStorageClass` field to `true` in `ClusterCSIDriver` object of that driver to disable
 creation of storageclass. This can be done as day-2 operation which will result in deletion of any previously created
 storageclasses by the CSI operator.
