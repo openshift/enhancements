@@ -4,6 +4,9 @@ authors:
   - "@gregsheremeta"
   - "@tgeer"
 reviewers:
+  - @patrickdillon
+  - @sdodson
+  - @jerpeter1
   - @joelspeed
   - @Miciah
   - @sinnykumari
@@ -12,9 +15,11 @@ reviewers:
   - @tkashem
   - @tjungblu
 approvers:
-  - @tjungblu
+  - @sdodson
+  - @jerpeter1
+  - @bparees
 creation-date: 2021-03-24
-last-updated: 2022-03-10
+last-updated: 2022-06-16
 status: implementable
 ---
 
@@ -114,6 +119,12 @@ apiVersion: apiextensions.k8s.io/v1
           properties:
             platform:
               aws:
+                experimentalPropagateUserTags:
+                description: ExperimentalPropagateUserTags is an experimental
+                            flag that directs in-cluster operators to include the specified
+                            user tags in the tags of the AWS resources that the operators
+                            create. The field is deprecated.
+                type: boolean
                 propagateUserTags:
                 description: PropagateUserTags is a flag that directs in-cluster operators to include the specified
                             user tags in the tags of the AWS resources that the operators create.
