@@ -90,7 +90,7 @@ If the userTags field is changed post-install, there is no guarantee about how a
 
 ### Updated design details
 
-A new field `propagateUserTags` is added in GA version. The `experimentalPropagateUserTags` field will be deprecated in future release versions.
+A new field `propagateUserTags` is added in GA release version. The `experimentalPropagateUserTags` field will be deprecated. In future release versions, `experimentalPropagateUserTags` will be removed.
 When both fields are set, `experimentalPropagateUserTags` takes precedence.
 
 ### User Stories
