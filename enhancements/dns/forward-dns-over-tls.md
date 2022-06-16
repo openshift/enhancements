@@ -243,7 +243,15 @@ for TLS configuration.
 Implementing this enhancement requires changes in the following repositories:
 
 openshift/api
+* [Addition of DNS-over-TLS Types](https://github.com/openshift/api/pull/1110)
+
 openshift/cluster-dns-operator
+* [Primary Implementation](https://github.com/openshift/cluster-dns-operator/pull/314)
+
+openshift/kubernetes
+* An [Admission Check](https://github.com/openshift/kubernetes/pull/1247) was added in OpenShift 4.12 to address the 
+  overly loose validation. In OpenShift 4.11 we addressed the loose validation mostly in the `cluster-dns-operator` 
+  at runtime.
 
 ### Risks and Mitigations
 
@@ -326,6 +334,13 @@ N/A
   something like [KeyLogWriter](https://pkg.go.dev/crypto/tls#example-Config-KeyLogWriter)
   but that would require an upstream change and be outside the scope of this 
   enhancement.
+* If a cluster admin configures a configmap that doesn't exist, you'll see logs in the operator pod that look like 
+  the following:
+  ```shell
+  time="2022-06-07T17:10:35Z" level=warning msg="source ca bundle configmap missing-cm does not exist"
+  time="2022-06-07T17:10:35Z" level=warning msg="failed to get destination ca bundle configmap ca-missing-cm: 
+  configmaps \"ca-missing-cm\" not found"
+  ```
 
 ## Implementation History
 
