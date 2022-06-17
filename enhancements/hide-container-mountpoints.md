@@ -236,13 +236,19 @@ ZTP, and also available
 - Add a CI lane that runs all current e2e tests with this feature enabled
 - Update the ZTP DU profile to use the new mechanism instead of the current
   MachineConfig-based proof-of-concept
+- User-facing documentation:
+  - Feature overview (what it is and what happens when it's enabled)
+  - How to enable the feature
+  - How to inspect the container mounts when the feature is enabled
+  - How to set up a system service to enter the mount namespace
 
 #### Tech Preview -> GA
 
 - Enable the feature by default
 - Remove the CI lane that enables the feature, as it is enabled by default
-- User-facing documentation to detail the mechanism to inspect container mounts
-  or disable the feature if needed
+- User-facing documentation changes:
+  - Mention the feature is on by default
+  - Change "how to enable" instructions to "how to disable"
 
 #### Removing a deprecated feature
 
