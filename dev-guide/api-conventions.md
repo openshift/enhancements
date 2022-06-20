@@ -166,6 +166,9 @@ type MyPlatformConfig struct {
   // The field should be an enum type, so you may also need an enum tag.
   // The enum values should be in PascalCase.
   // The field should be required.
+  // In configuration APIs, you may also want to allow an empty value or "NoOpinion" value to
+  // allow the consumer to declare that they do not have an opinion and that the platform
+  // should choose a sensible default on their behalf.
   // +unionDiscriminator
   // +kubebuilder:validation:Enum:="AWS";"Azure";"GCP"
   // +kubebuilder:validation:Required
