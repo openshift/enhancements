@@ -129,6 +129,128 @@ By providing quality documentation within the API itself, a number of generated 
 benefit from the additional context provided which in turn makes it easier for end users to understand
 and use our products.
 
+### Discriminated Unions
+
+In configuration APIs, we commonly have sections of the API model that are only valid to be configured in certain scenarios. A common example of this within OpenShift is platform specific configuration.
+When running on AWS, the other platform configuration blocks are not valid to be set.
+To model this within an API, we use a discriminated union, which models an at-most-one-of semantic with a
+declarative choice.
+
+#### What is a Discriminated Union?
+
+A discriminated union is a structure within the API that closely resembles a union type.
+A number of fields exist within the structure and we are expecting the user to configure precisely one of
+the fields.
+
+In particular, for a discriminated union, an extra field exists which allows the user to declaratively
+state which of particular fields they are configuring.
+
+We use discriminated unions in Kubernetes APIs so that we force the user to make a choice.
+We do not want our code to guess what the user meant, they should tell us which of the choices they made
+using the discriminant.
+
+#### Writing a union in Go
+
+Union types in Go have some additional helper tags which signify how the structure should be handled to consumers.
+Below is an example based on the idea of platform types.
+
+```go
+// MyPlatformConfig is a discriminated union of platform specific configuration.
+// It has a +union tag which informs consumers that this is expected to be a union type.
+// +union
+type MyPlatformConfig struct {
+  // PlatformType is the unions discriminator.
+  // Users are expected to set this value to the name of the platform.
+  // The value of this field should match exactly one field in the union structure.
+  // It has a +unionDiscriminator tag to inform consumers that this is the discriminator field.
+  // The field should be an enum type, so you may also need an enum tag.
+  // The enum values should be in PascalCase.
+  // The field should be required.
+  // In configuration APIs, you may also want to allow an empty value or "NoOpinion" value to
+  // allow the consumer to declare that they do not have an opinion and that the platform
+  // should choose a sensible default on their behalf.
+  // +unionDiscriminator
+  // +kubebuilder:validation:Enum:="AWS";"Azure";"GCP"
+  // +kubebuilder:validation:Required
+  PlatformType string `json:"platformType,omitempty"`
+
+  // AWS is the AWS configuration.
+  // All structures within the union must be optional and pointers.
+  // +optional.
+  AWS *MyAWSConfig `json:"aws,omitempty"`
+
+  // Azure is the Azure configuration.
+  // All structures within the union must be optional and pointers.
+  // +optional.
+  Azure *MyAzureConfig `json:"azure,omitempty"`
+
+  // GCP is the GCP configuration.
+  // All structures within the union must be optional and pointers.
+  // +optional.
+  GCP *MyGCPConfig `json:"gcp,omitempty"`
+}
+```
+
+The discriminator here allows the consumer to determine which of the configuration structures they should be consuming, AWS, Azure or GCP.
+
+Important to note:
+* All structs within the union **MUST** be pointers
+* All structs within the union **MUST** be optional
+* The discriminant should be required
+* The discriminant **MUST** be a string (or string alias) type
+* Discriminant values should be PascalCase and should be equivalent to the camelCase field name (json tag) of one member of the union
+* Empty union members (discriminant values without a paired union member) are also permitted
+
+#### Using union types
+
+Below are some examples of how a user may configure the above example.
+
+##### Case 1
+
+```yaml
+myPlatformConfig:
+  platformType: AWS
+  aws:
+    ...
+```
+
+This is valid. Only one struct is configured and the discriminant is correct.
+
+##### Case 2
+
+```yaml
+myPlatformConfig:
+  platformType: AWS
+  aws:
+    ...
+  azure:
+    ...
+```
+
+This is invalid. The Azure configuration should not be configured when the `platformType` is AWS.
+
+##### Case 3
+
+```yaml
+myPlatformConfig:
+  aws:
+    ...
+```
+
+This is invalid. Only one struct is configured but the discriminant is omitted.
+
+##### Case 4
+
+```yaml
+myPlatformConfig:
+  aws:
+    ...
+  azure:
+    ...
+```
+
+This is invalid. Multiple structs have been configured and no discriminant is provided.
+
 ## Exceptions to Kubernetes API Conventions
 
 ### Use JSON Field Names in Godoc
