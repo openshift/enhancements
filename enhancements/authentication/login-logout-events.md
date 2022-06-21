@@ -2,6 +2,7 @@
 title: Login Logout Auditing
 authors:
   - "@s-urbaniak"
+  - "@ibihim"
 reviewers:
   - "@mfojtik"
   - "@deads2k"
@@ -49,60 +50,15 @@ This approach has a couple of drawbacks:
 
 ### Non-Goals
 
-1. Hook into the existing API server [policy configuration](https://github.com/openshift/enhancements/blob/master/enhancements/kube-apiserver/audit-policy.md).
-2. Provide a fully featured audit subsystem in oauth-server compliant with API server policy framework.
-3. Rate limiting of logging login/logout events.
+1. Provide a fully featured audit subsystem in oauth-server compliant with API server policy framework.
+2. Rate limiting of logging login/logout events.
 
 ## Proposal
 
-We propose to add an `audit` struct to `oauth.config.openshift.io/v1` with a `profile` field which configures audit logging granularity.
+We propose to reuse the `audit.config.openshift.io/v1` profiles for enabling or disabling audit logging on the `oauth-server` and to add annotations to distinguish authentication events.
 
-```go
-// OAuthSpec contains desired cluster auth configuration
-type OAuthSpec struct {
-	// identityProviders is an ordered list of ways for a user to identify themselves.
-	// When this list is empty, no identities are provisioned for users.
-	// +optional
-	// +listType=atomic
-	IdentityProviders []IdentityProvider `json:"identityProviders,omitempty"`
-
-	// tokenConfig contains options for authorization and access tokens
-	TokenConfig TokenConfig `json:"tokenConfig"`
-
-	// templates allow you to customize pages like the login page.
-	// +optional
-	Templates OAuthTemplates `json:"templates"`
-	// audit specifies what should be audited in the context of OAuthServer.
-	// +optional
-	// +kubebuilder:default:={"profile":"WriteLoginEvents"}
-	Audit OAuthAudit `json:"audit"`
-}
-
-// OAuthAudit specifies the Audit profile in use.
-type OAuthAudit struct {
-	// profile is a simple drop in profile type that can be turned off by
-	// setting it to "None" or it can be turned on by setting it to
-	// "WriteLoginEvents".
-	// +kubebuilder:default:="WriteLoginEvents"
-	Profile OAuthAuditProfileType `json:"profile,omitempty"`
-}
-
-// OAuthAuditProfileType defines a simple audit profile, which can turn OAuth
-// authentication audit logging on or off.
-// +kubebuilder:validation:Enum=None;WriteLoginEvents
-type OAuthAuditProfileType string
-
-const (
-	// "None" disables audit logs.
-	OAuthNoneAuditProfileType AuditProfileType = "None"
-
-	// "WriteLoginEvents" logs login and login failure events.
-	// This is the default.
-	OAuthWriteLoginEventsProfileType AuditProfileType = "WriteLoginEvents"
-)
-```
-
-We propose to add additional information that helps to identify login and login failures to the audit log.
+We propose that there is a limitation to log only the Metadata level as the content of the `oauth-server` is considered security sensitive. The audit logging will be "just" turned on when the audit log policy profile is set to `Default`, `WriteRequestBodies` or `AllRequestBodies` and it will not adhere to the level of logging specified. Audit logging will be turned off, when the audit log
+policy profile is set to `None` ([Configuring the audit policy](https://docs.openshift.com/container-platform/4.10/security/audit-log-policy-config.html)).
 
 In case that the authentication happens through the `oauth-server`, we suggest to add:
 
@@ -281,13 +237,13 @@ To create successful login and login failure audit events differ slightly depend
 
 1. **Password-based identity providers**
 
-All password-based identity providers are using a [central location](https://github.com/openshift/oauth-server/blob/690499e76a0b242adb5ccc73f23cccc8a50b8788/pkg/server/login/login.go#L173) where login events are handled. Both login success and failure events will be emitted here.
+All password-based identity providers are being handled on the `/authorize` route and are hooked up [here](https://github.com/openshift/oauth-server/blob/8d80088ebf859d717e470b47fed9f9014b9226a0/pkg/oauthserver/auth.go#L633-L716=). The `authenticator.Request` is the result and will be used for auditing of login success and failures.
 
 2. **External OAuth identity providers**
 
 For login events external OAuth providers must invoke oauth-server callback handler to finalize authorization using [code grant flow](https://datatracker.ietf.org/doc/html/rfc6749#section-4.1).
 
-Login success will be emitted upon successful code exchange between the oauth-server and the OIDC IdP in the [central OAuth callback handler](https://github.com/openshift/oauth-server/blob/822478f88514a80f053d9f65cd689d981b6ea4fd/pkg/oauth/external/handler.go#L149-L157).
+Login success will be emitted upon successful code exchange between the oauth-server and the OIDC IdP in the [central OAuth callback handler](https://github.com/openshift/oauth-server/blob/master/pkg/oauth/external/handler.go#L143-L181=).
 
 Login failure however cannot be easily detected as there is no guarantee that external oauth providers will invoke callback in the case of a login failure. Hence, only best-effort login failure events can be emitted, if the external OAuth provider provides an `error` response in the [central `HandleRequest` handler](https://github.com/openshift/oauth-server/blob/513a8bb5b6cbd5e8faacbed523eb861aa29a674b/vendor/github.com/RangelReale/osincli/authorize.go#L84).
 
