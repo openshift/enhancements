@@ -17,6 +17,34 @@ status: informational
 OpenShift APIs follow the [Kubernetes API conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)
 with some exceptions and additional guidance, outlined below.
 
+## Why do we have API Reviews and Conventions?
+
+As OpenShift developers, we are creating a product where the API and its design play an important part in
+how our users interact with the product.
+Our users configure and use our product by interacting with the APIs that we define within the [openshift/api](https://github.com/openshift/api) repository.
+Whether they interact with the API via a CLI or GUI, the shape of the API contract will play a role in that
+experience.
+
+As OpenShift is a large product with many teams working independently to introduce new features,
+we must have a centralised set of conventions to ensure that the look and feel of our APIs is consistent
+across the board.
+By having consistent API design, our end users will feel familiar with the API no matter which of our APIs
+they are working with.
+
+API review also plays an important part in making sure that the APIs we release are of high quality and,
+where possible, consider the future needs of the API and the possible expansions we may make.
+
+As OpenShift APIs are supported immediately once they are merged, API reviews play an important part in
+making sure the API is correct (it has a logical shape and sufficient validation and documentation) and
+that, should changes be required later, these changes can be made in a way that is compatible with the
+existing, shipped API.
+
+A number of the conventions set out in this document derive from previous mistakes made in past API designs
+that became difficult to maintain as the API evolved.
+Importantly, this means that, while some of our APIs are not compliant with conventions, all new APIs must
+be compliant. Repeating the mistakes we have previously made is not acceptable and will not be approved by
+the API review team.
+
 ## API Author Guidance
 
 ### Write User Readable Documentation in Godoc
@@ -377,3 +405,28 @@ Following this convention has the disadvantage that it deviates from what users
 may be accustomed to from upstream APIs, but it has the advantage that it avoids
 ambiguity and the need for API consumers to resolve an API version and kind to
 the resource group and name that identify the resource.
+
+## FAQs
+
+### My proposed design looks like an existing API we have, why am I being told that it must be changed?
+
+There are a few reasons why an API reviewer might want you to change the proposed design of your API addition.
+
+When the API looks similar to an existing API, there are a couple of important things to bear in mind.
+
+Firstly, not all APIs in OpenShift have been through the API review process, therefore, especially early
+in the OpenShift 4 lifecycle, many APIs were shipped that were not compliant with the conventions.
+
+Secondly, the conventions have evolved over time as we have learned what does and doesn't work.
+Naturally this means that older APIs are not compliant with current conventions.
+
+Thirdly, the API review team is relatively small and API reviews can be very time consuming.
+During the review process, sometimes things are missed and lead to APIs being merged that aren't compliant.
+
+No matter the reason for an existing API being non-compliant with current conventions, the reasons above are not
+sufficient justification for merging a new API that doesn't meet conventions.
+If your proposed API changes look like an existing API, but that API is not compliant, we will ask you to update the
+API to meet the latest conventions.
+
+When adhered to the conventions prevent us from making API design mistakes or repeating them.
+As such, the existence of non-compliant APIs is not a justification for introducing additional non-compliant APIs.
