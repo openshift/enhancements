@@ -94,7 +94,7 @@ by a user with an admin or cluster-admin role.  This is done by installing
 the Network Observability Operator and Loki Operator.  The user can do this
 using the web console or the CLI.
 
-Either Open vSwitch (OVS) or eBPF agent will be configured to export IPFIX data.  The data will be
+Either Open vSwitch (OVS) or eBPF agent will be configured to export flows.  The data will be
 collected and combined with Kubernetes-related information (e.g. pod, services,
 namespaces) and then saved in local persistent storage or cloud storage such
 as Amazon S3.
@@ -127,7 +127,8 @@ The OVS can be configured to enable NetFlows by using Cluster Network Operator
 performance of the OVS.
 
 A priviledged eBPF agent can run on each cluster node as an alternative to 
-generate NetFlows. This will impact the performance of nodes.
+generate NetFlows. This will impact the performance of nodes with a lower overall 
+consumption than OVS approach.
 
 ### Implementation Details/Notes/Constraints
 
@@ -312,14 +313,16 @@ such as the cache size may also be exposed.
 Extended Berkeley Packet Filter (eBPF) is used to safely and efficiently extend 
 the capabilities of the kernel without requiring to change kernel source code or 
 load kernel modules.  The agent will allows collecting and aggregating all the 
-ingress and egress flows on Linux hosts to send IPFIX data.
+ingress and egress flows on Linux hosts to send flows.
 
-#### FLP
-Flow-Logs Pipeline (FLP) is an observability tool that consumes raw network 
-flow-logs in their original format (NetFlow v5,v9 or IPFIX) and uses a pipe-line 
-to enhances the IPFIX data with Kubernetes-related information, transform the logs
-into time series metrics in prometheus format and in parallel transform and persist
-the logs also into loki.
+#### Flow-Logs Pipeline
+Flow-Logs Pipeline (FLP) is an observability tool that consumes either:
+- raw network flow-logs in their original format (NetFlow v5,v9 or IPFIX)
+- eBPF flows in binary format (protobuf+GRPC)
+- Kafka entries in JSON format
+and uses a pipe-line to enhances the flows with Kubernetes-related information, 
+transform the logs into time series metrics in prometheus format and in parallel 
+transform and persist the logs also into loki.
 
 #### Storage
 Storage stores the IPFIX/Kubernetes data.  It provides a REST API to
