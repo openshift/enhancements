@@ -4,6 +4,8 @@ authors:
   - "@stleerh"
   - "@jotak"
   - "@mariomac"
+  - "@jpinsonneau"
+  - "@OlivierCazade"
 reviewers:
   - "@russellb"
   - "@mcurry-rh"
@@ -17,7 +19,7 @@ approvers:
   - "@mcurry-rh"
   - "@knobunc"
 creation-date: 2021-09-22
-last-updated: 2021-10-11
+last-updated: 2022-07-01
 status: implementable
 see-also:
 replaces:
@@ -29,8 +31,8 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
+- [X] Enhancement is `implementable`
+- [X] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Operational readiness criteria is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
@@ -92,14 +94,14 @@ by a user with an admin or cluster-admin role.  This is done by installing
 the Network Observability Operator and Loki Operator.  The user can do this
 using the web console or the CLI.
 
-Open vSwitch (OVS) will be configured to export IPFIX data.  The data will be
+Either Open vSwitch (OVS) or eBPF agent will be configured to export IPFIX data.  The data will be
 collected and combined with Kubernetes-related information (e.g. pod, services,
 namespaces) and then saved in local persistent storage or cloud storage such
 as Amazon S3.
 
-The web console will provide a NetFlow table showing traffic between
-pods in a table format.  In the future, more visualization and functionality
-will be added to include areas such as topology, network data gathered using
+The web console will provide a NetFlow table and topology views showing traffic between
+pods.  In the future, more visualization and functionality
+will be added to include areas such as extra network data gathered using
 eBPF, policy validation, security risks, and more.
 
 ***Note:*** *The term "NetFlow" is used generically throughout this document and
@@ -120,23 +122,33 @@ However, the first release will not analyze why something went wrong.
 
 ### API Extensions
 
-The OVS will be configured to enable NetFlows by using Cluster Network Operator
+The OVS can be configured to enable NetFlows by using Cluster Network Operator
 (networks.operator.openshift.io) to make this change.  This will impact the
 performance of the OVS.
+
+A priviledged eBPF agent can run on each cluster node as an alternative to 
+generate NetFlows. This will impact the performance of nodes.
 
 ### Implementation Details/Notes/Constraints
 
 Here are the limitations and constraints.
 
-1. CNI must be OVN-Kubernetes<br>
-    The network type (CNI) has to be OVN-Kubernetes since configuring OVS to
-export IPFIX data is only supported there.  By default, the CNI is OpenShift
-SDN and the overwhelming majority of customers run OpenShift SDN today.
-Therefore in a brown field scenario, this would require the user to change
-their CNI type before network observability can be enabled.
-    Note that the effort to implement OpenShift SDN to configure OVS is
-doable.  However, new features recently added have only been implemented
-in OVN-Kubernetes.
+1. NetFlows export<br>
+
+    - CNI must be OVN-Kubernetes for OVS NetFlows
+        The network type (CNI) has to be OVN-Kubernetes since configuring OVS to
+    export IPFIX data is only supported there.  By default, the CNI is OpenShift
+    SDN and the overwhelming majority of customers run OpenShift SDN today.
+    Therefore in a brown field scenario, this would require the user to change
+    their CNI type before network observability can be enabled.
+        Note that the effort to implement OpenShift SDN to configure OVS is
+    doable.  However, new features recently added have only been implemented
+    in OVN-Kubernetes.
+<br>
+    - Kernel must be 4.18+ with eBPF enabled
+        The eBPF agent will either need `BPF`, `PERFMON`, `NET_ADMIN`, `SYS_RESOURCE` 
+    Linux capabilities or Administrative privileges if the kernel doesn't 
+    recognize `BPF` and `PERFMON` (eg K3s / Kind).
 
 2. Data sampling<br>
     In order to scale in terms of collecting data, it is not uncommon to take
@@ -161,6 +173,100 @@ prior to enabling network observability, will require additional resources.
 The specific number of cores and the amount of memory and storage required
 will be finalized as more testing is done.
 
+### CRD
+
+The operator custom resource definition (CRD) is divided per components whith 
+the ability to select or enable optionnal ones. The console dynamic plugin also 
+have an option to automatically register.
+
+```yaml
+apiVersion: flows.netobserv.io/v1alpha1
+kind: FlowCollector
+metadata:
+  name: cluster
+spec:
+  namespace: "network-observability"
+  agent: #either ipfix or ebpf
+  ipfix:
+    ...
+  ebpf:
+    ...
+  flowlogsPipeline:
+    ...
+  kafka:
+    enable: false
+    ...
+  loki:
+    ...
+  consolePlugin:
+    register: true
+    ...
+```
+
+Here is a full sample using `ipfix` (current default configuration):
+```yaml
+apiVersion: flows.netobserv.io/v1alpha1
+kind: FlowCollector
+metadata:
+  name: cluster
+spec:
+  namespace: "network-observability"
+  agent: ipfix
+  ipfix:
+    cacheActiveTimeout: 60s
+    cacheMaxFlows: 100
+    sampling: 400
+  ebpf:
+    image: 'quay.io/netobserv/netobserv-ebpf-agent:main'
+    imagePullPolicy: IfNotPresent
+    sampling: 0
+    cacheActiveTimeout: 5s
+    cacheMaxFlows: 1000
+    interfaces: []
+    excludeInterfaces: ["lo"]
+    logLevel: info
+    privileged: false
+  flowlogsPipeline:
+    kind: DaemonSet
+    port: 2055
+    image: 'quay.io/netobserv/flowlogs-pipeline:main'
+    imagePullPolicy: IfNotPresent
+    logLevel: info
+    enableKubeProbes: true
+    healthPort: 8080
+    prometheusPort: 9090
+  kafka:
+    enable: false
+    address: "kafka-cluster-kafka-bootstrap.network-observability"
+    topic: "network-flows"
+  loki:
+    url: 'http://loki:3100/'
+    batchWait: 1s
+    batchSize: 102400
+    minBackoff: 1s
+    maxBackoff: 300s
+    maxRetries: 10
+    staticLabels:
+      app: netobserv-flowcollector
+  consolePlugin:
+    register: true
+    image: 'quay.io/netobserv/network-observability-console-plugin:main'
+    imagePullPolicy: IfNotPresent
+    port: 9001
+    logLevel: info
+    portNaming:
+      enable: true
+      portNames:
+        "3100": loki
+  clusterNetworkOperator:
+    namespace: "openshift-network-operator"
+  ovnKubernetes:
+    namespace: "ovn-kubernetes"
+    daemonSetName: "ovnkube-node"
+    containerName: "ovnkube-node"
+```
+
+Check [network-observability-operator/config/crd/bases/flows.netobserv.io_flowcollectors.yaml](https://github.com/netobserv/network-observability-operator/blob/main/config/crd/bases/flows.netobserv.io_flowcollectors.yaml) for all options.
 
 ### Risks and Mitigations
 
@@ -177,16 +283,19 @@ will be finalized as more testing is done.
 ## Design Details
 
 ### Software Architecture
-This is the software architecture at a high level.
+This is the software architecture at a high level using different configurations.
 
-![architectural diagram](arch22.drawio.svg)
+1. OVN
 
-The components with hatch marks indicate work that needs to be done.
+![ovn diagram](./images/ovn.png)
 
-For the first release, it intentionally leaves out the message broker,
-the plan being Kafka, for simplicity.  For the specific choice of
-component, separate enhancements will provide the detail analysis on
-these decision.
+2. eBPF
+
+![ebpf diagram](./images/ebpf.png)
+
+3. Kafka
+
+![kafka diagram](./images/kafka.png)
 
 
 ### Software Components
@@ -199,18 +308,18 @@ not be an option to selectively choose some OVS to be exporters only.  There
 will be a configuration parameter to set the sampling rate.  Other parameters
 such as the cache size may also be exposed.
 
-#### Flow Collector
-The Flow Collector is responsible for receiving and normalizing the data
-sent by the NetFlow exporter.  This component is [GoFlow 2](https://github.com/netsampler/goflow2).
-The enhancement is at [Enable flows collection](https://github.com/mariomac/enhancements/blob/enable-flows-collection/enhancements/network/enable-flows-collection.md).
+#### eBPF agent
+Extended Berkeley Packet Filter (eBPF) is used to safely and efficiently extend 
+the capabilities of the kernel without requiring to change kernel source code or 
+load kernel modules.  The agent will allows collecting and aggregating all the 
+ingress and egress flows on Linux hosts to send IPFIX data.
 
-#### Flow Enricher
-The Flow Enricher enhances the IPFIX data with Kubernetes-related
-information.  It watches for updates on pods, services and daemonsets
-using the Kubernetes API.  It merges data from Flow Collector and
-Kubernetes to be able to display pod-to-pod traffic.  It is also
-responsible for writing out the data to Storage.  See Network Observability
-Flow Enricher enhancement for more details (TBD).
+#### FLP
+Flow-Logs Pipeline (FLP) is an observability tool that consumes raw network 
+flow-logs in their original format (NetFlow v5,v9 or IPFIX) and uses a pipe-line 
+to enhances the IPFIX data with Kubernetes-related information, transform the logs
+into time series metrics in prometheus format and in parallel transform and persist
+the logs also into loki.
 
 #### Storage
 Storage stores the IPFIX/Kubernetes data.  It provides a REST API to
@@ -240,7 +349,7 @@ for hot fixes only.
 
 #### Loki Operator
 The Loki Operator is a separate project at
-https://github.com/ViaQ/loki-operator but is required for network
+https://github.com/grafana/loki/tree/main/operator but is required for network
 observability.  It manages Grafana Loki, which is the component that will be
 used to store NetFlows.  It will be installed in its own namespace with the
 intention that if another component wants to use Loki, it should create its
@@ -248,29 +357,51 @@ own instance.
 
 
 ### Visualization
-This is the proposal for the NetFlow table.
-
-<https://marvelapp.com/prototype/h4fei7h>
-
-The table has the following features:
-
-- User-selectable columns - Each user can select which columns from a set of
-predefined attributes to display in the table.
-- Filter on any column
-- Filter across columns - Minimally, this filters on the source or destination
-fields (e.g. filter on a pod in the Src Pod or Dest Pod column).
+All views should have the following common capabilities:
+- Filter on any field
+- Filter across fields - Minimally, this filters on the source or destination
+(e.g. filter on a pod in the Src Pod or Dest Pod).
 - Time range - Specify a start time and optional end time of the data to display
 - Refresh rate - Determine if the table will update automatically after some time
-- Sort by column (ascending, descending)
 - Persistent selection - Remember the settings across sessions such
-as the selected columns
+as query options, refresh rate, columns etc
+- Shareable URL that keeps filters and options
+
+1. This is the proposal for the table.
+
+<https://marvelapp.com/prototype/7ih8i2c/screen/87585102>
+
+The table has the following features:
+- User-selectable columns - Each user can select which columns from a set of
+predefined attributes to display in the table.
+- Sort by column (ascending, descending)
 - Export data to CSV format - Exports the selected columns and what
 is currently filtered in that time range
 
-The UI uses [Grafana](https://github.com/grafana/grafana)
-and [PatternFly](https://github.com/patternfly/patternfly) to provide a
-rich UI experience.
+The UI uses [PatternFly](https://github.com/patternfly/patternfly) to provide a
+rich user experience.
 
+2. This is the proposal for the topology.
+
+<https://marvelapp.com/prototype/7ih8i2c/screen/87585098>
+
+The topology view has the following features:
+- Select display (from PF library)
+- Select data scope from Node / Namespace / Owner / Resource
+- Group by Nodes / Namespace / Owner
+- Select data type from Bytes / Packets
+- Select data aggregation from Sum / Max / Avg
+
+3. This is the proposal for the dashboards
+
+<https://marvelapp.com/prototype/178d5j04/screen/86530615>
+
+The dashboard has the following features:
+- Provide an overview of the networking state
+- Show indicators like if the flows are recorded, average rate
+- Show total flows chart
+- Show top X charts per namespace / owners / pods as donut
+- Show top X charts per namespace / owners / pods as timeseries
 
 ### Installation and Packaging
 
