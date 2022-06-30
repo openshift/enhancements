@@ -204,70 +204,10 @@ spec:
     ...
 ```
 
-Here is a full sample using `ipfix` (current default configuration):
-```yaml
-apiVersion: flows.netobserv.io/v1alpha1
-kind: FlowCollector
-metadata:
-  name: cluster
-spec:
-  namespace: "network-observability"
-  agent: ipfix
-  ipfix:
-    cacheActiveTimeout: 60s
-    cacheMaxFlows: 100
-    sampling: 400
-  ebpf:
-    image: 'quay.io/netobserv/netobserv-ebpf-agent:main'
-    imagePullPolicy: IfNotPresent
-    sampling: 0
-    cacheActiveTimeout: 5s
-    cacheMaxFlows: 1000
-    interfaces: []
-    excludeInterfaces: ["lo"]
-    logLevel: info
-    privileged: false
-  flowlogsPipeline:
-    kind: DaemonSet
-    port: 2055
-    image: 'quay.io/netobserv/flowlogs-pipeline:main'
-    imagePullPolicy: IfNotPresent
-    logLevel: info
-    enableKubeProbes: true
-    healthPort: 8080
-    prometheusPort: 9090
-  kafka:
-    enable: false
-    address: "kafka-cluster-kafka-bootstrap.network-observability"
-    topic: "network-flows"
-  loki:
-    url: 'http://loki:3100/'
-    batchWait: 1s
-    batchSize: 102400
-    minBackoff: 1s
-    maxBackoff: 300s
-    maxRetries: 10
-    staticLabels:
-      app: netobserv-flowcollector
-  consolePlugin:
-    register: true
-    image: 'quay.io/netobserv/network-observability-console-plugin:main'
-    imagePullPolicy: IfNotPresent
-    port: 9001
-    logLevel: info
-    portNaming:
-      enable: true
-      portNames:
-        "3100": loki
-  clusterNetworkOperator:
-    namespace: "openshift-network-operator"
-  ovnKubernetes:
-    namespace: "ovn-kubernetes"
-    daemonSetName: "ovnkube-node"
-    containerName: "ovnkube-node"
-```
-
-Check [network-observability-operator/config/crd/bases/flows.netobserv.io_flowcollectors.yaml](https://github.com/netobserv/network-observability-operator/blob/main/config/crd/bases/flows.netobserv.io_flowcollectors.yaml) for all options.
+Check FlowCollector sample:
+[network-observability-operator/blob/main/config/samples/flows_v1alpha1_flowcollector.yaml](https://github.com/netobserv/network-observability-operator/blob/main/config/samples/flows_v1alpha1_flowcollector.yaml) 
+CustomResourceDefinition: 
+[network-observability-operator/config/crd/bases/flows.netobserv.io_flowcollectors.yaml](https://github.com/netobserv/network-observability-operator/blob/main/config/crd/bases/flows.netobserv.io_flowcollectors.yaml)
 
 ### Risks and Mitigations
 
@@ -312,7 +252,7 @@ such as the cache size may also be exposed.
 #### eBPF agent
 Extended Berkeley Packet Filter (eBPF) is used to safely and efficiently extend 
 the capabilities of the kernel without requiring to change kernel source code or 
-load kernel modules.  The agent will allows collecting and aggregating all the 
+load kernel modules.  The agent will allow collecting and aggregating all the 
 ingress and egress flows on Linux hosts to send flows.
 
 #### Flow-Logs Pipeline
