@@ -139,7 +139,7 @@ Here are the limitations and constraints.
     - CNI must be OVN-Kubernetes for OVS NetFlows
         The network type (CNI) has to be OVN-Kubernetes since configuring OVS to
     export IPFIX data is only supported there.  By default, the CNI is OpenShift
-    SDN and the overwhelming majority of customers run OpenShift SDN today.
+    SDN and the majority of customers run OpenShift SDN today.
     Therefore in a brown field scenario, this would require the user to change
     their CNI type before network observability can be enabled.
         Note that the effort to implement OpenShift SDN to configure OVS is
