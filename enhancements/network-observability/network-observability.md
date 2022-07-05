@@ -18,13 +18,16 @@ approvers:
   - "@russellb"
   - "@mcurry-rh"
   - "@knobunc"
+api-approvers:
+  - None
 creation-date: 2021-09-22
 last-updated: 2022-07-01
 status: implementable
 see-also:
 replaces:
 superseded-by:
-
+tracking-link:
+  - https://issues.redhat.com/browse/SPCLOUD-4566
 ---
 
 # Network Observability
@@ -94,6 +97,11 @@ by a user with an admin or cluster-admin role.  This is done by installing
 the Network Observability Operator and Loki Operator.  The user can do this
 using the web console or the CLI.
 
+***Note:*** *The term "NetFlow" is used generically throughout this document and
+is synonymous with IPFIX, which is the IETF version of NetFlow.*
+
+### Workflow Description
+
 Either Open vSwitch (OVS) or eBPF agent will be configured to export flows.  The data will be
 collected and combined with Kubernetes-related information (e.g. pod, services,
 namespaces) and then saved in local persistent storage or cloud storage such
@@ -103,9 +111,6 @@ The web console will provide a NetFlow table and topology views showing traffic 
 pods.  In the future, more visualization and functionality
 will be added to include areas such as extra network data gathered using
 eBPF, policy validation, security risks, and more.
-
-***Note:*** *The term "NetFlow" is used generically throughout this document and
-is synonymous with IPFIX, which is the IETF version of NetFlow.*
 
 ### User Stories
 
@@ -446,7 +451,7 @@ N/A
 
 TBD
 
-## Drawbacks
+### Drawbacks
 
 Measuring ROI on network observability is difficult so it might be hard
 to justify the cost and resources to deploy this.  It attempts to find
