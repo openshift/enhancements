@@ -384,6 +384,15 @@ rejected by the CVO.  Disabling a component post-install is not supported.
 
 Would expect this to go directly to GA once a design is agreed upon/approved.
 
+### How To Implement A New Capability
+
+1. [Introduce](https://github.com/openshift/api/pull/1150) the new capablity name in the openshift/api repo
+    1. If no [versioned capability set](https://github.com/openshift/api/blob/8324d657dee1d594a8a7768e5569fea6a8f887a9/config/v1/types_cluster_version.go#L257-L291) exists for the current OCP version under development, introduce one as part of your PR.
+2. [Bump](https://github.com/openshift/cluster-version-operator/pull/737) the openshift/api vendored dependency in the openshift/cluster-version-operator repo
+3. [Bump](https://github.com/openshift/installer/pull/5645) the openshift/api vendoered dependency in the openshift/installer repo
+4. [Annotate](https://github.com/openshift/cluster-samples-operator/pull/414) your resources to use the new capability name so they can be excluded when your capability is disabled
+
+
 #### Dev Preview -> Tech Preview
 N/A
 
