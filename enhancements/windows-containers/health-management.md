@@ -87,7 +87,9 @@ To enable this, WMCO will have these changes in responsibility:
 * WMCO will create and maintain a ConfigMap which provides WICD with the specifications for each Windows service that
   must be created on a Windows instance.
 * WMCO will invoke the `bootstrap` command of WICD when initially adding a Windows instance to the cluster. 
-  This will involve the services ConfigMap in order to start the containerd runtime and kubelet services.
+  This will require the services ConfigMap in order to start bootstrap services like the containerd runtime and kubelet
+  services. The current WMCO version will be passed as an argument to WICD `bootstrap`, indicating which services
+  ConfigMap to use as the source of truth when configuring an instance.
 * WMCO will invoke the `controller` command to run WICD as a Windows service on the instance.
 * WMCO will invoke the `cleanup` command of WICD when removing an instance from the cluster. WMCO will no longer
   delete the Node object.
@@ -175,16 +177,18 @@ generic enough to apply to all Windows instances being configured, by providing 
 certain values. For these fields, a retry period will be necessary for when the information is not available yet. For
 example, when waiting for an annotation to be applied to the Node object. This wait will be built into WICD, and should
 be long enough to account for normal scenarios. If for some reason there is a delay in an annotation application, the
-reconciliation would fail, the issue would be resolved when the next reconciliation occurs.
+reconciliation would fail, the issue would be resolved when the next reconciliation occurs. Note that a bootstrap 
+service cannot have any variables derived from the node object in its command, as no node is present at this stage. 
 
 When making use of a PowerShell script, retries should be present within the script, if necessary. An example of this
 is waiting for the HNS network to be created in order to create an HNS endpoint. In that specific case, the PowerShell
 script which creates the endpoint should include a retry period which waits for the needed Network to exist.
 
 Services marked with `bootstrap: true` will start before any others. Bootstrap services cannot depend on a non-bootstrap
-service; WICD will throw an error if this is detected. Similarly, each service that has the bootstrap flag set as true
-must have a higher priority than all non-bootstrap services. WICD will throw an error if this is not the case.
-There should be no overlap in the priorities of bootstrap services and controller services.
+service; WICD will throw an error if this is detected. There should be no cyclical dependencies among all services.
+Similarly, each service that has the bootstrap flag set as true must have a higher priority than all non-bootstrap
+services. WICD will throw an error if this is not the case. There should be no overlap in the priorities of bootstrap 
+services and controller services.
 
 For example, if the service ConfigMap had an entry with the following data:
 ```json
@@ -221,6 +225,13 @@ validate that essential files have not been tampered with.
 }
 ```
 
+#### Permissions
+
+WICD will use a new ServiceAccount to authenticate with the API server in order to pull down services ConfigMaps and
+watch node objects for a change in the desired version annotation. In order to limit WICD's access to just the necessary
+resources and operations, a new ServiceAccount will be created rather than relying on credentials tied to WMCO's
+ServiceAccount.
+
 ### Archiving windows-machine-config-bootstrapper repository
 
 The WICD source code will be added to the WMCO repo. Putting the WICD code into the WMCO repo has the major benefit
@@ -246,15 +257,16 @@ For Node configuration WICD will have two separate responsibilities:
 
 When run with the `bootstrap` command, WICD will do the steps required to ensure that Node is created for the instance. 
 The `bootstrap` command will start all services that have a `bootstrap` value of true, and exclusively these services.
+All services will be configured based on information from the services ConfigMap. WICD will get the ConfigMap tied to
+the correct operator version, provided as an argument to WICD's `bootstrap` command when invoked by WMCO.
 
-The `bootstrap` command will have the responsibility of starting the containerd service. This is becuase the kubelet
+The `bootstrap` command will have the responsibility of starting the containerd service. This is because the kubelet
 service has a dependency on the container runtime; the container runtime must have a reachable endpoint
 (i.e. `\\.\pipe\containerd-containerd` is open and usable) when kubelet is initialized (with the `container-runtime`
-and `container-runtime-endpoint` parameters supplied). The containerd service will be configured based on the
-information in the services ConfigMap, a priority 0 service with no dependencies that points to the location of
-CNI plug-ins on the instance. Although CNI config is populated later in the `bootstrap` phase after hybrid-overlay runs,
-pointing the containerd config to this location is enough to ensure that the service picks up networking config changes
-without erroring out on start-up or requiring a restart.
+and `container-runtime-endpoint` parameters supplied). The containerd service will be a priority 0 service with no
+dependencies, which points to the location of CNI plug-ins on the instance. Although CNI config is populated later in
+the `bootstrap` phase after hybrid-overlay runs, pointing the containerd config to this location is enough to ensure
+that the service picks up networking config changes without erroring out on start-up or requiring a restart.
 
 The rest of the functionality is reading the kubelet configuration from the service ConfigMap and starting the kubelet 
 service. A key note is that, since networking configuration is now the container runtime's responsibility, kubelet can 
