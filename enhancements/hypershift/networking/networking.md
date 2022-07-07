@@ -8,7 +8,7 @@ authors:
   - "@alvaroaleman"
   - "@ironcladlou"
   - "@derekwaynecarr"
-  
+
 reviewers:
   - "@csrwng"
   - "@enxebre"
@@ -43,7 +43,7 @@ This proposal fleshes out the details for the current networking solution for Hy
 
 ## Motivation
 
-HyperShift differs from standalone OCP in that the components that run in the Hosted Control Plane (HCP) on the management cluster are not on the same cluster service network as the components that run on guest cluster nodes.  
+HyperShift differs from standalone OCP in that the components that run in the Hosted Control Plane (HCP) on the management cluster are not on the same cluster service network as the components that run on guest cluster nodes.
 Challenges include but not limited to:
 - KAS access to kubelets.
 - KAS access to aggregated API servers.
@@ -100,13 +100,22 @@ egressSelections:
 ```
 
 #### konnectivity-socks5-proxy
-Konnectivity, at its core, is just a socks5 proxy.
-HyperShift has [a binary](https://github.com/openshift/hypershift/tree/main/konnectivity-socks5-proxy) that can be used as a sidecar that provides the main workload to access the guest service network over as the KAS does (KAS has this proxy built in and is configured with the EgressSelectorConfiguration).
-Workload is configured to use the proxy with envvars GRPC_PROXY, HTTPS_PROXY, NO_PROXY, etc.
+
+For components that do not natively support Konnectivity, Hypershift has a [sidecar](https://github.com/openshift/hypershift/tree/main/konnectivity-socks5-proxy)
+that provides a socks5 proxy that can be used by configuring the `HTTP{,S}_PROXY` and `NO_PROXY` env vars. The sidecar
+* Authenticates to Konnectivity
+* Does DNS resolving of guest cluster services
+* Excempts cloud provider traffic from going through Konnectivity, in order to support management clusters that have a proxy setup, as the components themselves
+  already have the sidecar as target in their proxy environment variables
+
+Despite being a socks5 proxy, the sidecar only supports TCP and not UDP, as it routes over Konnectivity through http connect. It is a socks5 proxy to allow
+supporting DNS resolving, which is not supported by http connect or Konnectivity itself.
+
 Current components that use this are :
 - OLM packageserver.
 - OLM operator.
 - openshift-apiserver.
+- oauth-server
 
 ### Guest pod service access to KAS
 Pods regularly use `kubernetes.default.svc` to contact the KAS. However, the KAS does not exist on the guest pod service network.
@@ -131,7 +140,7 @@ kubernetes   172.20.0.1:6443   3h59m
        valid_lft forever preferred_lft forever
     inet 172.20.0.1/32 brd 172.20.0.1 scope host lo
        valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host 
+    inet6 ::1/128 scope host
        valid_lft forever preferred_lft forever
 
 ```
@@ -139,7 +148,7 @@ kubernetes   172.20.0.1:6443   3h59m
 #### haproxy daemonset for proxying traffic to KAS
 
 ```shell
-# cat haproxy.cfg 
+# cat haproxy.cfg
 global
 ...
 
