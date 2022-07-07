@@ -41,12 +41,12 @@ This feature will remove the limitation that we have today in BYON (Bring your o
 
 ### User Stories
 
-- As an administrator, I would like to stretch my OpenShift control plane across multiple Failure Domainsi (x3) so I increase the cluster resilience and performance.
+- As an administrator, I would like to stretch my OpenShift control plane across multiple Failure Domains (x3) so I increase the cluster resilience and performance.
 - As an administrator, I would like to deploy my OpenShift workers across multiple Failure Domains (>1).
 
 ### Goals
 
-- The user will be able to define Failure Domains in the install-config.yaml used by the OpenShift Installer.
+- The user will be able to define Failure Domains in the `install-config.yaml` file used by the OpenShift Installer.
 - The user will have the ability to deploy an OpenShift cluster across multiple availability zones which have their own networks and storage resources.
 
 ### Non-Goals
@@ -58,9 +58,9 @@ This feature will remove the limitation that we have today in BYON (Bring your o
 
 ## Proposal
 
-The Installer allow users to provide a list of Failure Domains which contain informations about networking and storage.
+The Installer allow users to provide a list of Failure Domains which contain information about networking and storage.
 The cluster will be deployed in these domains on day 1 via IPI.
-The Installer will validate the informations given by the user and return an error if a resource doesn't exist or
+The Installer will validate the information given by the user and return an error if a resource doesn't exist or
 is incorrectly used.
 
 The cluster will be deployed in the different Failure Domains, following the Round Robin process. The first master will be deployed in the first domain, and once we have used all domains, we come back to the first one, etc.
@@ -75,8 +75,8 @@ Destroying a cluster must make sure that no resources are deleted that didn't be
 
 - The OpenStack administrators will deploy OpenStack with multiple Availability Zones, so Nova and Cinder can respectfully deploy servers and volumes in the Failure Domain.
 - The OpenStack administrators will create at least one Routed Provider Network, and then multiple subnets, where each zone has a least one subnet.
-- The OpenShift administrators will identify the Domain Failures: their availabilty zones, subnets, etc. They'll decide which ones will be used for the masters, and the ones for the workers (domains can be shared).
-- The OpenShift administrators will provide the right configuration in the install-config.yaml and then deploy the cluster (detailed later in this document).
+- The OpenShift administrators will identify the Domain Failures: their availability zones, subnets, etc. They'll decide which ones will be used for the masters, and the ones for the workers (domains can be shared).
+- The OpenShift administrators will provide the right configuration in the `install-config.yaml` file and then deploy the cluster (detailed later in this document).
 - (Out of scope for this enhancement, see "Non-Goals") The OpenShift administrators will make sure that the network infrastructure has a networking route to reach the OCP Control Plane VIPs.
 
 ### API Extensions
@@ -93,7 +93,7 @@ Not applicable.
 // the Neutron subnet of that failure domain.
 type OpenStackPlatformFailureDomainSpec struct {
   // name defines the name of the OpenStackPlatformFailureDomainSpec
-  Name string `json:"name"`
+  Name        string `json:"name"`
   ComputeZone string `json:"computeZone"`
   StorageZone string `json:"storageZone"`
   Subnet      string `json:"subnet"`
@@ -102,7 +102,7 @@ type OpenStackPlatformFailureDomainSpec struct {
 
 #### Resource provided to the installer
 
-The OpenShift administrators provide a list of `failureDomains` and their informations:
+The OpenShift administrators provide a list of `failureDomains` and their information:
 
 ```yaml
 platform:
@@ -161,8 +161,8 @@ networking:
   ...
   machineNetwork:
   - cidr: 192.168.25.0/24
+  - cidr: 192.168.26.0/24
   - cidr: 192.168.27.0/24
-  - cidr: 192.168.28.0/24
   - ...
 ```
 
@@ -194,9 +194,9 @@ Also, the installer will provide some validations in order to avoid deployment e
 
 ### Test Plan
 
-Beside unit tests in the installer, when possible, we'll have to create a new CI job that will run in a specific infrastructure that has multiple Failure Domains (currently named `mecha`).
-The CI job will deploy a cluster using an install-config.yaml that is defined in this enhancement and then run e2e tests to validate that the cluster is healthy and working as expected.
-
+Beside unit tests in the installer, when possible, we'll have to create a new CI job that will run in an infrastructure that has multiple Failure Domains. We'll use the `mecha` cloud for this purpose.
+The CI job will deploy a cluster using an install-config.yaml that is defined in this enhancement and then run e2e tests to validate that the cluster is healthy and working as expected. We'll ensure we have tests in [openstack-test][openstack-test] to validate the nodes were scheduled on separate Failure Domains as expected.
+ 
 ### Graduation Criteria
 
 This enhancement will follow standard graduation criteria.
@@ -220,7 +220,7 @@ Not applicable.
 
 ### Upgrade / Downgrade Strategy
 
-Not applicable.
+Not applicable. The proposed change only affects the installer, and thus new clusters. There is no upgrade implication.
 
 ### Version Skew Strategy
 
@@ -251,3 +251,4 @@ TBD
 Not applicable.
 
 [bz-2095323]: https://bugzilla.redhat.com/show_bug.cgi?id=2095323
+[openstack-test]: https://github.com/openshift/openstack-test
