@@ -386,12 +386,24 @@ Would expect this to go directly to GA once a design is agreed upon/approved.
 
 ### How To Implement A New Capability
 
-1. [Introduce](https://github.com/openshift/api/pull/1150) the new capablity name in the openshift/api repo
-    1. If no [versioned capability set](https://github.com/openshift/api/blob/8324d657dee1d594a8a7768e5569fea6a8f887a9/config/v1/types_cluster_version.go#L257-L291) exists for the current OCP version under development, introduce one as part of your PR.
-2. [Bump](https://github.com/openshift/cluster-version-operator/pull/737) the openshift/api vendored dependency in the openshift/cluster-version-operator repo
-3. [Bump](https://github.com/openshift/installer/pull/5645) the openshift/api vendoered dependency in the openshift/installer repo
-4. [Annotate](https://github.com/openshift/cluster-samples-operator/pull/414) your resources to use the new capability name so they can be excluded when your capability is disabled
+1. Select a name for the new capability, like `insights`.
+2. Open a pull request adding `capability.openshift.io/name` annotations to the manifests that deliver the capability, like [this][bump-annotations].
+    Some manifests should only be included if multiple capabilities are enabled, and in that case use the `+` delimiter between capability names, like `capability.openshift.io/name=insights+monitoring`.
+3. In presubmit CI for the pull request, the cluster-version operator will [exclude manifests with unrecognized capabilities][cvo-exclude-unrecognized].
+    Review presubmit results for your annotation pull request to ensure that:
+    1. The capability is being completely removed, without leaving dangling resources that you forgot to annotate.
+    2. CI suites which you expected to pass continue to pass.
+        You may find that some test-cases assume or require your capabilities presence, and they may need to grow logic to skip or alter the test conditions when your capability is not installed (like [this][bump-origin]).
+    If your annotation addition spans multiple pull requests, either because the manifests being annotated span multiple repositories or because you also need to make test suite adjustments in other repositories), you may be able to [use cluster-bot][cluster-bot] to run tests on a release assembling multiple in-flight pull requests.
+4. Introduce the new capablity name in the openshift/api repo, like [this][bump-api].
+    1. If no [versioned capability set](https://github.com/openshift/api/blob/8324d657dee1d594a8a7768e5569fea6a8f887a9/config/v1/types_cluster_version.go#L257-L291) exists for the current OCP version under development, introduce one as part of your pull request.
+5. Bump the openshift/api vendored dependency in the openshift/cluster-version-operator repo, like [this][bump-cvo-vendor], so the cluster-version operator will understand the new annotation and its `vCurrent` inclusion status.
 
+    At this point, clusters installed with the `None` set will nominally not include the new capability, but if you had un-annotated manifests in previous versions, those will still be installed.
+    Prereleases at this point may need to document this behavior ("this capability does not yet disable anything"), depending on the expected level of interest.
+6. Land your annotation pull request(s), so that the capability related resources will be ignored when the new capability is disabled.
+7. Bump the openshift/api vendored dependency in the openshift/installer repo, like [this][bump-installer-vendor], to allow folks to request the new capability via `additionalEnabledCapabilities` without the installer rejecting the unrecognized capability name.
+8. Check the relevant `no-capabilities` periodic, like [this][periodic], to confirm that your change has not introduced any regressions.
 
 #### Dev Preview -> Tech Preview
 N/A
@@ -489,5 +501,13 @@ it necessary that we take a tactical approach in the short term to enable this c
 N/A
 
 [admission-webhook]: https://issues.redhat.com/browse/OTA-575
+[bump-annotations]: https://github.com/openshift/insights-operator/pull/646
+[bump-api]: https://github.com/openshift/api/pull/1212
+[bump-cvo-vendor]: https://github.com/openshift/cluster-version-operator/pull/737
+[bump-installer-vendor]: https://github.com/openshift/installer/pull/5645
+[bump-origin]: https://github.com/openshift/origin/pull/26998
 [capability-registry]: https://github.com/openshift/api/blob/6f735e7109c87826edee3ca02a753071ecc933b9/config/v1/types_cluster_version.go#L231-L255
 [capability-set-registry]: https://github.com/openshift/api/blob/6f735e7109c87826edee3ca02a753071ecc933b9/config/v1/types_cluster_version.go#L257-L291
+[cluster-bot]: https://docs.ci.openshift.org/docs/how-tos/interact-with-running-jobs/#how-to-run-the-test-suites-outside-of-ci
+[cvo-exclude-unrecognized]: https://github.com/openshift/library-go/blob/3c66b317b110fe1a94bb0c9a9fa9f7a46df29941/pkg/manifest/manifest.go#L198
+[periodic]: https://testgrid.k8s.io/redhat-openshift-ocp-release-4.12-informing#periodic-ci-openshift-release-master-ci-4.12-e2e-aws-sdn-no-capabilities
