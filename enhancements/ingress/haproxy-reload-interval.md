@@ -32,7 +32,7 @@ superseded-by:
 Add an API field to configure OpenShift router's `RELOAD_INTERVAL` environment variable so that administrators can define the minimum frequency the router is allowed to reload to accept new changes.
 
 OpenShift router currently hard-codes this reload interval to 5s. It should be possible for administrators to tune this value as necessary. Based on the processes run in the cluster and the frequency that it sees new changes, decreasing the minimum frequency that the router is allowed to reload when its configuration is updated can improve its efficiency.
-This proposal extends the existing IngressController API to add a tuning option for max connections.
+This proposal extends the existing IngressController API to add a tuning option for the reload interval.
 
 ## Motivation
 
