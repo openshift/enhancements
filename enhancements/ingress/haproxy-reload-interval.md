@@ -31,9 +31,57 @@ superseded-by:
 
 Add an API field to configure OpenShift router's `RELOAD_INTERVAL` environment variable so that administrators can define the minimum frequency the router is allowed to reload to accept new changes.
 
-OpenShift router currently hard-codes this reload interval to 5s. It should be possible for administrators to tune this value as necessary. Based on the processes run in the cluster and the frequency that it sees new changes, decreasing the minimum frequency that the router is allowed to reload when its configuration is updated can improve its efficiency.
+OpenShift router currently hard-codes this reload interval to 5s. It should be possible for administrators to tune this value as necessary. Based on the processes run in the cluster and the frequency that it sees new changes, decreasing the minimum frequency that the router is allowed to reload can improve its efficiency.
 This proposal extends the existing IngressController API to add a tuning option for the reload interval.
 
 ## Motivation
 
-When there is an update to a route or endpoint in the cluster, the configuration for HAProxy changes, requiring that it reload for those changes to take effect. When HAProxy reloads, it must keep the old process running until all its connections die, so frequent reloading increases the rate of accumulation of HAProxy processes, particularly if it has to handle many long-lived connections.
+When there is an update to a route or endpoint in the cluster, the configuration for HAProxy changes, requiring that it reload for those changes to take effect. When HAProxy reloads to generate a new process with the updated configuration, it must keep the old process running until all its connections die. As such, frequent reloading increases the rate of accumulation of HAProxy processes, particularly if it has to handle many long-lived connections. The default reload interval is set as 5 seconds, which is too low for some scenarios, so it is important that administrators can extend this time interval.
+
+In addition, HAProxy's roundrobin balancing starts over from the first server every time HAProxy reloads. Thus, another motivating factor is that frequent reloads can cause load imbalance on a backend's servers when using the roundrobin balancing algorithm.
+
+### Goals
+
+1. Enable the configuration of a reload interval via the `IngressControllerSpec`, specifically via the `IngressControllerSpecTuningOptions`, with a new parameter `ReloadInterval`. `ReloadInterval` exposes OpenShift router's internal environment variable `RELOAD_INTERVAL` as an API that the cluster administrator can set.
+2. Leave the default interval at 5 seconds so that we do not perturb the behavior of existing clusters, particularly during upgrades.
+
+### Non-Goals
+
+Propose or advise on any new value for `IngressControllerTuningOptions.ReloadInterval` because the ideal reload interval varies for many different scenarios.
+
+**(more non-goals I should add?)**
+
+### User Stories
+
+> As a cluster administrator, I want to configure RELOAD_INTERVAL to force HAProxy to reload its configuration less frequently in response to route and endpoint updates.
+
+**(Incomplete: What to fill in here? What extra stories should I add?)**
+
+## Proposal
+
+### API Extension
+
+Add a new field `ReloadInterval` to the IngressController API:
+
+```go
+// IngressControllerTuningOptions specifies options for tuning the performance
+// of ingress controller pods
+type IngressControllerTuningOptions struct {
+    ...
+
+    // ReloadInterval defines the minimum frequency the router is allowed to reload
+    // to accept new changes. Increasing this value can prevent the accumulation of
+    // HAProxy processes, depending on the scenario. Increasing this interval can
+    // also lessen load imbalance on a backend's servers when using the roundrobin
+    // balancing algorithm. Alternatively, decreasing this value may decrease latency
+    // since updates to HAProxy's configuration can take effect more quickly.
+    //
+    // Permitted values are: empty and the range 1 - 
+    //
+    // +kubebuilder:validation:Optional
+	// +kubebuilder:validation:Pattern=^0|([0-9]+(s|m|h))+$
+	// +kubebuilder:validation:Type:=string
+	// +optional
+	ReloadInterval *metav1.Duration `json:"reloadInterval,omitempty"`
+}
+```
