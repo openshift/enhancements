@@ -49,8 +49,6 @@ In addition, HAProxy's roundrobin balancing starts over from the first server ev
 
 Propose or advise on any new value for `IngressControllerTuningOptions.ReloadInterval` because the ideal reload interval varies for many different scenarios.
 
-**(more non-goals I should add?)**
-
 ### User Stories
 
 > As a cluster administrator, I want to configure RELOAD_INTERVAL to force HAProxy to reload its configuration less frequently in response to route and endpoint updates.
