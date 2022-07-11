@@ -55,7 +55,11 @@ Propose or advise on any new value for `IngressControllerTuningOptions.ReloadInt
 
 > As a cluster administrator, I want to configure RELOAD_INTERVAL to force HAProxy to reload its configuration less frequently in response to route and endpoint updates.
 
-**(Incomplete: What to fill in here? What extra stories should I add?)**
+The administrator can use the new API to configure a longer reload interval. For example, the following command changes the default IngressController's minimum reload interval to 15 seconds:
+
+```shell
+oc -n openshift-ingress-operator patch ingresscontrollers/default --type=merge --patch='{"spec":{"tuningOptions":{"reloadInterval":"15s"}}}'
+```
 
 ## Proposal
 
@@ -106,7 +110,7 @@ To expose the `ReloadInterval` in HAProxy, the environment variable `RELOAD_INTE
 	    if ci.Spec.TuningOptions.ReloadInterval != nil && ci.Spec.TuningOptions.ReloadInterval.Duration >= 1*time.Second {
 		    reloadInterval = ci.Spec.TuningOptions.ReloadInterval.Duration
 	    }
-	    env = append(env, corev1.EnvVar{Name: RouterReloadIntervalEnvName, Value: durationToHAProxyTimespec(reloadInterval)})
+	    env = append(env, corev1.EnvVar{Name: RouterReloadIntervalEnvName, Value: strconv.Itoa(int(reloadInterval.Seconds()))})
         ...
     }
 ```
