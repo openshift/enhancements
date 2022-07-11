@@ -98,20 +98,7 @@ type IngressControllerTuningOptions struct {
 ```
 ### Implementation Details / Notes / Constraints
 
-To expose the `ReloadInterval` in HAProxy, the environment variable `RELOAD_INTERVAL` will be added to the environment in [desiredRouterDeployment](https://github.com/openshift/cluster-ingress-operator/blob/master/pkg/operator/controller/ingress/deployment.go):
-```go
-    // desiredRouterDeployment returns the desired router deployment.
-    func desiredRouterDeployment(ci *operatorv1.IngressController, ingressControllerImage string, ingressConfig *configv1.Ingress, apiConfig *configv1.APIServer, networkConfig *configv1.Network, proxyNeeded bool, haveClientCAConfigmap bool, clientCAConfigmap *corev1.ConfigMap) 
-    (*appsv1.Deployment, error){
-        ...
-        reloadInterval := 5 * time.Second
-	    if ci.Spec.TuningOptions.ReloadInterval != nil && ci.Spec.TuningOptions.ReloadInterval.Duration >= 1 * time.Second && ci.Spec.TuningOptions.ReloadInterval.Duration <= 720 * time.Hour {
-		    reloadInterval = ci.Spec.TuningOptions.ReloadInterval.Duration
-	    }
-	    env = append(env, corev1.EnvVar{Name: RouterReloadIntervalEnvName, Value: strconv.Itoa(int(reloadInterval.Seconds()))})
-        ...
-    }
-```
+To expose the `ReloadInterval` in HAProxy, the environment variable `RELOAD_INTERVAL` will be added to the environment in [desiredRouterDeployment](https://github.com/openshift/cluster-ingress-operator/blob/master/pkg/operator/controller/ingress/deployment.go).
 The HAProxy template will not be modified.
 
 ### Risks and Mitigation
