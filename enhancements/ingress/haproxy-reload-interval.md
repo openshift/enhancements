@@ -31,7 +31,7 @@ superseded-by:
 
 Add an API field to configure OpenShift router's `RELOAD_INTERVAL` environment variable so that administrators can define the minimum frequency the router is allowed to reload to accept new changes.
 
-OpenShift router currently hard-codes this reload interval to 5s. It should be possible for administrators to tune this value as necessary. Based on the processes run in the cluster and the frequency that it sees new changes, decreasing the minimum frequency that the router is allowed to reload can improve its efficiency.
+OpenShift router currently hard-codes this reload interval to 5s. It should be possible for administrators to tune this value as necessary. Based on the processes run in the cluster and the frequency that it sees new changes, increasing the minimum interval at which the router is allowed to reload can improve its efficiency.
 This proposal extends the existing IngressController API to add a tuning option for the reload interval.
 
 ## Motivation
@@ -69,23 +69,26 @@ Add a new field `ReloadInterval` to the IngressController API:
 type IngressControllerTuningOptions struct {
     ...
 
-    // ReloadInterval defines the minimum frequency the router is allowed to reload
+    // reloadInterval defines the minimum interval at which the router is allowed to reload
     // to accept new changes. Increasing this value can prevent the accumulation of
     // HAProxy processes, depending on the scenario. Increasing this interval can
     // also lessen load imbalance on a backend's servers when using the roundrobin
     // balancing algorithm. Alternatively, decreasing this value may decrease latency
     // since updates to HAProxy's configuration can take effect more quickly.
     //
-    // Permitted values are: empty and the range 1s - 2600000s (~ 30 days).
+    // The value must be a time duration value; see <https://pkg.go.dev/time#ParseDuration>.
+    // Currently, the minimum value allowed is 1s, and the maximum allowed value is
+    // 720h (= 30 days). Minimum and maximum allowed values may change in future versions
+    // of OpenShift.
     //
-    // An empty ReloadInterval tells the IngressController to choose the default, which
+    // An empty reloadInterval tells the IngressController to choose the default, which
     // is currently 5s.
     //
     // This field expects an unsigned duration string of integer numbers, each with a unit suffix,
     // e.g. "300s", "1h", "2h45m". Valid time units are "s", "m", and "h".
     //
     // +kubebuilder:validation:Optional
-    // +kubebuilder:validation:Pattern=^0|([0-9]+(s|m|h))+$
+    // +kubebuilder:validation:Pattern=^(0|([0-9]+(s|m|h))+)$
     // +kubebuilder:validation:Type:=string
     // +optional
 	ReloadInterval *metav1.Duration `json:"reloadInterval,omitempty"`
