@@ -168,8 +168,11 @@ networking:
 
 For now, `machinesSubnet` is required to be set when deploying nodes on separate Failure Domains, and is then used to identify where to create the API and Ingress ports.
 
+The OpenShift administrator will be able to deploy more or less workers for a specific Failure Domain, but only on day 2.
+
 Also, the installer will provide some validations in order to avoid deployment errors:
 
+- A maximum of 3 `failureDomains` can be provided to the masters. OpenShift only supports 3 masters for now.
 - Having `failureDomains` in machinepool without `machinesSubnet` is an error.
 - machinepool `zones` for both compute and storage can't be used together with machinepool `failureDomains`.
 - Check that `subnets` in `failureDomains` actually exist (the same validation as machinesSubnet). Note that we can't easily verify if the subnet can actually be used for a given availability zone. This is up to the OpenShift administrators to figure out which subnet they can use for which domain.
@@ -177,13 +180,15 @@ Also, the installer will provide some validations in order to avoid deployment e
 
 ### Risks and Mitigations
 
-- Backward compatibility will have to be maintained and the "old" way to define `zones` to remain available.
+- Backward compatibility will have to be maintained and the "old" way to define `zones` to remain available. A warning will be used to inform the user that a new modern way to specify zones, using `failureDomains` is now available and at some point
+  the old way would be deprecated.
 - UX will be reviewed by Field Engineers, partnering with a customer who needs this feature. Also our QE will
   help to review it.
 
 ### Drawbacks
 
 - The networking resources are pre-created and managed by the OpenStack administrators, and therefore not managed by the OpenShift cluster. Changes in the networking infrastructure will have to be planned and accordingly updated in the cluster.
+  This is not a new requirement by the way, this comes from the fact it relies on the BYON (bring-your-own-network) feature. If a network goes on maintenance, the machines connected to that network will have to be migrated or redeployed else where.
 - Adding new parameters (especially when they contain sub-parameters) is never easy for the users but we'll make sure to choose easy names and that they're all documented.
 
 ## Design Details
@@ -191,6 +196,7 @@ Also, the installer will provide some validations in order to avoid deployment e
 ### Open Questions
 
 - Do we want to deprecate machinepool `zones` in favor of machinepool `failureDomains`?
+- What maximum latency and bandwidth should we require between the failure domains?
 
 ### Test Plan
 
