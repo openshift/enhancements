@@ -395,13 +395,38 @@ Upgrades from previous versions of OpenShift will look like:
 
 Each provider will be released independently as and when the providers are deemed stable enough.
 
-Upgrade:
+##### Upgrade
 
 - New `cluster-kube-apiserver-operator` and `cluster-kube-controller-manager-operator` version updates the `kube-apiserver` and the `KCM` and removes the `--cloud-provider` flag. `cluster-kube-controller-manager-operator` in addition sets the `--external-cloud-volume-plugin=<some-platform>` flag on the `KCM` pods to ensure in-tree storage preservation.
 - `cluster-cloud-controller-manager-operator` starts and creates out-of-tree `CCM` resources for the provider.
 - `machine-config-operator` restart updates the `kubelet` with `--cloud-provider=external` option. At this point the `CCM` is running out-of-tree
 
-Downgrade:
+The decision of running with in-tree or external cloud provider is controlled by a function in [library-go](https://github.com/openshift/library-go/blob/master/pkg/cloudprovider/external.go#L20). To migrate the platform to external cloud provider that dependency needs to be updated in the following operators:
+
+- Cluster-Kube-Controller-Manager-Operator (KCMO): deploys KCM, which contains control loops for node, node lifecycle and service.
+- Cluster-Cloud-Controller-Manager-Operator (CCCMO): deploys CCM, which contains control loops for node, node lifecycle and service.
+- Machine-Config-Operator (MCO): configures kubelet
+- Cluster-Kube-APIServer-Operator (KASO): deploys api server
+
+Failure scenario during bootstrap:
+
+Initially it was considered that to use CCM by default a couple of operators needed to have the `library-go` dependency upgraded in a specific order to avoid issues. First, `cluster-cloud-controller-manager-operator` would have `library-go` updated to enable `CCM`, followed by `cluster-kube-controller-manager-operator`, `machine-config-operator` and
+then `cluster-kube-apiserver-operator`.
+
+In the process of including those changes in each operator, the `cluster-cloud-controller-manager-operator` would have `CCM` enabled, but the other operators wouldn't have yet. For fresh installations this would result on both out-of-tree and in-tree providers being enabled at the same time until the changes for the other operators merge.
+To avoid this, a new annotation named `unsupported-block-ccm-enablement` will be added to the infrastructure object in the `ipi-install-install` CI step to block the usage of `CCM` until the `library-go` dependency is updated in all the needed operators to enable `CCM` when the annotation is not present. After that, the annotation will be removed
+from the infrastructure object in the CI step. This annotation is meant for internal usage only and will not be included in the release. Each platform should handle these changes separately.
+
+Failure scenarios during upgrade:
+
+- `CCCMO` or `KCMO` upgraded before `MCO`
+  - `CCM` would be enabled in a cluster that has kubelet still using the in-tree cloud provider. This can cause Node addresses to be managed by both kubelet and the CCM's node controller. There is a [workaround](https://github.com/kubernetes/kubernetes/pull/109794) proposed for this issue. This situation can occur for every upgrade until all kubelets have been updated.
+
+- `MCO` upgraded before `CCCMO` or `KCMO`
+  - If kubelets are redeployed, they would be running with the external cloud provider configured, but no external cloud provider would be available. This would result in node addresses not being updated and new Nodes not being provisioned until `CCM` is deployed. As soon as `CCM` is deployed this transitions into the first issue until all kubelets have been updated.
+
+
+##### Downgrade
 
 - `cluster-kube-apiserver-operator` and `cluster-kube-controller-manager-operator` restart updates the `kube-apiserver` and the `kube-controller-manager` with the `--cloud-provider=<some-platform>` option.
 - `cluster-kube-controller-manager-operator` removes the `--external-cloud-volume-plugin=<some-platform>` flag from the `KCM` pods as `--cloud-provider=<some-platform>` superseeds it.
