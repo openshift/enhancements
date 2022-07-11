@@ -105,7 +105,7 @@ To expose the `ReloadInterval` in HAProxy, the environment variable `RELOAD_INTE
     (*appsv1.Deployment, error){
         ...
         reloadInterval := 5 * time.Second
-	    if ci.Spec.TuningOptions.ReloadInterval != nil && ci.Spec.TuningOptions.ReloadInterval.Duration >= 1*time.Second {
+	    if ci.Spec.TuningOptions.ReloadInterval != nil && ci.Spec.TuningOptions.ReloadInterval.Duration >= 1 * time.Second && ci.Spec.TuningOptions.ReloadInterval.Duration <= 720 * time.Hour {
 		    reloadInterval = ci.Spec.TuningOptions.ReloadInterval.Duration
 	    }
 	    env = append(env, corev1.EnvVar{Name: RouterReloadIntervalEnvName, Value: strconv.Itoa(int(reloadInterval.Seconds()))})
