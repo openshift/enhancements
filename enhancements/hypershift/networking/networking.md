@@ -105,7 +105,7 @@ For components that do not natively support Konnectivity, Hypershift has a [side
 that provides a socks5 proxy that can be used by configuring the `HTTP{,S}_PROXY` and `NO_PROXY` env vars. The sidecar
 * Authenticates to Konnectivity
 * Does DNS resolving of guest cluster services
-* Excempts cloud provider traffic from going through Konnectivity, in order to support management clusters that have a proxy setup, as the components themselves
+* Exempts cloud provider traffic from going through Konnectivity, in order to support management clusters that have a proxy setup, as the components themselves
   already have the sidecar as target in their proxy environment variables
 
 Despite being a socks5 proxy, the sidecar only supports TCP and not UDP, as it routes over Konnectivity through http connect. It is a socks5 proxy to allow
@@ -116,6 +116,7 @@ Current components that use this are :
 - OLM operator.
 - openshift-apiserver.
 - oauth-server
+- Ingress operator.
 
 ### Guest pod service access to KAS
 Pods regularly use `kubernetes.default.svc` to contact the KAS. However, the KAS does not exist on the guest pod service network.
