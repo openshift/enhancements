@@ -78,16 +78,16 @@ type IngressControllerTuningOptions struct {
     //
     // Permitted values are: empty and the range 1s - 2600000s (~ 30 days).
     //
-	// An empty ReloadInterval tells the IngressController to choose the default, which
-	// is currently 5s.
-	//
-	// This field expects an unsigned duration string of integer numbers, each with a unit suffix,
-	// e.g. "300s", "1h", "2h45m". Valid time units are "s", "m", and "h".
-	//
-	// +kubebuilder:validation:Optional
-	// +kubebuilder:validation:Pattern=^0|([0-9]+(s|m|h))+$
-	// +kubebuilder:validation:Type:=string
-	// +optional
+    // An empty ReloadInterval tells the IngressController to choose the default, which
+    // is currently 5s.
+    //
+    // This field expects an unsigned duration string of integer numbers, each with a unit suffix,
+    // e.g. "300s", "1h", "2h45m". Valid time units are "s", "m", and "h".
+    //
+    // +kubebuilder:validation:Optional
+    // +kubebuilder:validation:Pattern=^0|([0-9]+(s|m|h))+$
+    // +kubebuilder:validation:Type:=string
+    // +optional
 	ReloadInterval *metav1.Duration `json:"reloadInterval,omitempty"`
 }
 ```
