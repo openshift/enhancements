@@ -60,10 +60,13 @@ message, etc.).
 - The user should be able to find out when was a certain recommendation active
   by querying the Prometheus metric in the OCP console.
 - Configuration option allowing the user to disable/enable this functionality.
-  Since this feature consumes resources on both sides (cluster and Smart Proxy),
+  ~~Since this feature consumes resources on both sides (cluster and Smart Proxy),
   it should only be enabled on clusters where the user actually wants to use it.
-  (It should be disabled by default, unless the user explicitly enables it.)
-- The enabling should be done using the same approach as the rest of the
+  (It should be disabled by default, unless the user explicitly enables it.)~~
+  It was decided (see https://github.com/openshift/enhancements/pull/1036#discussion_r811739205) to enable this feature by default to get more visibility.
+  The alerts are info severity only and can be disabled so it should be acceptable
+   from the SRE point of view.   
+- The disabling should be done using the same approach as the rest of the
   Insights Operator configuration (i.e., currently using the `support` secret).
 
 ### Non-Goals
