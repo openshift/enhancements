@@ -329,6 +329,8 @@ dependencies.
    not using the same version of kubernetes?
 2. Can we further reduce the dependencies of MicroShift by making
    changes in any of the upstream components?
+3. Given the embedded image references, how will we build an
+   OKD-equivalent version of MicroShift?
 
 ### Test Plan
 
