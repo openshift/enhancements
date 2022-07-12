@@ -107,20 +107,12 @@ to launch within it to hide their many many mounts from systemd by:
 - Selecting a well-known location to pin a Kubernetes-specific mount namespace:
   `/run/kubens/mnt`
 
-- Adding a mechanism to CRI-O to enter a pre-existing mount namespace if pinned
-  in the well-known location.
-  - This can be overridden from the commandline or environment
-    `$KUBENSMNT` to opt-out or use a different mount namespace location.
-
-- Adding a mechanism to Kubelet to enter a pre-existing mount namespace if
-  pinned in the well-known location.
-  - This can be overridden from the commandline or environment
-    `$KUBENSMNT` to opt-out or use a different mount namespace location.
-
 - Adding a systemd service called `kubens.service` which spawns a separate
   namespace and pins it to this well-known location.
-  - This can be overridden from the environment `$KUBENSMNT` use a
-    different mount namespace location.
+  - This will pin the namespace in `/run/kubens/mnt`
+  - This will also create an environment file in `/run/kubens/env` which sets
+    `$KUBENSMNT` if the service is running and the namespace is pinned.
+  - A drop-in can be added to change the namespace location.
   - We don't want to create the namespace in `crio.service` or
     `kubelet.service`, since if either one restarts they would lose each
     other's namespaces.
@@ -128,11 +120,24 @@ to launch within it to hide their many many mounts from systemd by:
     both Kubelet and CRI-O) fully disables this proposed feature, falling back
     to the current not-hidden mode of operation.
 
+- Adding a mechanism to CRI-O to enter a pre-existing mount namespace if set in
+  `$KUBENSMNT`
+  - If the path does not exist, or does not point to a mount namespace
+    bindmount, CRI-O will run in its parent's mount namespace and log a warning
+    that the requested namespace was not joined.
+
+- Adding a mechanism to Kubelet to enter a pre-existing mount namespace if
+  set in `$KUBENSMNT`
+  - If the path does not exist, or does not point to a mount namespace
+    bindmount, Kubelet will run in its parent's mount namespace and log a
+    warning that the requested namespace was not joined.
+
 - A convenience wrapper to enter this well-known mount namespace,
   `kubensenter` for other tools, administrative and support actions which
   need access to this namespace.
   - This will operate identically to `nsenter` except that it defaults to
-    entering this well-known namespace location (if present)
+    entering this well-known namespace location (if present), or running the
+    command in the current mount namespace if the namespace is not pinned.
 
 - An update to the debug container's MOTD that mentions about the new need for
   `kubensenter` in addition to the current chroot instructions so it's clear
@@ -288,7 +293,7 @@ will not have visibility of the Kubernetes mountpoints.
   `kubensenter` script.
 
 - To disable this feature, inject a MachineConfig that disables the
-  'kubens.service':
+  `kubens.service`:
 
 ```yaml
 apiVersion: machineconfiguration.openshift.io/v1
@@ -347,3 +352,5 @@ clusters, with no reported issues.
 - Enhance systemd to support unsharing namespaces at the slice level, then put
   `crio.service` and `kubelet.service` in the same slice
 
+- We will also begin a KEP to support this same behavior in the stock upstream
+  kubernetes.
