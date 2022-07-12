@@ -202,8 +202,11 @@ Strategy:
 HyperShift AWS HostedClusters can be configured with one of 3 endpoint access settings: Public, PublicAndPrivate, and Private. Each access mode will expose access points differently to Customer clusters. However, the endpoints are the same in each case:
 
 Kubernetes API Server - This is the main API endpoint for the Kube APIServer running in the control plane namespace of the management cluster. It is secured initially via a kubeconfig over TLS. It  can also be accessed via bearer token emitted by the OAuth Server.
-OAuth Server - Authenticates users via customer defined identity provider(s) and provides a token to access the Kubernetes API Server.
+
+OAuth Server - Authenticates users via customer defined identity provider(s) and provides a token to access the Kubernetes API Server. When it's a route, it's labeled, so it can be accepted by an additional public ingress shard on the management cluster, keeping the default ingress private.
+
 Konnectivity Server - Creates a tunnel through which the API server communicates with worker nodes. Worker nodes authenticate with this endpoint using mTLS.
+
 OVN Control Plane - Provides OVN daemonset pods access to the OVN db and corresponding flows.
 
 ##### Public Cluster
