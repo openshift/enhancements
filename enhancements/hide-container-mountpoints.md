@@ -65,7 +65,7 @@ kubernetes-specific mountpoints as part of debugging issues.
 
 ### Non-Goals
 
-- Fix systemd mountpoint scanning overhead
+- Reduce systemd mountpoint scanning overhead
 
 ## Proposal
 
