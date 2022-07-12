@@ -139,9 +139,12 @@ to launch within it to hide their many many mounts from systemd by:
     entering this well-known namespace location (if present), or running the
     command in the current mount namespace if the namespace is not pinned.
 
-- An update to the debug container's MOTD that mentions about the new need for
-  `kubensenter` in addition to the current chroot instructions so it's clear
-  how the debug shell can gain access to the hidden Kubernetes mountpoints.
+- An update to the node's MOTD that details how to deal with these namespace
+  changes:
+  - oc debug already starts inside the kubernetes mount namespace, and should
+    give instructions on how to enter the default systemd mount namespace.
+  - SSH login will start in the systemd mount namespace, and should give
+    instructions on how to enter the kubernetes mount namespace.
 
 - Both the new systemd service and convenience wrapper will be installed
   as part of Kubelet.
@@ -286,11 +289,15 @@ change, detailed in the 'Risks and Mitigations' section above.
 
 #### Support Procedures
 
-When this feature is enabled, a shell on a node and the 'oc debug' container
-will not have visibility of the Kubernetes mountpoints.
+When this feature is enabled, a shell on a node will not have visibility of the
+Kubernetes mountpoints.  The container started by `oc debug` will by default
+start inside the kubernetes mount namespace.
 
-- To start a shell within the container mount namespace, execute the
-  `kubensenter` script.
+- To start a shell or execute a command within the container mount namespace,
+  execute the `kubensenter` script.
+
+- To start a shell within the top-level systemd mount namespace, run `nsenter
+  -t 1 -m`
 
 - To disable this feature, inject a MachineConfig that disables the
   `kubens.service`:
