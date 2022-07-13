@@ -30,11 +30,14 @@ superseded-by:
 For organizations where service availability is a concern, networking architectures are usually more modern than what we can find in a traditional datacenter.
 For example, the "Spine and Leaf" design is a recommended choice when deploying OpenStack at scale.
 In this architecture, each leaf (lower-level access switch) is connected to multiple spines (upper-level core switch) in a full mesh. The latency becomes predictable, there is no more bottleneck and overall the resilience is improved.
-Each leaf brings their own network fabrics that are usually using their own power units. Also each network fabric manages their its own Layer-2 domain, and therefore network subnets. Routing protocols are usually used so applications can communicate each other in the datacenter, since they don't live within the same domain anymore.
+Each leaf brings their own network fabrics that are usually using their own power units. Also each network fabric manages their its own Layer-2 domain, and therefore network subnets. Routing protocols are usually used so applications can communicate with each other in the datacenter, since they don't live within the same domain anymore.
 
-In this enhancement, we would like to support the deployment of OpenShift into multiple subnets from day 1, using IPI.
-To accomplish this, the OpenStack administrator will pre-create a Routed Provider Network and one or multiple subnets per leaf, which will be linked to an Availability Zone, here called Failure Domain for a better understanding.
-Each Failure Domain will have its own network subnet and storage resources used by OpenShift.
+We want to allow the OpenShift admins to make use of this topology when deploying via IPI and also provide higher resilience and performance for their clusters.
+
+This enhancement proposes to support the deployment of OpenShift into multiple subnets from day 1, using IPI on OpenStack platform.
+
+To accomplish this, we introduce an OpenStack platform scoped property combining compute and storage Availability Zones and subnets to represent Failure Domains. We allow referencing these failure domains in the Control Plane and Compute Machine Pools.
+
 This feature will remove the limitation that we have today in BYON (Bring your own network) which is the support of a single primary subnet for the machines on day 1. We want to be able to deploy the cluster across multiple subnets and storage sources, where each resource live in a given Failure Domain.
 
 ## Motivation
@@ -42,30 +45,33 @@ This feature will remove the limitation that we have today in BYON (Bring your o
 ### User Stories
 
 - As an administrator, I would like to stretch my OpenShift control plane across multiple Failure Domains (x3) so I increase the cluster resilience and performance.
-- As an administrator, I would like to deploy my OpenShift workers across multiple Failure Domains (>1).
+- As an administrator, I would like to deploy my OpenShift computes across multiple Failure Domains (>1) to increase the workload's resilience and performance.
 
 ### Goals
 
 - The user will be able to define Failure Domains in the `install-config.yaml` file used by the OpenShift Installer.
-- The user will have the ability to deploy an OpenShift cluster across multiple availability zones which have their own networks and storage resources.
+- The user will have the ability to deploy the OpenShift control plane across multiple Failure Domains from day 1 using IPI.
+- The user will have the ability to deploy the OpenShift computes across multiple Failure Domains from day 1 using IPI.
 
 ### Non-Goals
 
-- The networks and subnets have to be pre-created in OpenStack Neutron.
-- Routing between the networks is managed by the network infrastructure.
+- Management of the network resources by the installer: the networks and subnets have to be pre-created in OpenStack Neutron.
+- Dynamic routing: routing between the networks is managed by the network infrastructure.
 - Control-Plane VIP (e.g. API, ingress) route advertisement is not discussed in this enhancement and will
   be solved by another proposal. If needed, more options will be added to the Failure Domain block to allow more advanced configurations; but this is out of scope for now.
+- Validate the latency between the nodes. We expect all the availability zones to be located in the same datacenter. The latency between the nodes must remain acceptable for etcd to function correctly.
 
 ## Proposal
 
-The Installer allow users to provide a list of Failure Domains which contain information about networking and storage.
+The Installer allows users to provide a list of Failure Domains which contain information about networking and storage. The Failure domains is defined as an OpenStack platform scoped property. Failure domains are referenced in OpenStack MachinePools.
+
+The Installer validates the information given by the user and return an error if a resource doesn't exist or is incorrectly used.
+
 The cluster will be deployed in these domains on day 1 via IPI.
-The Installer will validate the information given by the user and return an error if a resource doesn't exist or
-is incorrectly used.
 
-The cluster will be deployed in the different Failure Domains, following the Round Robin process. The first master will be deployed in the first domain, and once we have used all domains, we come back to the first one, etc.
+Nodes will be provisioned in the different Failure Domains in a Round Robin fashion.
 
-When using Failure Domains, the users will have to do it for both the masters and the workers.
+When using Failure Domains, the users will have to do it for both the control plane and the computes machine pools.
 
 The infrastructure resources owned by the cluster continue to be clearly identifiable and distinct from other resources.
 
@@ -75,13 +81,14 @@ Destroying a cluster must make sure that no resources are deleted that didn't be
 
 - The OpenStack administrators will deploy OpenStack with multiple Availability Zones, so Nova and Cinder can respectfully deploy servers and volumes in the Failure Domain.
 - The OpenStack administrators will create at least one Routed Provider Network, and then multiple subnets, where each zone has a least one subnet.
-- The OpenShift administrators will identify the Domain Failures: their availability zones, subnets, etc. They'll decide which ones will be used for the masters, and the ones for the workers (domains can be shared).
+- The OpenShift administrators will identify the Failure Domains: their Availability Zones, subnets, etc. They'll decide which ones will be used for the masters, and the ones for the computes (failure domains can be shared).
 - The OpenShift administrators will provide the right configuration in the `install-config.yaml` file and then deploy the cluster (detailed later in this document).
 - (Out of scope for this enhancement, see "Non-Goals") The OpenShift administrators will make sure that the network infrastructure has a networking route to reach the OCP Control Plane VIPs.
 
 ### API Extensions
 
-Not applicable.
+The Cloud team is currently working on adding support for [Control Plane Machine Set](https://github.com/openshift/enhancements/blob/master/enhancements/machine-api/control-plane-machine-set.md).
+It is possible we'll want to update the Control Plane Machine Set API to match the OpenStack failure domains defined here.
 
 
 ### Implementation Details/Notes/Constraints
@@ -89,15 +96,50 @@ Not applicable.
 #### Types
 
 ```golang
-// OpenStackPlatformFailureDomainSpec holds the zone failure domain and
-// the Neutron subnet of that failure domain.
-type OpenStackPlatformFailureDomainSpec struct {
-  // name defines the name of the OpenStackPlatformFailureDomainSpec
-  Name        string `json:"name"`
-  ComputeZone string `json:"computeZone"`
-  StorageZone string `json:"storageZone"`
-  Subnet      string `json:"subnet"`
+package openstack
+
+// Platform stores all the global configuration that all
+// machinesets use.
+type Platform struct {
+    ...
+
+    // FailureDomains configures failure domain information for the OpenStack platform
+    // +optional
+    FailureDomains *[]FailureDomain `json:"failureDomains,omitempty"`
 }
+
+// FailureDomain holds the information for a failure domain
+type FailureDomain struct {
+  // Name defines the name of the OpenStackPlatformFailureDomainSpec
+  Name string `json:"name"`
+
+  // ComputeZone is the compute zone on which the nodes belonging to the
+  // failure domain must be provisioned.
+  // If not specified, the nodes are provisioned in the OpenStack Nova default availabity zone.
+  // +optional
+  ComputeZone string `json:"computeZone,omitempty"`
+
+  // StorageZone is the storage zone from where volumes should be provisioned
+  // for the nodes belonging to the failure domain.
+  // If not specified, volumes are provisioned from the default storage availabity zone.
+  // +optional
+  StorageZone string `json:"storageZone,omitempty"`
+
+  // Subnet is the UUID of the OpenStack subnet nodes will be provisioned on
+  Subnet string `json:"subnet"`
+}
+
+// MachinePool stores the configuration for a machine pool installed
+// on OpenStack.
+type MachinePool struct {
+	...
+
+	// FailureDomains is the list of failure domains where the instances should be deployed.
+	// If no failure domains are provided, all instances will be deployed on OpenStack Nova default availability zone
+	// +optional
+	FailureDomains []string `json:"failureDomains,omitempty"`
+}
+
 ```
 
 #### Resource provided to the installer
@@ -120,8 +162,9 @@ platform:
     - ...
 ```
 There might be additional options in the domains, like flavors or BGP peers, but for now we will cover the minimum.
+We reserve ourselves the possibility to expand the definition of failure domains in the future.
 
-Then they'll choose what Failure Domains to use when deploying the masters and workers directly in the machine pools:
+Then they'll choose what Failure Domains to use when deploying the control plane and compute nodes by setting the `failureDomain` field in the machine pools:
 
 ```yaml
 controlPlane:
@@ -150,11 +193,49 @@ compute:
   replicas: 10 // this will deploy 2 workers per rack
 ```
 
-The installer will create the control plane machines in a way that they can easily be adopted by the upcoming ControlPlane machineset.
+The installer creates a machineSet per failure domain passed to the compute machinePool.
 
-When deploying nodes on separate subnets, the user will need to update the `machineNetwork` option to list all the possible CIDRs on which the machines can be. The `machineNetwork` is the source for creating the security groups rules during installation. There's a [bug][bz-2095323] in the OpenStack implementation that only takes into account the first CIDR that we'll need to fix.
+The machineSet for the compute's `rack1` failure domain will look like the following:
+```yaml
+apiVersion: machine.openshift.io/v1beta1
+kind: MachineSet
+metadata:
+  labels:
+    machine.openshift.io/cluster-api-cluster: <infrastructure_ID>
+    machine.openshift.io/cluster-api-machine-role: worker
+    machine.openshift.io/cluster-api-machine-type: worker
+  name: <infrastructure_ID>-worker-rack1
+  namespace: openshift-machine-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      machine.openshift.io/cluster-api-cluster: <infrastructure_ID>
+      machine.openshift.io/cluster-api-machineset: <infrastructure_ID>-worker-rack1
+  template:
+    ...
+    spec:
+      metadata:
+      providerSpec:
+        value:
+          apiVersion: openstackproviderconfig.openshift.io/v1alpha1
+          cloudName: openstack
+          flavor: <nova_flavor>
+          kind: OpenstackProviderSpec
+          networks:
+            - subnets:
+              - uuid: d7ffd3d8-87e1-481f-a818-ff2f17787d40
+          availabilityZone: az1
+          rootVolume:
+            diskSize: 30
+            volumeType: performance
+            availabilityZone: cinder-az1
+          ...
+```
 
-However, once the bug will be fixed, the OpenShift administrators will have to provide a list of the CIDRs that will need access to the machine network:
+The installer will create the control plane machines in a way that they can easily be adopted by the [ControlPlane machineset](https://github.com/openshift/enhancements/blob/master/enhancements/machine-api/control-plane-machine-set.md).
+
+When deploying nodes on separate subnets, the user will need to update the `machineNetwork` option to list all the possible CIDRs on which the machines can be:
 
 ```yaml
 networking:
@@ -166,13 +247,15 @@ networking:
   - ...
 ```
 
+ The `machineNetwork` is the source for creating the security groups rules during installation. There's a [known bug][bz-2095323] in the OpenStack implementation that only takes into account the first CIDR.
+
 For now, `machinesSubnet` is required to be set when deploying nodes on separate Failure Domains, and is then used to identify where to create the API and Ingress ports.
 
-The OpenShift administrator will be able to deploy more or less workers for a specific Failure Domain, but only on day 2.
+The OpenShift administrator will be able to adjust the number of computes nodes for a specific Failure Domain, but only on day 2.
 
 Also, the installer will provide some validations in order to avoid deployment errors:
 
-- A maximum of 3 `failureDomains` can be provided to the masters. OpenShift only supports 3 masters for now.
+- A maximum of 3 `failureDomains` can be provided to the control plane machine pool. OpenShift only supports 3 control plane nodes for now.
 - Having `failureDomains` in machinepool without `machinesSubnet` is an error.
 - machinepool `zones` for both compute and storage can't be used together with machinepool `failureDomains`.
 - Check that `subnets` in `failureDomains` actually exist (the same validation as machinesSubnet). Note that we can't easily verify if the subnet can actually be used for a given availability zone. This is up to the OpenShift administrators to figure out which subnet they can use for which domain.
@@ -180,10 +263,7 @@ Also, the installer will provide some validations in order to avoid deployment e
 
 ### Risks and Mitigations
 
-- Backward compatibility will have to be maintained and the "old" way to define `zones` to remain available. A warning will be used to inform the user that a new modern way to specify zones, using `failureDomains` is now available and at some point
-  the old way would be deprecated.
-- UX will be reviewed by Field Engineers, partnering with a customer who needs this feature. Also our QE will
-  help to review it.
+- UX will be reviewed by Field Engineers, partnering with a customer who needs this feature. Also our QE will help to review it.
 
 ### Drawbacks
 
@@ -195,8 +275,10 @@ Also, the installer will provide some validations in order to avoid deployment e
 
 ### Open Questions
 
-- Do we want to deprecate machinepool `zones` in favor of machinepool `failureDomains`?
 - What maximum latency and bandwidth should we require between the failure domains?
+- Where should the failure domains be defined? Potential places would be the platform or the machine pool scope.
+- How do we specify where to create the API and Ingress VIPs ports? Is it OK to reuse machinesSubnet for this purpose? Isn't it confusing?
+- Should we discover the CIDR of the provided subnets and add them to MachineNetwork CIDR list automatically?
 
 ### Test Plan
 
