@@ -19,8 +19,6 @@ tracking-link:
 see-also:
   - "/enhancements/installer/aws-customer-provided-subnets.md"
   - https://github.com/openshift/enhancements/pull/918
-superseded-by:
-  - "https://docs.google.com/document/d/1_AjhGEyK6vGBFSSqiLVtLt_qOq6o9t2dtKqq2eFr48Y/"
 ---
 
 # Allow to stretch a cluster across multiple failure domains
