@@ -1,5 +1,5 @@
 ---
-title: kubernetes-for-industrial-edge
+title: kubernetes-for-device-edge
 authors:
   - dhellmann
 reviewers:
@@ -24,7 +24,7 @@ see-also:
   - https://github.com/openshift/microshift/blob/main/docs/design.md
 ---
 
-# Kubernetes for Industrial Edge
+# Kubernetes for Device Edge
 
 ## Summary
 
