@@ -33,7 +33,7 @@ see-also:
 This enhancement describes MicroShift, which provides an essential
 container orchestration runtime compatible with Kubernetes and
 OpenShift built for Internet-of-things (IoT) and Edge computing
-scenarios that are both CPU and memory constrained.  The container
+scenarios that are constrained in CPU, memory, and network bandwidth.  The container
 orchestration runtime is binary compatible with OpenShift Container
 Platform, but it is not 100% API resource compatible.  It has a strict
 subset of OpenShift API resources pertinent for IoT and Edge computing
@@ -52,13 +52,14 @@ pervasive in edge deployments. These cost a few hundred USD, have all
 necessary accelerators and I/O on-board, but are typically not
 extensible and are highly constrained on every resource, e.g.:
 
-* CPU: ARM Cortex or Intel Atom class CPU, 2-4 cores, 1.5GHz clock
+* CPU: ARM Cortex-A35-class or Intel Atom class CPU, 2-4 cores, 1.5GHz clock
 * memory: 2-16GB RAM
 * storage: e.g. SATA3 @ 6Gb/s, 10kIOPS, 1ms (vs. NVMe @ 32Gb/s,
   500kIOPS, 10µs)
-* network: Less than data center-based servers. Likely 1Gb/s NICs,
-  potentially even LTE/4G connections at 5-10Mbps, instead of
-  10/25/40Gb/s NICs
+* network: Less bandwidth and less reliable than data center-based
+  servers, including being completely disconnected for extended
+  periods. Likely 1Gb/s NICs, potentially even LTE/4G connections at
+  5-10Mbps, instead of 10/25/40Gb/s NICs
 
 These use cases are not being addressed by RHEL or OpenShift
 today. RHEL doesn’t include Kubernetes. OpenShift is fundamentally
@@ -82,17 +83,18 @@ applications.
    so that it works with MicroShift and all other topologies of
    OpenShift in a consistent way.
 2. As an application deployer, I can package MicroShift, the
-   applications, and any other platform components into an image that
-   is pre-installed on many devices by the manufacturer.
+   applications, and any other platform components into a "system image" that
+   is written onto many devices by the manufacturer.
 3. As an application deployer, I can package MicroShift, the
-   applications, and any other platform components into an image that
+   applications, and any other platform components into a "system image" that
    I install myself.
-4. As an device administrator, I can release an updated image over the
+4. As a device administrator, I can release an updated system image over the
    network to upgrade devices already in the field using minimal
    network bandwidth.
-5. As an device administrator, I can rely on the system to rollback to
-   a good state if an upgrade fails.
-6. As an device administrator, I have control over the operating
+5. As a device administrator, I can specify application-specific logic
+   with which the device will verify a successful upgrade and roll
+   back the upgrade automatically if verification fails.
+6. As a device administrator, I have control over the operating
    system running under MicroShift.
 
 ### Goals
@@ -104,8 +106,8 @@ applications.
   components needed to support them.
 * Design a system that can work autonomously, without requiring
   external orchestration tools for deployment.
-* Treat MicroShift as an application running on RHEL, with minimal
-  privileges.
+* Treat MicroShift as an application running on RHEL, with the minimum
+  privileges possible.
 * Design a system that can be configured by someone familiar with
   Linux, without Kubernetes expertise.
 * Follow the [MicroShift design
@@ -113,8 +115,8 @@ applications.
 
 ### Non-Goals
 
-* We are not trying to fit all of OpenShift into the target hardware
-  platforms.
+* We are not trying to fit all of the features of a standalone
+  OpenShift deployment into the target hardware platforms.
 * We are not trying to make MicroShift self-managing, so no core
   OpenShift operators will be included.
 * We do not plan to support multi-node clusters.
@@ -127,6 +129,8 @@ applications.
 * The design of MicroShift relies heavily on features of RHEL for Edge
   and rpm-ostree. Those features are referenced here, but their
   implementation is not described in detail.
+* The details of integrating with fleet orchestration tools such as
+  MCE or ACM are left to a future enhancement.
 
 ## Proposal
 
@@ -142,6 +146,8 @@ Today the all-in-one binary includes:
 * Kubernetes API server
 * Kubernetes controller manager
 * Kubernetes scheduler
+* Kubelet
+* Kube Proxy Server
 * OpenShift API server
 * OpenShift controller manager
 * OpenShift SCC manager
@@ -165,11 +171,27 @@ images and distribute software updates. Deployers will be responsible
 for configuring the operating system components and anything that runs
 on the device outside of MicroShift.
 
-Many of the OpenShift APIs are not relevant for edge device use
-cases. We are starting with the absolute minimal set for now because
-it will be easier to add more APIs later than it will be to remove
-anything. In addition to the standard APIs included in core
-Kubernetes, the OpenShift APIs supported will be:
+Administrators of edge devices may have little or no control over the
+network to which the devices are attached, especially the DNS or DHCP
+services on those networks. Edge devices are unlikely to have DNS
+entries added for MicroShift. MicroShift itself must also tolerate the
+host changing IP address when a DHCP lease expires or the host
+reboots.
+
+Many of the OpenShift APIs are not relevant for edge device use cases.
+We are starting with the absolute minimal set for now because it will
+be easier to add more APIs later than it will be to remove anything.
+It is meant as a pure runtime tool, and will not be used for
+build/dev-cluster use cases, therefore we will not include Builds,
+BuildConfigs, etc.  MicroShift is not an interactive, multi-user
+environment, therefore we do not include some of the authorization
+APIs such as users, projects, etc.  It doesn't manage OS or
+infrastructure, so we do not include MachineConfig and related APIs.
+MicroShift is a monolith, therefore we do not include any cluster
+configuration APIs.
+
+In addition to the standard APIs included in core Kubernetes, the
+OpenShift APIs supported will be:
 
 * route.openshift.io/v1 for Routes
 * security.openshift.io/v1 for SecurityContextConstraints
@@ -182,13 +204,18 @@ related to Ingress:
 * openshift.io/ingress-ip
 * openshift.io/ingress-to-route
 
-MicroShift is built downstream of OpenShift. The versions of the
-embedded components are selected by looking at an OpenShift release
-image, finding the git SHAs for the direct dependencies, resolving the
-secondary dependencies, and vendoring the results into the MicroShift
-git repository. The version of the containerized components are taken
-from the same release image and the image references are built into
-the MicroShift binary.
+MicroShift is built downstream of OpenShift to ensure that it includes
+the same versions of the embedded components that are present in
+standalone OpenShift, allowing us to maintain binary compatibility.
+The versions of the embedded components are selected by looking at an
+OpenShift release image, finding the git SHAs for the direct
+dependencies, resolving the secondary dependencies, and vendoring the
+results into the MicroShift git repository. That process needs to be
+as automatic as possible, so we want to avoid carrying any
+MicroShift-specific patches that must be applied after a rebase. The
+version of the containerized components are taken from the same
+release image and the image references are built into the MicroShift
+binary.
 
 A great deal of effort has gone into making OpenShift 4 self-managing,
 especially when it comes to multi-node deployment and upgrades. We do
@@ -225,10 +252,11 @@ be treated as unhealthy and be restarted.
 Application deployers will use RHEL for Edge tools such as Image
 Builder to construct full system images containing RHEL, MicroShift,
 agents, custom operating system configuration, data prerequisites, and
-optionally application images. Those system images will be installed
-on the target devices either individually for development/testing or
-via manufacturer imaging processes for large-scale production
-deployments. RHEL for Edge uses ostree-based images, and an [example
+optionally application images. Those system images will be written to
+the target devices either individually (via the RHEL installation
+process) for development/testing or via manufacturer imaging processes
+for large-scale production deployments. RHEL for Edge uses
+ostree-based images, and an [example
 workflow](https://github.com/openshift/microshift/blob/main/docs/rhel4edge_iso.md)
 for constructing a basic image is described in the MicroShift
 documentation. We are not creating a separate installer for
@@ -257,6 +285,16 @@ the file will only be implemented after the application is
 restarted. Most configuration changes in production settings would be
 rolled out as new ostree images.
 
+#### Deploying Applications
+
+Applications are deployed on MicroShift using standard Kubernetes
+resources such as Deployments. They can be deployed at runtime via API
+calls, or embedded in the system image with the manifests loaded from
+the filesystem by MicroShift on startup. By using the `IfNotPresent`
+pull policy and adding images to the CRI-O cache in the system image,
+it is possible to build a device that can boot and launch the
+application without network access.
+
 ### API Extensions
 
 MicroShift does not add any APIs to OpenShift.
@@ -265,24 +303,28 @@ MicroShift does not add any APIs to OpenShift.
 
 ### Risks and Mitigations
 
-If an upgrade fails, the RHEL for Edge greenboot feature will allow
-the system to reboot back into the older ostree.
+If an upgrade fails, the RHEL for Edge [greenboot
+feature](https://www.redhat.com/en/blog/automating-rhel-edge-image-rollback-greenboot)
+will allow the system to reboot back into the older ostree. Success
+and failure of an upgrade can be defined by the application developer
+and device administrator to include MicroShift, the applications
+running on MicroShift, or anything else running on the device.
 
 Building a single binary means that secondary dependencies of
 components need to be kept compatible. This is especially problematic
-during a Kubernetes rebase in Openhift, but applies to many other
+during a Kubernetes rebase in OpenShift, but applies to many other
 dependencies as well. We are working with the control plane team to
 find ways to mitigate this risk, including moving some code out of the
 OpenShift API server into controllers that would not depend on
 Kubernetes at all.
 
-Building a different form factor downstream of OpenShift means it is
-possible for behaviors introduced in the dependencies to cause issues
-within MicroShift that are not caught upstream. After the basic rebase
-automation is working, we will be trying to construct a CI job that
-can be run on pull requests to the repositories containing MicroShift
-dependencies to test upstream code changes using the MicroShift
-end-to-end test job.
+Building a different form factor downstream of the OpenShift release
+image means it is possible for behaviors introduced in the
+dependencies to cause issues within MicroShift that are not caught
+upstream. After the basic rebase automation is working, we will be
+trying to construct a CI job that can be run on pull requests to the
+repositories containing MicroShift dependencies to test upstream code
+changes using the MicroShift end-to-end test job.
 
 The support lifetime of MicroShift is the same as the version of
 OpenShift on which it is based, therefore it will be critical to
@@ -291,17 +333,21 @@ that MicroShift stays as closely up to date as it can. The team is
 developing a [rebase
 script](https://github.com/openshift/microshift/blob/main/scripts/rebase.sh)
 which will be used by an automated job to propose update pull
-requests. We anticipate periods of time when OpenShift is itself
-rebasing to a new version of Kubernetes where MicroShift's
-dependencies are not compatible and cannot be updated. We will need to
-work with the rebase team to ensure those periods of time are as short
-as possible.
+requests. We anticipate periods of time during the development of
+minor version updates when OpenShift is rebasing to a new version of
+Kubernetes where MicroShift's dependencies are not compatible and
+cannot be updated. We will need to work with the rebase team to ensure
+those periods of time are as short as possible.
 
 Because MicroShift will run as only a single node, for application
 availability we will recommend running two single-node instances that
 deploy a common application in active/active or active/passive mode
 and then using existing tools to support failover between those states
-when either host is unable to provide availability.
+when either host is unable to provide availability.  This
+configuration is more reliable than a single node control plane with a
+worker, because if the worker loses access to the control plane
+(through power or network loss), the worker has no way to restore or
+recover its state, and all workloads could be affected.
 
 Because MicroShift does not embed the operating system, its life-cycle
 is independent of the OS. The components built into or delivered with
@@ -330,6 +376,12 @@ dependencies.
    changes in any of the upstream components?
 3. Given the embedded image references, how will we build an
    OKD-equivalent version of MicroShift?
+4. We anticipate periods of time during the development of minor
+   version updates when OpenShift is rebasing to a new version of
+   Kubernetes where MicroShift's dependencies are not compatible and
+   cannot be updated. We also update the version of Kubernetes used in
+   z-stream branches. Are we likely to have the same problem with
+   those updates?
 
 ### Test Plan
 
@@ -339,6 +391,9 @@ CI.
 We will have end-to-end CI tests for many deployment scenarios.
 
 We will have manual and automated QE for other scenarios.
+
+We will submit Kubernetes conformance results for MicroShift to the
+CNCF.
 
 ### Graduation Criteria
 
@@ -410,23 +465,42 @@ application deployment independently of the cluster footprint.
 Podman is another tool for deploying container-based workloads onto
 RHEL systems. It does not support the Kubernetes and OpenShift APIs
 that users will be used to seeing in single-node and full OpenShift
-clusters, and users have asked us to provide a way to have a
-consistent deployment experience for all topologies and sizes.
+clusters, such as Kubernetes orchestration, services, etc.  Users have
+asked us to provide a way to have a consistent deployment experience
+for all OpenShift topologies and sizes.
 
 ### Single-node OpenShift
 
-Single-node OpenShift uses far more resources than are available in
-the field edge devices where MicroShift will be used. [Work is being
+Single-node OpenShift targets server-class hardware or cloud VMs and
+therefore uses far more resources than are available in the field edge
+devices where MicroShift will be used. [Work is being
 done](https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md)
 to address the resource consumption, but it is primarily focused on
 CPU utilization and not RAM or over-the-wire upgrade costs.
 
-### Separate Binaries
+Single-node OpenShift is designed to encapsulate management of the
+underlying operating system, and does not support the sort of
+user-built images that are needed to support edge device scenarios.
 
-Running the different control plane components as separate binaries,
-instead of compiling them into one, would be easier to support as
-dependencies drift apart. However, go binaries are large and splitting
-them apart would increase RAM consumption far beyond the allowance.
+Single-node OpenShift relies on being installed and does not support
+the sort of factory imaging process using customer-built images that
+is typically needed for edge devices.
+
+Single-node OpenShift, like other standalone OpenShift configurations,
+implements a roll-forward deployment model and does not support
+rolling the system back when an issue is encountered during upgrades.
+
+### Separate Binaries or Processes
+
+Running the different control plane components as separate processes
+using different binaries, instead of compiling them into one, would be
+easier to support as dependencies drift apart. However, go binaries
+are large and splitting them apart would increase RAM consumption far
+beyond the allowance.
+
+Separate processes would also require more complex orchestration to
+start, stop, upgrade, etc. We want to avoid recreating or running all
+of the logic currently in OpenShift's cluster operators.
 
 ## Infrastructure Needed [optional]
 
