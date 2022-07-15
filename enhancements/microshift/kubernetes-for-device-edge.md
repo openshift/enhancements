@@ -2,6 +2,8 @@
 title: kubernetes-for-device-edge
 authors:
   - dhellmann
+  - fzdarsky
+  - derekwaynecarr
 reviewers:
   - "@copejon, MicroShift contributor"
   - "@deads2k, control plane expert"
@@ -29,7 +31,7 @@ see-also:
 ## Summary
 
 This enhancement describes MicroShift, which provides an essential
-container orchestration runtime compatible with kubernetes and
+container orchestration runtime compatible with Kubernetes and
 OpenShift built for Internet-of-things (IoT) and Edge computing
 scenarios that are both CPU and memory constrained.  The container
 orchestration runtime is binary compatible with OpenShift Container
@@ -37,9 +39,6 @@ Platform, but it is not 100% API resource compatible.  It has a strict
 subset of OpenShift API resources pertinent for IoT and Edge computing
 scenarios with a strong bias to retaining traditional runtime security
 controls like SecurityContextConstraints and SELinux.
-
-Quite a lot of the text in this enhancement is taken from other
-working documents.
 
 ## Motivation
 
@@ -133,16 +132,16 @@ applications.
 
 To meet the resource consumption constraints (RAM and CPU), MicroShift
 is designed as an all-in-one binary for the components that are
-required to launch a kubernetes control plane, combined with
+required to launch a Kubernetes control plane, combined with
 components running in containers to provide runtime services after the
 control plane is up.
 
 Today the all-in-one binary includes:
 
 * etcd
-* kubernetes API server
-* kubernetes controller manager
-* kubernetes scheduler
+* Kubernetes API server
+* Kubernetes controller manager
+* Kubernetes scheduler
 * OpenShift API server
 * OpenShift controller manager
 * OpenShift SCC manager
@@ -197,7 +196,7 @@ not want to reinvent that work, nor do we want to recreate the
 OpenShift 3 model using an outside orchestration tool.  A single-node
 control plane becomes a single point of failure when worker nodes are
 attached, which eliminates the high availability benefits of running
-workloads on kubernetes. Those statements taken together lead us to
+workloads on Kubernetes. Those statements taken together lead us to
 conclude that MicroShift will only support deployments with 1 node
 acting as both control plane and worker.
 
@@ -271,11 +270,11 @@ the system to reboot back into the older ostree.
 
 Building a single binary means that secondary dependencies of
 components need to be kept compatible. This is especially problematic
-during a kubernetes rebase in Openhift, but applies to many other
+during a Kubernetes rebase in Openhift, but applies to many other
 dependencies as well. We are working with the control plane team to
 find ways to mitigate this risk, including moving some code out of the
 OpenShift API server into controllers that would not depend on
-kubernetes at all.
+Kubernetes at all.
 
 Building a different form factor downstream of OpenShift means it is
 possible for behaviors introduced in the dependencies to cause issues
@@ -293,7 +292,7 @@ developing a [rebase
 script](https://github.com/openshift/microshift/blob/main/scripts/rebase.sh)
 which will be used by an automated job to propose update pull
 requests. We anticipate periods of time when OpenShift is itself
-rebasing to a new version of kubernetes where MicroShift's
+rebasing to a new version of Kubernetes where MicroShift's
 dependencies are not compatible and cannot be updated. We will need to
 work with the rebase team to ensure those periods of time are as short
 as possible.
@@ -326,7 +325,7 @@ dependencies.
 ### Open Questions [optional]
 
 1. How can we best minimize the window of time when OCP components are
-   not using the same version of kubernetes?
+   not using the same version of Kubernetes?
 2. Can we further reduce the dependencies of MicroShift by making
    changes in any of the upstream components?
 3. Given the embedded image references, how will we build an
@@ -334,7 +333,7 @@ dependencies.
 
 ### Test Plan
 
-We will run the relevant kubernetes and OpenShift compliance tests in
+We will run the relevant Kubernetes and OpenShift compliance tests in
 CI.
 
 We will have end-to-end CI tests for many deployment scenarios.
@@ -409,7 +408,7 @@ application deployment independently of the cluster footprint.
 ### podman
 
 Podman is another tool for deploying container-based workloads onto
-RHEL systems. It does not support the kubernetes and OpenShift APIs
+RHEL systems. It does not support the Kubernetes and OpenShift APIs
 that users will be used to seeing in single-node and full OpenShift
 clusters, and users have asked us to provide a way to have a
 consistent deployment experience for all topologies and sizes.
