@@ -131,105 +131,105 @@ Azure resource.
 Enhancement requires below modifications to the mentioned CRDs
 - Add `userTags` field to `platform.azure` of the `installconfigs.install.openshift.io`
 ```yaml
-  apiVersion: apiextensions.k8s.io/v1
-  kind: CustomResourceDefinition
-  metadata:
-    name: installconfigs.install.openshift.io
-  spec:
-    versions:
-    - name: v1
-      schema:
-        openAPIV3Schema:
-          description: InstallConfig is the configuration for an OpenShift install.
-          properties:
-            platform:
-              description: Platform is configuration for machine pool specific
-                to the platform.
-              properties:
-                azure:
-                  description: Azure is the configuration used when installing
-                    on Azure.
-                  properties:
-                    userTags:
-                      additionalProperties:
-                        type: string
-                      description: UserTags additional keys and values that the installer
-                        will add as tags to all resources that it creates. Resources
-                        created by the cluster itself may not include these tags.
-                    type: object
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: installconfigs.install.openshift.io
+spec:
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: InstallConfig is the configuration for an OpenShift install.
+        properties:
+          platform:
+            description: Platform is configuration for machine pool specific
+              to the platform.
+            properties:
+              azure:
+                description: Azure is the configuration used when installing
+                  on Azure.
+                properties:
+                  userTags:
+                    additionalProperties:
+                      type: string
+                    description: UserTags additional keys and values that the installer
+                      will add as tags to all resources that it creates. Resources
+                      created by the cluster itself may not include these tags.
+                  type: object
 ```
 
 - Add `resourceTags` field to `spec.platformSpec.azure` and `platformStatus.status.azure` 
   of the `infrastructure.config.openshift.io`
 ```yaml
-  apiVersion: apiextensions.k8s.io/v1
-  kind: CustomResourceDefinition
-  metadata:
-    name: infrastructures.config.openshift.io
-  spec:
-    versions:
-    - name: v1
-      schema:
-        openAPIV3Schema:
-          description: "Infrastructure holds cluster-wide information about Infrastructure.  The canonical name is `cluster` \n Compatibility level 1: Stable within a major release for a minimum of 12 months or 3 minor releases (whichever is longer)."
-          properties:
-            spec:
-              description: spec holds user settable values for configuration
-              properties:
-                platformSpec:
-                  description: platformSpec holds desired information specific to the underlying infrastructure provider.
-                  properties:
-                    azure:
-                      description: Azure contains settings specific to the Azure infrastructure provider.
-                      properties:
-                        resourceTags:
-                          description: resourceTags is a list of additional tags to apply to Azure resources created for the cluster. See https://docs.microsoft.com/en-us/rest/api/resources/tags for information on tagging Azure resources. Azure supports a maximum of 50 tags per resource except for few. OpenShift reserves 10 tags for its use, leaving 40 tags available for the user.
-                          type: array
-                          maxItems: 10
-                          items:
-                            description: AzureResourceTag is a tag to apply to Azure resources created for the cluster.
-                            type: object
-                            required:
-                              - key
-                              - value
-                            properties:
-                              key:
-                                description: key is the key of the tag
-                                type: string
-                                maxLength: 128
-                                minLength: 1
-                                pattern: ^[a-zA-Z][0-9A-Za-z_.=+-@]+$
-                              value:
-                                description: value is the value of the tag.
-                                type: string
-                                maxLength: 256
-                                minLength: 1
-                                pattern: ^[0-9A-Za-z_.=+-@]+$
-            status:
-              description: status holds observed values from the cluster. They may not be overridden.
-              properties:
-                platformStatus:
-                  description: platformStatus holds status information specific to the underlying infrastructure provider.
-                  properties:
-                    azure:
-                      description: Azure contains settings specific to the Azure infrastructure provider.
-                      properties:
-                        resourceTags:
-                          description: resourceTags is a list of Azure resources for which tag update got failed. It contains the Azure resource name and the error encountered. 
-                          type: array
-                          items:
-                            description: Azure resource is the name of the resource created for the cluster.
-                            type: object
-                            required:
-                              - name
-                              - error
-                            properties:
-                              name:
-                                description: name is the name of the Azure resource.
-                                type: string
-                              error:
-                                description: error is the reason for the tag update failure.
-                                type: string
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: infrastructures.config.openshift.io
+spec:
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: "Infrastructure holds cluster-wide information about Infrastructure.  The canonical name is `cluster` \n Compatibility level 1: Stable within a major release for a minimum of 12 months or 3 minor releases (whichever is longer)."
+        properties:
+          spec:
+            description: spec holds user settable values for configuration
+            properties:
+              platformSpec:
+                description: platformSpec holds desired information specific to the underlying infrastructure provider.
+                properties:
+                  azure:
+                    description: Azure contains settings specific to the Azure infrastructure provider.
+                    properties:
+                      resourceTags:
+                        description: resourceTags is a list of additional tags to apply to Azure resources created for the cluster. See https://docs.microsoft.com/en-us/rest/api/resources/tags for information on tagging Azure resources. Azure supports a maximum of 50 tags per resource except for few. OpenShift reserves 10 tags for its use, leaving 40 tags available for the user.
+                        type: array
+                        maxItems: 10
+                        items:
+                          description: AzureResourceTag is a tag to apply to Azure resources created for the cluster.
+                          type: object
+                          required:
+                            - key
+                            - value
+                          properties:
+                            key:
+                              description: key is the key of the tag
+                              type: string
+                              maxLength: 128
+                              minLength: 1
+                              pattern: ^[a-zA-Z][0-9A-Za-z_.=+-@]+$
+                            value:
+                              description: value is the value of the tag.
+                              type: string
+                              maxLength: 256
+                              minLength: 1
+                              pattern: ^[0-9A-Za-z_.=+-@]+$
+          status:
+            description: status holds observed values from the cluster. They may not be overridden.
+            properties:
+              platformStatus:
+                description: platformStatus holds status information specific to the underlying infrastructure provider.
+                properties:
+                  azure:
+                    description: Azure contains settings specific to the Azure infrastructure provider.
+                    properties:
+                      resourceTags:
+                        description: resourceTags is a list of Azure resources for which tag update got failed. It contains the Azure resource name and the encountered error.
+                        type: array
+                        items:
+                          description: Azure resource is the name of the resource created for the cluster.
+                          type: object
+                          required:
+                            - name
+                            - error
+                          properties:
+                            name:
+                              description: name is the name of the Azure resource.
+                              type: string
+                            error:
+                              description: error is the reason for the tag update failure.
+                              type: string
 ```
 
 ### Implementation Details/Notes/Constraints [optional]
@@ -279,6 +279,35 @@ NetworkEdge ,Internal Registry ,CCO) will apply these tags to all Azure resource
 Operators should create an event to indicate the status of tag add/modify request and
 as well update the `status.platformSpec.azure` field of `infrastructure.config.openshift.io`
 with required details in case of failure. 
+
+Below list of terraform Azure APIs to create resources should be updated to add user
+defined tags and as well the openshift default tag in the installer component.
+`azurerm_resource_group, azurerm_image, azurerm_lb, azurerm_lb_backend_address_pool,
+azurerm_lb_probe, azurerm_lb_rule, azurerm_network_security_group,
+azurerm_network_security_rule, azurerm_role_assignment, azurerm_storage_account,
+azurerm_storage_blob, azurerm_storage_container, azurerm_subnet,
+azurerm_subnet_network_security_group_association, azurerm_user_assigned_identity,
+azurerm_virtual_network, azurerm_storage_account_sas, azurerm_linux_virtual_machine,
+azurerm_network_interface, azurerm_network_interface_backend_address_pool_association,
+azurerm_dns_cname_record, azurerm_linux_virtual_machine, azurerm_network_security_rule`
+
+API update example:
+A local variable should be defined, which merges the default tag and the user
+defined Azure tags, which should be referred in the Azure resource APIs.
+``` terraform
+locals {
+  tags = merge(
+    {
+      "kubernetes.io_cluster.${var.cluster_id}" = "owned"
+    },
+    var.azure_extra_tags,
+  )
+}
+
+resource "azurerm_resource_group" "main" {
+  tags     = local.tags
+}
+```
 
 #### Create tags scenarios
 In the cases where a tag is specified in the `infrastructure.config.openshift.io` resource and
@@ -379,8 +408,8 @@ On upgrade:
 
 On downgrade:
 - The status/spec field may remain populated, components may or may not continue 
-  to tag newly created resources with the additional tags depending on whether or 
-  not a given component still has logic to respect the status tags, after the downgrade.
+  to tag newly created resources with the additional tags depending on regardless of
+  whether given component still has logic to respect the spec tags, after the downgrade.
 
 ### Version Skew Strategy
 
@@ -425,5 +454,6 @@ Motivations for having a dedicated cloud-infra-controller include but are not li
 - Few Azure resources such as disk, storage account, DNS zones and records name might not
   match either `kubernetes.io/cluster/<cluster_name>:owned` or cluster name in the name tag
   and will result in tagging inconsistency, which will be minimal compared not to having 
-  aformentioned dedicated controller for managing tags of Azure resources.
+  aforementioned dedicated controller for managing tags of Azure resources.
+
 ## Infrastructure Needed [optional]
