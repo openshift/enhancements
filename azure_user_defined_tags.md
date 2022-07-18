@@ -69,22 +69,22 @@ to define the tags to be added to the resources created by installer and in-clus
 
 If `platform.azure.userTags` of install-config has any tag defined same will be added 
 to all the azure resources created by Openshift except, when the tag validation fails 
-due to any of below conditions
-	- A tag name can have a maximum of 128 characters 
-      (Note: Tag name has a limit of 512 characters for all resources except for 
-       storage accounts, which has a limit of 128 characters and hence tag name 
-       length is restricted to 128 characters for every resource required by Openshift)
-  	- A tag value has a limit of 256 characters.
-  	- A tag name cannot contain `<, >, %, &, \, ?, /, #, :, whitespace` characters and 
-      should not start with a number. 
-      (Note: DNS zones, Traffic, Front Door resources does not support tag with spaces, 
-       special/unicode characters or starting with number, hence these are added as
-       constraints to every other azure resource required by Openshift as well.)
-  	- A resource, resource-group or subscription can have a maximum of 10 tags. 
-      (Note: Azure supports a maximum of 50 tags except for Automation, 
-       Content Delivery Network, DNS resources which can have a maximum of 15 tags, hence 
-       restricting the number of tags to 10 for all resources created by Openshift, with 5 
-       spared for administrator's use)
+due to any of below conditions <br>
+1. A tag name can have a maximum of 128 characters <br>
+   (Note: Tag name has a limit of 512 characters for all resources except for 
+    storage accounts, which has a limit of 128 characters and hence tag name 
+    length is restricted to 128 characters for every resource required by Openshift) <br>
+2. A tag value has a limit of 256 characters. <br>
+3. A tag name cannot contain `<, >, %, &, \, ?, /, #, :, whitespace` characters and 
+   should not start with a number. <br>
+   (Note: DNS zones, Traffic, Front Door resources does not support tag with spaces, 
+    special/unicode characters or starting with number, hence these are added as 
+    constraints to every other azure resource required by Openshift as well.) <br>
+4. A resource, resource-group or subscription can have a maximum of 10 tags. <br>
+   (Note: Azure supports a maximum of 50 tags except for Automation, 
+    Content Delivery Network, DNS resources which can have a maximum of 15 tags, hence 
+    restricting the number of tags to 10 for all resources created by Openshift, with 5 
+    spared for administrator's use) <br>
 
 Add a new field `resourceTags` to `.spec.platformSpec.azure` of the 
 `infrastructure.config.openshift.io` type. Tags included in the `resourceTags` field 
@@ -262,9 +262,9 @@ be a good place to talk about core concepts and how they relate.
        maximum of 15 tags.
 
 - Administrator will have to manually perform tags pertaining actions for
-   - removing the undesired tags from the required resources.
-   - update tags of the resources which are not managed by an operator.
-   - update tags of the resources for which update logic is not supported by an operator.
+    1. removing the undesired tags from the required resources.
+    2. update tags of the resources which are not managed by an operator.
+    3. update tags of the resources for which update logic is not supported by an operator.
 
 ## Design Details
 The `resourceTags` field in `spec.platformSpec.azure` will be populated by the 
@@ -285,10 +285,10 @@ In the cases where a tag is specified in the `infrastructure.config.openshift.io
 1) A tag with the same key is present in an Azure resource, the value will be replaced with
    `infrastructure.config.openshift.io` resource value
 
-   For example,
-   Azure resource as a tag `key_infra = value_azure`
-   New tag request = `spec.platformSpec.azure.resourceTags` has `key_infra = value_infra`
-   Action = Azure resource tag is updated to `key_infra = value_infra`
+   For example, <br>
+   Azure resource as a tag `key_infra = value_azure` <br>
+   New tag request = `spec.platformSpec.azure.resourceTags` has `key_infra = value_infra` <br>
+   Action = Azure resource tag is updated to `key_infra = value_infra` <br>
    Event action = An event is generated to notify user about the request 
    status (success/failure) to update tags for the Azure resource.
 
@@ -296,10 +296,10 @@ In the cases where a tag is specified in the `infrastructure.config.openshift.io
    resource, but maximum tag limit is reached or any other error encountered
    should be notified to user.
 
-   For example,
-   New tag request = `.spec.platformSpec.azure.resourceTags` has `key_infra = value_infra`
-   Action = A new tag to be added for an Azure resource.
-   Final tag set to Azure resource = `key_infra = value_infra`
+   For example, <br>
+   New tag request = `.spec.platformSpec.azure.resourceTags` has `key_infra = value_infra` <br>
+   Action = A new tag to be added for an Azure resource. <br>
+   Final tag set to Azure resource = `key_infra = value_infra` <br>
    Event action = An event is generated to notify user about the request 
    status (success/failure) to create tags for the Azure resource.
 
@@ -311,20 +311,20 @@ Azure resource is not created or restarted.
 In the case where a tag is updated in the `infrastructure.config.openshift.io` resource and
 1) A tag with the same key and value is present in an Azure resource, no update is made.
 
-   For example,
-   Existing tag for Azure resource = `key_infra = value_update`
-   New tag request = `.spec.platformSpec.azure.resourceTags` has `key_infra = value_update`
-   Action = There is no update for Azure resource.
+   For example,<br>
+   Existing tag for Azure resource = `key_infra = value_update` <br>
+   New tag request = `.spec.platformSpec.azure.resourceTags` has `key_infra = value_update` <br>
+   Action = There is no update for Azure resource. <br>
    Final tag set to Azure resource = `key_infra = value_update`
 
 2) A tag with the same key but different value is present in an Azure resource, the Azure 
    resource will be updated with the new value.
 
-   For example,
-   Existing tag for Azure resource = `key_infra = value`
-   New tag request = `.spec.platformSpec.azure.resourceTags` has `key_infra = value_new`
-   Action = Existing tag for Azure resource is updated to reflect new value.
-   Final tag set to Azure resource = `key_infra = value_new`
+   For example, <br>
+   Existing tag for Azure resource = `key_infra = value` <br>
+   New tag request = `.spec.platformSpec.azure.resourceTags` has `key_infra = value_new` <br>
+   Action = Existing tag for Azure resource is updated to reflect new value. <br>
+   Final tag set to Azure resource = `key_infra = value_new` <br>
    Event action = An event is generated to notify user about the request 
    status (success/failure) to update tags for the Azure resource.
 
@@ -336,11 +336,11 @@ In the case where a tag is updated in the `infrastructure.config.openshift.io` r
    consistency maintained by the owning operator. The time taken to reconcile the modified 
    tag on Azure resource to desired value vary across owning operators.
 
-   For example,
-   Edited existing tag using external tool for Azure resource = `key_infra = value_tool`
-   Previous tag request = `.spec.platformSpec.azure.resourceTags` or resource has `key_infra = value`
-   Action = Update existing tag with value from `.spec.platformSpec.azure.resourceTags`.
-   Final tag set to Azure resource = `key_infra1 = value`
+   For example, <br>
+   Edited existing tag using external tool for Azure resource = `key_infra = value_tool` <br>
+   Previous tag request = `.spec.platformSpec.azure.resourceTags` or resource has `key_infra = value` <br>
+   Action = Update existing tag with value from `.spec.platformSpec.azure.resourceTags`. <br>
+   Final tag set to Azure resource = `key_infra1 = value` <br>
    Event action = An event is generated to notify user about the request 
    status (success/failure) to update tags for the Azure resource.
 
@@ -349,11 +349,11 @@ In the case where a tag is updated in the `infrastructure.config.openshift.io` r
    User can update tag using an external interface. The user-defined tag will not be modified 
    by the operator.
 
-   For example,
-   Existing tag for Azure resource = `key_infra = value`
-   New tag request = `.spec.platformSpec.azure.resourceTags` has no user-defined tag with key `key_infra`
-   Action = No change in tags for the Azure resource.
-   Final tag set to Azure resource = `key_infra1 = value`
+   For example, <br>
+   Existing tag for Azure resource = `key_infra = value` <br>
+   New tag request = `.spec.platformSpec.azure.resourceTags` has no user-defined tag with key `key_infra` <br>
+   Action = No change in tags for the Azure resource. <br>
+   Final tag set to Azure resource = `key_infra1 = value` <br>
 
 3) Updating tags of individual resources is not supported and any tag present in 
    `.spec.platformSpec.azure.resourceTags` of `infrastructure.config.openshift.io/v1` resource 
@@ -406,4 +406,24 @@ Motivations for having a dedicated cloud-infra-controller include but are not li
   created by installer and not being managed by any operator during tag update or cluster 
   upgrade scenario(from feature unsupported version).
 
+### Design Details
+- The dedicated controller will watch for changes in the `infrastructure.config.openshift.io`
+  resource and acts only when there is a change to `spec.platformSpec.azure` field.
+- Controller queries for all the resources which has the tag 
+  `kubernetes.io/cluster/<cluster_name>:owned` and updates each resource with the new 
+  requested changes.
+- In case cluster is upgraded from a release without Azure tag implementation (query for 
+  resources with `kubernetes.io/cluster/<cluster_name>:owned` tag yields just resource group
+  type), controller queries for the resources having cluster name in the name tag and 
+  updates each matching resource with the new requested changes.
+- In-cluster operators should not watch for changes to `spec.platformSpec.azure` field of 
+  `infrastructure.config.openshift.io` and should continue with current functionality of
+  creating requested resources, but include additional functionality to add user defined tags
+  and the `kubernetes.io/cluster/<cluster_name>:owned` default tag to created resource.
+  
+### Caveats
+- Few Azure resources such as disk, storage account, DNS zones and records name might not
+  match either `kubernetes.io/cluster/<cluster_name>:owned` or cluster name in the name tag
+  and will result in tagging inconsistency, which will be minimal compared not to having 
+  aformentioned dedicated controller for managing tags of Azure resources.
 ## Infrastructure Needed [optional]
