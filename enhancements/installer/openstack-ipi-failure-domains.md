@@ -61,7 +61,7 @@ This feature will remove the limitation that we have today in BYON (Bring your o
 
 ## Proposal
 
-The Installer allows users to provide a list of Failure Domains which contain information about networking and storage. The Failure domains is defined as an OpenStack platform scoped property. Failure domains are referenced in OpenStack MachinePools.
+The Installer allows users to provide a list of Failure Domains which contains information about host placement, networking, and storage. The Failure domains is defined as an OpenStack platform scoped property. Failure domains are referenced in OpenStack `Platform` struct in the types..
 
 The Installer validates the information given by the user and return an error if a resource doesn't exist or is incorrectly used.
 
@@ -69,7 +69,7 @@ The cluster will be deployed in these domains on day 1 via IPI.
 
 Nodes will be provisioned in the different Failure Domains in a Round Robin fashion.
 
-When using Failure Domains, the users will have to do it for both the control plane and the computes machine pools.
+If Failure Domains are being used, both the control-plane and compute pools will have to define a list of domains that will be used.
 
 The infrastructure resources owned by the cluster continue to be clearly identifiable and distinct from other resources.
 
@@ -77,8 +77,8 @@ Destroying a cluster must make sure that no resources are deleted that didn't be
 
 ### Workflow Description
 
-- The OpenStack administrators will deploy OpenStack with multiple Availability Zones, so Nova and Cinder can respectfully deploy servers and volumes in the Failure Domain.
-- The OpenStack administrators will create at least one Routed Provider Network, and then multiple subnets, where each zone has a least one subnet.
+- The OpenStack administrators will deploy OpenStack with multiple Availability Zones, so Nova and Cinder can respectively deploy servers and volumes in the Failure Domain.
+- The OpenStack administrators will create at least one Neutron Network, and then multiple subnets, where each zone has a least one subnet.
 - The OpenShift administrators will identify the Failure Domains: their Availability Zones, subnets, etc. They'll decide which ones will be used for the masters, and the ones for the computes (failure domains can be shared).
 - The OpenShift administrators will provide the right configuration in the `install-config.yaml` file and then deploy the cluster (detailed later in this document).
 - (Out of scope for this enhancement, see "Non-Goals") The OpenShift administrators will make sure that the network infrastructure has a networking route to reach the OCP Control Plane VIPs.
@@ -249,11 +249,10 @@ networking:
 
 For now, `machinesSubnet` is required to be set when deploying nodes on separate Failure Domains, and is then used to identify where to create the API and Ingress ports.
 
-The OpenShift administrator will be able to adjust the number of computes nodes for a specific Failure Domain, but only on day 2.
+The OpenShift admin can do this in any case by changing the number of replicas in the machineset they created which they pinned to a particular failure domain.
 
 Also, the installer will provide some validations in order to avoid deployment errors:
 
-- A maximum of 3 `failureDomains` can be provided to the control plane machine pool. OpenShift only supports 3 control plane nodes for now.
 - Having `failureDomains` in machinepool without `machinesSubnet` is an error.
 - machinepool `zones` for both compute and storage can't be used together with machinepool `failureDomains`.
 - Check that `subnets` in `failureDomains` actually exist (the same validation as machinesSubnet). Note that we can't easily verify if the subnet can actually be used for a given availability zone. This is up to the OpenShift administrators to figure out which subnet they can use for which domain.
@@ -277,6 +276,7 @@ Also, the installer will provide some validations in order to avoid deployment e
 - Where should the failure domains be defined? Potential places would be the platform or the machine pool scope.
 - How do we specify where to create the API and Ingress VIPs ports? Is it OK to reuse machinesSubnet for this purpose? Isn't it confusing?
 - Should we discover the CIDR of the provided subnets and add them to MachineNetwork CIDR list automatically?
+- How do we update `machineNetwork` on day 2? (e.g. moving a control plane node to another failure domain, update security groups, etc)
 
 ### Test Plan
 
