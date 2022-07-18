@@ -131,6 +131,13 @@ applications.
   implementation is not described in detail.
 * The details of integrating with fleet orchestration tools such as
   MCE or ACM are left to a future enhancement.
+* We do not want to push MicroShift use on RHEL versions where OCP is
+  not supported. We do have interest from users in RHEL 9, but will
+  not GA on RHEL 9 faster than OCP does.
+* We do not want to push MicroShift use on hardware platforms where
+  RHEL for Edge is not supported. We may use interest in MicroShift to
+  drive prioritization of hardware support, but we would not support
+  MicroShift on a platform where RHEL is not supported.
 
 ## Proposal
 
