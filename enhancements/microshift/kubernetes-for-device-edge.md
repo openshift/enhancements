@@ -52,7 +52,7 @@ pervasive in edge deployments. These cost a few hundred USD, have all
 necessary accelerators and I/O on-board, but are typically not
 extensible and are highly constrained on every resource, e.g.:
 
-* CPU: ARM Cortex-A35-class or Intel Atom class CPU, 2-4 cores, 1.5GHz clock
+* CPU: Low-power ARM or Intel Atom CPU, 2-4 cores, 1.5GHz clock
 * memory: 2-16GB RAM
 * storage: e.g. SATA3 @ 6Gb/s, 10kIOPS, 1ms (vs. NVMe @ 32Gb/s,
   500kIOPS, 10µs)
