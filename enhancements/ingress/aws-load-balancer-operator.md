@@ -292,15 +292,16 @@ the subnets and tag them or the user can do this. This can be enabled by setting
 the `SubnetTagging` to `AutoSubnetTaggingPolicy`.
 
 The user can also specify the Ingress class which the lb-controller will
-reconcile. This defaults to **_“alb”_**. This value is required because if
+reconcile, using the `.Spec.IngressClass` field of the `AWSLoadBalancerController`
+resource. This field's value defaults to **_“alb”_**. This value is required because if
 an ingress class value is not passed to the controller it attempts to reconcile
 all Ingress resources which don’t have an ingress class annotation or where the
 ingress class field is empty. In order to prevent this, the operator creates an
 **IngressClass** if it cannot find any **IngressClass**  with the name mentioned
-in `.Spec.IngressClass` field. Passing the value of **_“alb”_** does not restrict
-the number of ingress classes which the controller can reconcile. This is
-described further in the [Parallel operation of OpenShift Router](#parallel-operation-of-the-openshift-router-and-lb-controller)
-and lb-controller section.
+in the `.Spec.IngressClass` field of the CR. Passing the value of **_“alb”_** does
+not restrict the number of ingress classes which the controller can reconcile. This is
+described further in the [Parallel operation of the OpenShift router and lb-controller](#parallel-operation-of-the-openshift-router-and-lb-controller)
+section.
 
 The _DeploymentConfig_ field contains any configuration required for the
 deployment. The number of replicas is the only field for now. But in future
@@ -317,8 +318,7 @@ false. When an addon which was previously enabled is disabled the controller
 does not remove the existing addon attachment from the provisioned load
 balancers.
 
-The operator will also create a
-[CredentialRequest](https://docs.openshift.com/container-platform/4.10/rest_api/security_apis/credentialsrequest-cloudcredential-openshift-io-v1.html#credentialsrequest-cloudcredential-openshift-io-v1)
+The operator will also create a [CredentialRequest](https://docs.openshift.com/container-platform/4.10/rest_api/security_apis/credentialsrequest-cloudcredential-openshift-io-v1.html#credentialsrequest-cloudcredential-openshift-io-v1)
 on behalf of the lb-controller and mount the minted credentials in the
 _Deployment_ of the controller. This means that the operator will only work on
 OCP/OKD but this is sufficient for the initial release. There is a variation in
@@ -326,10 +326,11 @@ this flow when it comes to OCP/OKD clusters running in STS or Manual Mode. Since
 the `cloud-credentials-operator` will be running in `manual mode`, the credentials
 for the lb-controller won't be provisioned automatically, and will require manual
 intervention to do so. The required manual steps will be documented within the
-operator docs. Additional documentation for STS mode/manual mode can be found [here](https://docs.openshift.com/container-platform/4.10/authentication/managing_cloud_provider_credentials/cco-mode-sts.html)
+operator docs. Additional documentation for STS mode/manual mode can be found in 
+[the OCP documentation for using manual mode with STS](https://docs.openshift.com/container-platform/4.10/authentication/managing_cloud_provider_credentials/cco-mode-sts.html)
 
 The lb-controller requires a validating and mutating webhook for correct operation.
-The operator will have to create the webhooks along with the controller deployment. 
+The operator creates the webhook configuration along with the controller deployment. 
 The webhook can be registered with a CA bundle which is used to verify the identity 
 of webhook by the API server. The [service-ca controller](https://docs.openshift.com/container-platform/4.10/security/certificate_types_descriptions/service-ca-certificates.html)
 can be used to generate certificates and have them injected into the webhook
@@ -346,7 +347,7 @@ the created load balancer will be configured to route traffic through a NodePort
 service.  This is also the default behavior when the annotation is not set.
 However, when the value is set to _ip_, the lb-controller requires that
 the cluster use the Amazon VPC CNI, and hence the lb-controller fails to properly
-route traffic to the destination pods and will error.
+route traffic to the destination pods and will result in errors.
 
 ### Drawbacks
 
