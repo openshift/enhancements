@@ -488,11 +488,16 @@ therefore uses far more resources than are available in the field edge
 devices where MicroShift will be used. [Work is being
 done](https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md)
 to address the resource consumption, but it is primarily focused on
-CPU utilization and not RAM or over-the-wire upgrade costs.
+CPU utilization and not RAM or over-the-wire upgrade costs and the
+resulting deployment still includes all of the OpenShift operators,
+which are not wanted for MicroShift use cases.
 
 Single-node OpenShift is designed to encapsulate management of the
-underlying operating system, and does not support the sort of
-user-built images that are needed to support edge device scenarios.
+underlying operating system, and does not currently support the sort
+of user-built images that are needed to support edge device
+scenarios. The [CoreOS
+Layering](https://github.com/openshift/enhancements/blob/master/enhancements/ocp-coreos-layering.md)
+work will change that.
 
 Single-node OpenShift relies on being installed and does not support
 the sort of factory imaging process using customer-built images that
