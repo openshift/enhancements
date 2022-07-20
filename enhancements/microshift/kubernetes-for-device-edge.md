@@ -465,7 +465,7 @@ N/A
 
 ## Alternatives
 
-### RHEL
+### Yum-based RHEL
 
 Using non-containerized deployment options on RHEL may be appropriate
 for some cases, but does not solve the case where a customer is using
