@@ -254,6 +254,10 @@ not expose separate health checks or implement per-component restart
 features. If any embedded component is unhealthy, the application will
 be treated as unhealthy and be restarted.
 
+MicroShift embeds etcd, but will not expose many of its configuration
+options. In particular, on-disk encryption will be handled at the host
+level using FDE via dm-crypt/LUKS with the key stored in TPM.
+
 ### Workflow Description
 
 #### Deploying
