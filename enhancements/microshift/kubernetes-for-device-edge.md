@@ -131,7 +131,8 @@ applications.
   and rpm-ostree. Those features are referenced here, but their
   implementation is not described in detail.
 * The details of integrating with fleet orchestration tools such as
-  MCE or ACM are left to a future enhancement.
+  Multi-cluster Engine (MCE) or Advanced Cluster Manager (ACM) are
+  left to a future enhancement.
 * We do not want to push MicroShift use on RHEL versions where OCP is
   not supported. We do have interest from users in RHEL 9, but will
   not GA on RHEL 9 faster than OCP does.
