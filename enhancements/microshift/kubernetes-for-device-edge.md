@@ -238,12 +238,11 @@ acting as both control plane and worker.
 
 Because MicroShift does not reuse the system operators from OpenShift,
 it will not be configured through API resources in the way that
-OpenShift is. Instead, we will use a new configuration file for the
-control plane (`/etc/microshift/config.yaml`) with [limited
-configuration
-options](https://github.com/openshift/microshift/blob/main/pkg/config/config.go). The
-node-side configuration will be done via the standard kubelet
-configuration file.
+OpenShift is. Instead, we will use a new configuration file to expose
+all of the configuration settings that make sense for MicroShift users
+to access to control the embedded components
+(`/etc/microshift/config.yaml`) with [limited configuration
+options](https://github.com/openshift/microshift/blob/main/pkg/config/config.go).
 
 Other operating system services will be configured outside of
 MicroShift using their standard configuration files. There is no
