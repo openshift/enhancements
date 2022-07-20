@@ -61,6 +61,8 @@ oc -n openshift-ingress-operator patch ingresscontrollers/default --type=merge -
 
 ## Proposal
 
+### Workflow Description
+
 ### API Extension
 
 Add a new field `ReloadInterval` to the IngressController API:
@@ -96,6 +98,7 @@ type IngressControllerTuningOptions struct {
 	ReloadInterval *metav1.Duration `json:"reloadInterval,omitempty"`
 }
 ```
+
 ### Implementation Details / Notes / Constraints
 
 To expose the `ReloadInterval` in HAProxy, the environment variable `RELOAD_INTERVAL` will be added to the environment in [desiredRouterDeployment](https://github.com/openshift/cluster-ingress-operator/blob/master/pkg/operator/controller/ingress/deployment.go).
@@ -107,8 +110,6 @@ The HAProxy template will not be modified.
 
 ## Design Details
 
-### Open Questions
-
 ### Test Plan
 
 ### Graduation Criteria
@@ -118,8 +119,6 @@ The HAProxy template will not be modified.
 ### Version Skew Strategy
 
 ### Operations Aspects of API Extensions
-
-### Failure Modes
 
 ## Implementation History
 
