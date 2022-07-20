@@ -94,8 +94,9 @@ applications.
 5. As a device administrator, I can specify application-specific logic
    with which the device will verify a successful upgrade and roll
    back the upgrade automatically if verification fails.
-6. As a device administrator, I have control over the operating
-   system running under MicroShift.
+6. As a device administrator, I have control over the operating system
+   running under MicroShift and can install kernel drivers, other
+   applications, agents, etc. easily.
 
 ### Goals
 
