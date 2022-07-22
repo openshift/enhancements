@@ -3,7 +3,6 @@ title: microshift-default-cni
 authors:
   - majopela
   - zshi-redhat
-  - dhellmann
 reviewers:
   - "@copejon, MicroShift contributor"
   - "@fzdarsky, MicroShift architect"
@@ -12,7 +11,7 @@ reviewers:
   - "@oglok, MicroShift contributor"
   - "@dcbw, OpenShift Networking Manager"
 approvers:
-  - "@derekwaynecarr"
+  - "@dhellmann"
 api-approvers:
   - None
 creation-date: 2022-07-18
@@ -32,36 +31,32 @@ This enhancement proposes the adoption of a default MicroShift CNI.
 
 MicroShift addresses customer use cases with low-resource,
 field-deployed edge devices (SBCs, SoCs) requiring a minimal K8s
-container orchestration layer.
+container orchestration layer, please see PR#1187 for more details.
 
-MicroShift is targeting a class of devices like Xilinx ZYNQ
-UltraScale+, fitlet2, NVIDIA Jetson TX2, or Intel NUCs that are
-pervasive in edge deployments. These cost a few hundred USD, have all
-necessary accelerators and I/O on-board, but are typically not
-extensible and are highly constrained on every resource, e.g.:
+We are proposing OVNKubernetes to align with all the other OpenShift form factors,
+and provide the ability to use NetworkPolicies which some customers demand.
 
-* CPU: ARM Cortex-A35-class or Intel Atom class CPU, 2-4 cores, 1.5GHz clock
-* memory: 2-16GB RAM
-* storage: e.g. SATA3 @ 6Gb/s, 10kIOPS, 1ms (vs. NVMe @ 32Gb/s,
-  500kIOPS, 10µs)
-* network: Less bandwidth and less reliable than data center-based
-  servers, including being completely disconnected for extended
-  periods. Likely 1Gb/s NICs, potentially even LTE/4G connections at
-  5-10Mbps, instead of 10/25/40Gb/s NICs
-
+In this enhancement we describe the changes made to the OVNKubernetes configuration
+as well as the work that needs to be done, and possible improvements.
 
 ## Motivation
 
 MicroShift used flannel during the proof of concept phase, which later on
-was simplified to bridge-cni, being that pluggin the most minimalistic
-plugin which would provide Pod to Pod communication in a single-node environment
-and nothing else.
+was simplified to bridge-cni, being that plugin the most minimalistic
+plugin which would provide Pod to Pod communication in a single node environment
+and nothing else. 
 
 A very important characteristic necessary for any CNI plugin used in MicroShift
-is a low-enough RAM, Disk, CPU footprint and boot times, as explained in the summary,
-the target platforms for MicroShift are small SBCs or SoCs where most of
-the computing capability must remain available for the final applications,
-otherwise MicroShift stops being useful in it's target environment.
+is a low-enough RAM, Disk (which translates to network bandwidth consumption on
+updates), CPU footprint and boot times.
+
+The target platforms for MicroShift are small SBCs or SoCs (Single Board Computers
+or Systems on Chip) where most of the computing capability must remain available
+for the final applications, otherwise MicroShift stops being useful in its target
+environment.
+
+An optimized OVNKubernetes is chosen for the reasons explained in the summary, and
+we believe this optimization is enough for most customers.
 
 ### User Stories
 
@@ -73,7 +68,8 @@ An application developer builds applications where:
 
 An application developer builds applications where some pods must
 have limited connectivity to other pods, or to the external network (i.e.
-plugin services from vendors which must only contact specific internal APIs)
+plugin services from vendors which must only contact specific internal APIs),
+this is implemented by NetworkPolicies.
 
 The edge device with MicroShift and the final application is deployed on an
 IPv6, or DualStack IPV4/IPV6 network.
@@ -87,8 +83,10 @@ provisioning like DHCP, SLAAC, or DHCPv6 and remain functional when the IP addre
 changes.
 
 ### Goals
- 
-* Implement a default CNI that satisfies the described user histories while
+* Choose a default CNI that will meet most MicroShift users' needs while
+  being supportable by the OpenShift networking team.
+
+* Implement a default CNI that satisfies the described user stories while
   minimizing the impact on footprint.
 
 * The CNI plugin should run without the ClusterNetworkOperator, providing
@@ -104,13 +102,14 @@ changes.
 * We are not trying to address high availability within the CNI, 
   high availability should be acomplished by having multiple edge devices working
   as single node MicroShifts.
-
-* LoadBalancer type of Services, as this is out of the scope of the CNI.
+* While some of the optimizations applied to OVNKuberneters in MicroShift could
+  be applicable to single-node OpenShift that is out of scope for this enhancement
+  and should be handled separately.
 
 ## Proposal
 
-To meet the requirements described in the user histories, as well footprint
-requirements of the edge environment, an optimized version of OVN Kubernetes
+To meet the requirements described in the user stories, as well footprint
+requirements of the edge environment, an optimized version of OVNKubernetes
 is proposed.
 
 This option aligns better with Red Hat's strategy on networking and avoids
@@ -120,11 +119,18 @@ Using OVN-kubernetes is only possible thanks to the following optimizations:
 * Single node operation
 * Communication via unix sockets, avoiding the need of TLS & Certificate creation
   at boot time
-* No leader election, as there is no high availability or multi-node operation.
-* OpenvSwitch and ovsdb-server RAM optimization (CPUAffinity=0 and --no-mlockall)
-* Workload partitioning, to limit the cpusets where specific ovn-kubernetes workloads
+* Removed CRDs for egressip, egressfirewall and egressqos. These CRDs are supported
+  by OVNKubernetes, but not required for microshift.
+* No leader election for the ovn databases, as there is no high availability or
+  multi-node operation.
+* OpenvSwitch and ovsdb-server RAM optimization
+  [CPUAffinity=0 and --no-mlockall](https://bugzilla.redhat.com/show_bug.cgi?id=2106570)
+* [Workload partitioning](https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md), 
+   to limit the cpusets where specific ovn-kubernetes workloads
   can run.
-* New ovn-kubernetes with reduced footprint, oriented to single node operation.
+* New ovn-kubernetes image with reduced footprint, oriented to single node operation.
+* ovn-dbchecker and kube-rbac-proxy containers are removed, ovn-dbchecker will run on the
+  ovn-master container.
 
 The optimizations reduce the total footprint impact of OVN-Kubernetes + OpenvSwitch
 down to:
@@ -137,12 +143,26 @@ Remaining work items in ovn-kubernetes:
 * Improve cache allocation in libovsdb (this accounts for 16MB on northd and southdb
   database clients)
 
+Ideas for future improvements:
+* Ovnk code efficiency: Using index, not list all. I.e.  getInterface(index)
+  vs getInterfaces(), avoid allocation of large buffers when not necessary,
+  use less informers or event broadcasters where possible.
+
+* Single node operation: Disable ingress ip rotation, Remove ovn-master leader
+  election, further simplification of the ovn topology.
+
+* Go optimizations: cgo enable/disable comparison, libovsdb, netlink libraries,
+  analizing heap memory usage via pprof
+
+* Debugging improvements: “-s -w” build flags to remove debug info, enable pprof only
+  on debug builds. 
+
 ### Workflow Description
 
 #### Deploying
 
 MicroShift should setup the CNI during startup, and any specific configurations
-to cri-o or the system should be handled by the RPM install of `microshift-networking`.
+to CRI-O or the system should be handled by the RPM install of `microshift-networking`.
 
 #### Upgrading
 
@@ -157,13 +177,7 @@ to the CNI)
 
 #### Deploying Applications
 
-Applications are deployed on MicroShift using standard Kubernetes
-resources such as Deployments, Services or NetworkPolicies. 
-They can be deployed at runtime via API calls, or embedded in the system
-image with the manifests loaded from the filesystem by MicroShift on startup.
-By using the `IfNotPresent` pull policy and adding images to the CRI-O cache
-in the system image, it is possible to build a device that can boot and
-launch the application without network access.
+Applications are deployed as usual.
 
 ### API Extensions
 
@@ -183,16 +197,6 @@ Footprint optimizations applied today could stop being effective in the
 long term. To mitigate this risk continous performance/footprint analysis
 must be implemented in MicroShift.
 
-Because MicroShift will run as only a single node, for application
-availability we will recommend running two single-node instances that
-deploy a common application in active/active or active/passive mode
-and then using existing tools to support failover between those states
-when either host is unable to provide availability.  This
-configuration is more reliable than a single node control plane with a
-worker, because if the worker loses access to the control plane
-(through power or network loss), the worker has no way to restore or
-recover its state, and all workloads could be affected.
-
 ### Drawbacks
 
 The drawback of using OVN Kubernetes instead of something simple like
@@ -211,6 +215,8 @@ CI.
 We will have end-to-end CI tests for many deployment scenarios.
 
 We will have manual and automated QE for other scenarios.
+
+We will have automated QE scenarios measuring RAM/Disk footprint.
 
 We will submit Kubernetes conformance results for MicroShift to the
 CNCF.
@@ -243,7 +249,7 @@ N/A
 
 ### Upgrade / Downgrade Strategy
 
-The ovn-dbchecker should maintain the database schema in sync with the
+The ovn-master should maintain the database schema in sync with the
 specific OVN version.
 
 ### Version Skew Strategy
@@ -273,10 +279,10 @@ N/A
 
 ### bridge-cni
 
-Bridge CNI is part of the cri-o project and provides minimal connectivity
+Bridge CNI is part of the CRI-O project and provides minimal connectivity
 between pods on a single node deployment. While bridge-cni is very lightweight,
 because nothing needs to be deployed into the cluster, and it's made of a single
-cni binary installed along with cri-o, it does not provide support for
+cni binary installed along with CRI-O, it does not provide support for
 NetworkPolicies.
 
 ### openshift-sdn
