@@ -35,7 +35,7 @@ top priority ask for the installer in the 4.12 release. The ARO team wants this 
 in order to filter logs when logs from multiple installs are pooled. For example, all installer
 logs could be decorated with a k/v pair denoting an aroClusterID:
 
-```
+```shell
 INFO OpenShift Installer unreleased-master-6230-gf46ac2f0d1a3628a51d3437bd79e4221da9aff23-dirty  aroClusterID=123
 INFO Built from commit f46ac2f0d1a3628a51d3437bd79e4221da9aff23  aroClusterID=123
 INFO Fetching Master Machines...                   aroClusterID=123
