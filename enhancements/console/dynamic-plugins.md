@@ -433,9 +433,9 @@ const VMHeading = () => {
 };
 ```
 
-In the `v1` API version, an additional field is introduced for enabling and loading i18n namespace that
+In the `v1` API version, an additional field is introduced for enabling and pre-loading i18n namespace that
 given dynamic plugin contains. The i18n namespace name follows `plugin__{plugin-name}` naming convention.
-If i18n is not enabled in the `ConsolePlugin` resource, no i18n namespaces will be loaded for the plugin.
+If i18n namespace is not pre-loaded, the only way how fetch it is through lazy-loading.
 
 ```yaml
 apiVersion: console.openshift.io/v1
@@ -445,7 +445,7 @@ metadata:
 spec:
   displayName: 'Advanced Cluster Management'
   i18n:
-    enabled: true
+    loadType: Preload
 ```
 
 In the 4.11 release, a `console.openshift.io/use-i18n` annotation
