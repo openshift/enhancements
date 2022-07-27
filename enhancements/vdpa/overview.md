@@ -1,15 +1,23 @@
 ---
 title: VDPA support in OCP (Overview)
 authors:
-  - Leonardo Milleri, Adrian Moreno Zapata, Ariel Adam
-reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
+  - Leonardo Milleri
+  - Adrian Moreno Zapata
+  - Ariel Adam
+reviewers:
+  - "@mandre"
+  - "@tjungblu"
+  - "@zshi-redhat"
+  - "@SchSeba"
+  - "@bn222"
 approvers:
-  - TBD
-api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - TBD
+  - "@dcbw"
+  - "@knobunc"
+api-approvers:
+  - "@dcbw"
+  - "@knobunc"
 creation-date: 2022-07-20
-last-updated: 2022-07-20
+last-updated: 2022-07-27
 status: provisional
 ---
 
