@@ -13,6 +13,10 @@ help:  ## Display this help
 image:  ## Build local container image
 	$(RUNTIME) image build -f ./hack/Dockerfile.markdownlint --tag enhancements-markdownlint:latest
 
+.PHONY: image-clean
+image-clean:  ## Remove locally cached image
+	$(RUNTIME) image rm enhancements-markdownlint:latest
+
 lint: image  ## run the markdown linter
 	$(RUNTIME) run \
 		--rm=true \
