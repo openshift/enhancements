@@ -21,6 +21,8 @@ tracking-link:
 see-also:
   - https://github.com/openshift/microshift/blob/main/docs/design.md
   - https://github.com/openshift/enhancements/pull/1187
+  - https://docs.google.com/document/d/1Adc2zgsmS83ooXXy-NR8-8HnrcIv4or1J4lSxWJB52A
+  - https://docs.google.com/document/d/1zvPucfb9prDp1sv5pAa9IbiQCnm61BSNyyQUpWA56R0
 ---
 
 # Default CNI 
