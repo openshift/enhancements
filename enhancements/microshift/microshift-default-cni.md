@@ -46,7 +46,7 @@ as well as the work that needs to be done, and possible improvements.
 MicroShift used flannel during the proof of concept phase, which later on
 was simplified to bridge-cni, being that plugin the most minimalistic
 plugin which would provide Pod to Pod communication in a single node environment
-and nothing else. 
+and nothing else.
 
 A very important characteristic necessary for any CNI plugin used in MicroShift
 is a low-enough RAM, Disk (which translates to network bandwidth consumption on
@@ -127,7 +127,7 @@ Using OVN-kubernetes is only possible thanks to the following optimizations:
   multi-node operation.
 * OpenvSwitch and ovsdb-server RAM optimization
   [CPUAffinity=0 and --no-mlockall](https://bugzilla.redhat.com/show_bug.cgi?id=2106570)
-* [Workload partitioning](https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md), 
+* [Workload partitioning](https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md),
    to limit the cpusets where specific ovn-kubernetes workloads
   can run.
 * New ovn-kubernetes image with reduced footprint, oriented to single node operation.
@@ -157,7 +157,7 @@ Ideas for future improvements:
   analizing heap memory usage via pprof
 
 * Debugging improvements: “-s -w” build flags to remove debug info, enable pprof only
-  on debug builds. 
+  on debug builds.
 
 ### Workflow Description
 
@@ -168,7 +168,7 @@ to CRI-O or the system should be handled by the RPM install of `microshift-netwo
 
 #### Upgrading
 
-Upgrades to the OVN database should be handled by the ovn-dbchecker during
+Upgrades to the OVN database should be handled by the ovnkube-master during
 the ovn startup process.
 
 #### Configuring
@@ -211,7 +211,7 @@ bridge-cni is the increase of disk, RAM and CPU footprint.
 1. 
 ### Test Plan
 
-We will run the relevant Kubernetes and OpenShift compliance tests in
+We will run the network Kubernetes and OpenShift compliance tests in
 CI.
 
 We will have end-to-end CI tests for many deployment scenarios.
