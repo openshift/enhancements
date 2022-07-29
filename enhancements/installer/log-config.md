@@ -81,11 +81,6 @@ type LogConfig struct {
   // Fields contains user-provided fields to be added to all log entries.
   // +optional
   Fields map[string]string `json:"fields,omitempty"`
-
-  // Level sets the level of logging to standard out. 
-  // Valid values: info, debug, warning, error, panic, fatal, trace
-  // +optional
-  Level *string `json:"level,omitempty"`
 }
 ```
 
@@ -111,7 +106,6 @@ fields:
   key1: value1
   key2: value2
   key3: value3
-level: debug
 ```
 
 ### Workflow Description
