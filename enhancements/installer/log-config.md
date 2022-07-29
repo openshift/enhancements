@@ -44,14 +44,20 @@ INFO Loading Master Machines...                    aroClusterID=123
 
 * We can generalize the ask from ARO so that it may be useful to other users
 * We should keep future logging needs in mind when designing this solution 
-so that we do not complicate or preclude future development work
+so that we do not complicate or preclude future development work. Future
+considerations could be:
+  * Configuring any hooks within `logrus`
+([list of service hooks](https://github.com/sirupsen/logrus/wiki/Hooks))
+  * Allowing formatting of logs as JSON (cf. `logrus`
+[config docs](https://pkg.go.dev/github.com/sirupsen/logrus?utm_source=godoc#JSONFormatter))
+  * Changing output path for logs
+  * Configuring any future logging solution other than `logrus`
 
 
 ### User Stories
 
 * As an installer user, I want to be able to provide a set of key-value pairs that
 will decorate all Installer log lines
-* As an installer user, I would like to configure the level of logging through a config file 
 * As an installer developer, I want the design for this user input to be extensible
 
 ### Goals
@@ -77,9 +83,9 @@ type LogConfig struct {
   Fields map[string]string `json:"fields,omitempty"`
 
   // Level sets the level of logging to standard out. 
-  // Valid values: Info, Debug, Warn, Error
+  // Valid values: info, debug, warning, error, panic, fatal, trace
   // +optional
-  Level string `json:"level,omitempty"`
+  Level *string `json:"level,omitempty"`
 }
 ```
 
@@ -87,8 +93,8 @@ The install-config is the typical vehicle for installer configuration,
 but it is not acceptable in this use case because the install-config
 is an Installer Asset, and logging must be configured:
 
-1. Before assets are initialized
-2. Despite asset failures
+* before assets are initialized
+* despite asset failures
 
 In the example use case of decorating logs with fields, we need
 to decorate lines that are output before the install config is loaded
@@ -133,7 +139,11 @@ best effort to complete the install although the logging is not
 properly configured? 
 
 My weakly held opinion is that we should prevent attempting installs if
-`log-config.yaml` is supplied but is misconfigured.
+`log-config.yaml` is supplied but misconfigured. This would be in line
+with existing installer behavior for the `--log-level` flag which
+errors if an invalid value is passed. Any additions to the config
+should be backwards compatible and the default path for the config
+file would not change.
 
 ### Drawbacks
 
@@ -143,19 +153,25 @@ environment variables (not supported for customer user). By introducing
 another method of configuration, we risk confusion. I do not think
 this is a serious drawback or perhaps even a valid one.
 
+A more serious consideration is whether this should be implemented by the installer
+at all; or just handled by the client. The main drawbacks to implementing this in the
+installer are opportunity cost and maintenance. The implementation is not highly complex
+so from a technical perspective, the main drawback would be a potential slippery slope
+of introducing a second API for logging configuration.
+
 ## Design Details
 
 ### Open Questions [optional]
 
-This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance,
- 1. Should logging misconfiguration prevent installs? (see Risks & Mitigations)
- 2. Should log-config.yaml be versioned according to k8s API versioning?
+1. Should this logging functionality be implemented in the installer or be
+the responsibility of the client?
+3. Should logging misconfiguration prevent installs? (see Risks & Mitigations)
+4. Should log-config.yaml be versioned according to k8s API versioning?
 
 ### Test Plan
 
 For e2e-tests, it would be possible to drop a log-config.yaml
-file in the configuration stags and ensure that logs are
+file in the configuration steps and ensure that logs are
 properly configured.
 
 ### Graduation Criteria
@@ -187,3 +203,5 @@ misconfiguration should prevent an install from launching.
 * install config has been ruled out for reasons discussed above
 * env vars are not supported for customer use
 * passing logging configuration directly through the CLI has poor UX
+* implementing this as an "undocumented" feature that could be used
+purely by managed services or internal use cases
