@@ -1,5 +1,5 @@
 ---
-title: Virtio/vDPA with OVN HW offloading
+title: virtio-vdpa-ovn-hw-offload
 authors:
   - Leonardo Milleri
   - Adrian Moreno Zapata
@@ -17,18 +17,19 @@ api-approvers:
   - "@dcbw"
   - "@knobunc"
 creation-date: 2022-07-13
-last-updated: 2022-07-20
-status: provisional
+last-updated: 2022-07-29
+tracking-link: 
+  - https://issues.redhat.com/browse/NP-19
 ---
 
 
-# Virtio/vDPA with OVN HW offloading
+# Virtio/vDPA with OVN HW offload
 
 The purpose of this enhancement is to provide a proposal for integrating Virtio/vDPA in OCP for container workloads.
 
 
 ## Summary
-See [VDPA support in OCP (Overview)](https://github.com/openshift/enhancements/blob/master/enhancements/vdpa/overview.md).
+See [VDPA support in OCP (Overview)](https://github.com/openshift/enhancements/blob/master/enhancements/vdpa/vdpa-support-overview.md).
 
 Main aspects of this enhancement:
 - primary interface in the pod is configured as a Virtio/vDPA device
@@ -46,7 +47,7 @@ The main motivation is to integrate a Virtio/vDPA device in Openshift.
 
 Details are provided in the overview enhancement.
 
-### Goal
+### Goals
 
 - As a user I want to configure an Openshift cluster with Virtio/VDPA support.
 - As a user I want to determine how many VFs to create for a given NIC and how each VF should be consumed by workloads (e.g., netdev device in the container network namespace)
@@ -61,7 +62,7 @@ Details are provided in the overview enhancement.
 
 The following diagram depicts all the involved components and their interactions:
 
-![alt text](vdpa-architecure.png "VDPA architecture")
+![alt text](vdpa-architecture.png "VDPA architecture")
 
 ### Workflow Description
 
@@ -73,15 +74,15 @@ The following diagram depicts all the involved components and their interactions
 
 #### SRIOV network operator workflow
 
- - Deploy the SRIOV device plugin
- - Deploy OpenVswitch in HW offload mode
- - Configure the VFs (same as SR-IOV: echo N > /sys/devices/{PF}/sriov_numvfs)
- - Install vendor-independent kernel drivers: vdpa, virtio-vdpa
- - Install vendor-dependent kernel drivers, e.g. mlx5-vdpa for Mellanox cards
- - Put NIC in switchdev mode (smart NIC)
- - (Vendor specific) Bind the right PCI driver. Some vendors might implement vdpa in a different PCI driver (e.g: Intel’s ifcvf). Others might keep the same pci driver and require extra steps (e.g: in mellanox vdpa, the VF is still bound to “mlx5_core”)
- - Enable HW offload mode on PF, VFs and port representors
- - (Vendor specific) Create the vdpa device. Some vendors might require no extra steps because they create the vdpa device on a pci driver probe (e.g: ifcvf). Others might need extra steps (e.g: Mellanox requires loading an additional driver and in the future, they 	might require managing a “virtual bus”(source)). The plan is to extend the govdpa library to provide such functionality.
+- Deploy the SRIOV device plugin
+- Deploy OpenVswitch in HW offload mode
+- Configure the VFs (same as SR-IOV: echo N > /sys/devices/{PF}/sriov_numvfs)
+- Install vendor-independent kernel drivers: vdpa, virtio-vdpa
+- Install vendor-dependent kernel drivers, e.g. mlx5-vdpa for Mellanox cards
+- Put NIC in switchdev mode (smart NIC)
+- (Vendor specific) Bind the right PCI driver. Some vendors might implement vdpa in a different PCI driver (e.g: Intel’s ifcvf). Others might keep the same pci driver and require extra steps (e.g: in mellanox vdpa, the VF is still bound to “mlx5_core”)
+- Enable HW offload mode on PF, VFs and port representors
+- (Vendor specific) Create the vdpa device. Some vendors might require no extra steps because they create the vdpa device on a pci driver probe (e.g: ifcvf). Others might need extra steps (e.g: Mellanox requires loading an additional driver and in the future, they 	might require managing a “virtual bus”(source)). The plan is to extend the govdpa library to provide such functionality.
 - Bind the vdpa device to the correct vdpa bus driver (virtio-vdpa driver in the first implementation). This is not vendor specific and uses a sysfs-based API.
 - Add the appropriate vdpa flags to the SR-IOV Device Plugin’s configMap.
 - Create the Network Attachment Definitions
