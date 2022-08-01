@@ -29,7 +29,7 @@ Given that it’s an abstraction layer on top of SRIOV (Single Root I/O Virtuali
 
 Virtio (see [spec](https://docs.oasis-open.org/virtio/virtio/v1.1/csprd01/virtio-v1.1-csprd01.html)) is used for the data plane while vDPA is used to simplify the control plane thus this solution in general is called virtio/VDPA.
 
-Virtio/vDPA can provide acceleration capabilities replacing SRIOV both for VMs and containers. In this proposal we focus on adding virtio/vDPA capabilities to Openshift SDN as dev-preview for container workloads focusing on Nvidia connectx-6 DX NICs. In the future support for Nvidia Bluefield2/Bluefield3 is planned to be provided as well as support for VMs in openshift (kubevirt and kata containers).
+Virtio/vDPA can provide acceleration capabilities replacing SRIOV both for VMs and containers. In this proposal we focus on adding virtio/vDPA capabilities to OVN-Kubernetes as dev-preview for container workloads focusing on Nvidia connectx-6 DX NICs. In the future support for Nvidia Bluefield2/Bluefield3 is planned to be provided as well as support for VMs in openshift (kubevirt and kata containers).
 
 Virtio/vDPA can be consumed in two different ways by the user:
 - virtio-vdpa for container workloads
