@@ -140,9 +140,23 @@ E2E Tests
 
 ### Upgrade/Downgrade Strategy
 
+Upgrading from a previous release that does not have `Spec.TuningOptions.ReloadInterval` will leave the field empty, which is an acceptable state. With the field empty, the default value of 5s will be used.
+
+If `Spec.TuningOptions.ReloadInterval` is set when downgrading to a release without the field, the value will be discarded, and the ingress controller will revert to the previous default of 5s.
+
 ### Version Skew Strategy
 
+N/A
+
 ### Operations Aspects of API Extensions
+
+#### Failure Modes
+
+N/A
+
+#### Support Procedures
+
+If the frequency of reloads compromises the performance of HAProxy, and the revert to default values does not fix it, then that is indicative of another issue.
 
 ## Implementation History
 
