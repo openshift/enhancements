@@ -71,31 +71,39 @@ Add a new field `ReloadInterval` to the IngressController API:
 // IngressControllerTuningOptions specifies options for tuning the performance
 // of ingress controller pods
 type IngressControllerTuningOptions struct {
-    ...
+  	...
 
-    // reloadInterval defines the minimum interval at which the router is allowed to reload
-    // to accept new changes. Increasing this value can prevent the accumulation of
-    // HAProxy processes, depending on the scenario. Increasing this interval can
-    // also lessen load imbalance on a backend's servers when using the roundrobin
-    // balancing algorithm. Alternatively, decreasing this value may decrease latency
-    // since updates to HAProxy's configuration can take effect more quickly.
-    //
-    // The value must be a time duration value; see <https://pkg.go.dev/time#ParseDuration>.
-    // Currently, the minimum value allowed is 1s, and the maximum allowed value is
-    // 720h (= 30 days). Minimum and maximum allowed values may change in future versions
-    // of OpenShift.
-    //
-    // An empty reloadInterval tells the IngressController to choose the default, which
-    // is currently 5s.
-    //
-    // This field expects an unsigned duration string of integer numbers, each with a unit suffix,
-    // e.g. "300s", "1h", "2h45m". Valid time units are "s", "m", and "h".
-    //
-    // +kubebuilder:validation:Optional
-    // +kubebuilder:validation:Pattern=^(0|([0-9]+(s|m|h))+)$
-    // +kubebuilder:validation:Type:=string
-    // +optional
-	ReloadInterval *metav1.Duration `json:"reloadInterval,omitempty"`
+	// reloadInterval defines the minimum interval at which the router is allowed to reload
+	// to accept new changes. Increasing this value can prevent the accumulation of
+	// HAProxy processes, depending on the scenario. Increasing this interval can
+	// also lessen load imbalance on a backend's servers when using the roundrobin
+	// balancing algorithm. Alternatively, decreasing this value may decrease latency
+	// since updates to HAProxy's configuration can take effect more quickly.
+	//
+	// The value must be a time duration value; see <https://pkg.go.dev/time#ParseDuration>.
+	// Currently, the minimum value allowed is 1s, and the maximum allowed value is
+	// 120s. Minimum and maximum allowed values may change in future versions of OpenShift.
+	// Note that if a duration outside of these bounds is provided, the value of reloadInterval
+	// will be capped/floored and not rejected (e.g. a duration of over 120s will be capped to
+	// 120s; the IngressController will not reject and replace this disallowed value with
+	// the default).
+	//
+	// A nil or zero value for reloadInterval tells the IngressController to choose the default,
+	// which is currently 5s and subject to change.
+	//
+	// This field expects an unsigned duration string of decimal numbers, each with optional
+	// fraction and a unit suffix, e.g. "100s", "1m30s". Valid time units are "s" and "m".
+	//
+	// Note: Setting a value significantly larger than the default of 5s can cause latency
+	// in observing updates to routes and their endpoints. HAProxy's configuration will
+	// be reloaded less frequently, and newly created routes will not be served until the
+	// subsequent reload.
+	//
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:Pattern=^(0|([0-9]+(\.[0-9]+)?(s|m))+)$
+	// +kubebuilder:validation:Type:=string
+	// +optional
+	ReloadInterval metav1.Duration `json:"reloadInterval,omitempty"`
 }
 ```
 
@@ -106,13 +114,29 @@ The HAProxy template will not be modified.
 
 ### Risks and Mitigation
 
+A risk in this proposal is that customers who set a long reload interval to decrease the potential memory usage of HAProxy instances may inadverdently create latency issues in the cluster. Setting a large value for the reload interval can cause significant latency in observing updates to routes and their endpoints. This is because HAProxy's configuration will be reloaded less frequently, and newly created routes will not be served until the subsequent reload.
+
+To mitigate this risk, we will set a lower cap (than other interval environment variables) to limit the largest time interval that `reloadInterval` will accept. In addition, we have also included a note in the API godoc warning users of the possible risk in setting a large reload interval.
+
 ### Drawbacks
 
 ## Design Details
 
 ### Test Plan
 
+Unit testing can validate that `desiredRouterDeployment` sets the `RELOAD_INTERVAL` environment variable correctly. Unit testing can also validate that `capReloadIntervalValue` in deployment.go sets minimum and maximum caps correctly.
+
+E2E Tests
+
+1. Create a new IngressController. Wait for an ingress controller pod to be deployed.
+
 ### Graduation Criteria
+
+#### Dev Preview -> Tech Preview
+
+#### Tech Preview -> GA
+
+#### Removing a deprecated feature
 
 ### Upgrade/Downgrade Strategy
 
