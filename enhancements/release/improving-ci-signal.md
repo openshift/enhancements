@@ -189,9 +189,20 @@ change. And only a repo is impacted by the revert.
 Mechanically, a person who notices the payload is blocked can...
 
 1. Find all the changes made to the payload. The set is small for single payloads.
-2. Manually open reverts of the PRs that have changed.
-3. /hold the revert PRs and manually request payload promotion jobs on each of the revert PRs.
-4. If one of the revert PRs shows the payload promotion problem is fixed, the revert can be immediately merged.
+2. By examing logs on the failed payload jobs, it's possible to gather
+   enough evidence that a specific PR broke the payload. In this case,
+   we revert that PR.
+3. In cases where the cause is ambigous, but a code change is suspected,
+   you may open multiple investigatory reverts to confirm which PR was the
+   source of the problem. In that case, /hold the revert PRs and manually
+   request payload promotion jobs on each of the revert PRs. If one of
+   the revert PRs shows the payload promotion problem is fixed, the
+   revert can be immediately merged.
+4. The reverter must file a bug or jira for the team whose PR was
+   reverted, with instructions about how to come back in (see below).
+
+Note: specific PR language and revert instructions are available in
+TRT's [Revert playbook](https://docs.google.com/document/d/1WRfFQwHU-d_-DEWiz-Dl-JBH3gLQvYqizea2vNmKCsA/edit).
 
 #### So I’m reverted, but my functionality is important, how do I come back in?
 
