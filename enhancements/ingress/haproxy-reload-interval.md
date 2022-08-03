@@ -119,7 +119,7 @@ type IngressControllerTuningOptions struct {
 
 ### Implementation Details / Notes / Constraints
 
-To expose the `ReloadInterval` in HAProxy, the environment variable `RELOAD_INTERVAL` will be added to the environment in [desiredRouterDeployment](https://github.com/openshift/cluster-ingress-operator/blob/master/pkg/operator/controller/ingress/deployment.go). desiredRouterDeployment will also ensure that the value passed to `RELOAD_INTERVAL` is within the range of 1 second - 120 seconds.
+To expose the `ReloadInterval` in HAProxy, the environment variable `RELOAD_INTERVAL` will be added to the environment in [desiredRouterDeployment](https://github.com/openshift/cluster-ingress-operator/blob/master/pkg/operator/controller/ingress/deployment.go). desiredRouterDeployment will also ensure that the value passed to `RELOAD_INTERVAL` is within the range of 1 second - 120 seconds. If `ReloadInterval` is not set by the user or has a zero value, the default of 5 seconds will be used.
 The `reloadInterval` field expects an unsigned duration string of decimal numbers, each with optional fraction and a unit suffix, e.g. "100s", "1m30s". Valid time units are "s" and "m". This will be enforced by the API's validation.
 The HAProxy template will not be modified.
 Since `ReloadInterval` will be exposed as a tuning option in `IngressControllerTuningOptions`, it will no longer be an unsupported config and will be removed from `unsupportedConfigOverrides` in desiredRouterDeployment.
