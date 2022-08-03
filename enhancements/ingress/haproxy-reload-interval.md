@@ -3,15 +3,24 @@ title: haproxy-reload-interval
 authors:
   - "@Ethany-RH"
 reviewers:
-  - "?"
+  - "@frobware"
+  - "@knobunc"  
+  - "@Miciah"
+  - "@candita"
+  - "@miheer"
+  - "@rfredette"
 approvers:
-  - "?"
-api-approvers: # necessary?
-  - "?"
+  - "@Miciah"
+  - "@frobware"
+  - "@candita"
+api-approvers:
+  - "@deads2k"
 creation-date: 2022-07-01
-last-updated: 2022-07-01
+last-updated: 2022-08-03
 tracking-link:
   - "https://issues.redhat.com/browse/NE-586"
+  - "https://issues.redhat.com/browse/NE-978"
+  - "https://issues.redhat.com/browse/NE-979"
 see-also:
 replaces:
 superseded-by:
@@ -29,21 +38,22 @@ superseded-by:
 
 ## Summary
 
-Add an API field to configure OpenShift router's `RELOAD_INTERVAL` environment variable so that administrators can define the minimum frequency the router is allowed to reload to accept new changes.
+Add an API field to configure OpenShift router's `RELOAD_INTERVAL` environment variable so that administrators can define the minimum frequency the router is allowed to reload in order to publish new changes.
 
-OpenShift router currently hard-codes this reload interval to 5s. It should be possible for administrators to tune this value as necessary. Based on the processes run in the cluster and the frequency that it sees new changes, increasing the minimum interval at which the router is allowed to reload can improve its efficiency.
+OpenShift router currently hard-codes this reload interval to 5 seconds. It should be possible for administrators to tune this value as necessary. Based on the processes run in the cluster and the frequency that it sees new changes, increasing the minimum interval at which the router is allowed to reload can improve its efficiency.
 This proposal extends the existing IngressController API to add a tuning option for the reload interval.
 
 ## Motivation
 
-When there is an update to a route or endpoint in the cluster, the configuration for HAProxy changes, requiring that it reload for those changes to take effect. When HAProxy reloads to generate a new process with the updated configuration, it must keep the old process running until all its connections die. As such, frequent reloading increases the rate of accumulation of HAProxy processes, particularly if it has to handle many long-lived connections. The default reload interval is set as 5 seconds, which is too low for some scenarios, so it is important that administrators can extend this time interval.
+When there is an update to a route or endpoint in the cluster, the configuration for HAProxy changes, requiring that it reload for those changes to take effect. When HAProxy reloads to generate a new process with the updated configuration, it must keep the old process running until all its connections die. As such, too-frequent reloading can increase the rate of accumulation of HAProxy processes, particularly if it has to handle many long-lived connections. The default reload interval is set as 5 seconds, which is too low for some scenarios, so it is important that administrators can extend this time interval.
 
-In addition, HAProxy's roundrobin balancing starts over from the first server every time HAProxy reloads. Thus, another motivating factor is that frequent reloads can cause load imbalance on a backend's servers when using the roundrobin balancing algorithm.
+In addition, some of HAProxy's load balancing algorithms are disrupted by reloads. For instance, HAProxy's roundrobin load balancing starts over from the first server every time HAProxy reloads. Thus, another motivating factor is that frequent reloads can cause load imbalance on a backend's servers when using the roundrobin balancing algorithm.
 
 ### Goals
 
-1. Enable the configuration of a reload interval via the `IngressControllerSpec`, specifically via the `IngressControllerSpecTuningOptions`, with a new parameter `ReloadInterval`. `ReloadInterval` exposes OpenShift router's internal environment variable `RELOAD_INTERVAL` as an API that the cluster administrator can set.
+1. Enable the configuration of a reload interval via the `IngressControllerSpec`, specifically via the `IngressControllerTuningOptions`, with a new parameter `ReloadInterval`. `ReloadInterval` exposes OpenShift router's internal environment variable `RELOAD_INTERVAL` as an API that the cluster administrator can set.
 2. Leave the default interval at 5 seconds so that we do not perturb the behavior of existing clusters, particularly during upgrades.
+3. Impose limits on the range of allowed values for the reload interval. Specifically, the duration must be between 1 second and 120 seconds.
 
 ### Non-Goals
 
@@ -88,8 +98,8 @@ type IngressControllerTuningOptions struct {
 	// 120s; the IngressController will not reject and replace this disallowed value with
 	// the default).
 	//
-	// A nil or zero value for reloadInterval tells the IngressController to choose the default,
-	// which is currently 5s and subject to change.
+	// A zero value for reloadInterval tells the IngressController to choose the default,
+	// which is currently 5s and subject to change without notice.
 	//
 	// This field expects an unsigned duration string of decimal numbers, each with optional
 	// fraction and a unit suffix, e.g. "100s", "1m30s". Valid time units are "s" and "m".
@@ -109,16 +119,23 @@ type IngressControllerTuningOptions struct {
 
 ### Implementation Details / Notes / Constraints
 
-To expose the `ReloadInterval` in HAProxy, the environment variable `RELOAD_INTERVAL` will be added to the environment in [desiredRouterDeployment](https://github.com/openshift/cluster-ingress-operator/blob/master/pkg/operator/controller/ingress/deployment.go).
+To expose the `ReloadInterval` in HAProxy, the environment variable `RELOAD_INTERVAL` will be added to the environment in [desiredRouterDeployment](https://github.com/openshift/cluster-ingress-operator/blob/master/pkg/operator/controller/ingress/deployment.go). desiredRouterDeployment will also ensure that the value passed to `RELOAD_INTERVAL` is within the range of 1 second - 120 seconds.
+The `reloadInterval` field expects an unsigned duration string of decimal numbers, each with optional fraction and a unit suffix, e.g. "100s", "1m30s". Valid time units are "s" and "m". This will be enforced by the API's validation.
 The HAProxy template will not be modified.
+Since `ReloadInterval` will be exposed as a tuning option in `IngressControllerTuningOptions`, it will no longer be an unsupported config and will be removed from `unsupportedConfigOverrides` in desiredRouterDeployment.
 
 ### Risks and Mitigation
 
-A risk in this proposal is that customers who set a long reload interval to decrease the potential memory usage of HAProxy instances may inadverdently create latency issues in the cluster. Setting a large value for the reload interval can cause significant latency in observing updates to routes and their endpoints. This is because HAProxy's configuration will be reloaded less frequently, and newly created routes will not be served until the subsequent reload.
+A risk in this proposal is that customers who set a long reload interval to decrease the potential memory usage of HAProxy instances may inadverdently
+create latency issues in the cluster. Setting a large value for the reload interval can cause significant latency in observing updates to routes and their
+endpoints. This is because HAProxy's configuration will be reloaded less frequently, and newly created routes will not be served until the subsequent
+reload.
 
 To mitigate this risk, we will set a lower cap (than other interval environment variables) to limit the largest time interval that `reloadInterval` will accept. In addition, we have also included a note in the API godoc warning users of the possible risk in setting a large reload interval.
 
 ### Drawbacks
+
+This enhancement is customer-driven and is not proven to have the effects that the customer desires.
 
 ## Design Details
 
@@ -140,9 +157,12 @@ E2E Tests
 
 #### Removing a deprecated feature
 
+N/A
+
 ### Upgrade/Downgrade Strategy
 
 Upgrading from a previous release that does not have `Spec.TuningOptions.ReloadInterval` will leave the field empty, which is an acceptable state. With the field empty, the default value of 5s will be used.
+Note that even if the user has `ReloadInterval` set in `unsupportedConfigOverrides`, the new `Spec.TuningOptions.ReloadInterval` will still be empty after upgrading.
 
 If `Spec.TuningOptions.ReloadInterval` is set when downgrading to a release without the field, the value will be discarded, and the ingress controller will revert to the previous default of 5s.
 
@@ -158,7 +178,7 @@ N/A
 
 #### Support Procedures
 
-If the frequency of reloads compromises the performance of HAProxy, and the revert to default values does not fix it, then that is indicative of another issue.
+If the frequency of reloads compromises the performance of HAProxy, and the revert to the default value of 5 seconds does not fix the performance problem, then that is indicative of another issue.
 
 ## Implementation History
 
