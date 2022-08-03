@@ -47,7 +47,7 @@ This proposal extends the existing IngressController API to add a tuning option 
 
 When there is an update to a route or endpoint in the cluster, the configuration for HAProxy changes, requiring that it reload for those changes to take effect. When HAProxy reloads to generate a new process with the updated configuration, it must keep the old process running until all its connections die. As such, too-frequent reloading can increase the rate of accumulation of HAProxy processes, particularly if it has to handle many long-lived connections. The default reload interval is set as 5 seconds, which is too low for some scenarios, so it is important that administrators can extend this time interval.
 
-In addition, some of HAProxy's load balancing algorithms are disrupted by reloads. For instance, HAProxy's roundrobin load balancing starts over from the first server every time HAProxy reloads. Thus, another motivating factor is that frequent reloads can cause load imbalance on a backend's servers when using the roundrobin balancing algorithm.
+In addition, some of HAProxy's load balancing algorithms are disrupted by reloads. For instance, HAProxy's roundrobin load balancing starts over from the first server every time HAProxy reloads. Thus, another motivating factor is that too-frequent reloads can cause load imbalance on a backend's servers when using certain load balancing algorithms.
 
 ### Goals
 
