@@ -75,7 +75,7 @@ oc -n openshift-ingress-operator patch ingresscontrollers/default --type=merge -
 
 ### Workflow Description
 
-### API Extension
+### API Extensions
 
 Add a new field `ReloadInterval` to the IngressController API:
 
@@ -128,7 +128,7 @@ The `reloadInterval` field expects an unsigned duration string of decimal number
 The HAProxy template will not be modified.
 Since `ReloadInterval` will be exposed as a tuning option in `IngressControllerTuningOptions`, it will no longer be an unsupported config and will be removed from `unsupportedConfigOverrides` in desiredRouterDeployment.
 
-### Risks and Mitigation
+### Risks and Mitigations
 
 A risk in this proposal is that customers who set a long reload interval to decrease the potential memory usage of HAProxy instances may inadverdently
 create latency issues in the cluster. Setting a large value for the reload interval can cause significant latency in observing updates to routes and their
@@ -163,7 +163,7 @@ E2E Tests
 
 N/A
 
-### Upgrade/Downgrade Strategy
+### Upgrade / Downgrade Strategy
 
 Upgrading from a previous release that does not have `Spec.TuningOptions.ReloadInterval` will leave the field empty, which is an acceptable state. With the field empty, the default value of 5s will be used.
 Note that even if the user has `ReloadInterval` set in `unsupportedConfigOverrides`, the new `Spec.TuningOptions.ReloadInterval` will still be empty after upgrading.
@@ -174,7 +174,7 @@ If `Spec.TuningOptions.ReloadInterval` is set when downgrading to a release with
 
 N/A
 
-### Operations Aspects of API Extensions
+### Operational Aspects of API Extensions
 
 #### Failure Modes
 
