@@ -129,6 +129,8 @@ Unit testing can validate that `desiredRouterDeployment` sets the `RELOAD_INTERV
 E2E Tests
 
 1. Create a new IngressController. Wait for an ingress controller pod to be deployed.
+2. Patch the IngressController to set `spec.tuningOptions.reloadInterval` to values that do not pass the regex validation. Wait for the ingress controller pod to be updated. Verify that a regex validation error is thrown and that the router deployment has the environment variable `RELOAD_INTERVAL` unchanged (i.e. still at the default of 5s).
+3. Patch the IngressController to set `spec.tuningOptions.reloadInterval` to values that pass the regex validation. Wait for the ingress controller pod to be updated. Verify that the router deployment has the environment variable `RELOAD_INTERVAL` set to the expected value.
 
 ### Graduation Criteria
 
