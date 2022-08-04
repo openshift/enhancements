@@ -121,8 +121,8 @@ type IngressControllerTuningOptions struct {
 
 ### Implementation Details / Notes / Constraints
 
-To expose the `ReloadInterval` in HAProxy, the environment variable `RELOAD_INTERVAL` will be added to the environment in [desiredRouterDeployment](https://github.com/openshift/cluster-ingress-operator/blob/master/pkg/operator
-controller/ingress/deployment.go). desiredRouterDeployment will also ensure that the value passed to `RELOAD_INTERVAL` is within the range of 1 second - 120 seconds. If `ReloadInterval` is not set by the user or has a zero value,
+To expose the `ReloadInterval` in HAProxy, the environment variable `RELOAD_INTERVAL` will be added to the environment in [desiredRouterDeployment](https://github.com/openshift/cluster-ingress-operator/blob/master/pkg/operatorcontroller/ingress/deployment.go).
+desiredRouterDeployment will also ensure that the value passed to `RELOAD_INTERVAL` is within the range of 1 second - 120 seconds. If `ReloadInterval` is not set by the user or has a zero value,
 the default of 5 seconds will be used.
 The `reloadInterval` field expects an unsigned duration string of decimal numbers, each with optional fraction and a unit suffix, e.g. "100s", "1m30s". Valid time units are "s" and "m". This will be enforced by the API's validation.
 The HAProxy template will not be modified.
@@ -130,7 +130,7 @@ Since `ReloadInterval` will be exposed as a tuning option in `IngressControllerT
 
 ### Risks and Mitigations
 
-A risk in this proposal is that customers who set a long reload interval to decrease the potential memory usage of HAProxy instances may inadverdently
+A risk in this proposal is that customers who set a long reload interval to decrease the potential memory usage of HAProxy instances may inadvertently
 create latency issues in the cluster. Setting a large value for the reload interval can cause significant latency in observing updates to routes and their
 endpoints. This is because HAProxy's configuration will be reloaded less frequently, and newly created routes will not be served until the subsequent
 reload.
@@ -155,13 +155,19 @@ E2E Tests
 
 ### Graduation Criteria
 
+This enhancement does not require graduation milestones.
+
 #### Dev Preview -> Tech Preview
+
+N/A; This feature will go directly to GA.
 
 #### Tech Preview -> GA
 
+N/A; This feature will go directly to GA.
+
 #### Removing a deprecated feature
 
-N/A
+N/A; We do not plan to deprecate this feature.
 
 ### Upgrade / Downgrade Strategy
 
