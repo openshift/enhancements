@@ -1,21 +1,22 @@
 ---
-title: dual-stack-vips
+title: on-prem-dual-stack-vips
 authors:
-  - @cybertron
+  - "@cybertron"
+  - "@creydr"
 reviewers:
-  - @creydr
-  - @dougsland
+  - "@creydr"
+  - "@dougsland"
 approvers:
-  - @patrickdillon
-  - @kirankt
-  - @shardy
-  - @cgwalters
-  - @kikisdeliveryservice
+  - "@patrickdillon"
+  - "@kirankt"
+  - "@shardy"
+  - "@cgwalters"
+  - "@kikisdeliveryservice"
 api-approvers:
-  - @danwinship
-  - @aojea
+  - "@danwinship"
+  - "@aojea"
 creation-date: 2022-03-01
-last-updated: 2022-04-08
+last-updated: 2022-08-02
 tracking-link:
   - https://issues.redhat.com/browse/SDN-2213
 see-also:
@@ -88,6 +89,12 @@ Minimal risk. This is just adding another VIP, something we already have in
 our deployments. The main concern would be logic errors arising out of
 the need to handle multiple VIPs, which (if they happen) will need to be
 addressed as bugs.
+
+### Drawbacks
+
+Nothing significant. A very small amount of compute resources will be used
+to manage the new VIPs. Even this can be avoided by simply not specifying
+the second VIP if it is not needed.
 
 ## Design Details
 
@@ -258,6 +265,21 @@ will be maintained. We will not (and cannot) automatically add new VIPs to a
 cluster on upgrade. If a deployer of an older dual stack cluster wants the new
 VIP functionality that will have to be a separate operation from upgrade.
 
+CNO takes care updating the new fields (`apiServerInternalIPs` &
+`ingressInternalIPs`) and old fields (`apiServerInternalIP` &
+`ingressInternalIP`) in [openshift/api](#openshiftapi) to have a consistent API
+between versions and therefore keeping clients consuming the old API functional.
+
+The following table shows the rules how the fields are set:
+
+| Case | Initial value of new field | Initial value of old field | Resulting value of new field | Resulting value of old field | Description |
+| ---- | -------------------------- | -------------------------- | ---------------------------- | ---------------------------- | ----------- |
+| 1    | _empty_                    | foo                        | [0]: foo                     | foo                          | `new` field is empty, `old` with value: set `new[0]` to value from `old` |
+| 2    | [0]: foo <br />[1]: bar    | _empty_                    | [0]: foo <br />[1]: bar      | foo                          | `new` contains values, `old` is empty: set `old` to value from `new[0]` |
+| 3    | [0]: foo <br />[1]: bar    | foo                        | [0]: foo <br />[1]: bar      | foo                          | `new` field contains values, `old` contains `new[0]`: we are fine, as `old` is part of `new` |
+| 4    | [0]: foo <br />[1]: bar    | bar                        | [0]: foo <br />[1]: bar      | foo                          | `new` contains values, `old` contains `new[1]`: as `new[0]` contains the clusters primary IP family, new values take precedence over old values, so set `old` to value from `new[0]` |
+| 5    | [0]: foo <br />[1]: bar    | baz                        | [0]: foo <br />[1]: bar      | foo                          | `new` contains values, `old` contains a value which is not included in `new`: new values take precedence over old values, so set `old` to value from `new[0]` (and log a warning) |
+
 ### Version Skew Strategy
 
 This will also be handled as it is today. The keepalived configuration used
@@ -281,12 +303,6 @@ NA
 ## Implementation History
 
 4.11: Initial implementation
-
-## Drawbacks
-
-Nothing significant. A very small amount of compute resources will be used
-to manage the new VIPs. Even this can be avoided by simply not specifying
-the second VIP if it is not needed.
 
 ## Alternatives
 
