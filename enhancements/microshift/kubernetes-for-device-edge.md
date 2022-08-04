@@ -156,7 +156,6 @@ Today the all-in-one binary includes:
 * Kubernetes controller manager
 * Kubernetes scheduler
 * Kubelet
-* Kube Proxy Server
 * OpenShift API server
 * OpenShift controller manager
 * OpenShift SCC manager
