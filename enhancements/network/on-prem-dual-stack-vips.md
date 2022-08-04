@@ -277,7 +277,7 @@ The following table shows the rules how the fields are set:
 | 1    | _empty_                    | foo                        | [0]: foo                     | foo                          | `new` field is empty, `old` with value: set `new[0]` to value from `old` |
 | 2    | [0]: foo <br />[1]: bar    | _empty_                    | [0]: foo <br />[1]: bar      | foo                          | `new` contains values, `old` is empty: set `old` to value from `new[0]` |
 | 3    | [0]: foo <br />[1]: bar    | foo                        | [0]: foo <br />[1]: bar      | foo                          | `new` field contains values, `old` contains `new[0]`: we are fine, as `old` is part of `new` |
-| 4    | [0]: foo <br />[1]: bar    | bar                        | [0]: foo <br />[1]: bar      | bar                          | `new` contains values, `old` contains `new[1]`: we are fine, as `old` is part of `new` |
+| 4    | [0]: foo <br />[1]: bar    | bar                        | [0]: foo <br />[1]: bar      | foo                          | `new` contains values, `old` contains `new[1]`: as `new[0]` contains the clusters primary IP family, new values take precedence over old values, so set `old` to value from `new[0]` |
 | 5    | [0]: foo <br />[1]: bar    | baz                        | [0]: foo <br />[1]: bar      | foo                          | `new` contains values, `old` contains a value which is not included in `new`: new values take precedence over old values, so set `old` to value from `new[0]` (and log a warning) |
 
 ### Version Skew Strategy
