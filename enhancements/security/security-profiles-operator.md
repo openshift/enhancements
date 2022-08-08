@@ -13,32 +13,21 @@ reviewers:
   - "@dmesser"
 approvers:
   - TBD
-creation-date: yyyy-mm-dd
-last-updated: yyyy-mm-dd
-status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
-see-also:
-  - "/enhancements/this-other-neat-thing.md"
+creation-date: 2012-04-20
+last-updated: 2022-08-08
+tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
+  - [Make Security Profiles Operator a part of OpenShift](https://issues.redhat.com/browse/CMP-1091)
+status: implemented
 replaces:
   - [selinux-operator proposal](https://github.com/openshift/enhancements/pull/327)
-superseded-by:
-  - "/enhancements/our-past-effort.md"
 ---
 
 # Security Profiles Operator Integration in OpenShift
 
-## Release Signoff Checklist
-
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Operational readiness criteria is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-
 ## Summary
 
 Let's integrate the [Security Profiles Operator](https://github.com/kubernetes-sigs/security-profiles-operator)
-as part of the OpenShift platform in order to allow folks to:
+as an optional operator of the OpenShift platform in order to allow folks to:
 
 * Easily install security profiles to secure their workloads
   (both SELinux and Seccomp)
@@ -78,6 +67,23 @@ profiles in Kubernetes. By using these profiles, developers would have a more
 granular way of setting permissions for their workloads, hopefully eliminating
 the need to run privileged containers
 
+### User Stories
+
+ * As an application SRE, I would like to deploy a Seccomp profile
+   and an SELinux profile to secure my application.
+
+ * As an application SRE, I need to be able to see the state of
+   the installed profile(s) and verify that it has indeed been installed on
+   the system.
+
+ * As an application SRE, I need to easily be able to link a security
+   profile to a pod or set of pods.
+
+ * As an application developer, I would like to be able to automatically
+   generate initial security profiles that are specific to the application.
+
+Note that we also maintain a more complete list of [user stories upstream](https://github.com/kubernetes-sigs/security-profiles-operator/blob/main/doc/user-stories.md)
+
 ### Goals
 
 * Enable application developers to ship their applications with
@@ -85,11 +91,6 @@ the need to run privileged containers
 
 * Enable application developers to easily record the security profiles
   for their application.
-
-* Integrate the SPO into OpenShift's SCCs if possible. It is not strictly
-  required, but would increase the usefulness of SCCs and would be a good
-  security hardening in general. The backup plan is to ship some example
-  custom SCCs and add documentation for users.
 
 ### Non-Goals
 
@@ -106,7 +107,7 @@ the need to run privileged containers
 
 The Security Profiles Operator should be available for installation as an
 add-on. Its main function is to install security policies and ensure that
-they're attached to the appropriate pods which require them. Additionally,
+they're attached to the appropriate workloads which require them. Additionally,
 the Security Profiles Operator enables recording of SELinux and seccomp
 profiles, which can be used e.g. in CI runs.
 
@@ -119,12 +120,18 @@ it's scheduled and the capabilities that are enabled/disabled. For OpenShift,
 SELinux would be enabled by default and the DaemonSet would be scheduled
 everywhere.
 
+### Workflow Description
+
+Please see the upstream [documentation](https://github.com/kubernetes-sigs/security-profiles-operator/blob/main/installation-usage.md)
+
+### API Extensions
+
 `SeccompProfiles` are handled by simply persisting a file on a directory that
 the Kubelet has access to. A `SeccompProfile` looks as follows:
 
 ```yaml
 ---
-apiVersion: security-profiles-operator.x-k8s.io/v1alpha1
+apiVersion: security-profiles-operator.x-k8s.io/v1beta1
 kind: SeccompProfile
 metadata:
   name: profile-complain-block-high-risk
@@ -214,23 +221,49 @@ A `SelinuxProfile` object looks as follows:
 
 ```yaml
 ---
-apiVersion: security-profiles-operator.x-k8s.io/v1alpha1
+apiVersion: security-profiles-operator.x-k8s.io/v1alpha2
 kind: SelinuxProfile
 metadata:
   name: errorlogger
-  namespace: my-namespace
 spec:
-  policy: |
-    (blockinherit container)
-    (allow process var_log_t ( dir ( open read getattr lock search ioctl add_name remove_name write ))) 
-    (allow process var_log_t ( file ( getattr read write append ioctl lock map open create  ))) 
-    (allow process var_log_t ( sock_file ( getattr read write append open  )))
+  inherit:
+    - name: container
+  allow:
+    var_log_t:
+      dir:
+        - open
+        - read
+        - getattr
+        - lock
+        - search
+        - ioctl
+        - add_name
+        - remove_name
+        - write
+      file:
+        - getattr
+        - read
+        - write
+        - append
+        - ioctl
+        - lock
+        - map
+        - open
+        - create
+      sock_file:
+        - getattr
+        - read
+        - write
+        - append
+        - open
 ```
 
-It is mostly a wrapper around [SELinux's CIL language](https://github.com/SELinuxProject/cil)
-with the main block and naming handled by the operator. Naming of policies
-as implemented by the daemon is as follows `<object name>_<object namespace>`. Thus,
-we're able to distinguish between policies installed in different namespaces.
+It is mostly a more user-friendly wrapper around [SELinux's CIL
+language](https://github.com/SELinuxProject/cil) with the conversion
+to CIL, which is used underneath, handled by the operator. Naming of
+policies as implemented by the daemon is as follows `<object name>_<object
+namespace>`. Thus, we're able to distinguish between policies installed
+in different namespaces.
 
 To ease usability and allow for developers to easily bind profiles to workloads,
 an object called `ProfileBinding` was created. The intent is for the binding to
@@ -280,182 +313,10 @@ The operator automates the recording of profiles, and, when the
 workload is done, it's able to output a ready-to-use profile
 with the privileges that the application needs.
 
-The `SeccompProfile` objects rely on the [OCI Seccomp BPF Hook](https://github.com/containers/oci-seccomp-bpf-hook)
-to do the actual recording. So we'd need to ensure this hook is available in RHCOS
-before enabling this feature. Failing that, SPO allow to record `SeccompProfile`
-objects using its built-in BPF recorder or by tailing `audit.log`.
-
-To record SELinux profiles, SPO tails `audit.log`, looking for AVC messages
-and transforms them into a `SelinuxProfile` objects.
-
-### SCC integration (non-blocking)
-
-Security Context Constraints allow a user to restrict the security settings
-that a workload may have. Given that the profile settings are in the pod's
-`securityContext` it is imperative that we appropriately integrate with SCCs.
-
-Currently, the only SCC that allows users to set the Seccomp and SELinux
-settings for a pod is the privileged one. It looks as follows:
-
-```bash
-Name:                                           privileged
-Priority:                                       <none>
-Access:                                         
-  Users:                                        system:admin,system:serviceaccount:openshift-infra:build-controller
-  Groups:                                       system:cluster-admins,system:nodes,system:masters
-Settings:                                       
-  Allow Privileged:                             true
-  Allow Privilege Escalation:                   true
-  Default Add Capabilities:                     <none>
-  Required Drop Capabilities:                   <none>
-  Allowed Capabilities:                         *
-  Allowed Seccomp Profiles:                     *
-  Allowed Volume Types:                         *
-  Allowed Flexvolumes:                          <all>
-  Allowed Unsafe Sysctls:                       *
-  Forbidden Sysctls:                            <none>
-  Allow Host Network:                           true
-  Allow Host Ports:                             true
-  Allow Host PID:                               true
-  Allow Host IPC:                               true
-  Read Only Root Filesystem:                    false
-  Run As User Strategy: RunAsAny                
-    UID:                                        <none>
-    UID Range Min:                              <none>
-    UID Range Max:                              <none>
-  SELinux Context Strategy: RunAsAny            
-    User:                                       <none>
-    Role:                                       <none>
-    Type:                                       <none>
-    Level:                                      <none>
-  FSGroup Strategy: RunAsAny                    
-    Ranges:                                     <none>
-  Supplemental Groups Strategy: RunAsAny        
-    Ranges:                                     <none>
-```
-
-This basicallly allows for setting all security settings for a pod, which
-might not be what a user intends to allow.
-
-To enable integration with the SPO and promote better security in workloads,
-we could add another SCC called `measured` that would look similar to this:
-
-```bash
-Name:                                           measured
-Priority:                                       <none>
-Access:                                         
-  Users:                                        <none>
-  Groups:                                       <none>
-Settings:                                       
-  Allow Privileged:                             false
-  Allow Privilege Escalation:                   false
-  Default Add Capabilities:                     <none>
-  Required Drop Capabilities:                   <none>
-  Allowed Capabilities:                         *
-  Allowed Seccomp Profiles:                     *
-  Allowed Volume Types:                         *
-  Allowed Flexvolumes:                          <all>
-  Allowed Unsafe Sysctls:                       *
-  Forbidden Sysctls:                            <none>
-  Allow Host Network:                           true
-  Allow Host Ports:                             true
-  Allow Host PID:                               true
-  Allow Host IPC:                               true
-  Read Only Root Filesystem:                    false
-  Run As User Strategy: RunAsAny                
-    UID:                                        <none>
-    UID Range Min:                              <none>
-    UID Range Max:                              <none>
-  SELinux Context Strategy: RunAsAny  (1)          
-    User:                                       <none>
-    Role:                                       <none>
-    Type:                                       <none>
-    Level:                                      <none>
-  FSGroup Strategy: RunAsAny                    
-    Ranges:                                     <none>
-  Supplemental Groups Strategy: RunAsAny        
-    Ranges:                                     <none>
-
-```
-
-(1) See the Open Questions section
-
-With this profile, the intent is to disallow privileged containers,
-while enabling the usage of custom Seccomp and SELinux profiles.
-
-There needs to be extra validation in place in such a way that
-using the `measured` SCC will also result in workloads
-only being able to use profiles that are installed in the same
-namespace as the workload.
-
-This will prevent workloads trying to:
-
-* Wrongly use profiles that are assumed to be "pre-installed" in the system.
-
-* Share a profile accross namespaces which might lead to errors.
-
-* Maliciously gain privileges by using a profile installed from another
-  namespace.
-
-NOTE: This was filed as [RFE-2204](https://issues.redhat.com/browse/RFE-2204)
-but so far not accepted. The backup plan is to just include an example
-SCC using the existing SCC capabilities and provide documentation to users.
-
-### OLM integration
-
-As part of OpenShift promoting security as part of the platform, application
-developers need to be able to install Security Profiles when installing operators.
-
-For this, a `securityProfiles` section could be added to the CSV definition as part
-of the `install.spec` section. Following a similar pattern as permissions, it could
-look as follows:
-
-```yaml
-...
-  install:
-    spec:
-      clusterPermissions:
-        - rules:
-          - apiGroups:
-            - ""
-            resources:
-            - nodes
-            verbs:
-            - get
-            - list
-            - watch
-          serviceAccountName: some-sa
-      securityProfiles:
-        - seccomp:
-            spec:
-              defaultAction: "SCMP_ACT_LOG"
-          serviceAccountName: some-sa
-        - selinux:
-            spec:
-              policy: |
-                (blockinherit container)
-                (allow process var_log_t ( dir ( open read getattr lock search ioctl add_name remove_name write ))) 
-                (allow process var_log_t ( file ( getattr read write append ioctl lock map open create  ))) 
-                (allow process var_log_t ( sock_file ( getattr read write append open  ))
-          serviceAccountName: some-sa
-      deployments:
-      - name: some-deployment
-        spec:
-          replicas: 1
-      ...
-
-```
-
-Where SELinux and Seccomp profile definitions are linked to a
-Service Account, similar to other objects in the CSV.
-
-### User Stories
-
-The personas it aims to help are documented in [the project's documentation](
-https://github.com/kubernetes-sigs/security-profiles-operator/blob/master/doc/personas.md).
-
-The user stories that are being covered are [also appropriately documented](
-https://github.com/kubernetes-sigs/security-profiles-operator/blob/master/doc/user-stories.md).
+The `ProfileRecording` objects rely tailing the `audit.log` for both
+recording of SELinux policies and Seccomp policies. Additionaly, when recording
+is to be used, a recording webhook must be enabled that injects a special
+Seccomp or Selinux profile which actually enables the recording itself.
 
 ### Implementation Details/Notes/Constraints
 
@@ -471,51 +332,29 @@ On the other hand, the repository namespace selinuxd is hosted is currently
 a personal one. It would also be ideal to move that somewhere more appropriate.
 (The coreos namespace maybe?)
 
-#### OCI Seccomp BPF Hook
-
-This hook is currently not available in RHCOS. While it shouldn't be enabled
-by default, it would be good to make it available as an `extension` via the
-MachineConfigOperator. This way, when using OpenShift for development purposes,
-it would be possible for users to create `ProfileRecordings` for their workloads.
-
-We should also disable the `ProfileRecording` feature by default as it should only
-be used in development environments and not in production.
-
 ### Risks and Mitigations
 
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
+Recording of profiles and binding profiles to images both require mutating
+webhooks. Having a webhook always brings a degree of risk depending on the failure
+policies and what namespaces do the webhooks listen to. We need to balance
+usability (upstream enables webhooks always, on all namespaces) vs security or
+stability (probably by not enabling the webhooks at all).
 
-How will security be reviewed and by whom? How will UX be reviewed and by whom?
+The `selinuxd` deamon is performance heavy.
 
-Consider including folks that also work outside your immediate sub-project.
+### Drawbacks
+
+See Risks and Mitigations, as long as the operator is optional, I can't
+thing of anything else to add here.
 
 ## Design Details
 
-### Open Questions [optional]
-
- > 1. Should we use `RunAsAny` or something else for the `measured` SCC?
-
- Something such as `RunAllowed` would help make it more explicit
- that one can only run the security profiles that are allowed
- (installed) for that namespace.
+### Open Questions
 
 ### Test Plan
 
-**Note:** *Section not required until targeted at a release.*
-
-Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
-- What additional testing is necessary to support managed OpenShift service-based offerings?
-
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
-
-All code is expected to have adequate tests (eventually with coverage
-expectations).
+There is already a nice e2e test suite upstream, moreover RH QE have been
+involved for some time and have developed a test plan as well.
 
 ### Graduation Criteria
 
