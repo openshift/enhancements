@@ -4,8 +4,13 @@ authors:
   - "@eggfoobar"
 reviewers:
   - "@jerpeter1"
+  - "@mrunalp"
+  - "@rphillips"
+  - "@browsell"
+  - "@haircommander"
 approvers:
   - "@jerpeter1"
+  - "@mrunalp"
 api-approvers:
   - None
 creation-date: 2022-08-03
