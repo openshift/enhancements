@@ -60,8 +60,9 @@ determinism required of my applications.
 - We want to run different workload partitioning on masters and workers.
 - Customers will be supplied with the advice of 4 hyperthreaded cores for
   masters and for workers, 2 hyperthreaded cores.
-- We want a general approach, that can be applied to all OpenShift control plane
-  and per-node components via the PerformenceProfile
+- We want to consolidate the current approach and extend PerformanceProfile API
+  to avoid any possible errors when configuring a cluster for workload
+  partitioning.
 - We want to be clear with customers that this enhancement is a day 0 supported
   feature only. We do not support turning it off after the installation is done
   and the feature is on.
@@ -70,15 +71,14 @@ determinism required of my applications.
 
 This enhancement expands on the existing [Management Workload
 Partitioning](management-workload-partitioning.md) and as such shares similar
-but slightly different non-goals
+but slightly different non-goals.
+
+> Note: Items in bold are modifications/additions from the previous enhancement,
+> [Management Workload Partitioning](management-workload-partitioning.md)
 
 - This enhancement is focused on CPU resources. Other compressible resource
   types may need to be managed in the future, and those are likely to need
   different approaches.
-- This enhancement does not address mixing node partitioning, this feature will
-  be enabled cluster wide and encapsulate both master and worker pools. If it's
-  not desired then the setting will still be turned on but the management
-  workloads will run on the whole CPU set for that desired node.
 - This enhancement does not address non-compressible resource requests, such as
   for memory.
 - This enhancement does not address ways to disable operators or operands
@@ -88,33 +88,46 @@ but slightly different non-goals
   that a cluster configured to use a small number of cores for management
   services would offer exactly the same performance as the default. It must be
   stable and continue to operate reliably, but may respond more slowly.
-- This enhancement assumes that the configuration of a management CPU pool is
+- **This enhancement does not address mixing nodes with pinning and without,
+  this feature will be enabled cluster wide and encapsulate both master and
+  worker pools. If it's not desired then the setting will still be turned on but
+  the management workloads will run on the whole CPU set for that desired
+  pool.**
+- **This enhancement assumes that the configuration of a management CPU pool is
   done as part of installing the cluster. It can be changed after the fact but
   we will need to stipulate that, that is currently not supported. The intent
-  here is for this to be supported as a day 0 feature, only.
+  here is for this to be supported as a day 0 feature, only.**
 
 ## Proposal
 
 In order to implement this enhancement we are focused on changing 2 components.
 
-1. Admission controller ([management cpus
+1. Admission Controller ([management cpus
    override](https://github.com/openshift/kubernetes/blob/a9d6306a701d8fa89a548aa7e132603f6cd89275/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/doc.go))
    in openshift/kubernetes.
 1. The
-   [PerformanceProfile](https://github.com/openshift/cluster-node-tuning-operator/blob/master/docs/performanceprofile/performance_profile.md)
+   [Performance Profile Controller](https://github.com/openshift/cluster-node-tuning-operator/blob/master/docs/performanceprofile/performance_profile.md)
    part of [Cluster Node Tuning
    Operator](https://github.com/openshift/cluster-node-tuning-operator)
 
+### Admission Controller
+
 We want to remove the checks in the admission controller which specifically
-checks that partitioning is only applied to single node topology configuration.
+verifies that partitioning is only applied to single node topology configuration.
 The design and configuration for any pod modification will remain the same, we
 simply will allow you to apply partitioning on non single node topologies.
 
-Workload pinning involves configuring CRI-O and Kubelet. Currently, this is done
-through a machine config that contains both of those configurations. This can
-pose problems as the CPU set value has to be copied to these other two
-configurations. We want to simplify the current implementation and apply both of
-these configurations via the `PerformanceProfile` CRD.
+### Performance Profile Controller
+
+We want to consolidate the current approach to setting up workload partitioning.
+Currently workload partitioning involves configuring CRI-O and Kubelet earlier
+in the processes as a separate machine config manifest that requires the same
+information present in the `PerformanceProfile` resource, that being the
+`isolated` CPU sets. Because configuring multiple resources with the right CPU
+sets consistently is error prone, we want to extend the PerformanceProfile API
+to include settings for workload partitioning. We want to simplify the current
+implementation and apply both of these configurations via the
+`PerformanceProfile` resource.
 
 We want to add a new `Workloads` field to the `CPU` field that contains the
 configuration information for `enablePinning`. We are not sure where we would
@@ -183,12 +196,15 @@ This section outlines an end-to-end workflow for deploying a cluster with
 workload partitioning enabled and how pods are correctly scheduled to run on the
 management CPU pool.
 
+> Note: Items in bold are modifications/additions from the previous enhancement,
+> [Management Workload Partitioning](management-workload-partitioning.md)
+
 1. User sits down at their computer.
-1. The user creates a `PerformanceProfile` resource with the desired `isolated`
-   and `reserved` CPUSet with the `cpu.workloads.enablePinning` set to true.
+1. **The user creates a `PerformanceProfile` resource with the desired `isolated`
+   and `reserved` CPUSet with the `cpu.workloads.enablePinning` set to true.**
 1. The user runs the installer to create the standard manifests, adds their
    extra manifests from steps 2, then creates the cluster.
-1. NTO will generate the machine config manifests and apply them.
+1. **NTO will generate the machine config manifests and apply them.**
 1. The kubelet starts up and finds the configuration file enabling the new
    feature.
 1. The kubelet advertises `management.workload.openshift.io/cores` extended
