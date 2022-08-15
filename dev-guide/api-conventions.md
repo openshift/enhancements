@@ -279,6 +279,37 @@ myPlatformConfig:
 
 This is invalid. Multiple structs have been configured and no discriminant is provided.
 
+### Prefer consistency with Kubernetes style APIs
+
+As both Kubernetes and OpenShift have a number of integrations with cloud and infrastructure platforms, there are a
+number of different abstractions built into OpenShift that abstract and extend infrastructure capabilities.
+For example, the Machine API or platform specific storage integrations within OpenShift.
+
+These integrations often result in adding new API fields to OpenShift to allow users to configure various features of
+the platform. Often, different platform's concepts are similar, but their naming of particular features can be specific
+to their platform.
+If we copy verbatim the API from a platform, this may or may not be compliant with OpenShift conventions and may or
+may not make sense in a wider scope.
+
+If we intend to support similar features across platforms, it is preferable to have similar APIs for these features
+within OpenShift rather than mimicking the platform API. This has the benefit of providing consistency to users when
+using OpenShift across multiple platforms and reducing the learning curve when installing OpenShift on a new platform.
+Where possible, we should link to the platform specific documentation for features in the description of our own APIs.
+
+While we appreciate that reusing the platform specific terminology can make it easier for someone familiar with the
+platform to understand the API, we prefer to stick to Kubernetes style conventions (eg preferring PascalCase for
+enumerated values) when abstracting platform specific APIs as this allows us to build a consistent looking API across
+the OpenShift product.
+Differences between our APIs and platform APIs can be handled within the controller backing the API.
+
+We have seen examples in the past where the value of a platform API is not intuitive to the value to the end user.
+When designing APIs for OpenShift we try to make it clear what the value is to an end user and what exactly will happen
+when they configure a particular field.
+Where platform APIs may talk about a feature in terms of the implementation, we should aim to talk about a feature
+in terms of the action that OpenShift and the platform will take.
+This is an easy way to help users understand the effects of their actions and provide additional value over them using
+the platform specific APIs directly.
+
 ## Exceptions to Kubernetes API Conventions
 
 ### Use JSON Field Names in Godoc
@@ -430,3 +461,17 @@ API to meet the latest conventions.
 
 When adhered to the conventions prevent us from making API design mistakes or repeating them.
 As such, the existence of non-compliant APIs is not a justification for introducing additional non-compliant APIs.
+
+### I'm copying an API from an upstream project or platform/cloud provider, can I change the design?
+
+Yes! When designing an API for an abstraction, you should consider the end user experience and the value your
+abstraction is providing. If you copy the API verbatim, are you adding any value?
+
+If an upstream/platform API is not intuitive, we can improve the user experience by creating our own naming that better
+describes the effects of enabling a specific field with a specific value. Think about why a user would configure a field
+when choosing the name.
+
+When writing APIs for OpenShift, we try to make our APIs consistent with one another and "Kube-like" so that users of
+OpenShift have an understanding of how to use our APIs intuitively. If an upstream API is not consistent with
+those conventions, you should be prepared to change your abstraction to follow conventions to maintain that consistent
+user experience within OpenShift.
