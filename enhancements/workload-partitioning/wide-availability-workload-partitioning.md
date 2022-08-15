@@ -66,6 +66,9 @@ determinism required of my applications.
 - We want to be clear with customers that this enhancement is a day 0 supported
   feature only. We do not support turning it off after the installation is done
   and the feature is on.
+- We want to maintain the ability to configure the partition size after
+  installation, we do not support turning off the partition feature but we do
+  support changing the CPU partition size post day 0.
 
 ### Non-Goals
 
@@ -192,6 +195,8 @@ Installer-->>Alice: Cluster is Up!
 
 #### Variation [optional]
 
+##### E2E Workflow deployment
+
 This section outlines an end-to-end workflow for deploying a cluster with
 workload partitioning enabled and how pods are correctly scheduled to run on the
 management CPU pool.
@@ -224,6 +229,22 @@ management CPU pool.
    `management.workload.openshift.io/cores` resources on the node. The scheduler
    places the pod on the node.
 1. Repeat steps 8-10 until all pods are running.
+1. Cluster deployment comes up with management components constrained to subset
+   of available CPUs.
+
+##### Partition Resize workflow
+
+This section outlines an end-to-end workflow for resizing the CPUSet partition.
+
+> Note: Items in bold are modifications/additions from the previous enhancement,
+> [Management Workload Partitioning](management-workload-partitioning.md)
+
+1. User sits down at their computer.
+1. **The user updates the `PerformanceProfile` resource with the new desired
+   `isolated` and new `reserved` CPUSet with the `cpu.workloads.enablePinning`
+   set to true.**
+1. **NTO will re-generate the machine config manifests and apply them.**
+1. ... Steps same as [E2E Workflow deployment](#e2e-workflow-deployment) ...
 1. Cluster deployment comes up with management components constrained to subset
    of available CPUs.
 
@@ -302,9 +323,10 @@ should be a cluster wide feature.
 A risk we can run into is that a customer can apply a CPU set that is too small
 or out of bounds can cause problems such as extremely poor performance or start
 up errors. Mitigation of this scenario will be to provide proper guidance and
-guidelines for customers who enable this enhancement. Furthermore, the
+guidelines for customers who enable this enhancement. As mentioned in our goal
+we do support re-configuring the CPUSet partition size after installation. The
 performance team would need to be reached out to for more specific information
-around upper and lower bounds of CPU sets for running an Openshift cluster.
+around upper and lower bounds of CPU sets for running an Openshift cluster
 
 It is possible to build a cluster with the feature enabled and then add a node
 in a way that does not configure the workload partitions only for that node. We
