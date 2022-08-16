@@ -46,13 +46,14 @@ requirement of being able to run Windows workloads on OpenShift clusters.
 As part of this enhancement we plan to do the following:
 * Provide workflows for adding and removing Windows instances provisioned using
   the Machine API to OpenShift clusters
+* Install and configure the containerd container runtime on Windows instances
+  managed by WMCO version 6.0.0 onwards.
 * Perform all the required steps within the VM for it to be added to the cluster
   as an OpenShift worker node and removed from it.
 
 ### Non-Goals
 
 As part of this enhancement we do not plan to support:
-* Installing the container runtime in the Windows node
 * Upgrades (This will be addressed in a separate enhancement)
   * Windows operating system upgrades
   * Node management like k8s compute component upgrades and reboots
@@ -78,6 +79,7 @@ has a policy to not ship 3rd party kernels for support reasons.
 ### Design Details
 
 The WMCO image will be packaged with the following binaries:
+* containerd
 * Kubelet
 * CNI plugins
 * Hybrid-overlay
@@ -95,16 +97,20 @@ secret with a public key that corresponds to the private key. In addition it
 will have all the pre-requisite steps needed for setting the VM up for key based
 SSH connections.
 
-When the cluster admin wants to bring up Windows worker nodes, they will create
-a [MachineSet](https://github.com/openshift/machine-api-operator/blob/master/config/machineset.yaml)
-where they reference a Windows OS image which has the Docker container runtime
-add-on enabled. They will also specify the user data secret created by WMCO as
+When the cluster admin is using a WMCO version in the range 1.x-5.x 
+to bring up Windows worker nodes, they will create [MachineSets](https://github.com/openshift/machine-api-operator/blob/master/config/machineset.yaml) 
+where they reference a Windows OS image which has the Docker container runtime 
+add-on enabled.
+Enabling the Docker container runtime is not required for bringing up Windows 
+worker nodes using WMCO 6.0.0 onwards.
+They will also specify the user data secret created by WMCO as
 described above. WMCO will watch for Machine objects with a special label that
 indicate that they map to Windows VMs. Once the Machine object is in the
 ["provisioned" phase](https://github.com/openshift/enhancements/blob/master/enhancements/machine-api/machine-instance-lifecycle.md),
 WMCO will connect to the associated VM to transfer the binaries and perform the
 following steps for it to join the cluster as a worker node:
 * Transfer the required binaries
+* Configure containerd as the default container runtime for WMCO version 6.0.0+
 * Configure the kubelet service using WMCB
 * Run the hybrid-overlay-node.exe binary
 * Configure the kubelet service for CNI using WMCB
