@@ -74,20 +74,22 @@ The following diagram depicts all the involved components and their interactions
 
 #### SRIOV network operator workflow
 
-- Deploy the SRIOV device plugin
-- Deploy OpenVswitch in HW offload mode
-- Configure the VFs (same as SR-IOV: echo N > /sys/devices/{PF}/sriov_numvfs)
-- Install vendor-independent kernel drivers: vdpa, virtio-vdpa
-- Install vendor-dependent kernel drivers, e.g. mlx5-vdpa for Mellanox cards
-- Put NIC in switchdev mode (smart NIC)
-- (Vendor specific) Bind the right PCI driver. Some vendors might implement vdpa in a different PCI driver (e.g: Intel’s ifcvf). Others might keep the same pci driver and require extra steps (e.g: in mellanox vdpa, the VF is still bound to “mlx5_core”)
-- Enable HW offload mode on PF, VFs and port representors
-- (Vendor specific) Create the vdpa device. Some vendors might require no extra steps because they create the vdpa device on a pci driver probe (e.g: ifcvf). Others might need extra steps (e.g: Mellanox requires loading an additional driver and in the future, they 	might require managing a “virtual bus”(source)). The plan is to extend the govdpa library to provide such functionality.
-- Bind the vdpa device to the correct vdpa bus driver (virtio-vdpa driver in the first implementation). This is not vendor specific and uses a sysfs-based API.
-- Add the appropriate vdpa flags to the SR-IOV Device Plugin’s configMap.
-- Create the Network Attachment Definitions
+- Configure OpenVswitch in HW offload mode
+- Configure NIC (single script?)
+  - Install vendor-independent kernel drivers: vdpa, virtio-vdpa
+  - Configure VFs (same as SR-IOV: echo N > /sys/devices/{PF}/sriov_numvfs)
+  - Put NIC in switchdev mode (smart NIC)
+  - Enable HW offload mode on PF, VFs and port representors
+  - Disable Network Manager on PF, VFs and port representors
+  - Install vendor-dependent kernel drivers (e.g. mlx5-core for Mellanox cards)
+  - Bind the right PCI driver (vendor specific). Some vendors might implement vdpa in a different PCI driver (e.g: Intel’s ifcvf). Others might keep the same pci driver and require extra steps (e.g: in mellanox vdpa, the VF is still bound to “mlx5_core”)
+- Create the vdpa device (vendor specific). Some vendors might require no extra steps because they create the vdpa device on a pci driver probe (e.g: ifcvf). Others might need extra steps (e.g: Mellanox requires loading an additional driver and in the future, they 	might require managing a “virtual bus”(source)). The plan is to extend the govdpa library to provide this functionality.
+- Bind the vdpa device to the correct vdpa bus driver (virtio-vdpa driver in the first implementation). This is not vendor specific and uses a sysfs-based API
+- Configure the SRIOV device plugin
+  - Add the appropriate vdpa flags to the SR-IOV Device Plugin’s configMap.
+  - Create the Network Attachment Definitions
 
-Note: the operator will have to support the tear-down of resources during the undeploying phase.
+Note: the SRIOV operator (config-daemon) needs to destroy the vdpa device when policy is removed
 
 
 ### API Extensions
