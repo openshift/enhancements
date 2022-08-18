@@ -55,7 +55,7 @@ Motivations include but are not limited to:
 
 - The administrator or service (in the case of Managed OpenShift) installing OpenShift 
   can configure allowed number of user-defined tags in the Openshift installer generated
-  install config, which is referred and applied by installer and the in-cluster operators
+  install config, which is referred and applied by the installer and the in-cluster operators
   on the the Azure resources during creation.
 - Tags must be applied at creation time, in an atomic operation. It isn't acceptable 
   to create an object and, after some period of time, apply the tags post-creation.
@@ -82,17 +82,17 @@ due to any of below conditions
     storage accounts, which has a limit of 128 characters and hence tag name 
     length is restricted to 128 characters on every resource required by Openshift.
 2. A tag name cannot contain `<, >, %, &, \, ?, /, #, :, whitespace` characters and 
-   should not start with a number.
+   must not start with a number.
     - DNS zones, Traffic, Front Door resources does not support tag with spaces, 
     special/unicode characters or starting with number, hence these are added as 
     constraints on every other Azure resource required by Openshift as well.
-3. A tag value has a limit of 256 characters.
+3. A tag value can have a maximum of 256 characters.
 4. A resource, resource-group or subscription, user can configure a maximum of 5 tags
    through Openshift. 
     - Azure supports a maximum of 50 tags except for Automation, Content Delivery Network,
     DNS resources which can have a maximum of 15 tags, hence restricting the number of 
-    user defined tags to 5 and 10 for Openshift internal use for all resources created 
-    by Openshift.
+    user defined tags to 5 and 10 for Openshift's internal use, for all the resources 
+    created by Openshift.
 
 All in-cluster operators that create Azure resources (Cluster Infrastructure ,Storage ,Node ,NetworkEdge , Internal Registry ,CCO) will apply these tags during resource creation.
 
@@ -113,11 +113,9 @@ Azure resource.
   created by Openshift by adding it in `.platform.azure.userTags`
 - openshift installer validates the tags defined in `.platform.azure.userTags` and 
   adds these tags to all resources created during installation and also updates 
-  `.spec.platformSpec.azure.resourceTags` of the `infrastructure.config.openshift.io`
-- In cluster operators refers `.spec.platformSpec.azure.resourceTags` of the 
+  `.status.platformStatus.azure.resourceTags` of the `infrastructure.config.openshift.io`
+- In cluster operators refers `.sttaus.platformSTatus.azure.resourceTags` of the 
   `infrastructure.config.openshift.io` to add tags to resources created later.
-- An Openshift administrator can modify existing tags or add new tags by updating 
-  `.spec.platformSpec.azure.resourceTags` field in the `infrastructure.config.openshift.io`.
 
 #### Variation [optional]
 
@@ -197,10 +195,10 @@ Add a new field `resourceTags` to `.status.platformStatus.azure` of the
 `infrastructure.config.openshift.io` type. Tags included in the `resourceTags` field 
 will be applied to new resources created for the cluster by in-cluster operators.
 
-The `resourceTags` field in `spec.platformSpec.azure` will be populated by the 
-installer using the entries from `platform.azure.userTags` field of `install-config`.
+The `resourceTags` field in `status.platformStatus.azure` of `infrastructure.config.openshift.io`
+will be populated by the installer using the entries from `platform.azure.userTags` field of `install-config`.
 
-`infrastructure.config.openshift.io` field `status.platformStatus.azure` is immutable.
+`status.platformStatus.azure` of `infrastructure.config.openshift.io` is immutable.
 
 All operators that create Azure resources (Cluster Infrastructure ,Storage ,Node ,
 NetworkEdge ,Internal Registry ,CCO) will apply these tags to all Azure resources they create.
@@ -255,7 +253,7 @@ resource "azurerm_resource_group" "main" {
     5. CCO
 
 - OpenShift is bound to have the common limitation for all Azure resources created
-  by it and constrains other resources with the least matching limit as below
+  by it and constraints other resources with the least matching limit as below
     1. Tag names cannot have `microsoft`, `azure`, `windows` prefixes which are
        reserved for Azure use.
     2. An Azure storage account has a limit of 128 characters for the tag name.
@@ -264,7 +262,7 @@ resource "azurerm_resource_group" "main" {
     4. An Azure Automation or Content Delivery Network or DNS resource can have a
        maximum of 15 tags.
 
-- Administrator will have to manually perform tags pertaining actions for
+- Administrator will have to manually perform below tags pertaining actions
     1. removing the undesired tags from the required resources.
     2. update tag values of the required resources.
     3. update tags of the resources which are not managed by an operator.
