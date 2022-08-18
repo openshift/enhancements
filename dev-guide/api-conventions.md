@@ -47,6 +47,60 @@ the API review team.
 
 ## API Author Guidance
 
+### Configuration vs Workload APIs
+
+In OpenShift, we talk about two classes of APIs, Workload and Configuration APIs.
+The majority of APIs in OpenShift are Configuration APIs, though some are also Workload APIs.
+
+A Configuration API is one that is typically cluster scoped, a singleton within the cluster and managed by a Cluster
+Administrator only. An example of a configuration API would be the Infrastructure resource that defines configuration
+for the Infrastructure of the Cluster, or the Network resource that configures the networking within the cluster.
+A Configuration API helps a user to configure a property or feature of the cluster.
+
+A Workload API typically is namespaced and is used by end users of the cluster. Workload APIs exist many times within a
+cluster and often many times within a namespace. Many of the Kubernetes core resources such as the Deployment and
+DaemonSet APIs are considered to be Workload APIs.
+A Workload API helps a user to run their workload on top of OpenShift.
+
+You should try to identify whether your API is a Workload or Configuration API as there are different conventions
+applied to them based on which class the API falls into.
+
+#### Defaulting
+
+In Workload APIs, we typically default fields on create (or update) when the field isn't set. This sets the value
+on the resource and forms a part of the contract between the user and the controller fulfilling the API.
+This has the effect that you cannot change the behaviour of a default value once the resource is created.
+
+To change the default behaviour could constitute a breaking change and disrupt the end users workload,
+the behaviour must remain consistent through the lifetime of the resource.
+This also means that defaults cannot be changed without a breaking change to the API.
+If a user were to delete their Workload API resource and recreate it, the behaviour should remain the same.
+
+With Configuration APIs, we typically default fields within the controller and not within the API.
+This means that the platform has the ability to make changes to the defaults over time as we improve the capabilities
+of OpenShift. While we reserve the right to change a default in a Configuration API, we must ensure that when there is a
+change, that there is a smooth upgrade process between the old default and the new default and that we will not break
+existing clusters.
+
+Typically, optional fields on Configuration APIs contain a statement within their Godoc to describe
+the default behaviour when they are omitted, along with a note that this is subject to change over time.
+[The documentation section](#write-user-readable-documentation-in-godoc) of the API conventions goes into more detail
+on how to write good comments on optional fields.
+
+#### Pointers
+
+In Configuration APIs specifically, we advise to avoid making fields pointers unless there is an absolute need to do so.
+An absolute need being the need to distinguish between the zero value and a nil value.
+
+Using pointers makes writing code to interact with the API harder and more error prone and it also harms the
+discoverability of the API.
+
+When we use references, the marshalled version of a resource will include unset fields with their zero value.
+This means, that any end user fetching the resource from the API can observe that a particular field exists and
+"discover" a potentially new feature or option that they were not previously aware of.
+This has the effect of helping our users to understand how they might be able to configure their cluster, without
+having to search for features or review API schemas within the product docs.
+
 ### Write User Readable Documentation in Godoc
 
 Godoc text is generated into both Swagger and OpenAPI schemas which are then used
@@ -438,6 +492,16 @@ Authentication AuthenticationPolicy `json:authentication,omitempty`
 With this example, we have described through the enumerated values the action that the API will have.
 Should the API need to evolve in the future, for example to add a particular method of Authentication that should be
 used, we can do so by adding a new value (eg. `PublicKey`) to the enumeration and avoid adding a new field to the API.
+
+### Optional fields should not be pointers (in Configuration APIs)
+
+In [Configuration APIs](#configuration-vs-workload-apis), we do not follow the upstream guidance of making optional
+fields pointers.
+Pointers are difficult to work with and are more error prone than references and they also harm the discoverability
+of the API.
+
+This topic is expanded in the [Pointers](#pointers) subsection of the
+[Configuration vs Workload APIs](#configuration-vs-workload-apis) above.
 
 ## FAQs
 
