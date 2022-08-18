@@ -205,14 +205,7 @@ NetworkEdge ,Internal Registry ,CCO) will apply these tags to all Azure resource
 
 Below list of terraform Azure APIs to create resources should be updated to add user
 defined tags and as well the openshift default tag in the installer component.
-`azurerm_resource_group, azurerm_image, azurerm_lb, azurerm_lb_backend_address_pool,
-azurerm_lb_probe, azurerm_lb_rule, azurerm_network_security_group,
-azurerm_network_security_rule, azurerm_role_assignment, azurerm_storage_account,
-azurerm_storage_blob, azurerm_storage_container, azurerm_subnet,
-azurerm_subnet_network_security_group_association, azurerm_user_assigned_identity,
-azurerm_virtual_network, azurerm_storage_account_sas, azurerm_linux_virtual_machine,
-azurerm_network_interface, azurerm_network_interface_backend_address_pool_association,
-azurerm_dns_cname_record, azurerm_linux_virtual_machine, azurerm_network_security_rule`
+`azurerm_resource_group, azurerm_image, azurerm_lb, azurerm_network_security_group, azurerm_storage_account, azurerm_user_assigned_identity, azurerm_virtual_network, azurerm_linux_virtual_machine, azurerm_network_interface, azurerm_dns_cname_record`
 
 API update example:
 A local variable should be defined, which merges the default tag and the user
