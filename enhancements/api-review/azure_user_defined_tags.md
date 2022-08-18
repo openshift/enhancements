@@ -146,14 +146,14 @@ spec:
                   type: object
 ```
 
-- Add `resourceTags` field to `spec.platformSpec.azure` and `platformStatus.status.azure` 
+- Add `resourceTags` field to `platformStatus.status.azure` 
   of the `infrastructure.config.openshift.io`
 ```yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: infrastructures.config.openshift.io
-spec:
+status:
   versions:
   - name: v1
     schema:
@@ -282,9 +282,9 @@ On upgrade:
   should refer the new fields and take action. 
 
 On downgrade:
-- The status/spec field may remain populated, components may or may not continue 
+- The status field may remain populated, components may or may not continue 
   to tag newly created resources with the additional tags depending on regardless of
-  whether given component still has logic to respect the spec tags, after the downgrade.
+  whether given component still has logic to respect the status tags, after the downgrade.
 
 ### Version Skew Strategy
 
