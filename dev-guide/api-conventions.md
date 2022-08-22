@@ -465,14 +465,14 @@ the resource group and name that identify the resource.
 While the upstream Kubernetes conventions recommend thinking twice about using Booleans, they are explicitly forbidden
 within OpenShift APIs.
 
-Many ideas start as a boolean value, eg `FooEnabled: true|false`, but often evolve into needing 3, 4 or even more states
-at some point during the APIs lifetime.
-As a Boolean value can only ever have 3 values (`true`, `false`, `omitted` when a pointer), we have seen examples in
-where API authors have later added additional fields, paired with the Boolean field that are only meaningful when the
-original field has a certain state. This makes it confusing for an end user as they have to be aware that the field
-they are trying to use, only has an effect in certain circumstances.
+Many ideas start as a Boolean value, e.g. `FooEnabled: true|false`, but often evolve into needing 3, 4, or even more
+states at some point during the API's lifetime.
+As a Boolean value can only ever have 2 or in some cases 3 values (`true`, `false`, `omitted` when a pointer), we have
+seen examples in which API authors have later added additional fields, paired with a Boolean field, that are only
+meaningful when the original field has a certain state. This makes it confusing for an end user as they have to be
+aware that the field they are trying to use only has an effect in certain circumstances.
 
-Rather than creating a boolean field:
+Rather than creating a Boolean field:
 ```go
 // authenticationEnabled determines whether authentication should be enabled or disabled.
 // When omitted, this means the platform can choose a reasonable default.
@@ -482,8 +482,12 @@ AuthenticationEnabled *bool `json:"authenticationEnabled,omitempty"`
 
 Use an enumeration of values that describe the action instead:
 ```go
-// authentication determines the requirements for authentication within the cluster.
-// When omitted, the authentication will be Optional.
+// authentication determines the requirements for authentication within the cluster. Allowed values are "Optional",
+// "Required", "Disabled" and omitted.
+// Optional authentication allows users to optionally authenticate but will not reject an unauthenticated request.
+// Required authentication requires all requests to be authenticated.
+// Disabled authentication ignores any attempt to authenticate and processes all requests as unauthenticated.
+// When omitted, the authentication will be Optional. This default is subject to change over time.
 // +kubebuilder:validation:Enum:=Optional;Required;Disabled;""
 // +optional
 Authentication AuthenticationPolicy `json:authentication,omitempty`
@@ -491,7 +495,7 @@ Authentication AuthenticationPolicy `json:authentication,omitempty`
 
 With this example, we have described through the enumerated values the action that the API will have.
 Should the API need to evolve in the future, for example to add a particular method of Authentication that should be
-used, we can do so by adding a new value (eg. `PublicKey`) to the enumeration and avoid adding a new field to the API.
+used, we can do so by adding a new value (e.g. `PublicKey`) to the enumeration and avoid adding a new field to the API.
 
 ### Optional fields should not be pointers (in Configuration APIs)
 
