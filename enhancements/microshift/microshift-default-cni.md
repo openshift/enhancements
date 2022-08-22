@@ -15,7 +15,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2022-07-18
-last-updated: 2022-07-18
+last-updated: 2022-08-22
 tracking-link:
   - https://issues.redhat.com/browse/USHIFT-40
 see-also:
@@ -44,9 +44,8 @@ as well as the work that needs to be done, and possible improvements.
 ## Motivation
 
 MicroShift used flannel during the proof of concept phase, which later on
-was simplified to bridge-cni, being that plugin the most minimalistic
-plugin which would provide Pod to Pod communication in a single node environment
-and nothing else.
+was simplified to bridge-cni, being the most minimalistic plugin which would
+provide Pod to Pod communication in a single node environment and nothing else.
 
 A very important characteristic necessary for any CNI plugin used in MicroShift
 is a low-enough RAM, Disk (which translates to network bandwidth consumption on
@@ -63,7 +62,7 @@ we believe this optimization is enough for most customers.
 ### User Stories
 
 An application developer builds applications where:
-1. Pods need to talk to each other via TCP o UDP connectivity.
+1. Pods need to talk to each other via TCP or UDP connectivity.
 2. Pods need to talk to services on the LAN or Internet via TCP or UDP.
 3. Some pods need be exposed as NodePort types of services on the LAN.
 4. Some pods need to be exposed to other pods as ClusterIP services types.
@@ -101,9 +100,7 @@ changes.
 ### Non-Goals
 
 * We do not plan to support multi-node clusters.
-* We are not trying to address high availability within the CNI, 
-  high availability should be acomplished by having multiple edge devices working
-  as single node MicroShifts.
+* We are not trying to address high availability within the CNI.
 * While some of the optimizations applied to OVNKuberneters in MicroShift could
   be applicable to single-node OpenShift that is out of scope for this enhancement
   and should be handled separately.
@@ -142,8 +139,8 @@ down to:
 
 Remaining work items in ovn-kubernetes:
 * Handling node IP changes
-* Improve cache allocation in libovsdb (this accounts for 16MB on northd and southdb
-  database clients)
+* Improve cache allocation in libovsdb (this accounts for 16MB on northbound
+southbound database clients)
 
 Ideas for future improvements:
 * Ovnk code efficiency: Using index, not list all. I.e.  getInterface(index)
@@ -154,7 +151,7 @@ Ideas for future improvements:
   election, further simplification of the ovn topology.
 
 * Go optimizations: cgo enable/disable comparison, libovsdb, netlink libraries,
-  analizing heap memory usage via pprof
+  analyzing heap memory usage via pprof.
 
 * Debugging improvements: “-s -w” build flags to remove debug info, enable pprof only
   on debug builds.
@@ -184,8 +181,6 @@ Applications are deployed as usual.
 ### API Extensions
 
 The MicroShift default CNI does not add any APIs to OpenShift.
-
-### Implementation Details/Notes/Constraints [optional]
 
 ### Risks and Mitigations
 
