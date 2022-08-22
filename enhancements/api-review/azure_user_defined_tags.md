@@ -3,21 +3,21 @@ title: apply-user-defined-tags-to-all-azure-resources-created-by-openShift
 authors:
   - "@bhb"
 reviewers:
-  - @patrickdillon
-  - @sdodson
-  - @jerpeter1
-  - @Miciah
-  - @sinnykumari
-  - @dmage
-  - @staebler
-  - @tkashem
-  - @tjungblu
+  - "@patrickdillon"
+  - "@sdodson"
+  - "@jerpeter1"
+  - "@Miciah"
+  - "@sinnykumari"
+  - "@dmage"
+  - "@staebler"
+  - "@tkashem"
+  - "@tjungblu"
 approvers:
-  - @sdodson
-  - @jerpeter1
-  - @bparees
+  - "@sdodson"
+  - "@jerpeter1"
+  - "@bparees"
 api-approvers:
-  - @joelspeed
+  - "@joelspeed"
 creation-date: 2022-07-12
 last-updated: 2022-07-12
 tracking-link:
