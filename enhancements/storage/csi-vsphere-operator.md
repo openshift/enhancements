@@ -152,6 +152,62 @@ If we detect an existing driver present in the cluster then cluster will be mark
 
 We will ensure that these steps are documented in 4.10 docs.
 
+#### Configure CSI driver topology
+
+A customer may configure a topology for the CSI driver by using following fields in `ClusterCSIDriver` object:
+
+```go
+// ClusterCSIDriverSpec is the desired behavior of CSI driver operator
+type ClusterCSIDriverSpec struct {
+    ...
+    ...
+    // `driverConfig` field can be used to optionally specify
+    // driver specific configuration.
+    // If this field is nil, platform chosen default configuration
+    // will be applied.
+    DriverConfig *CSIDriverConfigSpec `json:"driverConfig,omitempty"`
+}
+
+// CSIDriverConfigSpec defines configuration spec that can be
+// used to optionally configure a specific CSI Driver.
+// +union
+type CSIDriverConfigSpec struct {
+    // `driverName` indicates which of the driver we are
+    // installing
+    // +unionDiscriminator
+    // +required
+    DriverName CSIDriverName `json:"driverName"`
+
+    // `vsphere` field is used to configure vsphere CSI driver
+    // specific properties
+    // +optional
+    VSphere *VSphereCSIDriverConfigSpec `json:"vsphere"`
+}
+
+type VSphereCSIDriverConfigSpec struct {
+    // `topology_categories` indicates categories with which
+    // vcenter resources as hostcluster or datacenter were tagged with.
+    // If unspecified CSI driver configuration will default to configuration
+    // specified in cluster configuration.
+    // +optional
+    TopologyCategories []string `json:"topology_categories"`
+}
+```
+
+Specifying topology as day-2 operation will not affect any of existing PVs in the cluster and they will remain with whatever topology configuration created with. Also changing the topology from a different value will not affect any of existing PVs. They will remain with whatever topology they were created with.
+
+Specifying topology here will cause CSI driver to be deployed with topology configuration as specified in https://docs.vmware.com/en/VMware-vSphere-Container-Storage-Plug-in/2.0/vmware-vsphere-csp-getting-started/GUID-162E7582-723B-4A0F-A937-3ACE82EAFD31.html .
+
+If customer had configured upstream CSI driver with an topology, they must ensure that they are using same values for CSI driver configuration here.
+
+The intent of this change is compatible with changes introduced in - https://github.com/openshift/enhancements/pull/918 . If `driverConfig` is unspecified,
+the CSI driver deployment in new clusters will default to platform specific defaults which will come from `Infrastructure` object if configured as defined in
+enhancement#918.
+
+
+The values specified in `Infrastructure` object will take precedence over user configuration (and user specified changes will be wiped away). Users can only
+configure `TopologyCategories` categories if OCP platform configuration does not specify a topology and user would like to use one for CSI driver.
+
 #### Disabling the operator
 
 Currently disabling the operator is unsupported feature.
