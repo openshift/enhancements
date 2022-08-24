@@ -102,21 +102,32 @@ egressSelections:
 #### konnectivity-socks5-proxy
 
 For components that do not natively support Konnectivity, Hypershift has a [sidecar](https://github.com/openshift/hypershift/tree/main/konnectivity-socks5-proxy)
-that provides a socks5 proxy that can be used by configuring the `HTTP{,S}_PROXY` and `NO_PROXY` env vars. The sidecar
+that provides a socks5 proxy. The components are made to use this sidecar by the control-plane-operator that configures the `HTTP{,S}_PROXY`/`ALL_PROXY` and
+`NO_PROXY` environment variables on their container. The sidecar
 * Authenticates to Konnectivity
-* Does DNS resolving of guest cluster services
-* Exempts cloud provider traffic from going through Konnectivity, in order to support management clusters that have a proxy setup, as the components themselves
-  already have the sidecar as target in their proxy environment variables
+* Optionally does DNS resolving of guest cluster services from its Kubernetes api
+* Optionally uses the guest clusters DNS server for resolving (over TCP)
+* Optionally exempts cloud provider traffic from going through Konnectivity in order to allow cluster operators to interact with the cloud provider
+  before the guest cluster has nodes
 
 Despite being a socks5 proxy, the sidecar only supports TCP and not UDP, as it routes over Konnectivity through http connect. It is a socks5 proxy to allow
-supporting DNS resolving, which is not supported by http connect or Konnectivity itself.
+supporting DNS resolving, which is not supported by http connect or Konnectivity itself. The DNS resolving happens as part of socks5, so the sidecar does not
+need to act as a DNS server.
 
-Current components that use this are :
-- OLM packageserver.
-- OLM operator.
-- openshift-apiserver.
+Current components that use this are:
+- OLM packageserver
+- OLM operator
+- openshift-apiserver
 - oauth-server
-- Ingress operator.
+- Ingress operator
+
+Components that use a protcol other than http and need to use the socks5 proxy need to be adjusted to use a [custom dialer from the x/net/proxy](https://pkg.go.dev/golang.org/x/net/proxy#FromEnvironment)
+package. This custom dialer uses the `ALL_PROXY` environment variable to read a proxy from it and creates connections through that proxy if set.
+Note that this dialer by default only supports socks5 and will [error if a different protocol is given.](https://cs.opensource.google/go/x/net/+/3211cb98:proxy/proxy.go;l=109;drc=3211cb9802344f37a243bc81d005fb6e97f4f8f5)
+
+This is currently being used by:
+* The `oauth-server` when it creates connections to an LDAP server
+
 
 ### Guest pod service access to KAS
 Pods regularly use `kubernetes.default.svc` to contact the KAS. However, the KAS does not exist on the guest pod service network.
