@@ -43,6 +43,7 @@ resources like namespaces, roles, rolebindings, serviceacounts, and deployments.
 ### Goals
 
 1. CVO honors an "only create, reconcile, and update this manifest in clusters with tech preview enabled".
+2. Allowing manifests conditional on other FeatureSets
 
 ### Non-Goals
 
@@ -52,28 +53,33 @@ resources like namespaces, roles, rolebindings, serviceacounts, and deployments.
     is enforced using validation on the apiserver.
 4. Allow manifests to be removed or un-reconciled if TechPreviewNoUpgrade is *not* set.  There are a few case (mostly
     around CRDs), where this capability is useful, but it is not as common as needing to create something additional.
-5. Allowing manifests condition on other featuresets in this iteration.
 
 ## Proposal
 
-Add an annotation that can be set on CVO manifests called `release.openshift.io/feature-gate` with one legal/honored value
-of "TechPreviewNoUpgrade".
-If the value is not "TechPreviewNoUpgrade", the manifest is never created.
+Add an annotation that can be set on CVO manifests called `release.openshift.io/feature-set` that can be set to a comma
+delimited list that can contain any value from 
+[FeatureSet](https://pkg.go.dev/github.com/openshift/api/config/v1#FeatureSet) and "Default" in place of "".
+If the value is not known, the manifest is never created.
 Since most people add manifests in order to see them applied, they will notice if their manifest is never created and
 the choice of annotation allows for potential future usage in the CVO consistent with feature gate handling used by
 other operators.
 
-If a manifest sets `.metadata.annotations["release.openshift.io/feature-gate"]="TechPreviewNoUpgrade"`, the manifest will
+If a manifest sets `.metadata.annotations["release.openshift.io/feature-set"]="TechPreviewNoUpgrade"`, the manifest will
 not be created unless `featuregates.config.openshift.io|.spec.featureSet="TechPreviewNoUpgrade"`.
 If `featuregates.config.openshift.io|.spec.featureSet="TechPreviewNoUpgrade"`, then the manifest is reconciled as normal
 for whatever stage the CVO is in.
+If a manifest sets `.metadata.annotations["release.openshift.io/feature-set"]="Default"`, the manifest will
+not be created unless `featuregates.config.openshift.io|.spec.featureSet=""` (empty string).
+If a manifest sets `.metadata.annotations["release.openshift.io/feature-set"]="Default,LatencySensitive"`, the manifest will
+not be created unless `featuregates.config.openshift.io|.spec.featureSet` is `""` or `"LatencySensitive"`.
 During bootstrapping, the CVO will assume no feature sets are enabled until it can successfully retrieve
 `featuregates.config.openshift.io` from the Kubernetes API server.
 If bootstrapping changes are required, it will be responsibility of the contributing team to manage the proper inclusion
 in the installer and other bootstrapping components.
 
-Because the cluster cannot upgrade to 4.y+1 and because the TechPreviewNoUpgrade flag cannot be unset, there is no concern
-about removing any manifests that were added for TechPreviewNoUpgrade.
+If a special manifest is required for a FeatureSet that allows changes (LatencySensitive to Default for instance),
+the person adding the manifest will have to add the appropriate delete-annotated manifest in Default.
+This is expected to be a rare occurrence of a rare occurrence.
 
 ### User Stories
 
@@ -102,16 +108,19 @@ about removing any manifests that were added for TechPreviewNoUpgrade.
 
 ### Upgrade / Downgrade Strategy
 
-When set, `TechPreviewNoUpgrade` prevents all 4.y to 4.y+1 upgrades.
+FeatureSets do not change often.
+In fact, all functional changes we have today cannot be undone at all (you cannot move out of TechPreviewNoUpgrade or CustomNoUpgrade).
+When upgrading or downgrading, the selection criteria will remain consistent.
+If the selection criteria does change and if a manifest should no longer exist, then it is responsibility of the
+component contributing the manifest to add the appropriate delete-annotated manifest for whichever FeatureSet requires it.
 
 ### Version Skew Strategy
 
-Because upgrades are prevented when this feature is active, there is no supported 4.y skew.
-The clusteroperator/kube-apiserver sets upgradeable=false when TechPreviewNoUpgrade is set.
-4.y.z+1 is still a possible upgrade path so that we can provide CVE service, but tech preview content in the payload
-is not expected to make a drastic change and the underlying cluster capabilities do not change significantly in a z-stream.
-This means that tech preview clusteroperators face the same manifest update restrictions in a single release as normal
-manifests.
+It is the responsibility of the component to ensure that manifests selected for particular FeatureSets are properly
+managed across versions.
+David is so confident that leaks are unlikely, that he doesn't think it's worth the time to attempt to build audit
+tooling to help detect them.
+Trevor promises to make David aware of every time this fails.
 
 ### Operational Aspects of API Extensions
 
