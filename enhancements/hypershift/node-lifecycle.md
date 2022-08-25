@@ -156,17 +156,22 @@ The Inplace Upgrader is a controller that watches both MachineSets (management c
 - Draining and any other step of the process but the upgrade itself are performed in a centralised fashion. This reduces the risk for high privilege Service Accounts permissions to be exposed in Nodes and therefore being vulnerable to containers escape.
 - Prevent the cluster end user as much as possible from interfering in the product owned behaviour.
 
+The overall workflow closely matches self-driving OCP's Machine-Config-Controller. The Inplace Upgrader is similar to the MCO node-controller and the Drainer is similar to the MCO drain-controller.
+
 During the in place upgrade process as of today annotations are used to signal back and forward between NodePool<->MachineSets and between MachineSets<->Nodes.
 This might in future evolve to a different form of contract e.g. CRD.
 
 Workflow:
 - The NodePool controller signals an upgrade (`.release` and `.config` pair change) via an annotation in the underlying MachineSet.
 - The Inplace Upgrader watches this.
-- It fetches all Nodes for the MachineSet and start the upgrade process one by one while honouring maxUnavailable.
-- Drains the Node.
-- Creates a Secret in the guest cluster with the payload content propagated from the token Secret.
-- Runs the machine-config-daemon (upgrader Pod) in the guest cluster targeted Node and mounts the secret with the payload.
-- The machine-config-daemon performs the upgrade in place and signal back state annotating the Node.
+- It fetches all Nodes for the MachineSet, starting the upgrade process one by one while honouring maxUnavailable.
+- The Inplace Upgrader creates update manifests, first creating a Secret in the guest cluster with the payload content propagated from the token Secret.
+- The Inplace Upgrader then runs the machine-config-daemon (upgrader Pod) in the guest cluster targeted Node and mounts the secret with the payload.
+- The machine-config-daemon pod processes the update, then signals back via Node annotations to request draining when needed.
+- The Drainer, watching the Nodes, performs the drains for Nodes requesting drain, and signals completion via another Node annotation.
+- The machine-config-daemon performs the upgrade in place, reboots the Node, and signal to uncordon the Node.
+- The Drainer performs the uncordon and signals completion via annotation.
+- The machine-config-daemon finally signals completion state via annotating the Node.
 - The Inplace Upgrader watches the Node annotation and moves on appropriately, short-circuiting (in case of failure) or proceeding to the next Node, until all Nodes are at the targeted version. 
 
 ### Workflow Description
