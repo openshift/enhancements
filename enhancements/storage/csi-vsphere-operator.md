@@ -161,36 +161,48 @@ A customer may configure a topology for the CSI driver by using following fields
 type ClusterCSIDriverSpec struct {
     ...
     ...
-    // `driverConfig` field can be used to optionally specify
-    // driver specific configuration.
-    // If this field is nil, platform chosen default configuration
-    // will be applied.
-    DriverConfig *CSIDriverConfigSpec `json:"driverConfig,omitempty"`
+    // driverConfig can be used to specify platform specific driver configuration.
+    // When omitted, this means no opinion and the platform is left to choose reasonable
+    // defaults. These defaults are subject to change over time.
+    // +optional
+    DriverConfig CSIDriverConfigSpec `json:"driverConfig"`
 }
 
 // CSIDriverConfigSpec defines configuration spec that can be
 // used to optionally configure a specific CSI Driver.
 // +union
 type CSIDriverConfigSpec struct {
-    // `driverName` indicates which of the driver we are
-    // installing
+    // driverType indicates type of CSI driver for which the
+    // driverConfig is being applied to.
+    //
+    // Valid values are:
+    //
+    // * vSphere
+    //
+    // Allows configuration of vsphere CSI driver topology.
+    //
+    // ---
+    // Consumers should treat unknown values as a NO-OP.
+    //
+    // +kubebuilder:validation:Required
     // +unionDiscriminator
-    // +required
-    DriverName CSIDriverName `json:"driverName"`
+    DriverType CSIDriverType `json:"driverType"`
 
-    // `vsphere` field is used to configure vsphere CSI driver
-    // specific properties
+    // vsphere is used to configure the vsphere CSI driver.
     // +optional
-    VSphere *VSphereCSIDriverConfigSpec `json:"vsphere"`
+    VSphere *VSphereCSIDriverConfigSpec `json:"vSphere,omitempty"`
 }
 
+// VSphereCSIDriverConfigSpec defines properties that
+// can be configured for vsphere CSI driver.
 type VSphereCSIDriverConfigSpec struct {
-    // `topology_categories` indicates categories with which
-    // vcenter resources as hostcluster or datacenter were tagged with.
-    // If unspecified CSI driver configuration will default to configuration
-    // specified in cluster configuration.
+    // topologyCategories indicates tag categories with which
+    // vcenter resources such as hostcluster or datacenter were tagged with.
+    // If cluster Infrastructure object has a topology, values specified in
+    // Infrastructure object will be used and modifications to topologyCategories
+    // will be rejected.
     // +optional
-    TopologyCategories []string `json:"topology_categories"`
+    TopologyCategories []string `json:"topologyCategories,omitempty"`
 }
 ```
 
