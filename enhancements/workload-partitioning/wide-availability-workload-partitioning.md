@@ -63,12 +63,15 @@ determinism required of my applications.
 - We want to consolidate the current approach and extend PerformanceProfile API
   to avoid any possible errors when configuring a cluster for workload
   partitioning.
-- We want to be clear with customers that this enhancement is a day 0 supported
-  feature only. We do not support turning it off after the installation is done
-  and the feature is on.
+- We want to make this enhancement a day 0 supported feature only. We do not
+  support turning it off after the installation is done and the feature is on.
+- We want to make sure that when this feature is on and no CPU set limit is
+  defined via the Performance Profile, the default behavior is to allow full use
+  of the CPU set.
 - We want to maintain the ability to configure the partition size after
   installation, we do not support turning off the partition feature but we do
-  support changing the CPU partition size post day 0.
+  support changing the CPU partition size post day 0. The ability for turning on
+  this feature will be part of the installation phase only.
 
 ### Non-Goals
 
@@ -103,15 +106,112 @@ but slightly different non-goals.
 
 ## Proposal
 
-In order to implement this enhancement we are focused on changing 2 components.
+We will need to maintain a global identifier that is set during installation and
+can not be easily removed after the fact. This approach will help remove
+exposing this feature via an API and limiting the chances that a
+misconfiguration can cause un-recoverable scenarios for our customers. At
+install time we will also apply an initial machine config for workload
+partitioning that sets a default CPUSet for the whole CPUSet. Effectively this
+will behave as if workload partitioning is not turned on. With this approach we
+eliminate the race condition that can occur if we apply a machine config after
+the fact as nodes join the cluster. When a customer wishes to pin the management
+workloads they will be able to do that via the existing Performance Profile.
+Resizing partition size will not cause any issues after installation.
 
-1. Admission Controller ([management cpus
+In order to implement this enhancement we are proposing changing 4 components
+defined below.
+
+1. Openshift API - ([Infrastructure
+   Status](https://github.com/openshift/api/blob/81fadf1ca0981f800029bc5e2fe2dc7f47ce698b/config/v1/types_infrastructure.go#L51))
+
+   - The change in this component is to store a global identifier if we have
+     partitioning turned on.
+
+2. [Openshift Installer](https://github.com/openshift/installer))
+
+   - The change in the installer is to support turning on this feature only
+     during installation as well as apply the partitioning machine configs so
+     that we avoid the race conditions when running in multi-node environments.
+
+3. Admission Controller ([management cpus
    override](https://github.com/openshift/kubernetes/blob/a9d6306a701d8fa89a548aa7e132603f6cd89275/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/doc.go))
    in openshift/kubernetes.
-1. The
+   - This change will be in support of checking the global identifier in order
+     to modify the pod spec with the correct `requests`.
+4. The
    [Performance Profile Controller](https://github.com/openshift/cluster-node-tuning-operator/blob/master/docs/performanceprofile/performance_profile.md)
    part of [Cluster Node Tuning
    Operator](https://github.com/openshift/cluster-node-tuning-operator)
+   - This change will support adding the ability to explicitly pin
+     `Infrastructure` workloads.
+
+### Openshift API - Infrastructure Status
+
+We will need to maintain a status flag to be able to identify if a cluster we
+are operating in has been setup for partitioning or not. Since this identifier
+signifies that a cluster's infrastructure is setup for workload partitioning we
+feel that this information should be part of the `Infrastructure Status`
+resource. This identifier will be an enum that will be set during installation
+and during an upgrade for existing single-node deployments we will set it via
+the Node Tuning Operator.
+
+We propose that in the current implementation we only support either `None` or
+`AllNodes`.
+
+```go
+type InfrastructureStatus struct {
+	...
+  // cpuPartitioning expresses if the cluster nodes have CPU Set partitioning turned on.
+  // The default of None means that no CPU Set partitioning is set.
+  // If AllNodes is set that indicates that all the nodes have partitioning set on
+  // and workloads might be pinned to specific CPU Sets depending on the configurations
+  // set via the Node Tuning Operator and the Performance Profile API
+	// +kubebuilder:default=None
+	// +kubebuilder:validation:Enum=None;AllNodes
+	CPUPartitioning PartitioningMode `json:"cpuPartitioning"`
+}
+
+// PartitioningMode defines the CPU partitioning mode of the nodes.
+type CPUPartitioningMode string
+
+const (
+  // No partitioning is applied.
+	CPUPartitioningNone        CPUPartitioningMode = "None"
+  // All nodes are configured for partitioning.
+	CPUPartitioningAllNodes    CPUPartitioningMode = "AllNodes"
+)
+```
+
+### Openshift Installer
+
+We will need to modify the Openshift installer to set and generate the machine
+configs for the initial setup. The generated machine config manifests will be
+set to be wide open to the whole CPU set. However, because these manifests are
+applied early on in the process we avoid race condition situations that might
+arise if these are applied after installation.
+
+In the similar approach to the `openshift/api` change we propose adding a new
+feature to the install configuration that will flag a cluster for CPU
+partitioning during installation.
+
+```go
+// CPUPartitioningMode is a strategy for how various endpoints for the cluster are exposed.
+// +kubebuilder:validation:Enum=None;AllNodes;MasterNodes;WorkerNodes
+type CPUPartitioningMode string
+
+const (
+	CPUPartitioningNone        CPUPartitioningMode = "None"
+	CPUPartitioningAllNodes    CPUPartitioningMode = "AllNodes"
+)
+
+type InstallConfig struct {
+	// CPUPartitioning configures if a cluster will be used with CPU partitioning
+	//
+	// +kubebuilder:default=None
+	// +optional
+	CPUPartitioning CPUPartitioningMode `json:"cpuPartitioning,omitempty"`
+}
+```
 
 ### Admission Controller
 
@@ -120,22 +220,30 @@ verifies that partitioning is only applied to single node topology configuration
 The design and configuration for any pod modification will remain the same, we
 simply will allow you to apply partitioning on non single node topologies.
 
+We will use the global identifier to correctly modify the pod spec with the
+`requests.cpu` for the new `requests[management.workload.openshift.io/cores]`
+that are used by the workload partitioning feature.
+
 ### Performance Profile Controller
 
-We want to consolidate the current approach to setting up workload partitioning.
 Currently workload partitioning involves configuring CRI-O and Kubelet earlier
 in the processes as a separate machine config manifest that requires the same
 information present in the `PerformanceProfile` resource, that being the
-`isolated` CPU sets. Because configuring multiple resources with the right CPU
-sets consistently is error prone, we want to extend the PerformanceProfile API
-to include settings for workload partitioning. We want to simplify the current
-implementation and apply both of these configurations via the
-`PerformanceProfile` resource.
+`isolated` and `reserved` CPU sets. Because configuring multiple resources with
+the right CPU sets consistently is error prone, we want to extend the
+PerformanceProfile API to include settings for workload partitioning.
 
-We want to add a new `Workloads` field to the `CPU` field that contains the
-configuration information for `enablePinning`. We are not sure where we would
-want to take workload pinning in the future and to allow flexibility we want to
-place the configuration in `cpu.workloads`.
+We want to consolidate the current approach to setting up workload partitioning
+and utilize the changes suggested via the `openshift/installer`. When
+installation is done and workload partitioning is set then from that point on
+the `kubelet` and `crio` only need to be configured with the desired CPU set to
+use. We currently express this to customers via the `reserved` CPU set as part
+of the performance profile api.
+
+We want to add a new `workloads` field to the `cpu` field that contains a list
+of enums for defining which workloads to pin. This should allow us to expand
+this in the future if desired, but in this enhancement we will only support
+`Infrastructure` which defines all of the Openshift workloads.
 
 ```yaml
 apiVersion: performance.openshift.io/v2
@@ -148,17 +256,55 @@ spec:
     reserved: 0,1
     # New addition
     workloads:
-      enablePinning: true
+      - Infrastructure
 ```
 
 ### Workflow Description
 
-The end user will be expected to provide a `PerformanceProfile` manifest that
-describes their desired `isolated` and `reserved` CPUSet and the
-`workloads.enablePinning` flag set to true. This manifest will be applied during
-the installation process.
+The end user will be expected to set the installer config to
+`installConfig.cpuPartitioning: AllNodes` to turn on the feature for the whole
+cluster. As well as provide a `PerformanceProfile` manifest that describes their
+desired `isolated` and `reserved` CPUSet and the `Infrastructure` enum provided
+to the list in the `workloads` enum list.
 
 **High level sequence diagram:**
+
+Install Time Sequence
+
+```mermaid
+sequenceDiagram
+Alice->>Installer: Apply Install Config
+loop Generate
+    Installer->>Installer: Machine Config
+end
+Installer-->>APIServer: Apply Machine Configs
+APIServer-->>Installer: Applied!
+APIServer-->>MCO: Machine Manifests
+MCO-->>Node: Configure and restart Node
+loop Apply
+    Node->>Node: Set kubelet config
+    Node->>Node: Set crio config
+    Node->>Node: Kubelet advertises cores
+end
+Node-->>MCO: Finished Restart
+```
+
+- **Alice** is a human user who creates an Openshift cluster.
+- **Installer** is assisted installer that applies the user manifest.
+- **MCO** is the machine config operator.
+- **Node** is the kubernetes node.
+
+1. Alice sits down and provides the desired installer config with cpu
+   partitioning turned on, `cpuPartitioning: AllNodes`
+2. The installer generates the manifest for a wide open CPU set and applies
+   them.
+3. Once the MCO applies the configs, the node is restarted and the cluster
+   installation continues to completion.
+4. Alice will now have a cluster that has been setup with workload pinning, but
+   the workloads are not limited to any CPU set until Alice applies the
+   performance profile.
+
+Applying CPU Partitioning Size Change
 
 ```mermaid
 sequenceDiagram
@@ -185,13 +331,13 @@ Installer-->>Alice: Cluster is Up!
 
 1. Alice sits down and provides the desired performance profile as an extra
    manifest to the installer.
-1. The installer applies the manifest.
-1. The NTO will generate the appropriate machine configs that include the
+2. The installer applies the manifest.
+3. The NTO will generate the appropriate machine configs that include the
    kubelet config and the crio config to be applied as well as the existing
    operation.
-1. Once the MCO applies the configs, the node is restarted and the cluster
+4. Once the MCO applies the configs, the node is restarted and the cluster
    installation continues to completion.
-1. Alice will now have a cluster that has been setup with workload pinning.
+5. Alice will now have a cluster that has been setup with workload pinning.
 
 #### Variation [optional]
 
@@ -205,32 +351,35 @@ management CPU pool.
 > [Management Workload Partitioning](management-workload-partitioning.md)
 
 1. User sits down at their computer.
-1. **The user creates a `PerformanceProfile` resource with the desired `isolated`
-   and `reserved` CPUSet with the `cpu.workloads.enablePinning` set to true.**
-1. The user runs the installer to create the standard manifests, adds their
+2. **The user creates a `PerformanceProfile` resource with the desired `isolated`
+   and `reserved` CPUSet with the `cpu.workloads[Infrastructure]` added to the
+   enum list.**
+3. **The user will set the installer configuration for CPU partitioning to
+   AllNodes, `cpuPartitioning: AllNodes`.**
+4. The user runs the installer to create the standard manifests, adds their
    extra manifests from steps 2, then creates the cluster.
-1. **NTO will generate the machine config manifests and apply them.**
-1. The kubelet starts up and finds the configuration file enabling the new
+5. **NTO will generate the machine config manifests and apply them.**
+6. The kubelet starts up and finds the configuration file enabling the new
    feature.
-1. The kubelet advertises `management.workload.openshift.io/cores` extended
+7. The kubelet advertises `management.workload.openshift.io/cores` extended
    resources on the node based on the number of CPUs in the host.
-1. The kubelet reads static pod definitions. It replaces the `cpu` requests with
+8. The kubelet reads static pod definitions. It replaces the `cpu` requests with
    `management.workload.openshift.io/cores` requests of the same value and adds
    the `resources.workload.openshift.io/{container-name}: {"cpushares": 400}`
    annotations for CRI-O with the same values.
-1. Something schedules a regular pod with the
+9. Something schedules a regular pod with the
    `target.workload.openshift.io/management` annotation in a namespace with the
    `workload.openshift.io/allowed: management` annotation.
-1. The admission hook modifies the pod, replacing the CPU requests with
-   `management.workload.openshift.io/cores` requests and adding the
-   `resources.workload.openshift.io/{container-name}: {"cpushares": 400}`
-   annotations for CRI-O.
-1. The scheduler sees the new pod and finds available
-   `management.workload.openshift.io/cores` resources on the node. The scheduler
-   places the pod on the node.
-1. Repeat steps 8-10 until all pods are running.
-1. Cluster deployment comes up with management components constrained to subset
-   of available CPUs.
+10. The admission hook modifies the pod, replacing the CPU requests with
+    `management.workload.openshift.io/cores` requests and adding the
+    `resources.workload.openshift.io/{container-name}: {"cpushares": 400}`
+    annotations for CRI-O.
+11. The scheduler sees the new pod and finds available
+    `management.workload.openshift.io/cores` resources on the node. The scheduler
+    places the pod on the node.
+12. Repeat steps 8-10 until all pods are running.
+13. Cluster deployment comes up with management components constrained to subset
+    of available CPUs.
 
 ##### Partition Resize workflow
 
@@ -240,25 +389,26 @@ This section outlines an end-to-end workflow for resizing the CPUSet partition.
 > [Management Workload Partitioning](management-workload-partitioning.md)
 
 1. User sits down at their computer.
-1. **The user updates the `PerformanceProfile` resource with the new desired
-   `isolated` and new `reserved` CPUSet with the `cpu.workloads.enablePinning`
-   set to true.**
-1. **NTO will re-generate the machine config manifests and apply them.**
-1. ... Steps same as [E2E Workflow deployment](#e2e-workflow-deployment) ...
-1. Cluster deployment comes up with management components constrained to subset
+2. **The user updates the `PerformanceProfile` resource with the new desired
+   `isolated` and new `reserved` CPUSet with the `cpu.workloads[Infrastructure]`
+   in the enum list.**
+3. **NTO will re-generate the machine config manifests and apply them.**
+4. ... Steps same as [E2E Workflow deployment](#e2e-workflow-deployment) ...
+5. Cluster deployment comes up with management components constrained to subset
    of available CPUs.
 
 ### API Extensions
 
 - We want to extend the `PerformanceProfile` API to include the addition of a
-  new `workloads` configuration under the `cpu` field.
-- The behavior of existing resources should not change with this addition.
+  new `workloads[Infrastructure]` configuration under the `cpu` field.
+- The behavior of existing API should not change with this addition.
 - New resources that make use of this new field will have the current machine
-  config generated with the additional machine config manifests.
-  - Uses the `isolated` to add the CRI-O and Kubelet configuration files to the
-    currently generated machine config.
-  - If no `isolated` and `enablePinning` is set to true, the default behavior is
-    to use the full CPUSet as if workloads were not pinned.
+  config generated with the additional configurations added to the manifest.
+  - Uses the `reserved` field to add the correct CPU set to the CRI-O and
+    Kubelet configuration files to the currently generated machine config.
+  - If no `workloads[Infrastructure]` is provided then no workload partitioning
+    configurations are left wide open to all CPU sets for the Kubelet and CRI-O
+    configurations.
 
 Example change:
 
@@ -271,9 +421,9 @@ spec:
   cpu:
     isolated: 2-3
     reserved: 0,1
-    # New addition
+    # New enum addition
     workloads:
-      enablePinning: true
+      - Infrastructure
 ```
 
 ### Implementation Details/Notes/Constraints [optional]
@@ -288,26 +438,39 @@ affords us the chance to consolidate the configuration for `kubelet` and `crio`.
 
 We will modify the code path that generates the [new machine
 config](https://github.com/openshift/cluster-node-tuning-operator/blob/a780dfe07962ad07e4d50c852047ef8cf7b287da/pkg/performanceprofile/controller/performanceprofile/components/machineconfig/machineconfig.go#L91-L127)
-using the performance profile. With the new `workloads.enablePinning` flag we
+using the performance profile. With the new `spec.workloads[Infrastructure]` enum we
 will add the configuration for `crio` and `kubelet` to the final machine config
 manifest. Then the existing code path will apply the change as normal.
 
 #### API Server Admission Hook
 
+We will need to alter the code in the admission controller to remove the check
+for Single Node Topology, and modify the check for running nodes to check the
+global identifier which will be set at install time.
+
 The existing admission hook has 4 checks when it comes to workload pinning.
+
+Old Path:
 
 1. Check if `pod` is a static pod
    - Skips modification attempt if it is static.
-1. Checks if currently running cluster topology is Single Node
+2. Checks if currently running cluster topology is Single Node - **Will Change**
    - Skips modification if it is anything other than Single Node
-1. Checks if all running nodes are managed
+3. Checks if all running nodes are managed - **Will Change**
    - Skips modification if any of the nodes are not managed
-1. Checks what resource limits and requests are set on the pod
+4. Checks what resource limits and requests are set on the pod
    - Skips modification if QoS is guaranteed or both limits and requests are set
    - Skips modification if after update the QoS is changed
 
-We will need to alter the code in the admission controller to remove the check
-for Single Node Topology, the other configurations should remain untouched.
+Changed Path:
+
+1. Check if `pod` is a static pod
+   - Skips modification attempt if it is static.
+2. Checks if currently running cluster has global identifier for partitioning set
+   - Skips modification if identifier partitioning set to `None`
+3. Checks what resource limits and requests are set on the pod
+   - Skips modification if QoS is guaranteed or both limits and requests are set
+   - Skips modification if after update the QoS is changed
 
 ### Risks and Mitigations
 
@@ -318,7 +481,7 @@ well.
 We need to make it very clear to customers that this feature is supported as a
 day 0 configuration and day n+1 alterations are not be supported with this
 enhancement. Part of that messaging should involve a clear indication that this
-should be a cluster wide feature.
+currently will be a cluster wide feature.
 
 A risk we can run into is that a customer can apply a CPU set that is too small
 or out of bounds can cause problems such as extremely poor performance or start
@@ -331,11 +494,6 @@ around upper and lower bounds of CPU sets for running an Openshift cluster
 It is possible to build a cluster with the feature enabled and then add a node
 in a way that does not configure the workload partitions only for that node. We
 do not support this configuration as all nodes must have the feature turned on.
-However, there might be a race condition where a node is added and is in the
-process of being restarted with workload partitioning, during that process pods
-being admitted will trigger a warning. We expect the resulting error message
-described in [failure modes](#failure-modes) to explain the problem well enough
-for admins to recover.
 
 A possible risk are cluster upgrades, this is the first time this enhancement
 will be for multi-node clusters, we need to run more tests on upgrade cycles to
@@ -400,9 +558,23 @@ the `workload.openshift.io/allowed` annotation.
 This new behavior will be added in 4.12 as part of the installation
 configurations for customers to utilize.
 
-Enabling the feature after installation is not supported in 4.12, so we do not
+Enabling the feature after installation for HA/3NC is not supported in 4.12, so we do not
 need to address what happens if an older cluster upgrades and then the feature
 is turned on.
+
+When upgrades occur for current single node deployments we will need to set the global
+identifier during the upgrade. We will do this via the NTO and the trigger for
+this event will be:
+
+- If we are in a `SingleNodeTopology`
+- If the `capacity` field set on the node
+- If the identifier is not currently set
+
+We will not change the current machine configs for single node deployments if
+they are already set, this will be done to avoid extra restarts. We will need to
+be clear with customers however, if they add the
+`spec.workloads[Infrastructure]` we will then take that opportunity to
+consolidate the machine configs and clean up the old way of deploying things.
 
 ### Version Skew Strategy
 
@@ -429,8 +601,8 @@ with a message warning the user that their partitioning instructions were
 ignored. These conditions are:
 
 1. When a pod has the Guaranteed QoS class
-1. When mutation would change the QoS class for the pod
-1. When the feature is inactive because not all nodes are reporting the
+2. When mutation would change the QoS class for the pod
+3. When the feature is inactive because not all nodes are reporting the
    management resource
 
 #### Support Procedures
