@@ -58,16 +58,13 @@ determinism required of my applications.
   conformance and functional end-to-end tests as similar deployments that are
   not isolating the management workloads.
 - We want to run different workload partitioning on masters and workers.
-- Customers will be supplied with the advice of 4 hyperthreaded cores for
-  masters and for workers, 2 hyperthreaded cores.
 - We want to consolidate the current approach and extend PerformanceProfile API
   to avoid any possible errors when configuring a cluster for workload
   partitioning.
 - We want to make this enhancement a day 0 supported feature only. We do not
   support turning it off after the installation is done and the feature is on.
-- We want to make sure that when this feature is on and no CPU set limit is
-  defined via the Performance Profile, the default behavior is to allow full use
-  of the CPU set.
+- We want to make sure that the default behavior of this feature is to allow
+  full use of the CPU set.
 - We want to maintain the ability to configure the partition size after
   installation, we do not support turning off the partition feature but we do
   support changing the CPU partition size post day 0. The ability for turning on
@@ -118,7 +115,7 @@ the fact as nodes join the cluster. When a customer wishes to pin the management
 workloads they will be able to do that via the existing Performance Profile.
 Resizing partition size will not cause any issues after installation.
 
-In order to implement this enhancement we are proposing changing 4 components
+In order to implement this enhancement we are proposing changing 3 components
 defined below.
 
 1. Openshift API - ([Infrastructure
@@ -127,23 +124,19 @@ defined below.
    - The change in this component is to store a global identifier if we have
      partitioning turned on.
 
-2. [Openshift Installer](https://github.com/openshift/installer))
-
-   - The change in the installer is to support turning on this feature only
-     during installation as well as apply the partitioning machine configs so
-     that we avoid the race conditions when running in multi-node environments.
-
-3. Admission Controller ([management cpus
+2. Admission Controller ([management cpus
    override](https://github.com/openshift/kubernetes/blob/a9d6306a701d8fa89a548aa7e132603f6cd89275/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/doc.go))
    in openshift/kubernetes.
    - This change will be in support of checking the global identifier in order
      to modify the pod spec with the correct `requests`.
-4. The
+3. The
    [Performance Profile Controller](https://github.com/openshift/cluster-node-tuning-operator/blob/master/docs/performanceprofile/performance_profile.md)
    part of [Cluster Node Tuning
    Operator](https://github.com/openshift/cluster-node-tuning-operator)
    - This change will support adding the ability to explicitly pin
      `Infrastructure` workloads.
+   - This change will support updating a global identifier when workload
+     partitioning is detected on the nodes.
 
 ### Openshift API - Infrastructure Status
 
@@ -233,12 +226,10 @@ information present in the `PerformanceProfile` resource, that being the
 the right CPU sets consistently is error prone, we want to extend the
 PerformanceProfile API to include settings for workload partitioning.
 
-We want to consolidate the current approach to setting up workload partitioning
-and utilize the changes suggested via the `openshift/installer`. When
-installation is done and workload partitioning is set then from that point on
-the `kubelet` and `crio` only need to be configured with the desired CPU set to
-use. We currently express this to customers via the `reserved` CPU set as part
-of the performance profile api.
+When installation is done and workload partitioning is set then from that point
+on the `kubelet` and `crio` only need to be configured with the desired CPU set
+to use. We currently express this to customers via the `reserved` CPU set as
+part of the performance profile api.
 
 We want to add a new `workloads` field to the `cpu` field that contains a list
 of enums for defining which workloads to pin. This should allow us to expand
@@ -259,13 +250,21 @@ spec:
       - Infrastructure
 ```
 
+To support upgrades and maintain better signaling for the cluster, the
+Performance Profile Controller will also inspect the Nodes to update a global
+identifier at start up. We will only update the identifier to true if our
+criteria is met, otherwise we will not change the state to "off" as disabling this
+feature is not supported. We will determine to be in workload pinning mode if
+all the master nodes are configured with a capacity
+(`management.workload.openshift.io/cores`) for workload partitioning. If that is
+true we will set the global identifier otherwise we leave it as is.
+
 ### Workflow Description
 
-The end user will be expected to set the installer config to
-`installConfig.cpuPartitioning: AllNodes` to turn on the feature for the whole
-cluster. As well as provide a `PerformanceProfile` manifest that describes their
-desired `isolated` and `reserved` CPUSet and the `Infrastructure` enum provided
-to the list in the `workloads` enum list.
+The end user will be expected to provide the default machine configs to turn on
+the feature for the whole cluster. As well as provide a `PerformanceProfile`
+manifest that describes their desired `isolated` and `reserved` CPUSet and the
+`Infrastructure` enum provided to the list in the `workloads` enum list.
 
 **High level sequence diagram:**
 
@@ -273,18 +272,32 @@ Install Time Sequence
 
 ```mermaid
 sequenceDiagram
-Alice->>Installer: Apply Install Config
-loop Generate
-    Installer->>Installer: Machine Config
+Alice->>Installer: Generate Manifests
+Installer->>Alice: Create Dir with Cluster Manifests
+loop Apply
+    Alice->>Alice: Add Custom Machine Configs
+    Alice->>Alice: Add PerformanceProfile Manifest
+    Alice->>Alice: Alter Infrastructure Status
 end
+Alice->>Installer: Create Cluster
 Installer-->>APIServer: Apply Machine Configs
 APIServer-->>Installer: Applied!
 APIServer-->>MCO: Machine Manifests
-MCO-->>Node: Configure and restart Node
+MCO-->>Node: Configure and Restart Node
 loop Apply
-    Node->>Node: Set kubelet config
-    Node->>Node: Set crio config
-    Node->>Node: Kubelet advertises cores
+    Node->>Node: Set Kubelet Config
+    Node->>Node: Set CRI- Config
+    Node->>Node: Kubelet Advertises Cores
+end
+Node-->>MCO: Finished Restart
+loop Generate
+    NTO->>NTO: Machine Config from PerformanceProfile
+end
+NTO-->>MCO: Apply Machine Config
+MCO-->>Node: Configure and Restart Node
+loop Apply
+    Node->>Node: Set Kubelet Config
+    Node->>Node: Set CRI- Config
 end
 Node-->>MCO: Finished Restart
 ```
@@ -294,23 +307,35 @@ Node-->>MCO: Finished Restart
 - **MCO** is the machine config operator.
 - **Node** is the kubernetes node.
 
-1. Alice sits down and provides the desired installer config with cpu
-   partitioning turned on, `cpuPartitioning: AllNodes`
-2. The installer generates the manifest for a wide open CPU set and applies
-   them.
-3. Once the MCO applies the configs, the node is restarted and the cluster
-   installation continues to completion.
-4. Alice will now have a cluster that has been setup with workload pinning, but
-   the workloads are not limited to any CPU set until Alice applies the
-   performance profile.
+1. Alice sits down and uses the installer to generate the manifests
+   - `openshift-install create manifests`
+2. The installer generates the manifests to create the cluster
+3. Alice adds the default machine configs and desired PerformanceProfile
+   manifest for workload partitioning to the `openshift` folder that was
+   generated by the installer.
+4. Alice updates the `Infrastructure` CR status
+   to denote that workload partitioning is turned on.
+5. Alice then creates the cluster via the installer.
+6. The installer will apply the manifests and during the bootstrapping process
+   the MCO will apply the default configurations for workload partitioning, and
+   restarts the nodes.
+7. After the cluster is up the NTO will then generate the machine configurations
+   using the information provided in the PerformanceProfile manifest.
+8. The MCO applies the updated workload partitioning configurations and restarts
+   the relevant nodes.
+9. Alice will now have a cluster that has been setup with workload partitioning
+   and the desired workloads pinned to the specified CPUSet in the PerformanceProfile.
 
 Applying CPU Partitioning Size Change
 
 ```mermaid
 sequenceDiagram
-Alice->>Installer: Provide PerformanceProfile manifest
-Installer-->>NTO: Apply
-NTO-->>MCO: Generated Machine Manifests
+Alice->>API: Apply PerformanceProfile Manifest
+API-->>NTO: Apply
+loop Generate
+    NTO->>NTO: Machine Configs
+end
+NTO-->>MCO: Apply Machine Configs
 MCO-->>Node: Configure node
 loop Apply
     Node->>Node: Set kubelet config
@@ -319,8 +344,7 @@ loop Apply
 end
 Node-->>MCO: Finished Restart
 MCO-->>NTO: Machine Manifests Applied
-NTO-->>Installer: PerformanceProfile Applied
-Installer-->>Alice: Cluster is Up!
+NTO-->>API: PerformanceProfile Applied
 ```
 
 - **Alice** is a human user who creates an Openshift cluster.
@@ -329,15 +353,13 @@ Installer-->>Alice: Cluster is Up!
 - **MCO** is the machine config operator.
 - **Node** is the kubernetes node.
 
-1. Alice sits down and provides the desired performance profile as an extra
-   manifest to the installer.
-2. The installer applies the manifest.
-3. The NTO will generate the appropriate machine configs that include the
-   kubelet config and the crio config to be applied as well as the existing
-   operation.
-4. Once the MCO applies the configs, the node is restarted and the cluster
-   installation continues to completion.
-5. Alice will now have a cluster that has been setup with workload pinning.
+1. Alice sits down and applies the desired PerformanceProfile with the selected
+   workloads to pin.
+2. The NTO will generate the appropriate machine configs that include the
+   Kubelet config and the CRIO config and apply the machine configs.
+3. Once the MCO applies the configs, the node is restarted and the cluster
+   has been updated with the desired workload pinning.
+4. Alice will now have a cluster that has been setup with workload pinning.
 
 #### Variation [optional]
 
@@ -494,6 +516,13 @@ around upper and lower bounds of CPU sets for running an Openshift cluster
 It is possible to build a cluster with the feature enabled and then add a node
 in a way that does not configure the workload partitions only for that node. We
 do not support this configuration as all nodes must have the feature turned on.
+The risk that a customer will run into here is that if that node is not in a pool
+configured with workload partitioning, then it might not be able to correctly
+function at all. Things such as networking pods might not work
+as those pods will have the custom `requests`
+`management.workload.openshift.io/cores`. In this situation the mitigation is
+for the customer to add the node to a pool that contains the configuration for
+workload partitioning.
 
 A possible risk are cluster upgrades, this is the first time this enhancement
 will be for multi-node clusters, we need to run more tests on upgrade cycles to
@@ -566,9 +595,7 @@ When upgrades occur for current single node deployments we will need to set the 
 identifier during the upgrade. We will do this via the NTO and the trigger for
 this event will be:
 
-- If we are in a `SingleNodeTopology`
-- If the `capacity` field set on the node
-- If the identifier is not currently set
+- If the `capacity` field set on the master node
 
 We will not change the current machine configs for single node deployments if
 they are already set, this will be done to avoid extra restarts. We will need to
