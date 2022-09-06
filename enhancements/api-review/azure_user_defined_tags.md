@@ -173,7 +173,13 @@ spec:
                   azure:
                     properties:
                       resourceTags:
-                        description: resourceTags is a list of additional tags to apply to Azure resources created for the cluster. See https://docs.microsoft.com/en-us/rest/api/resources/tags for information on tagging Azure resources. Azure supports a maximum of 50 tags per resource except for few, which have limitation of 15 tags. OpenShift reserves 10 tags for its internal use, and allows 5 tags for user configuration.
+                        description: resourceTags is a list of additional tags to apply to Azure
+                        resources created for the cluster. See 
+                        https://docs.microsoft.com/en-us/rest/api/resources/tags for information 
+                        on tagging Azure resources. Azure supports a maximum of 50 tags per 
+                        resource except for few, which have limitation of 15 tags. OpenShift 
+                        reserves 10 tags for its internal use, and allows 5 tags 
+                        for user configuration.
                         type: array
                         maxItems: 5
                         items:
