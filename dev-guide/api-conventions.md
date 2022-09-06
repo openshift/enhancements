@@ -47,6 +47,60 @@ the API review team.
 
 ## API Author Guidance
 
+### Configuration vs Workload APIs
+
+In OpenShift, we talk about two classes of APIs, Workload and Configuration APIs.
+The majority of APIs in OpenShift are Configuration APIs, though some are also Workload APIs.
+
+A Configuration API is one that is typically cluster scoped, a singleton within the cluster and managed by a Cluster
+Administrator only. An example of a configuration API would be the Infrastructure resource that defines configuration
+for the Infrastructure of the Cluster, or the Network resource that configures the networking within the cluster.
+A Configuration API helps a user to configure a property or feature of the cluster.
+
+A Workload API typically is namespaced and is used by end users of the cluster. Workload APIs exist many times within a
+cluster and often many times within a namespace. Many of the Kubernetes core resources such as the Deployment and
+DaemonSet APIs are considered to be Workload APIs.
+A Workload API helps a user to run their workload on top of OpenShift.
+
+You should try to identify whether your API is a Workload or Configuration API as there are different conventions
+applied to them based on which class the API falls into.
+
+#### Defaulting
+
+In Workload APIs, we typically default fields on create (or update) when the field isn't set. This sets the value
+on the resource and forms a part of the contract between the user and the controller fulfilling the API.
+This has the effect that you cannot change the behaviour of a default value once the resource is created.
+
+To change the default behaviour could constitute a breaking change and disrupt the end users workload,
+the behaviour must remain consistent through the lifetime of the resource.
+This also means that defaults cannot be changed without a breaking change to the API.
+If a user were to delete their Workload API resource and recreate it, the behaviour should remain the same.
+
+With Configuration APIs, we typically default fields within the controller and not within the API.
+This means that the platform has the ability to make changes to the defaults over time as we improve the capabilities
+of OpenShift. While we reserve the right to change a default in a Configuration API, we must ensure that when there is a
+change, that there is a smooth upgrade process between the old default and the new default and that we will not break
+existing clusters.
+
+Typically, optional fields on Configuration APIs contain a statement within their Godoc to describe
+the default behaviour when they are omitted, along with a note that this is subject to change over time.
+[The documentation section](#write-user-readable-documentation-in-godoc) of the API conventions goes into more detail
+on how to write good comments on optional fields.
+
+#### Pointers
+
+In Configuration APIs specifically, we advise to avoid making fields pointers unless there is an absolute need to do so.
+An absolute need being the need to distinguish between the zero value and a nil value.
+
+Using pointers makes writing code to interact with the API harder and more error prone and it also harms the
+discoverability of the API.
+
+When we use references, the marshalled version of a resource will include unset fields with their zero value.
+This means, that any end user fetching the resource from the API can observe that a particular field exists and
+"discover" a potentially new feature or option that they were not previously aware of.
+This has the effect of helping our users to understand how they might be able to configure their cluster, without
+having to search for features or review API schemas within the product docs.
+
 ### Write User Readable Documentation in Godoc
 
 Godoc text is generated into both Swagger and OpenAPI schemas which are then used
@@ -279,6 +333,37 @@ myPlatformConfig:
 
 This is invalid. Multiple structs have been configured and no discriminant is provided.
 
+### Prefer consistency with Kubernetes style APIs
+
+As both Kubernetes and OpenShift have a number of integrations with cloud and infrastructure platforms, there are a
+number of different abstractions built into OpenShift that abstract and extend infrastructure capabilities.
+For example, the Machine API or platform specific storage integrations within OpenShift.
+
+These integrations often result in adding new API fields to OpenShift to allow users to configure various features of
+the platform. Often, different platform's concepts are similar, but their naming of particular features can be specific
+to their platform.
+If we copy verbatim the API from a platform, this may or may not be compliant with OpenShift conventions and may or
+may not make sense in a wider scope.
+
+If we intend to support similar features across platforms, it is preferable to have similar APIs for these features
+within OpenShift rather than mimicking the platform API. This has the benefit of providing consistency to users when
+using OpenShift across multiple platforms and reducing the learning curve when installing OpenShift on a new platform.
+Where possible, we should link to the platform specific documentation for features in the description of our own APIs.
+
+While we appreciate that reusing the platform specific terminology can make it easier for someone familiar with the
+platform to understand the API, we prefer to stick to Kubernetes style conventions (eg preferring PascalCase for
+enumerated values) when abstracting platform specific APIs as this allows us to build a consistent looking API across
+the OpenShift product.
+Differences between our APIs and platform APIs can be handled within the controller backing the API.
+
+We have seen examples in the past where the value of a platform API is not intuitive to the value to the end user.
+When designing APIs for OpenShift we try to make it clear what the value is to an end user and what exactly will happen
+when they configure a particular field.
+Where platform APIs may talk about a feature in terms of the implementation, we should aim to talk about a feature
+in terms of the action that OpenShift and the platform will take.
+This is an easy way to help users understand the effects of their actions and provide additional value over them using
+the platform specific APIs directly.
+
 ## Exceptions to Kubernetes API Conventions
 
 ### Use JSON Field Names in Godoc
@@ -406,6 +491,49 @@ may be accustomed to from upstream APIs, but it has the advantage that it avoids
 ambiguity and the need for API consumers to resolve an API version and kind to
 the resource group and name that identify the resource.
 
+### Do not use Boolean fields
+
+While the upstream Kubernetes conventions recommend thinking twice about using Booleans, they are explicitly forbidden
+within OpenShift APIs.
+
+Many ideas start as a boolean value, eg `FooEnabled: true|false`, but often evolve into needing 3, 4 or even more states
+at some point during the APIs lifetime.
+As a Boolean value can only ever have 3 values (`true`, `false`, `omitted` when a pointer), we have seen examples in
+where API authors have later added additional fields, paired with the Boolean field that are only meaningful when the
+original field has a certain state. This makes it confusing for an end user as they have to be aware that the field
+they are trying to use, only has an effect in certain circumstances.
+
+Rather than creating a boolean field:
+```go
+// authenticationEnabled determines whether authentication should be enabled or disabled.
+// When omitted, this means the platform can choose a reasonable default.
+// +optional
+AuthenticationEnabled *bool `json:"authenticationEnabled,omitempty"`
+```
+
+Use an enumeration of values that describe the action instead:
+```go
+// authentication determines the requirements for authentication within the cluster.
+// When omitted, the authentication will be Optional.
+// +kubebuilder:validation:Enum:=Optional;Required;Disabled;""
+// +optional
+Authentication AuthenticationPolicy `json:authentication,omitempty`
+```
+
+With this example, we have described through the enumerated values the action that the API will have.
+Should the API need to evolve in the future, for example to add a particular method of Authentication that should be
+used, we can do so by adding a new value (eg. `PublicKey`) to the enumeration and avoid adding a new field to the API.
+
+### Optional fields should not be pointers (in Configuration APIs)
+
+In [Configuration APIs](#configuration-vs-workload-apis), we do not follow the upstream guidance of making optional
+fields pointers.
+Pointers are difficult to work with and are more error prone than references and they also harm the discoverability
+of the API.
+
+This topic is expanded in the [Pointers](#pointers) subsection of the
+[Configuration vs Workload APIs](#configuration-vs-workload-apis) above.
+
 ## FAQs
 
 ### My proposed design looks like an existing API we have, why am I being told that it must be changed?
@@ -430,3 +558,17 @@ API to meet the latest conventions.
 
 When adhered to the conventions prevent us from making API design mistakes or repeating them.
 As such, the existence of non-compliant APIs is not a justification for introducing additional non-compliant APIs.
+
+### I'm copying an API from an upstream project or platform/cloud provider, can I change the design?
+
+Yes! When designing an API for an abstraction, you should consider the end user experience and the value your
+abstraction is providing. If you copy the API verbatim, are you adding any value?
+
+If an upstream/platform API is not intuitive, we can improve the user experience by creating our own naming that better
+describes the effects of enabling a specific field with a specific value. Think about why a user would configure a field
+when choosing the name.
+
+When writing APIs for OpenShift, we try to make our APIs consistent with one another and "Kube-like" so that users of
+OpenShift have an understanding of how to use our APIs intuitively. If an upstream API is not consistent with
+those conventions, you should be prepared to change your abstraction to follow conventions to maintain that consistent
+user experience within OpenShift.

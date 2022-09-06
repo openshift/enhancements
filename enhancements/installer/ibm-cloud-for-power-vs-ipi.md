@@ -256,9 +256,27 @@ as because it is managing DNS & the Load Balancer (which is already set up with 
 the specifics of these interactions is available in [JIRA](<https://issues.redhat.com/browse/MULTIARCH-1103>).
 
 ### Persistent Storage
+The support for PowerVS storage is configured as day 1 operation. OCP ships a new cluster operator called ibm-powervs-block-csi-driver-operator.
+1. [ibm-powervs-block-csi-driver](https://github.com/kubernetes-sigs/ibm-powervs-block-csi-driver) is downstreamed to [openshift](https://github.com/openshift/ibm-powervs-block-csi-driver)
+2. The ibm-powervs-block-csi-driver-operator installs the IBM PowerVS Block CSI driver following the  [recommended guidelines](https://github.com/openshift/enhancements/blob/master/enhancements/storage/csi-driver-install.md)
+3. The ibm-powervs-block-csi-driver-operator deploys all the objects required by the  IBM PowerVS Block CSI driver:
+   1. A namespace called `openshift-cluster-csi-drivers`
+   2. Two ServiceAccounts: one for the Controller Service and other for the Node Service of the CSI driver
+   3. The RBAC rules to be used by the sidecar containers
+   4. The CSIDriver object representing the CSI driver
+   5. A Deployment that runs the driver's Controller Service
+   6. A DaemonSet that runs the driver's Node Service
+   7. A default StorageClass that uses the CSI driver as a provisioner.
+4. The ibm-powervs-block-csi-driver-operator deploys all the CSI driver objects in the namespace `openshift-cluster-csi-drivers`
+5. The ibm-powervs-block-csi-driver-operator itself is installed by [Cluster Storage Operator](https://github.com/openshift/cluster-storage-operator) for all Openshift clusters in the PowerVS as per below steps
+   1. `cluster-version-operator` starts `openshift-cluster-storage-operator`
+   2. `openshift-cluster-storage-operator` checks if it runs on PowerVS, installs IBM PowerVS Block CSI driver Operator, starts it and monitors its status (i.e. monitors existence of the IBM PowerVS Block CSI driver Operator ClusterOperator CR and reports its own `openshift-cluster-storage-operator` status based on it)
+   3. An instance of `ClusterCSIDriver` will be created to faciliate managment of driver operator.  `ClusterCSIDriver` is already defined in - https://github.com/openshift/api/blob/master/operator/v1/types_csi_cluster_driver.go but needs to be expanded to include IBMPowerVSBlockCSIDriver
+   4. IBM PowerVS Block CSI driver Operator starts and runs the IBM PowerVS Block CSI driver (i.e. starts Deployment with the controller parts and DaemonSet with the node parts). Additionally it creates a default StorageClass that users can use in their PVCs
+6. The ibm-powervs-block-csi-driver-operator leverages the PowerVS credentials by creating a credentials request to [Cloud Credential Operator](https://github.com/openshift/cloud-credential-operator).
+
 At launch, the planned support for storage (for PV & PVCs) is NFS & ODF as day 2 configuration options.
-On the roadmap, we would be looking into [Spectrum Scale][ibm-spectrum-scale-website] as a day 2 configuration as well as a
-CSI driver for Power VS. These features would look to be enabled in a future release of OpenShift.
+On the roadmap, we would be looking into [Spectrum Scale][ibm-spectrum-scale-website] as a day 2 configuration.These features would look to be enabled in a future release of OpenShift.
 
 ### VM & Image Registry Storage
 The VM instances in Power VS will be initialized with 120GB disks. For installation, the registry will be backed

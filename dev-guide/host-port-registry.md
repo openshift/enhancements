@@ -9,7 +9,7 @@ reviewers:
 approvers:
   - "@russelb"
 creation-date: 2020-08-26
-last-updated: 2022-05-09
+last-updated: 2022-08-31
 status: informational
 ---
 
@@ -88,6 +88,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9103  | ovn-kubernetes node kube-rbac-proxy | sdn || metrics |
 | 9105  | ovn-kubernetes node kube-rbac-proxy-ovn-metrics | sdn | 4.10 | metrics |
 | 9106  | sdn controller kube-rbac-proxy | sdn | 4.10 | control plane only, sdn only |
+| 9107  | ovn-kubernetes node | sdn | 4.12 | egressip-node-healthcheck-port, sdn interface only, ovn-kubernetes only |
 | 9120  | metallb | sdn | 4.9 | metrics|
 | 9121  | metallb | sdn | 4.9 | metrics|
 | 9122  | metallb | sdn | 4.9 | leader election protocol |
