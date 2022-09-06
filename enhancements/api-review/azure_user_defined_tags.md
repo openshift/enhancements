@@ -1,27 +1,33 @@
 ---
-title: apply-user-defined-tags-to-all-azure-resources-created-by-openShift
+title: azure_user_defined_tags
 authors:
   - "@bhb"
 reviewers:
   - "@patrickdillon"
   - "@sdodson"
-  - "@jerpeter1"
-  - "@Miciah"
-  - "@sinnykumari"
+  - "@jhixson74"
+  - "@JoelSpeed"
+  - "@dhellmann"
+  - "@jewzaam"
+  - "@adambkaplan"
+  - "@abhat"
   - "@dmage"
+  - "@Miciah"
+  - "@abutcher"
   - "@staebler"
-  - "@tkashem"
-  - "@tjungblu"
+  - "@jerpeter1"
 approvers:
   - "@sdodson"
   - "@jerpeter1"
   - "@bparees"
 api-approvers:
   - "@joelspeed"
+  - "@bparees"
 creation-date: 2022-07-12
 last-updated: 2022-07-12
 tracking-link:
   - https://issues.redhat.com/browse/OCPPLAN-8155
+  - https://issues.redhat.com/browse/CORS-2249
 see-also:
   - "enhancements/api-review/custom-tags-aws.md"
 replaces:
@@ -49,20 +55,21 @@ Motivations include but are not limited to:
 
 - As an openshift administrator, I want to have tags added to all resources created 
   in Azure by Openshift.
-- As an openshift administrator, I want to restrict access granted to Openshift specific account.
+- As an openshift administrator, I want to restrict access granted to Openshift 
+  specific account.
 
 ### Goals
 
 - The administrator or service (in the case of Managed OpenShift) installing OpenShift 
   can configure allowed number of user-defined tags in the Openshift installer generated
   install config, which is referred and applied by the installer and the in-cluster operators
-  on the the Azure resources during creation.
+  on the the Azure resources during cluster creation.
 - Tags must be applied at creation time, in an atomic operation. It isn't acceptable 
-  to create an object and, after some period of time, apply the tags post-creation.
+  to create an object and to apply tags post cluster creation.
 
 ### Non-Goals
 
-- Management of resource tags post creation of cluster is out of scope.
+- Management(update/delete) of resource tags post creation of cluster is out of scope.
 
 ## Proposal
 
@@ -75,8 +82,8 @@ New `userTags` field will be added to `platform.azure` of install-config for the
 to define the tags to be added to the resources created by installer and in-cluster operators.
 
 If `platform.azure.userTags` of install-config has any tag defined same will be added 
-to all the azure resources created by Openshift except, when the tag validation fails 
-due to any of below conditions
+to all the azure resources created by Openshift except, when the tag validation fail
+to meet any of the below conditions
 1. A tag name can have a maximum of 128 characters.
     - Tag name has a limit of 512 characters for all resources except for 
     storage accounts, which has a limit of 128 characters and hence tag name 
@@ -114,7 +121,7 @@ Azure resource.
 - openshift installer validates the tags defined in `.platform.azure.userTags` and 
   adds these tags to all resources created during installation and also updates 
   `.status.platformStatus.azure.resourceTags` of the `infrastructure.config.openshift.io`
-- In cluster operators refers `.sttaus.platformSTatus.azure.resourceTags` of the 
+- In cluster operators refers `.status.platformStatus.azure.resourceTags` of the 
   `infrastructure.config.openshift.io` to add tags to resources created later.
 
 #### Variation [optional]
@@ -146,14 +153,14 @@ spec:
                   type: object
 ```
 
-- Add `resourceTags` field to `platformStatus.status.azure` 
+- Add `resourceTags` field to `status.platformStatus.azure` 
   of the `infrastructure.config.openshift.io`
 ```yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: infrastructures.config.openshift.io
-status:
+spec:
   versions:
   - name: v1
     schema:
@@ -166,7 +173,7 @@ status:
                   azure:
                     properties:
                       resourceTags:
-                        description: resourceTags is a list of additional tags to apply to Azure resources created for the cluster. See https://docs.microsoft.com/en-us/rest/api/resources/tags for information on tagging Azure resources. Azure supports a maximum of 50 tags per resource except for few, which is limited to 15. OpenShift reserves 10 tags for its internal use, and allows 5 tags for user configuration.
+                        description: resourceTags is a list of additional tags to apply to Azure resources created for the cluster. See https://docs.microsoft.com/en-us/rest/api/resources/tags for information on tagging Azure resources. Azure supports a maximum of 50 tags per resource except for few, which have limitation of 15 tags. OpenShift reserves 10 tags for its internal use, and allows 5 tags for user configuration.
                         type: array
                         maxItems: 5
                         items:
@@ -193,15 +200,23 @@ status:
 ### Implementation Details/Notes/Constraints [optional]
 Add a new field `resourceTags` to `.status.platformStatus.azure` of the 
 `infrastructure.config.openshift.io` type. Tags included in the `resourceTags` field 
-will be applied to new resources created for the cluster by in-cluster operators.
+will be applied to new resources created for the cluster by the in-cluster operators.
 
 The `resourceTags` field in `status.platformStatus.azure` of `infrastructure.config.openshift.io`
 will be populated by the installer using the entries from `platform.azure.userTags` field of `install-config`.
 
 `status.platformStatus.azure` of `infrastructure.config.openshift.io` is immutable.
 
-All operators that create Azure resources (Cluster Infrastructure ,Storage ,Node ,
-NetworkEdge ,Internal Registry ,CCO) will apply these tags to all Azure resources they create.
+All operators that create Azure resources will apply these tags to all Azure 
+resources they create.
+
+| Operator | Resources created by the operator |
+| -------- | ----------------------------- |
+| cloud-network-config-controller | Private IP address |
+| cluster-image-registry-operator | Storage Account |
+| cluster-ingress-operator | Load Balancer, DNS records |
+| cloud-credential-operator | IAM roles and policies |
+| machine-api-provider-azure | Application Security Group, Availability Set, Group, Load Balancer, Public IP Address, Route, Network Security Group, Virtual Machine Extension, Virtual Interface, Virtual Machine, Virtual Network. |
 
 Below list of terraform Azure APIs to create resources should be updated to add user
 defined tags and as well the openshift default tag in the installer component.
