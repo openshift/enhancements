@@ -20,6 +20,8 @@ status: implementable
 
 # Targeted Update Edge Blocking
 
+Also known as conditional update risk declaration, because we [continue to support updates between releases][support-documentation], even if we declare a risk for a cluster using that update path.
+
 ## Release Signoff Checklist
 
 - [x] Enhancement is `implementable`
@@ -30,14 +32,14 @@ status: implementable
 
 ## Summary
 
-This enhancement proposes a mechanism for blocking edges for the subset of clusters considered vulnerable to known issues with a particular update or target release.
+This enhancement proposes a mechanism for declaring update risks for the subset of clusters considered vulnerable to known issues with a particular update or target release.
 
 ## Motivation
 
 When managing the [Cincinnati][cincinnati-spec] update graph [for OpenShift][cincinnati-for-openshift-design], we sometimes discover issues with particular release images or updates between them.
 Once an issue is discovered, we [block edges][block-edges] so we no longer recommend risky updates, or updates to risky releases.
 
-Note: as described [in the documentation][support-documentation], supported updates are still supported even if incoming edges are blocked, and Red Hat will eventually provide supported update paths from any supported release to the latest supported release in its z-stream.
+Note: as described [in the documentation][support-documentation], supported updates are still supported even if incoming edges are blocked or declare risks, and Red Hat will eventually provide supported update paths from any supported release to the latest supported release in its z-stream.
 And, since [docs#32091][openshift-docs-32091], [that documentation][support-documentation] also points out that updates initiated after the update recommendation has been removed are still supported.
 
 Incoming bugs are evaluated to determine an impact statement based on [a generic template][rhbz-1858026-impact-statement-request].
@@ -56,9 +58,9 @@ This enhancement aims to reduce that tension.
 
 ### Non-Goals
 
-* Exactly scoping the set of blocked clusters to those which would have been impacted by the issue.
+* Exactly scoping the set of risk-matching clusters to those which would have been impacted by the issue.
     For example, some issues may be races where the impacted cluster set is a random subset of the vulnerable cluster set.
-    Any targeting of the blocked edges will reduce the number of blocked clusters which would have not been impacted, and thus reduce the contention between protecting vulnerable clusters and inconveniencing invulnerable clusters, so even overly broad scoping is better than no scoping at all.
+    Any targeting of the update risk will reduce the number of risk-matching clusters which would have not been impacted, and thus reduce the contention between protecting vulnerable clusters and inconveniencing invulnerable clusters, so even overly broad scoping is better than no scoping at all.
 * Specifying a particular update service implementation.
     This enhancement floats some ideas, but the details of the chosen approach are up to each update service's maintainers.
 
@@ -68,10 +70,10 @@ This enhancement aims to reduce that tension.
 
 [The existing blocked-edges schema][block-edges] will be extended with the following new properties:
 
-* `url` (optional, [string][json-string]), with a URI documenting the blocking reason.
+* `url` (optional, [string][json-string]), with a URI documenting the update risk.
     For example, this could link to a bug's impact statement or knowledge-base article.
 * `name` (optional, [string][json-string]), with a CamelCase reason suitable for [a `ClusterOperatorStatusCondition` `reason` property][api-reason].
-* `message` (optional, [string][json-string]), with a human-oriented message describing the blocking reason, suitable for [a `ClusterOperatorStatusCondition` `message` property][api-message].
+* `message` (optional, [string][json-string]), with a human-oriented message describing the update risk, suitable for [a `ClusterOperatorStatusCondition` `message` property][api-message].
 * `matchingRules` (optional, [array][json-array]), defining conditions for deciding which clusters have the update recommended and which do not.
   The array is ordered by decreasing precedence.
   Consumers should walk the array in order.
@@ -131,7 +133,7 @@ The `type: PromQL` condition entry is an [object][json-object] with the followin
   Each entry is an [object][json-object] with the following schema:
   * `url` (required, [string][json-string]), with a URI documenting the issue, as described in [the blocked-edges section](#enhanced-graph-data-schema-for-blocking-edges).
   * `name` (required, [string][json-string]), with a CamelCase reason, as described in [the blocked-edges section](#enhanced-graph-data-schema-for-blocking-edges).
-  * `message` (required, [string][json-string]), with a human-oriented message describing the blocking reason, as described in [the blocked-edges section](#enhanced-graph-data-schema-for-blocking-edges).
+  * `message` (required, [string][json-string]), with a human-oriented message describing the update risk, as described in [the blocked-edges section](#enhanced-graph-data-schema-for-blocking-edges).
   * `matchingRules` (required with at least one entry, [array][json-array]), defining conditions for deciding which clusters have the update recommended and which do not.
     The array is ordered by decreasing precedence.
     Consumers should walk the array in order.
@@ -305,10 +307,10 @@ AcceptedRisks string `json:"acceptedRisks,omitempty"`
 The following recommendations are geared towards the [openshift/cincinnati][cincinnati].
 Maintainers of other update service implementations may or may not be able to apply them to their own implementation.
 
-The graph-builder's graph-data scraper should learn about [the new 1.1.0 schema](#enhanced-graph-data-schema-for-blocking-edges), and include the new properties in its blocker cache.
-For each edge declared by a release image (primary metadata), the graph-builder will check the blocker cache for matching blocks.
-Edges with no matching blocks are unconditionally recommended, and will be included in `edges`.
-Edges with matching blocks are conditionally recommended, and will be included in `conditionalEdges`.
+The graph-builder's graph-data scraper should learn about [the new 1.1.0 schema](#enhanced-graph-data-schema-for-blocking-edges), and include the new properties in its risk cache.
+For each edge declared by a release image (primary metadata), the graph-builder will check the risk cache for matching risks.
+Edges with no matching risks are unconditionally recommended, and will be included in `edges`.
+Edges with matching risks are conditionally recommended, and will be included in `conditionalEdges`.
 Including edges which are recommended for no clusters under `conditionalEdges` gives consumers access to `url`, `name`, and `message` metadata explaining why the edge is not recommended.
 
 ### Cluster-version operator support for the enhanced schema
@@ -319,7 +321,7 @@ Otherwise the `Evaluating` condition will be set to `False`, and the `Recommende
 `edges` will continue to go straight into `availableUpdates`.
 The operator will log an error if the same target is included in both `edges` and `conditionalEdges`, but will prefer the `conditionalEdges` entry in that case.
 
-Additionally, the operator will continually re-evaluate the blocking conditionals in `conditionalUpdates` and update `conditionalUpdates[].risks` accordingly.
+Additionally, the operator will continually re-evaluate the risks in `conditionalUpdates` and update `conditionalUpdates[].risks` accordingly.
 The timing of the evaluation and freshness are largely internal details, but to avoid [consuming excessive monitoring resources](#malicious-conditions) and because [the rules should be based on slowly-changing state](#clusters-moving-into-the-vulnerable-state-after-updating), the operator will handle polling with the following restrictions:
 
 * The cluster-version operator will cache polling results for each query, so a single query which is used in evaluating multiple risks over multiple conditional update targets will only be evaluated once per round.
@@ -412,13 +414,13 @@ matchingRules:
 
 Graph-data administrators may also [tombstone releases][tombstone] when issues are discovered before errata are published.
 [Docs#32091][openshift-docs-32091] [documented][support-documentation] support for updates initiated after update recommendations had been removed, but edges to or from tombstoned releases were never supported.
-Similarly, edges which were blocked before the release was supported were never supported, although there may be some ambiguity here if the blocks are conditional, as clusters may move in and out of the vulnerable set depending on their current configuration.
+Similarly, edges which declared risks before the release was supported were never supported, although there may be some ambiguity here if the risks are conditional, as clusters may move in and out of the vulnerable set depending on their current configuration.
 
 We also lack a clear mechanism for warning users about install-time or post-install issues with a particular release.
 The graph-data flow only informs update decisions.
 
-Because of both of these reasons, graph-data administrators should prefer tombstones to protect vulnerable users, instead of proceeding with an official release and relying on targeted edge blocking for protection.
-Publishing errata after blocking edges should be an exception for situations where we need to ship a fix for one serious issue but do not yet have a fix in place for a second serious issue.
+Because of both of these reasons, graph-data administrators should prefer tombstones to protect vulnerable users, instead of proceeding with an official release and relying on conditional update risks for protection.
+Publishing errata after declaring conditional risks should be an exception for situations where we need to ship a fix for one serious issue but do not yet have a fix in place for a second serious issue.
 
 #### Cincinnati JSON
 
@@ -676,8 +678,8 @@ While we could extend `nodes` in future enhancements to include release vulnerab
 
 #### Stranding supported clusters
 
-As described [in the documentation][support-documentation], supported updates are still supported even if incoming edges are blocked, and Red Hat will eventually provide supported update paths from any supported release to the latest supported release in its z-stream.
-There is a risk, with the dynamic, per-cluster graph, that targeted edge blocking removes all outgoing update recommendations for some clusters on supported releases.
+As described [in the documentation][support-documentation], supported updates are still supported even if incoming edges have risks, and Red Hat will eventually provide supported update paths from any supported release to the latest supported release in its z-stream.
+There is a risk, with the dynamic, per-cluster graph, that conditional update risks removes all outgoing update recommendations for some clusters on supported releases.
 This risk can be mitigated in at least two ways:
 
 * For the fraction of customer clusters that do not [opt-out of submitting Insights/Telemetry][uploaded-telemetry-opt-out], we can monitor [the existing `cluster_version_available_updates`][uploaded-telemetry-cluster_version_available_updates] to check for clusters running older versions which are still reporting no available, recommended updates.
@@ -709,7 +711,7 @@ For clusters whose Prometheus stack is present but troubled, [the query coverage
 
 [The graph-data repository][graph-data] should grow a presubmit test to enforce as much of the new schema as is practical.
 Validating PromQL will require Go tooling to access [the Go parser][PromQL-go-parser].
-The presubmit should require `url`, `name`, and `message` to be populated for new blocks.
+The presubmit should require `url`, `name`, and `message` to be populated for new update risks.
 
 Extending existing mocks and stage testing with data using the new schema should be sufficient for [update service support](#update-service-support-for-the-enhanced-schema).
 
@@ -771,7 +773,7 @@ I tried to sell folks on making edges an explicit, first-class graph-data concep
 Benefit of positive edge definitions include:
 
 * Update services would not need to load release images from a local repository in order to figure out which update sources had been baked inside.
-* Accidentally adding or forgetting to block edges becomes harder to overlook when reviewing graph-data pull requests, because more data is local vs. being stored in external release images.
+* Accidentally adding or forgetting to declare risks becomes harder to overlook when reviewing graph-data pull requests, because more data is local vs. being stored in external release images.
 
 Drawbacks of positive edge definitions include:
 
@@ -869,7 +871,7 @@ matchingRules:
       0 * cluster_infrastructure_provider
 ```
 
-examples from [the 4.7.4 user story](#graph-data-administrators) could be replaced by a blocker entry with:
+examples from [the 4.7.4 user story](#graph-data-administrators) could be replaced by a conditional risk entry with:
 
 ```yaml
 matchingRules:
