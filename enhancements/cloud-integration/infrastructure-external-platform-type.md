@@ -1,33 +1,35 @@
 ---
 title: infrastructure-external-platform-type
 authors:
-- "@lobziik"
-- "@elmiko"
+  - "@lobziik"
+  - "@elmiko"
 reviewers:
-- "@dhellmann"
-- "@mhrivnak"
-- "@rvanderp3" - SPLAT, installer flexibility initiative
-- "@deads2k" - API change, KCM, library-go
-- "@JoelSpeed" - cluster infra
-- "@jsafrane" - cluster storage operator
-- "@sinnykumari" - machine config operator
-- "@danwinship" - openshift networking
+  - "@dhellmann"
+  - "@mhrivnak"
+  - "@rvanderp3"
+  - "@mtulio"
+  - "@deads2k" 
+  - "@JoelSpeed"
+  - "@sinnykumari"
+  - "@danwinship"
 approvers:
-- TBD
+  - "@dhellmann"
+  - "@deads2k"
+  - "@bparees"
 api-approvers:
-- "@deads2k"
-- "@JoelSpeed"
+  - "@deads2k"
+  - "@JoelSpeed"
 creation-date: 2022-09-06
 last-updated: 2022-09-06
 tracking-link:
-- [OCPPLAN-9429](https://issues.redhat.com/browse/OCPPLAN-9429)
-- [OCPPLAN-8156](https://issues.redhat.com/browse/OCPPLAN-8156)
+  - https://issues.redhat.com/browse/OCPPLAN-9429
+  - https://issues.redhat.com/browse/OCPPLAN-8156
 see-also:
-- [KEP-2392 Cloud Controller Manager](https://github.com/kubernetes/enhancements/tree/master/keps/sig-cloud-provider/2392-cloud-controller-manager)
-- [OCP infrastructure provider onboarding guide](https://docs.providers.openshift.org/overview/)
-- [Out-of-tree cloud provider integration support](https://github.com/openshift/enhancements/blob/master/enhancements/cloud-integration/out-of-tree-provider-support.md)
-- [Platform Operators Proposal](https://github.com/openshift/enhancements/blob/master/enhancements/olm/platform-operators.md)
-- [Capabilites selection](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md)
+  - "[KEP-2392 Cloud Controller Manager](https://github.com/kubernetes/enhancements/tree/master/keps/sig-cloud-provider/2392-cloud-controller-manager)"
+  - "[OCP infrastructure provider onboarding guide](https://docs.providers.openshift.org/overview/)"
+  - "[Out-of-tree cloud provider integration support](https://github.com/openshift/enhancements/blob/master/enhancements/cloud-integration/out-of-tree-provider-support.md)"
+  - "[Platform Operators Proposal](https://github.com/openshift/enhancements/blob/master/enhancements/olm/platform-operators.md)"
+  - "[Capabilites selection](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md)"
 ---
 
 # Introduce new platform type "External" in the OpenShift specific Infrastructure resource
