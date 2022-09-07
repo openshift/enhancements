@@ -23,8 +23,24 @@ customer base, or change implementation details.
 
 ## Solution
 
-Rather than introducing the change, add just the detection logic to the operator
-for the change and associate it with a
+There are two main pathways for remote health monitoring, which collects fleet
+feedback on cluster state: [Telemetry and Insights][remote-health-monitoring].
+Data for Telemetry is extracted from [in-cluster monitoring][monitoring], based
+on Prometheus scraping and Thanos aggregation.  If the cluster state you are
+interested is not already being reported in remote health monitoring, extending
+either Telemetry or Insights can get you access as clusters update into releases
+with your gatherer extensions.  If the cluster state is available in in-cluster
+Prometheus, you can also use [conditional update
+risks](/enhancements/update/targeted-update-edge-blocking.md) or [conditional
+Insights gathering](/enhancements/insights/conditional-data-gathering.md) to
+extract the state from clusters, without waiting for the fleet to update.
+Proactively pushing in-cluster Prometheus metrics for state that you think might
+be helpful in the future is a low-cost approach for reducing risk.
+
+In the absence of existing remote health monitoring or in-cluster Prometheus
+metrics, a low-risk approach to adding cluster state to remote health monitoring
+is to add just the detection logic to the operator for the change and associate
+it with a
 [ClusterStatusConditionTypes](https://github.com/openshift/api/blob/cc0db1116639638254e87a564902833f1ee006d5/config/v1/types_cluster_operator.go#L145)
 called [EvaluationConditionDetected](https://github.com/openshift/api/pull/1250).
 If the
@@ -37,6 +53,10 @@ you are expecting, it will indicate that the change would have affected that
 cluster. However, if the _ConditionStatus_ is _false_, or it's _true_ but the
 _Reason_ does not include the _Reason_ you are expecting, the change doesn't
 affect the cluster.  You can join multiple _Reason_ to test multiple scenarios.
+This approach will get the cluster state into the in-cluster
+`cluster_operator_conditions` Prometheus metric, which is already exported
+through Telemetry.  It will also get the cluster state into Insights, which is
+already collecting ClusterOperator resources.
 
 Now release the detection logic to master and
 [backport](https://docs.google.com/document/d/1PC87sSFa_zGCk95kXDW-wrVxnlgBmkHqpOgQnd4bbUw/edit)
@@ -146,11 +166,18 @@ the scope and impact of the change and should ideally be done in collaboration
 with your respective OpenShift staff engineer, product manager and PLM contact.
 
 In order of preference, in what teams should choose:
-1. [Insight rule notification](https://access.redhat.com/labs/proactiveissuestracker/) -
+
+1. [Conditional update
+    risks](/enhancements/update/targeted-update-edge-blocking.md).  These appear
+    in-cluster when customers are logged in.  They are mutable, so the advice
+    being provided can be adjusted as new information or improved guidance
+    becomes available.  If we decide that the intended change is too invasive,
+    we can remove the conditional risk declaration entirely.
+2. [Insight rule notification](https://access.redhat.com/labs/proactiveissuestracker/) -
    These appear on cloud.redhat.com and on cluster when customers are logged in)
     1. [Insights Rule Contribution wiki](https://source.redhat.com/groups/public/insights-rule-contribution/insights_rule_contribution_wiki/insights_rule_contribution_main) 
     2. Contact [Jan Holecek](mailto:jholecek@redhat.com) for questions.
-2. [Technical Topic Torrent](https://source.redhat.com/groups/public/t3) (T3) -
+3. [Technical Topic Torrent](https://source.redhat.com/groups/public/t3) (T3) -
    This is a communication to TAM/CSM’s (GCS) and GCS customers; delivered via
    email.
     1. Read the
@@ -158,13 +185,13 @@ In order of preference, in what teams should choose:
        for more details.
     2. Contact [gcs-tam-ocp@redhat.com](mailto:gcs-tam-ocp@redhat.com) if you
        have questions.
-3. [Email Campaigns to affected customers](https://docs.google.com/document/d/11ZSX5HYG_-KPC-I4zuygK2BSBow58WnG0lQkTyNgMYI/edit) -
+4. [Email Campaigns to affected customers](https://docs.google.com/document/d/11ZSX5HYG_-KPC-I4zuygK2BSBow58WnG0lQkTyNgMYI/edit) -
    This is direct email contact with customers
     1. While this should ideally be viewed as a last option, history has
        indicated that this is more effective 90% of time over customer portal
        banners.
     2. Contact [Will Wang](mailto:wiwang@redhat.com) for questions.
-4. [Customer Portal Banners](https://docs.google.com/document/d/1rOU3aYNvW90dTPGoFJKA2RMtj65atXxsVoI3FLdIPeA/edit) -
+5. [Customer Portal Banners](https://docs.google.com/document/d/1rOU3aYNvW90dTPGoFJKA2RMtj65atXxsVoI3FLdIPeA/edit) -
    This will reach customers visiting our access.redhat.com (Customer Portal)
    web properties (IE: Docs, Product Pages, Downloads, etc)
     1. The linked document above is used to request the banner. The resulting
@@ -184,3 +211,6 @@ ClusterOperator _Upgradable=False_ guard in certain scenarios. This is not a
 preferable but in situations where the percentage of impacted clusters is small
 and the impact of upgrading without addressing the situation is high, it might
 be applicable.
+
+[remote-health-monitoring]: https://docs.openshift.com/container-platform/4.11/support/remote_health_monitoring/about-remote-health-monitoring.html
+[monitoring]: https://docs.openshift.com/container-platform/4.11/monitoring/monitoring-overview.html
