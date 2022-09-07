@@ -251,7 +251,7 @@ resource "azurerm_resource_group" "main" {
    will not be reconciled by the resource owning operator.
 2. Updating tags of individual resources is not supported and any tag present in 
    `.status.platformStatus.azure.resourceTags` of `infrastructure.config.openshift.io/v1` resource 
-   will result in addding tags to all Openshift managed Azure resources. 
+   will result in adding tags to all Openshift managed Azure resources. 
 
 ### Risks and Mitigations
 
