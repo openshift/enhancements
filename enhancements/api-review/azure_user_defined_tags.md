@@ -3,26 +3,17 @@ title: azure_user_defined_tags
 authors:
   - "@bhb"
 reviewers:
-  - "@patrickdillon"
-  - "@sdodson"
-  - "@jhixson74"
-  - "@JoelSpeed"
-  - "@dhellmann"
-  - "@jewzaam"
-  - "@adambkaplan"
-  - "@abhat"
-  - "@dmage"
-  - "@Miciah"
-  - "@abutcher"
-  - "@staebler"
-  - "@jerpeter1"
+  - "@patrickdillon" ## reviewer for installer component
+  - "@JoelSpeed" ## reviewer for machine-api-provider-azure component
+  - "@dmage" ## reviewer for cluster-image-registry-operator component
+  - "@Miciah" ## reviewer for cluster-ingress-operator component
+  - "@akhil-rane" ## reviewer for cloud-credential-operator component
+  - TBD ## reviewer for api component
+  - TBD ## reviewer for cloud-network-config-controller component
 approvers:
-  - "@sdodson"
-  - "@jerpeter1"
-  - "@bparees"
+  - "@jerpeter1" ## approver for CFE
 api-approvers:
-  - "@joelspeed"
-  - "@bparees"
+  - TBD
 creation-date: 2022-07-12
 last-updated: 2022-07-12
 tracking-link:
@@ -76,7 +67,8 @@ Motivations include but are not limited to:
 A tag of the form `kubernetes.io/cluster/<cluster_name>:owned` will be added to every
 resource created by Openshift to enable administrator to differentiate the resources
 created for Openshift cluster. An administrator is not allowed to add or modify the tag 
-having the prefix `kubernetes.io` or `openshift.io` in the name. 
+having the prefix `kubernetes.io` or `openshift.io` in the name. The same tag can be 
+found applied to other cloud platform resources which supports tagging for ex: AWS.
 
 New `userTags` field will be added to `platform.azure` of install-config for the user 
 to define the tags to be added to the resources created by installer and in-cluster operators.
@@ -214,7 +206,10 @@ will be populated by the installer using the entries from `platform.azure.userTa
 `status.platformStatus.azure` of `infrastructure.config.openshift.io` is immutable.
 
 All operators that create Azure resources will apply these tags to all Azure 
-resources they create.
+resources they create. List of in-cluster operators managing cloud resources
+could vary across platform types, example for AWS there are additional operators
+like aws-ebs-csi-driver-operator, aws-efs-csi-driver-operator to manage specific
+resources.
 
 | Operator | Resources created by the operator |
 | -------- | ----------------------------- |
@@ -300,7 +295,10 @@ resource "azurerm_resource_group" "main" {
 
 On upgrade:
 - Cluster operators that update the tags of Azure resources created for cluster 
-  should refer the new fields and take action. 
+  should refer the new fields and take action. Any new resource created post-upgrade
+  and the operators managing the resource will add the user defined tags to the 
+  resource. But the same does not apply to already existing resources, components may 
+  or may not update the resources with the user defined tags.
 
 On downgrade:
 - The status field may remain populated, components may or may not continue 
