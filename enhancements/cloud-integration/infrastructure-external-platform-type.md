@@ -310,10 +310,10 @@ A new optional constant of `PlatformType` type will be added to the "openshift/a
 
 ```go
 const (
-	...
+    ...
     // ExternalPlatformType represent generic infrastructure provider. Provider-specific components should be supplemented separately.
     ExternalPlatformType PlatformType = "External"
-	...
+    ...
 )
 ```
 
@@ -341,14 +341,14 @@ type CloudControllerManagerSettings struct {
     // When omitted or disabled, no `cloud-provider` flag should be set.
     // +kubebuilder:validation:Enum=Enabled;Disabled
     // +optional
-	Mode CloudControllerManagerMode `json:"mode,omitempty"`
+    Mode CloudControllerManagerMode `json:"mode,omitempty"`
 }
 
 
 // ExternalPlatformSpec holds the desired state for the generic External infrastructure provider.
 type ExternalPlatformSpec struct{
-	// CloudControllerManager contains settings specific to the external Cloud Controller Manager (a.k.a. CCM or CPI)
-	// +optional
+    // CloudControllerManager contains settings specific to the external Cloud Controller Manager (a.k.a. CCM or CPI)
+    // +optional
     CloudControllerManager CloudControllerManagerSettings `json:"cloudControllerManager,omitempty"`
 }
 
@@ -364,15 +364,15 @@ type PlatformSpec struct {
 
 // ExternalPlatformStatus holds the current status of the generic External infrastructure provider.
 type ExternalPlatformStatus struct{
-	// ProviderName holds the arbitrary string represented cloud provider name, expected to be set at the installation time.
-	// Intended to serve only for informational purposes and not expected to be used for decision-making.
+    // ProviderName holds the arbitrary string represented cloud provider name, expected to be set at the installation time.
+    // Intended to serve only for informational purposes and not expected to be used for decision-making.
     // +kubebuilder:default:="Unknown"
-	// +optional
-	ProviderName string `json:"providerName,omitempty"`
+    // +optional
+    ProviderName string `json:"providerName,omitempty"`
 }
 
 type PlatformStatus struct {
-	...
+    ...
     // External contains settings specific to the generic External infrastructure provider.
     // +optional
     External *ExternalPlatformStatus `json:"external,omitempty"`
