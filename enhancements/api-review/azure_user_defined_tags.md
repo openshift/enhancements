@@ -4,16 +4,15 @@ authors:
   - "@bhb"
 reviewers:
   - "@patrickdillon" ## reviewer for installer component
-  - "@JoelSpeed" ## reviewer for machine-api-provider-azure component
+  - "@JoelSpeed" ## reviewer for api and machine-api-provider-azure components
   - "@dmage" ## reviewer for cluster-image-registry-operator component
   - "@Miciah" ## reviewer for cluster-ingress-operator component
   - "@akhil-rane" ## reviewer for cloud-credential-operator component
-  - TBD ## reviewer for api component
   - TBD ## reviewer for cloud-network-config-controller component
 approvers:
   - "@jerpeter1" ## approver for CFE
 api-approvers:
-  - TBD
+  - "@JoelSpeed" ## approver for api component
 creation-date: 2022-07-12
 last-updated: 2022-07-12
 tracking-link:
