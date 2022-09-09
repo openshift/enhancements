@@ -847,7 +847,7 @@ This could potentially lead to "hey, where did that edge go?  It was there yeste
 Mitigating that "where did that edge go?" confusion in the required-property alternative, David expects graph-admins to be keeping watch over enough ClusterVersion content that they notice quickly if the CVO is not publishing some data that they expected to get through.
 So that in cases where partial data does slip into graph-data, the graph-data admins are likely to notice and fix the data before graph admins have time to get too worked up.
 
-David [was unconvinced][reqired-by-david] by my arguments about cluster admins being able to act on incomplete data (at least more than if the relevant conditional updates were missing entirely), so this enhancement uses required properties.
+David [was unconvinced][required-by-david] by my arguments about cluster admins being able to act on incomplete data (at least more than if the relevant conditional updates were missing entirely), so this enhancement uses required properties.
 
 Also, while I personally prefer `reason` for the slug, [David prefers `name`][name-over-reason], so that's what this enhancement uses.
 
