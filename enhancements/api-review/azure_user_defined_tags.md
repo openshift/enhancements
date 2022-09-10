@@ -89,7 +89,7 @@ to meet any of the below conditions
    through Openshift. 
     - Azure supports a maximum of 50 tags except for Automation, Content Delivery Network,
     DNS resources which can have a maximum of 15 tags, hence restricting the number of 
-    user defined tags to 5 and 10 for Openshift's internal use, for all the resources 
+    user defined tags to 10 and 5 for Openshift's internal use, for all the resources 
     created by Openshift.
 
 All in-cluster operators that create Azure resources (Cluster Infrastructure ,Storage ,Node ,NetworkEdge , Internal Registry ,CCO) will apply these tags during resource creation.
@@ -169,10 +169,10 @@ spec:
                         https://docs.microsoft.com/en-us/rest/api/resources/tags for information 
                         on tagging Azure resources. Azure supports a maximum of 50 tags per 
                         resource except for few, which have limitation of 15 tags. OpenShift 
-                        reserves 10 tags for its internal use, and allows 5 tags 
+                        reserves 5 tags for its internal use, and allows 10 tags 
                         for user configuration.
                         type: array
-                        maxItems: 5
+                        maxItems: 10
                         items:
                           description: AzureResourceTag is a tag to apply to Azure resources created for the cluster.
                           type: object
