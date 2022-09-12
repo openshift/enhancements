@@ -2,6 +2,7 @@
 title: installer-feature-sets
 authors:
   - @patrickdillon
+reviewers:
   - @wking, installer, upgrades
   - @bparees, feature sets
 approvers:
