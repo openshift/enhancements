@@ -2,7 +2,6 @@
 title: installer-feature-sets
 authors:
   - @patrickdillon
-reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - @wking, installer, upgrades
   - @bparees, feature sets
 approvers:
@@ -20,11 +19,10 @@ tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic 
 
 ## Summary
 
-This enhancement proposes introducing gated features to `openshift-install` through the use of feature sets.
-Users would be able to enable non-GA features, particularly fields in the install config API, by opting in
-to feature sets. The proposed feature sets are `TechPreviewNoUpgrade` and `ExperimentalNoUpgrade`.
-`TechPreviewNoUpgrade` would handle the standard tech preview use case, while `ExperimentalNoUpgrade` would
-allow for earlier stage experimental features and active development.
+This enhancement proposes adding support for feature sets to `openshift-install`.
+Users would be able to enable feature sets at install time. The Installer would support all feature sets
+in the OpenShift API, as well as an additional `ExperimentalNoUpgrade` feature set, which would be used
+to gate Installer features that are in active development.
 
 ## Motivation
 
@@ -53,12 +51,14 @@ that an incomplete feature would be exposed to customers.
 
 ### Goals
 
-The goal of this proposal is to provide an API that will allow users to enable feature sets in the Installer. In addition,
-the Installer should adhere to best practices for implementing feature sets.  
+The goals of this proposal are:
+* To provide an API that will allow users to enable feature sets in the Installer
+* Allow the Installer to enable feature sets in the cluster
+* Ensure the proposed implementation adheres to best practices for feature sets
 
 ### Non-Goals
 
-Allowing the Installer to enable feature sets in cluster operators or other components is out of scope.
+None
 
 ## Proposal
 
@@ -75,26 +75,27 @@ includes field `bar` in the install config; feature `foo` is part of the Tech Pr
 2. Admin specifies `bar: baz` in install-config.yaml (but `featureSet` is empty).
 3. `openshift-install` returns an error: `the TechPreviewNoUpgrade feature set must be enabled to use this field`
 4. Admin adds `featureSet: TechPreviewNoUpgrade` to install-config.yaml
-5. Cluster installs successfully as a non-upgradeable Tech Preview cluster
+5. Installer generates `FeatureGate` manifest
+6. Cluster installs successfully with TechPreview cluster 
 
 
 ### API Extensions
 
-Feature Sets would become part of the install config API:
+[OpenShift API Feature Sets](https://github.com/openshift/api/blob/master/config/v1/types_feature.go)
+would become part of the install config API:
 
 ```go
-// FeatureSet enables features that are not part of the default set of features.
-// +kubebuilder:validation:Enum="";ExperimentalNoUpgrade;TechPreviewNoUpgrade
-type FeatureSet string
+
+type FeatureSet configv1.FeatureSet
 
 const (
 	// ExperimentalNoUpgrade enables features that are experimental or in active development.
-	ExperimentalNoUpgrade FeatureSet = "ExperimentalNoUpgrade"
-
-	// TechPreviewNoUpgrade enables features that are in tech preview, i.e. ready for use but not GA & not fully supported.
-	TechPreviewNoUpgrade FeatureSet = "TechPreviewNoUpgrade"
+	ExperimentalNoUpgrade configv1.FeatureSet = "ExperimentalNoUpgrade"
 )
 ```
+
+`ExperimentalNoUpgrade`, for Installer work in progress or
+experimental features, is added to the set of accepted feature sets.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -147,7 +148,7 @@ $ openshift-install explain installconfig | tail -n 6
       SSHKey is the public Secure Shell (SSH) key to provide access to instances.
 ```
 
-`explain` should handle feature gated fields appropriately, either by skipping them (not printing them) or clearly marking
+`explain` should handle feature-gated fields appropriately, either by skipping them (not printing them) or clearly marking
 them as gated features.
 
 ### Risks and Mitigations
@@ -162,13 +163,9 @@ I am not aware of any significant drawbacks to introducing this feature.
 
 ### Open Questions [optional]
 
-1. For `*NoUpgrade` feature sets, it is a requirement that the cluster be non-upgradeable. When feature sets
-are implemented by operators, the operator can simply mark itself as non upgradeable. It is an open question
-about how to best enforce non-upgradeable functionality from the Installer. Currently I am experimenting with
-enforcing this through cvo overrides, but suggestions are welcome.
-2. Are the `ExperimentalNoUpgrade` & `TechPreviewNoUpgrade` feature sets appropriate? Sufficient?
-3. The [Tech Preview Guidelines](https://github.com/openshift/enhancements/blob/master/guidelines/techpreview.md)
-state that Tech Preview features, and perhaps all gated features, need to be listed in the [OpenShift API](https://github.com/openshift/api/blob/bace76a807222b30bb9bfd4926826348156fb522/config/v1/types_feature.go#L117). Is that necessary for the Installer? If so, for all gated features, or only Tech Preview?
+1. The [Tech Preview Guidelines](https://github.com/openshift/enhancements/blob/master/guidelines/techpreview.md)
+state that Tech Preview features, and perhaps all gated features, need to be listed in the [OpenShift API](https://github.com/openshift/api/blob/bace76a807222b30bb9bfd4926826348156fb522/config/v1/types_feature.go#L117). Is that necessary for the Installer, or
+only for operators?
 
 ### Test Plan
 
@@ -199,13 +196,11 @@ n/a
 
 #### Failure Modes
 
-Feature gating itself is straightforward install config validation, so there are no predictable, significant failures.
+Feature gating itself is straightforward install-config validation, so there are no predictable, significant failures.
 
 #### Support Procedures
 
-We must clearly identify clusters that are installed with gated features. The only method for doing this that I am
-aware of is by making the cluster non-upgradeable. If other resources should be written for tech preview clusters,
-please advisde.
+This should already be consistent with standard tech preview practices.
 
 ## Implementation History
 
