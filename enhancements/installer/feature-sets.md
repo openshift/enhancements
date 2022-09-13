@@ -1,15 +1,15 @@
 ---
 title: installer-feature-sets
 authors:
-  - @patrickdillon
+  - "@patrickdillon"
 reviewers:
-  - @wking, installer, upgrades
-  - @bparees, feature sets
+  - "@wking, installer, upgrades"
+  - "@bparees, feature sets"
 approvers:
-  - @sdodson
-  - @zaneb
+  - "@sdodson"
+  - "@zaneb"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - @deads2k
+  - "@deads2k"
 creation-date: 2022-09-07
 last-updated: 2022-09-07
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
@@ -21,9 +21,8 @@ tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic 
 ## Summary
 
 This enhancement proposes adding support for feature sets to `openshift-install`.
-Users would be able to enable feature sets at install time. The Installer would support all feature sets
-in the OpenShift API, as well as an additional `ExperimentalNoUpgrade` feature set, which would be used
-to gate Installer features that are in active development.
+Users would be able to enable feature sets at install time. The Installer would support all feature sets in the OpenShift API,
+and write the selected Feature Set to the cluster.
 
 ## Motivation
 
@@ -77,7 +76,8 @@ includes field `bar` in the install config; feature `foo` is part of the Tech Pr
 3. `openshift-install` returns an error: `the TechPreviewNoUpgrade feature set must be enabled to use this field`
 4. Admin adds `featureSet: TechPreviewNoUpgrade` to install-config.yaml
 5. Installer generates `FeatureGate` manifest
-6. Cluster installs successfully with TechPreview cluster 
+6. Installer emits warning message indicating the enabled feature set when provisioning infrastructure
+7. Cluster installs successfully with TechPreview cluster 
 
 
 ### API Extensions
@@ -87,16 +87,10 @@ would become part of the install config API:
 
 ```go
 
-type FeatureSet configv1.FeatureSet
-
-const (
-	// ExperimentalNoUpgrade enables features that are experimental or in active development.
-	ExperimentalNoUpgrade configv1.FeatureSet = "ExperimentalNoUpgrade"
-)
+// FeatureSet enables features that are not part of the default feature set.
+	// +optional
+	FeatureSet configv1.FeatureSet `json:"featureSet,omitempty"`
 ```
-
-`ExperimentalNoUpgrade`, for Installer work in progress or
-experimental features, is added to the set of accepted feature sets.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -150,7 +144,8 @@ $ openshift-install explain installconfig | tail -n 6
 ```
 
 `explain` should handle feature-gated fields appropriately, either by skipping them (not printing them) or clearly marking
-them as gated features.
+them as gated features. The initial implementation will simply include
+comments denoting fields that are feature gated.
 
 ### Risks and Mitigations
 
@@ -164,9 +159,7 @@ I am not aware of any significant drawbacks to introducing this feature.
 
 ### Open Questions [optional]
 
-1. The [Tech Preview Guidelines](https://github.com/openshift/enhancements/blob/master/guidelines/techpreview.md)
-state that Tech Preview features, and perhaps all gated features, need to be listed in the [OpenShift API](https://github.com/openshift/api/blob/bace76a807222b30bb9bfd4926826348156fb522/config/v1/types_feature.go#L117). Is that necessary for the Installer, or
-only for operators?
+N/A
 
 ### Test Plan
 
@@ -185,11 +178,33 @@ n/a
 
 ### Upgrade / Downgrade Strategy
 
-Upgrades will be blocked.
+Upgrades will be blocked based on the feature set. There is
+discussion about whether it makes sense to block a cluster
+upgrade based on Installer-only features, i.e. if the changes
+are only in the Installer and don't affect the cluster, why
+block upgrades?
+
+The upgrade status of the cluster is based on the feature set,
+so the current implementation would have the ability to accomodate
+an Installer-only tech preview if we were able to add a new feature
+set for that purpose. For discussion: if we added an `InstallerTechPreview` or `TechPreviewInstallOnly` feature set,
+it could be possible that such a feature set would allow upgrades.
+
+There could be a use case for supporting both feature sets in the
+Installer: `InstallerTechPreview` would be for install-only
+features, while `TechPreview` may apply to features that affect
+both the Installer and the cluster.
+
+The addition of such an `InstallerTechPreview` would need to be
+added in a follow up enhancement.
 
 ### Version Skew Strategy
 
-n/a
+There is a small risk in unreleased Installers that there may be
+a mismatch between the API versions in the installer and the cluster.
+The Installer would need to be kept in sync with the OpenShift API
+to make sure it is aware of current feature sets, which are updated
+rarely.
 
 ### Operational Aspects of API Extensions
 
