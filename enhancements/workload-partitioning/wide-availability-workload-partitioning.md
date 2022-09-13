@@ -12,7 +12,8 @@ approvers:
   - "@jerpeter1"
   - "@mrunalp"
 api-approvers:
-  - None
+  - "@deads2k"
+  - "@JoelSpeed"
 creation-date: 2022-08-03
 last-updated: 2022-08-09
 tracking-link:
