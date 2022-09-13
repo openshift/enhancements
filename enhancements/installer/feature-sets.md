@@ -1,5 +1,5 @@
 ---
-title: installer-feature-sets
+title: feature-sets
 authors:
   - "@patrickdillon"
 reviewers:
