@@ -44,9 +44,7 @@ Motivations include but are not limited to:
 ### User Stories
 
 - As an openshift administrator, I want to have tags added to all resources created 
-  in Azure by Openshift.
-- As an openshift administrator, I want to restrict access granted to Openshift 
-  specific account.
+  in Azure by Openshift, so that I can restrict access granted to an OpenShift specific account
 
 ### Goals
 
