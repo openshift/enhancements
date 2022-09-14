@@ -12,6 +12,7 @@ reviewers:
   - "@JoelSpeed"
   - "@sinnykumari"
   - "@danwinship"
+  - "@openshift/openshift-team-windows-containers"
 approvers:
   - "@dhellmann"
   - "@deads2k"
@@ -112,11 +113,11 @@ OpenShift can not be disabled and still requires a signal about an underlying pl
 
 One of the possible examples of the interaction of the capabilities with the "External" platform type would be the MachineAPI and the Machine Api Operator.
 At this point, the MachineAPI has no use in running if there is no machine controller (which is heavily cloud-provider dependent).
-"External" platform type will serve as a signal in the scenario when machine-api capability is enabled and the cluster deployer
-going to satisfy the machine controller requirement. In this case, machine-api-operator would know what to do and deploy
-only generic cloud-independent controllers (such as machine-healthcheck, machineset, and node-link controllers), such
-behaviour will simplify initial cloud-platform enablement and will reduce the necessity of reverse-engineering and replicating a work
-which was already done by Red Hat engineers.
+When the platform type is set to "External", and the machine-api capability is enabled,
+that will cause Machine API operator to deploy only generic cloud-independent controllers (such as machine-healthcheck, machineset, and node-link controllers).
+The platform-specific components would be deployed through a separate mechanism.
+Such behaviour will simplify initial cloud-platform enablement and will reduce the necessity of reverse-engineering
+and replicating work that was already done by Red Hat engineers.
 
 ### User Stories
 
@@ -169,7 +170,7 @@ During [initial implementation](#implementation-phases) we must ensure that all 
 In the future, we will need to change the behavior of OpenShift components to be able to receive supplemental provider-specific components from an infrastructure provider
 or, if a component manages something else (i.e. kubelet, kcm), adjust its behaviour (set `--cloud-provider=external` arg to kubelet for example).
 
-Specific component changes will be described in details within separate enhancement documents on a per-component basis.
+Specific component changes will be described in detail within separate enhancement documents on a per-component basis.
 
 #### Machine Config Operator
 
@@ -211,8 +212,13 @@ however this is a subject for the upcoming design work.
 
 Significant part of the code around PlatformType handling lives in the ["openshift/library-go"](https://github.com/openshift/library-go/blob/e1213f6ec5d10aa4aa8a4cac2780b1dc674c0396/pkg/operator/configobserver/cloudprovider/observe_cloudprovider.go).
 
-For the moment, this code is responsible for the decision around kubelet and kcm flags. Precisely, [IsCloudProviderExternal](https://github.com/openshift/library-go/blob/e1213f6ec5d10aa4aa8a4cac2780b1dc674c0396/pkg/operator/configobserver/cloudprovider/observe_cloudprovider.go#L154) function
-is used for decisions around kubelet and KCM flags (within MCO and KCMO respectively). Also, this code is used for the decision-making about CCM operator engagement.
+Currently, this code is responsible for the decision around kubelet and kcm flags. Precisely, [IsCloudProviderExternal](https://github.com/openshift/library-go/blob/e1213f6ec5d10aa4aa8a4cac2780b1dc674c0396/pkg/operator/configobserver/cloudprovider/observe_cloudprovider.go#L154) function
+is used for decisions around kubelet and KCM flags (within MCO and KCMO respectively).
+Also, this code is used for the decision-making about CCM operator engagement.
+
+This piece should be changed to react appropriately to the "External" platform type. During the first phases, it will need
+to behave the same as in the case of the "None" platform type. Then, in upcoming phases,
+it will need to respect additional parameters from the "External" platform spec down the road.
 
 #### Machine Api Operator
 
@@ -223,7 +229,7 @@ Machine Api Operator is responsible for deploying and maintaining the set of mac
 - machine health check controller
 - machine controller
 
-From the list above, the only "machine" controller is cloud-provider dependent, however, for now, Machine Api Operator
+From the list above, only the "machine controller" is cloud-provider dependent, however, for now, Machine Api Operator
 won't deploy anything if it encounters "None" or an unrecognized platform type. 
 
 In the future, "External" platform type would serve as a signal for Machine Api Operator to deploy only provider-agnostic
@@ -237,7 +243,7 @@ Cluster Storage Operator will go to no-op state if it encounters PlatformType "N
 At this point, nothing requires storage to be there during cluster installation, and storage (CSI) drivers might be supplemented
 later via OLM or some other way as day two operation. 
 
-No particular changes in regards to the "External" platform type introduction are not expected there.
+No particular changes in regards to the "External" platform type introduction are expected there.
 
 #### Cloud Credential Operator
 
@@ -259,7 +265,7 @@ into no-op mode if it encounters an unrecognized platform.
 #### Cluster Image Registry Operator
 
 For image registry a [storage backend config decision](https://github.com/openshift/cluster-image-registry-operator/blob/99474318db709a6d17d06468b90cdf0dc0fd2b87/pkg/storage/storage.go#L157) is platform specific.
-With the "None" platform type CIRO goes into no-op state, which means that no registry won't deploy in such case.
+With the "None" platform type CIRO goes into no-op state, which means that no registry will be deploy in such case.
 The image registry configures with EmptyDir storage for unknown platform type at the moment.
 
 Image Registry storage options might be configured to use PVC-backed or external storage systems
