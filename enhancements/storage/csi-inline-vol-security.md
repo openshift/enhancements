@@ -101,15 +101,15 @@ metadata:
     security.openshift.io/csi-ephemeral-volume-profile: restricted
 ```
 
-A new validating admission webhook - `CSIVolumeAdmission` - will inspect pod
-volumes on pod creation. If a pod uses a `csi` volume, the webhook will look up
+A new validating admission plugin - `CSIVolumeAdmission` - will inspect pod
+volumes on pod creation. If a pod uses a `csi` volume, the plugin will look up
 the CSIDriver object and inspect the `csi-ephemeral-volume-profile` label. This
-`CSIVolumeAdmission` webhook will then use the label’s value in its enforcement,
+`CSIVolumeAdmission` plugin will then use the label’s value in its enforcement,
 warning, and audit decisions.
 
-Because pod volumes are considered immutable, this admission webhook will only
+Because pod volumes are considered immutable, this admission plugin will only
 run its checks on pod creation. Existing pods that use `csi` volumes will not
-be affected once the admission webhook is enabled.
+be affected once the admission plugin is enabled.
 
 ### Workflow Description
 
@@ -118,7 +118,7 @@ be affected once the admission webhook is enabled.
 When a `CSIDriver` has the `csi-ephemeral-volume-profile` label, pods using the
 CSI driver to mount CSI ephemeral volumes must run in a namespace that enforces
 a pod security standard of equal or greater permission. If the namespace
-enforces a more restrictive standard, the `CSIVolumeAdmission` admission webhook
+enforces a more restrictive standard, the `CSIVolumeAdmission` admission plugin
 should deny admission.
 
 The following table demonstrates the pod admission behavior for a pod that
@@ -133,7 +133,7 @@ and CSI ephemeral volume profile:
 
 #### Pod Security Profile Warning
 
-The `CSIVolumeAdmission` admission webhook can also provide user-facing warnings
+The `CSIVolumeAdmission` admission plugin can also provide user-facing warnings
 (via appropriate HTTP response headers) if the CSI driver’s effective profile
 is more permissive than the pod security warning profile for the pod namespace.
 
@@ -148,7 +148,7 @@ security warning profile and CSI driver effective profile:
 
 #### Pod Security Profile Audit
 
-The `CSIVolumeAdmission` admission webhook can also apply audit annotations to
+The `CSIVolumeAdmission` admission plugin can also apply audit annotations to
 the pod if the CSI driver’s effective profile is more permissive than the pod
 security audit profile for the pod namespace.
 
@@ -164,10 +164,10 @@ security audit profile and CSI driver effective profile:
 #### Default Behavior
 
 If the referenced CSIDriver for a CSI ephemeral volume does not have the
-`csi-ephemeral-volume-profile` label, the `CSIVolumeAdmission` admission webhook
+`csi-ephemeral-volume-profile` label, the `CSIVolumeAdmission` admission plugin
 will consider the driver to have the `privileged` profile for enforcement,
 warning, and audit behaviors. Likewise, if the pod’s namespace does not have
-the pod security admission label set, the admission webhook will assume the
+the pod security admission label set, the admission plugin will assume the
 `restricted` profile is allowed for enforcement, warning, and audit decisions.
 
 This means that if no labels are set, CSI ephemeral volumes using that CSIDriver
@@ -176,33 +176,21 @@ default policy prevents risky drivers from being used as inline volumes in
 unprivileged namespaces, unless the cluster administrator makes a conscious
 decision to allow it.
 
-Like other admission webhooks, this webhook will have its own configuration API
-which allows this behavior to be tuned. The following example sets the
-`restricted` profile on CSIDriver objects by default, and the `privileged`
-profile as the default for namespaces. This configuration reverses the default
-behavior and will effectively run in a "no-op" mode.
-
-```yaml
-defaults:
-  …
-  csi-ephemeral-volume-profile: restricted
-  pod-security-enforce-profile: privileged
-  pod-security-warn-profile: privileged
-  pod-security-audit-profile: privileged
-```
-
 ### API Extensions
 
-This adds a new validating admission webhook which can prevent pods from being
-created - `CSIVolumeAdmission`. This admission webhook should only be invoked
+This adds a new validating admission plugin which can prevent pods from being
+created - `CSIVolumeAdmission`. This admission plugin should only be invoked
 when a pod is being created. Pod volumes are considered immutable, therefore
-this admission webhook should not prevent pods from being updated under any
+this admission plugin should not prevent pods from being updated under any
 circumstance.
 
-This admission webhook will impact any workload that can add a `csi` volume to
-a Pod. No OpenShift component is known to directly consume `csi` volumes today.
-Any pod-specable workload (`Deployment`, `DeploymentConfig`, etc.) and
-OpenShift Builds can consume `csi` volumes with approriate user specifications.
+This plugin must evaluate all pods and pod-specable workloads (`Deployment`,
+`DeploymentConfig`, `Job`, etc.), and the plugin is required for cluster
+security and basic cluster functionality. Given the critical nature of this
+component, it will be implemented as and admission plugin rather than a webhook
+to reduce network round-trips and improve overall stability/reliability.
+To do this, we will add a carry-patch to `openshift/kubernetes` containing
+the admission plugin logic--similar to SCC.
 
 OpenShift components that add `CSIDriver` objects that provide the `Ephemeral`
 volume capability should add the appropriate security profile label. As of 4.12,
@@ -219,34 +207,15 @@ N/A
 
 ### Risks and Mitigations
 
-Adding a new validating admission webhook inherently risks the cluster’s
+Adding a new validating admission plugin inherently risks the cluster’s
 availability and responsiveness. At its most extreme, this proposal will
-require the admission webhook to fetch a `CSIDriver` object on every pod
+require the admission plugin to fetch a `CSIDriver` object on every pod
 admission request, adding additional strain on the kubernetes apiserver. A
 lister for `CSIDriver` objects can mitigate this, and can be particularly
 effective because most clusters do not have a large number of `CSIDriver`
 objects, and these objects do not change frequently.
 
-If the webhook fails, it could have a major impact on cluster availability,
-specifically when starting new pods. To prevent such a failure from impacting
-the rest of the control plane, the webhook configuration will exempt control
-plane pods and the pods in the namespace hosting the webhook. It should also
-be possible to manually disable the webhook if desired.
-
-Implementing this as an admission webhook also means incurring extra network
-hops on every pod creation request. This can have a significant performance
-impact on OpenShift. This performance impact needs to be measured and well
-understood to avoid serious regressions before this feature moves to GA. We
-may need some assistance from the performance and scale team to quantify this.
-
-The webhook will run in a privileged namespace (`openshift-cluster-csi-drivers`),
-requires permissions to read all `CSIDriver` objects on the cluster, and is
-designed to review pod admission requests and allow or deny those requests.
-The permissions will be limited to only what is required by the webhook, and
-it will go through the standard security review by the Product Security team
-to ensure we are limiting the security risks in this design.
-
-The default behavior of this webhook will have an impact on user experience
+The default behavior of this plugin will have an impact on user experience
 for any customers using inline volumes, in that the cluster administrator will
 have to decide on a policy for each CSI driver that they intend to use for
 inline volumes in unprivileged namespaces. This is a tradeoff between security
@@ -256,31 +225,18 @@ enhancement review, and approval from the product experience team.
 
 ### Drawbacks
 
-Aside from the risks and mitigations described in the previous section, this
-proposal adds a new admission webhook with behavior and functionality that is
-related to the existing PodSecurityAdmission plugin. One challenge of this
-approach is the handling of defaults when the CSI driver does not have an
-effective profile label, the namespace does not have a pod security enforcement
-label, or both. The admission webhook would need its own configuration for
-default behavior, and skew between its behavior and the PodSecurityAdmission
-admission plugin could lead to undesirable outcomes. For example,
-PodSecurityAdmission could be configured to enforce the `restricted` profile by
-default in all namespaces, whereas this new admission webhook could be
-configured to assume the `privileged` namespace profile is enforced by default.
-This could cause the admission webhook to allow admission of a pod that uses a
-`privileged` CSI driver in a namespace that has the `restricted` profile enforced.
+See [Risks and Mitigations](#risks-and-mitigations).
 
 ## Design Details
 
 ### Open Questions [optional]
 
-1. Is the default behavior reasonable, given the security and usability trade-offs?
-2. Is a webhook an acceptable choice, given the availability requirements during pod creation?
+N/A
 
 ### Test Plan
 
-- Unit testing in the repo with the webhook.
-- Run e2e suite of the Shared Resource CSI driver with the webhook enabled.
+- Unit testing in tree, applied in a carry patch for maintainability.
+- Run e2e suite of the Shared Resource CSI driver with the plugin enabled.
 - End to end testing in openshift/origin, tested against the following:
   - Build pods that utilize the Shared Resource CSI driver
   - Workloads that utilize a `privileged` CSI driver in a `restricted` and
@@ -295,8 +251,8 @@ This could cause the admission webhook to allow admission of a pod that uses a
 
 #### Dev Preview -> Tech Preview
 
-- Admission webhook implementation behind feature gate
-- Test coverage for pods with CSI volumes
+- Admission plugin added to our fork of kube-apiserver
+- Test coverage in openshift/origin for pods with CSI volumes
 - Documentation for the admission plugin - use and configuration
 - Verify use with the Shared Resource CSI Driver
 
@@ -314,7 +270,13 @@ N/A
 
 ### Upgrade / Downgrade Strategy
 
-**TODO**
+CSI drivers that are managed by OCP and support inline volumes will automatically
+have a default CSI ephemeral volume profile applied to the `CSIDriver` object by
+Cluster Storage Operator.
+
+Users of inline volumes who upgrade to an OCP release with the admission plugin
+enabled will need to add a CSI ephemeral volume profile for any unmanaged `CSIDriver`
+objects that should allow the use of inline volumes in unprivileged namespaces.
 
 ### Version Skew Strategy
 
@@ -353,19 +315,28 @@ N/A
 ## Implementation History
 
 - 2022-01-12: Initial draft
-- 2022-09-08: Updates to original proposal and use webhook
+- 2022-09-08: Updates to original proposal
 
 ## Alternatives
 
-### Implement as an admission plugin
+### Augment the PodSecurityAdmission Plugin
 
-This was originally proposed as an admission plugin, rather than a webhook.
-However, this would require a carry patch in `openshift/kubernetes` which
-we want to avoid. Validating webhooks were designed with use cases like
-this in mind, and it results in a cleaner implementation without needing
-to maintain a carry patch indefinitely. There is also a precedent for
-implementing a validating webhook for inline volumes in the
-[Shared Resource Validation](/enhancements/cluster-scope-secret-volumes/shared-resource-validation.md) enhancement.
+Rather than creating a new admission plugin, this capability could be added by
+extending the PodSecurityAdmission plugin. A similar labeling scheme could be
+applied, and the admission plugin would admit or deny a pod based on the namespace's
+pod security labels and the CSI driver’s effective pod security profile.
+However, this would greatly extend the scope of PodSecurityAdmission plugin beyond
+the original pod security standards. The standards were explicitly designed to
+allow additional admission controls for CSI ephemeral volumes to be built on
+top of the PodSecurityAdmission plugin. Extending it in this way is a non-starter.
+
+### Implement as a Validating Webhook
+
+The plugin could be implemented as a validating webhook, which would eliminate
+the need to carry the plugin as a patch to Kubernetes proper. However, a separate
+webhook would incur extra network hops on every pod creation request, which would
+have significant performance impact on OpenShift. Given the critical nature of this
+component, an admission plugin invoked directly on the kube-apiserver is appropriate.
 
 ## Infrastructure Needed [optional]
 
