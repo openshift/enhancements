@@ -96,13 +96,17 @@ a new cloud provider and mostly impossible without Red Hat engineering engagemen
 Since a lot of infrastructure related components (such as [CCCMO](https://github.com/openshift/cluster-cloud-controller-manager-operator), [Machine API operator](https://github.com/openshift/machine-api-operator), [Machine Config Operator](https://github.com/openshift/machine-config-operator), and so on)
 require information about, at least, the presence of an underlying cloud provider, the "None" platform does not fit well as a signal in such a situation.
 
-Having a special, built-in, and somewhat generic platform type that will signal about the presence of an underlying infrastructure platform without
+A special, built-in, and somewhat generic platform type that will signal about the presence of an underlying infrastructure platform without
 platform-specific details will help to reduce the number of changes across OCP repositories
 and simplify the initial integration work for non-Red Hat contributors.
+Such a new ability will allow smaller / regional cloud providers to build and test their integration with the OpenShift
+with considerably less effort.
 
-Examples of difficulties that are present today due to having a predefined list of platforms:
-- No defined mechanism to set `--cloud-provider=external` arg to kubelet/KCM/apiserver without merges and further revendoring of "openshift/api"
-- No way to extend machine-api and deliver a new provider without merges to "openshift/machine-api-operator" and "openshift/api" repos
+Additionally, there are difficulties that are present today due to having a predefined list of platforms.
+A few examples:
+- No defined mechanism to set `--cloud-provider=external` arg to kubelet/KCM/apiserver without merges and further revendoring of "openshift/api",
+  at the moment decision-making here is tied to the PlatformType.
+- No way to extend machine-api and deliver a new provider without merges to "openshift/machine-api-operator" and "openshift/api" repos.
 
 ### Conjunction with Capabilities
 
@@ -232,7 +236,8 @@ Machine Api Operator is responsible for deploying and maintaining the set of mac
 From the list above, only the "machine controller" is cloud-provider dependent, however, for now, Machine Api Operator
 won't deploy anything if it encounters "None" or an unrecognized platform type. 
 
-In the future, "External" platform type would serve as a signal for Machine Api Operator to deploy only provider-agnostic
+In the future, "External" platform type, in conjunction with an enabled capability,
+would serve as a signal for Machine Api Operator to deploy only provider-agnostic
 controllers, which would leave room for the user to supplement only the machine controller and not to reverse engineer and
 replicate everything that MAO does.
 
