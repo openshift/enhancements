@@ -538,6 +538,114 @@ of the API.
 This topic is expanded in the [Pointers](#pointers) subsection of the
 [Configuration vs Workload APIs](#configuration-vs-workload-apis) above.
 
+## Tech Preview
+When new API resources or new API fields are added as TechPreviewNoUpgrade, OpenShift has schema generation extensions
+that allow generating multiple manifests for the same golang struct for TechPreviewNoUpgrade versus Default.
+
+See also
+1. [FeatureSets](https://github.com/openshift/api/blob/458ad9ca9ca536189d70d8b9e43843dc3435564d/config/v1/types_feature.go#L26-L43)
+   in openshift/api.
+2. [CVO conditional manifests](https://github.com/openshift/enhancements/blob/6704279c30e975368f6f6fa5b6b7ee00adf4aeb9/enhancements/update/cvo-techpreview-manifests.md)
+   in openshift/enhancements.
+
+This capability is important to use because it requires users to opt-in for TechPreview functionality on their cluster
+and prevents the accidental usage of TechPreview fields and types on production clusters.
+
+### New Makefile target
+To support TechPreview annotations and tags for your API group you will need to add new targets.
+Once you have added these targets, you can make use of the TechPreview generation.
+
+```makefile
+$(call add-crd-gen,example,./example/v1,./example/v1,./example/v1)
+$(call add-crd-gen-for-featureset,example,./example/v1,./example/v1,./example/v1,TechPreviewNoUpgrade)
+$(call add-crd-gen-for-featureset,example,./example/v1,./example/v1,./example/v1,Default)
+$(call add-crd-gen,example-alpha,./example/v1alpha1,./example/v1alpha1,./example/v1alpha1)
+```
+
+See the openshift/api [example](https://github.com/openshift/api/blob/5eaf4250c423eb7ae6b3139d82c14f14e5fe804a/Makefile#L32-L35).
+
+### New API resource
+If you're creating an entirely new CRD manifest and the CVO installs your CRD manifest, adding this annotation will
+tell the CVO to only create your manifest if the cluster is using TechPreviewNoUpgrade.
+
+```yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    release.openshift.io/feature-set: TechPreviewNoUpgrade
+```
+
+See the openshift/api [example](https://github.com/openshift/api/blob/5eaf4250c423eb7ae6b3139d82c14f14e5fe804a/example/v1alpha1/0000_50_notstabletype-techpreview.crd.yaml).
+
+### New field added to an existing CRD
+If you're adding a TechPreview field to an existing CRD, you will have to create two yaml files, one for running in Default
+and one for running in TechPreviewNoUpgrade.
+By convention they are named  
+
+`<normal-name>-default.crd.yaml` with content
+```yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    release.openshift.io/feature-set: Default
+```
+and
+
+`<normal-name>-techpreview.crd.yaml` with content
+```yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    release.openshift.io/feature-set: TechPreviewNoUpgrade
+```
+
+Then in your golang struct, you add a comment tag `// +openshift:enable:FeatureSets=TechPreviewNoUpgrade`
+```go
+type StableConfigTypeSpec struct {
+    // coolNewField is a field that is for tech preview only.  On normal clusters this shouldn't be present
+    //
+    // +kubebuilder:validation:Optional
+    // +openshift:enable:FeatureSets=TechPreviewNoUpgrade
+    // +optional
+    CoolNewField string `json:"coolNewField"`
+}
+```
+
+The generator will generate the `coolNewField` into `<normal-name>-techpreview.crd.yaml`, but not into `<normal-name>-default.crd.yaml`.
+
+See the openshift/api [example](https://github.com/openshift/api/tree/5eaf4250c423eb7ae6b3139d82c14f14e5fe804a/example/v1).
+
+### New allowed value for an existing enum
+Often you need to add a value to an enumeration. This comes up frequently for the discriminator field in discriminated unions.
+To do this, you will use the `// +openshift:validation:FeatureSetAwareEnum:featureSet` tag.
+
+```go
+type EvolvingUnion struct {
+	// type is the discriminator. It has different values for Default and for TechPreviewNoUpgrade
+	Type EvolvingDiscriminator `json:"type"`
+}
+
+// EvolvingDiscriminator defines the audit policy profile type.
+// +openshift:validation:FeatureSetAwareEnum:featureSet=Default,enum="";StableValue
+// +openshift:validation:FeatureSetAwareEnum:featureSet=TechPreviewNoUpgrade,enum="";StableValue;TechPreviewOnlyValue
+type EvolvingDiscriminator string
+
+const (
+	// "StableValue" is always present.
+	StableValue EvolvingDiscriminator = "StableValue"
+
+	// "TechPreviewOnlyValue" should only be allowed when TechPreviewNoUpgrade is set in the cluster
+	TechPreviewOnlyValue EvolvingDiscriminator = "TechPreviewOnlyValue"
+)
+```
+
+The generator will generate the `TechPreviewOnlyValue` into `<normal-name>-techpreview.crd.yaml`, but not into `<normal-name>-default.crd.yaml`.
+
+See the openshift/api [example](hhttps://github.com/openshift/api/blob/5eaf4250c423eb7ae6b3139d82c14f14e5fe804a/example/v1/types_stable.go#L48-L64).
+
 ## FAQs
 
 ### My proposed design looks like an existing API we have, why am I being told that it must be changed?
