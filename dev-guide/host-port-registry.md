@@ -103,6 +103,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9642  | ovn-kubernetes southd | sdn | 4.3 | control plane only, ovn-kubernetes only |
 | 9643  | ovn-kubernetes northd | sdn | 4.3 | control plane only, ovn-kubernetes only |
 | 9644  | ovn-kubernetes southd | sdn | 4.3 | control plane only, ovn-kubernetes only |
+| 9743  | node-observability-agent | node | 4.12 | Add-on operator (off OCP payload). HTTPS endpoint for the node observability API, kube-rbac-proxy protected |
 | 9978  | etcd      | etcd || metrics, control plane only |
 | 9979  | etcd      | etcd || ?, control plane only |
 | 10010 | crio | node || stream port |
@@ -158,6 +159,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 29102 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
 | 29103 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
 | 29445 | haproxy | sdn | 4.7 | on-prem internal loadbalancer, stats port |
+| 29740 | node-observability-agent | node | 4.12 | Add-on operator (off OCP payload). HTTP endpoint for the node observability API |
 
 
 ## Previously allocated
