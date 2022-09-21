@@ -82,7 +82,7 @@ Here are the guarantees components can get when they follow the rules we define:
 
 ### There are a set of guarantees components are expected to honor in return
 
-- An operator shoould not report the `Available` status condition the first time
+- An operator should not report the `Available` status condition the first time
    until they are completely rolled out (or within some reasonable percentage if
    the component must be installed to all nodes)
 - An operator reports `Degraded` when its current state does not match its
