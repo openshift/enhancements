@@ -17,9 +17,9 @@ api-approvers:
   - "@dcbw"
   - "@knobunc"
 creation-date: 2022-07-13
-last-updated: 2022-08-01
+last-updated: 2022-09-23
 tracking-link: 
-  - https://issues.redhat.com/browse/NP-19
+  - https://issues.redhat.com/browse/NHE-13
 ---
 
 
@@ -29,13 +29,13 @@ The purpose of this enhancement is to provide a proposal for integrating Virtio/
 
 
 ## Summary
-See [VDPA support in OCP (Overview)](https://github.com/openshift/enhancements/blob/master/enhancements/vdpa/vdpa-support-overview.md).
+See [VDPA support in OCP (Overview)](https://github.com/openshift/enhancements/blob/master/enhancements/network/vdpa/vdpa-support-overview.md).
 
 Main aspects of this enhancement:
 - primary interface in the pod is configured as a Virtio/vDPA device
 - NIC configured in switchdev mode
 - OVS HW offloading enabled
-- Supported HW: NVIDIA CTX-6 DX
+- Supported HW: NVIDIA ConnectX-6 Dx
 
 
 ## Motivation
@@ -75,19 +75,19 @@ The following diagram depicts all the involved components and their interactions
 #### SRIOV network operator workflow
 
 - Configure OpenVswitch in HW offload mode
-- Configure NIC (single script?)
+- Configure NIC (switchdev-configuration-before-nm.service and switchdev-configuration-after-nm.service services)
   - Install vendor-independent kernel drivers: vdpa, virtio-vdpa
   - Configure VFs (same as SR-IOV: echo N > /sys/devices/{PF}/sriov_numvfs)
   - Put NIC in switchdev mode (smart NIC)
   - Enable HW offload mode on PF, VFs and port representors
-  - Disable Network Manager on PF, VFs and port representors
+  - Disable Network Manager on VFs and port representors
   - Install vendor-dependent kernel drivers (e.g. mlx5-core for Mellanox cards)
   - Bind the right PCI driver (vendor specific). Some vendors might implement vdpa in a different PCI driver (e.g: Intel’s ifcvf). Others might keep the same pci driver and require extra steps (e.g: in mellanox vdpa, the VF is still bound to “mlx5_core”)
-- Create the vdpa device (vendor specific). Some vendors might require no extra steps because they create the vdpa device on a pci driver probe (e.g: ifcvf). Others might need extra steps (e.g: Mellanox requires loading an additional driver and in the future, they 	might require managing a “virtual bus”(source)). The plan is to extend the govdpa library to provide this functionality.
+- Create the vdpa device (vendor specific). Some vendors might require no extra steps because they create the vdpa device on a pci driver probe (e.g: ifcvf). Others might need extra steps (e.g: Mellanox requires loading an additional driver and in the future, they might require managing a “virtual bus”(source)). The plan is to extend the govdpa library to provide this functionality.
 - Bind the vdpa device to the correct vdpa bus driver (virtio-vdpa driver in the first implementation). This is not vendor specific and uses a sysfs-based API
 - Configure the SRIOV device plugin
   - Add the appropriate vdpa flags to the SR-IOV Device Plugin’s configMap.
-  - Create the Network Attachment Definitions
+- Create the Network Attachment Definitions
 
 Note: the SRIOV operator (config-daemon) needs to destroy the vdpa device when policy is removed
 
@@ -96,31 +96,25 @@ Note: the SRIOV operator (config-daemon) needs to destroy the vdpa device when p
 
 The plan is to extend the SriovNetworkNodePolicy CRD API to support the vDPA feature.
 
-There are two proposals:
+The proposed solution in details:
 
-#### **Proposal A**
-Change the semantics of the deviceType field to express the way the device is exposed to the user and let the SR-IOV Network Operator in cooperation with the vendor plugins determine what is the driver that must be bound at the PCI bus (and, of course the vdpa bus).
-**deviceType** would assume one of the following values: netdev/vfio-pci/vdpa-virtio/vdpa-vhost.
-The problem with this approach:
-**isRdma** goes in another direction. isRdma changes the way the device is exposed to the user but is only compatible with netdev type (and only one vendor implements it AFAIK).
-So for this proposal to be complete, deviceType would also include “rdma”. This could become a compatibility issue but backwards compatibility should be manageable.
-Benefits of this proposal: Easier for the user.
-#### **Proposal B**
-Keep deviceType meaning “driver bound to PCI device”. And add a field called **vdpaType** to select the type of vdpa device (vhost/virtio).
-We need to add a runtime check to verify that a user does not specify { “deviceType”:  “vfio-pci”, “vdpaType”: “virtio” } because that doesn’t make sense.
+- Keep deviceType meaning “driver bound to PCI device”. And add a field called **vdpaType** to select the type of vdpa device (vhost/virtio).
+- Add a runtime check to verify that a user does not specify { “deviceType”:  “vfio-pci”, “vdpaType”: “virtio” } because that doesn’t make sense. A new rule needs to be added to the Validation webhook.
+
 Benefits:
-Easier to implement
-Problems:
-If another vendor requires another driver for vdpa in the future we would need to expand deviceType to add the new driver.
-Relies more on knowledge from the user.
-Runtime errors (user creates a combination of fields that are wrong) are more difficult to return to the user.
+- Easy to implement
+- Backward compatibible
 
+Problems:
+- If another vendor requires another driver for vdpa in the future we would need to expand deviceType to add the new driver.
+Relies more on knowledge from the user.
+
+Note: there is an alternative option, aiming to change the semantics of the deviceType field to express the way the device is exposed to the user and let the SR-IOV Network Operator in cooperation with the vendor plugins determine what is the driver that must be bound at the PCI bus (and, of course the vdpa bus).
+DeviceType would assume one of the following values: netdev/vfio-pci/vdpa-virtio/vdpa-vhost. The problem with this approach is the management of the backward compatibility and the complexity of the change, so we're not going for this option (at least not now).
 
 ### Implementation Details/Notes/Constraints
 
-The proposed implementation depends on the CX-6 OVS hardware work which is not fully ready yet in OCP 4.11.
-
-**TBD: check if any dependencies with other projects, e.g. RHEL, drivers, etc**
+The proposed implementation depends on the CX-6 Dx OVS hardware work which is not fully ready yet in OCP 4.11.
 
 The work can be split into 4 main repos: [ovn-kubernetes](https://github.com/ovn-org/ovn-kubernetes), [sriov-network-device-plugin](https://github.com/k8snetworkplumbingwg/sriov-network-device-plugin), [sriov-networking-operator](https://github.com/k8snetworkplumbingwg/sriov-network-operator) and [govdpa](https://github.com/k8snetworkplumbingwg/govdpa).
 
@@ -157,30 +151,19 @@ The library needs to be extended with the following functionalities:
 
 ### Risks and Mitigations
 
-Check if the implementation would fit Openshit 4.12 code freeze date
+Check if the implementation would fit Openshift 4.12 code freeze date
 
 ### Drawbacks
 
 None
 
-
 ## Design Details
-
-### Open Questions [optional]
-
-TBD
 
 ### Test Plan
 
-**Note:** *Section not required until targeted at a release.*
-
-TBD
+- Automated CI tests
 
 ### Graduation Criteria
-
-**Note:** *Section not required until targeted at a release.*
-
-TBD
 
 #### Dev Preview -> Tech Preview
 
@@ -210,28 +193,28 @@ None
 
 ### Upgrade / Downgrade Strategy
 
-TBD
+None
 
 ### Version Skew Strategy
 
-TBD
+None
 
 ### Operational Aspects of API Extensions
 
-TBD
+None
 
 #### Failure Modes
 
-TBD
+None
 
 #### Support Procedures
 
-TBD
+None
 
 ## Implementation History
 
-TBD
+None
 
 ## Alternatives
 
-TBD
+None

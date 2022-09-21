@@ -89,7 +89,7 @@ For additional details on this use case see [Hardening Virtio for emerging secur
 ### Supported Hardware
 
 We want to support the following NVIDIA NIC cards:
-- CTX-6 DX
+- ConnectX-6 Dx
 - BlueField-2
 
 ## Proposal
