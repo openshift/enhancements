@@ -36,7 +36,7 @@ There are 2 important things that need to be set in the ClusterOperator Custom R
 - `.status.versions[name=operator].version`: this is the version that the operator is expected to report. ClusterVersionOperator only respects the `.status.conditions` from instances that report their version.
 
 Additionally you might choose to include some fundamental relatedObjects.
-The must-gather and insights operator depend on cluster operators and related objects in order to identify resources to create.
+The must-gather and insights operator depend on cluster operators and related objects in order to identify resources to gather.
 Because cluster operators are delegated to the operator install and upgrade failures of new operators can fail to gather the requisite info if the cluster degrades before those steps.
 To mitigate this scenario the ClusterVersionOperator will do a best effort to fast-fill cluster-operators using the ClusterOperator Custom Resource in /manifests.
 
