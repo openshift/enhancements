@@ -107,7 +107,8 @@ the cluster admin.
 - If the ingresscontroller already exists it must be updated to set 
   `.loadbalancer.dnsManagementPolicy` to `Unmanaged`.
   - ```bash
-    oc -n openshift-ingress-operator patch ingresscontrollers/<name> --type=merge --patch='{"spec":{"endpointPublishingStrategy":{"loadBalancer":{"dnsManagementPolicy":"Unmanaged"}}}}'
+    SCOPE=$(oc -n openshift-ingress-operator get ingresscontroller <name> -o=jsonpath="{.status.endpointPublishingStrategy.loadBalancer.scope}")
+    oc -n openshift-ingress-operator patch ingresscontrollers/<name> --type=merge --patch='{"spec":{"endpointPublishingStrategy":{"type":"LoadBalancerService","loadBalancer":{"dnsManagementPolicy":"Unmanaged", "scope":"${SCOPE}"}}}}'
     ```
 - This will trigger a reconcile of the controller, resulting in updating
   the following conditions on the ingress operator
@@ -136,13 +137,14 @@ of type `LoadBalancerDNSManagementPolicy`. This field will default to `Managed`.
 type LoadBalancerStrategy struct {
     // <snip>
 
-    // dnsManagementPolicy indicates if the lifecyle of the wildcard DNS record
+    // dnsManagementPolicy indicates if the lifecycle of the wildcard DNS record
     // associated with the load balancer service will be managed by
     // the ingress operator. It defaults to Managed.
-    // Valid values are: Managed and Unmanaged. 
+    // Valid values are: Managed and Unmanaged.
     //
     // +kubebuilder:default:="Managed"
-    // +kubebuilder:validation:Optional
+    // +kubebuilder:validation:Required
+    // +default="Managed"
     DNSManagementPolicy LoadBalancerDNSManagementPolicy `json:"dnsManagementPolicy"`
 }
 
@@ -169,18 +171,23 @@ will default to `Managed`.
 ```go
 // DNSRecordSpec contains the details of a DNS record.
 type DNSRecordSpec struct {
-  // <snip>
+    // <snip>
 
-  // dnsManagementPolicy denotes the current policy applied on the dns record.
-  // Records that have policy set as "Unmanaged" are ignored by the ingress
-  // operator and the DNS record on the cloud provider is not managed by the
-  // operator. This record on the cloud provider can be deleted at the
-  // discretion of the cluster admin. It defaults to Managed.
-  // Valid values are: Managed and Unmanaged.
-  //
-  // +kubebuilder:default:="Managed"
-  // +kubebuilder:validation:Optional
-  DNSManagementPolicy DNSManagementPolicy `json:"dnsManagementPolicy"`
+    // dnsManagementPolicy denotes the current policy applied on the DNS
+    // record. Records that have policy set as "Unmanaged" are ignored by
+    // the ingress operator.  This means that the DNS record on the cloud
+    // provider is not managed by the operator, and the "Published" status
+    // condition will be updated to "Unknown" status, since it is externally
+    // managed. Any existing record on the cloud provider can be deleted at
+    // the discretion of the cluster admin.
+    //
+    // This field defaults to Managed. Valid values are "Managed" and
+    // "Unmanaged".
+    //
+    // +kubebuilder:default:="Managed"
+    // +kubebuilder:validation:Required
+    // +default="Managed"
+    DNSManagementPolicy DNSManagementPolicy `json:"dnsManagementPolicy"`
 }
 
 // DNSManagementPolicy is a policy for configuring how the dns controller 
@@ -197,6 +204,21 @@ const (
     // manage any existing DNS record and allows the DNS record on the cloud 
     // provider to be managed by the cluster admin.
     UnmanagedDNS DNSManagementPolicy = "Unmanaged"
+)
+```
+
+The `Failed` condition type in `DNSZoneCondition` is replaced with a new type,
+`Published`. This would just act as an inverse of `Failed` condition and will
+help in depicting `Unknown` statuses.
+
+```go
+var (
+    // Failed means the record is not available within a zone.
+    // DEPRECATED: will be removed soon, use DNSRecordPublishedConditionType.
+    DNSRecordFailedConditionType = "Failed"
+
+    // Published means the record is published to a zone.
+    DNSRecordPublishedConditionType = "Published"
 )
 ```
 
@@ -227,6 +249,10 @@ If the ingresscontroller is deleted when `.loadbalancer.dnsManagementPolicy` is 
 DNS record on the cloud provider will not be deleted by the operator and will require
 the cluster admin to manually delete it. 
 
+If `.spec.domain` on the ingresscontroller does not contain the `baseDomain` of the
+cluster DNS config, then the `.loadbalancer.dnsManagementPolicy` is automatically set
+to `Unmanaged`.
+
 The support provided by the installer and this new field aren't entirely
 mutually exclusive, i.e. if customer has opted to disable DNS management cluster
 wide (as documented
@@ -234,18 +260,24 @@ wide (as documented
 this field is of no value and need not be set since reconciliation of the *DNSRecord*
 CR is a no-op when no DNS zones are configured.
 
-__Note:__ Appropriate logging is a must on all controllers clearly indicating the
-current DNS management policy set on both ingresscontroller and DNSRecord and any
-subsequent effects, such as skipping reconciliation etc., must also be logged.
+__Note:__ 
+
+- Appropriate logging is a must on all controllers clearly indicating the
+  current DNS management policy set on both ingresscontroller and DNSRecord and any
+  subsequent effects, such as skipping reconciliation etc., must also be logged.
+- Automatic `dnsManagementPolicy` assignment based on the `domain` is currently only
+  supported on the AWS Platform. It will be expanded to other clouds once we are sure
+  no one is depending on this behaviour ([BZ#2041616](https://bugzilla.redhat.com/show_bug.cgi?id=2041616)
+  for additional information).
 
 ### Risks and Mitigations
 
-This feature does not support default ingresscontrollers, if updated to be unmanaged
-in conjunction with updating the domain could result in breaking cluster connectivity
-if not all components are properly updated. This should be done at the discretion
-of the cluster admin. The manual creation of the required DNS records will need to be
-done prior to making this change, as the canary controller will try to ensure that the
-ingress domains are reachable, and otherwise this sets the `cluster-ingress-operator`
+This feature does not support default ingresscontrollers when the ingresscontroller is 
+updated to be unmanaged in conjunction with updating the domain could result in breaking
+cluster connectivity if not all components are properly updated. This should be done at 
+the discretion of the cluster admin. The manual creation of the required DNS records will
+need to be done prior to making this change, as the canary controller will try to ensure
+that the ingress domains are reachable, and otherwise this sets the `cluster-ingress-operator`
 in a degraded state.
 
 ### Drawbacks
