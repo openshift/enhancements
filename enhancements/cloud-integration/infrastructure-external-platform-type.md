@@ -244,10 +244,18 @@ described in the [API Extensions](#api-extensions) section down below.
 #### Cluster Cloud Controller Manager Operator
 
 Responsible for deploying platform-specific Cloud Controller Manager as well as for handling a number of OpenShift's
-specific peculiarities (such as populating proxy settings for CCMs, sync credentials and so on).
+specific peculiarities (such as populating proxy settings for CCMs, sync credentials, and so on).
+
+The code from the [library-go](#library-go) using for decision-making about operator engagement.
+In case library-go's [IsCloudProviderExternal](https://github.com/openshift/library-go/blob/e1213f6ec5d10aa4aa8a4cac2780b1dc674c0396/pkg/operator/configobserver/cloudprovider/observe_cloudprovider.go#L154) function
+indicates that cloud provider is external and the operator encounters a platform which it is not aware of it will go into 'Degraded' state.
 
 During the first phases of the "External" platform type enablement, this operator should be just disabled.
-In the future, when the delivery mechanism for CCMs will be defined, the operator might be engaged for deploying a user-provided cloud controller manager,
+This might be done with changes within the [library-go](#library-go) and further dependency updates or, better,
+by adding a respective check within the operator itself.
+
+In the future, when the delivery mechanism for CCMs will be defined,
+the operator might be engaged for deploying a user-provided cloud controller manager,
 however this is a subject for the upcoming design work.
 
 #### Machine Api Operator
