@@ -35,9 +35,9 @@ There are 2 important things that need to be set in the ClusterOperator Custom R
 - `.metadata.name`: name for finding the live instance
 - `.status.versions[name=operator].version`: this is the version that the operator is expected to report. ClusterVersionOperator only respects the `.status.conditions` from instances that report their version.
 
-Additionally you might choose to include some fundamental relatedObjects.
+Additionally, you should include some fundamental [related objects](#related-objects) of your operator. 
 The must-gather and insights operator depend on cluster operators and related objects in order to identify resources to gather.
-Because cluster operators are delegated to the operator install and upgrade failures of new operators can fail to gather the requisite info if the cluster degrades before those steps.
+Because cluster operators are delegated to the operator install and upgrade, failures of new operators can fail to gather the requisite info if the cluster degrades before those steps.
 To mitigate this scenario the ClusterVersionOperator will do a best effort to fast-fill cluster-operators using the ClusterOperator Custom Resource in /manifests.
 
 Example:
@@ -207,3 +207,49 @@ Conditions determine when the CVO considers certain actions complete, the follow
 [2] Upgrade will not proceed with upgrading components in the next runlevel until the previous runlevel completes.
 
 See also: https://github.com/openshift/cluster-version-operator/blob/a5f5007c17cc14281c558ea363518dcc5b6675c7/pkg/cvo/internal/operatorstatus.go#L176-L189
+
+### Related Objects
+
+Related objects are the fundamental set of objects related to your operator.
+As mentioned previously, the insights operator and must-gather depend on related images to collect relevant diagnostic information about each ClusterOperator.
+
+In addition to specifying related objects statically in your operator's manifests, you should also implement logic in your operator to keep related objects up-to-date.
+This ensures that another client cannot permanently change your related objects, and it enables the operator to change related objects dynamically based on operator configuration or cluster state. 
+
+Related objects are identified by their `group`, `resource`, and `name` (and `namespace` for namespace-scoped resources).
+
+To declare a namespace as a related object:
+```yaml
+# NOTE: "" is the core group
+- group: ""
+  resource: "namespaces"
+  name: "openshift-component"
+```
+
+To declare a configmap as a related object:
+```yaml
+- group: ""
+  resource: "configmaps"
+  namespace: "openshift-component"
+  name: "component-config"
+```
+
+It is possible to declare related objects without specifying a name or namespace.
+If you specify a namespace without specifying a name, you are declaring that all objects of that group/resource _in that namespace_ are related objects.
+If you specify only group and resource, you are declaring that all objects of that group/resource _throughout the cluster_ are related objects.
+
+To declare all configmaps in a particular namespace as related objects:
+```yaml
+- group: ""
+  resource: "configmaps"
+  namespace: "openshift-component"
+  name: ""
+```
+
+To declare all of your operator's CRs throughout the cluster as related objects:
+```yaml
+- group: "component.openshift.io"
+  resource: "componentthings"
+  namespace: ""
+  name: ""
+```
