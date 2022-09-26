@@ -226,11 +226,19 @@ To declare a namespace as a related object:
   name: "openshift-component"
 ```
 
-To declare a configmap as a related object:
+To declare a certificate in an operator namespace as a related object:
+```yaml
+- group: "cert-manager.io"
+  resource: "certificates"
+  namespace: "openshift-component"
+  name: "component-certificate"
+```
+
+To declare a configmap in a shared namespace as a related object:
 ```yaml
 - group: ""
   resource: "configmaps"
-  namespace: "openshift-component"
+  namespace: "openshift-config"
   name: "component-config"
 ```
 
