@@ -129,7 +129,7 @@ customers only need to interact with the Performance Profile to set their
 only can the CPUSets be different for workers and masters but the machines
 themselves might have vastly different core counts.
 
-In order to implement this enhancement we are proposing changing 3 components
+In order to implement this enhancement we are proposing working on the 4 components
 defined below.
 
 1. Openshift API - ([Infrastructure
@@ -141,9 +141,16 @@ defined below.
 2. Admission Controller ([management cpus
    override](https://github.com/openshift/kubernetes/blob/a9d6306a701d8fa89a548aa7e132603f6cd89275/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/doc.go))
    in openshift/kubernetes.
+
    - This change will be in support of checking the global identifier in order
      to modify the pod spec with the correct `requests`.
-3. The [Performance Profile
+
+3. Node Admission Plugin in openshift/kubernetes
+
+   - We will add an admission plugin for nodes to prevent nodes from joining a
+     cluster that are not correctly setup for CPU Partitioning.
+
+4. The [Performance Profile
    Controller](https://github.com/openshift/cluster-node-tuning-operator/blob/master/docs/performanceprofile/performance_profile.md)
    part of [Cluster Node Tuning
    Operator](https://github.com/openshift/cluster-node-tuning-operator)
@@ -204,6 +211,25 @@ that are used by the workload partitioning feature.
 However, for Single-Node we will continue to check the conventional way to be
 able to support the upgrade flow from 4.11 -> 4.12. After 4.12 release that
 logic should no longer be needed and will be removed.
+
+### Node Admission Plugin
+
+We want to ensure that nodes that are not setup for CPU Partitioning do not get
+added to a cluster that is designated for CPU Partitioning. We will create an
+admission plugin for Nodes that will validate if a cluster is setup for CPU
+Partitioning then the node MUST contain a Capacity resource for
+`workload.openshift.io/cores`. All node creation requests from Kubelet currently add
+that information on boot up when registering with the API Server, we will
+leverage that to ensure a CPU Partitioned cluster only contains nodes created
+for CPU Partitioning.
+
+We will also keep in mind upgrades from Single Node clusters which already
+contain this feature. During initial upgrade, Single Node clusters will not
+contain the CPUPartitioningMode, for this reason we will fall back to checking
+with the old logic for Single Node to insure we do not cause issues when
+upgrading. This check for Single Node should be something that happens on initial
+upgrades, as NTO will update the `Infra.Status.CPUPartitioningMode` to the correct
+value after initial boot.
 
 ### Performance Profile Controller
 
