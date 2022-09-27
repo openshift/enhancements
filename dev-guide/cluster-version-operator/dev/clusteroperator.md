@@ -246,15 +246,15 @@ It is possible to declare related objects without specifying a name or namespace
 If you specify a namespace without specifying a name, you are declaring that all objects of that group/resource _in that namespace_ are related objects.
 If you specify only group and resource, you are declaring that all objects of that group/resource _throughout the cluster_ are related objects.
 
-To declare all configmaps in a particular namespace as related objects:
+To declare all of a namespaced resource in a particular namespace as related objects:
 ```yaml
-- group: ""
-  resource: "configmaps"
+- group: "component.openshift.io"
+  resource: "namespacedthings"
   namespace: "openshift-component"
   name: ""
 ```
 
-To declare all of your operator's CRs throughout the cluster as related objects:
+To declare all of a particular group/resource throughout the cluster as related objects:
 ```yaml
 - group: "component.openshift.io"
   resource: "componentthings"
