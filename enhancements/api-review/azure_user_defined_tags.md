@@ -8,7 +8,7 @@ reviewers:
   - "@dmage" ## reviewer for cluster-image-registry-operator component
   - "@Miciah" ## reviewer for cluster-ingress-operator component
   - "@akhil-rane" ## reviewer for cloud-credential-operator component
-  - TBD ## reviewer for cloud-network-config-controller component
+  - "@trozet" ## reviewer for cloud-network-config-controller component
 approvers:
   - "@jerpeter1" ## approver for CFE
 api-approvers:
@@ -239,8 +239,8 @@ resource "azurerm_resource_group" "main" {
 ```
 
 #### Caveats
-1. User updates or removes Azure resource tags added by Openshift, using an external interface
-   will not be reconciled by the resource owning operator.
+1. Updating or removing resource tags added by Openshift using an external interface,
+   may or may not be reconciled by the operator managing the resource.
 2. Updating tags of individual resources is not supported and any tag present in 
    `.status.platformStatus.azure.resourceTags` of `infrastructure.config.openshift.io/v1` resource 
    will result in adding tags to all Openshift managed Azure resources. 
