@@ -77,14 +77,27 @@ The following statement (or a link to this section) can be pasted into bugs when
 
 We're asking the following questions to evaluate whether or not this bug warrants changing update recommendations from either the previous X.Y or X.Y.Z.
 The ultimate goal is to avoid delivering an update which introduces new risk or reduces cluster functionality in any way.
+In the absence of a declared update risk (the status quo), there is some risk that the existing fleet updates into the at-risk releases.
+Depending on the bug and estimated risk, leaving the update risk undeclared may be acceptable.
+
 Sample answers are provided to give more context and the ImpactStatementRequested label has been added to this bug.
 When responding, please remove ImpactStatementRequested and set the ImpactStatementProposed label.
 The expectation is that the assignee answers these questions.
 
-Which 4.y.z to 4.y'.z' updates increase vulnerability?  Which types of clusters?
-* reasoning: This allows us to populate [`from`, `to`, and `matchingRules` in conditional update recommendations][graph-data-block] for "the `$SOURCE_RELEASE` to `$TARGET_RELEASE` update is not recommended for clusters like `$THIS`".
-* example: Customers upgrading from 4.y.Z to 4.y+1.z running on GCP with thousands of namespaces, approximately 5% of the subscribed fleet.  Check your vulnerability with `oc ...` or the following PromQL `count (...) > 0`.
-* example: All customers upgrading from 4.y.z to 4.y+1.z fail.  Check your vulnerability with `oc adm upgrade` to show your current cluster version.
+Which 4.y.z to 4.y'.z' updates increase vulnerability?
+* reasoning: This allows us to populate [`from` and `to` in conditional update recommendations][graph-data-block] for "the `$SOURCE_RELEASE` to `$TARGET_RELEASE` update is exposed.
+* example: Customers upgrading from any 4.y (or specific 4.y.z) to 4.(y+1).z'.  Use `oc adm upgrade` to show your current cluster version.
+
+Which types of clusters?
+* reasoning: This allows us to populate [`matchingRules` in conditional update recommendations][graph-data-block] for "clusters like `$THIS`".
+* example: GCP clusters with thousands of namespaces, approximately 5% of the subscribed fleet.  Check your vulnerability with `oc ...` or the following PromQL `count (...) > 0`.
+
+The two questions above are sufficient to declare an initial update risk, and we would like as much detail as possible on them as quickly as you can get it.
+Perfectly crisp responses are nice, but are not required.
+For example "it seems like these platforms are involved, because..." in a day 1 draft impact statement is helpful, even if you follow up with "actually, it was these other platforms" on day 3.
+In the absence of a response within 7 days, we may or may not declare a conditional update risk based on our current understanding of the issue.
+
+If you can, answers to the following questions will make the conditional risk declaration more actionable for customers.
 
 What is the impact?  Is it serious enough to warrant removing update recommendations?
 * reasoning: This allows us to populate [`name` and `message` in conditional update recommendations][graph-data-block] for "...because if you update, `$THESE_CONDITIONS` may cause `$THESE_UNFORTUNATE_SYMPTOMS`".
