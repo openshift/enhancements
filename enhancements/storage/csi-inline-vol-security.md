@@ -252,6 +252,7 @@ N/A
 #### Dev Preview -> Tech Preview
 
 - Admission plugin added to our fork of kube-apiserver
+- Admission plugin disabled by default, feature gate can be enabled with TechPreviewNoUpgrade
 - Test coverage in openshift/origin for pods with CSI volumes
 - Documentation for the admission plugin - use and configuration
 - Verify use with the Shared Resource CSI Driver
@@ -284,29 +285,37 @@ N/A
 
 ### Operational Aspects of API Extensions
 
-**TODO**
-
-[Shared Resource Validation](https://github.com/openshift/enhancements/blob/master/enhancements/cluster-scope-secret-volumes/shared-resource-validation.md#operational-aspects-of-api-extensions) can serve as an example here.
-
 #### New SLIs for the new admission validations to help cluster administrators and support
 
-#### Impact of existing API Server SLIs
+TBD
 
-#### Measuring / Verifying impact on existing API Server SLIs
+#### Impact on existing API Server SLIs
 
+This admission plugin must evaluate all pods and pod-specable workloads. While
+the logic is not particularly complex (i.e. look for inline volumes and compare
+labels between the namespace and `CSIDriver`), it could potentially impact:
+
+- Latency measures for pod APIs
+- Latency measures for kube apiserver
+- Memory consumption of kube apiserver
+
+#### Measuring / verifying impact on existing API Server SLIs
+
+- Use `kubelet_pod_start_duration_seconds_bucket` to measure latency impact on pod APIs
+- Use `apiserver_request_duration_seconds` to measure latency impact on kube apiserver
+- Use `container_memory_working_set_bytes` to measure memory consumption of kube apiserver
 
 #### Failure Modes
 
-**TODO**
+Possible failure modes:
+1. Unanticipated bugs in the admission plugin could prevent Pods from being started (by incorrect validation responses).
+2. Additional load of the admission plugin could increase duration of API server responses to Pod creation requests, and in the worst case lead to degradation of the API server.
+3. A `CSIDriver` object managed by OCP that supports `Ephemeral` volumes could be missing the `csi-ephemeral-volume-profile` label, leading to an unexpected validation response.
+4. API Server failures could prevent the admission plugin from being called.
 
-<!--
-- Describe the possible failure modes of the API extensions.
-- Describe how a failure or behaviour of the extension will impact the overall cluster health
-  (e.g. which kube-controller-manager functionality will stop working), especially regarding
-  stability, availability, performance and security.
-- Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
-  and add them as reviewers to this enhancement.
--->
+OCP teams that may be involved with an escalation:
+- OCP Storage team for issues caused by the admission plugin
+- API Server team for issues invoking the plugin or creating / modifying objects
 
 #### Support Procedures
 
