@@ -70,15 +70,14 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 2041  | konnectivity-agent | hypershift | 4.10 | Only for Hypershift guest clusters not on IBM cloud |
 | 2379  | etcd      | etcd || control plane only |
 | 2380  | etcd      | etcd || control plane only |
-| 3306  | mariadb   | kni | 4.4 | baremetal ironic DB, control plane only |
-| 5050  | ironic-inspector | kni | 4.4 | baremetal provisioning, control plane only |
+| 5050  | ironic-inspector | metal | 4.4 | baremetal provisioning, control plane only |
 | 6080  | cluster-kube-apiserver-operator | apiserver || control plane only |
-| 6180  | httpd     | kni | 4.4 | baremetal provisioning server, control plane only |
-| 6181  | httpd     | kni | 4.7 | baremetal image cache, control plane only |
-| 6183  | httpd     | kni | 4.10 | baremetal provisioning server (TLS), control plane only |
-| 6385  | ironic-api   | kni | 4.4 | baremetal provisioning, control plane only |
+| 6180  | httpd     | metal | 4.4 | baremetal provisioning server, control plane only |
+| 6181  | httpd     | metal | 4.7 | baremetal image cache, control plane only |
+| 6183  | httpd     | metal | 4.10 | baremetal provisioning server (TLS), control plane only |
+| 6385  | ironic    | metal | 4.4 | baremetal provisioning, control plane only |
+| 6388  | ironic (internal) | metal | 4.12 | baremetal provisioning, control plane only |
 | 6443  | kube-apiserver | apiserver || control plane only |
-| 8089  | ironic-conductor | kni | 4.4 | baremetal provisioning, control plane only |
 | 9001  | machine-config-daemon oauth proxy | node || metrics |
 | 9100  | node-exporter | monitoring || metrics |
 | 9101  | openshift-sdn kube-rbac-proxy | sdn || metrics, openshift-sdn only |
@@ -96,8 +95,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9258  | cluster-cloud-controller-manager-operator | cluster infra | 4.9 | metrics, control plane only |
 | 9444  | haproxy | sdn | 4.7 | on-prem internal loadbalancer, healthcheck port |
 | 9445  | haproxy | sdn | 4.7 | on-prem internal loadbalancer |
-| 9446  | baremetal-operator | kni | 4.9 | healthz; baremetal provisioning, control plane only |
-| 9447  | baremetal-operator | kni | 4.10 | webhook; baremetal provisioning, control plane only |
+| 9446  | baremetal-operator | metal | 4.9 | healthz; baremetal provisioning, control plane only |
+| 9447  | baremetal-operator | metal | 4.10 | webhook; baremetal provisioning, control plane only |
 | 9537  | crio      | node || metrics |
 | 9641  | ovn-kubernetes northd | sdn | 4.3 | control plane only, ovn-kubernetes only |
 | 9642  | ovn-kubernetes southd | sdn | 4.3 | control plane only, ovn-kubernetes only |
@@ -121,7 +120,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 17697 | kube-apiserver | apiserver || ?, control plane only |
 | 22623 | machine-config-server | node || control plane only |
 | 22624 | machine-config-server | node || control plane only |
-| 60000 | baremetal-operator | kni || metrics, 4.6+, control plane only |
+| 60000 | baremetal-operator | metal || metrics, 4.6+, control plane only |
 
 
 ### UDP
@@ -165,6 +164,10 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 If a feature is completely removed, (not just deprecated), then any now-free
 ports should be noted here, along with the version in which they were removed.
 
+| Port  | Process   | Owning Team | Since | Removed In | Notes |
+|-------|-----------|-------------|-------|------------|-------|
+| 3306  | mariadb   | metal | 4.4 | 4.11 | baremetal ironic DB, control plane only |
+| 8089  | ironic-conductor | metal | 4.4 | 4.11 | baremetal provisioning, control plane only |
 
 ## Future
 
