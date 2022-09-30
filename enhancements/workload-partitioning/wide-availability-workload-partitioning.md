@@ -134,23 +134,23 @@ defined below.
 
 1. Openshift API - ([Infrastructure
    Status](https://github.com/openshift/api/blob/81fadf1ca0981f800029bc5e2fe2dc7f47ce698b/config/v1/types_infrastructure.go#L51))
-
    - The change in this component is to store a global identifier if we have
      partitioning turned on.
-
-2. Admission Controller ([management cpus
+2. Openshift Installer
+   - Add an `InstallConfig` flag to the installer to enable this feature from
+     install time only.
+3. Machine Config Operator
+   - Add the ability of MCO to generate the needed machine configs for the
+     worker pools from bootstrap and maintain it.
+4. Admission Controller ([management cpus
    override](https://github.com/openshift/kubernetes/blob/a9d6306a701d8fa89a548aa7e132603f6cd89275/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/doc.go))
    in openshift/kubernetes.
-
    - This change will be in support of checking the global identifier in order
      to modify the pod spec with the correct `requests`.
-
-3. Node Admission Plugin in openshift/kubernetes
-
+5. Node Admission Plugin in openshift/kubernetes
    - We will add an admission plugin for nodes to prevent nodes from joining a
      cluster that are not correctly setup for CPU Partitioning.
-
-4. The [Performance Profile
+6. The [Performance Profile
    Controller](https://github.com/openshift/cluster-node-tuning-operator/blob/master/docs/performanceprofile/performance_profile.md)
    part of [Cluster Node Tuning
    Operator](https://github.com/openshift/cluster-node-tuning-operator)
@@ -195,6 +195,62 @@ const (
 	CPUPartitioningAllNodes    CPUPartitioningMode = "AllNodes"
 )
 ```
+
+### Openshift Installer
+
+We want to be able to allow a concise way to turn this feature on and easily
+enable other consumers of the openshift-installer to utilize it via the
+`InstallConfig`. This allows our other supported installer methods, such as
+assisted installer or ztp, a straightforward way to expose this feature.
+
+In order to set the correct `Infrastructure Status` at install time, we'll
+modify the `InstallConfig` to include enums to correctly set the status.
+
+```go
+type InstallConfig struct {
+	...
+	// CPUPartitioning determines if a cluster should be setup for CPU workload partitioning at install time.
+	// When this field is set the cluster will be flagged for CPU Partitioning allowing users to segregate workloads to
+	// specific CPU Sets. This does not make any decisions on workloads it only configures the nodes for it.
+	//
+	// This feature will alter the infrastructure nodes and prepare them for CPU Partitioning and as such can not be changed after being set.
+	//
+	// +kubebuilder:default="None"
+	// +optional
+	CPUPartitioning CPUPartitioningMode `json:"cpuPartitioningMode,omitempty"`
+  ...
+}
+
+
+// CPUPartitioningMode defines how the nodes should be setup for partitioning the CPU Sets.
+// +kubebuilder:validation:Enum=None;AllNodes
+type CPUPartitioningMode string
+
+const (
+	// CPUPartitioningNone means that no CPU Partitioning is on in this cluster infrastructure
+	CPUPartitioningNone CPUPartitioningMode = "None"
+	// CPUPartitioningAllNodes means that all nodes are configured with CPU Partitioning in this cluster
+	CPUPartitioningAllNodes CPUPartitioningMode = "AllNodes"
+)
+```
+
+### Machine Config Operator
+
+Once we have a global flag, and a way to set it at install time, we'll need to
+apply the needed configurations at install time during bootstrap. We will add
+this ability to MCO to generate and maintain the needed configurations before
+`kubelet` and the `api-server` stands up.
+
+We will add to the `kubelet` controller the ability to watch the
+`Infrastructure` resource and if CPU Partitioning is set to `AllNodes` we will
+generate the bootstrap and the controller will maintain the MCs from that point
+on. Things to note, this feature is explicitly designed to not be turned off, as
+such once set we will not remove the MCs.
+
+We will need to support upgrades for Single Node since this feature already
+exists for them but this implementation differs slightly. To avoid needless
+restarts, we will not alter the current configuration if we detect that we are
+in a single node topology and the nodes are already configured for CPU Partitioning.
 
 ### Admission Controller
 
@@ -285,17 +341,24 @@ Install Time Sequence
 
 ```mermaid
 sequenceDiagram
-Alice->>Installer: Generate Manifests
+Alice->>Installer: Generate Manifests Install Config With CPU Partitioning
 Installer->>Alice: Create Dir with Cluster Manifests
 loop Apply
-    Alice->>Alice: Add Custom Machine Configs
     Alice->>Alice: Add PerformanceProfile Manifest
-    Alice->>Alice: Alter Infrastructure Status
 end
-Alice->>Installer: Create Cluster
-Installer-->>APIServer: Apply Machine Configs
-APIServer-->>Installer: Applied!
-APIServer-->>MCO: Machine Manifests
+Alice->>Installer: Install Config With CPU Partitioning
+loop Generate
+    Installer->>Installer: Set Infrastructure Status
+end
+Installer-->>APIServer: Create Cluster
+APIServer-->>MCO: Get Infrastructure Status
+loop Generate
+    MCO->>MCO: Generate MC Configs
+end
+MCO-->>APIServer: Apply New MC
+loop Generate
+    MCO->>MCO: Generate Rendered MC
+end
 MCO-->>Node: Configure and Restart Node
 loop Apply
     Node->>Node: Set Kubelet Config
@@ -320,23 +383,22 @@ Node-->>MCO: Finished Restart
 - **MCO** is the machine config operator.
 - **Node** is the kubernetes node.
 
-1. Alice sits down and uses the installer to generate the manifests
+1. Alice sits down and uses the installer to generate the manifests with the
+   InstallConfig specifying `cpuPartitioningMode: AllNodes`
    - `openshift-install create manifests`
-2. The installer generates the manifests to create the cluster
-3. Alice adds the default machine configs and desired PerformanceProfile
-   manifest for workload partitioning to the `openshift` folder that was
-   generated by the installer.
-4. Alice updates the `Infrastructure` CR status to denote that workload
-   partitioning is turned on.
-5. Alice then creates the cluster via the installer.
-6. The installer will apply the manifests and during the bootstrapping process
-   the MCO will apply the default configurations for workload partitioning, and
-   restarts the nodes.
-7. After the cluster is up the NTO will then generate the machine configurations
+2. The installer generates the manifests to create the cluster, with the new
+   `Infrastructure.Status.CPUPartitioning: AllNodes`
+3. Alice adds the desired PerformanceProfile manifest for workload partitioning
+   to the `openshift` folder that was generated by the installer.
+4. Alice then creates the cluster via the installer.
+5. The installer will apply the manifests and during the bootstrapping process
+   the MCO will generate the default configurations for workload partitioning
+   based off of the `Infrastructure.Status`, and restarts the nodes.
+6. After the cluster is up the NTO will then generate the machine configurations
    using the information provided in the PerformanceProfile manifest.
-8. The MCO applies the updated workload partitioning configurations and restarts
+7. The MCO applies the updated workload partitioning configurations and restarts
    the relevant nodes.
-9. Alice will now have a cluster that has been setup with workload partitioning
+8. Alice will now have a cluster that has been setup with workload partitioning
    and the desired workloads pinned to the specified CPUSet in the
    PerformanceProfile.
 
@@ -529,17 +591,6 @@ or out of bounds can cause problems such as extremely poor performance or start
 up errors. Mitigation of this scenario will be to provide proper guidance and
 guidelines for customers who enable this enhancement. As mentioned in our goal
 we do support re-configuring the CPUSet partition size after installation.
-
-It is possible to build a cluster with the feature enabled and then add a node
-in a way that does not configure the workload partitions only for that node. We
-do not support this configuration as all nodes must have the feature turned on.
-The risk that a customer will run into here is that if that node is not in a
-pool configured with workload partitioning, then it might not be able to
-correctly function at all. Things such as networking pods might not work as
-those pods will have the custom `requests`
-`management.workload.openshift.io/cores`. In this situation the mitigation is
-for the customer to add the node to a pool that contains the configuration for
-workload partitioning.
 
 A possible risk are cluster upgrades, this is the first time this enhancement
 will be for multi-node clusters, we need to run more tests on upgrade cycles to
