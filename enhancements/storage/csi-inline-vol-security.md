@@ -5,14 +5,13 @@ authors:
   - "@dobsonj"
 reviewers:
   - "@deads2k"
-  - "@gnufied"
+  - "@jsafrane"
 approvers:
   - "@jsafrane"
 api-approvers:
   - "@deads2k"
-  - "@sttts"
 creation-date: 2022-01-10
-last-updated: 2022-09-08
+last-updated: 2022-09-30
 tracking-link:
   - https://issues.redhat.com/browse/STOR-746
 see-also: 
