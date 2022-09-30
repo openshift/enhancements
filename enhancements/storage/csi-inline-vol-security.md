@@ -256,6 +256,7 @@ N/A
 - Test coverage in openshift/origin for pods with CSI volumes
 - Documentation for the admission plugin - use and configuration
 - Verify use with the Shared Resource CSI Driver
+- CSI Inline Volumes remains documented as a tech preview feature until admission plugin is GA
 
 #### Tech Preview -> GA
 
@@ -264,6 +265,7 @@ N/A
 - End to end testing with pods using volumes from the Shared Resource CSI driver
 - Sufficient time for feedback
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- CSI Inline Volumes is promoted to GA in OCP along with the admission plugin
 
 #### Removing a deprecated feature
 
@@ -279,15 +281,20 @@ Users of inline volumes who upgrade to an OCP release with the admission plugin
 enabled will need to add a CSI ephemeral volume profile for any unmanaged `CSIDriver`
 objects that should allow the use of inline volumes in unprivileged namespaces.
 
+The CSI Inline Volumes upstream feature graduated to GA in k8s 1.25, and was enabled
+by default as a beta feature since k8s 1.15. However, we don't want to declare
+this feature GA in OCP until the admission plugin is also GA and enabled by default.
+The reason is: if a user already deployed a community driver to use with inline
+volumes, and we say it's GA, then we shouldn't break it by enabling the admission
+plugin later (assuming the community driver does not have the correct annotation).
+This means we will still document CSI Inline Volumes as tech preview in OCP 4.12,
+and then graduate both the upstream feature and the admission plugin to GA in 4.13.
+
 ### Version Skew Strategy
 
 N/A
 
 ### Operational Aspects of API Extensions
-
-#### New SLIs for the new admission validations to help cluster administrators and support
-
-TBD
 
 #### Impact on existing API Server SLIs
 
@@ -298,12 +305,14 @@ labels between the namespace and `CSIDriver`), it could potentially impact:
 - Latency measures for pod APIs
 - Latency measures for kube apiserver
 - Memory consumption of kube apiserver
+- Number of pod security errors
 
-#### Measuring / verifying impact on existing API Server SLIs
+#### Measuring impact on existing API Server SLIs
 
 - Use `kubelet_pod_start_duration_seconds_bucket` to measure latency impact on pod APIs
 - Use `apiserver_request_duration_seconds` to measure latency impact on kube apiserver
 - Use `container_memory_working_set_bytes` to measure memory consumption of kube apiserver
+- Use `pod_security_errors_total` to measure number errors preventing evaluation of pod security
 
 #### Failure Modes
 
@@ -319,7 +328,15 @@ OCP teams that may be involved with an escalation:
 
 #### Support Procedures
 
-**TODO**
+##### Detecting failure modes
+
+- Check the `CSIDriver` object and the pod's `Namespace` to ensure they have the correct labels as described in the [Proposal](#proposal).
+- Check kube-apiserver logs for any errors relating to the `CSIInlineVolumeSecurity` admission plugin.
+- Use the metrics described in [Operational Aspects of API Extensions](#operational-aspects-of-api-extensions) to evaluate performance, load, and error rate of the API server and pod start up latency.
+
+##### Disable API extension
+
+While the admission plugin is tech preview, it can be disabled by removing TechPreviewNoUpgrade. No admission checks will be done by this plugin while the feature flag is disabled. Once it graduates to GA, the admission plugin will be enabled as part of OCP without a user-facing way to disable it since this is considered a critical security feature.
 
 ## Implementation History
 
