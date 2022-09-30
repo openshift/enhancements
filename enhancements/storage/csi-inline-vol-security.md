@@ -200,6 +200,13 @@ Inline volumes using third party CSI drivers that do not have an appropriate
 security profile label can be used only in privileged namespaces, as described
 in the [Default Behavior](#default-behavior) section.
 
+There will be a verification check in library-go
+(see [ApplyCSIDriver](https://github.com/openshift/library-go/blob/a18683c20aeef097fdb063237965dbe96fee3e80/pkg/operator/resource/resourceapply/storage.go#L108))
+that throws an error if `CSIDriver` objects with the `Ephemeral` volume
+life-cycle mode are missing the `csi-ephemeral-volume-profile` label.
+This means we'll get an error in the operator logs if we ever introduce
+a CSI driver in OCP that allows inline use without an appropriate profile.
+
 ### Implementation Details/Notes/Constraints [optional]
 
 N/A
