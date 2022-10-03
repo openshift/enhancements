@@ -21,7 +21,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2021-09-22
-last-updated: 2022-07-01
+last-updated: 2022-10-03
 status: implementable
 see-also:
 replaces:
@@ -36,28 +36,28 @@ tracking-link:
 
 - [X] Enhancement is `implementable`
 - [X] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
+- [X] Test plan is defined
 - [ ] Operational readiness criteria is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
+- [X] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
 Network Observability introduces a new category in OpenShift that
-provides networking information for a single cluster.  It gives insight
+provides networking information for a single cluster. It gives insight
 into what's on the network, when and what types of traffic and traffic
-flows are being made, and by whom.  It gathers data to help design, plan,
-and answer questions about the network and provides a visual representation
+flows are being made, and by whom. It gathers data to help design, plan,
+and answer questions about the network and provides visual representations
 to help understand, diagnose, and troubleshoot networking issues.
 
 ## Motivation
 
 With Kubernetes, a layer of abstraction is added making it difficult for
 Red Hat and customers who manage their networks to be able to fully see
-what's happening on their network.  Monitoring provides metrics and
-alerts to potential problems.  Network observability will then help you
+what's happening on their network. Monitoring provides metrics and
+alerts to potential problems. Network observability will then help you
 analyze, investigate and diagnose those problems by looking at it from
-a centralized perspective instead of device by device.  In addition,
+a centralized perspective instead of device by device. In addition,
 it can assist in the areas of network planning, network policy validation,
 security, and others.
 
@@ -70,16 +70,19 @@ security, and others.
 underlying layer
 
 The goal of the first release is to lay the groundwork and foundation
-in place, while still being able to deliver some functionality, even
-if it is at a smaller scale.  The target is to have a Dev Preview to
-generate interest in network observability.
+in place, and provide a first set of functionalities including:
+- Network flows collection, enrichment and storage
+- Raw flows visualization
+- Network Topology representation
+- Time-series representations of network throughtput
+- Integration with the OpenShift Console
 
 ### Non-Goals
 
 The focus is on network observability as opposed to other types of observability.
 
 While a key goal is troubleshooting, it is not strictly a troubleshooting
-tool.  Some of that are already addressed by
+tool. Some of that are already addressed by
 [Red Hat Insights](https://cloud.redhat.com/blog/openshift-insights-for-openshift-cluster-manager)
 and specific tools like pcap, traceroute, and [Jaeger](https://www.jaegertracing.io/)
 for tracing.
@@ -87,30 +90,35 @@ for tracing.
 
 ## Proposal
 
-Network Observability covers a broad area.  In the first release,
-it will focus on obtaining and storing NetFlow data and providing
-visualization for this.  This is a logical first step in showing what is
+Network Observability covers a broad area. In the first release,
+it will focus on obtaining and storing NetFlow-like data and providing
+visualization for this. This is a logical first step in showing what is
 happening on your network.
 
 Network Observability will be an opt-in feature that needs to be enabled
-by a user with an admin or cluster-admin role.  This is done by installing
-the Network Observability Operator and Loki Operator.  The user can do this
+by a user with a cluster-admin role. This is done by installing
+the Network Observability operator and Loki operator. The user can do this
 using the web console or the CLI.
 
-***Note:*** *The term "NetFlow" is used generically throughout this document and
-is synonymous with IPFIX, which is the IETF version of NetFlow.*
+***Note:*** *The term "NetFlow" is used generically throughout this document.
+Because the Network Observability operator deploys both agents and collectors,
+it doesn't have to use the NetFlow standard, or its IPFIX sequel, but it uses
+an internal protobuf-based format instead, that is roughly equivalent in terms
+of content. The operator is also able to listen IPFIX flows sent from OVS as
+an alternative.*
 
 ### Workflow Description
 
-Either Open vSwitch (OVS) or eBPF agent will be configured to export flows.  The data will be
+Either Open vSwitch (OVS) or eBPF agent will be configured to export flows. The data will be
 collected and combined with Kubernetes-related information (e.g. pod, services,
 namespaces) and then saved in local persistent storage or cloud storage such
-as Amazon S3.
+as Amazon S3, via Loki.
 
 The web console will provide a NetFlow table and topology views showing traffic between
-pods.  In the future, more visualization and functionality
-will be added to include areas such as extra network data gathered using
-eBPF, policy validation, security risks, and more.
+pods, as well as a couple of general statistics and time-series displayed as an overview.
+
+In the future, more visualization and functionality can be added to include areas such
+as extra network data gathered using eBPF, policy validation, security risks, and more.
 
 ### User Stories
 
@@ -127,63 +135,19 @@ However, the first release will not analyze why something went wrong.
 
 ### API Extensions
 
-The OVS can be configured to enable NetFlows by using Cluster Network Operator
-(networks.operator.openshift.io) to make this change.  This will impact the
-performance of the OVS.
+The default and recommended way to run the operator is to use an eBPF agent that runs on each cluster node to 
+generate NetFlows. This mode doesn't require any API interaction with the Cluster Network Operator or the CNI.
 
-A priviledged eBPF agent can run on each cluster node as an alternative to 
-generate NetFlows. This will impact the performance of nodes with a lower overall 
-consumption than OVS approach.
+However, an alternative offers to generate flows from OVS instead of the eBPF agent. OVS is then configured to enable NetFlows via the Cluster Network Operator (networks.operator.openshift.io) and OVN-Kubernetes. This will impact the
+performance of OVS and consumes overall more resources than the eBPF approach.
 
-### Implementation Details/Notes/Constraints
+#### New API
 
-Here are the limitations and constraints.
+The operator manages a single new custom resource definition (CRD), named `FlowCollector`.
 
-1. NetFlows export<br>
+A single resource can be installed throughout the cluster.
 
-    - CNI must be OVN-Kubernetes for OVS NetFlows
-        The network type (CNI) has to be OVN-Kubernetes since configuring OVS to
-    export IPFIX data is only supported there.  By default, the CNI is OpenShift
-    SDN and the majority of customers run OpenShift SDN today.
-    Therefore in a brown field scenario, this would require the user to change
-    their CNI type before network observability can be enabled.
-        Note that the effort to implement OpenShift SDN to configure OVS is
-    doable.  However, new features recently added have only been implemented
-    in OVN-Kubernetes.
-<br>
-    - Kernel must be 4.18+ with eBPF enabled
-        The eBPF agent will either need `BPF`, `PERFMON`, `NET_ADMIN`, `SYS_RESOURCE` 
-    Linux capabilities or Administrative privileges if the kernel doesn't 
-    recognize `BPF` and `PERFMON` (eg K3s / Kind).
-
-2. Data sampling<br>
-    In order to scale in terms of collecting data, it is not uncommon to take
-a very small sample of data. By default, the data sample rate in OVS is
-400 to 1.  Networks with larger bandwidth, sample at an even higher rate
-such as 1,024 to 1.
-
-    With sampling, you will be able to get trends about your network.  If
-you are looking for a specific flow of data, it's likely not to be there.
-The total number of bytes and packets are just estimations when sampling
-is used.  Therefore if you need full visibility of the traffic and accuracy,
-the only choice is not do sampling.
-
-3. Resources required<br>
-    Exporting data is potentially CPU, memory and bandwidth-intensive, and
-typically requires a large amount of storage.  The CPU/memory/bandwidth
-resources can be managed by the sampling data rate.  The storage requirements
-can be controlled by the data retention policy or how long to keep the data.
-
-    Nevertheless, in order to maintain the same performance that you have
-prior to enabling network observability, will require additional resources.
-The specific number of cores and the amount of memory and storage required
-will be finalized as more testing is done.
-
-### CRD
-
-The operator custom resource definition (CRD) is divided per components whith 
-the ability to select or enable optionnal ones. The console dynamic plugin also 
-have an option to automatically register.
+Here are the main points:
 
 ```yaml
 apiVersion: flows.netobserv.io/v1alpha1
@@ -191,28 +155,99 @@ kind: FlowCollector
 metadata:
   name: cluster
 spec:
-  namespace: "network-observability"
-  agent: #either ipfix or ebpf
-  ipfix:
-    ...
-  ebpf:
-    ...
-  flowlogsPipeline:
-    ...
+  namespace: netobserv
+  deploymentModel: DIRECT # DIRECT or KAFKA
+  agent:
+    type: EBPF # EBPF or IPFIX
+    ebpf:
+      sampling: 50
+      # ...
+  processor:
+    # ...
   kafka:
-    enable: false
-    ...
+    # ...
   loki:
-    ...
+    # ...
   consolePlugin:
-    register: true
-    ...
+    # ...
 ```
+
+Most of the configuration fields are optional and have default values.
 
 Check FlowCollector sample:
 [network-observability-operator/blob/main/config/samples/flows_v1alpha1_flowcollector.yaml](https://github.com/netobserv/network-observability-operator/blob/main/config/samples/flows_v1alpha1_flowcollector.yaml) 
 CustomResourceDefinition: 
 [network-observability-operator/config/crd/bases/flows.netobserv.io_flowcollectors.yaml](https://github.com/netobserv/network-observability-operator/blob/main/config/crd/bases/flows.netobserv.io_flowcollectors.yaml)
+
+
+### Implementation Details/Notes/Constraints
+
+Here are the limitations and constraints.
+
+1. NetFlows export<br>
+
+    - With `EBPF` agent, Kernel must be 4.18+ with eBPF enabled
+        The eBPF agent will either need `BPF`, `PERFMON`, `NET_ADMIN`, `SYS_RESOURCE` 
+    Linux capabilities or Administrative privileges if the kernel doesn't 
+    recognize `BPF` and `PERFMON` (eg K3s / Kind).
+
+    - With `IPFIX` agent, CNI must be OVN-Kubernetes
+        The network type (CNI) has to be OVN-Kubernetes since configuring OVS to
+    export IPFIX data is only supported there.
+<br>
+
+2. Data sampling<br>
+    In order to scale in terms of collecting data, it is not uncommon to take
+a very small sample of data. By default, the data sample rate with agent `EBPF` is
+50 to 1. Users may have to tweak this value until they get an acceptable tradeof between
+observability and resources consumption overhead.
+
+    With sampling, you will be able to get trends about your network. If
+you are looking for a specific flow of data, it's likely not to be there.
+The total number of bytes and packets are just estimations when sampling
+is used. Therefore if you need full visibility of the traffic and accuracy,
+the only choice is not do sampling.
+
+3. Resources required<br>
+    Exporting data is potentially CPU, memory and bandwidth-intensive, and
+typically requires a large amount of storage. The CPU/memory/bandwidth
+resources can be managed by the sampling data rate. The storage requirements
+can be controlled by the data retention policy or how long to keep the data.
+Other parameters can be configured to impact the resources consumption, such
+as Kafka and Loki client batch settings (size, timeouts...).
+
+    For Loki and Kafka, other settings are on the server side (e.g. Loki rate
+limits).
+
+    Nevertheless, in order to maintain the same performance that you have
+prior to enabling network observability, will require additional resources.
+The specific number of cores and the amount of memory and storage required
+will be finalized as more testing is done.
+
+#### New metrics
+
+The operator and its deployed components will expose new metrics for Cluster Monitoring.
+Part of these metrics is for internal / operational monitoring, and part of them
+is for consumption in the views provided by our Console plugin.
+
+***Note:*** *For GA target, our Console plugin will **not** consume any metrics from Prometheus.
+However, post-GA, it is planned to consume some of them.*
+
+A few provided metrics are expected to have a pretty high cardinality. This is in particular the
+case for metrics tracking traffic volumetry per source and destination. To limit the impact on 
+both client-side and Prometheus server, sources and destinations are aggregated at the Workload level
+(ie. Owner Controller), rather than individual Pods. As a matter of comparison, this should be very
+similar to what the Service Mesh metrics provide and is consumed by Kiali.
+
+The operational metrics can be seen there: https://github.com/netobserv/flowlogs-pipeline/blob/main/docs/operational-metrics.md. They are not expected to have high cardinality.
+
+The user-facing metrics are described in the YAML files there: https://github.com/netobserv/network-observability-operator/tree/main/controllers/flowlogspipeline/metrics_definitions. Some of them are expected to have a high cardinality, especially:
+- sent_bytes_total
+- received_bytes_total
+
+And to a lesser extent:
+- node_sent_bytes_total
+- node_received_bytes_total
 
 ### Risks and Mitigations
 
@@ -278,8 +313,13 @@ See Network Observability Storage enhancement for more details.
 
 
 ### Operators
-Two new operators will be required for network observability.  They are
-the Network Observability Operator and the Loki Operator.
+Network Observability provides an operator (Network Observability Operator - a.k.a NetObserv upstream). 
+
+It has a dependency on Loki, which also exists as a certified operator (also used for Logging).
+
+Finally, there is an optional dependency on Kafka, which also
+is provided by operators (AMQ Streams, or Strimzi upstream).
+
 
 #### Network Observability Operator (NetObserv)
 The Network Observability Operator will need to be installed from OperatorHub
@@ -298,10 +338,9 @@ for hot fixes only.
 #### Loki Operator
 The Loki Operator is a separate project at
 https://github.com/grafana/loki/tree/main/operator but is required for network
-observability.  It manages Grafana Loki, which is the component that will be
-used to store NetFlows.  It will be installed in its own namespace with the
-intention that if another component wants to use Loki, it should create its
-own instance.
+observability. It manages Grafana Loki, which is the component that will be
+used to store NetFlows. It will be installed in its own namespace with the
+intention that if another component wants to use Loki, it should create its own instance / operand.
 
 
 ### Visualization
@@ -388,7 +427,10 @@ testing.
 
 ### Graduation Criteria
 
-The first release will be a Dev Preview.  The general acceptance criteria
+Upstream, NetObserv has already been released as an informal Dev Preview, which allowed to collect feedback and
+take the appropriate actions, mostly in terms of performance improvements.
+
+For GA, the general acceptance criteria
 are:
 
 - Meet scalability targets
@@ -400,19 +442,19 @@ Similar criteria will be apply to Tech Preview and GA but with
 different metrics such as increased node support and NetFlows
 per second.
 
+No Tech Preview is planned.
+
 #### Dev Preview -> Tech Preview
 
-The following are items to complete for Tech Preview:
-
-- Increase scalability targets
-- Performance testing
-- End user documentation
-- Gather feedback from customers
+N/A
 
 #### Tech Preview -> GA
 
-The following are items to complete for GA:
+The following are items to complete before GA:
 
+- Increase scalability targets
+- End user documentation
+- Gather more feedback from early adopters
 - Finalize end-to-end and performance testing
 - API stability
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
@@ -423,10 +465,7 @@ N/A
 
 ### Upgrade / Downgrade Strategy
 
-In a brown field scenario, if the customer is running OpenShift
-SDN, a change to OVN-Kubernetes is required.  Migrating to
-OVN-Kubernetes is a manual process that requires some downtime.  For
-more information, see [Migration to the OVN-Kubernetes network provider](https://docs.openshift.com/container-platform/4.8/networking/ovn_kubernetes_network_provider/migrate-from-openshift-sdn.html).
+N/A
 
 ### Version Skew Strategy
 
@@ -434,10 +473,7 @@ N/A since this is the first release
 
 ### Operational Aspects of API Extensions
 
-Because OVS is configured to export NetFlows, the performance impact
-will be related to the amount of traffic and the sampling rate.  This
-will be tested against a number of scenarios as described in the Test
-Plan section above.
+Because all the traffic is monitored to export NetFlows, the performance impact will be related to the amount of traffic and the sampling rate. This will be tested against a number of scenarios as described in the Test Plan section above.
 
 #### Failure Modes
 
@@ -480,7 +516,4 @@ other components in Web Console that plan to ultimately use Loki.
 
 ## Infrastructure Needed
 
-This is a new project that will require a new Git repository under
-[openshift](https://github.com/openshift).  CI will be set up with
-Prow and/or GitHub Actions.  Development will need resources for
-infrastructure.
+N/A
