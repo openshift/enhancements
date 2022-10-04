@@ -101,6 +101,10 @@ but slightly different non-goals.
   done as part of installing the cluster. It can be changed after the fact but
   we will need to stipulate that, that is currently not supported. The intent
   here is for this to be supported as a day 0 feature, only.**
+- **This enhancement does not address mixing nodes of different CPU sizes in
+  Machine Configuration Pools. Pools must contain machines of the same CPU set size,
+  currently the Performance Profile defines and targets specific machine pools
+  to apply the configuration to, as such they must have the same CPU set size.**
 
 ## Proposal
 
@@ -591,6 +595,15 @@ or out of bounds can cause problems such as extremely poor performance or start
 up errors. Mitigation of this scenario will be to provide proper guidance and
 guidelines for customers who enable this enhancement. As mentioned in our goal
 we do support re-configuring the CPUSet partition size after installation.
+
+Another similar risk to CPU set sizes being too small or out of bounds is if
+customers mix nodes of differing CPU set sizes in the same machine config pool.
+This is not supported with this feature as it is required that machine pools
+contain machines of the same size to correctly apply the CPUSet affinities. If
+customers mix node sizes in the same pool, then the ones where the CPUSet is out
+of bound will fail, while the others will not. They will need to evict those
+machines and add ones that fall with in bounds of the `reserved` and `isolated`
+CPUSets defined in their PerformanceProfile.
 
 A possible risk are cluster upgrades, this is the first time this enhancement
 will be for multi-node clusters, we need to run more tests on upgrade cycles to
