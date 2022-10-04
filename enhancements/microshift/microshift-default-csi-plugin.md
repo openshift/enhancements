@@ -276,7 +276,7 @@ annotation.  This has the following effects:
 skewed between the platforms.
 
 - The API group is planned to merge backwards-compatibility breaking change to the API, upstream. See upstream 
-(PR)[https://github.com/topolvm/topolvm/issues/168]. The API will shift from `topolvm.cybozu.com` to `topolvm.io`. However, the controller will not 
+[PR](https://github.com/topolvm/topolvm/issues/168). The API will shift from `topolvm.cybozu.com` to `topolvm.io`. However, the controller will not 
 intelligently manage the legacy and new versions at the same time.  Instead, existing clusters  will need to set an 
 environmental variable in the controller pod to signal if the cluster is using the legacy group or the new one. This creates
 a potential for data loss if upgrades do not account for the API difference.
