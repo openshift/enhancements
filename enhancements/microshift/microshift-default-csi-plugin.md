@@ -143,27 +143,31 @@ The workflow is automated and documented
 
 > After the device owner has logged into the device ... 
 
-1. The device owner will create a file called `/etc/microshift/lvmd.yaml`
-1. The device owner will define the lvmd config, according to its 
-[documentation](https://github.com/red-hat-storage/topolvm/blob/main/docs/lvmd.md)
+1. The device owner will create a file called `lvmd.yaml`, per documentation according to its 
+[documentation](https://github.com/red-hat-storage/topolvm/blob/main/docs/lvmd.md).
+   1. The device owner will provide the absolute path to this file in the MicroShift config field `LvmdConfigFilePath`. 
 
    _For example:_
-   
+
     ```shell
-    $ cat <<EOF > /etc/microshift/lvmd.yaml
+    $ cat <<'EOF' > /etc/microshift/lvmd.yaml
     deviceClasses:
     - default: true
       name: "user-provided-config"
       volume-group: rhel
       spare-gb: 10 # in GB
-    socket-name: /run/lvmd/lvmd.sock
+    socket-name: /run/lvmd/lvmd.socket
+   EOF
+   $ cat <<'EOF' > /etc/microshift/config.yaml
+   LvmdConfigFilePath: /etc/microshift/lvmd.yaml
+   EOF
     ```
 
 1. The device owner will define a storageClass per LVM VolumeGroup to expose them to cluster workloads, which should be
 placed on the device under `/etc/microshift/manifests/` or `/usr/lib/microshift/manifests/`.  An example storageClass
 is provided [here](https://github.com/red-hat-storage/topolvm/blob/main/docs/user-manual.md#storageclass).  Note the
 device class is referenced as `parameters["topolvm.cybozu.com"]: <DEVICE_CLASS_NAME>`
-   
+
    _Example StorageClass_ 
    ```yaml
    kind: StorageClass
@@ -177,6 +181,7 @@ device class is referenced as `parameters["topolvm.cybozu.com"]: <DEVICE_CLASS_N
    volumeBindingMode: WaitForFirstConsumer
    allowVolumeExpansion: true
    ```
+
 1. The device owner will start the microshift service, and proceed to validate the platform as described in **Validate 
 ODF-LVM function**
 1. The device owner will validate the system, following workflow **Validate ODF-LVM function**
@@ -185,7 +190,7 @@ ODF-LVM function**
 
 > After the device owner has logged into the device ...
 
-1. The device owner creates an misconfigured lvmd config file under /etc/microshift/lvmd.config.  In this example, assume the LVM volume group cannot be found on the host device.
+1. The device owner creates a misconfigured lvmd config file under /etc/microshift/lvmd.config.  In this example, assume the LVM volume group cannot be found on the host device.
 
     _For example:_
     ```shell
@@ -195,7 +200,7 @@ ODF-LVM function**
       name: "user-provided-config"
       volume-group: non_existent_volume_group
       spare-gb: 10 # in GB
-    socket-name: /run/lvmd/lvmd.sock
+    socket-name: /run/lvmd/lvmd.socket
     ```
 **Correct a _malformed_ user-provided ODF-LVM configuration and restart MicroShift**
 
@@ -231,7 +236,7 @@ deviceClasses:
   name: "default"
   volume-group: "rhel"
   spare-gb: 10 # in GB
-socket-name: /run/lvmd/lvmd.sock
+socket-name: /run/lvmd/lvmd.socket
 ```
 
 #### Under the Hood
@@ -240,9 +245,9 @@ This workflow ensures that ODF-LVM is reading the most recent version of the lvm
 lvmd process reads this once at startup.  Changes to the configuration require that a) the data be pushed to the `lvmd`
 configMap and b) the lvmd process be restarted so that it will pick up the latest configuration.
 
-1. On startup, MicroShift will check for the existence of a file called `/etc/microshift/lvmd.yaml`.  
-   1. If the file exists, MicroShift will read the file into memory
-   1. If the file doesn't exist, MicroShift will assume hardcoded default values.
+1. On startup, MicroShift will check the `MicroshiftConfig.LvmdConfigFilePath` value.  
+   1. If the file exists, MicroShift will read the file into memory.
+   1. If the value is nil, it will assume default hardcoded values. 
 1. MicroShift will calculate a SHA256 checksum from the config data. 
 1. MicroShift will generate a ConfigMap to encapsulate the lvmd config data.
 
@@ -259,7 +264,7 @@ configMap and b) the lvmd process be restarted so that it will pick up the lates
         - name: user-provided-config
           volume-group: rhel
           default: true
-        socket-name: /run/lvmd/lvmd.sock
+        socket-name: /run/lvmd/lvmd.socket
     ```
 
 1. MicroShift will Create / Update the ConfigMap.
