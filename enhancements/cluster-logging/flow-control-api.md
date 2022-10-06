@@ -6,12 +6,13 @@ reviewers:
   - "@pmoogi"
   - "@eranra"
   - "@ajay"
+  - "@prangupt"
 approvers:
   - TBD
 api-approvers:
   - TBD
 creation-date: 2021-02-05
-last-updated: 2022-01-20
+last-updated: 2022-10-06
 tracking-link: https://issues.redhat.com/browse/LOG-1043
 see-also:
 status: provisional
@@ -99,6 +100,7 @@ This may be added as a feature in future proposals.
     - name: offsite
 	  type: kafka
 	  limit:
+        policy: drop
         maxRecordsPerSecond: 10M
 ```
 
@@ -110,8 +112,19 @@ This may be added as a feature in future proposals.
   outputs:
     - name: default
 	  limit:
+        policy: drop
         maxRecordsPerSecond: 10M
 ```
+
+#### Ignore (don't send) logs to default output
+
+``` yaml
+  outputs:
+    - name: default
+	  limit:
+        policy: ignore
+```
+
 
 **Note**: we need to add the ability to set a flow rule on the special "default" output.
 
@@ -122,12 +135,13 @@ This may be added as a feature in future proposals.
 	- application:
 		selector:
 		  matchLabels: { boring: true }
-	    limitPerContainer:
-          maxRecordsPerSecond: 0
+	  limitPerContainer:
+      policy: ignore
+      maxRecordsPerSecond: 0
 ```
 
 **Notes**
-* Flow rules applied to *inputs* specify a *per container* limit.
+* Flow rules applied to *inputs* specify a *per container/group* limit.
 * Inputs and input selectors are already part of the ClusterLogForwarder API.
 * If multiple input limits apply to a container, the _lowest_ limit is applied.
   Example: the same container is selected by two inputs, one by namespace and one by label.
@@ -137,13 +151,15 @@ This may be added as a feature in future proposals.
 ``` yaml
   inputs:
 	- application:
-		namespaces: [ boring, tedious, tiresome ]
-	    limitPerContainer:
+	  namespaces: [ boring, tedious, tiresome ]
+	  limitPerContainer:
+      policy: drop
 		  maxRecordsPerSecond: 10
-    - application:
+  - application:
 		namespaces: [ important, exciting ]
-	    limitPerContainer:
-		  maxRecordsPerSecond: 1000
+	  limitPerContainer:
+      policy: drop
+      maxRecordsPerSecond: 1000
 ```
 
 #### Set a per-container limit for containers with certain labels
@@ -153,13 +169,25 @@ This may be added as a feature in future proposals.
 	- application:
 		selector:
 		  matchLabels: { importance: low }
-        limitPerContainer:
-		  maxRecordsPerSecond: 10
-    - application:
-	    selector:
-	  	  matchLabels: { importance: high }
-        limitPerContainer:
+    limitPerContainer:
+      policy: drop
+      maxRecordsPerSecond: 10
+  - application:
+	  selector:
+	  	matchLabels: { importance: high }
+    limitPerContainer:
+      policy: drop
 		  maxRecordsPerSecond: 1000
+```
+
+#### Set a group limit for all containers
+
+``` yaml
+  inputs:
+	- application:
+    limitGroup:
+      policy: drop
+      maxRecordsPerSecond: 10M
 ```
 
 ### API Extensions
@@ -170,14 +198,16 @@ New API struct type `RateLimit` with fields:
   - Absent (default): best effort, drop records only if the forwarder cannot keep up.
   - 0: means do not forward any logs - if possible the logs are not even collected.
   - greater than 0: is a limit in log records per second.
-- `policy`: (enum: drop, default: drop) Placeholder for future policy extensions.\
+- `policy`: (enum: drop, ignore; default: drop) Placeholder for future policy extensions.\
   For the first iteration the only policy is `drop` and this field need not be specified.
   If the inbound flow exceeds the limit, logs are dropped.
   See Non-Goals for examples of possible future policy extensions.
 
-`ClusterLogForwarder.input` new optional field:
+`ClusterLogForwarder.input.Application` new optional field:
 - `perContainerLimit`: (RateLimit, optional) limit applied to _each container_ selected by this input.
   No container selected by this input can exceed this limit.
+- `GroupLimit`: (RateLimit, optional) flow control limit applied _to the aggregated log flow_ through this input.
+  No guarantee of _fairness_ in log collection by this rate limit.
 
 `ClusterLogForwarder.output` new optional field:
 - `limit`: (RateLimit, optional) flow control limit to be applied _to the aggregated log flow to this output_.
