@@ -8,11 +8,11 @@ reviewers:
   - "@mhrivnak"
   - "@rvanderp3"
   - "@mtulio"
-  - "@deads2k" 
-  - "@JoelSpeed"
-  - "@sinnykumari"
-  - "@danwinship"
-  - "@Miciah"
+  - "@deads2k, to review library-go, KCMO related parts andopenshift/api changes" 
+  - "@JoelSpeed, to review CCM, MAPO related parts and openshift/api changes"
+  - "@sinnykumari, to review MCO related parts"
+  - "@danwinship, to review CNO related parts"
+  - "@Miciah, to review Ingress related parts"
   - "@openshift/openshift-team-windows-containers"
 approvers:
   - "@dhellmann"
@@ -32,6 +32,7 @@ see-also:
   - "[Out-of-tree cloud provider integration support](https://github.com/openshift/enhancements/blob/master/enhancements/cloud-integration/out-of-tree-provider-support.md)"
   - "[Platform Operators Proposal](https://github.com/openshift/enhancements/blob/master/enhancements/olm/platform-operators.md)"
   - "[Capabilites selection](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md)"
+  - "[Bare metal in-cluster network infrastructure](https://github.com/openshift/enhancements/blob/ce4d303db807622687159eb9d3248285a003fabb/enhancements/network/baremetal-networking.md)"
 ---
 
 # Introduce new platform type "External" in the OpenShift specific Infrastructure resource
@@ -147,6 +148,8 @@ There are several topics in this area that would be wise to defer for upcoming p
 1. Define missing capabilities and their concrete behaviour, for example, add a "capability" for machine-api
 2. Precisely define the reaction of the operators listed below for the "External" platform type
 3. Define and document concrete mechanism for supplement cluster with provider-specific components during installation time (CCM, MAPI controller, DNS controller)
+4. Research the necessity for engagement and api extension for ["on-prem"-like in-cluster network infrastructure](https://github.com/openshift/enhancements/blob/ce4d303db807622687159eb9d3248285a003fabb/enhancements/network/baremetal-networking.md) for the "External" platform.
+   This will depend on demand from partner cloud providers and their cloud capabilities (the presence of a load-balancer-like concept, for example).
 
 ### Background
 
