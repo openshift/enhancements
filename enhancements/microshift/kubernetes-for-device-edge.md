@@ -203,8 +203,6 @@ OpenShift APIs supported will be:
 
 * route.openshift.io/v1 for Routes
 * security.openshift.io/v1 for SecurityContextConstraints
-* authorization.openshift.io/v1 for RBAC APIs such as Role,
-  RoleBinding, etc.
 
 In addition to those APIs, we will enable two OpenShift controllers
 related to Ingress:
