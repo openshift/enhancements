@@ -374,23 +374,23 @@ type CloudControllerManagerMode string
 const (
     // Cloud Controller Manager is enabled and expected to be supplied.
     // Signaling MCO to set `--cloud-provider=external` flag to the kubelets.
-    CloudControllerManagerEnabled CloudControllerManagerMode = "Enabled"
+    CloudControllerManagerExternal CloudControllerManagerState = "External"
     // No Cloud Controller Manager is expected to be supplied.
     // Signaling MCO not to set `--cloud-provider` flag to the kubelets.
-    CloudControllerManagerDisabled CloudControllerManagerMode = "Disabled"
+    CloudControllerManagerNone CloudControllerManagerState = "None"
 )
 
 type CloudControllerManagerSettings struct {
-    // Mode determines whether or not an external Cloud Controller Manager is expected to 
+    // State determines whether or not an external Cloud Controller Manager is expected to 
     // be presented in the cluster.
     // For engaging an external Cloud Controller Manager, certain flags are expected to be set to the kubelets.
     // https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/#running-cloud-controller-manager
     //
-    // When enabled, the respective operator (machine config operator) should set `--cloud-provider=external` flag to the kubelet.
+    // When set to "External", the respective operator (machine config operator) should set `--cloud-provider=external` flag to the kubelet.
     // When omitted or disabled, no `cloud-provider` flag should be set.
-    // +kubebuilder:validation:Enum=Enabled;Disabled
+    // +kubebuilder:validation:Enum=External;None
     // +optional
-    Mode CloudControllerManagerMode `json:"mode,omitempty"`
+    State CloudControllerManagerMode `json:"state,omitempty"`
 }
 
 
@@ -452,16 +452,41 @@ codebase would be mostly out of our control.
 
 - Should we explicitly communicate that the "External" platform is something that we do not support yet?
 
-- Should we invest in preparing workflows that will perform UPI with the "None"/"External" platform types installation
-  on the AWS or GCP, or existed vSphere-based workflows would be enough?
-
 ### Answered question
 
-Q: Should we gate the "External" platform addition behind the feature gate by generating separate CRD for TPNU clusters?
-A: There seems to be a soft consensus that we do not need to gate these changes behind Tech Preview if it is not necessary.
+**Q**: Should we gate the "External" platform addition behind the feature gate by generating separate CRD for TPNU clusters?
+
+**A**: There seems to be a soft consensus that we do not need to gate these changes behind Tech Preview if it is not necessary.
 Due to operators intended to react on the "External" platform the same as for the "None" one during the first phases,
 gating these API extensions does not seem needed.
-Related discussion: https://github.com/openshift/enhancements/pull/1234#discussion_r968935259
+
+Related discussion: [1](https://github.com/openshift/enhancements/pull/1234#discussion_r968935259)
+
+---
+**Q**: Should we invest in preparing workflows that will perform UPI with the "None"/"External" platform types installation
+on the AWS or GCP, or existing vSphere-based workflows would be enough?
+
+**A**: Adding a job on one additional cloud platform to ensure that the "External" platform type works as intended looks reasonable now,
+but we should mainly rely on in-repo functional tests on a per-component basis and avoid engaging of e2e workflows as much as possible.
+
+Related discussions: [1](https://github.com/openshift/enhancements/pull/1234#discussion_r968934725), [2](https://github.com/openshift/enhancements/pull/1234#discussion_r968936500).
+
+---
+**Q**: Do we need an API for the MAPI components similar to the proposed [CCM one](#api-extensions)
+to allow users to choose how the MAPI components are deployed.
+
+**A**: We do not see an absolute necessity to add such API knobs right now. For the moment combination of the
+"External" platform and an enabled MAPI capability look like a sufficient signal.
+By the nature of the [capabilities mechanism](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md#summary)(i.e., no MAO deployment, no MAPI CRDs),
+if Machine API operator running and detects the "External" platform, that is the signal to it that *someone* is going to run a machine controller.
+
+Given that capabilities "API" is already added and in use, introducing additional knobs which will interfere with that
+would mean more code changes and the necessity of establishing a mechanism for communicating with users (i.e., what should handle such API if MAPI is disabled by the capabilities mechanism).
+
+However, if during upcoming phases, we will discover a need to add an API field specifically to help a user install their machine API controller,
+we could update this EP, or a new enhancement document should be created to provide a proper exploration of interaction with capabilities and other operation modes.
+
+Related discussions: [1](https://github.com/openshift/enhancements/pull/1234#issuecomment-1271896532)
 
 ### Test Plan
 
