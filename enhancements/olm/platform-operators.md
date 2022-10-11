@@ -233,7 +233,7 @@ spec:
   featureSet: TechPreviewNoUpgrade
 ```
 
-Enabling the tech preview feature set will result in the installation of the PO components in the cluster. This requires adding the "release.openshift.io/feature-gate" annotation key to the PO's downstream CVO manifests, and setting that key's value to "TechPreviewNoUpgrade".
+Enabling the tech preview feature set will result in the installation of the PO components in the cluster. This requires adding the "release.openshift.io/feature-set" annotation key to the PO's downstream CVO manifests, and setting that key's value to "TechPreviewNoUpgrade".
 
 #### Reconcile POM "aggregate" ClusterOperator object
 
@@ -522,7 +522,7 @@ type PlatformOperator struct {
 
 #### Mitigations
 
-The v1alpha1 CRDs won't be deployed by default, and those APIs will be hidden behind the "TechPreviewNoUpgrade" feature set that admins need to explicitly enable before cluster creation. Any new components introduced during these early phases will also specify the `release.openshift.io/feature-gate` annotation in their CVO manifests, and set that key's value to "TechPreviewNoUpgrade".
+The v1alpha1 CRDs won't be deployed by default, and those APIs will be hidden behind the "TechPreviewNoUpgrade" feature set that admins need to explicitly enable before cluster creation. Any new components introduced during these early phases will also specify the `release.openshift.io/feature-set` annotation in their CVO manifests, and set that key's value to "TechPreviewNoUpgrade".
 This annotation will ensure that the CVO won't deploy any tech preview components in a non-tech preview cluster.
 
 The BundleDeployment API is a cluster-scoped API, which means that only users with wildcard permissions should be able to access this API by default. It's recommended that admins should limit access to the BundleDeployment API to the minimum set of users in order to mitigate the plain provisioner's wide net of permissions. This behavior may require explicit downstream documentation.
