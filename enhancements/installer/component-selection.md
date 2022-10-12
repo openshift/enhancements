@@ -150,7 +150,7 @@ excluded while ServiceMonitors associated with other capabilities would not be).
 To determine which manifests are managed for a given cluster, the CVO will:
 
 1. Start with all the manifests in the payload.
-2. If TechPreviewNoUpgrade is not set, [remove all the manifests with `release.openshift.io/feature-gate=TechPreviewNoUpgrade`](../update/cvo-techpreview-manifests.md).
+2. If TechPreviewNoUpgrade is not set, [remove all the manifests with `release.openshift.io/feature-set=TechPreviewNoUpgrade`](../update/cvo-techpreview-manifests.md).
 3. Remove all the manifests that lack [`include.release.openshift.io/{profile}=true`](../update/cluster-profiles.md).
 4. Remove all the manifests that declare a capability in `capability.openshift.io/name` which is not part of the current enabled capabilities.
 
