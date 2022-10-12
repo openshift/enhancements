@@ -201,7 +201,7 @@ When configuring an individual PlatformOperator resource, the resource's `spec.p
 
 > Note: The `spec.packageName` field is a required field that must be populated.
 
-```yaml=
+```yaml
 apiVersion: platform.openshift.io/v1alpha1
 kind: PlatformOperator
 metadata:
@@ -368,7 +368,7 @@ When generating the BundleDeployment resource, the PO manager will use the uniqu
 
 An example of this behavior can be seen below:
 
-```yaml=
+```yaml
 apiVersion: core.rukpak.io/v1alpha1
 kind: BundleDeployment
 metadata:
