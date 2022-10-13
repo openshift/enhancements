@@ -151,7 +151,7 @@ The workflow is automated and documented
 
     ```shell
     $ cat <<'EOF' > /etc/microshift/lvmd.yaml
-    deviceClasses:
+    device-classes:
     - default: true
       name: "user-provided-config"
       volume-group: rhel
@@ -195,7 +195,7 @@ ODF-LVM function**
     _For example:_
     ```shell
     [root@ushift ~]# cat <<EOF > /etc/microshift/lvmd.yaml
-    deviceClasses:
+    device-classes:
     - default: true
       name: "user-provided-config"
       volume-group: non_existent_volume_group
@@ -231,7 +231,7 @@ If a user-defined lvmd config is not provided, MicroShift will provide default v
 configuration would be:
 
 ```yaml
-deviceClasses:
+device-classes:
 - default: true
   name: "default"
   volume-group: "rhel"
