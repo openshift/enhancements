@@ -188,6 +188,21 @@ If an error blocks reaching 4.0.1, the conditions might be:
 
 The progressing message is the first message a human will see when debugging an issue, so it should be terse, succinct, and summarize the problem well.  The degraded message can be more verbose. Start with simple, easy to understand messages and grow them over time to capture more detail.
 
+#### Happy conditions
+
+Operators should set `reason` and `message` for both happy and sad conditions.
+For sad conditions, the strings help explain what is going wrong.
+For happy conditions, the strings help convince users that things are going well.
+
+`AsExpected` is a common choice for happy reasons with messages like `All is well` or `NodeInstallerProgressing: 3 nodes are at revision 7`.
+
+Having an explicit happy reasons also make it easier to do things like:
+
+```none
+sort_desc(count by (reason) (cluster_operator_conditions{name="cloud-credential",condition="Degraded"}))
+```
+
+for convenient aggregation, without having to mix in the time-series values to distinguish happy and sad cases.
 
 #### Conditions and Install/Upgrade
 
