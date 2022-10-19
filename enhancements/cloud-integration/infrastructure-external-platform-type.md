@@ -64,7 +64,7 @@ to build, develop, test and release provider-specific components independently f
 Speaking about the Openshift integrations with cloud providers - for the moment, a lot of things are tended to be encoded
 in [the Openshift codebase](https://docs.providers.openshift.org/cloud-controller-manager/#integrating-with-other-openshift-components)
 within API definitions, operators logic, and installer program code.
-This fact creates quite  a lot of obstacles for RH partners and community members in their attempts to add new cloud providers to Openshift,
+This fact creates quite a lot of obstacles for RH partners and community members in their attempts to add new cloud providers to Openshift,
 as well as making RH engineering involvement quite necessary.
 
 Lately, there have been several initiatives around making Openshift more composable and flexible,
@@ -104,7 +104,7 @@ without the necessity of tying to Red Hat's internal processes or keeping a fork
 - Remove the necessity to make changes in "openshift/api", "openshift/library-go" and dependant infrastructure-related components during basic cloud-provider integration with OpenShift
 - Make a cloud provider integration process more accessible and simple to external contributors as well as for RH engineers
 - Provide an overview of projected changes to affected components that will be planned for a later phase of development
-- Introduce a somewhat "neutral" platform type, which would serve as a signal about an underlying, but generic, cloud-provider presence
+- Introduce a somewhat "neutral" platform type, which would serve as a signal about an underlying generic cloud-provider presence
 
 ### Non-Goals
 
@@ -301,7 +301,7 @@ and, in theory, in the future, it might be extended in a way to react to the new
 platform-specific credentials management logic.
 
 During initial enablement phases of "External" platform type, no specific actions will be needed there, since
-CCO [would](https://github.com/openshift/cloud-credential-operator/blob/master/pkg/operator/controller.go#L134) go
+CCO [would](https://github.com/openshift/cloud-credential-operator/blob/58c41771a87e613415a1fa16d299601a1c2f48c2/pkg/operator/controller.go#L134) go
 into no-op mode if it encounters an unrecognized platform.
 
 #### Cluster Image Registry Operator
@@ -373,11 +373,11 @@ type CloudControllerManagerMode string
 
 const (
     // Cloud Controller Manager is enabled and expected to be supplied.
-    // Signaling MCO to set `--cloud-provider=external` flag to the kubelets.
-    CloudControllerManagerExternal CloudControllerManagerState = "External"
-    // No Cloud Controller Manager is expected to be supplied.
-    // Signaling MCO not to set `--cloud-provider` flag to the kubelets.
-    CloudControllerManagerNone CloudControllerManagerState = "None"
+    // Signaling that kubelets and other CCM consumers should use --cloud-provider=external.
+    CloudControllerManagerExternal CloudControllerManagerMode = "External"
+    // Cloud Controller Manager is enabled and expected to be supplied.
+    // Signaling that kubelets and other CCM consumers should not set --cloud-provider flag.
+    CloudControllerManagerNone CloudControllerManagerMode = "None"
 )
 
 type CloudControllerManagerSettings struct {
@@ -551,9 +551,19 @@ TBD
 
 ## Alternatives
 
-Leave things as is, i.e. encode every new cloud platform statically into "openshift/api" from the beginning of a technical enablement process.
+Leave things as is, i.e., encode every new cloud platform statically into "openshift/api" from the beginning of a technical enablement process.
 
-Also, we could proceed to leverage PlatformType "None".
+### Proceed to use "None" Platform type
+
+We could proceed to leverage PlatformType "None"; however, there are some difficulties that need to be worked around somehow, some examples:
+
+* No defined mechanism to set `--cloud-provider=external` arg to kubelet/KCM/apiserver without merges and further revendoring of "openshift/api",
+  at the moment, decision-making here is tied to the PlatformType.
+  - This might be solved by creating additional documentation and mechanisms for propagating and controlling additional flags on kubelet/KCM/apiserver.
+  - Possible approach proposed in this EP, but an alternative API / mechanism is possible.
+
+* No way to extend machine-api and deliver a new provider without merges to "openshift/machine-api-operator" and "openshift/api" repos.
+  - This might be solved by teaching the MachineAPI operator to deploy platform-independent components despite a platform type.
 
 ## Infrastructure Needed
 
