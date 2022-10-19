@@ -92,7 +92,7 @@ in the outpost (tagged as "kubernetes.io/cluster/<non-cluster-name>": "owned"). 
 install-config only AWS region subnet needs to be used so NLB is created for the
 apiserver to use. During manifest stage it is needed to change workers' machineSet
 to use subnets created in the outpost. As the last modification the user needs to
-update MTU for the network provider due to AWS Outpost supporting only 1300 bytes. One the
+update MTU for the network provider due to AWS Outpost supporting only 1300 bytes. Once the
 cluster is deployed the user needs to install AWS load balancer operator and configure
 ALB ingress.
 
