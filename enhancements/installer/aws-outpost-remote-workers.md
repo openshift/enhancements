@@ -5,6 +5,12 @@ authors:
   - "@pkliczewski"
 reviewers:
   - "@sdodson"
+  - "@JoelSpeed"
+  - "@Miciah"
+  - "@alebedev87"
+  - "@patrickdillon"
+  - "@jsafrane"
+  - "@damdo"
 approvers:
   - "@sdodson"
 api-approvers:
@@ -33,7 +39,7 @@ AWS Outpost.
 
 The work is divided into several phases:
 - Phase 0: Research. Understand what is needed to deploy OCP on AWS Outpost.
-  No code changes needed and we only provide documentation on how to customize
+  No code changes needed and we only provide [documentation](https://github.com/openshift/openshift-docs/pull/53265) on how to customize
   generated manifests and list known limitations.
 - Phase 1: Improve cluster deployment on AWS Ouptost by implementing necessary
   changes and provide mitigations to know limitations.
@@ -49,7 +55,7 @@ and storage resources for lower latency and local data processing needs.
 ### User Stories
 
 Phase 0:
-- As a cluster admin I want to follow OCP documentation to deploy OCP on AWS Outpost
+- As a cluster admin I want to follow OCP [documentation](https://github.com/openshift/openshift-docs/pull/53265) to deploy OCP on AWS Outpost
   where my master nodes are running in the regular AWS region and workers in AWS Outpost.
 
 Phase 1:
@@ -64,7 +70,7 @@ Phase 2:
 ### Goals
 
 Phase 0:
-- Admin can follow documentation to customize installer generated manifests to deploy
+- Admin can follow [documentation](https://github.com/openshift/openshift-docs/pull/53265) to customize installer generated manifests to deploy
   OCP on AWS Outpost
 - As post installation step admin can configure ALB on AWS Outpost as workload ingress
 - Admin can check list of limitations or not supported features
@@ -84,7 +90,7 @@ do not plan to handle long lasting networking issues between regular AWS region 
 ## Proposal
 
 Phase 0:
-We want to provide documented manual procedure on how to deploy an OCP cluster in a regular
+We want to provide [documented](https://github.com/openshift/openshift-docs/pull/53265) manual procedure on how to deploy an OCP cluster in a regular
 AWS region with worker nodes running in AWS Outpost. The user needs to create VPC and
 subnets before the installation and provide them in the install-config to prevent VPC
 creation by IPI installer. The subnets need to be created both in the regular region and
@@ -110,7 +116,7 @@ configure AWS account and AWS Outpost instance types. Next the user needs to cre
 VPC with subnets for both the AWS region and the outpost. The user needs to create
 cloud formation template with AWS outpost details and use aws client to run it.
 Next the user needs to create an install-config in the specified directory and modify it
-with AWS details according to documentation. Once it is ready the user needs to
+with AWS details according to [documentation](https://github.com/openshift/openshift-docs/pull/53265). Once it is ready the user needs to
 create manifests. MachineSet needs to be updated with AWS outpost subnet information
 and MTU. Now we can create the cluster and after the installation we need to install
 AWS load balancer operator and configure ALB based ingress.
