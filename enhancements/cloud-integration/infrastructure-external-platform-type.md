@@ -163,7 +163,7 @@ Given that PlatformSpec and PlatformStatus are defined as "discriminated unions"
 "openshift/api" beforehand, it creates a significant footprint and plenty of effort from Red Hat engineers to create the initial technical enablement of
 a new cloud provider and mostly impossible without Red Hat engineering engagement.
 
-Since a lot of infrastructure related components (such as [CCCMO](https://github.com/openshift/cluster-cloud-controller-manager-operator), [Machine API operator](https://github.com/openshift/machine-api-operator), [Machine Config Operator](https://github.com/openshift/machine-config-operator), and so on)
+Since a lot of infrastructure related components (such as [CCCMO](https://github.com/openshift/cluster-cloud-controller-manager-operator), [Machine API operator](https://github.com/openshift/machine-api-operator), [Machine Config Operator](https://github.com/openshift/machine-config-operator), [Windows Machine Config Operator](https://github.com/openshift/windows-machine-config-operator) and so on)
 require information about, at least, the presence of an underlying cloud provider, the "None" platform does not fit well as a signal in such a situation.
 
 A special, built-in, and somewhat generic platform type that will signal about the presence of an underlying infrastructure platform without
@@ -243,6 +243,22 @@ Initially, the new "External" platform should be treated similarly to PlatformTy
 Then, down the road (during [phase 3](#implementation-phases)), it would be expected for the MCO to use the "External" platform type and its spec as a signal about the underlying platform and cloud controller manager presence and operate accordingly.
 For an explicit signal about the necessity to set `--cloud-provider=external` flag to the kubelet, we will use the `CloudControllerManager` field of the `ExternalPlatformSpec`, which is  
 described in the [API Extensions](#api-extensions) section down below.
+
+#### Windows Machine Config Operator
+
+The Windows Machine Config Operator configures Windows instances into nodes, enabling Windows container workloads to run within OCP clusters.
+
+Its behaviour relies on the [Machine Config Operator](#machine-config-operator) since Windows-related machinery uses MCO-rendered ignition files
+(there are plans to switch this to use MachineConfigs) to extract and then use some kubelet flags, including the `--cloud-provider` one.
+
+Initially, the new "External" platform should be treated similarly to PlatformType "None" by the WMCO.
+
+Important to note that WMCO has specific behaviour for the `None` platform type.
+With this platform type WMCO [will](https://github.com/openshift/windows-machine-config-operator/blob/95a2c5225a066f40fb4af44cbd5a4d4d763c149e/pkg/windows/windows.go#L654) [set](https://github.com/openshift/windows-machine-config-operator/blob/95a2c5225a066f40fb4af44cbd5a4d4d763c149e/pkg/windows/windows.go#L654)
+`--node-ip` flag with the user-provided IP address, which requires additional configuration.
+For other supported platform types, WMCO relies on MachineAPI to figure out IP addresses or does not set this flag at all.
+This seems acceptable for the initial phase, but during [phase 3](#implementation-phases) this behaviour should be revised and changed
+to provide users additional knobs to configure this behaviour or, perhaps, check MachineAPI engagement to make a decision.
 
 #### Cluster Cloud Controller Manager Operator
 
