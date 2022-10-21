@@ -201,7 +201,7 @@ When configuring an individual PlatformOperator resource, the resource's `spec.p
 
 > Note: The `spec.packageName` field is a required field that must be populated.
 
-```yaml=
+```yaml
 apiVersion: platform.openshift.io/v1alpha1
 kind: PlatformOperator
 metadata:
@@ -368,7 +368,7 @@ When generating the BundleDeployment resource, the PO manager will use the uniqu
 
 An example of this behavior can be seen below:
 
-```yaml=
+```yaml
 apiVersion: core.rukpak.io/v1alpha1
 kind: BundleDeployment
 metadata:
@@ -673,6 +673,8 @@ In addition, we may encounter ordering issues when attempting to upgrade POs wit
 This may indicate the want/need for a more robust implementation for the status reporting model when communicating with the CVO component, and preflight checking mechanisms to ensure POs can tolerate the incoming cluster server version.
 
 For more information, see [a discussion thread centered around this topic in the o/enhancements#1170 proposal](https://github.com/openshift/enhancements/pull/1170#discussion_r915034676).
+
+See the [platform operators roadmap](https://hackmd.io/MFwDuS_XS7quls3Q4ANKLw) for more information on subsequent phases.
 
 ## Infrastructure Needed [optional]
 
