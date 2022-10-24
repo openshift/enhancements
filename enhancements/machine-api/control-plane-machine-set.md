@@ -113,6 +113,18 @@ on the spec and status structures defined below.
 ```go
 // ControlPlaneMachineSet represents the configuration of the ControlPlaneMachineSet.
 type ControlPlaneMachineSetSpec struct {
+	// State defines whether the ControlPlaneMachineSet is Active or Inactive.
+	// When Inactive, the ControlPlaneMachineSet will not take any action on the
+	// state of the Machines within the cluster.
+	// When Active, the ControlPlaneMachineSet will reconcile the Machines and
+	// will update the Machines as necessary.
+	// Once Active, a ControlPlaneMachineSet cannot be made Inactive. To prevent
+	// further action please remove the ControlPlaneMachineSet.
+	// +kubebuilder:default:="Inactive"
+	// +default="Inactive"
+	// +kubebuilder:validation:XValidation:rule="oldSelf != 'Active' || self == oldSelf",message="state cannot be changed once Active"
+	// +optional
+
 	// Replicas defines how many Control Plane Machines should be
 	// created by this ControlPlaneMachineSet.
 	// This field is immutable and cannot be changed after cluster
@@ -121,6 +133,7 @@ type ControlPlaneMachineSetSpec struct {
 	// 3 and 5 are the only valid values for this field.
 	// +kubebuilder:validation:Enum:=3;5
 	// +kubebuilder:default:=3
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicas is immutable"
 	// +kubebuilder:validation:Required
 	Replicas *int32 `json:"replicas"`
 
@@ -134,6 +147,7 @@ type ControlPlaneMachineSetSpec struct {
 	// selector will be the ones affected by this ControlPlaneMachineSet.
 	// It must match the template's labels.
 	// This field is considered immutable after creation of the resource.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="selector is immutable"
 	// +kubebuilder:validation:Required
 	Selector metav1.LabelSelector `json:"selector"`
 
@@ -142,6 +156,21 @@ type ControlPlaneMachineSetSpec struct {
 	// +kubebuilder:validation:Required
 	Template ControlPlaneMachineSetTemplate `json:"template"`
 }
+
+// ControlPlaneMachineSetState is an enumeration of the possible states of the
+// ControlPlaneMachineSet resource. It allows it to be either Active or Inactive.
+// +kubebuilder:validation:Enum:="Active";"Inactive"
+type ControlPlaneMachineSetState string
+
+const (
+	// ControlPlaneMachineSetStateActive is the value used to denote the ControlPlaneMachineSet
+	// should be active and should perform updates as required.
+	ControlPlaneMachineSetStateActive ControlPlaneMachineSetState = "Active"
+
+	// ControlPlaneMachineSetStateInactive is the value used to denote the ControlPlaneMachineSet
+	// should be not active and should no perform any updates.
+	ControlPlaneMachineSetStateInactive ControlPlaneMachineSetState = "Inactive"
+)
 
 // ControlPlaneMachineSetTemplate is a template used by the ControlPlaneMachineSet
 // to create the Machines that it will manage in the future.
