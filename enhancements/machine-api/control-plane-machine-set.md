@@ -113,6 +113,19 @@ on the spec and status structures defined below.
 ```go
 // ControlPlaneMachineSet represents the configuration of the ControlPlaneMachineSet.
 type ControlPlaneMachineSetSpec struct {
+	// State defines whether the ControlPlaneMachineSet is Active or Inactive.
+	// When Inactive, the ControlPlaneMachineSet will not take any action on the
+	// state of the Machines within the cluster.
+	// When Active, the ControlPlaneMachineSet will reconcile the Machines and
+	// will update the Machines as necessary.
+	// Once Active, a ControlPlaneMachineSet cannot be made Inactive. To prevent
+	// further action please remove the ControlPlaneMachineSet.
+	// +kubebuilder:default:="Inactive"
+	// +default="Inactive"
+	// +kubebuilder:validation:XValidation:rule="oldSelf != 'Active' || self == oldSelf",message="state cannot be changed once Active"
+	// +optional
+	State ControlPlaneMachineSetState `json:"state,omitempty"`
+
 	// Replicas defines how many Control Plane Machines should be
 	// created by this ControlPlaneMachineSet.
 	// This field is immutable and cannot be changed after cluster
@@ -121,6 +134,7 @@ type ControlPlaneMachineSetSpec struct {
 	// 3 and 5 are the only valid values for this field.
 	// +kubebuilder:validation:Enum:=3;5
 	// +kubebuilder:default:=3
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicas is immutable"
 	// +kubebuilder:validation:Required
 	Replicas *int32 `json:"replicas"`
 
@@ -134,6 +148,7 @@ type ControlPlaneMachineSetSpec struct {
 	// selector will be the ones affected by this ControlPlaneMachineSet.
 	// It must match the template's labels.
 	// This field is considered immutable after creation of the resource.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="selector is immutable"
 	// +kubebuilder:validation:Required
 	Selector metav1.LabelSelector `json:"selector"`
 
@@ -142,6 +157,21 @@ type ControlPlaneMachineSetSpec struct {
 	// +kubebuilder:validation:Required
 	Template ControlPlaneMachineSetTemplate `json:"template"`
 }
+
+// ControlPlaneMachineSetState is an enumeration of the possible states of the
+// ControlPlaneMachineSet resource. It allows it to be either Active or Inactive.
+// +kubebuilder:validation:Enum:="Active";"Inactive"
+type ControlPlaneMachineSetState string
+
+const (
+	// ControlPlaneMachineSetStateActive is the value used to denote the ControlPlaneMachineSet
+	// should be active and should perform updates as required.
+	ControlPlaneMachineSetStateActive ControlPlaneMachineSetState = "Active"
+
+	// ControlPlaneMachineSetStateInactive is the value used to denote the ControlPlaneMachineSet
+	// should be not active and should no perform any updates.
+	ControlPlaneMachineSetStateInactive ControlPlaneMachineSetState = "Inactive"
+)
 
 // ControlPlaneMachineSetTemplate is a template used by the ControlPlaneMachineSet
 // to create the Machines that it will manage in the future.
@@ -409,13 +439,22 @@ This ConfigMap has been deprecated for some time and as such, should not be used
 Due to this limitation, we will need to have a desired replicas field within the ControlPlaneMachineSet controller.
 As we are not planning to tackle horizontal scaling of the control plane initially, we will implement a validating
 webhook to deny changes to this value once set.
-
-For new clusters, the installer will create (timeline TBD) the `ControlPlaneMachineSet` resource and will set the value
-based on the install configuration.
-For existing clusters, we will need to validate during creation of the `ControlPlaneMachineSet` resource that the
-number of existing Control Plane Machines matches the replica count set within the `ControlPlaneMachineSet`.
 This will prevent end users from attempting to horizontally scale their control plane during creation of the
 `ControlPlaneMachineSet` resource.
+
+For new clusters, the installer will create the `ControlPlaneMachineSet` resource and will set the value
+based on the install configuration, setting its `.spec.state` to `Active`.
+
+For existing clusters the `ControlPlaneMachineSet` generator controller,
+will always assume a cluster to have 3 replicas.
+As such, it will create an `Inactive` `ControlPlaneMachineSet` with `.spec.replicas` set to `3`.
+It will be the responsibility of the user, while reviewing the generated `ControlPlaneMachineSet`,
+to check that the replica count matches the actual number of control plane machines
+configured for that cluster before setting the `ControlPlaneMachineSet` to `Active`.
+Should the user notice the cluster has more control plane machines (i.e. 5, as configurations of 3 and 5 machines
+are the only ones supported by the operator) than what is set in the generated `ControlPlaneMachineSet`'s replica count,
+the user will need to force apply the a `ControlPlaneMachineSet` with an updated replica count, while at the same time
+setting its state to `Active` (due to the aformentioned immutability property of the replica count field).
 
 In the future, once we have identified risks and issues with horizontal scale, and mitigated those, we will remove the
 immutability restriction on the replica field to allow horizontal scaling of the control plane between 3 and 5 replicas
@@ -620,15 +659,31 @@ were to make an action on the Machine, the Control Plane Machine Set Operator wi
 
 #### Installing a ControlPlaneMachineSet within an existing cluster
 
-When adding a ControlPlaneMachineSet to a existing cluster, the end user will need to define the
-`ControlPlaneMachineSet` resource by copying the existing Control Plane Machine ProviderSpecs.
-Once this is copied, they should remove the failure domain and add the desired failure domains to the `FailureDomains`
-field within the ControlPlaneMachineSet spec.
+For existing clusters that are not born with a `ControlPlaneMachineSet` already defined,
+we will introduce a second "generator" controller alonside the "main" `ControlPlaneMachineSet`
+controller which will be responsible for constantly checking the cluster state (number of control plane machines present in the cluster,
+number of failure domains defined across all the machinesets in the cluster, most up to date control plane machine provider spec) and
+creating/maintaining an up to date `ControlPlaneMachineSet` in the corresponding namespace, with state set to `Inactive`.
 
-To ensure adding a `ControlPlaneMachineSet` to the cluster is safe, we will need to ensure via a validating webhook
-that the replica count defined in the spec is consistent with the actual size of the control plane within the cluster.
-We will also validate that the failure domains align with those within the cluster already, this will prevent users
+If the cluster has been upgraded to a version that supports this feature, users will be able
+to find an automatically generated, `Inactive` `ControlPlaneMachineSet` with name `cluster` in the `openshift-machine-api` namespace.
+They will need to inspect the generated `ControlPlaneMachineSet` and check that the generated spec matches the desired one,
+optionally modifying the fields to the desired values before then proceeding with its activation, by
+setting the `.spec.state` field to `Active`.
+
+To ensure the values set for the `ControlPlaneMachineSet` are safe for the cluster, we will need to
+validate that the failure domains align with those within the cluster already, this will prevent users
 from accidentally migrating their Control Plane Machines from multiple availability zones to a single zone.
+
+Once the `ControlPlaneMachineSet`'s `.spec.state` is set to `Active`, the main control plane machine set
+controller will start its reconciliation and from then on it will take all the necessary actions to drive
+the cluster control plane machines towards the desired state.
+Once `Active` the `ControlPlaneMachineSet` cannot be deactivated. If the user desires to stop the controller
+from reconciling cluster control plane machines, they will need to delete the `ControlPlaneMachineSet`. Doing so
+will stop all the reconciliation operations.
+
+In case the `ControlPlaneMachineSet` is deleted, the generator will recreate an `Inactive` `ControlPlaneMachineSet` ready
+for the user to be re-activated, if need be.
 
 If no Control Plane Machines exist, or they are in a non-Running state, the operator will report degraded until this
 issue is resolved. This creates a dependency for the `ControlPlaneMachineSet` operator on the Machine API. It will be
