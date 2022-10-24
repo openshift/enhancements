@@ -393,7 +393,7 @@ Would expect this to go directly to GA once a design is agreed upon/approved.
     Review presubmit results for your annotation pull request to ensure that:
     1. The capability is being completely removed, without leaving dangling resources that you forgot to annotate.
     2. CI suites which you expected to pass continue to pass.
-        You may find that some test-cases assume or require your capability's presence, and they may need to grow logic to skip or alter the test conditions when your capability is not installed (like [this][bump-origin]).
+        You may find that some test-cases assume or require your capability's presence, and they may need to grow logic to skip or alter the test conditions when your capability is not installed (like [this][bump-origin] or by adding a suitable regex to the `[Skipped:NoOptionalCapabilities]` [annotation rule][annotation-rules]).
     If your annotation addition spans multiple pull requests, either because the manifests being annotated span multiple repositories or because you also need to make test suite adjustments in other repositories), you may be able to [use cluster-bot][cluster-bot] to run tests on a release assembling multiple in-flight pull requests.
 4. Introduce the new capablity name in the openshift/api repo, like [this][bump-api].
     1. If no [versioned capability set](https://github.com/openshift/api/blob/8324d657dee1d594a8a7768e5569fea6a8f887a9/config/v1/types_cluster_version.go#L257-L291) exists for the current OCP version under development, introduce one as part of your pull request.
@@ -501,6 +501,7 @@ it necessary that we take a tactical approach in the short term to enable this c
 N/A
 
 [admission-webhook]: https://issues.redhat.com/browse/OTA-575
+[annotation-rules]: https://github.com/openshift/origin/blob/a86fa526218f3e5c5b8e101ebb78c287a6a4b215/test/extended/util/annotate/rules.go#L342-L348
 [bump-annotations]: https://github.com/openshift/insights-operator/pull/646
 [bump-api]: https://github.com/openshift/api/pull/1212
 [bump-cvo-vendor]: https://github.com/openshift/cluster-version-operator/pull/737
