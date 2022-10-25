@@ -22,7 +22,7 @@ api-approvers:
   - "@deads2k"
   - "@JoelSpeed"
 creation-date: 2022-09-06
-last-updated: 2022-09-23
+last-updated: 2022-10-25
 tracking-link:
   - https://issues.redhat.com/browse/OCPPLAN-9429
   - https://issues.redhat.com/browse/OCPPLAN-8156
@@ -56,22 +56,22 @@ any core payload components and without the need for direct involvement of OpenS
 ## Motivation
 
 Historically, the k8s project contained plenty of code for handling integration with
-various cloud providers (AWS, GCP, vSphere). These pieces were developed and released along with the k8s as a part of a core,
-however, over time, the community concluded that this approach does not scale and manages well and should be changed.
+various cloud providers (AWS, GCP, vSphere). These pieces were developed and released as part of Kubernetes core.
+However, over time, the community concluded that this approach does not scale well and should be changed.
 The community put a lot of energy into introducing the [mechanism](https://github.com/kubernetes/enhancements/tree/master/keps/sig-cloud-provider/2392-cloud-controller-manager) to allow cloud-providers and community members
 to build, develop, test and release provider-specific components independently from the Kubernetes core.
 
-Speaking about the Openshift integrations with cloud providers - for the moment, a lot of things are tended to be encoded
-in [the Openshift codebase](https://docs.providers.openshift.org/cloud-controller-manager/#integrating-with-other-openshift-components)
-within API definitions, operators logic, and installer program code.
-This fact creates quite a lot of obstacles for RH partners and community members in their attempts to add new cloud providers to Openshift,
+With regard to OpenShift integrations with cloud providers, for the moment, a lot of things are tended to be encoded
+in [the OpenShift codebase](https://docs.providers.openshift.org/cloud-controller-manager/#integrating-with-other-openshift-components)
+within API definitions, operator logic, and installer program code.
+This fact creates quite a lot of obstacles for RH partners and community members in their attempts to add new cloud providers to OpenShift,
 as well as making RH engineering involvement quite necessary.
 
-Lately, there have been several initiatives around making Openshift more composable and flexible,
-for example [Capabilites selection](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md) and
+Lately, there have been several initiatives around making OpenShift more composable and flexible.
+For example, [Capabilites selection](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md) and
 [Platform Operators](https://github.com/openshift/enhancements/blob/master/enhancements/olm/platform-operators.md) are
-the significant steps towards this direction. However, despite having these powerful instruments, there is still necessary
-to land a code into the Openshift codebase for technical enablement of a new cloud provider, which might be hard or
+significant steps in this direction. However, despite having these powerful instruments, it is still necessary
+to land code into the OpenShift codebase for technical enablement of a new cloud provider, which might be hard or
 nearly impossible for external contributors.
 
 Imagine some regional or special-purpose cloud have created an infrastructure platform that resembles AWS but has its own API that is different than AWS.
@@ -81,12 +81,12 @@ and [platform operators](https://github.com/openshift/enhancements/blob/master/e
 they can still deliver this functionality by creating their own Cloud Controller Managers,
 CSI drivers, network topology operators, Machine API controllers, and OpenShift configurations.
 This allows these cloud providers to supply the best OpenShift experience while also developing their components
-without the necessity of tying to Red Hat's internal processes or keeping a fork of the significant part of the Openshift code base.
+without the necessity of tying to Red Hat's internal processes or keeping a fork of the significant part of the OpenShift code base.
 
 ### User Stories
 
 - As a cloud-provider affiliated engineer / platform integrator / RH partner
-  I want to have a mechanism to signal Openshift's built-in operators about additional
+  I want to have a mechanism to signal OpenShift's built-in operators about additional
   cloud-provider specific components so that I can inject my own platform-specific controllers into OpenShift
   to improve the integration between OpenShift and my cloud provider.
 
@@ -101,10 +101,10 @@ without the necessity of tying to Red Hat's internal processes or keeping a fork
 
 ### Goals
 
-- Remove the necessity to make changes in "openshift/api", "openshift/library-go" and dependant infrastructure-related components during basic cloud-provider integration with OpenShift
-- Make a cloud provider integration process more accessible and simple to external contributors as well as for RH engineers
-- Provide an overview of projected changes to affected components that will be planned for a later phase of development
-- Introduce a somewhat "neutral" platform type, which would serve as a signal about an underlying generic cloud-provider presence
+- remove the necessity to make changes in "openshift/api", "openshift/library-go" and dependant infrastructure-related components during basic cloud-provider integration with OpenShift
+- make a cloud provider integration process more accessible and simple to external contributors as well as for RH engineers
+- provide an overview of projected changes to affected components that will be planned for a later phase of development
+- introduce a somewhat "neutral" platform type, which would serve as a signal about an underlying generic cloud-provider presence
 
 ### Non-Goals
 
@@ -114,16 +114,16 @@ without the necessity of tying to Red Hat's internal processes or keeping a fork
 
 ## Proposal
 
-Our main goal is to simplify a new cloud providers integration process with the OpenShift/OKD. To achieve this
-we are proposing to add new "External" [PlatformType](https://github.com/openshift/api/blob/51f399230d604fa013c2bb341040c4ad126e7309/config/v1/types_infrastructure.go#L128)
-along with respective Spec and Status structures into the "openshift/api".
+Our main goal is to simplify the integration process for new cloud providers in OpenShift/OKD. To achieve this
+we are proposing to add a new "External" [PlatformType](https://github.com/openshift/api/blob/51f399230d604fa013c2bb341040c4ad126e7309/config/v1/types_infrastructure.go#L128)
+along with respective Spec and Status structures in openshift/api.
 
-Such a generic platform type will serve as a signal for built-in Openshift operators about an underlying cloud-provider presence.
+Such a generic platform type will serve as a signal for built-in OpenShift operators about an underlying cloud-provider presence.
 Related PlatformSpec and PlatformStatus type structures will serve as a source of generic configuration information for
-the Openshift-specific operators.
+the OpenShift-specific operators.
 
 Having that special platform type will allow infrastructure partners to clearly designate when their OpenShift
-deployments contain components that replaces and/or supplement the core Red Hat components.
+deployments contain components that replace and/or supplement the core Red Hat components.
 
 ### Implementation phases
 
@@ -147,7 +147,7 @@ There are several topics in this area that would be wise to defer for upcoming p
 
 1. Define missing capabilities and their concrete behaviour, for example, add a "capability" for machine-api
 2. Precisely define the reaction of the operators listed below for the "External" platform type
-3. Define and document concrete mechanism for supplement cluster with provider-specific components during installation time (CCM, MAPI controller, DNS controller)
+3. Define and document concrete mechanisms for supplementing a cluster with provider-specific components at installation time (CCM, MAPI controller, DNS controller)
 4. Research the necessity for engagement and api extension for ["on-prem"-like in-cluster network infrastructure](https://github.com/openshift/enhancements/blob/ce4d303db807622687159eb9d3248285a003fabb/enhancements/network/baremetal-networking.md) for the "External" platform.
    This will depend on demand from partner cloud providers and their cloud capabilities (the presence of a load-balancer-like concept, for example).
 
@@ -160,8 +160,8 @@ and [PlatformStatus](https://github.com/openshift/api/blob/51f399230d604fa013c2b
 of the infrastructure resource.
 
 Given that PlatformSpec and PlatformStatus are defined as "discriminated unions" and are required to have the platform type encoded within
-"openshift/api" beforehand, it creates a significant footprint and plenty of effort from Red Hat engineers to create the initial technical enablement of
-a new cloud provider and mostly impossible without Red Hat engineering engagement.
+"openshift/api" beforehand, it requires significant involvement and effort from Red Hat engineers to create the initial technical enablement of
+a new cloud provider and is effectively impossible without Red Hat engineering engagement.
 
 Since a lot of infrastructure related components (such as [CCCMO](https://github.com/openshift/cluster-cloud-controller-manager-operator), [Machine API operator](https://github.com/openshift/machine-api-operator), [Machine Config Operator](https://github.com/openshift/machine-config-operator), [Windows Machine Config Operator](https://github.com/openshift/windows-machine-config-operator) and so on)
 require information about, at least, the presence of an underlying cloud provider, the "None" platform does not fit well as a signal in such a situation.
@@ -169,7 +169,7 @@ require information about, at least, the presence of an underlying cloud provide
 A special, built-in, and somewhat generic platform type that will signal about the presence of an underlying infrastructure platform without
 platform-specific details will help to reduce the number of changes across OCP repositories
 and simplify the initial integration work for non-Red Hat contributors.
-Such a new ability will allow smaller / regional cloud providers to build and test their integration with the OpenShift
+Such a new ability will allow smaller / regional cloud providers to build and test their integration with OpenShift
 with considerably less effort.
 
 Additionally, there are difficulties that are present today due to having a predefined list of platforms.
@@ -180,9 +180,9 @@ A few examples:
 
 #### Conjunction with Capabilities
 
-In the future, at some degree, [capabilites selection](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md)
-approach might help to solve the issue and give a room for supplementing *some* platform-dependent components, however some integral parts of
-OpenShift can not be disabled and still requires a signal about an underlying platform, for example, KCM and MCO, in respect of the enablement of
+In the future, to some degree, an approach based on [capabilites selection](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md)
+might help to solve the issue and provide an option for supplementing *some* platform-dependent components.  However, some integral parts of
+OpenShift cannot be disabled and still require a signal about the underlying platform, for example, KCM and MCO, with respect to enabling an
 [external cloud controller manager](https://kubernetes.io/docs/concepts/architecture/cloud-controller/).
 
 One of the possible examples of the interaction of the capabilities with the "External" platform type would be the MachineAPI and the Machine Api Operator.
@@ -197,10 +197,10 @@ and replicating work that was already done by Red Hat engineers.
 
 This section enumerates OpenShift's components and briefly elaborates the future plans around this proposal.
 During [initial implementation](#implementation-phases) we must ensure that all OpenShift's components treat "External" platform in the same way as
-"None" to ensure we do not disrupt the current openshift operation.
+"None" in order to ensure a consistent baseline across OpenShift components.
 
 In the future, we will need to change the behavior of OpenShift components to be able to receive supplemental provider-specific components from an infrastructure provider
-or, if a component manages something else (i.e. kubelet, kcm), adjust its behaviour (set `--cloud-provider=external` arg to kubelet for example).
+or, if a component manages something else (e.g. kubelet, kcm), adjust its behaviour (set `--cloud-provider=external` arg to kubelet for example).
 
 Specific component changes will be described in detail within separate enhancement documents on a per-component basis.
 
@@ -208,7 +208,7 @@ Specific component changes will be described in detail within separate enhanceme
 
 Significant part of the code around PlatformType handling lives in the ["openshift/library-go"](https://github.com/openshift/library-go/blob/e1213f6ec5d10aa4aa8a4cac2780b1dc674c0396/pkg/operator/configobserver/cloudprovider/observe_cloudprovider.go).
 
-Currently, this code is responsible for the decision around kubelet and kcm flags. Precisely, [IsCloudProviderExternal](https://github.com/openshift/library-go/blob/e1213f6ec5d10aa4aa8a4cac2780b1dc674c0396/pkg/operator/configobserver/cloudprovider/observe_cloudprovider.go#L154) function
+Currently, this code is responsible for the decision around kubelet and kcm flags. Specifically, the [IsCloudProviderExternal](https://github.com/openshift/library-go/blob/e1213f6ec5d10aa4aa8a4cac2780b1dc674c0396/pkg/operator/configobserver/cloudprovider/observe_cloudprovider.go#L154) function
 is used for decisions around kubelet and KCM flags (within MCO and KCMO respectively).
 Also, this code is used for the decision-making about CCM operator engagement.
 
@@ -241,8 +241,8 @@ This flag is [crucial](https://kubernetes.io/docs/tasks/administer-cluster/runni
 
 Initially, the new "External" platform should be treated similarly to PlatformType "None" by the MCO, and do not set up any cloud-specific flags for the kubelet.
 Then, down the road (during [phase 3](#implementation-phases)), it would be expected for the MCO to use the "External" platform type and its spec as a signal about the underlying platform and cloud controller manager presence and operate accordingly.
-For an explicit signal about the necessity to set `--cloud-provider=external` flag to the kubelet, we will use the `CloudControllerManager` field of the `ExternalPlatformSpec`, which is  
-described in the [API Extensions](#api-extensions) section down below.
+For an explicit signal about the necessity to set `--cloud-provider=external` flag to the kubelet, we will use the `CloudControllerManager` field of the `ExternalPlatformSpec`,
+which is described in the [API Extensions](#api-extensions) section down below.
 
 #### Windows Machine Config Operator
 
@@ -265,9 +265,9 @@ to provide users additional knobs to configure this behaviour or, perhaps, check
 Responsible for deploying platform-specific Cloud Controller Manager as well as for handling a number of OpenShift's
 specific peculiarities (such as populating proxy settings for CCMs, sync credentials, and so on).
 
-The code from the [library-go](#library-go) using for decision-making about operator engagement.
+The code from the [library-go](#library-go) is used for decision-making about operator engagement.
 In case library-go's [IsCloudProviderExternal](https://github.com/openshift/library-go/blob/e1213f6ec5d10aa4aa8a4cac2780b1dc674c0396/pkg/operator/configobserver/cloudprovider/observe_cloudprovider.go#L154) function
-indicates that cloud provider is external and the operator encounters a platform which it is not aware of it will go into 'Degraded' state.
+indicates that the cloud provider is external and the operator encounters a platform which it is not aware of, it will go into 'Degraded' state.
 
 During the first phases of the "External" platform type enablement, this operator should be just disabled.
 This might be done with changes within the [library-go](#library-go) and further dependency updates or, better,
@@ -336,10 +336,10 @@ since we're providing enough possibilities to customize Image Registry storage b
 
 Within the ingress operator, a PlatformType affects two things:
 1. Choosing EndpointPublishingStrategy, which is `HostNetworkStrategyType` for "None" and unknown PlatformType
-2. Creating dns provider on some platforms. This logic does not engage for "None" or unknown PlatformType
+2. Creating DNS provider on some platforms. This logic does not engage for "None" or unknown PlatformType. The DNS provider is used to create a wildcard DNS record for ingress when using `LoadBalancerServiceStrategyType`. It is not used for `HostNetworkStrategyType`.
 
-Speaking about `LoadBalancer` [EndpointPublishingStrategy](https://docs.openshift.com/container-platform/4.11/networking/ingress-operator.html#nw-ingress-controller-configuration-parameters_configuring-ingress) -
-Cluster Ingress Operator might be reconfigured for using it as a day2 operation. 
+With regard to the [EndpointPublishingStrategy](https://docs.openshift.com/container-platform/4.11/networking/ingress-operator.html#nw-ingress-controller-configuration-parameters_configuring-ingress),
+the cluster admin can configure Cluster Ingress Operator to use `LoadBalancerServiceStrategyType` as a day two operation.
 The operator itself creates `Service` objects with correct provider-specific annotations,
 the actual handling of such objects happens in a provider-specific [cloud controller manager](https://kubernetes.io/docs/concepts/architecture/cloud-controller/).
 
@@ -366,7 +366,7 @@ and design a way for configuring platform-specific CNI behaviour.
 
 ### Workflow Description
 
-During [phase 1](#implementation-phases) proposed changes intended to have no effect and the "External"
+During [phase 1](#implementation-phases), the proposed changes are intended to have no effect, and the "External"
 platform type should be handled the same as the "None", so no specific user interaction is expected.
 
 ### API Extensions
@@ -452,14 +452,14 @@ type PlatformStatus struct {
 #### Support burden
 There is concern that *random* customers will use this feature out of context
 and create a support burden. However, using such platform type in conjunction with [capabilites selection](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md)
-could give us a clear signal about how to properly triage 3d party created replacements for Red Hat components.
+could give us a clear signal about how to properly triage third-party created replacements for Red Hat components.
 
 ### Drawbacks
 
 Current approach with having statically defined platform list is already there, quite transparent and battle-hardened.
 Changing it by adding the new, way less specific platform type would mean a significant step away from current design patterns in this area.
 
-Also, future support strategy is not completely clear due to we have plans around enablement of 3d party platform-specific components, which
+Also, future support strategy is not completely clear due to our plans around enablement of third-party platform-specific components, which
 codebase would be mostly out of our control.
 
 ## Design Details
@@ -473,7 +473,7 @@ codebase would be mostly out of our control.
 **Q**: Should we gate the "External" platform addition behind the feature gate by generating separate CRD for TPNU clusters?
 
 **A**: There seems to be a soft consensus that we do not need to gate these changes behind Tech Preview if it is not necessary.
-Due to operators intended to react on the "External" platform the same as for the "None" one during the first phases,
+Because operators are intended to react on the "External" platform the same as for the "None" one during the first phases,
 gating these API extensions does not seem needed.
 
 Related discussion: [1](https://github.com/openshift/enhancements/pull/1234#discussion_r968935259)
@@ -489,12 +489,12 @@ Related discussions: [1](https://github.com/openshift/enhancements/pull/1234#dis
 
 ---
 **Q**: Do we need an API for the MAPI components similar to the proposed [CCM one](#api-extensions)
-to allow users to choose how the MAPI components are deployed.
+to allow users to choose how the MAPI components are deployed?
 
 **A**: We do not see an absolute necessity to add such API knobs right now. For the moment combination of the
 "External" platform and an enabled MAPI capability look like a sufficient signal.
 By the nature of the [capabilities mechanism](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md#summary)(i.e., no MAO deployment, no MAPI CRDs),
-if Machine API operator running and detects the "External" platform, that is the signal to it that *someone* is going to run a machine controller.
+if Machine API operator is running and detects the "External" platform, that is the signal to it that *someone* is going to run a machine controller.
 
 Given that capabilities "API" is already added and in use, introducing additional knobs which will interfere with that
 would mean more code changes and the necessity of establishing a mechanism for communicating with users (i.e., what should handle such API if MAPI is disabled by the capabilities mechanism).
@@ -509,8 +509,8 @@ Related discussions: [1](https://github.com/openshift/enhancements/pull/1234#iss
 During the first stages, we must ensure that OpenShift [built-in operators whose behaviour depends on platform type](#affected-components) treat the "External" platform type the same way as "None".
 To achieve this - existing infrastructure and mechanisms employed for exercising topologies with the "None" platform type might be used.
 
-For the moment of writing, the only workflow where the "None" platform tests is [upi-conf-vsphere-platform-none-ovn](https://steps.ci.openshift.org/workflow/upi-vsphere-platform-none-ovn).
-Based on this workflow, a new one with platform type "External" with a respective set of jobs should be added to ensure that we do not disrupt the current openshift operation.
+At the time of writing, the only workflow where the "None" platform tests is [upi-conf-vsphere-platform-none-ovn](https://steps.ci.openshift.org/workflow/upi-vsphere-platform-none-ovn).
+Based on this workflow, a new one with platform type "External" with a respective set of jobs should be added to ensure that we do not disrupt the current OpenShift operation.
 
 However, given that vSphere is the only platform where we're exercising clusters installation with platform "None" specified,
 it would be beneficial to develop additional workflows using a provider with better capacity and performance (AWS or GCP, perhaps).
@@ -544,13 +544,13 @@ should not affect upgrade/downgrade process across existing clusters.
 
 ### Version Skew Strategy
 
-Since setting PlatformType is a day 0 operation, sets up during cluster installation and does not expect to be changed during cluster lifecycle,
+Since PlatformType is set as a day zero operation during cluster installation and is not expected to be changed during the cluster lifecycle,
 version skew should not be the case there.
 
 ### Operational Aspects of API Extensions
 
 It should be no different from other PlatformTypes. Scalability, API throughput and availability should not be affected.
-In the first phases, it is expected to work the same way as for PlatformType "None"
+In the first phases, it is expected to work the same way as for PlatformType "None".
 
 #### Failure Modes
 
@@ -559,13 +559,15 @@ In the first phases, it is expected to work the same way as for PlatformType "No
 
 #### Support Procedures
 
-During the first phases of this effort, support procedures should be no different as for cluster with PlatformType equals "None"
+During the first phases of this effort, support procedures should be no different from clusters with PlatformType set to "None".
 
 ## Implementation History
 
 TBD
 
 ## Alternatives
+
+### Status Quo
 
 Leave things as is, i.e., encode every new cloud platform statically into "openshift/api" from the beginning of a technical enablement process.
 
@@ -583,4 +585,4 @@ We could proceed to leverage PlatformType "None"; however, there are some diffic
 
 ## Infrastructure Needed
 
-- Additional CI workflows and set of CI jobs that exercise Openshift installation with the new "External" platform.
+- Additional CI workflows and set of CI jobs that exercise OpenShift installation with the new "External" platform.
