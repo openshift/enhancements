@@ -199,7 +199,7 @@ This section enumerates OpenShift's components and briefly elaborates the future
 During [initial implementation](#implementation-phases) we must ensure that all OpenShift's components treat "External" platform in the same way as
 "None" in order to ensure a consistent baseline across OpenShift components.
 
-In the future, we will need to change the behavior of OpenShift components to be able to receive supplemental provider-specific components from an infrastructure provider
+In the future, we will need to change the behavior of OpenShift components on a case-by-case basis to be able to function harmoniously with supplemental provider-specific components from an infrastructure provider
 or, if a component manages something else (e.g. kubelet, kcm), adjust its behaviour (set `--cloud-provider=external` arg to kubelet for example).
 
 Specific component changes will be described in detail within separate enhancement documents on a per-component basis.
@@ -483,7 +483,7 @@ Related discussion: [1](https://github.com/openshift/enhancements/pull/1234#disc
 on the AWS or GCP, or existing vSphere-based workflows would be enough?
 
 **A**: Adding a job on one additional cloud platform to ensure that the "External" platform type works as intended looks reasonable now,
-but we should mainly rely on in-repo functional tests on a per-component basis and avoid engaging of e2e workflows as much as possible.
+but we should mainly rely on in-repo functional tests on a per-component basis and avoid creating new e2e workflows as much as possible.
 
 Related discussions: [1](https://github.com/openshift/enhancements/pull/1234#discussion_r968934725), [2](https://github.com/openshift/enhancements/pull/1234#discussion_r968936500).
 
