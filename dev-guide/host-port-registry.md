@@ -9,7 +9,7 @@ reviewers:
 approvers:
   - "@russelb"
 creation-date: 2020-08-26
-last-updated: 2022-08-31
+last-updated: 2022-10-26
 status: informational
 ---
 
@@ -63,7 +63,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 ### TCP
 
 | Port  | Process   | Owning Team | Since | Notes |
-|-------|-----------|-------------|-------|-------|
+|-------|-----------|-------------|------|-------|
 | 80    | haproxy   | net edge    | 3.0 | HTTP routes; baremetal only; only on nodes running router pod replicas |
 | 443   | haproxy   | net edge    | 3.0 | HTTPS routes; baremetal only; only on nodes running router pod replicas |
 | 1936  | openshift-router | net edge | 3.0 | healthz/stats; baremetal only; only on nodes running router pod replicas |
@@ -91,6 +91,10 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9120  | metallb | sdn | 4.9 | metrics|
 | 9121  | metallb | sdn | 4.9 | metrics|
 | 9122  | metallb | sdn | 4.9 | leader election protocol |
+| 9191  | cluster-machine-approver | cluster infra | 4.3 | metrics |
+| 9192  | cluster-machine-approver | cluster infra | 4.3 | metrics |
+| 9193  | cluster-machine-approver-capi | cluster infra | 4.11 | metrics |
+| 9194  | cluster-machine-approver-capi | cluster infra | 4.11 | metrics |
 | 9200-9219  | various CSI drivers | storage | 4.8 | metrics |
 | 9258  | cluster-cloud-controller-manager-operator | cluster infra | 4.9 | metrics, control plane only |
 | 9444  | haproxy | sdn | 4.7 | on-prem internal loadbalancer, healthcheck port |
