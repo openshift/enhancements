@@ -73,6 +73,7 @@ ensure safe detachment of volumes before the Machine is deleted.
 
 ### Goals
 
+- Define an initial set of hook points for the creation phase.
 - Define an initial set of hook points for the deletion phase.
 - Define an initial set and form of related lifecycle hook API.
 - Define basic expectations for a controller or process that responds to a
@@ -138,6 +139,16 @@ applications first to ensure that service interruptions are minimised in cases
 where cluster capacity is limited. Ordering is not supported today in drain
 libraries and as such, this would require a custom drain provider.
 
+#### Story 4
+(pre-create) As an operator, I want the ability to utilize my own creation
+controller instead of the logic built into the machine controller. This will
+allow me better flexibility and control over the lifecycle of workloads on each
+node.
+
+For example, this would allow me to configure static IPs for a machine that is 
+about to be created.  IPAM or IP management is not supported today in the 
+creation libraries and as such, this would require a custom creation controller.
+
 ### API Extensions
 
 The following changes will be made to the Machine API `MachineSpec` to allow
@@ -159,6 +170,9 @@ type MachineSpec struct {
 }
 
 type LifecycleHooks struct {
+  // +optional
+  PreCreate []LifecycleHook `json:"preCreate,omitempty"`
+
   // +optional
   PreDrain []LifecycleHook `json:"preDrain,omitempty"`
 
@@ -188,6 +202,10 @@ type LifecycleHook struct {
 The following new Machine `ConditionType` constants will be added:
 
 ```go
+// MachineCreatable is set on a machine to indicate whether or not the machine can be created, or, whether some
+// creation hook is blocking the create operation.
+MachineCreatable ConditionType = "Creatable"
+
 // MachineDrained is set on a machine to indicate that the machine has been drained. When an error occurs during
 // the drain process, the condition will be added with a false status and details of the error.
 MachineDrained ConditionType = "Drained"
@@ -222,6 +240,19 @@ The hooks should be managed by a Hook Implementing Controller or other external
 application, or manually created and removed by an administrator.
 
 #### Lifecycle Points
+
+##### pre-create
+
+```yaml
+lifecycleHooks:
+  preCreate:
+  - name: <hook-name>
+    owner: <hook-owner>
+```
+
+Hooks defined at this point will prevent the machine-controller from creating 
+the instance in the infrastructure provider and the Machine will not enter the 
+`provisioning` phase until the hooks are removed. 
 
 ##### pre-drain
 
@@ -259,6 +290,9 @@ take. The name of each hook and the respective controllers are fictional.
 
 ```yaml
 lifecycleHooks:
+  preCreate:
+  - name: IPAMController
+    owner: my-ipam-controller
   preDrain:
   - name: MigrateImportantApp
     owner: my-app-migration-controller
@@ -308,7 +342,10 @@ hook as 'failed.'  Only the Hook Implementing Controller (or the end user in
 extenuating circumstances) may decide to remove a particular lifecycle hook
 to allow the machine controller to progress past the corresponding lifecycle-point.
 
-The Machine status will contain conditions identifying why the Machine controller
+For machine creation, the Machine status will contain conditions identifying why the Machine controller
+has not progressed in creating the Machine. This will be in the form of a new `Creatable` condition.
+
+For machine removal, the Machine status will contain conditions identifying why the Machine controller
 has not progressed in removing the Machine. This will be in the form of new `Drainable`
 and `Terminable` conditions.
 
@@ -392,6 +429,11 @@ utilizing them in their clusters.
 
 To ensure that users have visibility into why a Machine has not been removed yet,
 we will add new conditions to the status of the Machine.
+
+##### Creatable
+
+The creatable condition will reflect whether the Machine is able to be created. 
+If any pre-create hooks are present on the Machine, the condition will be marked false.
 
 ##### Drainable
 
