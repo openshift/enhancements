@@ -8,6 +8,11 @@ reviewers:
   - "@rphillips"
   - "@browsell"
   - "@haircommander"
+  - "@JoelSpeed"
+  - "@deads2k"
+  - "@patrickdillon"
+  - "@zaneb"
+  - "@sinnykumari"
 approvers:
   - "@jerpeter1"
   - "@mrunalp"
