@@ -143,7 +143,7 @@ The workflow is automated and documented
 
 > After the device owner has logged into the device ... 
 
-1. The device owner will create a file called `lvmd.yaml` _in the same directory as the https://github.com/openshift/microshift/blob/main/docs/howto_config.md_, specified per the lvmd [documentation](https://github.com/red-hat-storage/topolvm/blob/main/docs/lvmd.md).
+1. The device owner will create a file called `lvmd.yaml` in the same directory as the [microshift config](https://github.com/openshift/microshift/blob/main/docs/howto_config.md), specified per the lvmd [documentation](https://github.com/red-hat-storage/topolvm/blob/main/docs/lvmd.md).
    _For example:_
 
     ```shell
