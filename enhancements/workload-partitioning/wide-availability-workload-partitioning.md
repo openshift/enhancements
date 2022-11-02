@@ -164,7 +164,7 @@ defined below.
    part of [Cluster Node Tuning
    Operator](https://github.com/openshift/cluster-node-tuning-operator)
    - This change will support adding the ability to explicitly pin
-     `Infrastructure` workloads.
+     `Management` workloads.
    - This change will support updating a global identifier when workload
      partitioning is detected on the nodes.
 
@@ -313,7 +313,7 @@ part of the performance profile api.
 We want to add a new `workloads` field to the `cpu` field that contains a list
 of enums for defining which workloads to pin. This should allow us to expand
 this in the future if desired, but in this enhancement we will only support
-`Infrastructure` which defines all of the Openshift workloads.
+`Management` which defines all of the Openshift workloads.
 
 ```yaml
 apiVersion: performance.openshift.io/v2
@@ -342,7 +342,7 @@ should not be needed after 4.12 for all clusters. This should have no baring on
 The end user will be expected to provide the default machine configs to turn on
 the feature for the whole cluster. As well as provide a `PerformanceProfile`
 manifest that describes their desired `isolated` and `reserved` CPUSet and the
-`Infrastructure` enum provided to the list in the `workloads` enum list.
+`Management` enum provided to the list in the `workloads` enum list.
 
 **High level sequence diagram:**
 
@@ -459,10 +459,10 @@ management CPU pool.
 
 1. User sits down at their computer.
 2. **The user creates a `PerformanceProfile` resource with the desired
-   `isolated` and `reserved` CPUSet with the `cpu.workloads[Infrastructure]`
+   `isolated` and `reserved` CPUSet with the `cpu.workloads[Management]`
    added to the enum list.**
-3. **Alice updates the `Infrastructure` CR status to denote that workload
-   partitioning is turned on.**
+3. **User updates the `InstallConfig` and sets `cpuPartitioningMode: AllNodes`
+   to denote that workload partitioning is turned on.**
 4. The user runs the installer to create the standard manifests, adds their
    extra manifests from steps 2, then creates the cluster.
 5. The kubelet starts up and finds the configuration file enabling the new
@@ -499,7 +499,7 @@ This section outlines an end-to-end workflow for resizing the CPUSet partition.
 
 1. User sits down at their computer.
 2. **The user updates the `PerformanceProfile` resource with the new desired
-   `isolated` and new `reserved` CPUSet with the `cpu.workloads[Infrastructure]`
+   `isolated` and new `reserved` CPUSet with the `cpu.workloads[Management]`
    in the enum list.**
 3. **NTO will re-generate the machine config manifests and apply them.**
 4. ... Steps same as [E2E Workflow deployment](#e2e-workflow-deployment) ...
@@ -509,13 +509,13 @@ This section outlines an end-to-end workflow for resizing the CPUSet partition.
 ### API Extensions
 
 - We want to extend the `PerformanceProfile` API to include the addition of a
-  new `workloads[Infrastructure]` configuration under the `cpu` field.
+  new `workloads[Management]` configuration under the `cpu` field.
 - The behavior of existing API should not change with this addition.
 - New resources that make use of this new field will have the current machine
   config generated with the additional configurations added to the manifest.
   - Uses the `reserved` field to add the correct CPU set to the CRI-O and
     Kubelet configuration files to the currently generated machine config.
-  - If no `workloads[Infrastructure]` is provided then no workload partitioning
+  - If no `workloads[Management]` is provided then no workload partitioning
     configurations are left wide open to all CPU sets for the Kubelet and CRI-O
     configurations.
 
@@ -532,7 +532,7 @@ spec:
     reserved: 0,1
     # New enum addition
     workloads:
-      - Infrastructure
+      - Management
 ```
 
 ### Implementation Details/Notes/Constraints [optional]
@@ -547,7 +547,7 @@ affords us the chance to consolidate the configuration for `kubelet` and `crio`.
 
 We will modify the code path that generates the [new machine
 config](https://github.com/openshift/cluster-node-tuning-operator/blob/a780dfe07962ad07e4d50c852047ef8cf7b287da/pkg/performanceprofile/controller/performanceprofile/components/machineconfig/machineconfig.go#L91-L127)
-using the performance profile. With the new `spec.workloads[Infrastructure]`
+using the performance profile. With the new `spec.workloads[Management]`
 enum we will add the configuration for `crio` and `kubelet` to the final machine
 config manifest. Then the existing code path will apply the change as normal.
 
@@ -686,7 +686,7 @@ trigger for this event will be:
 We will not change the current machine configs for single node deployments if
 they are already set, this will be done to avoid extra restarts. We will need to
 be clear with customers however, if they add the
-`spec.workloads[Infrastructure]` we will then generate the new machine config
+`spec.workloads[Management]` we will then generate the new machine config
 and an extra restart will happen. They will need to delete the old machine
 configs afterwards.
 
