@@ -270,11 +270,14 @@ the same, we simply will allow you to apply partitioning on non single node
 topologies.
 
 We will use the global identifier to correctly modify the pod spec with the
-`requests.cpu` for the new `requests[management.workload.openshift.io/cores]`
-that are used by the workload partitioning feature.
+`requests.cpu` for the new
+`requests[<workload-type>.workload.openshift.io/cores]` that are used by the
+workload partitioning feature. Where `workload-type` is driven from the
+Deployment pod spec annotation
+`spec.template.metadata.annotations[target.workload.openshift.io/<workload-type>]`
 
 However, for Single-Node we will continue to check the conventional way to be
-able to support the upgrade flow from 4.11 -> 4.12. After 4.12 release that
+able to support the upgrade flow from 4.12 -> 4.13. After 4.13 release that
 logic should no longer be needed and will be removed.
 
 ### Node Admission Plugin
@@ -326,16 +329,16 @@ spec:
     reserved: 0,1
     # New addition
     workloads:
-      - Infrastructure
+      - Management
 ```
 
 To support upgrades and maintain better signaling for the cluster, the
 Performance Profile Controller will also inspect the Nodes to update a global
 identifier at start up. We will only update the identifier to `AllNodes` if we
 are running in Single Node and our Node has the capacity resource
-(`management.workload.openshift.io/cores`) for our 4.11 -> 4.12 upgrades. This
-should not be needed after 4.12 for all clusters. This should have no baring on
-4.11 HA/3NC clusters as this feature will not be back ported.
+(`management.workload.openshift.io/cores`) for our 4.12 -> 4.13 upgrades. This
+should not be needed after 4.13 for all clusters. This should have no baring on
+4.12 HA/3NC clusters as this feature will not be back ported.
 
 ### Workflow Description
 
@@ -578,8 +581,8 @@ Changed Path:
 2. Checks if currently running cluster has global identifier for partitioning
    set
    - Skips modification if identifier partitioning set to `None` unless Single
-     Node, will check with old logic to maintain upgrade for Single-Node 4.11 ->
-     4.12.
+     Node, will check with old logic to maintain upgrade for Single-Node 4.12 ->
+     4.13.
 3. Checks what resource limits and requests are set on the pod
    - Skips modification if QoS is guaranteed or both limits and requests are set
    - Skips modification if after update the QoS is changed
@@ -635,7 +638,9 @@ N/A
 We will add a CI job with a cluster configuration that reflects the minimum of
 2CPU/4vCPU masters and 1CPU/2vCPU worker configuration. This job should ensure
 that cluster deployments configured with management workload partitioning pass
-the compliance tests.
+the compliance tests. We will run a periodic informing job that will test and
+verify that workload partitioning is working as expected. The intention is to
+run this job at least once a day and as needed on NTO/PAO PRs.
 
 We will add a CI job to ensure that all release payload workloads have the
 `target.workload.openshift.io/management` annotation and their namespaces have
@@ -670,10 +675,10 @@ the `workload.openshift.io/allowed` annotation.
 
 ### Upgrade / Downgrade Strategy
 
-This new behavior will be added in 4.12 as part of the installation
+This new behavior will be added in 4.13 as part of the installation
 configurations for customers to utilize.
 
-Enabling the feature after installation for HA/3NC is not supported in 4.12, so
+Enabling the feature after installation for HA/3NC is not supported in 4.13, so
 we do not need to address what happens if an older cluster upgrades and then the
 feature is turned on.
 
@@ -729,7 +734,19 @@ WIP
 
 ## Alternatives
 
-N/A
+When we first discussed the global identifier we looked for ways to add it with
+out involving any changes to the `Installer`, however, a few things made that
+more difficult. Originally we had planned to generate the manifests via the
+installer and allow the user to modify the `Infrastructure` resource to add the
+`AllNodes` option for CPU Partitioning. It quickly became a cumbersome process to
+automate and would require more effort on customers and be prone to error, especially
+since this feature has to be turned on at install time. Furthermore, the primary
+decision to involve the installer directly became evident when most of our other
+tooling such as `ztp`, `assisted-installer`, and `agent-installer` did not have
+a way to modify the `Infrastructure` resource after being generated. If we expose
+this feature through a configuration flag on the `install-config.yaml` we
+provide a straightforward path for these consumers to support workload
+partitioning in their offering.
 
 ## Infrastructure Needed [optional]
 
