@@ -135,7 +135,7 @@ type NetworkConfig struct {
   // DnsResolver defines nameservers to be applied to a network interface
   // interfaces.
   // +kubebuilder:validation:Required
-  DnsResolver DnsResolver `json:"dns-resolver"`
+  DnsResolver DnsResolver `json:"dnsResolver"`
 
   // Routes routes to be applied to a network interface
   // interfaces.
@@ -150,23 +150,23 @@ type Interface struct {
   // +optional
   Name  string        `json:"name"`
 
-  // IPV4 IP configuration for network interface
+  // IPv4 IP configuration for network interface
   // +kubebuilder:validation:Required
-  IPV4  IPV4Addresses `json:"ipv4"`
+  IPv4  IPv4Addresses `json:"ipv4"`
 }
 
 // IPV4Addresses IPV4 addresses to be applied for an `Interface`
-type IPV4Addresses struct {
+type IPv4Addresses struct {
   // Address a slice of `IPV4Address`
   // +kubebuilder:validation:Required
   // +kubebuilder:validation:MaxItems=1
   // +kubebuilder:validation:MinItems=1
   // +kubebuilder:validation:Required
-  Address []IPV4Address `json:"address"`
+  Address []IPv4Address `json:"address"`
 }
 
 // IPV4Address IPV4 address to be applied for an `Interface`
-type IPV4Address struct {
+type IPv4Address struct {
   // IP address to be applied
   // +kubebuilder:validation:format=ip
   // +kubebuilder:validation:Required
@@ -176,7 +176,7 @@ type IPV4Address struct {
   // +kubebuilder:validation:Maximum=32
   // +kubebuilder:validation:Default=23
   // +kubebuilder:validation:Required
-  PrefixLength uint  `json:"prefix-length"`
+  PrefixLength uint  `json:"prefixLength"`
   
 
 // DnsResolver DNS resolution configuration to be applied to a `Host`
@@ -209,7 +209,7 @@ type RouteConfig struct {
   // NextHopAddress IP address of router
   // +kubebuilder:validation:format=ip
   // +kubebuilder:validation:Required
-  NextHopAddress string `json:"next-hop-address"`
+  NextHopAddress string `json:"nextHopAddress"`
 }
 
 ~~~
@@ -225,14 +225,14 @@ platform:
            - ipv4:
                address:
                  - ip: 192.168.101.240
-                   prefix-length: 23
-           dns-resolver:
+                   prefixLength: 23
+           dnsResolver:
              config:
                server:
                  - 192.168.1.215
            routes:
              config:
-               - next-hop-address: 192.168.100.1
+               - nextHopAddress: 192.168.100.1
       controlPlane:
         - failureDomain: us-east-1
           networkConfig:
@@ -240,82 +240,82 @@ platform:
               - ipv4:
                   address:
                     - ip: 192.168.101.241
-                      prefix-length: 23
-            dns-resolver:
+                      prefixLength: 23
+            dnsResolver:
               config:
                 server:
                   - 192.168.1.215
             routes:
               config:
-                - next-hop-address: 192.168.100.1
+                - nextHopAddress: 192.168.100.1
         - failureDomain: us-east-2
           networkConfig:
             interfaces:
               - ipv4:
                   address:
                     - ip: 192.168.101.242
-                      prefix-length: 23
-            dns-resolver:
+                      prefixLength: 23
+            dnsResolver:
               config:
                 server:
                   - 192.168.1.215
             routes:
               config:
-                - next-hop-address: 192.168.100.1
+                - nextHopAddress: 192.168.100.1
         - failureDomain: us-east-3
           networkConfig:
             interfaces:
               - ipv4:
                   address:
                     - ip: 192.168.101.243
-                      prefix-length: 23
-            dns-resolver:
+                      prefixLength: 23
+            dnsResolver:
               config:
                 server:
                   - 192.168.1.215
             routes:
               config:
-                - next-hop-address: 192.168.100.1
+                - nextHopAddress: 192.168.100.1
       compute:
         - networkConfig:
             interfaces:
               - ipv4:
                   address:
                     - ip: 192.168.101.244
-                      prefix-length: 23
-            dns-resolver:
+                      prefixLength: 23
+            dnsResolver:
               config:
                 server:
                   - 192.168.1.215
             routes:
               config:
-                - next-hop-address: 192.168.100.1
+                - nextHopAddress: 192.168.100.1
         - networkConfig:
             interfaces:
               - ipv4:
                   address:
                     - ip: 192.168.101.245
-                      prefix-length: 23
-            dns-resolver:
+                      prefixLength: 23
+            dnsResolver:
               config:
                 server:
                   - 192.168.1.215
             routes:
               config:
-                - next-hop-address: 192.168.100.1
+                - nextHopAddress: 192.168.100.1
         - networkConfig:
             interfaces:
               - ipv4:
                   address:
                     - ip: 192.168.101.246
-                      prefix-length: 23
-            dns-resolver:
+                      prefixLength: 23
+            dnsResolver:
               config:
                 server:
                   - 192.168.1.215
             routes:
               config:
-                - next-hop-address: 192.168.100.1
+                - nextHopAddress: 192.168.100.1
 ~~~
 2. Add validation for the modified/added fields in the platform specification.
 3. For compute nodes, produce machine manifests with associated IP configuration.  
@@ -347,14 +347,14 @@ spec:
                 - ipv4:
                     address:
                       - ip: 192.168.101.245
-                        prefix-length: 23
-              dns-resolver:
+                        prefixLength: 23
+              dnsResolver:
                 config:
                   server:
                     - 192.168.1.215
               routes:
                 config:
-                  - next-hop-address: 192.168.100.1
+                  - nextHopAddress: 192.168.100.1
       metadata:
         creationTimestamp: null
       numCPUs: 2      
