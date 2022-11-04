@@ -38,8 +38,8 @@ tracking-link:
 
 ## Summary
 
-The goal of this enhancement is to provide the ability to install vSphere IPI zonal on separate L2 segments. As of this writing the only way to 
-accomplish this is to allow an external load balancer.
+The goal of this enhancement is to provide the ability to install vSphere IPI zonal on separate L2 segments without the static pods (keepalived, haproxy, coredns). 
+As of this writing the only way to accomplish this is to allow an external load balancer.
 
 ## Motivation
 
@@ -49,6 +49,7 @@ Users of OpenShift would like the ability to deploy control plane and compute no
 
 - Support external load balancer in vSphere IPI zonal
 - Support multiple subnets via the external load balancer
+- Support for no static pod deployment (keepalived, haproxy, coredns)
 
 ### Non-Goals
 
