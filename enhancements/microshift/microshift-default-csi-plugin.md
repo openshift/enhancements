@@ -143,10 +143,7 @@ The workflow is automated and documented
 
 > After the device owner has logged into the device ... 
 
-1. The device owner will create a file called `lvmd.yaml`, per documentation according to its 
-[documentation](https://github.com/red-hat-storage/topolvm/blob/main/docs/lvmd.md).
-   1. The device owner will provide the absolute path to this file in the MicroShift config field `LvmdConfigFilePath`. 
-
+1. The device owner will create a file called `lvmd.yaml` in the same directory as the [MicroShift config](https://github.com/openshift/microshift/blob/main/docs/howto_config.md), specified per lvmd [documentation](https://github.com/red-hat-storage/topolvm/blob/main/docs/lvmd.md).
    _For example:_
 
     ```shell
@@ -157,9 +154,6 @@ The workflow is automated and documented
       volume-group: rhel
       spare-gb: 10 # in GB
     socket-name: /run/lvmd/lvmd.socket
-   EOF
-   $ cat <<'EOF' > /etc/microshift/config.yaml
-   LvmdConfigFilePath: /etc/microshift/lvmd.yaml
    EOF
     ```
 
