@@ -177,6 +177,7 @@ type IPV4Address struct {
   // PrefixLength length of the IP address prefix
   // +kubebuilder:validation:Minimum=1
   // +kubebuilder:validation:Maximum=32
+  // +kubebuilder:validation:Default=23
   // +kubebuilder:validation:Required
   PrefixLength uint  `json:"prefix-length"`
   
