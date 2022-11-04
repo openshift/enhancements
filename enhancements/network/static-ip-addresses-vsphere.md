@@ -476,8 +476,10 @@ the expected name/owner.
 
 On scale down, the controller will recognize a machine is being deleted and check for a `preTerminate`
 lifecycle hook.  If the hook exists, the controller will retrieve the IP address of the node from
-nmstate and release the IP.  The `preTerminate` should be removed regardless of if the IP address was 
-successfully released to prevent blocking the machine's deletion.
+nmstate and release the IP.  It is recommended that if releasing a lease fails that the controller
+retries some number of times before giving up.  However, upon giving up, the controller should remove 
+the `preTerminate` regardless of if the IP address was successfully released to prevent blocking 
+the machine's deletion.
 
 In this workflow, the controller is responsible for managing, claiming, and releasing IP addresses.  
 
