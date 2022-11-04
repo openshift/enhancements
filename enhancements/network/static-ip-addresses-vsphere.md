@@ -50,9 +50,6 @@ As an OpenShift administrator, I want to provision static IP addresses with the 
 
 As an OpenShift administrator, I want to scale nodes with static IPs so that I can meet capacity demands as well as respond to disaster recovery scenarios.
 
-As an OpenShift engineer, I want to know if a IPI installation was performed so that support can determine the IP assignment strategy for a given cluster.
-
-
 ### Goals
 
 - All nodes created during the installation are configured with static IPs
