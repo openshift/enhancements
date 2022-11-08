@@ -76,6 +76,8 @@ DNS record in the cloud provider at his discretion.
 - Provide a day-0 solution for cluster installations involving external DNS
   management by the customer.
 - DNS traffic management during DNS management policy migration from managed to unmanaged.
+- Enable the cluster admin to change the default ingresscontroller's domain (which
+  would also require updating routes and certificates).
 
 ## Proposal
 
@@ -234,24 +236,28 @@ If the user is updating the IngressController's `dnsManagementPolicy` field from
 `"Managed"` to `"Unmanaged"`, the previously created *DNSRecord* CR will be updated
 appropriately.
 
-The existing `.loadbalancer.dnsManagementPolicy` value of the ingresscontroller
-will be replicated to the *DNSRecord*'s `.spec.dnsManagementPolicy` as well, to
-clearly state which dns record is unmanaged. If the cluster admin were to delete
+The existing `.status.endpointPublishingStrategy.loadbalancer.dnsManagementPolicy`
+value of the ingresscontroller will be replicated to the *DNSRecord*'s `.spec.dnsManagementPolicy`
+as well, to clearly state which dns record is unmanaged. If the cluster admin were to delete
 the *DNSRecord* CR, the operator would recreate it (again reflecting and respecting the 
-IngressController's `spec.endpointPublishingStrategy.loadBalancer.dnsManagementPolicy` field).
+IngressController's `status.endpointPublishingStrategy.loadBalancer.dnsManagementPolicy` field).
 
 Once the *DNSRecord* is set to `Unmanaged`, any updates done to it will be ignored
 by the operator, but it is to be noted that if the ingresscontroller is updated from
 `Unmanaged` to `Managed` any changes done will be lost during re-sync.
 
-If the ingresscontroller is deleted when `.loadbalancer.dnsManagementPolicy` is set to
-`Unmanaged`, the *DNSRecord* CR will be deleted as per the current implementation, but the
+If the ingresscontroller is deleted, the DNSRecord CR will be deleted irrespective of the
+dnsManagementPolicy field in the ingresscontroller's spec and status. If 
+`.status.endpointPublishingStrategy.loadbalancer.dnsManagementPolicy` is set to `Unmanaged` the
 DNS record on the cloud provider will not be deleted by the operator and will require
-the cluster admin to manually delete it. 
+the cluster admin to manually delete it.
 
 If `.spec.domain` on the ingresscontroller does not contain the `baseDomain` of the
-cluster DNS config, then the `.loadbalancer.dnsManagementPolicy` is automatically set
-to `Unmanaged`.
+cluster DNS config, then the `status.endpointPublishingStrategy.loadBalancer.dnsManagementPolicy`
+is automatically set to `Unmanaged`. It is to be noted that in this scenario the
+`dnsManagementPolicy` in `spec` and `status` will be different as the operator
+determined that the value set for `spec.endpointPublishingStrategy.loadBalancer.dnsManagementPolicy`
+cannot be realised.
 
 The support provided by the installer and this new field aren't entirely
 mutually exclusive, i.e. if customer has opted to disable DNS management cluster
@@ -272,13 +278,14 @@ __Note:__
 
 ### Risks and Mitigations
 
-This feature does not support default ingresscontrollers when the ingresscontroller is 
-updated to be unmanaged in conjunction with updating the domain could result in breaking
-cluster connectivity if not all components are properly updated. This should be done at 
-the discretion of the cluster admin. The manual creation of the required DNS records will
-need to be done prior to making this change, as the canary controller will try to ensure
-that the ingress domains are reachable, and otherwise this sets the `cluster-ingress-operator`
-in a degraded state.
+This feature does not in itself provide a means to change the default ingresscontroller's
+domain. Even if the cluster admin were to change the ingresscontroller's `spec.domain`
+and then use this feature to configure a custom DNS record for the new domain, changing
+the domain will break cluster connectivity if not all components are properly updated.
+This should be done at the discretion of the cluster admin. The manual creation of the
+required DNS records will need to be done prior to making this change, as the canary
+controller will try to ensure that the ingress domains are reachable, and otherwise
+this sets the `cluster-ingress-operator` in a degraded state.
 
 ### Drawbacks
 
