@@ -13,6 +13,8 @@ reviewers:
   - "@patrickdillon"
   - "@zaneb"
   - "@sinnykumari"
+  - "@dagrayvid"
+  - "@jmencak"
 approvers:
   - "@jerpeter1"
   - "@mrunalp"
@@ -148,9 +150,10 @@ defined below.
 2. Openshift Installer
    - Add an `InstallConfig` flag to the installer to enable this feature from
      install time only.
-3. Machine Config Operator
-   - Add the ability of MCO to generate the needed machine configs for the
-     worker pools from bootstrap and maintain it.
+   - Add the ability to call the NTO `render` command during bootstrap.
+3. Node Tuning Operator
+   - Add the ability of NTO to generate the needed machine configs for the
+     worker pools from bootstrap.
 4. Admission Controller ([management cpus
    override](https://github.com/openshift/kubernetes/blob/a9d6306a701d8fa89a548aa7e132603f6cd89275/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/doc.go))
    in openshift/kubernetes.
@@ -243,18 +246,23 @@ const (
 )
 ```
 
-### Machine Config Operator
+We will also need to be able to support instantiating the cpu partitioning files at
+bootstrap. Currently, NTO has support to render most of the configurations for a given
+`PerformanceProfile`, what we are missing is that this is not being called in
+the installer yet. We will add the NTO render command as part of the installer
+bootstrap flow to generate the default configs.
+
+### Node Tuning Operator
 
 Once we have a global flag, and a way to set it at install time, we'll need to
 apply the needed configurations at install time during bootstrap. We will add
-this ability to MCO to generate and maintain the needed configurations before
+this ability to NTO to generate the needed configurations before
 `kubelet` and the `api-server` stands up.
 
-We will add to the `kubelet` controller the ability to watch the
-`Infrastructure` resource and if CPU Partitioning is set to `AllNodes` we will
-generate the bootstrap and the controller will maintain the MCs from that point
-on. Things to note, this feature is explicitly designed to not be turned off, as
-such once set we will not remove the MCs.
+We will add to the `render` command the ability to ingest the `Infrastructure`
+resource and if CPU Partitioning is set to `AllNodes` we will generate the
+bootstrap configurations. Things to note, this feature is explicitly designed to
+not be turned off.
 
 We will need to support upgrades for Single Node since this feature already
 exists for them but this implementation differs slightly. To avoid needless
