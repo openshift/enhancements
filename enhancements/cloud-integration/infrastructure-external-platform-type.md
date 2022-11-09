@@ -133,7 +133,7 @@ A reader can find the proposed phase breakdown in [OCPPLAN-9429](https://issues.
 This document intends to describe the initial phases of this project. The proposed initial course of action:
 
 1. Update "openshift/api" with adding "External" PlatformType
-2. Ensure that all Red Hat operators tolerate the "External" platform and treat the same as the "None" platform
+2. Ensure that all Red Hat operators tolerate the "External" platform and treat it the same as the "None" platform
 
 Next phase which is out of the scope for this EP:
 
@@ -479,7 +479,7 @@ gating these API extensions does not seem needed.
 Related discussion: [1](https://github.com/openshift/enhancements/pull/1234#discussion_r968935259)
 
 ---
-**Q**: Should we invest in preparing workflows that will perform UPI with the "None"/"External" platform types installation
+**Q**: Should we invest in preparing CI workflows that will perform UPI with the "None"/"External" platform types installation
 on the AWS or GCP, or existing vSphere-based workflows would be enough?
 
 **A**: Adding a job on one additional cloud platform to ensure that the "External" platform type works as intended looks reasonable now,
@@ -493,7 +493,7 @@ to allow users to choose how the MAPI components are deployed?
 
 **A**: We do not see an absolute necessity to add such API knobs right now. For the moment combination of the
 "External" platform and an enabled MAPI capability look like a sufficient signal.
-By the nature of the [capabilities mechanism](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md#summary)(i.e., no MAO deployment, no MAPI CRDs),
+By the nature of the [capabilities mechanism](https://github.com/openshift/enhancements/blob/master/enhancements/installer/component-selection.md#summary) (i.e., no MAO deployment, no MAPI CRDs),
 if Machine API operator is running and detects the "External" platform, that is the signal to it that *someone* is going to run a machine controller.
 
 Given that capabilities "API" is already added and in use, introducing additional knobs which will interfere with that
@@ -509,7 +509,7 @@ Related discussions: [1](https://github.com/openshift/enhancements/pull/1234#iss
 During the first stages, we must ensure that OpenShift [built-in operators whose behaviour depends on platform type](#affected-components) treat the "External" platform type the same way as "None".
 To achieve this - existing infrastructure and mechanisms employed for exercising topologies with the "None" platform type might be used.
 
-At the time of writing, the only workflow where the "None" platform tests is [upi-conf-vsphere-platform-none-ovn](https://steps.ci.openshift.org/workflow/upi-vsphere-platform-none-ovn).
+At the time of writing, the only workflow that tests the "None" platform is [upi-conf-vsphere-platform-none-ovn](https://steps.ci.openshift.org/workflow/upi-vsphere-platform-none-ovn).
 Based on this workflow, a new one with platform type "External" with a respective set of jobs should be added to ensure that we do not disrupt the current OpenShift operation.
 
 However, given that vSphere is the only platform where we're exercising clusters installation with platform "None" specified,
