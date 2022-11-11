@@ -76,6 +76,7 @@ https://github.com/openshift/enhancements/blob/master/enhancements/monitoring/hy
 - Define a path to collect metrics in a managed service scenario (SD e.g. ROSA).
 - Ensure our ability to send desired metrics to telemetry.
 - Define which metrics have value to expose in the HyperShift Operator.
+- Define a side-cart providing users with managment cluster metrics.
 
 ### Non-Goals
 
@@ -85,6 +86,9 @@ In the guest cluster, the platform monitoring collects and forwards metrics to t
 However, some metrics needed for telemetry come from the control plane, and these are not currently available to the CMO inside the guest cluster.
 
 The following are potential solutions for collecting metrics and send them to telemetry from HyperShift control planes.
+
+### Provide metrics using side-cart
+A solution based on creating a side-cart container that would scrape info from the data-plain components(API server, etcd, and cluster version operator) and communicate that to the users clusters. This process currently exist within IBM ROKS toolkit called roks-metrics-deployment. It provides users with metrics from the managed cluster in a similar way that we would want for HyperShift.
 
 ### Collecting in a self-managed scenario (ACM/MCE)
 We propose to use the UWM stack on the management cluster to scrape metrics from control planes and forward them to telemetry.
