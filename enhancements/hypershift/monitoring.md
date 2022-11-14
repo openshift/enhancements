@@ -69,6 +69,8 @@ https://github.com/openshift/enhancements/blob/master/enhancements/monitoring/hy
 - As a Service Consumer I want to have the ability to monitor metrics that I control and impact my apps availability, i.e. end workloads.
 - As RedHat I want to collect data on clusters run by HyperShift, so I can improve the services powered by it.
 - As a Service Provider using HyperShift I want to understand their usage, e.g. management cluster/hostedClusters density, level of usage of autoscaling, etc.
+- As a Service Provider, I want to provide my customers metrics for their control plane components
+- As a Service Consumer, I want the ability to understand the performance of my managed control plane
 
 ### Goals
 - Define which metrics have value to expose in both management cluster and guest cluster.
@@ -76,7 +78,7 @@ https://github.com/openshift/enhancements/blob/master/enhancements/monitoring/hy
 - Define a path to collect metrics in a managed service scenario (SD e.g. ROSA).
 - Ensure our ability to send desired metrics to telemetry.
 - Define which metrics have value to expose in the HyperShift Operator.
-- Define a side-cart providing users with managment cluster metrics.
+- Ensure our ability to send desired metrics to guest cluster CMO.
 
 ### Non-Goals
 
@@ -88,7 +90,7 @@ However, some metrics needed for telemetry come from the control plane, and thes
 The following are potential solutions for collecting metrics and send them to telemetry from HyperShift control planes.
 
 ### Provide metrics using side-cart
-A solution based on creating a side-cart container that would scrape info from the data-plain components(API server, etcd, and cluster version operator) and communicate that to the users clusters. This process currently exist within IBM ROKS toolkit called roks-metrics-deployment. It provides users with metrics from the managed cluster in a similar way that we would want for HyperShift.
+A solution based on creating a side-cart container that would scrape info from the data-plain components(API server, etcd, and cluster version operator) and communicate that to the users clusters. This process currently exist within IBM ROKS toolkit called roks-metrics-deployment(https://github.com/openshift/ibm-roks-toolkit/tree/master/assets/roks-metrics). It provides users with metrics from the managed cluster in a similar way that we would want for HyperShift. In short, we would go about this by adding a metrics-pusher container on pods already existing on our managed cluster that we would want to collect metrics from. This metrics-pusher container will then push metrics from the pods to a push-gateway pod that will exist on our Hypershift-cluster. We will then have metrics from the managed cluster as well as our Hypershift cluster avaliable. To make this accessible for the costumer, we will create a ServiceMonitoring-pod that will be in charge of passing the metrics gathered to our cluster monitoring service, in our case Prometheus. There the necessary metrics will be avaliable for the costumer in a simple and well organized way.
 
 ### Collecting in a self-managed scenario (ACM/MCE)
 We propose to use the UWM stack on the management cluster to scrape metrics from control planes and forward them to telemetry.
