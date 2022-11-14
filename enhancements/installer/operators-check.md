@@ -81,10 +81,8 @@ None
 
 The important detail is how we define _stable_. The definition proposed here is:
 
-```
-If a cluster operator does not maintain Progressing=False for at least 30 seconds,
-during a five minute period it is unstable.
-```
+> If a cluster operator does not maintain Progressing=False for at least 30 seconds,
+> during a five minute period it is unstable.
 
 ### Risks and Mitigations
 
