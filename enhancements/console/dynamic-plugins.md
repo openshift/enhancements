@@ -2,6 +2,7 @@
 title: dynamic-plugins
 authors:
   - "@spadgett"
+  - "@jhadvig"
 reviewers:
   - "@bparees"
   - "@shawn-hurley"
@@ -10,8 +11,8 @@ reviewers:
 approvers:
   - "@bparees"
 creation-date: 2020-08-18
-last-updated: 2021-07-22
-status: implementable
+last-updated: 2022-11-16
+status: implemented
 ---
 
 # Dynamic Plugins for OpenShift Console
@@ -22,7 +23,7 @@ status: implementable
 - [x] Design details are appropriately documented from clear requirements
 - [x] Test plan is defined
 - [x] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [x] User-facing documentation is created in [openshift-docs](https://docs.openshift.com/container-platform/4.12/web_console/dynamic-plug-ins.html)
 
 ## Summary
 
@@ -130,38 +131,44 @@ The console backend will proxy the plugin assets from the `Service` using the
 service CA bundle.
 
 Operators declare that they have a console plugin available by creating a
-cluster-scoped `ConsolePlugin` resource that includes the service name, port,
-and base path used to access all of the plugin's assets.
+cluster-scoped `ConsolePlugin` resource, that includes information about
+the backend service name, port, and base path used to access all of the
+plugin's assets.
 
 ```yaml
-apiVersion: console.openshift.io/v1alpha1
+apiVersion: console.openshift.io/v1
 kind: ConsolePlugin
 metadata:
   name: acm
 spec:
   displayName: 'Advanced Cluster Management'
-  service:
-    name: acm
-    namespace: open-cluster-management
-    port: 8443
-    basePath: '/'
+  backend:
+    type: Service
+    service:
+      name: acm
+      namespace: open-cluster-management
+      port: 8443
+      basePath: '/'
 ```
 
 In case the plugin needs to communicate with some in-cluster service, it can
 declare a service proxy in its `ConsolePlugin` resource using the `spec.proxy` array.
 Each entry needs to specify type and alias of the proxy, under the `type` and `alias` field.
-For the `Service` proxy type, a `service` field with `name`, `namespace` and `port` fields
-needs to be specified, to which the request will be proxied.
+Proxy request could be done to different endpoints types. For the `Service` proxy type,
+a `service` field with `name`, `namespace` and `port` fields needs to be specified,
+to which the request will be proxied.
 
 ```yaml
 spec:
   proxy:
   - type: Service
     alias: <proxy-alias>
-    service:
-      name: <service-name>
-      namespace: <service-namespace>
-      port: <service-port>
+    endpoint:
+      type: Service
+      service:
+        name: <service-name>
+        namespace: <service-namespace>
+        port: <service-port>
 ```
 
 Console backend exposes following endpoint in order to proxy the communication
@@ -181,26 +188,29 @@ then passed in the HTTP `Authorization` request header, for example:
 `Authorization: Bearer sha256~kV46hPnEYhCWFnB85r5NrprAxggzgb6GOeLbgcKNsH0`
 
 ```yaml
-apiVersion: console.openshift.io/v1alpha1
+apiVersion: console.openshift.io/v1
 kind: ConsolePlugin
 metadata:
   name: acm
 spec:
   displayName: 'Advanced Cluster Management'
-  service:
-    name: acm
-    namespace: open-cluster-management
-    port: 8443
-    basePath: '/'
+  backend:
+    type: Service
+    service:
+      name: acm
+      namespace: open-cluster-management
+      port: 8443
+      basePath: '/'
   proxy:
   - type: Service
     alias: search
     caCertificate: '-----BEGIN CERTIFICATE-----\nMIID....'
     authorize: true
-    service:
-      name: search
-      namespace: open-cluster-management
-      port: 8443
+    endpoint:
+      service:
+        name: search
+        namespace: open-cluster-management
+        port: 8443
 ```
 
 Plugins are disabled by default. They need to be manually enabled by a cluster
@@ -433,9 +443,11 @@ const VMHeading = () => {
 };
 ```
 
-In the `v1` API version, an additional field is introduced for enabling and loading i18n namespace that
-given dynamic plugin contains. The i18n namespace name follows `plugin__{plugin-name}` naming convention.
-If i18n is not enabled in the `ConsolePlugin` resource, no i18n namespaces will be loaded for the plugin.
+In the `v1` API version, an additional `spec.i18n.loadType` field introduced for defining the loading type of i18n resrouces that
+given dynamic plugin contains. If the `loadType` is set to `Preload`, console will load all plugin's localization resources during
+loading of the plugin. If the `loadType` is set to `Lazy` or left blank, console wont preload any plugin's localization resources,
+instead will leave thier loading to runtime's lazy-loading.
+The i18n namespace name follows `plugin__{plugin-name}` naming convention.
 
 ```yaml
 apiVersion: console.openshift.io/v1
@@ -445,7 +457,7 @@ metadata:
 spec:
   displayName: 'Advanced Cluster Management'
   i18n:
-    enabled: true
+    loadType: Preload
 ```
 
 In the 4.11 release, a `console.openshift.io/use-i18n` annotation
@@ -519,10 +531,14 @@ dynamic.
 | OpenShift | Maturity     | API version   |
 |-|-|-|
 | 4.8       | Alpha        | v1alpha1      |
-| 4.11      | GA (planned) | v1            |
+| 4.12      | GA           | v1            |
 
 Static plugins are already a supported feature. Any existing static plugin that
 is migrated to a dynamic plugin will need to have the same support level.
+
+Both `v1` and `v1alpha1` version are supported. `v1alpha1` plugins will get
+converted by the conversion webhook server into `v1` representation.
+Conversion webhook server is part of the `console-operator` pod.
 
 #### Dev Preview -> Tech Preview
 
@@ -571,6 +587,7 @@ console will only load the correct plugin.
 * 2021-06-22 - Support localization of dynamic plugins
 * 2021-10-06 - Allow dynamic plugins to proxy to services on the cluster
 * 2022-05-13 - API enhancements for GA
+* 2023-01-17 - GA
 
 ## Drawbacks
 
