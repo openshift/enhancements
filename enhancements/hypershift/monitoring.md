@@ -92,6 +92,12 @@ The following are potential solutions for collecting metrics and send them to te
 ### Provide metrics using sidecar
 A solution based on creating a sidecar container that would scrape info from the data plain components(API server, etcd, and cluster version operator) and communicate that to the users clusters. This process currently exist within IBM ROKS toolkit called roks-metrics-deployment(https://github.com/openshift/ibm-roks-toolkit/tree/master/assets/roks-metrics). It provides users with metrics from the managed cluster in a similar way that we would want for HyperShift. In short, we would go about this by adding a metrics-pusher container on pods already existing on our managed cluster that we would want to collect metrics from. This metrics-pusher container will then push metrics from the pods to a push-gateway pod that will exist on our Hypershift-cluster. We will then have metrics from the managed cluster as well as our Hypershift cluster avaliable. To make this accessible for the customer, we will create a ServiceMonitoring-pod that will be in charge of passing the metrics gathered to our cluster monitoring service, in our case Prometheus. There the necessary metrics will be avaliable for the customer in a simple and well organized way.
 
+### Collecting metrics using Prometheus remote write
+This is a feature recently developed for Prometheus. It requiers you to have a prometheus instance on the managment cluster. This instance will look for metrics sent out from jobs that for some reason wont be able to exist long enough to be scraped by the agent.
+
+### A combination of the two above mentioned proposals
+Here we would deploy a sidecar container with the remote write capabilities added to it. This would give us the option to use either of the two mentioned proposals based on which one works best for specific situations.
+
 ### Collecting in a self-managed scenario (ACM/MCE)
 We propose to use the UWM stack on the management cluster to scrape metrics from control planes and forward them to telemetry.
 This is a good fit because in terms of scalability because The UWM stack’s purpose is to collect metrics for arbitrary workloads.
