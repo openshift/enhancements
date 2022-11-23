@@ -138,13 +138,20 @@ https://github.com/openshift/hypershift/pull/1376
 Consumers of HyperShift-managed clusters should be able to observe metrics for their managed control planes in their deployed CMO. We propose 3 options to achieve this integation for HyperShift:
 
 #### Option 1: Compatibility with ROKS toolkit metrics system (sidecar + push gateway)
-A solution based on creating a sidecar container that would scrape metrics from the control plane components (API server, etcd, cluster version operator, etc) and forward that to the guest clusters. This process currently exist within [IBM ROKS toolkit called roks-metrics-deployment](https://github.com/openshift/ibm-roks-toolkit/tree/master/assets/roks-metrics). In short, this is done by injecting a sidecar container on pods already existing on our managed control plane that we would want to collect metrics from. This sidecar container will then push metrics to the push-gateway that will exist on the guest cluster, making control plane metrics available to the guest cluster CMO.
+A solution based on creating a sidecar container that would scrape metrics from the control plane components (API server, etcd, cluster version operator, etc) and forward that to the guest clusters. 
+This process currently exist within [IBM ROKS toolkit called roks-metrics-deployment](https://github.com/openshift/ibm-roks-toolkit/tree/master/assets/roks-metrics). 
+In short, this is done by injecting a sidecar container on pods already existing on our managed control plane that we would want to collect metrics from. 
+This sidecar container will then push metrics to the push-gateway that will exist on the guest cluster, making control plane metrics available to the guest cluster CMO.
 
 #### Option 2: Collecting and forwarding via Prometheus remote write
-Prometheus remote write features can be utilized to forward control plane metrics from the management cluster to the guest cluster CMO. This approach requires you to have a Prometheus instance available on the management cluster and can be acheived by [configuring remote write](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#remote_write) to send metrics to the guest cluster CMO's Prometheus [remote write endpoint/receiver](https://prometheus.io/docs/prometheus/latest/feature_flags/#remote-write-receiver).
+Prometheus remote write features can be utilized to forward control plane metrics from the management cluster to the guest cluster CMO. 
+This approach requires you to have a Prometheus instance available on the management cluster and can be acheived by [configuring remote write](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#remote_write) 
+to send metrics to the guest cluster CMO's Prometheus [remote write endpoint/receiver](https://prometheus.io/docs/prometheus/latest/feature_flags/#remote-write-receiver).
 
 #### Option 3: Sidecar and Prometheus remote write (combination of options 1 and 2)
-In this approach, a sidecar container with Prometheus remote write capabilities can be injected to control plane components. Similar to the ROKS metrics approach, the sidecar will scape metrics from its local control plane component and instead of push gateway, it will remote write to the guest cluster CMO/Prometheus endpoint. This will give us advantages from both options:
+In this approach, a sidecar container with Prometheus remote write capabilities can be injected to control plane components. 
+Similar to the ROKS metrics approach, the sidecar will scape metrics from its local control plane component and instead of push gateway, it will remote write to the guest cluster CMO/Prometheus endpoint. 
+This will give us advantages from both options:
 - Sidecar container can have dedicated resources alloted from a per HC basis
 - Eliminates the need to deploy a push gateway on the guest cluster
 - Reliable metrics streaming via remote write
