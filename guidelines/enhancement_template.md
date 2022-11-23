@@ -282,17 +282,22 @@ end to end tests.**
 
 ### Upgrade / Downgrade Strategy
 
-If applicable, how will the component be upgraded and downgraded? Make sure this
-is in the test plan.
+How will the component be upgraded and downgraded?  Make sure this is
+in the test plan.  How will existing clusters update into the new
+feature?
 
-Consider the following in developing an upgrade/downgrade strategy for this
+#### Upgrade strategy
+
+Consider the following in developing an upgrade strategy for this
 enhancement:
+
 - What changes (in invocations, configurations, API use, etc.) is an existing
   cluster required to make on upgrade in order to keep previous behavior?
 - What changes (in invocations, configurations, API use, etc.) is an existing
   cluster required to make on upgrade in order to make use of the enhancement?
 
-Upgrade expectations:
+Expectations:
+
 - Each component should remain available for user requests and
   workloads during upgrades. Ensure the components leverage best practices in handling [voluntary
   disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to
@@ -311,15 +316,31 @@ Upgrade expectations:
   pods must continue to work correctly even while the cluster remains
   in this partially upgraded state for some time.
 
-Downgrade expectations:
-- If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
-  misbehaving, it should be possible for the user to rollback to `N`. It is
-  acceptable to require some documented manual steps in order to fully restore
-  the downgraded cluster to its previous state. Examples of acceptable steps
-  include:
-  - Deleting any CVO-managed resources added by the new version. The
-    CVO does not currently delete resources that no longer exist in
-    the target version.
+#### Downgrade strategy
+
+If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
+misbehaving, users may wish to rollback to `N`.  We [do not support
+rollbacks or downgrades of any kind][no-downgrades], but if structuring to
+allow rollbacks is possible, that is a nice internal safety valve.
+It is acceptable to:
+
+* Irrecoverably break the cluster on downgrades.
+* Lock up during downgrades.
+* Allow for messy downgrades with documented manual workaround steps.
+* Implement clean, beautiful automatic downgrades. With sub-categories for:
+  * Manually polishing the post-downgrade state, such as deleting
+    any resources which the `N+1` release created but which the `N`
+    release doesn't know to delete.
+  * Automatically removing any `N+1`-specific resources, for example
+    via [cluster-version operator deletion
+    manifests](../enhancements/update/object-removal-manifest-annotation.md)
+    in the `N` release payload.
+
+While all of the above are acceptable downgrade plans, the enhancement
+must describe the expected downgrade behavior.  If it is anything
+other than a clean, automated downgrade for either patch (4.y.z ->
+4.y.(<z)) or minor (4.y -> 4.(y-1)) downgrades, the enhancement should
+explain why that downgrade experience was not achievable.
 
 ### Version Skew Strategy
 
@@ -438,3 +459,5 @@ subproject, repos requested, github details, and/or testing infrastructure.
 
 Listing these here allows the community to get the process for these resources
 started right away.
+
+[no-downgrades]: https://github.com/openshift/openshift-docs/blob/7f87267bc69d65abd96e6b783100195c6b78549f/updating/updating-troubleshooting.adoc
