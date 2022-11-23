@@ -89,23 +89,6 @@ However, some metrics needed for telemetry come from the control plane, and thes
 
 The following are potential solutions for collecting metrics and send them to telemetry from HyperShift control planes.
 
-### Provide metrics using sidecar
-A solution based on creating a sidecar container that would scrape info from the data plain components(API server, etcd, and cluster version operator) and communicate that to the users clusters. This process currently exist within IBM ROKS toolkit called roks-metrics-deployment(https://github.com/openshift/ibm-roks-toolkit/tree/master/assets/roks-metrics). It provides users with metrics from the managed cluster in a similar way that we would want for HyperShift. In short, we would go about this by adding a metrics-pusher container on pods already existing on our managed cluster that we would want to collect metrics from. This metrics-pusher container will then push metrics from the pods to a push-gateway pod that will exist on our Hypershift-cluster. We will then have metrics from the managed cluster as well as our Hypershift cluster avaliable. To make this accessible for the customer, we will create a ServiceMonitoring-pod that will be in charge of passing the metrics gathered to our cluster monitoring service, in our case Prometheus. There the necessary metrics will be avaliable for the customer in a simple and well organized way. Underneath I listed some known pros and cons going with this solution. 
-Pros
-- No scaling issues will be caused by using this solution. This is because the metrics are pushed to separate prometheus stacks located on each guest cluster.
-- The kube API server proxy would be used to reach the push gateway service inside the guest cluster so no special networking setup will be needed. 
-- Similarly there will be no other action needed regarding metrics related telemetry being sent to the telemetry service. This as long as they are being pushed into the cluster. 
-Cons
-- The push gateway solution would have to be added to our current release payload. This so that it can be multi-platform compatible and mirrored along with other images for offline use.
-- The push gateway was designed to be used for short-lived processes that cannot be scraped. By using it for metrics it would go against what it was originally created for.
-
-
-### Collecting metrics using Prometheus remote write
-This is a feature recently developed for Prometheus. It requiers you to have a prometheus instance on the managment cluster. This instance will look for metrics sent out from jobs that for some reason wont be able to exist long enough to be scraped by the agent.
-
-### A combination of the two above mentioned proposals
-Here we would deploy a sidecar container with the remote write capabilities added to it. This would give us the option to use either of the two mentioned proposals based on which one works best for specific situations.
-
 ### Collecting in a self-managed scenario (ACM/MCE)
 We propose to use the UWM stack on the management cluster to scrape metrics from control planes and forward them to telemetry.
 This is a good fit because in terms of scalability because The UWM stack’s purpose is to collect metrics for arbitrary workloads.
@@ -150,6 +133,21 @@ Metrics exposed by the HyperShift operator itself should be able to answer at le
 - How many replicas are there per NodePool?
 
 https://github.com/openshift/hypershift/pull/1376
+
+### Forwarding metrics to guest cluster CMO
+Consumers of HyperShift-managed clusters should be able to observe metrics for their managed control planes in their deployed CMO. We propose 3 options to achieve this integation for HyperShift:
+
+#### Option 1: Compatibility with ROKS toolkit metrics system (sidecar + push gateway)
+A solution based on creating a sidecar container that would scrape metrics from the control plane components (API server, etcd, cluster version operator, etc) and forward that to the guest clusters. This process currently exist within [IBM ROKS toolkit called roks-metrics-deployment](https://github.com/openshift/ibm-roks-toolkit/tree/master/assets/roks-metrics). In short, this is done by injecting a sidecar container on pods already existing on our managed control plane that we would want to collect metrics from. This sidecar container will then push metrics to the push-gateway that will exist on the guest cluster, making control plane metrics available to the guest cluster CMO.
+
+#### Option 2: Collecting and forwarding via Prometheus remote write
+Prometheus remote write features can be utilized to forward control plane metrics from the management cluster to the guest cluster CMO. This approach requires you to have a Prometheus instance available on the management cluster and can be acheived by [configuring remote write](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#remote_write) to send metrics to the guest cluster CMO's Prometheus [remote write endpoint/receiver](https://prometheus.io/docs/prometheus/latest/feature_flags/#remote-write-receiver).
+
+#### Option 3: Sidecar and Prometheus remote write (combination of options 1 and 2)
+In this approach, a sidecar container with Prometheus remote write capabilities can be injected to control plane components. Similar to the ROKS metrics approach, the sidecar will scape metrics from its local control plane component and instead of push gateway, it will remote write to the guest cluster CMO/Prometheus endpoint. This will give us advantages from both options:
+- Sidecar container can have dedicated resources alloted from a per HC basis
+- Eliminates the need to deploy a push gateway on the guest cluster
+- Reliable metrics streaming via remote write
 
 ### Workflow Description
 N/A.
