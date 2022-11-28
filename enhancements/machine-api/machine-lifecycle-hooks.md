@@ -1,8 +1,9 @@
 ---
-title: machine-deletion-hooks
+title: machine-lifecycle-hooks
 authors:
   - "@JoelSpeed"
   - "@michaelgugino"
+  - "@rvanderp3"
 reviewers:
   - "@enxebre"
   - "@elmiko"
@@ -36,6 +37,10 @@ see-also:
 A specific point in a machine's reconciliation lifecycle where execution of
 normal machine-controller behaviour is paused or modified.
 
+### Creation Phase
+Describes when a machine has been created in the API and will be or is being 
+created in the infrastructure. 
+
 ### Deletion Phase
 Describes when a machine has been marked for deletion but is still present
 in the API.  Various actions happen during this phase, such as draining a node,
@@ -64,12 +69,19 @@ This pause in reconciliation will allow these custom components to take action
 after a Machine has been marked for deletion, but prior to the Machine being
 drained and/or associated instance terminated.
 
+### Creation Phase
+In particular, this will allow the machine API Operator to allow a 3rd party 
+controller to decorate the Machine with IP configuration prior to the machine 
+being created in the infrastructure.
+
+### Deletion Phase
 In particular, this will allow the etcd Operator to prevent a Control Plane
 Machine from being drained/removed until the etcd Operator has had a chance
 to synchronise the etcd data to the replacement Machine.
 
 This could also be used by other components such as Storage to allow them to
 ensure safe detachment of volumes before the Machine is deleted.
+
 
 ### Goals
 
@@ -146,7 +158,7 @@ allow me better flexibility and control over the lifecycle of workloads on each
 node.
 
 For example, this would allow me to configure static IPs for a machine that is 
-about to be created.  IPAM or IP management is not supported today in the 
+about to be created. IPAM or IP management is not supported today in the 
 creation libraries and as such, this would require a custom creation controller.
 
 ### API Extensions
@@ -252,7 +264,7 @@ lifecycleHooks:
 
 Hooks defined at this point will prevent the machine-controller from creating 
 the instance in the infrastructure provider and the Machine will not enter the 
-`provisioning` phase until the hooks are removed. 
+`Provisioning` phase until the hooks are removed. 
 
 ##### pre-drain
 
