@@ -14,11 +14,15 @@ approvers:
   - "@elmiko"
   - "@hexfusion"
   - "@deads2k"
+api-approvers:
+  - "@JoelSpeed"
 creation-date: 2021-08-10
 last-updated: 2021-11-11
 status: implementable
 see-also:
-  - [Cluster API Upstream Equivalent](https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20200602-machine-deletion-phase-hooks.md)
+  - https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20200602-machine-deletion-phase-hooks.md
+tracking-link:
+  - https://issues.redhat.com/browse/OCPPLAN-9654
 ---
 
 # Machine Deletion Hooks
@@ -83,33 +87,6 @@ to synchronise the etcd data to the replacement Machine.
 This could also be used by other components such as Storage to allow them to
 ensure safe detachment of volumes before the Machine is deleted.
 
-
-### Goals
-
-- Define an initial set of hook points for the provisioning phase.
-- Define an initial set of hook points for the deletion phase.
-- Define an initial set and form of related lifecycle hook API.
-- Define basic expectations for a controller or process that responds to a
-lifecycle hook.
-
-### Non-Goals
-
-- Create an exhaustive list of hooks; we can add more over time.
-- Create new machine phases.
-- Create a mechanism to signal what lifecycle point a machine is at currently.
-- Dictate implementation of controllers that respond to the hooks.
-- Implement ordering in the machine controller.
-- Require anyone to use these hooks for normal machine operations, these are
-strictly optional and for custom integrations only.
-
-## Proposal
-
-- Utilize new Machine spec to implement lifecycle hooks.
-- Each lifecycle point can have 0 or more hooks.
-- Hooks do not enforce ordering.
-- Hooks found during machine reconciliation effectively pause reconciliation
-until all hooks for that lifecycle point are removed from a machine's spec.
-
 ### User Stories
 
 #### Story 1
@@ -163,6 +140,34 @@ about to be provisioned in the cloud provider. IPAM or IP management is not supp
 today in the provision libraries and as such, this would require a custom provision 
 controller.
 
+
+### Goals
+
+- Define an initial set of hook points for the provisioning phase.
+- Define an initial set of hook points for the deletion phase.
+- Define an initial set and form of related lifecycle hook API.
+- Define basic expectations for a controller or process that responds to a
+lifecycle hook.
+
+### Non-Goals
+
+- Create an exhaustive list of hooks; we can add more over time.
+- Create new machine phases.
+- Create a mechanism to signal what lifecycle point a machine is at currently.
+- Dictate implementation of controllers that respond to the hooks.
+- Implement ordering in the machine controller.
+- Require anyone to use these hooks for normal machine operations, these are
+strictly optional and for custom integrations only.
+
+## Proposal
+
+- Utilize new Machine spec to implement lifecycle hooks.
+- Each lifecycle point can have 0 or more hooks.
+- Hooks do not enforce ordering.
+- Hooks found during machine reconciliation effectively pause reconciliation
+until all hooks for that lifecycle point are removed from a machine's spec.
+
+
 ### API Extensions
 
 The following changes will be made to the Machine API `MachineSpec` to allow
@@ -212,6 +217,8 @@ type LifecycleHook struct {
   Owner string `json:"owner"`
 }
 ```
+
+#### Condition Types 
 
 The following new Machine `ConditionType` constants will be added:
 
@@ -316,6 +323,8 @@ lifecycleHooks:
   - name: WaitForStorageDetach
     owner: my-custom-storage-detach-controller
 ```
+
+### Workflow Description
 
 #### Changes to machine-controller
 
@@ -485,6 +494,11 @@ alert that will warn users when a Machine removal is blocked for an extended
 period. This should continue to function and notify users when a removal has
 been blocked, at which point we expect manual intervention to check the Machine.
 
+### Drawbacks
+
+* If misused, this could prevent Machines from being deleted and lead to an increase in support
+cases to determine if it is safe to override the feature.
+
 ## Design Details
 
 ### Test Plan
@@ -528,11 +542,6 @@ We do not expect any issues with version skew as this is a new feature.
 ## Implementation History
 
 * This has already been implemented in Cluster API using an annotation based approach.
-
-## Drawbacks
-
-* If misused, this could prevent Machines from being deleted and lead to an increase in support
-cases to determine if it is safe to override the feature.
 
 ## Alternatives
 
@@ -608,3 +617,14 @@ Seems like we’d need to sync information to and from a CR.
 There are different approaches to CRDs (1-to-1 mapping Machine to CR, match labels,
   present/absent vs status fields) that each have their own drawbacks and are more
 complex to define and configure.
+
+### Operational Aspects of API Extensions
+
+#### Failure Modes 
+
+See [Hook failure](#hook-failure) for details
+
+#### Support Procedures
+
+[condition types](#condition-types) have been added to describe the state of lifecycle hooks.
+Controllers will communicate status and errors through these conditions.
