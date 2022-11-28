@@ -9,6 +9,7 @@ reviewers:
   - "@elmiko"
   - "@ademicev"
   - "@hexfusion"
+  - "@lobziik"
 approvers:
   - "@elmiko"
   - "@hexfusion"
@@ -37,9 +38,9 @@ see-also:
 A specific point in a machine's reconciliation lifecycle where execution of
 normal machine-controller behaviour is paused or modified.
 
-### Creation Phase
+### Provisioning Phase
 Describes when a machine has been created in the API and will be or is being 
-created in the infrastructure. 
+provisioned in the infrastructure. 
 
 ### Deletion Phase
 Describes when a machine has been marked for deletion but is still present
@@ -66,15 +67,15 @@ for deletion.
 Allow custom and 3rd party components to easily interact with a Machine or
 related resources while that Machine's reconciliation is temporarily paused.
 This pause in reconciliation will allow these custom components to take action
-after a Machine has been marked for deletion, but prior to the Machine being
-drained and/or associated instance terminated.
+prior to a Machine being provisioned or after a Machine has been marked for 
+deletion, but prior to the Machine being drained and/or associated instance terminated.
 
-### Creation Phase
+### Controlling Provisioning 
 In particular, this will allow the machine API Operator to allow a 3rd party 
 controller to decorate the Machine with IP configuration prior to the machine 
-being created in the infrastructure.
+being provisioned in the infrastructure.
 
-### Deletion Phase
+### Controlling Draining/Removal
 In particular, this will allow the etcd Operator to prevent a Control Plane
 Machine from being drained/removed until the etcd Operator has had a chance
 to synchronise the etcd data to the replacement Machine.
@@ -85,7 +86,7 @@ ensure safe detachment of volumes before the Machine is deleted.
 
 ### Goals
 
-- Define an initial set of hook points for the creation phase.
+- Define an initial set of hook points for the provisioning phase.
 - Define an initial set of hook points for the deletion phase.
 - Define an initial set and form of related lifecycle hook API.
 - Define basic expectations for a controller or process that responds to a
@@ -152,14 +153,15 @@ where cluster capacity is limited. Ordering is not supported today in drain
 libraries and as such, this would require a custom drain provider.
 
 #### Story 4
-(pre-create) As an operator, I want the ability to utilize my own creation
+(pre-provision) As an operator, I want the ability to utilize my own provision
 controller instead of the logic built into the machine controller. This will
 allow me better flexibility and control over the lifecycle of workloads on each
 node.
 
-For example, this would allow me to configure static IPs for a machine that is 
-about to be created. IPAM or IP management is not supported today in the 
-creation libraries and as such, this would require a custom creation controller.
+For example, this would allow me to configure static IPs for an instance that is 
+about to be provisioned in the cloud provider. IPAM or IP management is not supported 
+today in the provision libraries and as such, this would require a custom provision 
+controller.
 
 ### API Extensions
 
@@ -183,7 +185,7 @@ type MachineSpec struct {
 
 type LifecycleHooks struct {
   // +optional
-  PreCreate []LifecycleHook `json:"preCreate,omitempty"`
+  PreProvision []LifecycleHook `json:"preProvision,omitempty"`
 
   // +optional
   PreDrain []LifecycleHook `json:"preDrain,omitempty"`
@@ -214,9 +216,9 @@ type LifecycleHook struct {
 The following new Machine `ConditionType` constants will be added:
 
 ```go
-// MachineCreatable is set on a machine to indicate whether or not the machine can be created, or, whether some
-// creation hook is blocking the create operation.
-MachineCreatable ConditionType = "Creatable"
+// MachineProvisionable is set on a machine to indicate whether or not the machine can be provisioned, or, whether some
+// provisioning hook is blocking the provisioning operation.
+MachineProvisionable ConditionType = "Provisionable"
 
 // MachineDrained is set on a machine to indicate that the machine has been drained. When an error occurs during
 // the drain process, the condition will be added with a false status and details of the error.
@@ -253,11 +255,11 @@ application, or manually created and removed by an administrator.
 
 #### Lifecycle Points
 
-##### pre-create
+##### pre-provision
 
 ```yaml
 lifecycleHooks:
-  preCreate:
+  preProvision:
   - name: <hook-name>
     owner: <hook-owner>
 ```
@@ -302,7 +304,7 @@ take. The name of each hook and the respective controllers are fictional.
 
 ```yaml
 lifecycleHooks:
-  preCreate:
+  preProvision:
   - name: IPAMController
     owner: my-ipam-controller
   preDrain:
@@ -354,8 +356,8 @@ hook as 'failed.'  Only the Hook Implementing Controller (or the end user in
 extenuating circumstances) may decide to remove a particular lifecycle hook
 to allow the machine controller to progress past the corresponding lifecycle-point.
 
-For machine creation, the Machine status will contain conditions identifying why the Machine controller
-has not progressed in creating the Machine. This will be in the form of a new `Creatable` condition.
+For machine provisioning, the Machine status will contain conditions identifying why the Machine controller
+has not progressed in provisioning the Machine. This will be in the form of a new `Provisionable` condition.
 
 For machine removal, the Machine status will contain conditions identifying why the Machine controller
 has not progressed in removing the Machine. This will be in the form of new `Drainable`
@@ -442,10 +444,10 @@ utilizing them in their clusters.
 To ensure that users have visibility into why a Machine has not been removed yet,
 we will add new conditions to the status of the Machine.
 
-##### Creatable
+##### Provisionable
 
-The creatable condition will reflect whether the Machine is able to be created. 
-If any pre-create hooks are present on the Machine, the condition will be marked false.
+The provisionable condition will reflect whether the Machine is able to be provisioned. 
+If any pre-provision hooks are present on the Machine, the condition will be marked false.
 
 ##### Drainable
 
