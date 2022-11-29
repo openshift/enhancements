@@ -20,7 +20,6 @@ last-updated: 2022-11-01
 tracking-link: 
 - https://issues.redhat.com/browse/OCPPLAN-9654
 see-also:
-  - /enhancements/network/baremetal-ipi-network-configuration.md
   - /enhancements/installer/vsphere-ipi-zonal.md
 replaces:
 superseded-by:
@@ -52,14 +51,13 @@ As an OpenShift administrator, I want to scale nodes with static IPs so that I c
 
 ### Goals
 
-- All nodes created during the installation are configured with static IPs
-      Rationale: Many environments, due to security policies, do not allow DHCP.
+- All nodes created during the installation are configured with static IPs.  
+  Rationale: Many environments, due to security policies, do not allow DHCP.
 
 - The IPI installation method is able to provide static IPs to the nodes
   Rationale: Some users must qualify each tool used in their environment. 
   Leveraging IPI greatly reduces the number of tools required to provision
   a cluster.
-- 
 
 ### Non-Goals
 
@@ -69,147 +67,92 @@ As an OpenShift administrator, I want to scale nodes with static IPs so that I c
 
 ### Static IPs Configured at Installation
 
-To faciliate the configuration of static IP address, nmstate definitions are created for each node in the install-config.yaml. This follows a similar pattern set forth in the [Baremetal IPI Network Configuration](https://github.com/openshift/enhancements/blob/master/enhancements/network/baremetal-ipi-network-configuration.md#user-facing-api) enhancement. 
-
-This enhancement expands on the [`hosts` slice](https://github.com/openshift/enhancements/blob/master/enhancements/network/baremetal-ipi-network-configuration.md#user-facing-api) by associating hosts with roles and, optionally, a failure domain.
+To faciliate the configuration of static IP address, network device configuration definitions are created for each node in the install-config.yaml. A `hosts`
+slice will be introduced to the installer platform specification to allow network device configurations to be specified for a nodes.
 
 For the bootstrap and control plane nodes, static IPs are passed to the node via the `guestinfo.afterburn.initrd.network-kargs` extraconfig parameter.  [Afterburn](https://github.com/coreos/afterburn/blob/main/src/providers/vmware/amd64.rs) recognizes this parameter when the node initially boots. 
 
-When static IP configuration is required, Machines can not be created via MachineSets.
+When static network device configuration is required, Machines can not be created via MachineSets.
 The installer must create the initial set of compute Machines manually and an administrator
-must implement a `preCreate` hook for the MachineSet to allow the MachineSet to create
-Machines during day-2 operations. See [IP Configuration of Machines](#Scaling-new-Nodes-with-`machinesets`) for more information.
+must implement a `preProvision` hook for the MachineSet to allow the MachineSet to create
+Machines during day-2 operations. See [network device configuration of Machines](#Scaling-new-Nodes-with-`machinesets`) for more information.
 
 As with the installer, the vSphere [machine reconciler](https://github.com/openshift/machine-api-operator/blob/master/pkg/controller/vsphere/reconciler.go#L745-L755) 
-will pass the static IP configuration via the `guestinfo.afterburn.initrd.network-kargs` extraconfig parameter.  
+will pass the static network device configuration via the `guestinfo.afterburn.initrd.network-kargs` extraconfig parameter.  
 
 
-### Day 2 Static IP Configuration
+### Day 2 Static network device configuration
 
-Nodes being added to a cluster may be configured via an `nmstate` IP configuration or default to DHCP.  The networking configuration of a node/machine is immutable after creation. The vSphere machine API machine controller will apply the nmstate configuration when the associated VM is cloned.
+Nodes being added to a cluster may be configured with an network device configuration or default to DHCP.  The networking configuration of a node/machine is immutable after creation. The vSphere machine API machine controller will apply the network device configuration when the associated VM is cloned.
 
-`machinesets` will be supported through the creation of a user-created custom controller.  This custom controller will leverage machine lifecycle hooks to
-provide IP configuration to machines descending from `machinesets` with `machine` annotated with the appropriate lifecycle hook.
+`machinesets` will be supported through the creation of a user-created custom controller([sample controller](https://github.com/rvanderp3/machine-ipam-controller)).  This custom controller will leverage machine lifecycle hooks to
+provide network device configuration to machines descending from `machinesets` with `machine` annotated with the appropriate lifecycle hook.
 
 #### Changes Required
 
 ##### Installer
 
-1. Modify the `install-config.yaml` vSphere platform specification to support nmstate configuration. The nmstate configuration is intended to be structurally compatible with the [nmstate API](https://nmstate.io/) but will omit fields that do not map logically to installation of a cluster.
-
+1. Modify the `install-config.yaml` vSphere platform specification to support the definition of the 
 ~~~go
 // Hosts defines `Host` configurations to be applied to nodes deployed by the installer
-type Hosts struct {
-  // Bootstrap IP configuration for the bootstrap node. If omitted, node will default to DHCP.
-  // +optional
-  Bootstrap *Host `json: "bootstrap,omitempty"`
+type Hosts []Host
 
-  // ControlPlane slice of IP configurations for the control plane nodes. If empty, nodes will default to DHCP.
-  // +optional
-  ControlPlane []Host `json: "controlPlane,omitempty"`
-
-  // Compute slice of IP configurations for the compute nodes. If empty, nodes will default to DHCP.
-  // +optional
-  Compute []Host `json: "compute,omitempty"`
-}
-
-// Host defines the IP configuration to be applied for a node deployed by the installer
+// Host defines the network device configuration to be applied for a node deployed by the installer
 type Host struct {  
   // FailureDomain refers to the name of a FailureDomain as described in https://github.com/openshift/enhancements/blob/master/enhancements/installer/vsphere-ipi-zonal.md
   // +optional
   FailureDomain string `json: "failureDomain"`
 
-  // NetworkConfig IP configuration to be applied
+  // Slice of NetworkDeviceSpecs to be applied
   // +kubebuilder:validation:Required
-  NetworkConfig machineapiv1beta1.NetworkConfig string `json: "networkConfig"` 
+  NetworkDevice []NetworkDeviceSpec `json: "networkDevice"` 
+
+  // Role defines the role of the node
+  // +kubebuilder:validation:Enum="";bootstrap;control-plane;compute
+  // +kubebuilder:validation:Required
+  Role string `json: "role"`
 }
 
-// NetworkConfig Config specifies an IP configuration to be applied upon cloning.
-type NetworkConfig struct {
-  // Interfaces slice of interfaces to be configured.	
-  // +kubebuilder:validation:MaxItems=1
-  // +kubebuilder:validation:MinItems=1
-  // +kubebuilder:validation:Required
-  Interfaces []Interface `json:"interfaces"`
+type NetworkDeviceSpec struct {
+	// gateway4 is the IPv4 gateway used by this device.
+	// Required when DHCP4 is false.
+	// +optional
+	// +kubebuilder:validation:Format=ipv4
+	gateway4 string `json:"gateway4,omitempty"`
 
-  // DnsResolver defines nameservers to be applied to a network interface
-  // interfaces.
-  // +kubebuilder:validation:Required
-  DnsResolver DnsResolver `json:"dnsResolver"`
+	// gateway4 is the IPv4 gateway used by this device.
+	// Required when DHCP6 is false.
+	// +kubebuilder:validation:Format=ipv6
+	// +optional
+	Gateway6 string `json:"gateway6,omitempty"`
 
-  // Routes routes to be applied to a network interface
-  // interfaces.
-  // +kubebuilder:validation:Required
-  Routes Routes `json:"routes"`
+	// ipaddrs is a list of one or more IPv4 and/or IPv6 addresses to assign
+	// to this device.
+	// Required when DHCP4 and DHCP6 are both Disabled.
+	// + Validation is applied via a patch, we validate the format as either ipv4 or ipv6
+	// +optional
+	ipaddrs []string `json:"ipAddrs,omitempty"`
+
+	// nameservers is a list of IPv4 and/or IPv6 addresses used as DNS
+	// nameservers.
+	// Please note that Linux allows only three nameservers (https://linux.die.net/man/5/resolv.conf).
+	// +optional
+	nameservers []string `json:"nameservers,omitempty"`
 }
 
-// Interface IP configuration to be applied to a network interface.
-type Interface struct {
-  // Name interface name
-  // +kubebuilder:default=ens192
+// NetworkRouteSpec defines a static network route.
+type NetworkRouteSpec struct {
+	// To is an IPv4 or IPv6 address.
+  // +kubebuilder:validation:Format=ip
   // +optional
-  Name  string        `json:"name"`
+	To string `json:"to"`
+	// Via is an IPv4 or IPv6 address.
+  // +kubebuilder:validation:Format=ip
+  // +optional
+	Via string `json:"via"`
 
-  // IPv4 IP configuration for network interface
-  // +kubebuilder:validation:Required
-  IPv4  IPv4Addresses `json:"ipv4"`
-}
-
-// IPV4Addresses IPV4 addresses to be applied for an `Interface`
-type IPv4Addresses struct {
-  // Address a slice of `IPV4Address`
-  // +kubebuilder:validation:Required
-  // +kubebuilder:validation:MaxItems=1
-  // +kubebuilder:validation:MinItems=1
-  // +kubebuilder:validation:Required
-  Address []IPv4Address `json:"address"`
-}
-
-// IPV4Address IPV4 address to be applied for an `Interface`
-type IPv4Address struct {
-  // IP address to be applied
-  // +kubebuilder:validation:format=ip
-  // +kubebuilder:validation:Required
-  IP           string `json:"ip"`  
-  // PrefixLength length of the IP address prefix
-  // +kubebuilder:validation:Minimum=1
-  // +kubebuilder:validation:Maximum=32
-  // +kubebuilder:validation:Default=23
-  // +kubebuilder:validation:Required
-  PrefixLength uint  `json:"prefixLength"`
-  
-
-// DnsResolver DNS resolution configuration to be applied to a `Host`
-type DnsResolver struct {
-  // Config DNS resolver configuration to be applied to a `Host`
-  // +kubebuilder:validation:Required
-  Config DnsResolverConfig `json:"config"`
-}
-
-// Config defines DNS resolver configuration to be applied to a `Host`
-type DnsResolverConfig struct {
-  // Server a slice of DNS name servers  
-  // +kubebuilder:validation:MaxItems=1
-  // +kubebuilder:validation:MinItems=1
-  // +kubebuilder:validation:Required
-  Server []string `json:"server"`
-}
-
-// Routes routes to be applied to a `Host`
-type Routes struct {
-  // Config slice of routes to be applied to a `Host`
-  // +kubebuilder:validation:MaxItems=1
-  // +kubebuilder:validation:MinItems=1
-  // +kubebuilder:validation:Required  
-  Config []RouteConfig `json:"config"`
-}
-
-// RouteConfig routing configuration to be applied to a `Host`.
-type RouteConfig struct {
-  // NextHopAddress IP address of router
-  // +kubebuilder:validation:format=ip
-  // +kubebuilder:validation:Required
-  NextHopAddress string `json:"nextHopAddress"`
+	// Metric is the weight/priority of the route.
+	Metric int32 `json:"metric"`
 }
 
 ~~~
@@ -219,108 +162,63 @@ Example of a platform spec configured to provide static IPs for the bootstrap, c
 platform:
   vsphere:
     hosts:
-      bootstrap:
-        networkConfig:
-           interfaces:
-           - ipv4:
-               address:
-                 - ip: 192.168.101.240
-                   prefixLength: 23
-           dnsResolver:
-             config:
-               server:
-                 - 192.168.1.215
-           routes:
-             config:
-               - nextHopAddress: 192.168.100.1
-      controlPlane:
-        - failureDomain: us-east-1
-          networkConfig:
-            interfaces:
-              - ipv4:
-                  address:
-                    - ip: 192.168.101.241
-                      prefixLength: 23
-            dnsResolver:
-              config:
-                server:
-                  - 192.168.1.215
-            routes:
-              config:
-                - nextHopAddress: 192.168.100.1
-        - failureDomain: us-east-2
-          networkConfig:
-            interfaces:
-              - ipv4:
-                  address:
-                    - ip: 192.168.101.242
-                      prefixLength: 23
-            dnsResolver:
-              config:
-                server:
-                  - 192.168.1.215
-            routes:
-              config:
-                - nextHopAddress: 192.168.100.1
-        - failureDomain: us-east-3
-          networkConfig:
-            interfaces:
-              - ipv4:
-                  address:
-                    - ip: 192.168.101.243
-                      prefixLength: 23
-            dnsResolver:
-              config:
-                server:
-                  - 192.168.1.215
-            routes:
-              config:
-                - nextHopAddress: 192.168.100.1
-      compute:
-        - networkConfig:
-            interfaces:
-              - ipv4:
-                  address:
-                    - ip: 192.168.101.244
-                      prefixLength: 23
-            dnsResolver:
-              config:
-                server:
-                  - 192.168.1.215
-            routes:
-              config:
-                - nextHopAddress: 192.168.100.1
-        - networkConfig:
-            interfaces:
-              - ipv4:
-                  address:
-                    - ip: 192.168.101.245
-                      prefixLength: 23
-            dnsResolver:
-              config:
-                server:
-                  - 192.168.1.215
-            routes:
-              config:
-                - nextHopAddress: 192.168.100.1
-        - networkConfig:
-            interfaces:
-              - ipv4:
-                  address:
-                    - ip: 192.168.101.246
-                      prefixLength: 23
-            dnsResolver:
-              config:
-                server:
-                  - 192.168.1.215
-            routes:
-              config:
-                - nextHopAddress: 192.168.100.1
+    - role: bootstrap
+      networkDevice:
+        ipaddrs:
+        - 192.168.101.240/24
+        gateway4: 192.168.101.1
+        nameservers:
+        - 192.168.101.2
+    - role: control-plane
+      failureDomain: us-east-1a
+      networkDevice:
+        ipaddrs:
+        - 192.168.101.241/24
+        gateway4: 192.168.101.1
+        nameservers:
+        - 192.168.101.2
+    - role: control-plane
+      failureDomain: us-east-1b
+      networkDevice:
+        ipaddrs:
+        - 192.168.101.242/24
+        gateway4: 192.168.101.1
+        nameservers:
+        - 192.168.101.2
+    - role: control-plane
+      failureDomain: us-east-1c
+      networkDevice:
+        ipaddrs:
+        - 192.168.101.243/24
+        gateway4: 192.168.101.1
+        nameservers:
+        - 192.168.101.2
+    - role: compute
+      networkDevice:
+        ipaddrs:
+        - 192.168.101.244/24
+        gateway4: 192.168.101.1
+        nameservers:
+        - 192.168.101.2
+    - role: compute
+      networkDevice:
+        ipaddrs:
+        - 192.168.101.245/24
+        gateway4: 192.168.101.1
+        nameservers:
+        - 192.168.101.2
+    - role: compute
+      networkDevice:
+        ipaddrs:
+        - 192.168.101.246/24
+        gateway4: 192.168.101.1
+        nameservers:
+        - 192.168.101.2
 ~~~
 2. Add validation for the modified/added fields in the platform specification.
-3. For compute nodes, produce machine manifests with associated IP configuration.  
+3. For compute nodes, produce machine manifests with associated network device configuration.  
 
-Example of `machine` configured with IP configuration
+Example of `machine` configured with network device configuration
 ~~~yaml
 apiVersion: machine.openshift.io/v1beta1
 kind: Machine
@@ -342,19 +240,11 @@ spec:
       network:
         devices:
           - networkName: lab
-            config:
-              interfaces:
-                - ipv4:
-                    address:
-                      - ip: 192.168.101.245
-                        prefixLength: 23
-              dnsResolver:
-                config:
-                  server:
-                    - 192.168.1.215
-              routes:
-                config:
-                  - nextHopAddress: 192.168.100.1
+            ipaddrs:
+            - 192.168.101.244/24
+            gateway4: 192.168.101.1
+            nameservers:
+            - 192.168.101.2            
       metadata:
         creationTimestamp: null
       numCPUs: 2      
@@ -368,74 +258,58 @@ spec:
       template: vm-template-rhcos
       apiVersion: machine.openshift.io/v1beta1
 ~~~
-4. For bootstrap and control plane nodes, modify vSphere terraform to convert nmstate to a VM guestinfo parameter
+4. For bootstrap and control plane nodes, modify vSphere terraform to convert network device configuration to a VM guestinfo parameter
 for each VM to be created.
 
 As the assets are generated for the control plane and compute nodes, the slice of `host`s for each 
-node role will be used to populate `nmstate` information.  The number of `host`s must match the number of
+node role will be used to populate network device configuration.  The number of `host`s must match the number of
 replicas defined in the associated machine pool.
 
-Additionally, each defined host may optionally define a failure domain.  This indicates that the associated `networkConfig` will be applied to a machine created in the indicated failure domain.
+Additionally, each defined host may optionally define a failure domain.  This indicates that the associated `networkDevice` will be applied to a machine created in the indicated failure domain.
 
 
 ##### Machine API
-- Modify vSphere machine controller to convert nmstate to VM guestinfo parameter
-- Introduce a new lifecycle hook called `preCreate`.
-- Modify [types_vsphereprovider.go](https://github.com/openshift/api/blob/master/machine/v1beta1/types_vsphereprovider.go) to support nmstate configuration. 
+- Modify vSphere machine controller to convert IP configuration to VM guestinfo parameter
+- Introduce a new lifecycle hook called `preProvision`.
+- Modify [types_vsphereprovider.go](https://github.com/openshift/api/blob/master/machine/v1beta1/types_vsphereprovider.go) to support network device configuration. 
 
 
-###### IP Configuration of Machines
-The machine API `VSphereMachineProviderSpec.Network` will be modified to include a new type called `NetworkConfig`.  
-
-~~~go
-// NetworkDeviceSpec defines the network configuration for a virtual machine's
-// network device.
-type NetworkDeviceSpec struct {
-	// NetworkName is the name of the vSphere network to which the device
-	// will be connected.
-	NetworkName string `json:"networkName"`
-
-	// Config specifies an IP configuration to be applied upon cloning.
-	// +optional
-	Config *NetworkConfig `json:"config,omitempty"`
-}
-~~~
-
-See [installer](#installer) for a definition of this type as well as other types that make up the definition of `NetworkConfig`.  `NetworkConfig` and it's dependent types will be defined in [types_vsphereprovider.go](https://github.com/openshift/api/blob/master/machine/v1beta1/types_vsphereprovider.go).
+###### network device configuration of Machines
+The machine API `VSphereMachineProviderSpec.Network` will be extended to include a subset of additional properties as defined in https://github.com/kubernetes-sigs/cluster-api-provider-vsphere/blob/main/apis/v1beta1/types.go.  See [openshift/api#1338](https://github.com/openshift/api/pull/1338) for further details on the API extension to the provider specification.  
 
 An additional lifecycle hook will be added to the The `machine.machine.openshift.io` and `machinesets.machine.openshift.io` CRDs to enable a controller to augment a machine resource before it is rendered in the backing infrastructure.
 
 ~~~go
-// PreCreate hooks prevent the machine from being created in the backing infrastructure.
+// preProvision hooks prevent the machine from being created in the backing infrastructure.
 // +listType=map
 // +listMapKey=name
 // +optional
-PreCreate []LifecycleHook `json:"preCreate,omitempty"`
+preProvision []LifecycleHook `json:"preProvision,omitempty"`
 ~~~
 
-Creation of the resource will be blocked until the `preCreate` hook is removed from the `machine.machine.openshift.io` instance.
+Creation of the resource will be blocked until the `preProvision` hook is removed from the `machine.machine.openshift.io` instance.
 
 ### Workflow Description
 
 #### Installation
 1. OpenShift administrator reserves IP addresses for installation.
-2. OpenShift administrator constructs `install-config.yaml` to define an nmstate configuration for each node that will receive a static IP address.
+2. OpenShift administrator constructs `install-config.yaml` to define an network device configuration for each node that will receive a static IP address.
 3. OpenShift administrator initiates an installation with `openshift-install create cluster`.  
 4. The installer will proceed to:
-- provision bootstrap and control plane nodes with specified IP configuration
-- create machine resources containing specified IP configuration
-5. Once the machine API controllers become active, the compute machine resources will be rendered with the specified IP configuration.
+- provision bootstrap and control plane nodes with the specified network device configuration
+- create machine resources containing specified network device configuration
+5. Once the machine API controllers become active, the compute machine resources will be rendered with the specified network device configuration.
 
 #### Scaling new Nodes without `machinesets`
 1. OpenShift administrator reserves IP addresses for new nodes to be scaled up.
-2. OpenShift administrator constructs machine resource to define an nmstate configuration for each new node that will receive a static IP address.
+2. OpenShift administrator constructs machine resource to define an network device configuration for each new node that will receive a static IP address.
 3. OpenShift administrator initiates the creation of new machines by running `oc create -f machine.yaml`.  
-4. The machine API will render the nodes with the specified IP configuration.
+4. The machine API will render the nodes with the specified network device configuration.
 
 #### Scaling new Nodes with `machinesets`
-1. OpenShift administrator configures a machineset with a `preCreate` lifecycle hook.
+1. OpenShift administrator configures a machineset with a `preProvision` lifecycle hook.
 
-Example of a `machineset` configured to configure the `preCreate` lifecycle hook on machines it creates.
+Example of a `machineset` configured to configure the `preProvision` lifecycle hook on machines it creates.
 ~~~yaml
 apiVersion: machine.openshift.io/v1beta1
 kind: MachineSet
@@ -459,21 +333,21 @@ spec:
         machine.openshift.io/cluster-api-machineset: static-machineset-worker
     spec:
       lifecycleHooks:
-        preCreate:
+        preProvision:
           - name: ipamController
             owner: network-admin
 ~~~
 
 2. OpenShift administrator or machine autoscaler scales `n` machines
-3. Controller watches machine resources created with the a `preCreate` lifecycle hook which matches
+3. Controller watches machine resources created with the a `preProvision` lifecycle hook which matches
 the expected name/owner.
-4. Controller updates machine providerSpec with IP configuration
+4. Controller updates machine providerSpec with network device configuration
 5. Controller sets `preTerminate` lifecycle hook
-6. Controller removes `preCreate` lifecycle hook
+6. Controller removes `preProvision` lifecycle hook
 
 On scale down, the controller will recognize a machine is being deleted and check for a `preTerminate`
-lifecycle hook.  If the hook exists, the controller will retrieve the IP address of the node from
-nmstate and release the IP.  It is recommended that if releasing a lease fails that the controller
+lifecycle hook.  If the hook exists, the controller will retrieve the IP address of the machine and 
+release the IP.  It is recommended that if releasing a lease fails that the controller
 retries some number of times before giving up.  However, upon giving up, the controller should remove 
 the `preTerminate` regardless of if the IP address was successfully released to prevent blocking 
 the machine's deletion.
@@ -482,13 +356,13 @@ In this workflow, the controller is responsible for managing, claiming, and rele
 
 ~~~mermaid
 sequenceDiagram
-    machineset controller->>+machine: creates machine with<br> preCreate hook
-    machine controller-->machine controller: waits for preCreate hook<br>to be removed
-    IP controller-->>+machine: confirm precense of<br>preCreate hook
+    machineset controller->>+machine: creates machine with<br> preProvision hook
+    machine controller-->machine controller: waits for preProvision hook<br>to be removed
+    IP controller-->>+machine: confirm precense of<br>preProvision hook
     IP controller-->IP controller: allocates IP address
-    IP controller->>+machine: sets IP configuration on machine
-    IP controller->>+machine: removes preCreate hook and<br>sets preTerminate hook
-    machine-->>machine controller: IP configuration read from <br>machine and converted to<br>guestinfo.afterburn.initrd.network-kargs
+    IP controller->>+machine: sets network device configuration on machine
+    IP controller->>+machine: removes preProvision hook and<br>sets preTerminate hook
+    machine-->>machine controller: network device configuration read from <br>machine and converted to<br>guestinfo.afterburn.initrd.network-kargs
     machine controller->>vCenter: creates virtual machine
 ~~~
 
@@ -500,7 +374,7 @@ A sample project [machine-ipam-controller](https://github.com/rvanderp3/machine-
 
 ### API Extensions
 
-The CRDs `machines.machine.openshift.io` and `machinesets.machine.openshift.io` will be modified to add a new lifecycle hook called `preCreate`.  When defined, the `preCreate` lifecycle hook will block the rendering of a machine in it's backing infrastructure.
+The CRDs `machines.machine.openshift.io` and `machinesets.machine.openshift.io` will be modified to add a new lifecycle hook called `preProvision`.  When defined, the `preProvision` lifecycle hook will block the rendering of a machine in it's backing infrastructure.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -508,20 +382,22 @@ The CRDs `machines.machine.openshift.io` and `machinesets.machine.openshift.io` 
 
 ### Drawbacks
 
-- Scaling nodes will become more complex. This will require the OpenShift administrator to integrate IP configuration
+- Scaling nodes will become more complex. This will require the OpenShift administrator to integrate network device configuration
   management to enable scaling of machine API machine resources.
 
-- If a `machineset` is configured to specify the `preCreate` lifecycle hook, a controller must remove the hook before
+- If a `machineset` is configured to specify the `preProvision` lifecycle hook, a controller must remove the hook before
 machine creation will continue.
 
 - `install-config.yaml` will grow in complexity.
 
 ## Design Details
 
-### Open Questions [optional]
+### Open Questions
 
 #### `nmstate` API
-How should we introduce `nmstate` to the OpenShift API?  While we only need a subset of `nmstate` for this enhancement, `nmstate` may have broader applicability outside of vSphere.
+Q: How should we introduce `nmstate` to the OpenShift API?  While we only need a subset of `nmstate` for this enhancement, `nmstate` may have broader applicability outside of vSphere.
+
+A: In the November 10, 2022 cluster lifecycle arch call, it was decided to move to an [API consistent with CAPV](https://github.com/kubernetes-sigs/cluster-api-provider-vsphere/blob/main/apis/v1beta1/types.go).
 
 ### Test Plan
 
