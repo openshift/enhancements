@@ -97,6 +97,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9194  | cluster-machine-approver-capi | cluster infra | 4.11 | metrics |
 | 9200-9219  | various CSI drivers | storage | 4.8 | metrics |
 | 9258  | cluster-cloud-controller-manager-operator | cluster infra | 4.9 | metrics, control plane only |
+| 9300  | kube-proxy | sdn | 4.12 | metrics, ingress node firewall |
+| 9301  | kube-proxy | sdn | 4.12 | metrics, ingress node firewall |
 | 9444  | haproxy | sdn | 4.7 | on-prem internal loadbalancer, healthcheck port |
 | 9445  | haproxy | sdn | 4.7 | on-prem internal loadbalancer |
 | 9446  | baremetal-operator | metal | 4.9 | healthz; baremetal provisioning, control plane only |
@@ -161,6 +163,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 29102 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
 | 29103 | ovn-kubernetes | sdn || metrics, ovn-kubernetes only |
 | 29445 | haproxy | sdn | 4.7 | on-prem internal loadbalancer, stats port |
+| 39300 | manager | sdn | 4.12 | metrics, ingress node firewall |
+| 39301 | daemon | sdn | 4.12 | metrics, ingress node firewall |
 
 
 ## Previously allocated
