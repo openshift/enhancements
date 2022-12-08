@@ -24,7 +24,9 @@ superseded-by:
 
 ## Summary
 
-Core OpenShift operators (e.g. ingress, image-registry, machine-api) use long-lived credentials to access Azure API services today. This enhancement proposes an implementation by which OpenShift operators would utilize short-lived, [bound service account tokens](https://docs.openshift.com/container-platform/4.11/authentication/bound-service-account-tokens.html) signed by OpenShift that can be trusted by Azure as the `ServiceAccounts` have been associated with [Azure Managed Identities](https://learn.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/overview). [Workload identity federation support for Managed Identities](https://github.com/Azure/azure-workload-identity/issues/325) was recently made public preview by Azure ([announcement](https://learn.microsoft.com/en-us/azure/aks/workload-identity-overview)) and is the basis for this proposal.
+Core OpenShift operators (e.g. ingress, image-registry, machine-api) use long-lived credentials to access Azure API services today. This enhancement proposes an implementation by which OpenShift operators would utilize short-lived, [bound service account tokens](https://docs.openshift.com/container-platform/4.11/authentication/bound-service-account-tokens.html) signed by OpenShift that can be
+trusted by Azure as the `ServiceAccounts` have been associated with [Azure Managed Identities](https://learn.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/overview). [Workload identity federation support for Managed Identities](https://github.com/Azure/azure-workload-identity/issues/325) was recently made public preview by Azure
+([announcement](https://learn.microsoft.com/en-us/azure/aks/workload-identity-overview)) and is the basis for this proposal.
 
 ## Motivation
 
@@ -52,7 +54,8 @@ In this proposal, the Cloud Credential Operator's command-line utility (`ccoctl`
 
 OpenShift operators will be updated to create Azure clients using the operator's bound `ServiceAccount` token that has been associated with the `clientID` of a Managed Identity in Azure.
 
-Managed Identity details such as the `clientID` and `tenantID` necessary for creating a client can also be supplied to pods as environment variables via a [mutating admission webhook provided by Azure Workload Identity](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html). This webhook would be deployed and lifecycled by the Cloud Credential Operator such that it could be utilized to supply credential details to customer workloads.
+Managed Identity details such as the `clientID` and `tenantID` necessary for creating a client can also be supplied to pods as environment variables via a [mutating admission webhook provided by Azure Workload Identity](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html). This webhook would be deployed and lifecycled by the Cloud Credential Operator
+such that it could be utilized to supply credential details to customer workloads.
 
 ### Workflow Description
 
@@ -60,10 +63,11 @@ Managed Identity details such as the `clientID` and `tenantID` necessary for cre
 
 The Cloud Credential Operator's command-line utility (`ccoctl`) will be extended with subcommands for Azure which provide methods for,
 - Generating a key pair to be used for `ServiceAccount` token signing for a fresh OpenShift cluster.
-- Creating an Azure blob storage container to serve as the identity provider in which to publish OIDC and JWKS documents needed to establish trust at a publically available address. This subcommand will output a modified cluster `Authentication` CR, containing a `serviceAccountIssuer` pointing to the Azure blob storage container's URL to be provided as a manifest for installation. 
-- Creating Managed Identity infrastructure with federated credentials for OpenShift operator `ServiceAccounts` (identified by namespace & name) and to output secrets containing the `clientID` of the Managed Identity to be provided as manifests for the installer. This command will process `CredentialsRequest` custom resources to identify service accounts that will be associated with Managed Identities in Azure as federated credentials. For self-managed installation, `CredentialsRequests` will be exracted from the release image.
+- Creating an Azure blob storage container to serve as the identity provider in which to publish OIDC and JWKS documents needed to establish trust at a publically available address. This subcommand will output a modified cluster `Authentication` CR, containing a `serviceAccountIssuer` pointing to the Azure blob storage container's URL to be provided as a manifest for installation.
+- Creating Managed Identity infrastructure with federated credentials for OpenShift operator `ServiceAccounts` (identified by namespace & name) and to output secrets containing the `clientID` of the Managed Identity to be provided as manifests for the installer. This command will process `CredentialsRequest` custom resources to identify service accounts that will be associated with Managed
+  Identities in Azure as federated credentials. For self-managed installation, `CredentialsRequests` will be exracted from the release image.
 
-```
+```sh
 $ ./ccoctl azure
 Creating/updating/deleting cloud credentials objects for Azure
 
@@ -87,7 +91,7 @@ Use "ccoctl azure [command] --help" for more information about a command.
 
 OpenShift operators currently obtain their long-lived credentials from a config secret with the following format:
 
-```
+```yaml
 apiVersion: v1
 data:
   azure_client_id: <client id>
@@ -101,11 +105,13 @@ kind: Secret
 type: Opaque
 ```
 
-We propose that when utilizing Azure Workload Identity, the credentials secret will contain an `azure_client_id` that is the `clientID` of the Managed Identity provisioned by `ccotcl` for the operator. The `azure_client_secret` key will be absent and instead we can provide the path to the mounted `ServiceAccount` token as an `azure_federated_token_file` key; the path to the mounted token is well known and is specified in the operator deployment.
+We propose that when utilizing Azure Workload Identity, the credentials secret will contain an `azure_client_id` that is the `clientID` of the Managed Identity provisioned by `ccotcl` for the operator. The `azure_client_secret` key will be absent and instead we can provide the path to the mounted `ServiceAccount` token as an `azure_federated_token_file` key; the path to the mounted token is well
+known and is specified in the operator deployment.
 
-The resource group in which the installer will create infrastructure will not be known when these secrets are generated by `ccoctl` ahead of installation and operators which rely on `azure_resourcegroup` and `azure_resource_prefix` such as the [image-registry](https://github.com/openshift/cluster-image-registry-operator/blob/8556fd48027f89e19daad36e280b60eb93d012d4/pkg/storage/azure/azure.go#L95-L100) should obtain the resource group details from the cluster `Infrastructure` object instead.
+The resource group in which the installer will create infrastructure will not be known when these secrets are generated by `ccoctl` ahead of installation and operators which rely on `azure_resourcegroup` and `azure_resource_prefix` such as the
+[image-registry](https://github.com/openshift/cluster-image-registry-operator/blob/8556fd48027f89e19daad36e280b60eb93d012d4/pkg/storage/azure/azure.go#L95-L100) should obtain the resource group details from the cluster `Infrastructure` object instead.
 
-```
+```yaml
 apiVersion: v1
 data:
   azure_client_id: <client id>
@@ -119,7 +125,10 @@ type: Opaque
 
 #### Creating workload identity clients in operators
 
-In order to create Azure clients which utilize a `ClientAssertionCredential`, operators must update to version `>= v1.2.0` of the azidentity package within [azure-sdk-for-go](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity@v1.2.0). Ahead of this work, due to the [end of life announcement](https://techcommunity.microsoft.com/t5/microsoft-entra-azure-ad-blog/microsoft-entra-change-announcements-september-2022-train/ba-p/2967454) of the Azure Active Directory Authentication Library (ADAL), PRs (ex. [openshift/cluster-ingress-operator](https://github.com/openshift/cluster-ingress-operator/pull/846)) have been opened for operators to migrate to creating clients via azidentity which are converted into an authorizer for use with v1 clients. Once these changes have been made, we propose that OpenShift operators continue to utilize a config secret to obtain authentication details as described in the previous section but create workload identity clients when the `azure_client_secret` is absent AND/OR when  `azure_federated_token_file` fields are found in the config. Config secrets will be generated by cluster creators prior to installation by using `ccoctl` and will be provided as manifests for install.
+In order to create Azure clients which utilize a `ClientAssertionCredential`, operators must update to version `>= v1.2.0` of the azidentity package within [azure-sdk-for-go](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity@v1.2.0). Ahead of this work, due to the [end of life
+announcement](https://techcommunity.microsoft.com/t5/microsoft-entra-azure-ad-blog/microsoft-entra-change-announcements-september-2022-train/ba-p/2967454) of the Azure Active Directory Authentication Library (ADAL), PRs (ex. [openshift/cluster-ingress-operator](https://github.com/openshift/cluster-ingress-operator/pull/846)) have been opened for operators to migrate to creating clients via
+azidentity which are converted into an authorizer for use with v1 clients. Once these changes have been made, we propose that OpenShift operators continue to utilize a config secret to obtain authentication details as described in the previous section but create workload identity clients when the `azure_client_secret` is absent AND/OR when  `azure_federated_token_file` fields are found in the
+config. Config secrets will be generated by cluster creators prior to installation by using `ccoctl` and will be provided as manifests for install.
 
 Due to the deployment of the Azure Workload Identity mutating admission webhook, environment variables should also be respected by client instatiation as an alternative way of supplying the `clientID` eg. `AZURE_CLIENT_ID`, `tenantID` eg. `AZURE_TENANT_ID` and `federatedTokenFile` eg. `AZURE_FEDERATED_TOKEN_FILE`.
 
@@ -213,7 +222,8 @@ func getAuthorizerForResource(config Config) (autorest.Authorizer, error) {
 
 #### Mutating admission webhook
 
-CCO will deploy and lifecycle the [Azure Workload Identity mutating admission webhook](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html) on Azure clusters such that customers can annotate workload `ServiceAccounts` with Managed Identity details necessary for creating clients. When the mutating admission webhook finds these annotations on a `ServiceAccount` referenced by a pod being created, environment variables are set for the pod for the `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE`.
+CCO will deploy and lifecycle the [Azure Workload Identity mutating admission webhook](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html) on Azure clusters such that customers can annotate workload `ServiceAccounts` with Managed Identity details necessary for creating clients. When the mutating admission webhook finds these annotations on a
+`ServiceAccount` referenced by a pod being created, environment variables are set for the pod for the `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE`.
 
 This will be similar to how CCO deploys the [AWS Pod Identity webhook](https://github.com/openshift/aws-pod-identity-webhook) which we have forked for use by customer workloads.
 
@@ -237,7 +247,8 @@ TBD
 
 ### Drawbacks
 
-The pod identity webhook deployed for AWS has received little ongoing maintenance since its initial deployment by CCO and this proposal adds yet another webhook to by lifecycled by CCO, however upstream seems to be moving in this direction for providing client details as opposed to config secrets. It is likely best for compatibility with how operators currently obtain client information from a config secret while also respecting the environment variables that would be set by the webhook. Additionally, upstream projects may reject the notion of reading these details from a config secret but that has yet to be seen.
+The pod identity webhook deployed for AWS has received little ongoing maintenance since its initial deployment by CCO and this proposal adds yet another webhook to by lifecycled by CCO, however upstream seems to be moving in this direction for providing client details as opposed to config secrets. It is likely best for compatibility with how operators currently obtain client information from a
+config secret while also respecting the environment variables that would be set by the webhook. Additionally, upstream projects may reject the notion of reading these details from a config secret but that has yet to be seen.
 
 ## Design Details
 
