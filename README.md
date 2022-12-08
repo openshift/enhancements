@@ -68,6 +68,11 @@ Create an enhancement here once you:
 - have identified people who agree to work on and maintain the enhancement
   - many enhancements will take several releases to complete
 
+Although you should probably not start your new idea's journey by writing an 
+enhancement up front, it's worth perusing [the enhancement template](guidelines/enhancement_template.md) to understand the 
+kinds of details that will ultimately be required, so you can keep them in mind as 
+you explore your new idea.
+
 ## How are Enhancements Reviewed and Approved?
 
 The author of an enhancement is responsible for managing it through
