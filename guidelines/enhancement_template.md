@@ -72,16 +72,49 @@ this proposal. Describe why the change is important and the benefits to users.
 
 ### User Stories
 
-Detail the things that people will be able to do if this is
-implemented. In each story, explain who the actor is based on their
-role, explain what they want to do with the system, and explain the
-underlying goal they have. Use the standard three part formula:
+Detail the things that people will be able to do if this is implemented and
+what goal that allows them to achieve. In each story, explain who the actor
+is based on their role, explain what they want to do with the system,
+and explain the underlying goal they have, what it is they are going to
+achieve with this new feature.
 
-"As a <role>, I want to <take some action> so that I can <accomplish a
-goal>."
+Use the standard three part formula:
+
+> "As a _role_, I want to _take some action_ so that I can _accomplish a
+goal_."
 
 Make the change feel real for users, without getting bogged down in
 implementation details.
+
+Here are some example user stories to show what they might look like:
+
+* As an OpenShift engineer, I want to write an enhancement, so that I can get feedback on my design and 
+build consensus about the approach to take before starting the implementation.
+* As a product manager, I want to review this enhancement proposal, so that I can make sure the customer 
+requirements are met by the design.
+* As an administrator, I want a one-click OpenShift installer, so that I can easily set up a new cluster
+without having to follow a long set of operations.
+
+In each example, the persona's goal is clear, and the goal is clearly provided
+by the capability being described.
+The engineer wants feedback on their enhancement from their peers, and writing
+an enhancement allows for that feedback.
+The product manager wants to make sure that their customer requirements are fulfilled,
+reviewing the enhancement allows them to check that.
+The administrator wants to set up his OpenShift cluster as easily as possible, and
+reducing the install to a single click simplifies that process.
+
+Here are some real examples from previous enhancements:
+* [As a member of OpenShift concerned with the release process (TRT, dev, staff engineer, maybe even PM),
+I want to opt in to pre-release features so that I can run periodic testing in CI and obtain a signal of 
+feature quality.](https://github.com/openshift/enhancements/blob/master/enhancements/installer/feature-sets.md#user-stories)
+* [As a cloud-provider affiliated engineer / platform integrator / RH partner
+I want to have a mechanism to signal OpenShift's built-in operators about additional
+cloud-provider specific components so that I can inject my own platform-specific controllers into OpenShift
+to improve the integration between OpenShift and my cloud provider.](https://github.com/openshift/enhancements/blob/master/enhancements/cloud-integration/infrastructure-external-platform-type.md#user-stories)
+* [As an OpenShift cluster administrator, I want to add worker nodes to my
+existing single control-plane node cluster, so that it'll be able to meet
+growing computation demands.](https://github.com/openshift/enhancements/blob/master/enhancements/single-node/single-node-openshift-with-workers.md#user-stories)
 
 Include a story on how this proposal will be operationalized:
 life-cycled, monitored and remediated at scale.
