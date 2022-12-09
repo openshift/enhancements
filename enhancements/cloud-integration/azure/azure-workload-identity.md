@@ -247,7 +247,7 @@ TBD
 
 ### Drawbacks
 
-The pod identity webhook deployed for AWS has received little ongoing maintenance since its initial deployment by CCO and this proposal adds yet another webhook to by lifecycled by CCO, however upstream seems to be moving in this direction for providing client details as opposed to config secrets. It is likely best for compatibility with how operators currently obtain client information from a
+The pod identity webhook deployed for AWS has received little ongoing maintenance since its initial deployment by CCO and this proposal adds yet another webhook to be lifecycled by CCO, however upstream seems to be moving in this direction for providing client details as opposed to config secrets. It is likely best for compatibility with how operators currently obtain client information from a
 config secret while also respecting the environment variables that would be set by the webhook. Additionally, upstream projects may reject the notion of reading these details from a config secret but that has yet to be seen.
 
 ## Design Details
