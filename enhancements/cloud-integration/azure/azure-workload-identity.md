@@ -30,7 +30,7 @@ trusted by Azure as the `ServiceAccounts` have been associated with [Azure Manag
 
 ## Motivation
 
-Previous enhancements have implemented short-lived credential support via [STS for AWS](https://github.com/openshift/enhancements/pull/260) and GCP Workload Identity. This enhancement proposal intends to compliment those implementations within the Azure platform.
+Previous enhancements have implemented short-lived credential support via [STS for AWS](https://github.com/openshift/enhancements/pull/260) and GCP Workload Identity. This enhancement proposal intends to complement those implementations within the Azure platform.
 
 ### User Stories
 
