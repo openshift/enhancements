@@ -11,6 +11,7 @@ reviewers: # Include a comment about what domain expertise a reviewer is expecte
   - @joelspeed, for MAPI / machine api operator.
   - @dmage, for image registry operator, please look at resource group being removed from credential secret and lookup from infrastructure object.
   - @Miciah, for ingress operator.
+  - @patrickdillon, for installer.
 approvers:
   - TBD, who can serve as an approver?
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
