@@ -85,7 +85,7 @@ To provide your own must-gather image, it must....
 
 1. Must have a zero-arg, executable file at `/usr/bin/gather` that does your default gathering
 2. Must produce data to be copied back at `/must-gather`.  The data must not contain any sensitive data.  We don't string PII information, only secret information.
-3. Must produce a text `/must-gather/version` that indicates the product (first line) and the version (second line, `major.minor.micro.qualifier`),
+3. Must produce a text `/must-gather/version` that indicates the product (first line) and the version (second line, `major.minor.micro-qualifier`),
    so that programmatic analysis can be developed.
 
 ### local fall-back
