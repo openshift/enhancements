@@ -166,8 +166,8 @@ defined below.
    Controller](https://github.com/openshift/cluster-node-tuning-operator/blob/master/docs/performanceprofile/performance_profile.md)
    part of [Cluster Node Tuning
    Operator](https://github.com/openshift/cluster-node-tuning-operator)
-   - This change will support adding the ability to explicitly pin
-     `Management` workloads.
+   - This change will support adding the ability to implicitly pin
+     `management` workloads based on `reserved` and `isolated` cores.
    - This change will support updating a global identifier when workload
      partitioning is detected on the nodes.
 
@@ -262,7 +262,10 @@ this ability to NTO to generate the needed configurations before
 We will add to the `render` command the ability to ingest the `Infrastructure`
 resource and if CPU Partitioning is set to `AllNodes` we will generate the
 bootstrap configurations. Things to note, this feature is explicitly designed to
-not be turned off.
+not be turned off. After the files have been generated, NTO/PAO will take
+ownership of the default generated files, so even if the customer deletes the
+PerformanceProfile resource the cluster will remain in compliance under the
+default configuration, which is CPU Partitioned but with the whole CPUSet used.
 
 We will need to support upgrades for Single Node since this feature already
 exists for them but this implementation differs slightly. To avoid needless
@@ -304,7 +307,7 @@ contain this feature. During initial upgrade, Single Node clusters will not
 contain the CPUPartitioningMode, for this reason we will fall back to checking
 with the old logic for Single Node to insure we do not cause issues when
 upgrading. This check for Single Node should be something that happens on initial
-upgrades, as NTO will update the `Infra.Status.CPUPartitioningMode` to the correct
+upgrades, as NTO will update the `infra.status.cpuPartitioning` to the correct
 value after initial boot.
 
 ### Performance Profile Controller
@@ -314,17 +317,15 @@ in the processes as a separate machine config manifest that requires the same
 information present in the `PerformanceProfile` resource, that being the
 `isolated` and `reserved` CPU sets. Because configuring multiple resources with
 the right CPU sets consistently is error prone, we want to extend the
-PerformanceProfile API to include settings for workload partitioning.
+Performance Profile Operator to manage settings for workload partitioning. This
+will not include an API Change, merely that those files will now be implicitly
+set by Performance Profile Operator when the cluster is setup for workload
+partitioning via the global flag in `infra.status.cpuPartitioning`.
 
 When installation is done and workload partitioning is set then from that point
 on the `kubelet` and `crio` only need to be configured with the desired CPU set
 to use. We currently express this to customers via the `reserved` CPU set as
 part of the performance profile api.
-
-We want to add a new `workloads` field to the `cpu` field that contains a list
-of enums for defining which workloads to pin. This should allow us to expand
-this in the future if desired, but in this enhancement we will only support
-`Management` which defines all of the Openshift workloads.
 
 ```yaml
 apiVersion: performance.openshift.io/v2
@@ -333,11 +334,10 @@ metadata:
   name: openshift-node-workload-partitioning-custom
 spec:
   cpu:
+    # These values will be used to derive pinned CPUSets
+    # for management workloads
     isolated: 2-3
     reserved: 0,1
-    # New addition
-    workloads:
-      - Management
 ```
 
 To support upgrades and maintain better signaling for the cluster, the
@@ -357,7 +357,7 @@ manifest that describes their desired `isolated` and `reserved` CPUSet and the
 
 **High level sequence diagram:**
 
-Install Time Sequence
+#### Install Time Sequence (With Performance Profile)
 
 ```mermaid
 sequenceDiagram
@@ -366,41 +366,29 @@ Installer->>Alice: Create Dir with Cluster Manifests
 loop Apply
     Alice->>Alice: Add PerformanceProfile Manifest
 end
-Alice->>Installer: Install Config With CPU Partitioning
 loop Generate
     Installer->>Installer: Set Infrastructure Status
 end
-Installer-->>APIServer: Create Cluster
-APIServer-->>MCO: Get Infrastructure Status
-loop Generate
-    MCO->>MCO: Generate MC Configs
+loop Bootstrap Cycle
+    Installer->>Installer: NTO Render
 end
-MCO-->>APIServer: Apply New MC
+Installer->>APIServer: Apply Manifests
+MCO-->>APIServer: Get MCs
 loop Generate
     MCO->>MCO: Generate Rendered MC
 end
-MCO-->>Node: Configure and Restart Node
+MCO-->>Node: Configure and Restart
 loop Apply
     Node->>Node: Set Kubelet Config
     Node->>Node: Set CRI- Config
     Node->>Node: Kubelet Advertises Cores
 end
 Node-->>MCO: Finished Restart
-loop Generate
-    NTO->>NTO: Machine Config from PerformanceProfile
-end
-NTO-->>MCO: Apply Machine Config
-MCO-->>Node: Configure and Restart Node
-loop Apply
-    Node->>Node: Set Kubelet Config
-    Node->>Node: Set CRI- Config
-end
-Node-->>MCO: Finished Restart
 ```
 
 - **Alice** is a human user who creates an Openshift cluster.
 - **Installer** is assisted installer that applies the user manifest.
-- **MCO** is the machine config operator.
+- **NTO** is the node tunning operator.
 - **Node** is the kubernetes node.
 
 1. Alice sits down and uses the installer to generate the manifests with the
@@ -411,18 +399,60 @@ Node-->>MCO: Finished Restart
 3. Alice adds the desired PerformanceProfile manifest for workload partitioning
    to the `openshift` folder that was generated by the installer.
 4. Alice then creates the cluster via the installer.
-5. The installer will apply the manifests and during the bootstrapping process
-   the MCO will generate the default configurations for workload partitioning
-   based off of the `Infrastructure.Status`, and restarts the nodes.
-6. After the cluster is up the NTO will then generate the machine configurations
-   using the information provided in the PerformanceProfile manifest.
-7. The MCO applies the updated workload partitioning configurations and restarts
+5. The installer will call the NTO `render` command to generate the manifests
+   during the bootstrapping process.
+6. The MCO applies the updated workload partitioning configurations and restarts
    the relevant nodes.
-8. Alice will now have a cluster that has been setup with workload partitioning
+7. Alice will now have a cluster that has been setup with workload partitioning
    and the desired workloads pinned to the specified CPUSet in the
    PerformanceProfile.
 
-Applying CPU Partitioning Size Change
+##### Install Time Sequence (Performance Profile)
+
+This sequence describes the scenario where you would want to activate Workload
+Pinning on a cluster, but not pin any workloads to CPUSets just yet.
+
+```mermaid
+sequenceDiagram
+Alice->>Installer: Start Install with CPU Partitioning
+loop Generate
+    Installer->>Installer: Set Infrastructure Status
+end
+loop Bootstrap Cycle
+    Installer->>Installer: NTO Render
+end
+Installer->>APIServer: Apply Manifests
+MCO-->>APIServer: Get MCs
+loop Generate
+    MCO->>MCO: Generate Rendered MC
+end
+MCO-->>Node: Configure and Restart
+loop Apply
+    Node->>Node: Set Kubelet Config
+    Node->>Node: Kubelet Advertises Cores
+end
+Node-->>MCO: Finished Restart
+```
+
+- **Alice** is a human user who creates an Openshift cluster.
+- **Installer** is assisted installer that applies the user manifest.
+- **NTO** is the node tunning operator.
+- **Node** is the kubernetes node.
+
+1. Alice sits down and uses the installer with the InstallConfig specifying
+   `cpuPartitioningMode: AllNodes` to create the cluster.
+   - `openshift-install create cluster`
+2. The installer generates the manifests to create the cluster, with the new
+   `Infrastructure.Status.CPUPartitioning: AllNodes`
+3. The installer will call the NTO `render` command to generate the manifests
+   during the bootstrapping process.
+4. The MCO applies the updated workload partitioning configurations and restarts
+   the relevant nodes.
+5. Alice will now have a cluster that has been setup with workload partitioning
+   with no workloads bound to CPUSets until choosing to apply a
+   PerformanceProfile later on.
+
+#### Applying CPU Partitioning Size Change
 
 ```mermaid
 sequenceDiagram
@@ -470,35 +500,39 @@ management CPU pool.
 
 1. User sits down at their computer.
 2. **The user creates a `PerformanceProfile` resource with the desired
-   `isolated` and `reserved` CPUSet with the `cpu.workloads[Management]`
-   added to the enum list.**
+   `isolated` and `reserved` CPUSet.**
 3. **User updates the `InstallConfig` and sets `cpuPartitioningMode: AllNodes`
    to denote that workload partitioning is turned on.**
 4. The user runs the installer to create the standard manifests, adds their
    extra manifests from steps 2, then creates the cluster.
-5. The kubelet starts up and finds the configuration file enabling the new
-   feature.
-6. The kubelet advertises `management.workload.openshift.io/cores` extended
-   resources on the node based on the number of CPUs in the host.
-7. The kubelet reads static pod definitions. It replaces the `cpu` requests with
-   `management.workload.openshift.io/cores` requests of the same value and adds
-   the `resources.workload.openshift.io/{container-name}: {"cpushares": 400}`
-   annotations for CRI-O with the same values.
-8. **NTO will generate the machine config manifests and apply them.**
-9. **MCO modifies kubelet and cri-o configurations of the relevant machine pools
-   to the updated `reserved` CPU cores and restarts the nodes**
-10. Something schedules a regular pod with the
+5. **During the installation bootstrap phase, the NTO's `render` command will be
+   called**.
+6. **The `render` command will generate the initial CPU Partitioning machine
+   config manifests signaled by the `Infrastructure.Status.CPUPartitioningMode`.**
+7. **The `render` command will then generate the subsequent manifest files
+   derived from the PerformanceProfile included by the user.**
+8. **All nodes will query the machine config server for their configuration prior
+   to joining the cluster.**
+9. **The kubelet starts up and finds the configuration file enabling the new
+   feature.**
+10. The kubelet advertises `management.workload.openshift.io/cores` extended
+    resources on the node based on the number of CPUs in the host.
+11. The kubelet reads static pod definitions. It replaces the `cpu` requests with
+    `management.workload.openshift.io/cores` requests of the same value and adds
+    the `resources.workload.openshift.io/{container-name}: {"cpushares": 400}`
+    annotations for CRI-O with the same values.
+12. Something schedules a regular pod with the
     `target.workload.openshift.io/management` annotation in a namespace with the
     `workload.openshift.io/allowed: management` annotation.
-11. The admission hook modifies the pod, replacing the CPU requests with
+13. The admission hook modifies the pod, replacing the CPU requests with
     `management.workload.openshift.io/cores` requests and adding the
     `resources.workload.openshift.io/{container-name}: {"cpushares": 400}`
     annotations for CRI-O.
-12. The scheduler sees the new pod and finds available
+14. The scheduler sees the new pod and finds available
     `management.workload.openshift.io/cores` resources on the node. The
     scheduler places the pod on the node.
-13. Repeat steps 10-12 until all pods are running.
-14. Cluster deployment comes up with management components constrained to subset
+15. Repeat steps 12-14 until all pods are running.
+16. Cluster deployment comes up with management components constrained to subset
     of available CPUs.
 
 ##### Partition Resize workflow
@@ -510,41 +544,16 @@ This section outlines an end-to-end workflow for resizing the CPUSet partition.
 
 1. User sits down at their computer.
 2. **The user updates the `PerformanceProfile` resource with the new desired
-   `isolated` and new `reserved` CPUSet with the `cpu.workloads[Management]`
-   in the enum list.**
+   `isolated` and new `reserved` CPUSet.**
 3. **NTO will re-generate the machine config manifests and apply them.**
-4. ... Steps same as [E2E Workflow deployment](#e2e-workflow-deployment) ...
-5. Cluster deployment comes up with management components constrained to subset
+4. **MCO will re-render change and propogate to the machine pools**
+5. ... Follows steps 9-15 defined in [E2E Workflow deployment](#e2e-workflow-deployment) ...
+6. Cluster deployment comes up with management components constrained to subset
    of available CPUs.
 
 ### API Extensions
 
-- We want to extend the `PerformanceProfile` API to include the addition of a
-  new `workloads[Management]` configuration under the `cpu` field.
-- The behavior of existing API should not change with this addition.
-- New resources that make use of this new field will have the current machine
-  config generated with the additional configurations added to the manifest.
-  - Uses the `reserved` field to add the correct CPU set to the CRI-O and
-    Kubelet configuration files to the currently generated machine config.
-  - If no `workloads[Management]` is provided then no workload partitioning
-    configurations are left wide open to all CPU sets for the Kubelet and CRI-O
-    configurations.
-
-Example change:
-
-```yaml
-apiVersion: performance.openshift.io/v2
-kind: PerformanceProfile
-metadata:
-  name: openshift-node-workload-partitioning-custom
-spec:
-  cpu:
-    isolated: 2-3
-    reserved: 0,1
-    # New enum addition
-    workloads:
-      - Management
-```
+N/A
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -558,9 +567,10 @@ affords us the chance to consolidate the configuration for `kubelet` and `crio`.
 
 We will modify the code path that generates the [new machine
 config](https://github.com/openshift/cluster-node-tuning-operator/blob/a780dfe07962ad07e4d50c852047ef8cf7b287da/pkg/performanceprofile/controller/performanceprofile/components/machineconfig/machineconfig.go#L91-L127)
-using the performance profile. With the new `spec.workloads[Management]`
-enum we will add the configuration for `crio` and `kubelet` to the final machine
-config manifest. Then the existing code path will apply the change as normal.
+using the performance profile. We will use the existing `reserved` and
+`isolated` signaled by the global `Infrastructure.Status.CPUPartitioningMode` to
+add the configuration for `crio` and `kubelet` to the final machine config
+manifest. Then the existing code path will apply the change as normal.
 
 #### API Server Admission Hook
 
@@ -601,16 +611,25 @@ The sames risks and mitigations highlighted in [Management Workload
 Partitioning](management-workload-partitioning.md) apply to this enhancement as
 well.
 
+#### Configuration
+
 We need to make it very clear to customers that this feature is supported as a
-day 0 configuration and day n+1 alterations are not be supported with this
+day 0 configuration and day n+1 alterations are not to be supported with this
 enhancement. Part of that messaging should involve a clear indication that this
-currently will be a cluster wide feature.
+currently will be a cluster wide feature. As such, adding nodes that are not
+configured for CPUPartitioning is not supported, with the enhancement as
+described we will add a node admission plugin to mitigate that possibility by
+not allowing customers to add nodes that are not configured properly.
+
+#### CPU Set size
 
 A risk we can run into is that a customer can apply a CPU set that is too small
 or out of bounds can cause problems such as extremely poor performance or start
 up errors. Mitigation of this scenario will be to provide proper guidance and
 guidelines for customers who enable this enhancement. As mentioned in our goal
-we do support re-configuring the CPUSet partition size after installation.
+we do support re-configuring the CPUSet partition size after installation. This
+is current messaging that is occurring with the Single Node implementation of
+this feature.
 
 Another similar risk to CPU set sizes being too small or out of bounds is if
 customers mix nodes of differing CPU set sizes in the same machine config pool.
@@ -621,9 +640,42 @@ of bound will fail, while the others will not. They will need to evict those
 machines and add ones that fall with in bounds of the `reserved` and `isolated`
 CPUSets defined in their PerformanceProfile.
 
-A possible risk are cluster upgrades, this is the first time this enhancement
-will be for multi-node clusters, we need to run more tests on upgrade cycles to
-make sure things run as expected.
+#### Deletions
+
+Once a cluster is setup for CPU Partitioning, if a customer was to delete the
+machine config defining the default CPU Partitioning, nothing would happen
+initially since the Kubelet does not remove the Capacity and Allocatable
+resource for workload partitioning from the Node resource. Scheduling will still
+work but we will run into A possible risk are cluster upgrades, this is the
+first time this enhancement will be for multi-node clusters, we need to run more
+tests on upgrade cycles to make sure things run as expected.
+
+#### CRIO Config File
+
+The current CRIO config supports multiple workload configurations. We do not
+support multiple workload CRIO config and customers need to be aware that when
+it comes to workload partitioning, we can only support the CRIO configurations
+we create and maintain on CPU partitioned clusters.
+
+#### Install Failures
+
+In terms of possible install failures, the most critical thing is that the
+`kubelet` workload partitioning configuration file exists before `kubelet` comes
+online to join the cluster. A cluster that is designated as CPU Partitioned via
+the global flag will not allow nodes not configured with CPU Partitioning to
+join. Since nodes query the `machine-config-server` for their configuration
+prior to joining the cluster, we expect any failures prior to this query to be
+resolved in any fashion they are currently being resolved in. When it comes to
+errors that occur after this query the thing that matters is that the `kubelet`
+configuration file `/etc/kubernetes/openshift-workload-pinning` exists. At the
+moment of writing its content is irrelevant as kubelet uses it as a flag to
+correctly apply the node `capacity/allocatable` information to the node resource
+when joining the cluster. If that file exists then you can resolve any errors in
+the fashion they are being resolved today. If that file does not exist due to
+some other error, we will need to access the node and create it and restart
+kubelet. Once kubelet applies the node `capacity/allocatable` information it
+does not remove them unless manually done so. Resolving errors from that
+point on should be done in what ever manner they are being done now.
 
 ### Drawbacks
 
@@ -696,12 +748,12 @@ trigger for this event will be:
 
 - If the `capacity` field set on the master node and is running in Single Node
 
-We will not change the current machine configs for single node deployments if
-they are already set, this will be done to avoid extra restarts. We will need to
-be clear with customers however, if they add the
-`spec.workloads[Management]` we will then generate the new machine config
-and an extra restart will happen. They will need to delete the old machine
-configs afterwards.
+One challenge we have with existing single node deployments of workload
+partitioning is that customers may have applied different named files and
+different formatting for the crio and kubelet configuration files. This means
+that a onetime secondary reboot during upgrade might be unavoidable to bring
+those cluster deployments in compliance with this new method of configuring
+workload partitioning.
 
 ### Version Skew Strategy
 
@@ -709,15 +761,7 @@ N/A
 
 ### Operational Aspects of API Extensions
 
-The addition to the API is an optional field which should not require any
-conversion admission webhook changes. This change will only be used to allow the
-user to explicitly define their intent and simplify the machine manifest by
-generating the extra machine manifests that are currently being created
-independently of the `PerformanceProfile` CRD.
-
-Futhermore the design and scope of this enhancement will mean that the existing
-Admission webhook will continue to apply the same warnings and error messages to
-Pods as described in the [failure modes](#failure-modes).
+N/A
 
 #### Failure Modes
 
