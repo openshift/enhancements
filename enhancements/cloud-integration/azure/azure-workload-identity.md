@@ -3,11 +3,18 @@ title: azure-workload-identity
 authors:
   - abutcher
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
+  - @2uasimojo
+  - @derekwaynecarr, for overall architecture.
+  - @sdodson, for overall architecture.
+  - @jharrington22, for service delivery considerations.
+  - @RomanBednar, for azure file/disk operators.
+  - @joelspeed, for MAPI / machine api operator.
+  - @dmage, for image registry operator, please look at resource group being removed from credential secret and lookup from infrastructure object.
+  - @Miciah, for ingress operator.
 approvers:
-  - TBD
+  - TBD, who can serve as an approver?
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - TBD
+  - None
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
 tracking-link:
@@ -50,12 +57,20 @@ Previous enhancements have implemented short-lived credential support via [STS f
 
 ## Proposal
 
-In this proposal, the Cloud Credential Operator's command-line utility (`ccoctl`) will be extended with subcommands for Azure which will provide methods for generating the manifests necessary to create an Azure cluster that utilizes Azure Workload Identity for core OpenShift operator authentication.
+In this proposal, the Cloud Credential Operator's command-line utility (`ccoctl`) will be extended with subcommands for Azure which will provide methods for generating the Azure infrastructure (blob container OIDC, managed identities and federated credentials) and secret manifests necessary to create an Azure cluster that utilizes Azure Workload Identity for core OpenShift operator authentication.
 
-OpenShift operators will be updated to create Azure clients using the operator's bound `ServiceAccount` token that has been associated with the `clientID` of a Managed Identity in Azure.
+OpenShift operators will be updated to create Azure clients using the operator's bound `ServiceAccount` token that has been associated with a Managed Identity (identified by `clientID`) in Azure. Operators (or repositories) that we expect will need changes, listed in [CCO-235](https://issues.redhat.com/browse/CCO-235):
+- https://github.com/openshift/cloud-credential-operator
+- https://github.com/openshift/cluster-image-registry-operator
+- https://github.com/openshift/cluster-ingress-operator
+- https://github.com/openshift/cluster-storage-operator
+- https://github.com/openshift/cluster-api-provider-azure
+- https://github.com/openshift/machine-api-operator
+- https://github.com/openshift/azure-disk-csi-driver-operator
+- https://github.com/openshift/azure-file-csi-driver-operator
 
 Managed Identity details such as the `clientID` and `tenantID` necessary for creating a client can also be supplied to pods as environment variables via a [mutating admission webhook provided by Azure Workload Identity](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html). This webhook would be deployed and lifecycled by the Cloud Credential Operator
-such that it could be utilized to supply credential details to customer workloads.
+such that it could be utilized to supply credential details to user workloads.
 
 ### Workflow Description
 
@@ -77,8 +92,8 @@ Usage:
 Available Commands:
   create-all                Create key pair, identity provider and Azure Managed Identities
   create-identity-provider  Create identity provider
-  create-managed-identities Create Azure Managed Identities
   create-key-pair           Create a key pair
+  create-managed-identities Create Azure Managed Identities
   delete                    Delete Azure identity provider and Managed Identity infrastructure
 
 Flags:
@@ -127,7 +142,7 @@ type: Opaque
 
 In order to create Azure clients which utilize a `ClientAssertionCredential`, operators must update to version `>= v1.2.0` of the azidentity package within [azure-sdk-for-go](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity@v1.2.0). Ahead of this work, due to the [end of life
 announcement](https://techcommunity.microsoft.com/t5/microsoft-entra-azure-ad-blog/microsoft-entra-change-announcements-september-2022-train/ba-p/2967454) of the Azure Active Directory Authentication Library (ADAL), PRs (ex. [openshift/cluster-ingress-operator](https://github.com/openshift/cluster-ingress-operator/pull/846)) have been opened for operators to migrate to creating clients via
-azidentity which are converted into an authorizer for use with v1 clients. Once these changes have been made, we propose that OpenShift operators continue to utilize a config secret to obtain authentication details as described in the previous section but create workload identity clients when the `azure_client_secret` is absent AND/OR when  `azure_federated_token_file` fields are found in the
+azidentity which are converted into an authorizer for use with v1 clients. Once these changes have been made, we propose that OpenShift operators continue to utilize a config secret to obtain authentication details as described in the previous section but create workload identity clients when the `azure_client_secret` is absent and when  `azure_federated_token_file` fields are found in the
 config. Config secrets will be generated by cluster creators prior to installation by using `ccoctl` and will be provided as manifests for install.
 
 Due to the deployment of the Azure Workload Identity mutating admission webhook, environment variables should also be respected by client instantiation as an alternative way of supplying the `clientID` eg. `AZURE_CLIENT_ID`, `tenantID` eg. `AZURE_TENANT_ID` and `federatedTokenFile` eg. `AZURE_FEDERATED_TOKEN_FILE`.
@@ -222,10 +237,10 @@ func getAuthorizerForResource(config Config) (autorest.Authorizer, error) {
 
 #### Mutating admission webhook
 
-CCO will deploy and lifecycle the [Azure Workload Identity mutating admission webhook](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html) on Azure clusters such that customers can annotate workload `ServiceAccounts` with Managed Identity details necessary for creating clients. When the mutating admission webhook finds these annotations on a
+CCO will deploy and lifecycle the [Azure Workload Identity mutating admission webhook](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html) on Azure clusters such that users can annotate workload `ServiceAccounts` with Managed Identity details necessary for creating clients. When the mutating admission webhook finds these annotations on a
 `ServiceAccount` referenced by a pod being created, environment variables are set for the pod for the `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE`.
 
-This will be similar to how CCO deploys the [AWS Pod Identity webhook](https://github.com/openshift/aws-pod-identity-webhook) which we have forked for use by customer workloads.
+This will be similar to how CCO deploys the [AWS Pod Identity webhook](https://github.com/openshift/aws-pod-identity-webhook) which we have forked for use by user workloads.
 
 #### Variation [optional]
 
@@ -254,7 +269,7 @@ config secret while also respecting the environment variables that would be set 
 
 ### Open Questions [optional]
 
-- From where should CCO source the mutating admission webhook for deployment?
+- From where should CCO source the mutating admission webhook for deployment? In order to generate our own build of the image backing the webhook we would have to fork [Azure/azure-workload-identity](https://github.com/Azure/azure-workload-identity)([dockerfile](https://github.com/Azure/azure-workload-identity/blob/main/docker/webhook.Dockerfile)).
 
 ### Test Plan
 
@@ -290,108 +305,31 @@ end to end tests.**
 
 #### Removing a deprecated feature
 
+None.
+
 ### Upgrade / Downgrade Strategy
 
-As clusters are upgraded, new permissions may be required or extended (in the case of future role granularity work) and customers must evaluate those changes at the upgrade boundary similarly to [upgrading an STS cluster in manual mode](https://docs.openshift.com/container-platform/4.11/authentication/managing_cloud_provider_credentials/cco-mode-manual.html#manual-mode-sts-blurb).
+As clusters are upgraded, new permissions may be required or extended (in the case of future role granularity work) and users must evaluate those changes at the upgrade boundary similarly to [upgrading an STS cluster in manual mode](https://docs.openshift.com/container-platform/4.11/authentication/managing_cloud_provider_credentials/cco-mode-manual.html#manual-mode-sts-blurb).
 
 ### Version Skew Strategy
 
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
-
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
+None.
 
 ### Operational Aspects of API Extensions
 
-Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
-admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
-especially how they impact the OCP system architecture and operational aspects.
-
-- For conversion/admission webhooks and aggregated apiservers: what are the SLIs (Service Level
-  Indicators) an administrator or support can use to determine the health of the API extensions
-
-  Examples (metrics, alerts, operator conditions)
-  - authentication-operator condition `APIServerDegraded=False`
-  - authentication-operator condition `APIServerAvailable=True`
-  - openshift-authentication/oauth-apiserver deployment and pods health
-
-- What impact do these API extensions have on existing SLIs (e.g. scalability, API throughput,
-  API availability)
-
-  Examples:
-  - Adds 1s to every pod update in the system, slowing down pod scheduling by 5s on average.
-  - Fails creation of ConfigMap in the system when the webhook is not available.
-  - Adds a dependency on the SDN service network for all resources, risking API availability in case
-    of SDN issues.
-  - Expected use-cases require less than 1000 instances of the CRD, not impacting
-    general API throughput.
-
-- How is the impact on existing SLIs to be measured and when (e.g. every release by QE, or
-  automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
-  this enhancement)
+None.
 
 #### Failure Modes
 
-- Describe the possible failure modes of the API extensions.
-- Describe how a failure or behaviour of the extension will impact the overall cluster health
-  (e.g. which kube-controller-manager functionality will stop working), especially regarding
-  stability, availability, performance and security.
-- Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
-  and add them as reviewers to this enhancement.
+None.
 
 #### Support Procedures
 
-Describe how to
-- detect the failure modes in a support situation, describe possible symptoms (events, metrics,
-  alerts, which log output in which component)
-
-  Examples:
-  - If the webhook is not running, kube-apiserver logs will show errors like "failed to call admission webhook xyz".
-  - Operator X will degrade with message "Failed to launch webhook server" and reason "WehhookServerFailed".
-  - The metric `webhook_admission_duration_seconds("openpolicyagent-admission", "mutating", "put", "false")`
-    will show >1s latency and alert `WebhookAdmissionLatencyHigh` will fire.
-
-- disable the API extension (e.g. remove MutatingWebhookConfiguration `xyz`, remove APIService `foo`)
-
-  - What consequences does it have on the cluster health?
-
-    Examples:
-    - Garbage collection in kube-controller-manager will stop working.
-    - Quota will be wrongly computed.
-    - Disabling/removing the CRD is not possible without removing the CR instances. Customer will lose data.
-      Disabling the conversion webhook will break garbage collection.
-
-  - What consequences does it have on existing, running workloads?
-
-    Examples:
-    - New namespaces won't get the finalizer "xyz" and hence might leak resource X
-      when deleted.
-    - SDN pod-to-pod routing will stop updating, potentially breaking pod-to-pod
-      communication after some minutes.
-
-  - What consequences does it have for newly created workloads?
-
-    Examples:
-    - New pods in namespace with Istio support will not get sidecars injected, breaking
-      their networking.
-
-- Does functionality fail gracefully and will work resume when re-enabled without risking
-  consistency?
-
-  Examples:
-  - The mutating admission webhook "xyz" has FailPolicy=Ignore and hence
-    will not block the creation or updates on objects when it fails. When the
-    webhook comes back online, there is a controller reconciling all objects, applying
-    labels that were not applied during admission webhook downtime.
-  - Namespaces deletion will not delete all objects in etcd, leading to zombie
-    objects when another namespace with the same name is created.
+- How to detect that operator credentials are incorrect / insufficient?
+  - ClusterOperators will be degraded when credentials are not present / insufficient.
+- How to detect that the mutating webhook is degraded?
+  - Webhook has `failurePolicy=Ignore` and will not block pod creation when degraded.
+  - Webhook should be deployed with replicas >= 2 and a PDB to ensure highly available.
 
 ## Implementation History
 
