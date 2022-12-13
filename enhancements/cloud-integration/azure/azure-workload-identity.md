@@ -3,15 +3,15 @@ title: azure-workload-identity
 authors:
   - abutcher
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - @2uasimojo
-  - @derekwaynecarr, for overall architecture.
-  - @sdodson, for overall architecture.
-  - @jharrington22, for service delivery considerations.
-  - @RomanBednar, for azure file/disk operators.
-  - @joelspeed, for MAPI / machine api operator.
-  - @dmage, for image registry operator, please look at resource group being removed from credential secret and lookup from infrastructure object.
-  - @Miciah, for ingress operator.
-  - @patrickdillon, for installer.
+  - "@2uasimojo"
+  - "@derekwaynecarr, for overall architecture."
+  - "@sdodson, for overall architecture."
+  - "@jharrington22, for service delivery considerations."
+  - "@RomanBednar, for azure file/disk operators."
+  - "@joelspeed, for MAPI / machine api operator."
+  - "@dmage, for image registry operator, please look at resource group being removed from credential secret and lookup from infrastructure object."
+  - "@Miciah, for ingress operator."
+  - "@patrickdillon, for installer."
 approvers:
   - TBD, who can serve as an approver?
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
