@@ -122,8 +122,15 @@ can cause un-recoverable scenarios for our customers. At install time we will
 also apply an initial machine config for workload partitioning that sets a
 default CPUSet for the whole CPUSet. Effectively this will behave as if workload
 partitioning is not turned on. When a customer wishes to pin the management
-workloads they will be able to do that via the existing Performance Profile.
+workloads they will be able to do that via the existing Performance Profile API.
 Resizing partition size will not cause any issues after installation.
+
+In short, the global identifier of `Infrastructure.Status.CPUPartitioning:
+AllNodes/None` will be the authoritative value that sets a cluster for workload
+partitioning or not. If a customer has a cluster setup with `CPUPartitioning:
+None`, applying a PerformanceProfile will not apply workload partitioning. With
+`CPUPartitioning: AllNodes` is the only condition when we will apply workload
+partitioning with the CPUSet size being driven by a Performance Profile instance.
 
 With this approach we eliminate the race condition that can occur if we apply
 the machine config after bootstrap via NTO. Since we create a "default" cri-o
