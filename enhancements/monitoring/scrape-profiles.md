@@ -28,8 +28,8 @@ The core OpenShift components ship a large number of metrics. A 4.12-nightly
 cluster on AWS currently produces around 350K series by default, and enabling
 additional add-ons increases that number. Users have repeatedly asked for a supported
 method of making Prometheus consume less memory, either by increasing the scraping
-timeout (which isn't a direction we would like to follow) or by scraping fewer targets 
--- for example, modifying the ServiceMonitors to drop metrics undesired to some users.
+interval or by scraping fewer targets -- for example, modifying the ServiceMonitors
+to drop metrics undesired to some users.
 
 These modifications are currently not possible, because the service monitors deployed to OCP
 are managed by operators and cannot be modified. This proposal outlines a solution for allowing
@@ -40,14 +40,14 @@ users to set a level of scraping aligned with their needs.
 OpenShift is an opinionated platform, and the default set of metrics has of course 
 been crafted to match what we think the majority of users might need. Nevertheless,
 users have repeatedly asked for the ability to reduce the amount of memory consumed by
-Prometheus either lowering the Prometheus scrape intervals or by modifying ServiceMonitors.
+Prometheus either by lowering the Prometheus scrape intervals or by modifying ServiceMonitors.
 
 Users currently can not control the ServiceMonitors scraped by Prometheus since some of the
 metrics collected are essential for other parts of the system to function propperly
 (console, HPA and alerts). Users also are not allowed to tune the interval at which Prometheus
 scrapes targets as this again can have unforeseen results that can hinder the platform, a very
 low cadence may overwhelm the platform Prometheus instance a very high interval may render some
-of the default alerts  ineffective.
+of the default alerts ineffective.
 
 The goal of this proposal is to allow users to pick their desired level of scraping while limiting
 the impact this might have on the platform, via resources under the control of the
@@ -56,7 +56,7 @@ cluster-monitoring-operator and other platform operators.
 
 ### User Stories
 
-- As an OpenShift user, I want to lower the amount of memory consumed by Prometheus in a supported way, so I can choose between different scrape profiles, e.g `full` or `operational`.
+- As an OpenShift user, I want to lower the amount of memory consumed by Prometheus in a supported way, so I can choose between different scrape profiles, e.g `full` or `minimal`.
 - As an OpenShift developer, I want a supported way to collect a subset of the metrics exported by my operator depending on the distribution.
 
 ### Goals
@@ -98,14 +98,14 @@ The different profiles would be pre-defined by us. Once a profile is selected CM
 - monitors with the profile label and the requested label value (profile)
 - monitors without the profile label present (additionally to the current namespace selector).
 
-This was it would be up to OpenShift teams if they wanted to adopt this feature. Without any change to a monitor, if a user picks a profile in the CMO config, things should work as they did before. When a OpenShift team wants to implement scrape profiles, they need to provide monitors for all profiles making sure they do not provide monitors without the profile label. If a profile label is not used, then a monitor will not be scraped at all for any given profile.
+OpenShift teams can decide if they wanted to adopt this feature. Without any change to a ServiceMonitor, if a user picks a profile in the CMO config, things should work as they did before. When an OpenShift team wants to implement scrape profiles, they need to provide monitors for all profiles, making sure they do not provide monitors without the profile label. If a profile label is not used, then a monitor will not be scraped at all for any given profile.
 
 In the beginning the goal is to support 2 profiles:
 
 - `full` (same as today)
-- `operational` (only collect metrics necessary for alerts, recording rules, telemetry and dashboards)
+- `minimal` (only collect metrics necessary for alerts, recording rules, telemetry and dashboards)
 
-When the cluster admin enables the `operational` profile, the k8s Prometheus resource would be configured accordingly:
+When the cluster admin enables the `minimal` profile, the k8s Prometheus resource would be configured accordingly:
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -144,8 +144,8 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
-    monitoring.openshift.io/scrape-profile: operational
-  name: foo-operational
+    monitoring.openshift.io/scrape-profile: minimal
+  name: foo-minimal
   namespace: openshift-bar
 spec:
   endpoints:
@@ -170,9 +170,9 @@ NA
 ```go
 type PrometheusK8sConfig struct {
   // Defines the scraping profile that will be enforced on the platform
-  // prometheus instance. Possible values are full and operational.
+  // prometheus instance. Possible values are full and minimal.
   //
-  // +kubebuilder:validation:Enum=full;operational
+  // +kubebuilder:validation:Enum=full;minimal
   // +optional
 	ScrapeProfile string `json:"scrapeProfile,omitempty"`
 }
@@ -180,7 +180,7 @@ type PrometheusK8sConfig struct {
 
 ### Implementation Details/Notes/Constraints [optional]
 
-Each OpenShift team that wants to adopt this feature will be responsible for providing the different monitors. This work is not trivial, dependecies beween operators exist, this makes unclear for developers if it's really fine or not for their operator in the "operational" profile to not expose a given metric. To try and help teams with this problem we would provide a tool that would consume a monitor and generate the "operational" monitor for that operator. However for this, the tool would need to have access to an up to date, instalation of OpenShift in order to query the Prometheus instance running in the cluster.
+Each OpenShift team that wants to adopt this feature will be responsible for providing the different monitors. This work is not trivial. Dependencies between operators and their metrics exist. This makes it difficult for developers to determine whether a given metric must be added to the "minimal" profile or not. To aid teams with this problem we will provide a tool that would consume a monitor and generate the "minimal" monitor for that operator. However for this, the tool would need to have access to an up to date, installation of OpenShift in order to query the Prometheus instance running in the cluster.
 
 ### Risks and Mitigations
 
@@ -244,7 +244,7 @@ end to end tests.**
 
 TBD but I don't think it applies here
 
-### Operational Aspects of API Extensions
+### minimal Aspects of API Extensions
 
 TBD but I don't think it applies here
 
@@ -264,6 +264,7 @@ Initial proofs-of-concept:
 
 ## Alternatives
 
+- Let users configure themselves the Prometheus scraping interval. This solution was discarded since some users might not be fully aware of the impact that changing this interval migh have. Too low of an interval and users might overwelm Prometheus and exaust it's memory. In contrast, too long of an interval might render the default alerts ineffective.
 - Add a seperate container to prometheus-operator (p-o) that would be used by p-o to modify the prometheus config according to a scrape profile.
   - This container would perform an analysis on what metrics were being used. Then it would provide prometheus operator with this list.
   - Prometheus-operator with the list provided by this new component would know what scraping targets it could change to keep certain metrics.
