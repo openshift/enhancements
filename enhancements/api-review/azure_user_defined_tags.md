@@ -44,7 +44,7 @@ Motivations include but are not limited to:
 ### User Stories
 
 - As an openshift administrator, I want to have tags added to all resources created 
-  in Azure by Openshift, so that I can restrict access granted to an OpenShift specific account
+  in Azure by Openshift, so that I can restrict access granted to an OpenShift specific account.
 
 ### Goals
 
@@ -283,8 +283,13 @@ resource "azurerm_resource_group" "main" {
 ### Graduation Criteria
 
 #### Dev Preview -> Tech Preview
+- Feature available for end-to-end usage.
+- Complete end user documentation.
+- UTs and e2e tests are present.
+- Gather feedback from the users.
 
 #### Tech Preview -> GA
+N/A. This feature is for Tech Preview, until decided for GA.
 
 #### Removing a deprecated feature
 
