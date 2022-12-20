@@ -412,11 +412,11 @@ type CloudControllerManagerSettings struct {
 
 // ExternalPlatformSpec holds the desired state for the generic External infrastructure provider.
 type ExternalPlatformSpec struct{
-    // ProviderName holds the arbitrary string represented cloud provider name, expected to be set at the installation time.
+    // PlatformName holds the arbitrary string represented cloud provider name, expected to be set at the installation time.
     // Intended to serve only for informational purposes and not expected to be used for decision-making.
     // +kubebuilder:default:="Unknown"
     // +optional
-    ProviderName string `json:"providerName,omitempty"`
+    PlatformName string `json:"platformName,omitempty"`
     // CloudControllerManager contains settings specific to the external Cloud Controller Manager (a.k.a. CCM or CPI)
     // +optional
     CloudControllerManager CloudControllerManagerSettings `json:"cloudControllerManager"`
