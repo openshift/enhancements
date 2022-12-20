@@ -83,7 +83,7 @@ to meet any of the below conditions
     special/unicode characters or starting with number, hence these are added as 
     constraints on every other Azure resource required by Openshift as well.
 3. A tag value can have a maximum of 256 characters.
-4. A resource, resource-group or subscription, user can configure a maximum of 5 tags
+4. A resource, resource-group or subscription, user can configure a maximum of 10 tags
    through Openshift. 
     - Azure supports a maximum of 50 tags except for Automation, Content Delivery Network,
     DNS resources which can have a maximum of 15 tags, hence restricting the number of 
