@@ -12,12 +12,6 @@ creation-date: 2022-12-06
 last-updated: yyyy-mm-dd
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/MON-2483
-see-also:
-  - "/enhancements/this-other-neat-thing.md"
-replaces:
-  - "/enhancements/that-less-than-great-idea.md"
-superseded-by:
-  - "/enhancements/our-past-effort.md"
 ---
 
 # Scrape profiles
@@ -25,22 +19,24 @@ superseded-by:
 ## Summary
 
 The core OpenShift components ship a large number of metrics. A 4.12-nightly
-cluster on AWS currently produces around 350K series by default, and enabling
-additional add-ons increases that number. Users have repeatedly asked for a supported
-method of making Prometheus consume less memory, either by increasing the scraping
-interval or by scraping fewer targets -- for example, modifying the ServiceMonitors
-to drop metrics undesired to some users.
+cluster on AWS currently produces around 350,000 unique timeseries by default,
+and enabling additional add-ons increases that number. Users have repeatedly
+asked for a supported method of making Prometheus consume less memory and CPU,
+either by increasing the scraping interval or by scraping fewer targets.
 
-These modifications are currently not possible, because the service monitors deployed to OCP
-are managed by operators and cannot be modified. This proposal outlines a solution for allowing
-users to set a level of scraping aligned with their needs.
+These modifications are currently not possible, because the OpenShift operators
+manage their service/pod monitors (either directly or via the cluster version
+operator) and any manual modification would be reverted. This proposal outlines
+a solution for allowing users to set a level of scraping aligned with their
+needs.
 
 ## Motivation
 
-OpenShift is an opinionated platform, and the default set of metrics has of course 
-been crafted to match what we think the majority of users might need. Nevertheless,
-users have repeatedly asked for the ability to reduce the amount of memory consumed by
-Prometheus either by lowering the Prometheus scrape intervals or by modifying ServiceMonitors.
+OpenShift is an opinionated platform, and the default set of metrics has of
+course been crafted to match what we think the majority of users might need.
+Nevertheless, users have repeatedly asked for the ability to reduce the amount
+of memory consumed by Prometheus either by lowering the Prometheus scrape
+intervals or by modifying ServiceMonitors.
 
 Users currently can not control the ServiceMonitors scraped by Prometheus since some of the
 metrics collected are essential for other parts of the system to function propperly
@@ -53,10 +49,20 @@ The goal of this proposal is to allow users to pick their desired level of scrap
 the impact this might have on the platform, via resources under the control of the
 cluster-monitoring-operator and other platform operators.
 
+Furthermore to assess the viability of the scrape profile feature the monitoring
+team performed a detailed analysis of its impact in an OpenShift cluster.
+The analysis consisted in a test where an OpenShift cluster would run three replicas
+of the OpenShift Prometheus instance but each replica would be configured to a 
+different scrape profile (`full`, `minimal`, `uponly`). Then we would trigger a 
+workload using kube-burner and at the end of 2 hours, we evaluated the results.
+We concluded that in terms of resource usage, given the results obtained we
+can confidently state that the feature is quite valuable given the reduction of
+CPU by ~21% and memory by ~33% when comparing the `minimal` to the `full` profile.
+More detail can be consulted in this [document](https://docs.google.com/document/d/1MA-HTJQ_X7y_bwpJS2IPbGmC4qDyIMp25jisr34X2F4/edit?usp=sharing)
 
 ### User Stories
 
-- As an OpenShift user, I want to lower the amount of memory consumed by Prometheus in a supported way, so I can choose between different scrape profiles, e.g `full` or `minimal`.
+- As an OpenShift cluster administrator, I want to lower the amount of resources consumed by Prometheus in a supported way, so I can choose between different scrape profiles, e.g `full` or `minimal`.
 - As an OpenShift developer, I want a supported way to collect a subset of the metrics exported by my operator depending on the distribution.
 
 ### Goals
@@ -68,6 +74,8 @@ cluster-monitoring-operator and other platform operators.
 ### Non-Goals
 
 - Dynamically adjusting metrics scraped at runtime based on heuristics.
+- Allowing users to explicitly set a list or a regex of metrics that they would
+want to be included in a given profile.
 
 ## Proposal
 
@@ -94,7 +102,7 @@ data:
       scrapeProfile: full 
 ```
 
-The different profiles would be pre-defined by us. Once a profile is selected CMO then populates the main Prometheus CR to select resources that implement the requested profile -- using [pod|service]MonitorSelector and the label `monitoring.openshift.io/scrape-profile` (profile label) -- this way Prometheus would select monitors from two sets:
+The different profiles would be pre-defined by the OpenShift monitoring team. Once a profile is selected CMO then populates the main Prometheus CR to select resources that implement the requested profile -- using [pod|service]MonitorSelector and the label `monitoring.openshift.io/scrape-profile` (profile label) -- this way Prometheus would select monitors from two sets:
 - monitors with the profile label and the requested label value (profile)
 - monitors without the profile label present (additionally to the current namespace selector).
 
@@ -130,34 +138,54 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
+    k8s-app: telemeter-client
     monitoring.openshift.io/scrape-profile: full
-  name: foo-full
-  namespace: openshift-bar
+  name: telemeter-client
+  namespace: openshift-monitoring
 spec:
   endpoints:
-    port: metrics
+  - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    interval: 30s
+    port: https
+    scheme: https
+    tlsConfig:
+      <...>
+  jobLabel: k8s-app
   selector:
     matchLabels:
-      app.kubernetes.io/name: foo
+      k8s-app: telemeter-client
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
+    k8s-app: telemeter-client
     monitoring.openshift.io/scrape-profile: minimal
-  name: foo-minimal
-  namespace: openshift-bar
+  name: telemeter-client
+  namespace: openshift-monitoring
 spec:
   endpoints:
-    port: metrics
+  - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    interval: 30s
+    port: https
+    scheme: https
+    tlsConfig:
+      <...>
+  jobLabel: k8s-app
   selector:
     matchLabels:
-      app.kubernetes.io/name: foo
+      k8s-app: telemeter-client
   metricRelabelings:
   - sourceLabels: [__name__]
     action: keep
-    regex: "requests_total|requests_failed_total"
+    regex: "federate_samples|federate_filtered_samples"
  ```
+
+Note: the `metricRelabeling` section only keeping two metrics, while the rest is dropped.
+
+Finally, a team that adopts the scrape profile feature should also add 
+themselves and their component to the list under 
+[Infrastruture needed](#infrastructure-needed-optional)
 
 #### Variation [optional]
 
@@ -171,9 +199,6 @@ NA
 type PrometheusK8sConfig struct {
   // Defines the scraping profile that will be enforced on the platform
   // prometheus instance. Possible values are full and minimal.
-  //
-  // +kubebuilder:validation:Enum=full;minimal
-  // +optional
 	ScrapeProfile string `json:"scrapeProfile,omitempty"`
 }
 ```
@@ -188,7 +213,9 @@ Each OpenShift team that wants to adopt this feature will be responsible for pro
   - The tool we provide would run in CI and ensure are ServiceMonitors are up to date;
 
 - A new profile is added, what will happen to operators that had implemented scrape profiles but did not implement the latest profile.
-  - TBD. Currently, according to the description above, they would not be scraped when the new profile would be picked.
+  - The monitoring team will use the list under 
+  [Infrastruture needed](#infrastructure-needed-optional) to help the developers
+  with the addoption of the new scrape profile.
 
 ### Drawbacks
 
@@ -200,6 +227,7 @@ Each OpenShift team that wants to adopt this feature will be responsible for pro
 
 - Should we add future profiles? 
 - Should developers have to comply with all profiles?
+- How will ensure that all metrics used by the console are still present?
 
 ### Test Plan
 
@@ -238,7 +266,8 @@ end to end tests.**
 
 ### Upgrade / Downgrade Strategy
 
-- Upgrade and downgrade are not expected to present a significant challenge. The new field is a small layers over existing stable APIs.
+- If this feature is accepted and is released to 4.13 then we should backport it as well to 4.12. The reason is that when the upgrade occurs and the new ServiceMonitors are deployed to the cluster, we don't want the 4.12 Prometheus-Operator to configure the 4.12 Prometheus instances to start double scraping OpenShift components that deployed the new ServiceMonitors.
+- Once this feature is backported upgrades and downgrades are not expected to present a significant challenge.
 
 ### Version Skew Strategy
 
@@ -264,11 +293,33 @@ Initial proofs-of-concept:
 
 ## Alternatives
 
-- Let users configure themselves the Prometheus scraping interval. This solution was discarded since some users might not be fully aware of the impact that changing this interval migh have. Too low of an interval and users might overwelm Prometheus and exaust it's memory. In contrast, too long of an interval might render the default alerts ineffective.
+- Make CMO injecting metric relabelling for all service monitors based on the rules being deployed, but this is not a good idea because: 
+  - CMO acting behind the back of other operators isn't probably a very good idea (less explicit, more brittle);
+  - it's likely to be less efficient because the relabeling configs would be very complex and expensive in terms of processing.
+- Let users configure themselves the Prometheus scraping interval. This solution was discarded because:
+  - Users might not be fully aware of the impact that changing this interval might have. Too low of an interval and users might overwhelm Prometheus and exhaust its memory. In contrast, too long of an interval might render the default alerts ineffective;
+  - It's not advisable to increase the scrape interval to more than 2 minutes. Staleness occurs at 5 minutes (by default) which is would cause gaps in graphs/dashboards;
+  - Many upstream dashboards were built while having the 30 second interval in mind;
+  - Scrapes can fail, but the user might not be mindful of this and set a high scrape interval;
 - Add a seperate container to prometheus-operator (p-o) that would be used by p-o to modify the prometheus config according to a scrape profile.
   - This container would perform an analysis on what metrics were being used. Then it would provide prometheus operator with this list.
   - Prometheus-operator with the list provided by this new component would know what scraping targets it could change to keep certain metrics.
+- Recently Azure also added support for scrape profiles:
+  - [Azure Docs](https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/prometheus-metrics-scrape-configuration-minimal)
+  -  https://github.com/Azure/prometheus-collector
+  - In their approach they also have [hard coded](https://github.com/Azure/prometheus-collector/blob/66ed1a5a27781d7e7e3bb1771b11f1da25ffa79c/otelcollector/configmapparser/tomlparser-default-targets-metrics-keep-list.rb#L28) 
+  set of metrics that are only consussumed when the minimal profile is enabled.
+  However, customer are also able to extend this minimal profile with regexes
+  to include metrics which might be interesting to them.
 
 ## Infrastructure Needed [optional]
 
-None.
+### Adopted Scrape Profiles
+
+Add the team and the component that wants to adopt scrape profiles
+
+
+```yaml
+----- Team -----| ----- Component -----
+Monitoring Team | Cluster Monitoring Operator
+```
