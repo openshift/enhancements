@@ -1,18 +1,25 @@
 ---
-title: haproxy-default-cookie-name.md
+title: haproxy-default-cookie-name
 authors:
   - "@dudinea"
 reviewers:
-  # "@ingressgurus"
-  - "TBD"
+  - "@frobware"
+  - "@knobunc"
+  - "@Miciah"
+  - "@candita"
+  - "@miheer"
+  - "@rfredette"
+  - "@deads2k"
 approvers:
-  - TBD
+  - "@frobware"
+  - "@Miciah"
+  - "@candita"
 api-approvers:
-  - TBD
-creation-date: 2023-01-07
-last-updated: 2023-01-07
+  - @deads2k
+creation-date: 2023-01-08
+last-updated: 2023-01-08
 tracking-link:
-  - TBD
+  - ??
 ---
 
 # HAProxy Max Connections Tuning
