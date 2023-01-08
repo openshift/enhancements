@@ -15,7 +15,7 @@ approvers:
   - "@Miciah"
   - "@candita"
 api-approvers:
-  - @deads2k
+  - "@deads2k"
 creation-date: 2023-01-08
 last-updated: 2023-01-08
 tracking-link:
