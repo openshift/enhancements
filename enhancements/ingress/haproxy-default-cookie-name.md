@@ -22,7 +22,7 @@ tracking-link:
   - ??
 ---
 
-# HAProxy Max Connections Tuning
+# Expose Default Session Cookie Name in HAProxy Configuration
 
 ## Release Signoff Checklist
 
