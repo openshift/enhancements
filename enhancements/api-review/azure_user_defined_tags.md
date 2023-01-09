@@ -257,7 +257,6 @@ to 21 characters.
     2. Storage account
     3. NetworkEdge
     4. Internal Registry
-    5. CCO
 
 - OpenShift is bound to have the common limitation for all Azure resources created
   by it and constraints other resources with the least matching limit as below
