@@ -19,7 +19,7 @@ api-approvers:
 creation-date: 2023-01-08
 last-updated: 2023-01-08
 tracking-link:
-  # FIMXE: where to create the issue?
+  # FIXME: where to create the issue?
   - https://issues.redhat.com/browse/AAA-NNN"
 ---
 
