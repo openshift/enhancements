@@ -5,10 +5,8 @@ authors:
 reviewers:
   - "@patrickdillon" ## reviewer for installer component
   - "@JoelSpeed" ## reviewer for api and machine-api-provider-azure components
-  - "@dmage" ## reviewer for cluster-image-registry-operator component
+  - "@flavianmissi" ## reviewer for cluster-image-registry-operator component
   - "@Miciah" ## reviewer for cluster-ingress-operator component
-  - "@akhil-rane" ## reviewer for cloud-credential-operator component
-  - "@trozet" ## reviewer for cloud-network-config-controller component
 approvers:
   - "@jerpeter1" ## approver for CFE
 api-approvers:
@@ -90,7 +88,7 @@ to meet any of the below conditions
     user defined tags to 10 and 5 for Openshift's internal use, for all the resources 
     created by Openshift.
 
-All in-cluster operators that create Azure resources (Cluster Infrastructure ,Storage ,Node ,NetworkEdge , Internal Registry ,CCO) will apply these tags during resource creation.
+All in-cluster operators that create Azure resources (Cluster Infrastructure ,Storage ,Node ,NetworkEdge , Internal Registry) will apply these tags during resource creation.
 
 The userTags field is intended to be set at install time and is considered immutable. 
 Components that respect this field must only ever add tags that they retrieve from this 
@@ -210,10 +208,8 @@ resources.
 
 | Operator | Resources created by the operator |
 | -------- | ----------------------------- |
-| cloud-network-config-controller | Private IP address |
 | cluster-image-registry-operator | Storage Account |
 | cluster-ingress-operator | Load Balancer, DNS records |
-| cloud-credential-operator | IAM roles and policies |
 | machine-api-provider-azure | Application Security Group, Availability Set, Group, Load Balancer, Public IP Address, Route, Network Security Group, Virtual Machine Extension, Virtual Interface, Virtual Machine, Virtual Network. |
 
 Below list of terraform Azure APIs to create resources should be updated to add user
