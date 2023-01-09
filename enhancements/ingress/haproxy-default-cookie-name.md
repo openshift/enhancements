@@ -19,7 +19,8 @@ api-approvers:
 creation-date: 2023-01-08
 last-updated: 2023-01-08
 tracking-link:
-  - ?
+  # FIMXE: where to create the issue?
+  - https://issues.redhat.com/browse/AAA-NNN"
 ---
 
 # Default Session Cookie Name
@@ -75,6 +76,11 @@ may simplify their migration to OpenShift v4.
    session persistence.
 
 ## Proposal
+
+### Workflow Description
+
+FIXME:
+
 
 ### API Extensions
 
