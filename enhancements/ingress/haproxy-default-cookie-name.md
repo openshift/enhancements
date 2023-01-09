@@ -79,8 +79,11 @@ may simplify their migration to OpenShift v4.
 
 ### Workflow Description
 
-FIXME:
-
+1. A cluster admin that needs to set default session cookie name for
+   an IngressController configures it using the `spec.cookieName`
+   field.
+2. The ingress operator reconciles the the change and configures the 
+   HAProxy router deployment to use this name for session cookies.
 
 ### API Extensions
 
@@ -195,7 +198,7 @@ N/A
 If the `spec.cookieName` is set to an invalid value (according to RFC-6265)
 the router will fall back to its default behavior (automatically
 generated cookie names).
- 
+
 #### Support Procedures
 
 N/A
