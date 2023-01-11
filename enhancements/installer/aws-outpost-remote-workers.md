@@ -1,5 +1,5 @@
 ---
-title: aws-outpost-remote-workers
+title: aws-outposts-remote-workers
 authors:
   - "@nirarg"
   - "@pkliczewski"
