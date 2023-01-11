@@ -34,7 +34,7 @@ Running workload closer to end users or leveraging data locality seems to be
 important for many customers. That is why AWS came up with fully [managed
 service](https://docs.aws.amazon.com/outposts/latest/userguide/how-outposts-works.html)
 that extends AWS infrastructure and run on customer's premises. This enhancement
-proposes extending how we deploy OCP on AWS platform so it ispossible to run on
+proposes extending how we deploy OCP on AWS platform so it is possible to run on
 AWS Outpost.
 
 The work is divided into several phases:
