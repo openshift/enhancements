@@ -41,7 +41,7 @@ The work is divided into several phases:
 - Phase 0: Research. Understand what is needed to deploy OCP on AWS Outpost.
   No code changes needed and we only provide [documentation](https://github.com/openshift/openshift-docs/pull/53265) on how to customize
   generated manifests and list known limitations.
-- Phase 1: Improve cluster deployment on AWS Ouptost by implementing necessary
+- Phase 1: Improve cluster deployment on AWS Outposts by implementing necessary
   changes and provide mitigations to know limitations.
 - Phase 2: Add OCP on AWS Outpost support to ROSA for regular clusters and HyperShift.
 
