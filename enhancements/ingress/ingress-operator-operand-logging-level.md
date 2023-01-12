@@ -2,6 +2,7 @@
 title: ingress-operator-operand-logging-level
 authors:
   - "@sgreene570"
+  - "@rfredette"
 reviewers:
   - "@alebedev87"
   - "@candita"
@@ -16,20 +17,11 @@ approvers:
   - "@knobunc"
   - "@Miciah"
 creation-date: 2021-06-07
-last-updated: 2021-06-09
+last-updated: 2023-01-10
 status: implementable
 ---
 
 # Ingress Log Level API
-
-## Release Signoff Checklist
-
-- [X] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Operational readiness criteria is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
@@ -80,17 +72,47 @@ The Ingress Operator currently uses [Zapr](https://github.com/go-logr/zapr) logg
 are displayed in the Ingress Operator pod logs. Debug-level logs are currently omitted in the Ingress Operator pod logs, although, the Ingress Operator itself rarely logs at any level
 other than `log.Info` and `log.Error`. In general, more lower-level logging calls could be added to the Ingress Operator.
 
-For this enhancement, a new `OperatorLogLevel` field is added to the Ingress Config resource:
+In a previous iteration of this enhancement proposal, the `OperatorLogLevel` field was proposed to be included in the
+Ingress Config resource (ingresses.config.openshift.io). However, the intent of the Ingress Config resource is to define
+cluster-wide ingress policies and configuration, not to define specific configuration for the Ingress Operator. As such,
+a new Custom Resource Definition (CRD) must be defined for Ingress Operator configuration, called `Ingress`
+(ingresses.operator.openshift.io):
+
+```go
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:subresource:status
+// +kubebuilder:object:root=true
+//
+// Ingress contains configuration options specific to the Ingress Operator itself.
+//
+// Compatibility level 1: Stable within a major release for a minimum of 12 months or 3 minor releases (whichever is longer).
+// +openshift:compatibility-gen:level=1
+type Ingress struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// spec is the specification of the desired behavior of the Ingress Operator.
+	Spec IngressSpec `json:"spec,omitempty"`
+	// status is the most recently observed status of the Ingress Operator.
+	Status IngressStatus `json:"status,omitempty"`
+}
+```
+
+The `OperatorLogLevel` field will be included in the `spec` of the Ingress Operator CRD:
 
 ```go
 type IngressSpec struct {
-	// <snip>
-
-	// operatorLogLevel controls the logging level of the Ingress Operator.
-	// See LogLevel for more information about each available logging level.
+	// operatorLogLevel is the log level of the ingress operator. Options are:
+	// * Normal
+	// * Debug
+	// * Trace
+	// * TraceAll
+	// When unspecified, the default level is "Normal".
 	//
 	// +optional
-	OperatorLogLevel LogLevel `json:"operatorLogLevel"`
+	OperatorLogLevel LogLevel `json:"operatorLogLevel,omitempty"`
 }
 ```
 
@@ -116,15 +138,14 @@ type IngressControllerLogging struct {
 
 ```
 
-This new field would allow a clsuter administrator to specify the desired logging level of an IngressController's openshift-router Go program, in addition
+This new field would allow a cluster administrator to specify the desired logging level of an IngressController's openshift-router Go program, in addition
 to the logging level of an IngressController's HAProxy access logs, if they are enabled.
 
-Both of these new APIs would be accompanied by appropriate `LogLevel` definitions:
+Both of these new APIs will use the `LogLevel` type, as defined in the openshift API
+[operator/v1/types.go](https://github.com/openshift/api/blob/master/operator/v1/types.go):
 
 ```go
-
-// LogLevel describes several available logging verbosity levels.
-// +kubebuilder:validation:Enum=Normal;Debug;Trace;TraceAll
+// +kubebuilder:validation:Enum="";Normal;Debug;Trace;TraceAll
 type LogLevel string
 
 var (
@@ -153,8 +174,11 @@ who are running into Ingress issues in production.
 
 ### Implementation Details/Notes/Constraints [optional]
 
+#### Avoiding unnecessary pod rollouts
+
 Setting the logging level for IngressController pods should not cause the IngressController pods to rollout.
-This is expected behavior whenever an IngressController's pod template's environment variables are changed.
+Unfortunately, a new pod rollout is the expected behavior whenever an environment variable is changed in an
+IngressController's pod template.
 
 In place of an additional environment variable, openshift-router could watch for changes to a `ConfigMap`
 that holds relevant Logging Level information. This would allow Router pods to modify the logging level of
@@ -164,6 +188,31 @@ In theory, this would make debugging Ingress issues easier, as the Router loggin
 Presumably, in some cases, rolling out new router pods may "reset" the issue and make it harder to observe without a reliable reproducer handy.
 
 It is worth noting the openshift-sdn team has already taken a similar approach for controlling the logging verbosity of some OpenShift networking components.
+
+#### Log level names in the Ingress Operator
+
+The most verbose named log level available in Zapr is debug, leaving no appropriate log level to map to "Trace" or
+"TraceAll". However, Zapr and the Zap library it's based on allow for more verbose log levels to be set using numeric
+values. Using the named log levels is reasonably straightforward:
+```go
+myLogger.Info("This will be logged when OperatorLogLevel is set to Normal or more verbose. It will show up in the logs as 'info'.")
+myLogger.V(0).Info("This will also be logged when OperatorLogLevel is Normal or more verbose. The log will not differentiate between V(0) and no V() level specified, so this will also show up as 'info'.")
+myLogger.V(1).Info("This will be logged when OperatorLogLevel is at least Debug. It will show up in the logs as 'debug'.")
+```
+
+Trace is the next level after Debug, so it makes sense to map it to `V(2)`:
+```go
+myLogger.V(2).Info("This will be logged when OperatorLogLevel is at least Trace. Since there is no official name for Trace, it will show up as 'Level(-2)'. Note that it's the inverse of the V() number specified.")
+```
+
+The logical next step is to map TraceAll to `V(3)`, but Zapr allows much higher V levels, with `V(127)` as the most
+verbose option. While it's likely that there's no reason for the Ingress Operator to use this whole range, TraceAll
+should include every log message possible, so setting `OperatorLogLevel` to TraceAll should set the internal log level
+to 127:
+```go
+myLogger.V(3).Info("This will only be logged when OperatorLogLevel is TraceAll. Since there is no official name for TraceAll, it will show up as 'Level(-3)'.")
+myLogger.V(127).Info("This will also only be logged when OperatorLogLevel is TraceAll. Since there is no official name for TraceAll, it will show up as 'Level(-127)'.")
+```
 
 ### Risks and Mitigations
 
