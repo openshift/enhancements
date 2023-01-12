@@ -51,7 +51,7 @@ Motivations include but are not limited to:
   install config, which is referred and applied by the installer and the in-cluster operators
   on the the Azure resources during cluster creation.
 - Tags must be applied at creation time, in an atomic operation. It isn't acceptable 
-  to create an object and to apply tags post cluster creation.
+  to create an object and to apply tags post resource creation.
 
 ### Non-Goals
 
@@ -68,8 +68,8 @@ found applied to other cloud platform resources which supports tagging for ex: A
 New `userTags` field will be added to `platform.azure` of install-config for the user 
 to define the tags to be added to the resources created by installer and in-cluster operators.
 
-If `platform.azure.userTags` of install-config has any tag defined same will be added 
-to all the azure resources created by Openshift except, when the tag validation fail
+If `platform.azure.userTags` in the install-config has any tags defined, then these tags will be added 
+to all the azure resources created by OpenShift, except when the tag validation fails
 to meet any of the below conditions
 1. A tag name can have a maximum of 128 characters.
     - Tag name has a limit of 512 characters for all resources except for 
@@ -96,9 +96,9 @@ field to cloud resources, they must never remove tags from the existing underlyi
 resource even if the tags are removed from this field(despite it being immutable).
 
 If the userTags field is changed post-install, there is no guarantee about how an 
-in-cluster operator will respond to the change. Some operators may reconcile the 
-change and change tags on the Azure resource. Some operators may ignore the change. 
-However, if tags are removed from userTags, the tag will not be removed from the 
+in-cluster operator will respond to the change. Operators may reconcile the 
+change by adding or updating tags on the Azure resource. Operators may ignore the change. 
+However, if a tag is removed from `userTags`, the tag must not be removed from the 
 Azure resource.
 
 ### Workflow Description
@@ -108,8 +108,8 @@ Azure resource.
 - openshift installer validates the tags defined in `.platform.azure.userTags` and 
   adds these tags to all resources created during installation and also updates 
   `.status.platformStatus.azure.resourceTags` of the `infrastructure.config.openshift.io`
-- In cluster operators refers `.status.platformStatus.azure.resourceTags` of the 
-  `infrastructure.config.openshift.io` to add tags to resources created later.
+- Cluster operators refer to `.status.platformStatus.azure.resourceTags` of the 
+  `infrastructure.config.openshift.io` object to add tags to resources created later.
 
 #### Variation [optional]
 
@@ -134,7 +134,7 @@ spec:
                   userTags:
                     additionalProperties:
                       type: string
-                    description: UserTags additional keys and values that the installer
+                    description: UserTags has additional keys and values that the installer
                       will add as tags to all resources that it creates. Resources
                       created by the cluster itself may not include these tags.
                   type: object
@@ -218,7 +218,7 @@ defined tags and as well the openshift default tag in the installer component.
 
 API update example:
 A local variable should be defined, which merges the default tag and the user
-defined Azure tags, which should be referred in the Azure resource APIs.
+defined Azure tags, which should be referenced in the Azure resource APIs.
 ``` terraform
 locals {
   tags = merge(
@@ -258,8 +258,8 @@ to 21 characters.
     3. NetworkEdge
     4. Internal Registry
 
-- OpenShift is bound to have the common limitation for all Azure resources created
-  by it and constraints other resources with the least matching limit as below
+- Because tags in `userTags` must be applied to all Azure resources that OpenShift creates,
+  tags must fit all the constraints of the various Azure resources as described below:
     1. Tag names cannot have `microsoft`, `azure`, `windows` prefixes which are
        reserved for Azure use.
     2. An Azure storage account has a limit of 128 characters for the tag name.
@@ -296,9 +296,9 @@ N/A. This feature is for Tech Preview, until decided for GA.
 ### Upgrade / Downgrade Strategy
 
 On upgrade:
-- Cluster operators that update the tags of Azure resources created for cluster 
-  should refer the new fields and take action. Any new resource created post-upgrade
-  and the operators managing the resource will add the user defined tags to the 
+- Cluster operators that update the tags of Azure resources created for the cluster 
+  should refer to the new fields and take action. For any new resource created post-upgrade,
+  the operator managing the resource will add the user-defined tags to the 
   resource. But the same does not apply to already existing resources, components may 
   or may not update the resources with the user defined tags.
 
