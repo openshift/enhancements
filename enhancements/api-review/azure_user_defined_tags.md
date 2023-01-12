@@ -253,21 +253,21 @@ to 21 characters.
   operator. In this proposal, the changes proposed and developed will be part of
   openshift-* namespace. External operators are not in the scope.
   User-defined tags can be updated on the following Azure resources.
-    - ResouceGroup
-    - Storage Account
-    - DNS Zones
-    - DNS Records
-    - ApplicationSecurityGroup
-		- AvailabilitySet
-		- Group
-		- LoadBalancer
-		- PublicIPAddress
-		- RouteTable
-		- SecurityGroup
-		- VirtualMachineExtension
-		- NetworkInterface
-		- VirtualMachine
-		- VirtualNetwork
+  - ResouceGroup
+  - Storage Account
+  - DNS Zones
+  - DNS Records
+  - ApplicationSecurityGroup
+  - AvailabilitySet
+  - Group
+  - LoadBalancer
+  - PublicIPAddress
+  - RouteTable
+  - SecurityGroup
+  - VirtualMachineExtension
+  - NetworkInterface
+  - VirtualMachine
+  - VirtualNetwork
 
 - Because tags in `userTags` must be applied to all Azure resources that OpenShift creates,
   tags must fit all the constraints of the various Azure resources as described below:
