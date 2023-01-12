@@ -209,7 +209,7 @@ resources.
 | Operator | Resources created by the operator |
 | -------- | ----------------------------- |
 | cluster-image-registry-operator | Storage Account |
-| cluster-ingress-operator | Load Balancer, DNS records |
+| cluster-ingress-operator | DNS records |
 | machine-api-provider-azure | Application Security Group, Availability Set, Group, Load Balancer, Public IP Address, Route, Network Security Group, Virtual Machine Extension, Virtual Interface, Virtual Machine, Virtual Network. |
 
 Below list of terraform Azure APIs to create resources should be updated to add user
@@ -240,7 +240,7 @@ string will be limited to a maximum length of 27 characters by trimming long clu
 to 21 characters.
 
 #### Caveats
-1. Updating or removing resource tags added by Openshift using an external interface,
+1. Updating or removing resource tags added by Openshift, using an external interface
    may or may not be reconciled by the operator managing the resource.
 2. Updating tags of individual resources is not supported and any tag present in 
    `.status.platformStatus.azure.resourceTags` of `infrastructure.config.openshift.io/v1` resource 
@@ -251,12 +251,23 @@ to 21 characters.
 ### Drawbacks
 - User-defined tags cannot be updated on an Azure resource which is not managed by an
   operator. In this proposal, the changes proposed and developed will be part of
-  openshift-* namespace. External operators are not in scope.
+  openshift-* namespace. External operators are not in the scope.
   User-defined tags can be updated on the following Azure resources.
-    1. Virtual machine resources created for master and worker nodes.
-    2. Storage account
-    3. NetworkEdge
-    4. Internal Registry
+    - ResouceGroup
+    - Storage Account
+    - DNS Zones
+    - DNS Records
+    - ApplicationSecurityGroup
+		- AvailabilitySet
+		- Group
+		- LoadBalancer
+		- PublicIPAddress
+		- RouteTable
+		- SecurityGroup
+		- VirtualMachineExtension
+		- NetworkInterface
+		- VirtualMachine
+		- VirtualNetwork
 
 - Because tags in `userTags` must be applied to all Azure resources that OpenShift creates,
   tags must fit all the constraints of the various Azure resources as described below:
@@ -304,8 +315,8 @@ On upgrade:
 
 On downgrade:
 - The status field may remain populated, components may or may not continue 
-  to tag newly created resources with the additional tags depending on regardless of
-  whether given component still has logic to respect the status tags, after the downgrade.
+  to tag newly created resources with the additional tags depending on whether 
+  given component still has logic to respect the status tags, after the downgrade.
 
 ### Version Skew Strategy
 
