@@ -144,8 +144,8 @@ workers in AWS outpost where we can configure ALB for workload ingress.
 ### Risks and Mitigations
 
 Administrator may want to use other storage types than gp2 (supported by outpost).
-In Phase 0 we will make gp2 storageclass as default and later make sure that gp3
-storageClass is not created.
+In Phase 0 we will provide steps on how to make gp2 storageclass as default and
+later make sure that gp3 storageClass is not created.
 
 ### Drawbacks
 
