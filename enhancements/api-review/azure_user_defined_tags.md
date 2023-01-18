@@ -47,7 +47,7 @@ Motivations include but are not limited to:
 ### Goals
 
 - The administrator or service (in the case of Managed OpenShift) installing OpenShift 
-  can configure allowed number of user-defined tags in the Openshift installer generated
+  can configure a list of up to 10 user-defined tags in the OpenShift installer generated
   install config, which is referred and applied by the installer and the in-cluster operators
   on the the Azure resources during cluster creation.
 - Tags must be applied at creation time, in an atomic operation. It isn't acceptable 
@@ -253,7 +253,7 @@ to 21 characters.
   operator. In this proposal, the changes proposed and developed will be part of
   openshift-* namespace. External operators are not in the scope.
   User-defined tags can be updated on the following Azure resources.
-  - ResouceGroup
+  - ResourceGroup
   - Storage Account
   - DNS Zones
   - DNS Records
@@ -290,9 +290,12 @@ to 21 characters.
 ### Open Questions
 
 ### Test Plan
+- Upgrade/downgrade testing
+- Sufficient time for feedback
+- Available by default
+- Stress testing for scaling and tag update scenarios
 
 ### Graduation Criteria
-
 #### Dev Preview -> Tech Preview
 - Feature available for end-to-end usage.
 - Complete end user documentation.
@@ -307,14 +310,27 @@ N/A. This feature is for Tech Preview, until decided for GA.
 ### Upgrade / Downgrade Strategy
 
 On upgrade:
-- Cluster operators that update the tags of Azure resources created for the cluster 
-  should refer to the new fields and take action. For any new resource created post-upgrade,
-  the operator managing the resource will add the user-defined tags to the 
-  resource. But the same does not apply to already existing resources, components may 
-  or may not update the resources with the user defined tags.
+- Scenario 1: Upgrade to OpenShift version having support for adding tags.
+  The new status field won't be populated since it is only populated by the
+  installer and that can't have happened if the cluster was installed from a
+  prior version. Components that consume the new field should take no action
+  since there won't be any tags to apply.
+- Scenario 2: Upgrade from OpenShift version having support for adding tags to higher:
+  Cluster operators that add tags to Azure resources created for the cluster
+  should refer to the tag fields and take action. For any new resource created
+  post-upgrade, the operator managing the resource will add the user-defined tags
+  to the resource. But the same does not apply to already existing resources,
+  components may or may not update the resources with the user defined tags.
 
 On downgrade:
-- The status field may remain populated, components may or may not continue 
+- Scenario 1: Cluster installed with OpenShift version having support for adding tags
+  and later downgrading to a lower version not having support for addding tags.
+  The new status field won't be populated since it is only populated by the
+  installer and that can't have happened if the cluster was installed from a
+  earlier version and upgraded to version having support for tags.
+- Scenario 2: Downgrading a cluster to installed OpenShift version not having support 
+  for adding tags from an OpenShift version having support for addding tags.
+  The status field may remain populated, components may or may not continue 
   to tag newly created resources with the additional tags depending on whether 
   given component still has logic to respect the status tags, after the downgrade.
 
