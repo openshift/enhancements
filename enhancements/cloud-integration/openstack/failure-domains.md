@@ -155,14 +155,17 @@ this proposal. Describe why the change is important and the benefits to users.
 * Define a unified failure domain specification for use by the control plane.
 * Integrate this into the installer.
 * Integrate this into Control Plane MachineSet.
+* Upgrade an existing cluster to use CPMS (but see caveat below).
 
 ### Non-Goals
 
-* Use of failure domains by workers. The ability to reuse a failure domain
-  definition for workers would be nice to have, but as we don't currently have
-  the ability to automatically distribute workers across failure domains this
-  can be achieved today by simply embedding the failure domain configuration
-  into the MachineSet.
+* Upgrading an existing cluster to use network failure domains.
+  Specifying network ports in failure domains requires using an external load
+  balancer. Configuration of the external load balancer is not in the scope of
+  this enhancement, but we should note that we do not currently intend to
+  support upgrading from internal to external load balancer so it will not be
+  supported to add failure domains defining network ports to an existing
+  cluster.
 
 ## Proposal
 
@@ -188,6 +191,11 @@ type OpenStackFailureDomain struct {
 }
 ```
 
+This same struct will be referenced:
+* In the installer's InstallConfig for the initial creation of control plane machines, and the creation of relevant manifests.
+* In CPMS, for the managed balancing of control plane machines across failure domains.
+* In OpenStackProviderSpec for the creation of a machine using a specific failure domain.
+
 Leaving any of these fields as their zero value will cause it to be ignored when provisioning the machine. This means a failure domain can define any combination of these fields.
 
 `ComputeAvailabilityZone` will set the Nova availability zone of the created server. It will be an error to specify [`AvailabilityZone`](https://github.com/openshift/api/blob/54592eea55395af31e82fa9a605eb45523115454/machine/v1alpha1/types_openstack.go#L67-L69) on a Machine with a failure domain that specifies `ComputeAvailabilityZone`.
@@ -195,6 +203,22 @@ Leaving any of these fields as their zero value will cause it to be ignored when
 `StorageAvailabilityZone` will set the Cinder availability zone of any volume attached during initial machine creation. This is currently limited to a root volume, but may be extended to include additional volumes in the future. It will be an error to specify [`Zone`](https://github.com/openshift/api/blob/54592eea55395af31e82fa9a605eb45523115454/machine/v1alpha1/types_openstack.go#L358-L360) on a volume attached to a Machine with a failure domain that specifies `StorageAvailabilityZone`.
 
 `Ports` will be used to define a set of port to be attached to all Machines in a failure domain. They use the existing [`PortOpts`](https://github.com/openshift/api/blob/54592eea55395af31e82fa9a605eb45523115454/machine/v1alpha1/types_openstack.go#L283-L333) struct to define ports with all currently supported properties and attachments. Unlike `ComputeAvailabilityZone` and `StorageAvailabilityZone` it will be allowed to specify this field on both the failure domain and the Machine. If both are defined they will be merged by putting the failure domain ports first.
+
+### Installer
+
+We will add a `FailureDomains` field to [OpenStack MachinePool](https://github.com/openshift/installer/blob/dbbc890fa40bd49aa761fb03612415e964c9eaf2/pkg/types/openstack/machinepool.go#L5-L35). The semantics of this field will be identical to the semantics of the existing `Zones` field expanded to be complete failure domains. We will document `Zones` as being deprecated, but have no immediate plans to remove it.
+
+```go
+    // FailureDomains defines a set of failure domains to be used by this
+    // MachinePool. For the control plane, machines will be balanced between
+    // these failure domains. For workers the installer will create a seperate
+    // MachineSet for each defined failure domain. If empty, failure domains
+    // will not be used and a single worker MachineSet will be created.
+    //
+    // It is an error to define both zones and failureDomains.
+    // +optional
+    FailureDomains []OpenStackFailureDomain `json:"failureDomains,omitempty"`
+```
 
 
 ### Workflow Description
@@ -286,6 +310,11 @@ burden?  Is it likely to be superceded by something else in the near future?
 ## Design Details
 
 ### Open Questions [optional]
+
+1. What is the interaction with MachineSubnet in the platform spec?
+
+
+
 
 This is where to call out areas of the design that require closure before deciding
 to implement the design.  For instance,
