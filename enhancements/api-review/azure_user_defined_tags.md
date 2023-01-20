@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed" ## approver for api component
 creation-date: 2022-07-12
-last-updated: 2022-07-12
+last-updated: 2023-01-20
 tracking-link:
   - https://issues.redhat.com/browse/OCPPLAN-8155
   - https://issues.redhat.com/browse/CORS-2249
@@ -68,9 +68,9 @@ found applied to other cloud platform resources which supports tagging for ex: A
 New `userTags` field will be added to `platform.azure` of install-config for the user 
 to define the tags to be added to the resources created by installer and in-cluster operators.
 
-If `platform.azure.userTags` in the install-config has any tags defined, then these tags will be added 
-to all the azure resources created by OpenShift, except when the tag validation fails
-to meet any of the below conditions
+If `platform.azure.userTags` in the install-config has any tags defined, then these tags 
+will be added to all the azure resources created by OpenShift, provided all the defined 
+tags meet all the below conditions or else the cluster creation will fail.
 1. A tag name can have a maximum of 128 characters.
     - Tag name has a limit of 512 characters for all resources except for 
     storage accounts, which has a limit of 128 characters and hence tag name 
@@ -323,16 +323,17 @@ On upgrade:
   components may or may not update the resources with the user defined tags.
 
 On downgrade:
-- Scenario 1: Cluster installed with OpenShift version having support for adding tags
-  and later downgrading to a lower version not having support for addding tags.
+- Scenario 1: Cluster installed with OpenShift version not having support for adding
+  tags, upgraded to a version supporting tags and later downgraded to installed version.
   The new status field won't be populated since it is only populated by the
   installer and that can't have happened if the cluster was installed from a
-  earlier version and upgraded to version having support for tags.
-- Scenario 2: Downgrading a cluster to installed OpenShift version not having support 
-  for adding tags from an OpenShift version having support for addding tags.
-  The status field may remain populated, components may or may not continue 
-  to tag newly created resources with the additional tags depending on whether 
-  given component still has logic to respect the status tags, after the downgrade.
+  earlier version and upgraded to version having support for tags and downgrade will
+  have no impact with the tags functionality too.
+- Scenario 2: Cluster installed with OpenShift version having support for adding tags,
+  upgraded to higher version and later downgraded to a lower version supporting tags.
+  The status field may remain populated, components may or may not continue to tag 
+  newly created resources with the additional tags depending on whether given component 
+  sill has the logic to add tags post downgrade. 
 
 ### Version Skew Strategy
 
