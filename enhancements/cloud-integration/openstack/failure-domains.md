@@ -2,6 +2,7 @@
 title: openstack-failure-domains
 authors:
   - "@mdbooth"
+  - "@pierreprinetti"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - "@JoelSpeed, api review, CPMS integration"
 approvers:
@@ -152,20 +153,13 @@ this proposal. Describe why the change is important and the benefits to users.
 
 ### Goals
 
-* Define a unified failure domain specification for use by the control plane.
+* Define a unified failure domain specification for use by machines.
 * Integrate this into the installer.
-* Integrate this into Control Plane MachineSet.
-* Upgrade an existing cluster to use CPMS (but see caveat below).
+* Ensure this can be integrated into ControlPlane MachineSet.
 
 ### Non-Goals
 
-* Upgrading an existing cluster to use network failure domains.
-  Specifying network ports in failure domains requires using an external load
-  balancer. Configuration of the external load balancer is not in the scope of
-  this enhancement, but we should note that we do not currently intend to
-  support upgrading from internal to external load balancer so it will not be
-  supported to add failure domains defining network ports to an existing
-  cluster.
+* Integration with ControlPlane MachineSet.
 
 ## Proposal
 
@@ -192,9 +186,9 @@ type OpenStackFailureDomain struct {
 ```
 
 This same struct will be referenced:
-* In the installer's InstallConfig for the initial creation of control plane machines, and the creation of relevant manifests.
-* In CPMS, for the managed balancing of control plane machines across failure domains.
+* In the installer's InstallConfig for the initial creation of control plane servers and the creation of relevant manifests.
 * In OpenStackProviderSpec for the creation of a machine using a specific failure domain.
+* In CPMS, for the managed balancing of control plane machines across failure domains.
 
 Leaving any of these fields as their zero value will cause it to be ignored when provisioning the machine. This means a failure domain can define any combination of these fields.
 
@@ -202,11 +196,13 @@ Leaving any of these fields as their zero value will cause it to be ignored when
 
 `StorageAvailabilityZone` will set the Cinder availability zone of any volume attached during initial machine creation. This is currently limited to a root volume, but may be extended to include additional volumes in the future. It will be an error to specify [`Zone`](https://github.com/openshift/api/blob/54592eea55395af31e82fa9a605eb45523115454/machine/v1alpha1/types_openstack.go#L358-L360) on a volume attached to a Machine with a failure domain that specifies `StorageAvailabilityZone`.
 
-`Ports` will be used to define a set of port to be attached to all Machines in a failure domain. They use the existing [`PortOpts`](https://github.com/openshift/api/blob/54592eea55395af31e82fa9a605eb45523115454/machine/v1alpha1/types_openstack.go#L283-L333) struct to define ports with all currently supported properties and attachments. Unlike `ComputeAvailabilityZone` and `StorageAvailabilityZone` it will be allowed to specify this field on both the failure domain and the Machine. If both are defined they will be merged by putting the failure domain ports first.
+`Ports` will be used to define a set of port to be attached to all Machines in a failure domain. They use the existing [`PortOpts`](https://github.com/openshift/api/blob/54592eea55395af31e82fa9a605eb45523115454/machine/v1alpha1/types_openstack.go#L283-L333) struct to define ports with all currently supported properties and attachments with the same semantics. Note specifically that the network or subnet a port will attach to must already exist. Unlike `ComputeAvailabilityZone` and `StorageAvailabilityZone` it will be allowed to specify this field on both the failure domain and the Machine. If both are defined they will be merged by putting the failure domain ports first.
 
 ### Installer
 
-We will add a `FailureDomains` field to [OpenStack MachinePool](https://github.com/openshift/installer/blob/dbbc890fa40bd49aa761fb03612415e964c9eaf2/pkg/types/openstack/machinepool.go#L5-L35). The semantics of this field will be identical to the semantics of the existing `Zones` field expanded to be complete failure domains. We will document `Zones` as being deprecated, but have no immediate plans to remove it.
+The installer is directly reponsible for initial creation of the control plane servers. It is only indirectly responsible for creation of workers through the creation of the appropriate manifests.
+
+We will add a `FailureDomains` field to [OpenStack MachinePool](https://github.com/openshift/installer/blob/dbbc890fa40bd49aa761fb03612415e964c9eaf2/pkg/types/openstack/machinepool.go#L5-L35). The semantics of this field will be identical to the semantics of the existing `Zones` field expanded to be complete failure domains. These semantics are described in the comment below. We will document `Zones` as being deprecated, but have no immediate plans to remove it.
 
 ```go
     // FailureDomains defines a set of failure domains to be used by this
@@ -220,6 +216,30 @@ We will add a `FailureDomains` field to [OpenStack MachinePool](https://github.c
     FailureDomains []OpenStackFailureDomain `json:"failureDomains,omitempty"`
 ```
 
+// TODO: Interaction with MachinesSubnet. How does the installer know when not to create a machine network? Can failuredomains be 'incompatible'? e.g. Within a set of failure domains, some define ports and others do not.
+
+Note that there is an unusual interaction here with [`MachinesSubnet`](https://github.com/openshift/installer/blob/dbbc890fa40bd49aa761fb03612415e964c9eaf2/pkg/types/openstack/platform.go#L112-L117) in the OpenStack platform spec. There is currently a concept of a single cluster-wide default subnet which Machines will be attached to if no other network is specified. By default the installer will create this subnet, but if the user wants to use an existing subnet it can be specified in `MachinesSubnet`, and creation of a new default network will be suppressed.
+
+In the most likely usage scenario for network failure domains the
+
+Currently, if the user specifies `MachinesSubnet` in the platform spec and omits ports from the (Machine) provider spec, the installer will not create a default network and instead add the specified `MachinesSubnet` as the default network, which is required to exist already. It is not possible to achieve equivalent behaviour when using failure domains without a workaround. If the user specifies 3 different subnets for 3 control plane failure domains, the machines will not have a default subnet added, but that subnet will be created anyway. A workaround would be to arbitrarily specify one of them as `MachinesSubnet`, which would prevent the creation of the default network but would never be used because subnets are already defined in the failure domain. We should likely tidy this interface up in the future.
+
+defaultSubnet: (create|specific|none)
+
+// Note: definition of default network in MAPO
+
+### OpenStackProviderSpec
+
+OpenStackProviderSpec includes a copy of the failure domain. This means that a higher level orchestrator, e.g. the installer when creating multiple MachineSets, or CPMS when creating Machines in different failure domains, only needs to do a simple copy. The Machine controller will validate and merge the FailureDomain with the rest of the MachineSpec at server creation time.
+
+```go
+    // The OpenStackFailureDomain used to create the server.
+    FailureDomains OpenStackFailureDomain `json:"failureDomains,omitempty"`
+```
+
+### ControlPlane MachineSet
+
+The full details of integration with ControlPlane MachineSet are out of scope of this enhancement. However, we must ensure this enhancement is compatible with future integration with CPMS.
 
 ### Workflow Description
 
