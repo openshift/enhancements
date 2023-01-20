@@ -216,17 +216,9 @@ We will add a `FailureDomains` field to [OpenStack MachinePool](https://github.c
     FailureDomains []OpenStackFailureDomain `json:"failureDomains,omitempty"`
 ```
 
-// TODO: Interaction with MachinesSubnet. How does the installer know when not to create a machine network? Can failuredomains be 'incompatible'? e.g. Within a set of failure domains, some define ports and others do not.
+The `MachinesSubnet` option in install-config can be used to define the default subnet where to attach servers that do not have a Failure domain, or servers in Failure domains that do not specify Ports. If no `MachinesSubnet` is specified, the Installer will create a subnet and use it as the `MachinesSubnet`.
 
-Note that there is an unusual interaction here with [`MachinesSubnet`](https://github.com/openshift/installer/blob/dbbc890fa40bd49aa761fb03612415e964c9eaf2/pkg/types/openstack/platform.go#L112-L117) in the OpenStack platform spec. There is currently a concept of a single cluster-wide default subnet which Machines will be attached to if no other network is specified. By default the installer will create this subnet, but if the user wants to use an existing subnet it can be specified in `MachinesSubnet`, and creation of a new default network will be suppressed.
-
-In the most likely usage scenario for network failure domains the
-
-Currently, if the user specifies `MachinesSubnet` in the platform spec and omits ports from the (Machine) provider spec, the installer will not create a default network and instead add the specified `MachinesSubnet` as the default network, which is required to exist already. It is not possible to achieve equivalent behaviour when using failure domains without a workaround. If the user specifies 3 different subnets for 3 control plane failure domains, the machines will not have a default subnet added, but that subnet will be created anyway. A workaround would be to arbitrarily specify one of them as `MachinesSubnet`, which would prevent the creation of the default network but would never be used because subnets are already defined in the failure domain. We should likely tidy this interface up in the future.
-
-defaultSubnet: (create|specific|none)
-
-// Note: definition of default network in MAPO
+Note that in deployments where all the servers are spawned in Failure domains, and where all these Failure domains have Ports specified, the `MachinesSubnet` may remain empty. To prevent the Installer from creating a `MachinesSubnet` subnet, set `MachinesSubnet` in install-config to an existing subnet.
 
 ### OpenStackProviderSpec
 
