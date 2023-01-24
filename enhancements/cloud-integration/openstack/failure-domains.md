@@ -155,11 +155,11 @@ this proposal. Describe why the change is important and the benefits to users.
 
 * Define a unified failure domain specification for use by machines.
 * Integrate this into the installer.
-* Ensure this can be integrated into ControlPlane MachineSet.
+* Ensure this can be integrated into Control Plane MachineSet.
 
 ### Non-Goals
 
-* Integration with ControlPlane MachineSet.
+* Integration with Control Plane MachineSet.
 
 ## Proposal
 
@@ -229,45 +229,223 @@ OpenStackProviderSpec includes a copy of the failure domain. This means that a h
     FailureDomains OpenStackFailureDomain `json:"failureDomains,omitempty"`
 ```
 
-### ControlPlane MachineSet
+### Control Plane MachineSet
 
-The full details of integration with ControlPlane MachineSet are out of scope of this enhancement. However, we must ensure this enhancement is compatible with future integration with CPMS.
+The full details of integration with Control Plane MachineSet are out of scope of this enhancement. However, we must ensure this enhancement is compatible with future integration with CPMS.
+
+Our primary concern is to ensure we can implement [InjectFailureDomain and ExtractFailureDomain from ProviderConfig](https://github.com/openshift/cluster-control-plane-machine-set-operator/blob/7f66c3455bda9b23ad063eafd4c797541e358d6d/pkg/machineproviders/providers/openshift/machine/v1beta1/providerconfig/providerconfig.go#L51-L59):
+
+```go
+  type ProviderConfig interface {
+    // InjectFailureDomain is used to inject a failure domain into the ProviderConfig.
+    // The returned ProviderConfig will be a copy of the current ProviderConfig with
+    // the new failure domain injected.
+    InjectFailureDomain(failuredomain.FailureDomain) (ProviderConfig, error)
+
+    // ExtractFailureDomain is used to extract a failure domain from the ProviderConfig.
+    ExtractFailureDomain() failuredomain.FailureDomain
+```
+
+We can always do this unambiguously because we store the entire failure domain in the ProviderSpec.
+
+### Cluster API Provider OpenStack
+
+We will implement this behaviour in upstream CAPO first. Critically the points of similarity will be:
+
+* The OpenStackFailureDomain struct will be identical in OpenShift and CAPO. To ensure the independence of the OpenShift API we will have a copy rather than a reference, but the intention will be for them to remain in lock step.
+* CAPO will have a complete copy of the failure domain in the OpenStackMachineSpec analogous to the copy of the failure domain in OpenStackProviderSpec.
+
+The intention is that in CAPO the machine controller will substitute failure domain values into machine spec prior to calling the server creation function shared with MAPO. Therefore MAPO will also have to do this failure domain substitution.
+
+Note that the above is subject to change due to upstream review.
 
 ### Workflow Description
 
-Explain how the user will use the feature. Be detailed and explicit.
-Describe all of the actors, their roles, and the APIs or interfaces
-involved. Define a starting state and then list the steps that the
-user would need to go through to trigger the feature described in the
-enhancement. Optionally add a
-[mermaid](https://github.com/mermaid-js/mermaid#readme) sequence
-diagram.
+#### Create a new cluster with control plane and worker failure domains
 
-Use sub-sections to explain variations, such as for error handling,
-failure recovery, or alternative outcomes.
+An OpenStack cloud has 3 failure domains: az1, az2, and az3. Each of these has corresponding Nova(compute) and Cinder(storage) availability zones of the same name. Additionally each failure domain contains a pre-created provider network with a subnet.
 
-For example:
+The user wants to create a control plane with 3 nodes with each node in a different failure domain, and 6 workers distributed evenly across the same 3 failure domains.
 
-**cluster creator** is a human user responsible for deploying a
-cluster.
+The user creates an install config containing the following:
 
-**application administrator** is a human user responsible for
-deploying an application in a cluster.
+```yaml
+platform:
+  openstack:
+    machinesSubnet: 31ad4088-7e52-48da-9df5-35e70da438f6
+controlPlane:
+  name: control-plane
+  platform:
+    openstack:
+      type: m1.large
+      rootVolume:
+        size: 50
+        type: gold
+      failureDomains:
+      - computeAvailabilityZone: az1
+        storageAvailabilityZone: az1
+        ports:
+        - networkID: 4a270cf8-f5f9-4a09-8cfc-d39d77aa2ba1
+          fixedIPs:
+          - subnetID: 31ad4088-7e52-48da-9df5-35e70da438f6
+          tags:
+          - "control-plane"
+      - computeAvailabilityZone: az2
+        storageAvailabilityZone: az2
+        ports:
+        - networkID: dbc8664c-feee-4168-854b-75f8eb8eb258
+          fixedIPs:
+          - subnetID: c23f88c0-910a-4d4a-9ca6-9a11a0d71f40
+          tags:
+          - "control-plane"
+      - computeAvailabilityZone: az3
+        storageAvailabilityZone: az3
+        ports:
+        - networkID: a996c932-2aa1-4095-a40e-765bf844fcb4
+          fixedIPs:
+          - subnetID: 61d376b0-3714-4549-b017-3a5e0007f07c
+          tags:
+          - "control-plane"
+  replicas: 3
+compute:
+- name: worker
+  platform:
+    openstack:
+      type: m1.large
+      rootVolume:
+        size: 50
+        type: silver
+      failureDomains:
+      - computeAvailabilityZone: az1
+        storageAvailabilityZone: az1
+        ports:
+        - networkID: 4a270cf8-f5f9-4a09-8cfc-d39d77aa2ba1
+          fixedIPs:
+          - subnetID: 31ad4088-7e52-48da-9df5-35e70da438f6
+          tags:
+          - "control-plane"
+      - computeAvailabilityZone: az2
+        storageAvailabilityZone: az2
+        ports:
+        - networkID: dbc8664c-feee-4168-854b-75f8eb8eb258
+          fixedIPs:
+          - subnetID: c23f88c0-910a-4d4a-9ca6-9a11a0d71f40
+          tags:
+          - "control-plane"
+      - computeAvailabilityZone: az3
+        storageAvailabilityZone: az3
+        ports:
+        - networkID: a996c932-2aa1-4095-a40e-765bf844fcb4
+          fixedIPs:
+          - subnetID: 61d376b0-3714-4549-b017-3a5e0007f07c
+          tags:
+          - "control-plane"
+  replicas: 6
+```
 
-1. The cluster creator sits down at their keyboard...
-2. ...
-3. The cluster creator sees that their cluster is ready to receive
-   applications, and gives the application administrator their
-   credentials.
+Note that by specifying `machinesSubnet` the installer will not create a default control plane network. Any future workers created without explicit ports will be attached to this subnet.
+
+The created Machines will contain the relevant failure domain in full in their `OpenStackProviderSpec`, e.g.:
+
+```yaml
+  ...
+  flavor: m1.large
+  rootVolume:
+    volumeType: gold
+    size: 50
+  failureDomain:
+    computeAvailabilityZone: az1
+    storageAvailabilityZone: az1
+    ports:
+    - networkID: 4a270cf8-f5f9-4a09-8cfc-d39d77aa2ba1
+      fixedIPs:
+      - subnetID: 31ad4088-7e52-48da-9df5-35e70da438f6
+      tags:
+      - "control-plane"
+```
+
+#### Upgrade an existing cluster to use control plane failure domains
+
+This is not supported until we integrate with Control Plane MachineSet.
+
+#### Upgrade an existing cluster to use worker failure domains
+
+Note that there is currently little reason to do this. The only functionality we currently have for distributing workers across failure domains is in the installer, so not relevent to an existing cluster. However, the user would do this by creating a new MachineSet with a template containing the failure domain definition. e.g.:
+
+```yaml
+spec:
+  ...
+  replicas: 5
+  template:
+    ...
+    spec:
+      providerSpec:
+        value:
+          apiVersion: openstackproviderconfig.openshift.io/v1alpha1
+          kind: OpenstackProviderSpec
+          ...
+          flavor: m1.large
+          image: rhcos
+          failureDomain:
+            computeAvailabilityZone: az1
+            ports:
+            - networkID: 4a270cf8-f5f9-4a09-8cfc-d39d77aa2ba1
+              fixedIPs:
+              - subnetID: 31ad4088-7e52-48da-9df5-35e70da438f6
+              tags:
+              - "control-plane"
+```
 
 #### Variation [optional]
 
-If the cluster creator uses a standing desk, in step 1 above they can
-stand instead of sitting down.
+A failure domain with only compute availability zones:
 
-See
-https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md#high-level-end-to-end-workflow
-and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples.
+```yaml
+failureDomain:
+  computeAvailabilityZone: az1
+```
+
+A failure domain with only storage availability zones:
+
+```yaml
+failureDomain:
+  storageAvailabilityZone: az1
+```
+
+A failure domain with only network ports:
+
+```yaml
+failureDomain:
+  ports:
+  - networkID: 4a270cf8-f5f9-4a09-8cfc-d39d77aa2ba1
+    fixedIPs:
+    - subnetID: 31ad4088-7e52-48da-9df5-35e70da438f6
+    tags:
+    - "control-plane"
+```
+
+A failure domain defining both control plane and storage network ports:
+
+```yaml
+failureDomain:
+  ports:
+  - networkID: 4a270cf8-f5f9-4a09-8cfc-d39d77aa2ba1
+    fixedIPs:
+    - subnetID: 31ad4088-7e52-48da-9df5-35e70da438f6
+    tags:
+    - "control-plane"
+  - networkID: deb137b1-8ea4-4674-ab46-4cdaaa27637d
+    fixedIPs:
+    - subnetID: e5cb5138-8427-4cbe-ac10-bcf86b7b0db0
+    tags:
+    - "storage"
+```
+
+An empty failure domain is valid, but probably not very useful:
+
+```yaml
+failureDomain:
+```
 
 ### API Extensions
 
@@ -322,11 +500,6 @@ burden?  Is it likely to be superceded by something else in the near future?
 ## Design Details
 
 ### Open Questions [optional]
-
-1. What is the interaction with MachineSubnet in the platform spec?
-
-
-
 
 This is where to call out areas of the design that require closure before deciding
 to implement the design.  For instance,
