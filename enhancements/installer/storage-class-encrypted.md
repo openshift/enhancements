@@ -112,6 +112,16 @@ to platform-specific config specs:
 #### AWS
 
 ```go
+// AWSPartition indicates the partition that contains the KMS key's region.
+// +kubebuilder:validation:Enum=AWS;AWS-CN;AWS-US-GOV
+type AWSPartition string
+
+const (
+  AWSRegions      AWSPartition = "AWS"
+  ChinaRegions    AWSPartition = "AWS-CN"
+  GovCloudRegions AWSPartition = "AWS-US-GOV"
+)
+
 // AWSCSIDriverConfigSpec defines properties that can be configured for the AWS CSI driver.
 type AWSCSIDriverConfigSpec struct {
     // kmsKey sets the cluster default storage class to encrypt volumes with a user-defined KMS key,
@@ -128,6 +138,11 @@ type AWSCSIDriverConfigSpec struct {
 // arn:${Partition}:kms:${Region}:${Account}:key/${KeyId}
 // When constructing the ARN, the partition can be determined from the region.
 type AWSKMSKey struct {
+    // partition is the AWS partition that contains the KMS key.
+    // Valid values are: AWS, AWS-CN, AWS-US-GOV.
+    // +kubebuilder:validation:Required
+    Partition AWSPartition `json:"partition"`
+
     // region is the AWS region that contains the KMS key.
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:Pattern:=^[a-z-]+[0-9]$
