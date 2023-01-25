@@ -105,9 +105,9 @@ but slightly different non-goals.
   turned on but the management workloads will run on the whole CPU set for that
   desired pool.**
 - **This enhancement assumes that the configuration of a management CPU pool is
-  done as part of installing the cluster. It can be changed after the fact but
-  we will need to stipulate that, that is currently not supported. The intent
-  here is for this to be supported as a day 0 feature, only.**
+  done as part of installing the cluster since we only support this feature as a
+  day 0 feature. This enhancement does not implement or provide a path to toggle
+  this feature after day 0.**
 - **This enhancement does not address mixing nodes of different CPU sizes in
   Machine Configuration Pools. Pools must contain machines of the same CPU set size,
   currently the Performance Profile defines and targets specific machine pools
