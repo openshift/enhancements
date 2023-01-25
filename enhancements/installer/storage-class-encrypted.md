@@ -112,54 +112,17 @@ to platform-specific config specs:
 #### AWS
 
 ```go
-// AWSPartition indicates the partition that contains the KMS key's region.
-// +kubebuilder:validation:Enum=AWS;AWS-CN;AWS-US-GOV
-type AWSPartition string
-
-const (
-  AWSRegions      AWSPartition = "AWS"
-  ChinaRegions    AWSPartition = "AWS-CN"
-  GovCloudRegions AWSPartition = "AWS-US-GOV"
-)
-
 // AWSCSIDriverConfigSpec defines properties that can be configured for the AWS CSI driver.
 type AWSCSIDriverConfigSpec struct {
-    // kmsKey sets the cluster default storage class to encrypt volumes with a user-defined KMS key,
+    // kmsKeyARN sets the cluster default storage class to encrypt volumes with a user-defined KMS key,
     // rather than the default KMS key used by AWS.
+    // The value may be either the ARN or Alias ARN of a KMS key.
+    // +kubebuilder:validation:Pattern:=arn:(aws|aws-cn|aws-us-gov):kms:[a-z0-9]+(-[a-z0-9]+)*:[0-9]{12}:(key|alias)/.*
     // +optional
-    KMSKey AWSKMSKey `json:"kmsKey,omitempty"`
+    KMSKeyARN string `json:"kmsKeyARN,omitempty"`
 }
 ```
 
-```go
-// AWSKMSKey contains the component parts that comprise an ARN for a KMS key.
-// According to https://docs.aws.amazon.com/service-authorization/latest/reference/list_awskeymanagementservice.html
-// the format for a KMS key ARN is:
-// arn:${Partition}:kms:${Region}:${Account}:key/${KeyId}
-// When constructing the ARN, the partition can be determined from the region.
-type AWSKMSKey struct {
-    // partition is the AWS partition that contains the KMS key.
-    // Valid values are: AWS, AWS-CN, AWS-US-GOV.
-    // +kubebuilder:validation:Required
-    Partition AWSPartition `json:"partition"`
-
-    // region is the AWS region that contains the KMS key.
-    // +kubebuilder:validation:Required
-    // +kubebuilder:validation:Pattern:=^[a-z-]+[0-9]$
-    Region string `json:"region"`
-
-    // account is the AWS account that contains the KMS key.
-    // +kubebuilder:validation:Required
-    // +kubebuilder:validation:Pattern:=^[0-9]{12}$
-    Account string `json:"account"`
-
-    // keyID is the ID of the KMS key.
-    // +kubebuilder:validation:Required
-    // +kubebuilder:validation:Pattern:=^[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}$
-    KeyID string `json:"keyID"`
-}
-
-```
 #### Azure
 
 ```go
