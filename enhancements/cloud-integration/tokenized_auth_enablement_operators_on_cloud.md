@@ -25,28 +25,6 @@ superseded-by:
   - []
 ---
 
-To get started with this template:
-1. **Pick a domain.** Find the appropriate domain to discuss your enhancement.
-1. **Make a copy of this template.** Copy this template into the directory for
-   the domain.
-1. **Fill out the "overview" sections.** This includes the Summary and
-   Motivation sections. These should be easy and explain why the community
-   should desire this enhancement.
-1. **Create a PR.** Assign it to folks with expertise in that domain to help
-   sponsor the process.
-1. **Merge after reaching consensus.** Merge when there is consensus
-   that the design is complete and all reviewer questions have been
-   answered so that work can begin.  Come back and update the document
-   if important details (API field names, workflow, etc.) change
-   during code review.
-1. **Keep all required headers.** If a section does not apply to an
-   enhancement, explain why but do not remove the section. This part
-   of the process is enforced by the linter CI job.
-
-See ../README.md for background behind these instructions.
-
-Start by filling out the header with the metadata for this enhancement.
-
 # Tokenized Authentication for Red Hat Operators on Cloud Providers
 
 ## Release Signoff Checklist
@@ -99,55 +77,70 @@ fashion that allows customer to use those operators as easily as possible, drivi
 
 ### Goals
 
-Summarize the specific goals of the proposal. How will we know that
-this has succeeded?  A good goal describes something a user wants from
-their perspective, and does not include the implementation details
-from the proposal.
+Allow Day-2 Operators to access cloud provider resources as seamlessly as possible when being installed, used and
+updated on STS enabled clusters.
+
+While providing the above goal, allow for multi-tenancy. In this sense multi-tenancy means that an operator may
+provide different cloud provider credentials per operand such that operator users may uniquely access non-shared cloud
+resources.
+
+Guide and assist Day-2 Operator admins in providing the required cloud provider credentials matched to their permission
+needs for install and update.
+
+Ideally, a solution here will work in both HyperShift (STS always) and non-HyperShift clusters.
 
 ### Non-Goals
 
-What is out of scope for this proposal? Listing non-goals helps to
-focus discussion and make progress. Highlight anything that is being
-deferred to a later phase of implementation that may call for its own
-enhancement.
+Day-1 operators are not included in this proposal, they are pre-provisioned for STS enabled clusters.
+
+
 
 ## Proposal
 
-Hypershift changes:
-OperatorHub changes:
-OLM changes:
-CCO changes:
-Operator changes:
+Cloud Credential Operator (CCO) changes: Add an STS mode, distinct from disabled/manual mode that will look for and
+process CredentialRequests referenced in Operator CRs.
+
+Hypershift changes: Add Cloud Credential Operator or at least the portion thereof that installs and manages Pod Identity
+Webhooks. This is needed for fine-grained credential management to allow for multi-tenancy (see definition earlier).
+
+OperatorHub changes: Present users with needed cloud provider credentials by scanning the CR's CredentialRequest refs.
+
+OLM changes: None?
+
+Operator team/ Operator SDK changes: Follow new guidelines for allowing for the operator to work on an STS enabled. 
+New guidelines would include changing CRD to add CredentialRequest references and putting those referenced
+CredentialRequests into a defined directory in the bundle. SDK to support this new template.
 
 
-
-This is where we get down to the nitty gritty of what the proposal
+[This is where we get down to the nitty gritty of what the proposal
 actually is. Describe clearly what will be changed, including all of
 the components that need to be modified and how they will be
 different. Include the reason for each choice in the design and
 implementation that is proposed here, and expand on reasons for not
 choosing alternatives in the Alternatives section at the end of the
-document.
+document.]
 
 ### Workflow Description
 
-Explain how the user will use the feature. Be detailed and explicit.
+[Explain how the user will use the feature. Be detailed and explicit.
 Describe all of the actors, their roles, and the APIs or interfaces
 involved. Define a starting state and then list the steps that the
 user would need to go through to trigger the feature described in the
 enhancement. Optionally add a
 [mermaid](https://github.com/mermaid-js/mermaid#readme) sequence
-diagram.
+diagram.]
+
+This graph shows the need, not the proposed solution workflow:
 ```mermaid
 graph  LR
-  sa([ServiceAccount Signing Keys])-. Public <br> Key .->s3[S3 Bucket w/ OIDC Config];
-  sa([ServiceAccount Signing Keys])-. Private <br> Key .->token_signing;
+  sa([ServiceAccount Signing Keys])- Public <br> Key ->s3[S3 Bucket w/ OIDC Config];
+  sa([ServiceAccount Signing Keys])- Private <br> Key ->token_signing;
   service<-.->config
   service<-.->Pod
   Pod-->role
   subgraph cluster [AWS]
   s3;
-  iam_id[IAM Identity Provider] -.Trust Tokens<br>Signed.->s3;
+  iam_id[IAM Identity Provider] -Trust Tokens<br>Signed->s3;
   role[IAM Role For Pod]<-->service[AWS Services];
   end
   subgraph cluster2 [OpenShift]
