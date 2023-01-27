@@ -216,9 +216,9 @@ We will add a `FailureDomains` field to [OpenStack MachinePool](https://github.c
     FailureDomains []OpenStackFailureDomain `json:"failureDomains,omitempty"`
 ```
 
-The `MachinesSubnet` option in install-config can be used to define the default subnet where to attach servers that do not have a Failure domain, or servers in Failure domains that do not specify Ports. If no `MachinesSubnet` is specified, the Installer will create a subnet and use it as the `MachinesSubnet`.
+By default, the Installer creates a subnet where to attach servers that do not have a Failure domain, or servers in Failure domains that do not specify Ports. The `MachinesSubnet` option in install-config can be used to set an existing subnet as the default subnet for machines instead.
 
-Note that in deployments where all the servers are spawned in Failure domains, and where all these Failure domains have Ports specified, the `MachinesSubnet` may remain empty. To prevent the Installer from creating a `MachinesSubnet` subnet, set `MachinesSubnet` in install-config to an existing subnet.
+_Note that in deployments where all the servers are assigned to Failure domains, and where all these Failure domains have Ports specified, the default subnet for machines may remain empty. To prevent the Installer from creating a subnet, set `MachinesSubnet` in install-config to an existing subnet._
 
 ### OpenStackProviderSpec
 
