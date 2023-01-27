@@ -138,7 +138,7 @@ this proposal. Describe why the change is important and the benefits to users.
   independent L2 networks.
 * As an administrator, when I implement failure domains for an OpenStack service
   that did not previously have them, I want to be able to automatically redeploy
-  my control plane to take advantage of them.
+  my control plane in a running cluster to take advantage of them.
 * As an administrator, when I modify a failure domain within my OpenStack
   deployment, I want to be able to automatically redeploy my control plane to
   take advantage of the change.
