@@ -163,6 +163,11 @@ this proposal. Describe why the change is important and the benefits to users.
 
 ## Proposal
 
+In our proposed definition, a failure domain is a bundle of:
+* zero or one Compute zones
+* zero or one Storage zones
+* zero or more ports
+
 We will create a new `OpenStackFailureDomain` type defining a set of Machine
 properties which together ensure the Machine is deployed to a specific,
 consistent failure domain. These properties will be merged into the Machine
