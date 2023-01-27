@@ -181,7 +181,7 @@ type OpenStackFailureDomain struct {
 
     // Ports defines a set of ports and their attached networks. These will be prepended to any another ports attached to the server.
     // +optional
-    Ports: []PortOpts `json:"ports,omitempty"`
+    Ports []PortOpts `json:"ports,omitempty"`
 }
 ```
 
@@ -247,17 +247,6 @@ Our primary concern is to ensure we can implement [InjectFailureDomain and Extra
 ```
 
 We can always do this unambiguously because we store the entire failure domain in the ProviderSpec.
-
-### Cluster API Provider OpenStack
-
-We will implement this behaviour in upstream CAPO first. Critically the points of similarity will be:
-
-* The OpenStackFailureDomain struct will be identical in OpenShift and CAPO. To ensure the independence of the OpenShift API we will have a copy rather than a reference, but the intention will be for them to remain in lock step.
-* CAPO will have a complete copy of the failure domain in the OpenStackMachineSpec analogous to the copy of the failure domain in OpenStackProviderSpec.
-
-The intention is that in CAPO the machine controller will substitute failure domain values into machine spec prior to calling the server creation function shared with MAPO. Therefore MAPO will also have to do this failure domain substitution.
-
-Note that the above is subject to change due to upstream review.
 
 ### Workflow Description
 
@@ -449,62 +438,45 @@ failureDomain:
 
 ### API Extensions
 
-API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
+We change 2 APIs:
 
-- Name the API extensions this enhancement adds or modifies.
-- Does this enhancement modify the behaviour of existing resources, especially those owned
-  by other parties than the authoring team (including upstream resources), and, if yes, how?
-  Please add those other parties as reviewers to the enhancement.
+* [OpenStack `MachinePool`](https://github.com/openshift/installer/blob/dbbc890fa40bd49aa761fb03612415e964c9eaf2/pkg/types/openstack/machinepool.go#L5-L35) as described in [the Installer section](#installer).
+* [`OpenStackProviderSpec`](https://github.com/openshift/api/blob/54592eea55395af31e82fa9a605eb45523115454/machine/v1alpha1/types_openstack.go#L30-L107) as described in [the `OpenStackProviderSpec` section](#openstackproviderspec).
 
-  Examples:
-  - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
-  - Restricts the label format for objects to X.
-  - Defaults field Y on object kind Z.
+In both cases we are strictly adding new functionality rather than modifying existing behaviour.
 
-Fill in the operational impact of these API Extensions in the "Operational Aspects
-of API Extensions" section.
+OpenStack `MachinePool` is referenced in both the `compute` and `controlPlane` sections of install-config with behaviour defined above.
 
-### Implementation Details/Notes/Constraints [optional]
+`OpenStackProviderSpec` is not strictly directly referenced by any CRD as it is only ever embedded as a Raw value. However, being embedded in the `MachineSpec` it is effectively referenced by `Machine` and `MachineSet`. It does not modify the behaviour of any component other than `machine-api-provider-openstack` (the OpenStack machine controller) as described above.
 
-What are the caveats to the implementation? What are some important details that
-didn't come across above. Go in to as much detail as necessary here. This might
-be a good place to talk about core concepts and how they relate.
+Integration with Control Plane MachineSet will require a modification to that API. However, while it is planned it is not yet defined.
+
+### Implementation Details/Notes/Constraints
+
+We will implement this behaviour in upstream CAPO first. Critically the points of similarity will be:
+
+* The OpenStackFailureDomain struct will be identical in OpenShift and CAPO. To ensure the independence of the OpenShift API we will have a copy rather than a reference, but the intention will be for them to remain in lock step.
+* CAPO will have a complete copy of the failure domain in the OpenStackMachineSpec analogous to the copy of the failure domain in OpenStackProviderSpec.
+
+The intention is that in CAPO the machine controller will substitute failure domain values into machine spec prior to calling the server creation function shared with MAPO. Therefore MAPO will also have to do this failure domain substitution.
+
+Note that the above is subject to change due to upstream review.
 
 ### Risks and Mitigations
 
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
-
-How will security be reviewed and by whom?
-
-How will UX be reviewed and by whom?
-
-Consider including folks that also work outside your immediate sub-project.
+None yet.
 
 ### Drawbacks
 
-The idea is to find the best form of an argument why this enhancement should
-_not_ be implemented.  
+Keeping copies of failure domains everywhere is safe, but clunky. In particular, having copies of failure domains in both compute and control-plane in install-config is not ergonomic.
 
-What trade-offs (technical/efficiency cost, user experience, flexibility, 
-supportability, etc) must be made in order to implement this? What are the reasons
-we might not want to undertake this proposal, and how do we overcome them?  
-
-Does this proposal implement a behavior that's new/unique/novel? Is it poorly
-aligned with existing user expectations?  Will it be a significant maintenance
-burden?  Is it likely to be superceded by something else in the near future?
-
+The implementation of this feature in CAPI is problematic because failure domains are referenced by name and mutable. This presents a problem with MachineDeployment if the referenced failure domain is updated because there is no API change which MachineDeployment will notice. The same is true of Machines deployed in the control plane. The risk is that fixing this in CAPI may result in a significantly different API for failure domains which we may have to adapt to in order to continue reusing code. The risk of this is probably low.
 
 ## Design Details
 
 ### Open Questions [optional]
 
-This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance,
- > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this?
+None.
 
 ### Test Plan
 
@@ -555,6 +527,8 @@ please be sure to include in the graduation criteria.**
 to the aforementioned [maturity levels][maturity-levels].
 
 #### Dev Preview -> Tech Preview
+
+- 
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
