@@ -4,8 +4,8 @@ approvers:
 - LalatenduMohanty
 - sdodson
 reviewers:
-- jottofar
 - LalatenduMohanty
 - PratikMahajan
-- vrutkovs
 - wking
+- petr-muller
+- Davoska
