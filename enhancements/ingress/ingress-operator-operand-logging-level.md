@@ -12,6 +12,8 @@ reviewers:
   - "@Miciah"
   - "@miheer"
   - "@rfredette"
+  - "@deads2k"
+  - "@JoelSpeed"
 approvers:
   - "@frobware"
   - "@knobunc"
@@ -195,14 +197,24 @@ The most verbose named log level available in Zapr is debug, leaving no appropri
 "TraceAll". However, Zapr and the Zap library it's based on allow for more verbose log levels to be set using numeric
 values. Using the named log levels is reasonably straightforward:
 ```go
-myLogger.Info("This will be logged when OperatorLogLevel is set to Normal or more verbose. It will show up in the logs as 'info'.")
-myLogger.V(0).Info("This will also be logged when OperatorLogLevel is Normal or more verbose. The log will not differentiate between V(0) and no V() level specified, so this will also show up as 'info'.")
-myLogger.V(1).Info("This will be logged when OperatorLogLevel is at least Debug. It will show up in the logs as 'debug'.")
+// This will be logged when OperatorLogLevel is set to Normal or more verbose. It will
+// show up in the logs as 'info'.
+myLogger.Info("This is an info message")
+// This will also be logged when OperatorLogLevel is Normal or more verbose. The log will
+// not differentiate between V(0) and no V() level specified, so this will also show up as
+// 'info'.
+myLogger.V(0).Info("This is an info message")
+// This will be logged when OperatorLogLevel is at least Debug. It will show up in the
+// logs as 'debug'.
+myLogger.V(1).Info("This is a debug message")
 ```
 
 Trace is the next level after Debug, so it makes sense to map it to `V(2)`:
 ```go
-myLogger.V(2).Info("This will be logged when OperatorLogLevel is at least Trace. Since there is no official name for Trace, it will show up as 'Level(-2)'. Note that it's the inverse of the V() number specified.")
+// This will be logged when OperatorLogLevel is at least Trace. Since there is no official
+// name for Trace, it will show up as 'Level(-2)'.
+// Note that it's the inverse of the V() number specified.
+myLogger.V(2).Info("This is a trace message")
 ```
 
 The logical next step is to map TraceAll to `V(3)`, but Zapr allows much higher V levels, with `V(127)` as the most
@@ -210,8 +222,11 @@ verbose option. While it's likely that there's no reason for the Ingress Operato
 should include every log message possible, so setting `OperatorLogLevel` to TraceAll should set the internal log level
 to 127:
 ```go
-myLogger.V(3).Info("This will only be logged when OperatorLogLevel is TraceAll. Since there is no official name for TraceAll, it will show up as 'Level(-3)'.")
-myLogger.V(127).Info("This will also only be logged when OperatorLogLevel is TraceAll. Since there is no official name for TraceAll, it will show up as 'Level(-127)'.")
+// This will only be logged when OperatorLogLevel is TraceAll. It will show up as 'Level(-3)'.
+myLogger.V(3).Info("This is a traceall message")
+// This will also only be logged when OperatorLogLevel is TraceAll. It will show up as
+// 'Level(-127)'. This is the highest verbosity available.
+myLogger.V(127).Info("This is a traceall message")
 ```
 
 ### Risks and Mitigations
