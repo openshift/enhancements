@@ -19,7 +19,7 @@ approvers:
   - "@knobunc"
   - "@Miciah"
 creation-date: 2021-06-07
-last-updated: 2023-01-10
+last-updated: 2023-01-30
 status: implementable
 ---
 
@@ -102,7 +102,10 @@ type Ingress struct {
 }
 ```
 
-The `OperatorLogLevel` field will be included in the `spec` of the Ingress Operator CRD:
+The new resource will be cluster scoped. To keep consistent with the naming conventions for other cluster-scoped
+resources where only a single instance is expected, the default name will be "cluster".
+
+The `OperatorLogLevel` field will be included in the `spec` of the Ingress CRD:
 
 ```go
 type IngressSpec struct {
