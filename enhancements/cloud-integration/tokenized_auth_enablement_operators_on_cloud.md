@@ -65,14 +65,17 @@ with tokenized cloud auth as it does with "mint-mode" IAM credentials. I expect 
 under the Red Hat brand (that need to reach cloud APIs) in that tokenized workflows are equally integrated and workable 
 as with "mint-mode" IAM credentials.
  
-As the managed services, including Hypershift teams, offering a downstream opinionated, supported and managed lifecycle 
-of OpenShift (in the forms of ROSA, ARO, OSD on GCP, Hypershift, etc), the OpenShift platform should have as close as 
+As the managed services, including HyperShift teams, offering a downstream opinionated, supported and managed lifecycle 
+of OpenShift (in the forms of ROSA, ARO, OSD on GCP, HyperDhift, etc), the OpenShift platform should have as close as 
 possible, native integration with core platform operators when clusters use tokenized cloud auth, driving the use of 
 layered products.
 
 As the Hypershift team, where the only credential mode for clusters/customers is STS (on AWS) , the Red Hat branded 
 Operators that must reach the AWS API, should be enabled to work with STS credentials in a consistent, and automated 
 fashion that allows customer to use those operators as easily as possible, driving the use of layered products.
+
+As an operator team that may already be supporting cloud credential provisioning, including a manner for allowing
+operand instances to have a unique set of credential per instance, I want my solution to keep working (Quay Operator).
 
 
 ### Goals
@@ -91,25 +94,32 @@ Ideally, a solution here will work in both HyperShift (STS always) and non-Hyper
 
 ### Non-Goals
 
-Day-1 operators are not included in this proposal, they are pre-provisioned for STS enabled clusters.
+Day 1 operators are not included in this proposal, they are pre-provisioned for STS enabled clusters (at least 
+for HyperShift)
 
 
 
 ## Proposal
 
+[NB: these are all short now, just adding to them as we outline what each involved component will do in the solution]
+
 Cloud Credential Operator (CCO) changes: Add an STS mode, distinct from disabled/manual mode that will look for and
 process CredentialRequests referenced in Operator CRs.
 
-Hypershift changes: Add Cloud Credential Operator or at least the portion thereof that installs and manages Pod Identity
-Webhooks. This is needed for fine-grained credential management to allow for multi-tenancy (see definition earlier).
+HyperShift changes: Possibly some changes to logic for Pod Identity Webhooks as needed for fine-grained credential
+management to allow for multi-tenancy (see definition earlier).
 
-OperatorHub changes: Present users with needed cloud provider credentials by scanning the CR's CredentialRequest refs.
+OperatorHub changes: Inform users of needed cloud provider credentials by scanning the CR's CredentialRequest refs. Allow
+for input of these credentials.
 
 OLM changes: None?
 
 Operator team/ Operator SDK changes: Follow new guidelines for allowing for the operator to work on an STS enabled. 
 New guidelines would include changing CRD to add CredentialRequest references and putting those referenced
-CredentialRequests into a defined directory in the bundle. SDK to support this new template.
+CredentialRequests into a defined directory in the bundle. 
+
+SDK to support this new template. SDK to validate and in particular: alert on any permission changes 
+between operator versions.
 
 
 [This is where we get down to the nitty gritty of what the proposal
@@ -129,8 +139,26 @@ user would need to go through to trigger the feature described in the
 enhancement. Optionally add a
 [mermaid](https://github.com/mermaid-js/mermaid#readme) sequence
 diagram.]
+Making a layered operator ready to work on an STS will involve the following steps:
 
-This graph shows the need, not the proposed solution workflow:
+For the operator author team:
+- Add CredentialRequests to the bundle, known location;
+- Add references to the CredentialRequests in the CRD spec;
+- Use SDK to validate bundle to catch permission changes or mis-configuration
+- Add eventing to report status on a CR to indicate lacking STS credentials for fully operational deploy or update.
+
+For the Cloud Credential Operator:
+- Add an STS mode that will watch for CredentialRequests (as per mint mode) but then resolve time-based tokens
+  per cloud platform by looking in known location on operator bundle for cloud platform credentials. Make resource
+  happen for the operator by setting pod identity webhook as needed. Can account for per-operand tenancy permissions.
+
+For Operator Administrator:
+- Supply cloud credentials for STS (ARN ID, etc) in the known location and change CR to reflect this.
+
+For OperatorHub:
+- Prompt for missing credentials that prevent fully operational install on STS cluster. Same for upgrades.
+
+This graph shows the system as it needs to work (AWS only), not the proposed solution workflow:
 ```mermaid
 graph  LR
   sa([ServiceAccount Signing Keys])- Public <br> Key ->s3[S3 Bucket w/ OIDC Config];
