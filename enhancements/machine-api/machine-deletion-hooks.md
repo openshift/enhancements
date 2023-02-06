@@ -16,7 +16,7 @@ creation-date: 2021-08-10
 last-updated: 2021-11-11
 status: implementable
 see-also:
-  - [Cluster API Upstream Equivalent](https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20200602-machine-deletion-phase-hooks.md)
+   - "[Cluster API Upstream Equivalent](https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20200602-machine-deletion-phase-hooks.md)"
 ---
 
 # Machine Deletion Hooks

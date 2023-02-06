@@ -1,20 +1,20 @@
 ---
 title: external-remediations
 authors:
-  - @slintes
+  - "@slintes"
 reviewers:
-  - @beekhof
-  - @n1r1
+  - "@beekhof"
+  - "@n1r1"
 approvers:
-  - @JoelSpeed
-  - @michaelgugino
-  - @enxebre
+  - "@JoelSpeed"
+  - "@michaelgugino"
+  - "@enxebre"
 creation-date: 2020-11-29
 last-updated: 2020-11-29
 status: implementable
 see-also:
-  - https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20191030-machine-health-checking.md
-  - https://github.com/kubernetes-sigs/cluster-api/pull/3606
+  - "https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20191030-machine-health-checking.md"
+  - "https://github.com/kubernetes-sigs/cluster-api/pull/3606"
 ---
 
 # External remediations
