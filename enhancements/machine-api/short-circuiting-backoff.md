@@ -2,17 +2,17 @@
 title: short-circuiting backoff
 
 authors:
-  - @mshitrit
+  - "@mshitrit"
 
 reviewers:
-  - @beekhof
-  - @n1r1
-  - @slintes
+  - "@beekhof"
+  - "@n1r1"
+  - "@slintes"
 
 approvers:
-  - @JoelSpeed
-  - @michaelgugino
-  - @enxebre
+  - "@JoelSpeed"
+  - "@michaelgugino"
+  - "@enxebre"
 
 creation-date: 2021-03-01
 
@@ -21,7 +21,7 @@ last-updated: 2021-03-01
 status: implementable
 
 see-also:
-  - https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20191030-machine-health-checking.md
+ - "https://github.com/kubernetes-sigs/cluster-api/blob/master/docs/proposals/20191030-machine-health-checking.md"
 ---
 
 # Support backoff when short-circuiting

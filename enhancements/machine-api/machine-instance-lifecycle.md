@@ -1,17 +1,17 @@
 ---
 title: machine/instance-lifecycle
 authors:
-  - @enxebre
+  - "@enxebre"
 reviewers:
-  - @derekwaynecarr
-  - @michaelgugino
-  - @bison
-  - @mrunalp
+  - "@derekwaynecarr"
+  - "@michaelgugino"
+  - "@bison"
+  - "@mrunalp"
 approvers:
-  - @derekwaynecarr
-  - @michaelgugino
-  - @bison
-  - @mrunalp
+  - "@derekwaynecarr"
+  - "@michaelgugino"
+  - "@bison"
+  - "@mrunalp"
 
 creation-date: 2019-09-09
 last-updated: 2019-09-09
