@@ -103,6 +103,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9445  | haproxy | sdn | 4.7 | on-prem internal loadbalancer |
 | 9446  | baremetal-operator | metal | 4.9 | healthz; baremetal provisioning, control plane only |
 | 9447  | baremetal-operator | metal | 4.10 | webhook; baremetal provisioning, control plane only |
+| 9448  | run-once-duration-override-operator | workloads | 4.13 | webhook; run-once-duration-override |
 | 9537  | crio      | node || metrics |
 | 9641  | ovn-kubernetes northd | sdn | 4.3 | control plane only, ovn-kubernetes only |
 | 9642  | ovn-kubernetes southd | sdn | 4.3 | control plane only, ovn-kubernetes only |
