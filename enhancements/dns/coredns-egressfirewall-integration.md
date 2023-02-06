@@ -1,16 +1,16 @@
 ---
 title: coredns-egressfirewall-integration
 authors:
-  - @arkadeepsen
+  - '@arkadeepsen'
 reviewers:
-  - @Miciah
-  - @danwinship
-  - @joelspeed
+  - '@Miciah'
+  - '@danwinship'
+  - '@joelspeed'
 approvers:
-  - @Miciah
-  - @danwinship
+  - '@Miciah'
+  - '@danwinship'
 api-approvers:
-  - @joelspeed
+  - '@joelspeed'
 creation-date: 2023-01-31
 last-updated: 2023-01-31
 tracking-link:
