@@ -178,17 +178,16 @@ spec:
                           properties:
                             key:
                               description: key is the key part of the tag. A tag key can have a maximum of
-                              128 characters and cannot be empty. Key must beg in with a letter, end with a
-                              letter, number or underscore, and can contain only letters, numbers,
-                              underscores, periods, or hyphens.
-                              type: string
+                              128 characters and cannot be empty. Key must begin with a letter, end with a
+                              letter, number or underscore, and must contain only alphanumeric characters
+                              and the following special characters `_ . -`.
                               maxLength: 128
                               minLength: 1
-                              pattern: ^[a-zA-Z][0-9A-Za-z_.-]+[0-9A-Za-z_]$
+                              pattern: ^[a-zA-Z]([0-9A-Za-z_.-]*[0-9A-Za-z_])?$
                             value:
                               description: value is the value part of the tag. A tag value can have a maximum
-                              of 256 characters and cannot be empty. Value can contain only `a-zA-Z0-9_.=+-@`
-                              characters.
+                              of 256 characters and cannot be empty. Value must contain only alphanumeric
+                              characters and the following special characters `_ + , - . / : ; < = > ? @`.
                               type: string
                               maxLength: 256
                               minLength: 1
