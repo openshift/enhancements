@@ -104,19 +104,37 @@ for HyperShift)
 [NB: these are all short now, just adding to them as we outline what each involved component will do in the solution]
 
 Cloud Credential Operator (CCO) changes: Add an STS mode, distinct from disabled/manual mode that will look for and
-process CredentialRequests referenced in Operator CRs.
+process CredentialRequests referenced in Operator CRs. This will operate in one of two ways depending on which other parts 
+of this EP for other components are adopted: specifically HyperShift/Rosa adding CCO with STS mode or continuing with the
+current support for the pod identity webhook).
+- CCO STS mode flow will work by adding a "role-arn"-type field on operator added CredentialsRequest objects, this will 
+trigger CCO to annotate the ServiceAccount on behalf of the operator.
+- Webhook mode will work by annotating the ServiceAccount triggering the projection of the service account tokens into pods
+ created for the operator (same method and resultant actions as: https://github.com/openshift/hypershift/pull/1351)
 
 HyperShift changes: Possibly some changes to logic for Pod Identity Webhooks as needed for fine-grained credential
-management to allow for multi-tenancy (see definition earlier).
+management to allow for multi-tenancy (see definition earlier). Also, need to add pod identity webhooks targeting other
+cloud providers and change the annotations to more generic naming.
 
-OperatorHub changes: Inform users of needed cloud provider credentials by scanning the CR's CredentialRequest refs. Allow
-for input of these credentials.
+OperatorHub changes: Allow for import of additional, well-known, ENV variables on the Subscription object. These fields
+will allows UX for the information needed by CCO or webhook, for input of the cloud credentials. 
 
-OLM changes: None?
+OLM changes: Generate a manual ack for operator upgrade when cloud resources are involved. This can be determined by 
+parsing the Subscription objects. Ensures admin signs off that cloud resources are provisioned and working as intended
+before an operator upgrade.
 
 Operator team/ Operator SDK changes: Follow new guidelines for allowing for the operator to work on an STS enabled. 
 New guidelines would include changing CRD to add CredentialRequest references and putting those referenced
-CredentialRequests into a defined directory in the bundle. 
+[@jharrington22 need help turning these bullet items into concrete steps]
+- CredentialRequests into a defined directory in the bundle.
+- ServiceAccount annotated:
+- ServiceAccount annotation: Projected ServiceAccount volume but not the Secret
+- Annotate with Role ARN and it projects the Volume
+- Provide CredentialsRequest, but that needs to have ARN added to it.
+- Search for ENV variable (new one) that goes on a Subscription
+- Template it into CredentialsRequest (RoleARN, etc)
+
+Guidance to operator authors to structure controller code to alert on missing cloud credentials, not crash.
 
 SDK to support this new template. SDK to validate and in particular: alert on any permission changes 
 between operator versions.
