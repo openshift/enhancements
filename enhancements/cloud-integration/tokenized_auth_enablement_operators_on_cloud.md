@@ -1,5 +1,5 @@
 ---
-title: tokenized-auth-for-operators-on-cloud
+title: tokenized-auth-enablement-operators-on_cloud
 authors:
   - "@bentito"
   - "@jharrington22"
@@ -77,6 +77,18 @@ fashion that allows customer to use those operators as easily as possible, drivi
 As an operator team that may already be supporting cloud credential provisioning, including a manner for allowing
 operand instances to have a unique set of credential per instance, I want my solution to keep working (Quay Operator).
 
+As a customer of OpenShift layered products I can confidently upgrade the operator even if the next version requires
+elevated permissions be provided.
+
+As an operator author I have a set of best practices and tools that help me develop a compliant operator
+
+As a monitor of OpenShift layered products I can identify which operators are compliant with STS best practices and 
+tools. 
+
+As a cluster admin, it's clear when installing an operator if it is STS compliant (i.e. either doesn't need cloud 
+resources or does and is following the best practices).
+
+As an OpenShift user I want the STS enablement solution to be as cloud-agnostic as possible.
 
 ### Goals
 
@@ -173,7 +185,7 @@ For the Cloud Credential Operator:
 For Operator Administrator:
 - Supply cloud credentials for STS (ARN ID, etc) in the known location and change CR to reflect this.
 
-For OperatorHub:
+For OperatorHub, OLM:
 - Prompt for missing credentials that prevent fully operational install on STS cluster. Same for upgrades.
 
 This graph shows the system as it needs to work (AWS only), not the proposed solution workflow:
