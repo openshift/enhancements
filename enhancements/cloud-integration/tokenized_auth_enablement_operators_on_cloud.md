@@ -37,10 +37,10 @@ superseded-by:
 
 ## Summary
 
-Secure Token Service (STS) tokens allow for limited time access to be granted on cloud provider resources. A concrete 
+Amazon Web Services (AWS) Secure Token Service (STS) allows you to request temporary limited-privilege credentials. A concrete 
 example is write permission on an S3 bucket on AWS. STS is supported on all the major cloud providers where OpenShift is
-deployed. Currently, several Red Hat operators provided detailed instructions for how to use the operator on STS-enabled
-clusters. It is a highly manual process. This enhancement seeks to bring common standards to the process of enabling an
+deployed. Currently, several Red Hat operators provide detailed instructions for how to use the operator on STS-enabled
+clusters. The process is designed to have manual operations performed by the customer. This enhancement seeks to bring common standards to the process of enabling an
 operator to access cloud provider resources, by enabling automation, UX and logic for the process. 
 
 ## Motivation
@@ -60,13 +60,13 @@ this proposal. Describe why the change is important and the benefits to users.
 As a customer of OpenShift layered products, I need to be able to fluidly, reliably and consistently install and use 
 OpenShift layered product Kubernetes Operators into my ROSA STS clusters, while keeping a STS workflow throughout.
  
-As a customer of OpenShift on the big cloud providers, overall I expect OpenShift as a platform to function equally well
+As a customer of OpenShift on supported cloud providers, overall I expect OpenShift as a platform to function equally well
 with tokenized cloud auth as it does with "mint-mode" IAM credentials. I expect the same from the Kubernetes Operators 
 under the Red Hat brand (that need to reach cloud APIs) in that tokenized workflows are equally integrated and workable 
 as with "mint-mode" IAM credentials.
  
 As the managed services, including HyperShift teams, offering a downstream opinionated, supported and managed lifecycle 
-of OpenShift (in the forms of ROSA, ARO, OSD on GCP, HyperDhift, etc), the OpenShift platform should have as close as 
+of OpenShift (in the forms of ROSA, ARO, OSD on GCP, HyperShift, etc), the OpenShift platform should have as close as 
 possible, native integration with core platform operators when clusters use tokenized cloud auth, driving the use of 
 layered products.
 
