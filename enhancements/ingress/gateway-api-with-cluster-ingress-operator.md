@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@knobunc"
 creation-date: 2022-12-13
-last-updated: 2023-01-26
+last-updated: 2023-02-07
 tracking-link:
   - https://issues.redhat.com/browse/NE-1105
   - https://issues.redhat.com/browse/NE-1107
@@ -488,13 +488,52 @@ release-planning question.
 
 TBD.
 
-### Risks and Mitigations
-
-#### Automatic deployments
+#### Automated and Manual Gateway Deployments
 
 OpenShift Service Mesh and Istio have a feature called [automated deployment](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#automated-deployment)
-that creates an Envoy deployment and service for each Gateway.  Enabling
-automated deployments and also allowing arbitrary users to create Gateways would
+that creates an Envoy deployment and service in the same namespace for each Gateway
+if the Gateway's `spec.addresses` field is left unset. This enables users to seamlessly
+create a "shard" per Gateway, much like how each IngressController object is a shard
+for routes. It is enabled via the `PILOT_ENABLE_GATEWAY_API_DEPLOYMENT_CONTROLLER`
+env variable.
+
+Conversely, with [manual deployments](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#manual-deployment),
+if the Gateway has the `spec.addresses` field set, then it must manually link
+to an [ingress gateway](https://istio.io/latest/docs/tasks/traffic-management/ingress/ingress-control/#configuring-ingress-using-a-gateway).
+The user needs to make their own ingress gateway  service and deployment in the same
+namespace to manually link to, or they need to use the default ingress gateway (if enabled).
+
+If the ServiceMeshControlPlane's `spec.gateways.ingress.enabled` field is set to `true`,
+Istio creates an `istio-ingressgateway` service, in the same namespace as the control plane,
+that is a ready-to-use proxy which gateways can be manually linked to. Istio [discourages](https://istio.io/latest/docs/setup/additional-setup/gateway/)
+the use of this ingress gateway as it couples the gateway to the control plane.
+
+_To summarize, there are four ways a user could link Gateways to Ingress Gateways:_
+1. Use automated deployments
+2. Use a manual deployment, manually create a new ingress gateway service and deployment, and link to this service
+3. Use a manual deployment and link to the existing `istio-ingressgateway` ingress gateway
+4. Use a manual deployment and link to a previously created automated deployment ingress gateway
+
+OpenShift will not inhibit or alter the functionality of automated deployments, except
+restricting creation of Gateways to specific users (_see the automated deployment section
+in Risks and Mitigations_).
+
+Nor will OpenShift inhibit or alter the functionality of manual deployments. Users
+are responsible for understanding and creating links to manual deployments when creating
+Gateways.
+
+The choice between these two features depends on the user's desired sharding scheme. Manual
+linking, being more expressive, can establish a many-to-one Gateway-to-Gateway-Deployment
+relationship, while automated deployments strictly establish a one-to-one
+Gateway-to-Gateway-Deployment relationship. Arguably, automated deployments are more portable
+among Gateway API implementations due to the fact manually deployments require linking an
+Istio-specific service address.
+
+### Risks and Mitigations
+
+#### Automatic Deployments
+
+Enabling automated deployments and also allowing arbitrary users to create Gateways would
 create a new attack surface for untrusted cluster users.  For this reason, the
 default policy allows only cluster admins to create Gateways.
 
@@ -708,7 +747,12 @@ _Should we use automated deployments?_
 To answer this question, we need to better understand the behavior and security
 implications of automated deployments.
 
-**Resolution**: TBD.
+**Resolution**: Yes. Automatic deployments offer a more portable and streamline way to
+create [ingress gateways](https://istio.io/latest/docs/tasks/traffic-management/ingress/ingress-control/#configuring-ingress-using-a-gateway). However, in dev preview we will not provide a way to
+enable/disable Automatic Deployments, it will always be enabled (see resolution to
+_Do we need a new config object? How can the cluster admin configure OSSM?_ for more
+details.). In tech preview, we may expose a customization option for enabling/disabling
+Automatic Deployments.
 
 #### Should we enable Gateway API's [ReferenceGrant](https://gateway-api.sigs.k8s.io/references/spec/#gateway.networking.k8s.io/v1beta1.ReferenceGrant) CRD?
 
