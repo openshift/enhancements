@@ -691,7 +691,8 @@ OpenShift Service Mesh resources and Gateway CRs?_
 We may proceed with using the "openshift-ingress" namespace for dev preview and
 revisit this design decision ahead of tech preview.
 
-**Resolution**: TBD for tech preview.
+**Resolution**: We will use the "openshift-ingress" namespace for dev preview;
+however we will revisit this decision for tech preview.
 
 #### Should we enable automated deployments?
 
