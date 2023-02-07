@@ -2,7 +2,7 @@
 title: scrape-profiles
 authors:
   - @JoaoBraveCoding
-reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
+reviewers:
   - @openshift/openshift-team-monitoring
 approvers:
   - TBD
@@ -56,7 +56,7 @@ Furthermore to assess the viability of the scrape profile feature the monitoring
 team performed a detailed analysis of its impact in an OpenShift cluster. The
 analysis consisted in a test where an OpenShift cluster would run three replicas
 of the OpenShift Prometheus instance but each replica would be configured to a
-different scrape profile (`full`, `minimal`, `uponly`). Then we would trigger a
+different scrape profile (`full`, `minimal`). Then we would trigger a
 workload using kube-burner and at the end of 2 hours, we evaluated the results.
 We concluded that in terms of resource usage, given the results obtained we can
 confidently state that the feature is quite valuable given the reduction of CPU
@@ -295,7 +295,7 @@ exists in the cluster?)
 
 ### Graduation Criteria
 
-Plan to release as TechPreview as the first step: the default being "full", it shouldn't impact operations.
+Plan to release as TechPreview as the first step: the default being `full`, it shouldn't impact operations.
 
 #### Tech Preview -> GA
 
@@ -356,6 +356,9 @@ Initial proofs-of-concept:
     idea (less explicit, more brittle);
   - it's likely to be less efficient because the relabeling configs would be
     very complex and expensive in terms of processing.
+  - Hypershift implements a [similar
+    strategy](https://github.com/openshift/hypershift/pull/1294), but again this
+    would only work for service monitors that CMO deploys directly
 - Let users configure themselves the Prometheus scraping interval. This solution
   was discarded because:
   - Users might not be fully aware of the impact that changing this interval
