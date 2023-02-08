@@ -11,7 +11,7 @@ approvers:
 creation-date: 2022-03-28
 last-updated: 2022-04-05
 tracking-link: 
-  - [OCPCLOUD-1436](https://issues.redhat.com/browse/OCPCLOUD-1436)
+  - "https://issues.redhat.com/browse/OCPCLOUD-1436"
 ---
 
 # Support AWS IMDSv2 for EC2 machines

@@ -3,18 +3,18 @@ title: azure-ultra-disks
 authors:
   - "@damdo"
 reviewers:
-  - @JoelSpeed
-  - @alexander-demichev
-  - @elmiko
+  - "@JoelSpeed"
+  - "@alexander-demichev"
+  - "@elmiko"
 approvers:
-  - @JoelSpeed
-  - @elmiko
+  - "@JoelSpeed"
+  - "@elmiko"
 api-approvers:
-  - @JoelSpeed
+  - "@JoelSpeed"
 creation-date: 2022-01-28
 last-updated: 2022-02-11
 tracking-link:
-  - https://issues.redhat.com/browse/OCPCLOUD-1377
+  - "https://issues.redhat.com/browse/OCPCLOUD-1377"
 see-also:
 replaces:
 superseded-by:

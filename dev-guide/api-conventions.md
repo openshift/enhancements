@@ -109,6 +109,47 @@ This means, that any end user fetching the resource from the API can observe tha
 This has the effect of helping our users to understand how they might be able to configure their cluster, without
 having to search for features or review API schemas within the product docs.
 
+### Only one phrasing for each idea
+
+Each idea should have a single possible expression in the API structures, without having multiple ways to say the same thing.
+From [PEP 20][pep-20]:
+
+> * There should be one-- and preferably only one --obvious way to do it.
+> * Although that way may not be obvious at first unless you're Dutch.
+
+For example, [ClusterVersion's `spec.desiredUpdate`][desiredUpdate] is a pointer field.
+
+This does not meet our current API guidelines (see our [pointer
+guidelines](#pointers)) as we advise against the use of pointers in
+most cases, but, in this example, it also allows the same semantic to
+be expressed in two different ways.
+
+Both `nil`:
+
+
+```yaml
+spec: {}
+```
+
+and empty-struct:
+
+```yaml
+spec:
+  desiredUpdate: {}
+```
+
+represent the same "I do not desire an update" idea.
+
+Having a single allowed phrasing has a few benefits:
+
+* Users don't have to spend time wondering about which of several identical phrasings to use, or whether those phrasings are actually identical or not.
+* Users don't have to debate about which of several pet phrasings are most canonical.
+* There is no need to document alternative phrasings.
+* Testing and verification for alternative phrasings are simple: the non-canonical phrasing is rejected, with documentation guiding users towards the canonical phrasing.
+* When an API structure has multiple consumers, having a single phrasing for each idea reduces the scope of possible semantic divergence between consumers.
+
+For existing APIs, progress toward these ideals needs to happen within the usual [constraints on API changes][api-changes].
+
 ### Write User Readable Documentation in Godoc
 
 Godoc text is generated into both Swagger and OpenAPI schemas which are then used
@@ -692,3 +733,7 @@ When writing APIs for OpenShift, we try to make our APIs consistent with one ano
 OpenShift have an understanding of how to use our APIs intuitively. If an upstream API is not consistent with
 those conventions, you should be prepared to change your abstraction to follow conventions to maintain that consistent
 user experience within OpenShift.
+
+[api-changes]: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api_changes.md
+[desiredUpdate]: https://github.com/openshift/api/blob/803c45de7ab5567e8d1575138f014226974768a1/config/v1/types_cluster_version.go#L43-L57
+[pep-20]: https://peps.python.org/pep-0020/
