@@ -185,7 +185,7 @@ type EgressFirewallDestination struct {
 }
 ````
 
-The following ``DNSName`` CRD will be added.
+The following ``DNSName`` CRD will be added to the ``k8s.ovn.org`` api-group.
 
 ````go
 // DNSName describes a DNS name used a EgressFirewall rule.
