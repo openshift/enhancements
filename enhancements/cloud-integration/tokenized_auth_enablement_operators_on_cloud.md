@@ -4,13 +4,12 @@ authors:
   - "@bentito"
   - "@jharrington22"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - "@joelanford"
-  - "@bparees"
-  - TBD
+  - "@joelanford" # for OLM, OperatorHub changes
+  - "@bparees" # for OLM, OperatorHub changes
 approvers:
   - TBD
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - TBD
+  - @abutcher # for CCO API changes, or please suggest alternative
 creation-date: 2023-01-21
 last-updated: 2023-01-21
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
@@ -115,13 +114,23 @@ for HyperShift)
 
 [NB: these are all short now, just adding to them as we outline what each involved component will do in the solution]
 
-Cloud Credential Operator (CCO) changes: Add an STS mode, distinct from disabled/manual mode that will look for and
+Cloud Credential Operator (CCO) changes: Add a "Token" mode, distinct from disabled/manual mode that will look for and
 process CredentialRequests referenced in Operator CRs. This will operate in one of two ways depending on which other parts 
-of this EP for other components are adopted: specifically HyperShift/Rosa adding CCO with STS mode or continuing with the
-current support for the pod identity webhook).
-- CCO STS mode flow will work by adding a "role-arn"-type field on operator added CredentialsRequest objects, this will 
-trigger CCO to annotate the ServiceAccount on behalf of the operator.
-- Webhook mode will work by annotating the ServiceAccount triggering the projection of the service account tokens into pods
+of this EP for other components are adopted: specifically HyperShift/Rosa adding CCO with Token mode or continuing with the
+current support for the pod identity webhook.
+- CCO Token mode will work by adding a "role-arn"-type field on operator added CredentialsRequest objects. This is a new
+  API field on the CredentialsRequest spec. When CCO acquires a CredentialsRequest it will mint a Secret (as today 
+  mostly) with new functionality: Adding to the Secret a path to the projected ServiceAccount token (static for OCP) 
+  and a roleARN (from the new field on the CredentialsRequest).
+
+
+  Validation of CredentialsRequest by Token mode CCO? Maybe. Currently CCO gets some permissions under ROSA (unused),
+  could expand these permissions to include the Policy Simulator such that it could validate a role has permissions, and
+  with this CCO could be the alerting mechanism for a changed CredentialsRequest without sufficient permissions
+
+- Pod Identity Webhook mode (Deployed on classic ROSA, ROSA on HyperShift, standard OCP and Hypershift)
+
+Will work by annotating the ServiceAccount triggering the projection of the service account tokens into pods
  created for the operator (same method and resultant actions as: https://github.com/openshift/hypershift/pull/1351)
 
 HyperShift changes: Possibly some changes to logic for Pod Identity Webhooks as needed for fine-grained credential
@@ -135,18 +144,15 @@ OLM changes: Generate a manual ack for operator upgrade when cloud resources are
 parsing the Subscription objects. Ensures admin signs off that cloud resources are provisioned and working as intended
 before an operator upgrade.
 
-Operator team/ Operator SDK changes: Follow new guidelines for allowing for the operator to work on an STS enabled. 
-New guidelines would include changing CRD to add CredentialRequest references and putting those referenced
-[@jharrington22 need help turning these bullet items into concrete steps]
-- CredentialRequests into a defined directory in the bundle.
-- ServiceAccount annotated:
-- ServiceAccount annotation: Projected ServiceAccount volume but not the Secret
-- Annotate with Role ARN and it projects the Volume
-- Provide CredentialsRequest, but that needs to have ARN added to it.
-- Search for ENV variable (new one) that goes on a Subscription
-- Template it into CredentialsRequest (RoleARN, etc)
+Operator team/ Operator SDK changes: Follow new guidelines for allowing for the operator to work on STS enabled cluster. 
+New guidelines would include the following to use CCO Token mode:
 
-Guidance to operator authors to structure controller code to alert on missing cloud credentials, not crash.
+- changing CRD to add CredentialRequest references and putting those referenced
+- CredentialRequests into a defined directory in the bundle
+- add the projected ServiceAccount volume to deployment;
+- handle the Secret themselves (like today’s CCO Mint mode, read and use the credentials in the Secret whose name they 
+  know from the CredentialsRequest and is in the same Namespace)
+- Guidance to operator authors to structure controller code to alert on missing cloud credentials, not crash.
 
 SDK to support this new template. SDK to validate and in particular: alert on any permission changes 
 between operator versions.
