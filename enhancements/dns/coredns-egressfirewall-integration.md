@@ -5,12 +5,13 @@ authors:
 reviewers:
   - '@Miciah'
   - '@danwinship'
-  - '@joelspeed'
+  - '@JoelSpeed'
+  - '@TrilokGeer'
 approvers:
   - '@Miciah'
   - '@danwinship'
 api-approvers:
-  - '@joelspeed'
+  - '@JoelSpeed'
 creation-date: 2023-01-31
 last-updated: 2023-01-31
 tracking-link:
@@ -35,10 +36,11 @@ and also will be able to provide support for wildcard DNS names.
 
 Currently, EgressFirewall (OVN-K master) does a DNS lookup of a DNS name based on a default TTL or the
 TTL of the previous lookup. OVN-K master then updates the underlying ``AddressSet`` for the DNS name
-referenced by the corresponding ACL rule of the EgressFirewall. However, if a pod, belonging to the same
-Namespace as that of the EgressFirewall, does a DNS lookup and is able to get the response before the OVN-K
-master then the pod will be incorrectly allowed/denied access to the DNS name. The integration between
-CoreDNS and EgressFirewall needs to be improved to avoid such a scenario.
+referenced by the corresponding ACL rule of the EgressFirewall rule containing the DNS name. However,
+if a pod, belonging to the same Namespace as that of the EgressFirewall, does a DNS lookup and is able
+to get the response before the OVN-K master then the pod will be incorrectly allowed/denied access to
+the DNS name. The integration between CoreDNS and EgressFirewall needs to be improved to avoid such a
+scenario.
 
 If an administrator wants to specifically allow/deny access to all subdomains then currently the
 administrator has to add all subdomains in the EgressFirewall rules. This becomes difficult when
@@ -63,8 +65,8 @@ new plugin enabled.
 
 ### Goals
 
-* Support update of the ``AddressSet`` referenced by the ACL rule corresponding to an EgressFirewall if IPs associated
-with the corresponding DNS names change dynamically.
+* Support update of the ``AddressSet`` referenced by the ACL rule corresponding to an EgressFirewall rule containing
+a DNS name if the IPs associated with it change dynamically.
 * Support usage of wildcard DNS names in EgressFirewall rules.
 * Create CRs for each unique DNS name used in the EgressFirewall rules and use the CRs to track the current
 IPs and the corresponding TTL information.
@@ -89,7 +91,7 @@ plugins. If the DNS name in the query matches any ``DNSName`` CR(s) (regular or 
 plugin will update the ``.status`` of the matching ``DNSName`` CR(s) with the DNS name along with the IPs and
 the corresponding TTL and the next lookup time based on the TTL. The OVN-K master will watch the ``DNSName``
 CRs. Whenever the IPs are updated for a ``DNSName`` CR, the OVN-K master will update the the underlying ``AdressSet``
-referenced by the ACL rule(s) for the corresponding EgressFirewall(s).
+referenced by the ACL rule(s) for the corresponding EgressFirewall rule(s).
 
 OVN-K master will keep track of the TTL (or next lookup time) for each regular DNS name and send a DNS lookup
 query to CoreDNS when the minimum TTL expires. However, for a wildcard DNS name a DNS lookup cannot be performed
@@ -98,13 +100,14 @@ which are updated in the ``.status`` of the corresponding wildcard ``DNSName`` C
 
 ### Workflow Description
 
-The workflows for DNS name addition and deletion are explained in this section.
+The workflows for Create, Delete and Update events for EgressFirewall related to DNS names are explained in this section.
 
-#### Addition
+#### Create/Update
 
 ##### Regular DNS name
-* An OpenShift cluster administrator creates an EgressFirewall resource for a Namespace and adds rule(s) containing
-regular DNS name(s).
+
+* An OpenShift cluster administrator creates/updates an EgressFirewall resource for a Namespace and adds rule(s) containing regular
+DNS name(s).
 * The OVN-K master will create corrresponding `DNSName` CRs for each of the DNS names in the EgressFirewall rules, if not
 already created. Each CR will be created in the ``openshift-dns`` Namespace and the Name of the CR will be same as the DNS
 name (barring any trailinng `.`). The ``.spec.isregular`` field of the CR will be set to true, even if it already exists.
@@ -116,17 +119,19 @@ the `DNSName` CRs with the DNS name and the corresponding current IPs along with
 on the TTL. However, this update will only take place if there is a change in the exisiting IP
 addresses or next time to lookup or both for the DNS name.
 * The OVN-K master will watch the ``DNSName`` CRs. When the ``.status`` of a ``DNSName`` CR is updated, the OVN-K master
-will update the ``AddressSet`` for the DNS name, which is linked with the ACL rule(s) for the corresponding EgressFirewall(s).
+will update the ``AddressSet`` for the DNS name, which is linked with the ACL rule(s) for the corresponding EgressFirewall
+rule(s).
 * The OVN-K master will also receive the response of the DNS lookup query for the DNS name. The OVN-K master will check
 the corresponding ``DNSName`` CR's ``.status`` and if the next lookup time in the status is greater than the next lookup
 time based on the received TTL, then the corresponding CR's ``.status`` will be updated. The corresponding ``AddressSet``
 will also be updated.
 
 ##### Wildcard DNS name
-* An OpenShift cluster administrator creates an EgressFirewall resource for a Namespace and adds rule(s) containing
-wildcard DNS name(s).
-* The OVN-K master will create corrresponding `DNSName` CRs for each of the wildcard DNS names in the EgressFirewall rules, if not
-already created. Each CR will be created in the ``openshift-dns`` Namespace. The Name of the CR will be set to the wildcard
+
+* An OpenShift cluster administrator creates/updates an EgressFirewall resource for a Namespace and adds rule(s) containing wildcard
+DNS name(s).
+* The OVN-K master will create corrresponding `DNSName` CRs for each of the wildcard DNS names in the EgressFirewall rules, if
+not already created. Each CR will be created in the ``openshift-dns`` Namespace. The Name of the CR will be set to the wildcard
 DNS name after replacing the ``*`` with ``wildcard`` (barring any trailinng `.`). For example, if the wildcard DNS name is
 ``*.example.com``, then the Name of the corresponding CR will be ``wildcard.example.com``. This is done to adhere to the
 [Kubernetes object naming validations](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names).
@@ -138,32 +143,37 @@ the regular DNS name in the lookup matches with a wildcard DNS name, then the ``
 and the next lookup time based on the TTL. However, this update will only take place if there is a change in the exisiting IP
 addresses or the next lookup time or both for the DNS name.
 * The OVN-K master will watch the ``DNSName`` CRs. When the ``.status`` of a ``DNSName`` CR is updated, the OVN-K master
-will update the ``AddressSet`` for the wildcard DNS name, which is linked with the ACL rule for the corresponding EgressFirewall(s).
+will update the ``AddressSet`` for the wildcard DNS name, which is linked with the ACL rule for the corresponding EgressFirewall
+rule(s).
 * The OVN-K master will also store the regular DNS name and the corresponding current IPs along with the TTL and the next time
 to lookup. Based on the next time to lookup, the OVN-K master will follow the same method as that of the regular DNS names to get the
 latest IPs and TTL information.
 
-#### Deletion
+#### Delete/Update
 
 ##### Regular DNS name
-* An OpenShift cluster administrator deletes an EgressFirewall resource for a Namespace containing rul(e) for regular DNS name(s).
-* The OVN-K master will delete the ACL rule corresponding to the EgressFirewall.
+
+* An OpenShift cluster administrator deletes an EgressFirewall resource for a Namespace containing rule(s) for regular DNS
+name(s) OR updates an EgressFirewall resource for a Namespace and deletes rule(s) containing regular DNS name(s).
+* The OVN-K master will delete the ACL rule(s) corresponding to the EgressFirewall rule(s) containing the regular DNS name(s).
 * The OVN-K master will then check if the same regular DNS names are also used in the EgressFirewall rules in other Namespaces. If
-they are not used, then the OVN-K master will delete the corrresponding ``AdressSets`` for each of the DNS names in the EgressFirewall
+they are not used, then the OVN-K master will delete the corrresponding ``AdressSet`` for each of the DNS names in the EgressFirewall
 rules. The OVN-K master will also delete the corresponding ``DNSName`` CRs, only if the ``.spec.isregular`` field is set to true and
 the ``.spec.iswildcard`` field is set to false. If both the fields are set to true, then the CR will not be deleted and the
 ``.spec.isregular`` field will be set to false.
 
 
 ##### Wildcard DNS name
-* An OpenShift cluster administrator deletes an EgressFirewall resource for a Namespace containing rul(e) for wildcard DNS name(s).
-* The OVN-K master will delete the ACL rule corresponding to the EgressFirewall.
+
+* An OpenShift cluster administrator deletes an EgressFirewall resource for a Namespace containing rule(s) for wildcard DNS name(s)
+OR updates an EgressFirewall resource for a Namespace and deletes rule(s) containing wildcard DNS name(s).
+* The OVN-K master will delete the ACL rule(s) corresponding to the EgressFirewall rule(s) containing the wildcard DNS name(s).
 * The OVN-K master will then check if the same wildcard DNS names are also used in the EgressFirewall rules in other Namespaces. If
-they are not used, then the OVN-K master will delete the corrresponding ``AdressSets`` for each of the DNS names in the EgressFirewall
+they are not used, then the OVN-K master will delete the corrresponding ``AdressSet`` for each of the DNS names in the EgressFirewall
 rules. The OVN-K master will also delete the corresponding ``DNSName`` CRs, only if the ``.spec.isregular`` field is set to false and
 the ``.spec.iswildcard`` field is set to true. If both the fields are set to true, then the CR will not be deleted and the
 ``.spec.iswildcard`` field will be set to false. From the ``.status`` field all the other DNS names' details will be removed and
-only the details of the DNS name will be kept which matches the Name field of the CR.
+only the details of the DNS name will be kept which matches with the Name field of the CR.
 
 
 #### Variation [optional]
@@ -233,6 +243,39 @@ type DNSNameInfo struct {
 
 ### Implementation Details/Notes/Constraints [optional]
 
+The implementation changes needed for the proposed enhancement are documented in this section for each of the components.
+
+#### Cluster DNS Operator
+
+Cluster DNS Operator will deploy CoreDNS with the ``egressfirewall`` plugin enabled by adding it to the corefile. As the
+plugin will watch and update the ``DNSName`` CRs in the ``k8s.ovn.org`` api-group, proper RBAC permissions will be needed
+to be added to the ``ClusterRole`` for CoreDNS.
+
+#### CoreDNS
+
+The new plugin ``egressfirewall`` will be added to CoreDNS. As the plugin will inspect the DNS lookup queries and response from
+other plugins, it needs to be added before the other plugins (namely ``forward`` plugin) in the ``plugin.cfg`` file.
+
+The ``egressfirewall`` plugin will watch the ``DNSName`` CRs and whenever there is a DNS lookup which matches one of the ``DNSName``
+CRs (either regular or wildcard DNS names or both), then it will update the ``.status`` of the ``DNSName`` CR(s) if there's any change
+in the corresponding IPs and/or the TTL information.
+
+#### OVN-K master
+
+For every unique DNS name used in EgressFirewall rules, OVN-K master will create a corresponding ``DNSName`` CR. The Name of the CRs
+will be same as that of the DNS name (for wildcard DNS name the ``*`` will be replaced by ``wildcard``) without any trailing ``.``.
+This will follow the [Kubernetes object naming validations](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names).
+
+The OVN-K master will also watch the ``DNSName`` CRs. Whenever the ``.status`` of the CRs will be updated with new IPs and corresponding
+TTL information for a DNS name, OVN-K master will update the ``AdressSet`` mapped to the DNS name. This ``AdressSet`` will be linked
+to the ACL rule(s) for the EgressFirewall rule(s) in which the DNS name is used. This will ensure that the latest IPs are always updated in
+the ``AddressSets``.
+
+The OVN-K master will not directly query for the wildcard DNS names, rather it will query for the DNS names that get added to the
+``.status`` of the corresponding ``DNSName`` CR. However, the list of the DNS names to lookup for a wildcard DNS name should also
+not become stale if a DNS name belonging its subdomain is removed. To achieve this a retry counter will be used for the DNS name
+lookups. If the lookup fails for a DNS name listed in the ``.status`` of a ``DNSName`` CR for threshold number of times (say 5),
+then the DNS name will be removed from the ``.status``.
 
 
 ### Risks and Mitigations
