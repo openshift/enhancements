@@ -41,7 +41,7 @@ between CoreDNS and EgressFirewall needs to be improved to avoid such a scenario
 
 If an administrator wants to specifically allow/deny access to all subdomains then currently the
 administrator has to add all subdomains in the EgressFirewall rules. This becomes difficult when
-subdomains are dynamically added/removed as each one has to added/removed individually from the
+subdomains are dynamically added/removed as each one has to be added/removed individually from the
 EgressFirewall rules. Currently, wildcard DNS names are not supported in EgressFirewall. However,
 even if the support is added to EgressFirewall, the integration between CoreDNS and EgressFirewall
 needs to be improved as wildcard DNS names cannot be directly looked up through a query.
@@ -52,10 +52,10 @@ needs to be improved as wildcard DNS names cannot be directly looked up through 
 * As an OpenShift cluster administrator, I want to add DNS Names to EgressFirewall rules, so that I can allow/deny
 access to them even if the IPs associated with the corresponding DNS records change dynamically.
 * As an OpenShift cluster administrator, I want to add wildcard DNS Names to EgressFirewall rules, so that I can
-allow/deny access to all the subdomains.
-* As an OpenShift engineer, I want to add a new Custom Resource, so that IPs and TTLs of DNS names can be tracked
-which are used in EgressFirewall rules.
-* As an OpenShift engineer, I want add a new plugin to CoreDNS, so that DNS lookups of DNS names used in EgressFirewall
+allow/deny access to all the subdomains belonging to the wildcard DNS names.
+* As an OpenShift engineer, I want to add a new Custom Resource, so that IPs and TTLs of DNS names which are used
+in EgressFirewall rules can be tracked.
+* As an OpenShift engineer, I want to add a new plugin to CoreDNS, so that DNS lookups of DNS names used in EgressFirewall
 rules can be inspected and the current IPs and TTLs can be tracked in the corresponding new CR.
 * As an OpenShift engineer, I want to modify Cluster DNS operator, so that CoreDNS can be deployed with the
 new plugin enabled.
@@ -97,12 +97,73 @@ which are updated in the ``.status`` of the corresponding wildcard ``DNSName`` C
 
 ### Workflow Description
 
-* An OpenShift cluster administrator creates an EgressFirewall resource for a Namespace and adds rules containing
-DNS name(s).
-* The OVN-K master will create corrresponding `DNSName` CRs for each of the DNS name(s) in the EgressFirewall rules.
-* The ``egressfirewall`` CoreDNS plugin will update the ``.status`` of the `DNSName` CRs which matches with a DNS
-lookup query with the current IPs and the correspodning TTL and the next lookup time based on the TTL.
-* Based on these updates OVN-K master will create/update the ACL rules for the corresponding EgressFirewall resource.
+The workflows for DNS name addition and deletion are explained in this section.
+
+#### Addition
+
+##### Regular DNS name
+* An OpenShift cluster administrator creates an EgressFirewall resource for a Namespace and adds rule(s) containing
+regular DNS name(s).
+* The OVN-K master will create corrresponding `DNSName` CRs for each of the DNS names in the EgressFirewall rules, if not
+already created. Each CR will be created in the ``openshift-dns`` Namespace and the Name of the CR will be same as the DNS
+name (barring any trailinng `.`). The ``.spec.isregular`` field will be set to true, even if it already exists.
+* The OVN-K master will then perform DNS lookup for each of the regular DNS names added to the EgressFirewall rules.
+* The ``egressfirewall`` CoreDNS plugin will intercept the request and the response for the DNS lookup for each of the
+regular DNS names.
+* As these DNS names have corresponding ``DNSName`` CRs, the ``egressfirewall`` plugin will update the ``.status`` of
+the `DNSName` CRs with the DNS name and the corresponding current IPs along with the TTL and the next lookup time based
+on the TTL. However, this update will only take place if there is a change in the exisiting IP
+addresses or TTL or both for the DNS name.
+* The OVN-K master will watch the ``DNSName`` CRs. When the ``.status`` of a ``DNSName`` CR is updated, the OVN-K master
+will update the ``AddressSet`` for the DNS name, which is linked with the ACL rule for the corresponding EgressFirewall(s).
+* The OVN-K master will also receive the response of the DNS lookup query for the DNS name. The OVN-K master will check
+the corresponding ``DNSName`` CR's ``.status`` and if the next lookup time in the status is greater than the next lookup
+time based on the received TTL, then the corresponding CR's ``.status`` will be updated. The corresponding ``AddressSet``
+will also be updated.
+
+##### Wildcard DNS name
+* An OpenShift cluster administrator creates an EgressFirewall resource for a Namespace and adds rule(s) containing
+wildcard DNS name(s).
+* The OVN-K master will create corrresponding `DNSName` CRs for each of the wildcard DNS names in the EgressFirewall rules, if not
+already created. Each CR will be created in the ``openshift-dns`` Namespace. The Name of the CR will be set to the wildcard
+DNS name after replacing the ``*`` with ``wildcard`` (barring any trailinng `.`). For example, if the wildcard DNS name is
+``*.example.com``, then the Name of the corresponding CR will be ``wildcard.example.com``. This is done to adhere to the
+[Kubernetes object naming validations](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names).
+The ``.spec.iswildcard`` field will be set to true, even if it already exists.
+* The OVN-K master will not perform any DNS lookup for the wildcard DNS names directly.
+* The ``egressfirewall`` CoreDNS plugin will intercept the request and the response for the DNS lookups from all the pods. If
+the regular DNS name in the lookup matches with a wildcard DNS name, then the ``egressfirewall`` plugin will update the
+``.status`` of the corresponding `DNSName` CR with the regular DNS name and the corresponding current IPs along with the TTL
+and the next lookup time based on the TTL. However, this update will only take place if there is a change in the exisiting IP
+addresses or the next lookup time or both for the DNS name.
+* The OVN-K master will watch the ``DNSName`` CRs. When the ``.status`` of a ``DNSName`` CR is updated, the OVN-K master
+will update the ``AddressSet`` for the wildcard DNS name, which is linked with the ACL rule for the corresponding EgressFirewall(s).
+* The OVN-K master will also store the regular DNS name and the corresponding current IPs along with the TTL and the next time
+to lookup. Based on the next time to lookup, the OVN-K master will follow same method as that of regular DNS names to get the
+latest IPs and TTL information.
+
+#### Deletion
+
+##### Regular DNS name
+* An OpenShift cluster administrator deletes an EgressFirewall resource for a Namespace containing rul(e) for regular DNS name(s).
+* The OVN-K master will delete the ACL rules corresponding to the EgressFirewall.
+* The OVN-K master will then check if the same regular DNS names are also used in the EgressFirewall rules in other Namespaces. If
+they are not used, then the OVN-K master will delete the corrresponding ``AdressSets`` for each of the DNS names in the EgressFirewall
+rules. The OVN-K master will also delete the corresponding ``DNSName`` CRs, only if the ``.spec.isregular`` field is set to true and
+the ``.spec.iswildcard`` field is set to false. If both the fields are set to true, then the CR will not be deleted and the
+``.spec.isregular`` field will be set to false.
+
+
+##### Wildcard DNS name
+* An OpenShift cluster administrator deletes an EgressFirewall resource for a Namespace containing rul(e) for wildcard DNS name(s).
+* The OVN-K master will delete the ACL rules corresponding to the EgressFirewall.
+* The OVN-K master will then check if the same wildcard DNS names are also used in the EgressFirewall rules in other Namespaces. If
+they are not used, then the OVN-K master will delete the corrresponding ``AdressSets`` for each of the DNS names in the EgressFirewall
+rules. The OVN-K master will also delete the corresponding ``DNSName`` CRs, only if the ``.spec.isregular`` field is set to false and
+the ``.spec.iswildcard`` field is set to true. If both the fields are set to true, then the CR will not be deleted and the
+``.spec.iswildcard`` field will be set to false. The from the ``.status`` field all the other DNS names' details will be removed and
+only the details of the DNS name will be kept which matches the Name field of the CR.
+
 
 #### Variation [optional]
 
@@ -124,6 +185,45 @@ type EgressFirewallDestination struct {
 }
 ````
 
+The following ``DNSName`` CRD will be added.
+
+````go
+// DNSName describes a DNS name used a EgressFirewall rule.
+type DNSName struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// Specification of the desired behavior of DNSName.
+	Spec DNSNameSpec `json:"spec"`
+	// Observed status of DNSName
+	// +optional
+	Status DNSNameStatus `json:"status,omitempty"`
+}
+
+// DNSNameSpec is a desired state description of DNSName.
+type DNSNameSpec struct {
+	IsRegular  bool `json:"isregular,omitempty"`
+	IsWildcard bool `json:"iswildcard,omitempty"`
+}
+
+type DNSNameStatus struct {
+	// The list of matching DNS names and their corresponding IPs along with TTL and next
+	// time to DNS lookup.
+	Items []DNSNameStatusItem `json:"items"`
+}
+
+type DNSNameStatusItem struct {
+	DNSName string        `json:"dnsname"`
+	Info    []DNSNameInfo `json:"info"`
+}
+
+type DNSNameInfo struct {
+	IP             string `json:"ip"`
+	TTL            string `json:"ttl"`
+	NextLookupTime string `json:"nextlookuptime"`
+}
+````
+
 ### Implementation Details/Notes/Constraints [optional]
 
 
@@ -133,7 +233,9 @@ type EgressFirewallDestination struct {
 
 ### Drawbacks
 
-
+* Whenever there's a change in the IPs or next time to DNS lookup for a DNS name, the additional step of updating the
+related ``DNSName`` CRs will be executed. This might add some delay to the DNS lookup process. However, this will only
+happen whenever there's a change in the DNS information.
 
 
 ## Design Details
@@ -142,7 +244,10 @@ type EgressFirewallDestination struct {
 
 ### Test Plan
 
-* 
+* This enhancement will be tested through e2e tests by adding EgressFirewall rules containing regular DNS names
+and wildcard DNS names.
+* Testing the feature where IPs are dynamically changed may be a little bit tricky as this will probably include
+creation of DNS records and then changing the IP adresses of the DNS records through the e2e tests.
 
 ### Graduation Criteria
 
