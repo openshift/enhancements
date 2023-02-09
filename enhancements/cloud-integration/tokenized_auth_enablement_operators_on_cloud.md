@@ -98,7 +98,7 @@ While providing the above goal, allow for multi-tenancy. In this sense multi-ten
 provide different cloud provider credentials per operand such that operator users may uniquely access non-shared cloud
 resources.
 
-Guide and assist Day-2 Operator admins in providing the required cloud provider credentials matched to their permission
+Operator authors have a way to notify, guide, and assist Day-2 Operator admins in providing the required cloud provider credentials matched to their permission
 needs for install and update.
 
 Ideally, a solution here will work in both HyperShift (STS always) and non-HyperShift clusters.
