@@ -1,5 +1,5 @@
 ---
-title: tokenized-auth-enablement-operators-on_cloud
+title: tokenized-auth-enablement-operators-on-cloud
 authors:
   - "@bentito"
   - "@jharrington22"
