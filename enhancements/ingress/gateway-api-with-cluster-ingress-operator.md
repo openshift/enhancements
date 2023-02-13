@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@knobunc"
 creation-date: 2022-12-13
-last-updated: 2023-02-17
+last-updated: 2023-02-22
 tracking-link:
   - https://issues.redhat.com/browse/NE-1105
   - https://issues.redhat.com/browse/NE-1107
@@ -771,7 +771,33 @@ To answer this question, we need to do the following:
 * Verify that OpenShift Service Mesh will include support for this feature in time for this EP.
 * Evaluate any potential security concerns around this feature.
 
-**Resolution**: TBD.
+**Resolution**: The answer depends on what version of OSSM is selected for dev
+preview. If we use OSSM 2.3, we will **NOT** enable ReferenceGrants. If we use OSSM 2.4,
+we will enable ReferenceGrants. This is because ReferenceGrants are non-functional in
+OSSM 2.3, but functional in OSSM 2.4.
+
+OSSM 2.3 uses Istio 1.14 and Istio 1.14 doesn't support ReferenceGrants; therefore,
+in OSSM 2.3, ReferenceGrants are **non-functional**. However, by default,
+Gateway API objects in OSSM 2.3 can reference objects across namespace boundaries,
+such as an HTTPRoute referencing a service in another namespace. A ReferenceGrant
+CRD has no impact on this functionality.
+
+OSSM 2.4 uses Istio 1.16 and Istio 1.16 supports ReferenceGrants; therefore,
+in OSSM 2.4, ReferenceGrants are **functional**. This means that, by default,
+Gateway API objects in OSSM 2.4 **CANNOT** reference objects across namespace
+boundaries without an appropriate ReferenceGrant object.
+
+There are security risks to allowing cross-namespace references. A nefarious user
+could send network traffic to locations they would otherwise not have access to via a
+confused deputy attack as documented by [CVE-2021-25749](https://github.com/kubernetes/kubernetes/issues/103675).
+ReferenceGrant was introduced as a safeguard against these types of attacks by requiring
+explicit permission from the target object's owner. The ability to do cross-namespace
+references in OSSM 2.3 without any safeguards is a risk; however, OSSM 2.4's requirement
+for ReferenceGrants mitigates this risk.
+
+In the future, ReferenceGrant will likely be migrated out of Gateway API and into
+Kubernetes upstream. Until then, we will support ReferenceGrant as a part of
+Gateway API v1beta1 when using OSSM 2.4.
 
 #### Should we have a feature gate?
 
