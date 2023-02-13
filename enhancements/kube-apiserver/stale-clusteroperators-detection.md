@@ -5,9 +5,9 @@ authors:
 reviewers:
   - "@deads2k"
 approvers:
-  - "@deads2k"
+  - "@tkashem"
 creation-date: 2022-01-31
-last-updated: 2022-01-31
+last-updated: 2023-02-13
 ---
 
 # Detection and reporting of stale cluster operators
@@ -106,3 +106,12 @@ One alternative discussed was a new API field that will be added to clusteropera
 Instead of relying on
 "lastTransitionTime" will introduce this field and use it as "heart-beat". This will require **all** operators to update
 this field correctly and multiply the writes significantly.
+
+Another alternative is to use lease inspection based on explicitly named leases in the .status.relatedResources for each
+clusteroperator.
+This alternative resolves the additional heartbeat problem and doesn't require a logic change since operators already 
+provide .status.relatedResources.
+Every operator would need updating to include their lease and the staleness checker navigates through and inspects leases.
+This is preferred, but takes significantly longer to produce value.
+The tradeoff of flapping message and 4.13 value versus not-flapping message and value in a nebulous future release is not
+clean or obvious: staff-eng holds the keys, but will heavily weight the kube-apiserver team recommendation.
