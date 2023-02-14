@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@knobunc"
 creation-date: 2022-12-13
-last-updated: 2023-02-07
+last-updated: 2023-02-15
 tracking-link:
   - https://issues.redhat.com/browse/NE-1105
   - https://issues.redhat.com/browse/NE-1107
@@ -781,7 +781,7 @@ To answer this question, we need to do the following:
 
 With this enhancement, the Ingress Operator installs the gatewayclasses CRD and
 watches this resource.  No other logic that this enhancement adds is executed
-until a GatewayClass CR is created.  In effect, the GatewayClass CR behaves as a
+until a GatewayClass CR is created.  To some degree, the GatewayClass CR behaves as a
 feature gate: creating the CR is the equivalent of turning on a feature gate.
 
 _Do we need an explicit feature gate for Gateway API?_
@@ -790,7 +790,32 @@ To answer this question, we need to understand the requirements around feature
 gates and understand whether just installing the gatewayclasses CRD may be
 problematic for some clusters.
 
-**Resolution**: TBD.
+**Resolution**: Yes, we should use a feature gate.  It is not just the installation of
+the CRDs that must be considered.  The additional controllers and watchers needed for
+managing Gateway API resources should be avoided if not needed. In addition, having an
+official feature gate is useful for setting expectations about whether a cluster may be
+upgraded. In Dev and Tech Preview, a cluster with this feature should not be upgradeable.
+Finally, if a user wants to install the Gateway API CRDs on their cluster for experimenting
+with an implementation other than OSSM/Istio, we should permit them to do this without
+interference from OpenShift Gateway API on OSSM.
+
+In Dev Preview we choose to use the `CustomNoUpgrade` variety of feature gate primarily
+because our other choice was named `TechPreviewNoUpgrade`, and we felt this would cause some
+confusion over the status of the feature.  Even though `TechPreviewNoUpgrade` has automatic
+CI testing in place and is managed by the OpenShift API, we won't need it until the feature has
+graduated in maturity to Tech Preview.
+
+The list of feature gate constraints includes:
+
+* The feature gate should be named `GatewayAPI` for all iterations of the feature.
+* The GatewayAPI feature gate should be a `CustomNoUpgrade` variety in Dev Preview,
+a `TechPreviewNoUpgrade` variety in Tech Preview, and removed before GA.
+* The GatewayAPI feature gate will be used to bar the installation of the GatewayAPI CRDs.
+* The GatewayAPI feature gate will be used to bar the installation, configuration, or watch of OpenShift Service Mesh
+components.
+* The GatewayAPI feature gate will be used to bar special operation of the LoadBalancer and DNS.
+* The GatewayAPI feature gate will be used to lift the restriction of DNSRecords to an owning
+ingresscontroller.
 
 ### Test Plan
 
