@@ -9,9 +9,9 @@ reviewers: # Include a comment about what domain expertise a reviewer is expecte
   - "@csrwng" # for HyperShift changes
   - "@spadgett" # for Console changes
 approvers:
-  - @sdodson
+  - "@sdodson"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - @abutcher # for CCO API changes, or please suggest alternative
+  - "@abutcher" # for CCO API changes, or please suggest alternative
 creation-date: 2023-01-21
 last-updated: 2023-02-15
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
@@ -111,10 +111,10 @@ for HyperShift)
 
 ## Proposal
 
-**Cloud Credential Operator (CCO) changes**: Add a "Token" mode, distinct from disabled/manual mode that will look for and
-process CredentialRequests referenced in Operator CRs. This will operate in one of two ways depending on which other parts 
-of this EP for other components are adopted: specifically HyperShift/Rosa adding CCO with Token mode or continuing with the
-current support for the pod identity webhook.
+**Cloud Credential Operator (CCO) changes**: Add a "Token" mode, distinct from disabled/manual mode that will look for 
+and process CredentialRequests referenced in Operator CRs. This will operate in one of two ways depending on which other
+parts of this EP for other components are adopted: specifically HyperShift/Rosa adding CCO with Token mode or continuing
+with the current support for the pod identity webhook.
 
 CCO Token mode will work by adding a "role-arn"-type field on operator added CredentialsRequest objects. This is a new
 API field on the CredentialsRequest spec. When CCO acquires a CredentialsRequest it will mint a Secret (as today 
@@ -161,31 +161,27 @@ versions.
 
 ### Workflow Description
 
-[Explain how the user will use the feature. Be detailed and explicit.
-Describe all of the actors, their roles, and the APIs or interfaces
-involved. Define a starting state and then list the steps that the
-user would need to go through to trigger the feature described in the
-enhancement. Optionally add a
-[mermaid](https://github.com/mermaid-js/mermaid#readme) sequence
-diagram.]
-Making a layered operator ready to work on an STS will involve the following steps:
+Making a layered operator ready to work on an STS enabled cluster will involve the following steps:
 
 For the operator author team:
 - Add CredentialRequests to the bundle, known location;
+- Add "role-arn"-type fields to the CredentialRequests
 - Add references to the CredentialRequests in the CRD spec;
 - Use SDK to validate bundle to catch permission changes or mis-configuration
 - Add eventing to report status on a CR to indicate lacking STS credentials for fully operational deploy or update.
 
 For the Cloud Credential Operator:
-- Add an STS mode that will watch for CredentialRequests (as per mint mode) but then resolve time-based tokens
-  per cloud platform by looking in known location on operator bundle for cloud platform credentials. Make resource
-  happen for the operator by setting pod identity webhook as needed. Can account for per-operand tenancy permissions.
+- Add a Token mode that will watch for CredentialRequests (as per mint mode) and then resolve time-based tokens
+  per cloud platform. 
+- Make Secret resource available for the operator via pod identity webhook. 
+- Pod identity webhook logic to account for per-operand tenancy permissions.
 
 For Operator Administrator:
 - Supply cloud credentials for STS (ARN ID, etc) in the known location and change CR to reflect this.
 
 For OperatorHub, OLM:
 - Prompt for missing credentials that prevent fully operational install on STS cluster. Same for upgrades.
+- Badge indicating STS enabled operators (including operators that don't need cloud credentials)
 
 This graph shows the system as it needs to work (AWS only), not the proposed solution workflow:
 ```mermaid
@@ -216,49 +212,16 @@ graph  LR
   class cluster2 cluster1;
 ```
 
-Use sub-sections to explain variations, such as for error handling,
-failure recovery, or alternative outcomes.
-
-For example:
-
-**cluster creator** is a human user responsible for deploying a
-cluster.
-
-**application administrator** is a human user responsible for
-deploying an application in a cluster.
-
-1. The cluster creator sits down at their keyboard...
-2. ...
-3. The cluster creator sees that their cluster is ready to receive
-   applications, and gives the application administrator their
-   credentials.
-
 #### Variation [optional]
 
 If the cluster creator uses a standing desk, in step 1 above they can
 stand instead of sitting down.
 
-See
-https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md#high-level-end-to-end-workflow
-and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples.
-
 ### API Extensions
 
-API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
+"Role-ARN-like" field added CCO CredentialsRequest API (name not finalized yet, ARN is AWS specific)
+This field allows CCO to ...
 
-- Name the API extensions this enhancement adds or modifies.
-- Does this enhancement modify the behaviour of existing resources, especially those owned
-  by other parties than the authoring team (including upstream resources), and, if yes, how?
-  Please add those other parties as reviewers to the enhancement.
-
-  Examples:
-  - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
-  - Restricts the label format for objects to X.
-  - Defaults field Y on object kind Z.
-
-Fill in the operational impact of these API Extensions in the "Operational Aspects
-of API Extensions" section.
 
 ### Implementation Details/Notes/Constraints [optional]
 
