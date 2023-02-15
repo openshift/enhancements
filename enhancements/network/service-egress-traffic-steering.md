@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - "@trozet"
 creation-date: 2022-07-28
-last-updated: 2022-07-28
+last-updated: 2023-01-10
 status: implementable
 tracking-link:
   - https://issues.redhat.com/browse/SDN-2682
@@ -26,7 +26,10 @@ tracking-link:
 Some external systems that communicate with applications running on the Kubernetes cluster through a LoadBalancer service expect that the source IP of egress traffic originating from the pods backing the service is identical to the destination IP they use to reach them - i.e the LoadBalancer's ingress IP.
 This behavior requires that service access from outside the cluster will only work to a designated node. This is contradictory to how default services work where a service may be accessed via any node.
 
-By annotating a LoadBalancer service, users could request that the source IP of egress packets originating from all of the pods that are endpoints of it would be its ingress IP.
+By introducing a new CRD `EgressService`, users could request that the source IP of egress packets originating from all of the pods that are endpoints of a LoadBalancer service would be its ingress IP.
+The CRD will be Namespaced, each named as the LoadBalancer Service that should be modified.
+
+The feature will be supported by both "Shared" and "Local" gateway modes and the affected traffic will be that which is coming from a pod to a destination outside of the cluster.
 
 ## Motivation
 
@@ -43,7 +46,7 @@ Therefore they require that when one of these pod applications initiate traffic 
 
 - Announcing the service externally (for service ingress traffic) with OVN-Kubernetes - this part should be handled by a LoadBalancer provider (like MetalLB) as explained later.
 
-- Using the service's ingress IP for pod to pod traffic.
+- Using the service's ingress IP for pod to pod traffic, pod to node traffic, pod to service traffic.
 
 ## Proposal
 
@@ -60,14 +63,18 @@ The ingress part will be handled by a LoadBalancer provider, such as MetalLB, th
 Taking MetalLB as an example for a LoadBalancer provider, the user will need to create their `L2Advertisement` and/or `BGPAdvertisements` with the `nodeSelector` field pointing to that label. That way only the node holding the label will be used for announcing the LoadBalancer service ingress IP.
 It is worth noting that in MetalLB's case, a given LoadBalancer service can be announced by multiple L2 and BGP advertisements, possibly being (even accidently) announced from multiple nodes. For our use-case the user MUST take care of configuring their MetalLB resources in a way that the service is announced only by the node holding the label - a full example is detailed in [Usage Example](#Usage-Example).
 
-To achieve these goals, we introduce a new annotation for users to set on LoadBalancer services: `k8s.ovn.org/egress-service`, which can be either empty or contain a `nodeSelector` field: `'{"nodeSelector":{"matchLabels":{"color": "green"}}}'` that allows limiting the nodes that can be selected to handle the service's traffic.
-By specifying the `nodeSelector` field, only a node whose labels match the specified selectors can be selected for handling the service's traffic as explained earlier.
-By not specifying the `nodeSelector` field any node in the cluster can be chosen to manage the service's traffic.
+To achieve these goals, we introduce a new resource `EgressService` for users to create alongside LoadBalancer services which can be either empty or contain optional fields:
+- `nodeSelector`: allows limiting the nodes that can be selected to handle the service's traffic.
+When present only a node whose labels match the specified selectors can be selected for handling the service's traffic as explained earlier.
+When the field is not specified any node in the cluster can be chosen to manage the service's traffic.
+
+- `network`: The network which this service should send egress and corresponding ingress replies to.
+This is typically implemented as VRF mapping, representing a numeric id or string name of a routing table which by omission uses the default host routing.
 
 ### Implementation Details/Notes/Constraints
 
-A new annotation `k8s.ovn.org/egress-service` is supported for LoadBalancer services.
-When `ovnkube-master` detects that a LoadBalancer service has this annotation it will elect a node to act as the point for all of the traffic of that service (ingress/egress). If the annotation contains valid LabelSelectors in its `nodeSelector` field only a node whose labels match the selectors can be elected.
+A new resource `EgressService` is supported alongside LoadBalancer services.
+When `ovnkube-master` detects that a LoadBalancer service has a corresponding `EgressService` it will elect a node to act as the point for all of the traffic of that service (ingress/egress). If the resource contains valid LabelSelectors in its `nodeSelector` field only a node whose labels match the selectors can be elected.
 The specified selectors have to match at least one of the nodes in the cluster, otherwise we don't configure anything.
 If the `nodeSelector` field is not specified any node can be elected.
 
@@ -86,11 +93,11 @@ $ ovn-nbctl lr-policy-list ovn_cluster_router
        101      ip4.src == 10.244.1.6/32                                       reroute      10.244.0.2
        ...
 ```
-After that the service will be annotated with `k8s.ovn.org/egress-service-host=<node_name>` and the node labeled with `egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>: ""`.
+After that the `EgressService` resource status field will be updated with `host: <node_name>` and the node labeled with `egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>: ""`.
 
-When `ovnkube-node` detects that a LoadBalancer service has the `k8s.ovn.org/egress-service` annotation and it is running in the node specified in the service's `k8s.ovn.org/egress-service-host` annotation, it will add the relevant SNATs to the host's iptables for each of the service's endpoints.
+When `ovnkube-node` detects that the host of an `EgressService` is the one it is running on, it will add the relevant SNATs to the host's iptables for each of the service's endpoints.
 
-For example when `ovn-worker` node matches the LabelSelectors specified in the `nodeSelector` field, 10.244.0.3 and 10.244.1.6 are the endpoints of the annotated LoadBalancer service "some-service" in the default namespace whose ingress IP is 172.19.0.100, we expect to see iptables rules like these in `ovn-worker`:
+For example when `ovn-worker` node matches the LabelSelectors specified in the `nodeSelector` field, 10.244.0.3 and 10.244.1.6 are the endpoints of the LoadBalancer service "some-service" in the default namespace whose ingress IP is 172.19.0.100, we expect to see iptables rules like these in `ovn-worker`:
 ```none
 $ iptables-save
 *nat
@@ -99,16 +106,24 @@ $ iptables-save
 -A OVN-KUBE-EGRESS-SVC -s 10.244.1.6/32 -m comment --comment default/some-service -j SNAT --to-source 172.19.0.100
 ```
 
-After this, for a given service with these final annotations:
+After this, for a given `EgressService`:
 ```none
 $ kubectl describe svc some-service
 Name:                     some-service
 Namespace:                default
-Annotations:              k8s.ovn.org/egress-service: {"nodeSelector":{"matchLabels":{"color": "green"}}} (set by user)
-                          k8s.ovn.org/egress-service-host: "ovn-worker"                                      (set by ovn-k)
 Type:                     LoadBalancer
 LoadBalancer Ingress:     172.19.0.100
 Endpoints:                10.244.0.3:8080,10.244.1.6:8080
+
+$ kubectl describe egressservice some-service
+Name:         some-service
+Namespace:    default
+Spec:
+  Node Selector:
+    Match Labels:
+      color:  green
+Status:
+  Host:  ovn-worker
 ```
 the egress traffic flow for the pod `10.244.1.6` on `ovn-worker2` towards an external destination (172.19.0.5) will look like:
 ```none
@@ -144,14 +159,36 @@ the egress traffic flow for the pod `10.244.1.6` on `ovn-worker2` towards an ext
 ```
 As mentioned earlier, for the opposite direction (ingress/external client initiates) to work properly the LoadBalancer provider needs to announce the service only from `ovn-worker`.
 
+#### Network
+In addition, an `EgressService` supports a `network` field.
+When it is specified the relevant `ovnkube-node` takes care of creating an additional ip rule and iptables rules on its host.
+Assuming an `EgressService` has `Network: blue`, a ClusterIP of 10.96.135.5 and its endpoints are 10.244.0.3 and 10.244.1.6, a `fwmark` will be internally assigned to the "blue" table and the following will be created on the host:
+
+```none
+$ iptables-save
+*mangle
+-A POSTROUTING -j OVN-KUBE-EGRESS-SVC
+-A OVN-KUBE-EGRESS-SVC -s 10.244.0.3/32 -m comment --comment default/some-service -j MARK --set-mark 100
+-A OVN-KUBE-EGRESS-SVC -s 10.244.1.6/32 -m comment --comment default/some-service -j MARK --set-mark 100
+-A OVN-KUBE-EGRESS-SVC -s 10.96.135.5/32 -m comment --comment default/some-service -j MARK --set-mark 100
+
+$ ip rule list
+100:	from all fwmark 100 lookup blue
+```
+
+This makes the egress traffic of endpoints of an EgressService to be marked before a routing decision is made in order to hit the corresponding ip rule that uses the right routing table.
+A marking rule is also created for the ClusterIP of the service which is needed in order for the return traffic (reply to an external client calling the service) to use the correct table - this is because the packet flow of contacting a LoadBalancer service goes:
+`lb ip -> node -> enter ovn with ClusterIP -> exit ovn with ClusterIP -> exit node with lb ip`
+so we need to make sure that packets from ClusterIPs are marked before being routed in order for them to hit the relevant ip rule in time.
+
 ### Node Selection
 Selecting a node will work similarly to how EgressIP selects one.
-When a LoadBalancer service is annotated with a valid `k8s.ovn.org/egress-service` annotation, a node is selected to be in charge of all of its traffic.
+When an `EgressService` resource is created for a LoadBalancer service, a node is selected to be in charge of all of its traffic.
 If the `nodeSelector` field is specified, only a node whose labels match the specified selectors can be selected.
 A cache of the nodes and their number of allocations is kept in order to spread the allocations between all of the nodes available for a given service - selecting the node with the least amount of allocations every time.
 
 Once a node is selected, it is checked for readiness to serve traffic every x seconds the same way EgressIP does for its nodes (TCP/gRPC).
-If a node fails the health check, its allocations move to another node by removing the `egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>: ""` label from it, removing the logical router policies from the cluster router and resetting the `k8s.ovn.org/egress-service-host=<node_name>` annotation on the service which causes it to be reconciled - causing a new node to be selected for the service.
+If a node fails the health check, its allocations move to another node by removing the `egress-service.k8s.ovn.org/<svc-namespace>-<svc-name>: ""` label from it, removing the logical router policies from the cluster router and resetting the status of the `EgressService` which causes it to be reconciled - causing a new node to be selected for the service.
 If the node becomes not ready or its labels no longer match the service's selectors the same re-election process happens.
 
 ### Usage Example
@@ -171,9 +208,7 @@ spec:
   autoAssign: false
 ```
 
-2. Create the LoadBalancer service. We create it with 2 annotations:
-- `metallb.universe.tf/address-pool` - to explicitly request the IP to be from the `example-pool`.
-- `k8s.ovn.org/egress-service` - to request that all of the endpoints of the service exit the cluster with the service's ingress IP. We also provide `nodeSelector` so that the traffic exits from a node that matches these selectors.
+2. Create the LoadBalancer service and the corresponding EgressService. We create the service with the `metallb.universe.tf/address-pool` annotation to explicitly request its IP to be from the `example-pool` and the EgressService with a `nodeSelector` so that the traffic exits from a node that matches these selectors.
 ```yaml
 apiVersion: v1
 kind: Service
@@ -182,7 +217,6 @@ metadata:
   namespace: some-namespace
   annotations:
     metallb.universe.tf/address-pool: example-pool
-    k8s.ovn.org/egress-service: '{"nodeSelector":{"matchLabels":{"color": "green"}}}'
 spec:
   selector:
     app: example
@@ -192,6 +226,16 @@ spec:
       port: 8080
       targetPort: 8080
   type: LoadBalancer
+---
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: example-service
+  namespace: some-namespace
+spec:
+  nodeSelector:
+    matchLabels:
+      color: green
 ```
 
 3. Advertise the service from the node in charge of the service's traffic. So far the service is "broken" - it is not reachable from outside the cluster and if the pods try to send traffic outside it would probably not come back as it is SNATed to an IP which is unknown.
@@ -229,12 +273,44 @@ As a user of OpenShift, I should be able to have functioning LoadBalancer servic
 As a Telco customer who uses SNMP in OpenShift, I want to access pods that I'm managing using a LoadBalancer service. In order to do so, I need these pods to send traps using the same IP as I use for polling them.
 
 ### API Extensions
-N/A
+```go
+// EgressService is a CRD that allows the user to request that the source
+// IP of egress packets originating from all of the pods that are endpoints
+// of the corresponding LoadBalancer Service would be its ingress IP.
+type EgressService struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   EgressServiceSpec   `json:"spec,omitempty"`
+	Status EgressServiceStatus `json:"status,omitempty"`
+}
+
+// EgressServiceSpec defines the desired state of EgressService
+type EgressServiceSpec struct {
+  // Allows limiting the nodes that can be selected to handle the service's traffic.
+  // When present only a node whose labels match the specified selectors can be selected
+  // for handling the service's traffic.
+  // When it is not specified any node in the cluster can be chosen to manage the service's traffic.
+  // +optional
+  NodeSelector metav1.LabelSelector `json:"nodeSelector,omitempty"`
+
+  // The network which this service should send egress and corresponding ingress replies to.
+  // This is typically implemented as VRF mapping, representing a numeric id or string name
+  // of a routing table which by omission uses the default host routing.
+  // +optional
+  Network string `json:"network,omitempty"`
+}
+
+// EgressServiceStatus defines the observed state of EgressService
+type EgressServiceStatus struct {
+	Host string `json:"host"`
+}
+```
 
 ### Test Plan
 
 - Unit tests coverage.
-- E2E coverage by creating a LoadBalancer service with the proper annotations and validating that:
+- E2E coverage by creating an EgressService and validating that:
   - pod to pod traffic works.
   - external client to service works.
   - pod to external client works and is SNATed properly.
@@ -262,8 +338,16 @@ To make it work for our use-case we'd have to refactor a lot of its functionalit
 Having said that, the solution proposed here will probably share/reuse some of the code of EgressIP as they have some sort of similarity.
 ## Design Details
 Since both EgressIP and this feature create logical router policies on the cluster router, the policies created here will use a higher priority than the EgressIP ones.
-This means that if a pod is an endpoint of both an EgressIP and a LoadBalancer service annotated with a valid `k8s.ovn.org/egress-service` annotation the service's ingress IP will be used for the SNAT.
+This means that if a pod is an endpoint of both an EgressIP and an EgressService the service's ingress IP will be used for the SNAT.
 
+An option to have the CRD cluster-scoped/namespaced that leverages selectors to match the services was considered, however the current 1-1 mapping between EgressServices and LoadBalancer services design was picked as it offers some advantages over selectors:
+- It matches the old annotation way the most, presenting a clear togglable mechanism.
+
+- Simplicity of configuration - from a user's perspective a 1-1 mapping makes it clear which service should act as an "Egress Service" and what node is in charge of its traffic. When looking at a resource in charge of handling multiple services it would not be clear which services should be configured and it would need to have a long status field mapping each service to its node.
+
+- No overlapping configurations - selectors can overlap, which means we will have to set some priority mechanism for which config to apply for a given service. With a 1-1 mapping a service can match only a single config and we would not need to add additional semantics for the resource.
+
+That being said, this still leaves room for a higher level object that can group egress services by selectors.
 ### Graduation Criteria
 
 
@@ -293,6 +377,7 @@ This means that if a pod is an endpoint of both an EgressIP and a LoadBalancer s
 
 ## Implementation History
 
+2023-01-10: Convert annotation to a CRD and add a Network field.
 
 ### Drawbacks
 

@@ -185,12 +185,11 @@ type GCPKMSKeyReference struct {
   // projectID is the ID of the Project in which the KMS Key Ring exists.
   // It must be 6 to 30 lowercase letters, digits, or hyphens.
   // It must start with a letter. Trailing hyphens are prohibited.
-  // Defaults to the cluster project defined in the cluster infrastructure object, if not set.
   // +kubebuilder:validation:Pattern:=^[a-z][a-z0-9-]+[a-z0-9]$
   // +kubebuilder:validation:MinLength:=6
   // +kubebuilder:validation:MaxLength:=30
-  // +optional
-  ProjectID string `json:"projectID,omitempty"`
+  // +kubebuilder:validation:Required
+  ProjectID string `json:"projectID"`
   
   // location is the GCP location in which the Key Ring exists.
   // The input must match an existing GCP location, or "global".
