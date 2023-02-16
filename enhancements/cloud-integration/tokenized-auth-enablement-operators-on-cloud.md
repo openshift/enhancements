@@ -139,18 +139,21 @@ cloud providers and change the annotations to more generic naming.
 **HyperShift changes**: Include Cloud Credential Operator with "Token" mode (see above). Allows for processing of 
 CredentialsRequest objects added by operators.
 
-**OperatorHub changes**: Allow for import of additional, well-known, ENV variables on the Subscription object. These 
-fields will allows UX for the information needed by CCO or webhook, for input of the cloud credentials. 
+**OperatorHub and Console changes**: Allow for import of additional, well-known, bundle annotations which will result 
+in ENV variables on the Subscription object. Show operator is enabled for Token-based use based on Console determining 
+cluster is running in token-based authentication enabled cluster by reading the Issuer URL from the Authenticaion CR AND
+bundle has token-based auth enabled annotation. This info should be written to a new field on Subscription objects.
+The Subscription fields will allow UX for the information needed by CCO or webhook, for input of the cloud credentials. 
+Generate a manual ack for operator upgrade when cloud resources are involved. This can be determined by parsing the 
+Subscription objects. Ensures admin signs off that cloud resources are provisioned and working as intended before an 
+operator upgrade.
 
-**OLM changes**: Generate a manual ack for operator upgrade when cloud resources are involved. This can be determined by 
-parsing the Subscription objects. Ensures admin signs off that cloud resources are provisioned and working as intended
-before an operator upgrade.
-
-**Operator team/ Operator SDK changes**: Follow new guidelines for allowing for the operator to work on STS enabled 
-cluster. New guidelines would include the following to use CCO Token mode:
+**Operator team/ Operator SDK changes**: Follow new guidelines for allowing for the operator to work on token auth 
+enabled cluster. New guidelines would include the following to use CCO Token mode:
 
 - changing CRD to add CredentialRequest references and putting those referenced
 - CredentialRequests into a defined directory in the bundle
+- Add a bundle annotation claiming token-based authentication support
 - add the projected ServiceAccount volume to deployment;
 - handle the Secret themselves (like today’s CCO Mint mode, read and use the credentials in the Secret whose name they 
   know from the CredentialsRequest and is in the same Namespace)
@@ -179,7 +182,7 @@ For the Cloud Credential Operator:
 For Operator Administrator:
 - Supply cloud credentials for STS (ARN ID, etc) in the known location and change CR to reflect this.
 
-For OperatorHub, OLM:
+For OperatorHub, Console:
 - Prompt for missing credentials that prevent fully operational install on STS cluster. Same for upgrades.
 - Badge indicating STS enabled operators (including operators that don't need cloud credentials)
 
