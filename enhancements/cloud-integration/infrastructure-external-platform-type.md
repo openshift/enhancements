@@ -563,7 +563,15 @@ During the first phases of this effort, support procedures should be no differen
 
 ## Implementation History
 
-TBD
+- [`External` platform API](https://github.com/openshift/api/pull/1301)
+
+### Remove CloudControllerManagerSpec from the infrastructure resource
+
+Due to priority changes for the Installer Flexibility effort,
+the decision about temporarily removing `CloudControllerManagerSpec` from the `Infrastructure` resource was made.
+OCP 4.13 will not contain the `CloudControllerManagerSpec` part.
+
+- [PR for removing CloudControllerManagerSpec](https://github.com/openshift/api/pull/1409)
 
 ## Alternatives
 
