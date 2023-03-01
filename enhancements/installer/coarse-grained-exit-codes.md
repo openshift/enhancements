@@ -10,7 +10,7 @@ approvers:
 api-approvers: # in case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers)
   - TBD
 creation-date: 2022-03-16
-last-updated: 2022-03-16
+last-updated: 2023-02-16
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - TBD
 see-also:
@@ -85,12 +85,12 @@ Key things to remember:
 5. Consumers must properly handle previously unknown exit codes.
 
 | Stage | Exit Code |
-| --- | --- | 
+| --- | --- |
 | Generic | whatever other value is produced |
-| infrastructure creation | 3 |
-| bootstrapping | 4 | 
-| wait-for-cluster-install | 5 |
-| install-config verification | TBD |
+| install-config verification | 3 |
+| infrastructure creation | 4 |
+| bootstrapping | 5 |
+| wait-for-cluster-install | 6 |
 
 ### User Stories
 
