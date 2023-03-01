@@ -141,7 +141,7 @@ CredentialsRequest objects added by operators.
 
 **OperatorHub and Console changes**: Allow for import of additional, well-known, bundle annotations which will result 
 in ENV variables on the Subscription object. Show operator is enabled for Token-based use based on Console determining 
-cluster is running in token-based authentication enabled cluster by reading the Issuer URL from the Authenticaion CR AND
+cluster is running in token-based authentication enabled cluster by reading the `.spec.serviceAccountIssuer` from the Authentication CR, `.spec.platformSpec.type` from the Infrastructure CR,`.spec.credentialsMode` from the CloudCredentials CR  AND
 bundle has token-based auth enabled annotation. This info should be written to a new field on Subscription objects.
 The Subscription fields will allow UX for the information needed by CCO or webhook, for input of the cloud credentials. 
 Generate a manual ack for operator upgrade when cloud resources are involved. This can be determined by parsing the 
