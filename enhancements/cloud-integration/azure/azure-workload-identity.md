@@ -48,8 +48,9 @@ Previous enhancements have implemented short-lived credential support via [STS f
 ### Goals
 
 - Core OpenShift operators utilize short-lived, bound service account token credentials to authenticate with Azure API Services.
+- Self-managed OpenShift administrators can create Azure infrastructure necessary to utilize workload identity federation such as an Azure blob storage container based OIDC using `ccoctl`.
 - Self-managed OpenShift administrators can create Azure Managed Identities via `ccoctl`'s processing of `CredentialsRequest` custom resources extracted from the release image prior to installation and provide the secrets output as manifests for installation which serve as the credentials for core OpenShift operators.
-- An admin can create an Azure Managed Identity and Federated Credential via `CredentialsRequest` CR and inject (via annotation) to a `ServiceAccount`, just as they can create an Azure service principal and inject to a `Secret` currently.
+- A user can utilize a Federated Azure Managed Identity Credential for their workload using the [mutating admission webhook provided by Azure Workload Identity](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html).
 
 ### Non-Goals
 
