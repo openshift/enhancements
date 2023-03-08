@@ -108,7 +108,7 @@ Use "ccoctl azure [command] --help" for more information about a command.
 
 #### Azure CredentialsRequests ServiceAccounts
 
-`CredentialsRequests` for the Azure platform must now list `ServiceAccounts` in order to for `ccoctl` to be able to create federated credentials for an Azure Managed Identity. Example: [aws-ebs-csi-driver-operator](https://github.com/openshift/cluster-storage-operator/blob/f1ddb697afb3c33d6d45936e58fad101abe26f13/manifests/03_credentials_request_aws.yaml#L11-L13).
+`CredentialsRequests` for the Azure platform must now list [ServiceAccountNames](https://github.com/openshift/cloud-credential-operator/blob/1f7a2602bf8a9ddec5d8fc29f77215697d9e7c07/pkg/apis/cloudcredential/v1/types_credentialsrequest.go#L57-L62) in order to for `ccoctl` to be able to create federated credentials for an Azure Managed Identity that are associated with the `name` and `namespace` of the `ServiceAccount`. Example: [aws-ebs-csi-driver-operator](https://github.com/openshift/cluster-storage-operator/blob/f1ddb697afb3c33d6d45936e58fad101abe26f13/manifests/03_credentials_request_aws.yaml#L11-L13).
 
 #### Credentials secret
 
