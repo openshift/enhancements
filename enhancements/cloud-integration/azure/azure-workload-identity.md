@@ -55,13 +55,21 @@ Previous enhancements have implemented short-lived credential support via [STS f
 ### Non-Goals
 
 - Creation of Azure Managed Identity infrastructure (OIDC, managed identities, federated credentials) in managed environments (eg. ARO).
-- Role granularity for the explicit necessary permissions granted to Managed Identities. Permissions needed by operator identities are enumerated within `CredentialsRequests` for platforms such as AWS, example: [aws-ebs-csi-driver-operator](https://github.com/openshift/cluster-storage-operator/blob/f1ddb697afb3c33d6d45936e58fad101abe26f13/manifests/03_credentials_request_aws.yaml). Granular permissions for operators on Azure are not a goal of this enhancement but should be implemented either in parallel to this enhancement or as a followup.
+- Role granularity for the explicit necessary permissions granted to
+  Managed Identities. Permissions needed by operator identities are
+  enumerated within `CredentialsRequests` for platforms such as AWS,
+  example:
+  [aws-ebs-csi-driver-operator](https://github.com/openshift/cluster-storage-operator/blob/f1ddb697afb3c33d6d45936e58fad101abe26f13/manifests/03_credentials_request_aws.yaml). Granular
+  permissions for operators on Azure are not a goal of this
+  enhancement but should be implemented either in parallel to this
+  enhancement or as a followup.
 
 ## Proposal
 
 In this proposal, the Cloud Credential Operator's command-line utility (`ccoctl`) will be extended with subcommands for Azure which will provide methods for generating the Azure infrastructure (blob container OIDC, managed identities and federated credentials) and secret manifests necessary to create an Azure cluster that utilizes Azure Workload Identity for core OpenShift operator authentication.
 
 OpenShift operators as well as the Installer will be updated to create Azure clients using a bound `ServiceAccount` token that has been associated with a Managed Identity (identified by `clientID`) in Azure. Operators or repositories that we expect will need changes, listed in [CCO-235](https://issues.redhat.com/browse/CCO-235):
+
 - [Installer](https://github.com/openshift/installer)
 - [cloud-credential-operator](https://github.com/openshift/cloud-credential-operator)
 - [cluster-image-registry-operator](https://github.com/openshift/cluster-image-registry-operator)
@@ -74,7 +82,15 @@ OpenShift operators as well as the Installer will be updated to create Azure cli
 - [cloud-controller-manager-operator](https://github.com/openshift/cluster-cloud-controller-manager-operator)
 - [cloud-provider-azure](https://github.com/kubernetes-sigs/cloud-provider-azure/)
 
-Managed Identity details such as the `clientID`, `tenantID` and path to the mounted Service Account token necessary for creating a client can also be supplied to pods as environment variables via a [mutating admission webhook provided by Azure Workload Identity](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html). This webhook would be deployed and lifecycled by the Cloud Credential Operator such that the webhook could be utilized to supply credential details to user workloads. Core OpenShift operators will not rely on the webhook.
+Managed Identity details such as the `clientID`, `tenantID` and path
+to the mounted Service Account token necessary for creating a client
+can also be supplied to pods as environment variables via a [mutating
+admission webhook provided by Azure Workload
+Identity](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html). This
+webhook would be deployed and lifecycled by the Cloud Credential
+Operator such that the webhook could be utilized to supply credential
+details to user workloads. Core OpenShift operators will not rely on
+the webhook.
 
 ### Workflow Description
 
@@ -108,7 +124,12 @@ Use "ccoctl azure [command] --help" for more information about a command.
 
 #### Azure CredentialsRequests ServiceAccounts
 
-`CredentialsRequests` for the Azure platform must now list [ServiceAccountNames](https://github.com/openshift/cloud-credential-operator/blob/1f7a2602bf8a9ddec5d8fc29f77215697d9e7c07/pkg/apis/cloudcredential/v1/types_credentialsrequest.go#L57-L62) in order to for `ccoctl` to be able to create federated credentials for an Azure Managed Identity that are associated with the `name` and `namespace` of the `ServiceAccount`. Example: [aws-ebs-csi-driver-operator](https://github.com/openshift/cluster-storage-operator/blob/f1ddb697afb3c33d6d45936e58fad101abe26f13/manifests/03_credentials_request_aws.yaml#L11-L13).
+`CredentialsRequests` for the Azure platform must now list
+[ServiceAccountNames](https://github.com/openshift/cloud-credential-operator/blob/1f7a2602bf8a9ddec5d8fc29f77215697d9e7c07/pkg/apis/cloudcredential/v1/types_credentialsrequest.go#L57-L62)
+in order to for `ccoctl` to be able to create federated credentials
+for an Azure Managed Identity that are associated with the `name` and
+`namespace` of the `ServiceAccount`. Example:
+[aws-ebs-csi-driver-operator](https://github.com/openshift/cluster-storage-operator/blob/f1ddb697afb3c33d6d45936e58fad101abe26f13/manifests/03_credentials_request_aws.yaml#L11-L13).
 
 #### Credentials secret
 
