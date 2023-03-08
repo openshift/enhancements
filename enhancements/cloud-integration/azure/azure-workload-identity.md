@@ -16,8 +16,8 @@ approvers:
   - TBD, who can serve as an approver?
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - None
-creation-date: yyyy-mm-dd
-last-updated: yyyy-mm-dd
+creation-date: 2022-12-08
+last-updated: 2023-03-02
 tracking-link:
   - https://issues.redhat.com/browse/CCO-187
 see-also:
@@ -43,7 +43,7 @@ Previous enhancements have implemented short-lived credential support via [STS f
 ### User Stories
 
 - As a cluster-creator, I want to create a self-managed OpenShift cluster on Azure that utilizes short-lived credentials for core operator authentication to Azure API services so that long-lived credentials do not live on the cluster.
-- As a cluster-administrator, I want to provision Managed Identities within Azure and use those for my own workload's authentication to Azure API services.
+- As a cluster-administrator, I want to provision Federated Managed Identities within Azure and use Federated Managed Identities for my own workload's authentication to Azure API services.
 
 ### Goals
 
@@ -54,24 +54,26 @@ Previous enhancements have implemented short-lived credential support via [STS f
 ### Non-Goals
 
 - Creation of Azure Managed Identity infrastructure (OIDC, managed identities, federated credentials) in managed environments (eg. ARO).
-- Role granularity for the explicit necessary permissions granted to Managed Identities.
+- Role granularity for the explicit necessary permissions granted to Managed Identities. Permissions needed by operator identities are enumerated within `CredentialsRequests` for platforms such as AWS, example: [aws-ebs-csi-driver-operator](https://github.com/openshift/cluster-storage-operator/blob/f1ddb697afb3c33d6d45936e58fad101abe26f13/manifests/03_credentials_request_aws.yaml). Granular permissions for operators on Azure are not a goal of this enhancement but should be implemented either in parallel to this enhancement or as a followup.
 
 ## Proposal
 
 In this proposal, the Cloud Credential Operator's command-line utility (`ccoctl`) will be extended with subcommands for Azure which will provide methods for generating the Azure infrastructure (blob container OIDC, managed identities and federated credentials) and secret manifests necessary to create an Azure cluster that utilizes Azure Workload Identity for core OpenShift operator authentication.
 
-OpenShift operators will be updated to create Azure clients using the operator's bound `ServiceAccount` token that has been associated with a Managed Identity (identified by `clientID`) in Azure. Operators (or repositories) that we expect will need changes, listed in [CCO-235](https://issues.redhat.com/browse/CCO-235):
-- https://github.com/openshift/cloud-credential-operator
-- https://github.com/openshift/cluster-image-registry-operator
-- https://github.com/openshift/cluster-ingress-operator
-- https://github.com/openshift/cluster-storage-operator
-- https://github.com/openshift/cluster-api-provider-azure
-- https://github.com/openshift/machine-api-operator
-- https://github.com/openshift/azure-disk-csi-driver-operator
-- https://github.com/openshift/azure-file-csi-driver-operator
+OpenShift operators as well as the Installer will be updated to create Azure clients using a bound `ServiceAccount` token that has been associated with a Managed Identity (identified by `clientID`) in Azure. Operators or repositories that we expect will need changes, listed in [CCO-235](https://issues.redhat.com/browse/CCO-235):
+- [Installer](https://github.com/openshift/installer)
+- [cloud-credential-operator](https://github.com/openshift/cloud-credential-operator)
+- [cluster-image-registry-operator](https://github.com/openshift/cluster-image-registry-operator)
+- [cluster-ingress-operator](https://github.com/openshift/cluster-ingress-operator)
+- [cluster-storage-operator](https://github.com/openshift/cluster-storage-operator)
+- [machine-api-operator](https://github.com/openshift/machine-api-operator)
+- [docker-distribution](https://github.com/openshift/docker-distribution)
+- [azure-disk-csi-driver-operator](https://github.com/openshift/azure-disk-csi-driver-operator)
+- [azure-file-csi-driver-operator](https://github.com/openshift/azure-disk-csi-driver-operator)
+- [cloud-controller-manager-operator](https://github.com/openshift/cluster-cloud-controller-manager-operator)
+- [cloud-provider-azure](https://github.com/kubernetes-sigs/cloud-provider-azure/)
 
-Managed Identity details such as the `clientID` and `tenantID` necessary for creating a client can also be supplied to pods as environment variables via a [mutating admission webhook provided by Azure Workload Identity](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html). This webhook would be deployed and lifecycled by the Cloud Credential Operator
-such that it could be utilized to supply credential details to user workloads.
+Managed Identity details such as the `clientID`, `tenantID` and path to the mounted Service Account token necessary for creating a client can also be supplied to pods as environment variables via a [mutating admission webhook provided by Azure Workload Identity](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html). This webhook would be deployed and lifecycled by the Cloud Credential Operator such that the webhook could be utilized to supply credential details to user workloads. Core OpenShift operators will not rely on the webhook.
 
 ### Workflow Description
 
@@ -102,6 +104,10 @@ Flags:
 
 Use "ccoctl azure [command] --help" for more information about a command.
 ```
+
+#### Azure CredentialsRequests ServiceAccounts
+
+`CredentialsRequests` for the Azure platform must now list `ServiceAccounts` in order to for `ccoctl` to be able to create federated credentials for an Azure Managed Identity. Example: [aws-ebs-csi-driver-operator](https://github.com/openshift/cluster-storage-operator/blob/f1ddb697afb3c33d6d45936e58fad101abe26f13/manifests/03_credentials_request_aws.yaml#L11-L13).
 
 #### Credentials secret
 
