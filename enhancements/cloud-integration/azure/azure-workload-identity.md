@@ -17,7 +17,7 @@ approvers:
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - None
 creation-date: 2022-12-08
-last-updated: 2023-03-08
+last-updated: 2023-03-09
 tracking-link:
   - https://issues.redhat.com/browse/CCO-187
 see-also:
@@ -76,11 +76,13 @@ OpenShift operators as well as the Installer will be updated to create Azure cli
 - [cluster-ingress-operator](https://github.com/openshift/cluster-ingress-operator)
 - [cluster-storage-operator](https://github.com/openshift/cluster-storage-operator)
 - [machine-api-operator](https://github.com/openshift/machine-api-operator)
+- [machine-api-provider-azure](https://github.com/openshift/machine-api-provider-azure)
 - [docker-distribution](https://github.com/openshift/docker-distribution)
 - [azure-disk-csi-driver-operator](https://github.com/openshift/azure-disk-csi-driver-operator)
 - [azure-file-csi-driver-operator](https://github.com/openshift/azure-disk-csi-driver-operator)
 - [cloud-controller-manager-operator](https://github.com/openshift/cluster-cloud-controller-manager-operator)
 - [cloud-provider-azure](https://github.com/kubernetes-sigs/cloud-provider-azure/)
+- [cluster-api-provider-azure](https://github.com/kubernetes-sigs/cluster-api-provider-azure)
 
 Managed Identity details such as the `clientID`, `tenantID` and path
 to the mounted Service Account token necessary for creating a client
