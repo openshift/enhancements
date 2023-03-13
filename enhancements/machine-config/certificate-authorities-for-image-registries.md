@@ -3,15 +3,15 @@ title: certificate-authorities-for-image-registries
 authors:
   - dmage
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
+  - @sinnykumari
 approvers:
-  - TBD
+  - TBD, who can serve as an approver?
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - TBD
 creation-date: 2022-12-01
 last-updated: 2022-12-01
 tracking-link:
-  - https://issues.redhat.com/browse/IR-230
+  - https://issues.redhat.com/browse/MCO-499
 see-also:
 replaces:
 superseded-by:
@@ -56,10 +56,10 @@ goal>.
 
 ## Proposal
 
-Create a controller inside machine-config-operator that will replace the
+Create a mechanism inside machine-config-operator that will replace the
 node-ca daemon set.
 
-This controller should handle and distribute to all nodes certificate
+This mechanism should handle and distribute to all nodes certificate
 authorities from the user-provided config map that is specified in
 `images.config.openshift.io/cluster`. It should also observe a config map in
 the `openshift-config-managed` namespace and merge its content with the
@@ -67,7 +67,7 @@ user-provided config map. This will allow cluster-image-registry-operator to
 provide certificate authorities for the integrated image registry without
 changing the user-provided config map.
 
-Once this controller is created, the node-ca daemon set should be removed.
+Once this mechanism is created, the node-ca daemon set should be removed.
 
 ### Workflow Description
 
@@ -136,7 +136,7 @@ cluster-openshift-apiserver-operator needs a merged config map with all
 certificate authorities for image registries, so that openshift-apiserver can
 access registries.
 
-For them, the controller should create a merged config map in
+For them, the mechanism should create a merged config map in
 `openshift-config-managed`.
 
 ### API Extensions
