@@ -15,7 +15,7 @@ approvers:
 api-approvers:
   - N/A
 creation-date: 2023-01-20
-last-updated: 2023-01-20
+last-updated: 2023-03-13
 tracking-link:
   - https://issues.redhat.com/browse/USHIFT-716
 see-also:
@@ -229,24 +229,48 @@ The external network is used for external connections, such as `oc` clients.
 The internal network is used for internal connections, such as the ones from
 pods in the cluster.
 
-Choosing the internal network is a complex task, as it can collide with other
-IP ranges coming from DHCP or other environment configurations. In order to
-minimize risks, the API server service IP, which is always the [first one](https://github.com/kubernetes/kubernetes/blob/master/pkg/controlplane/services.go#L47)
-from the service CIDR range, is selected by default.
+When configuring apiserver we need to provide an IP where it will be listening.
+This turns into an `EndpointSlice` object that will create an association
+between the apiserver service network IP and https port (defaults to
+10.43.0.1:443) and the IP where it will actually be listening on the real port,
+which defaults to 6443.
+Ovnk creates flows to turn this VIP into the one from the `EndpointSlice`. Here
+we need a valid IP, local to the node, where the apiserver is listening so that
+this translation succeeds.
+Imagine we use the same service network apiserver address for the
+`EndpointSlice`: 10.43.0.1. This creates a VIP-endpoint in ovnk that looks like
+10.43.0.1:443->10.43.0.1:6443. Imagine we have an interface in the host where
+the apiserver service network IP has been configured. While regular pod network
+origin traffic goes through the ovnk flows to translate it correctly, this is
+not the case with host network pods. These fall through the flow that redirects
+node IP traffic (which is the source for the host network pods) to the
+apiserver IP, 10.43.0.1, configured in some interface. Since the port is not
+modified by ovnk traffic ends up reaching whoever is listening on port 443 in
+any host interface. And there is a process listening there, the router for
+ingress traffic. Certificate validations fail, and even if they succeeded this
+is not the apiserver but a different service.
+
+In order to fix this we must use a different `EndpointSlice` that does not
+match the service network apiserver IP.
+
+From the service CIDR MicroShift can compute the next available subnet and use
+the first IP from the range as the new endpoint for apiserver. In case of
+defaults, service CIDR is 10.43.0.0/16 and the next subnet is 10.44.0.0. Since
+there is only 1 IP required the netmask can be at /32 and have only one
+available IP.
 
 Since API server listens in [all interfaces](https://github.com/openshift/microshift/blob/0f4e4e8d7cb9946a7af81550eb6a537d0f5b4e15/pkg/controllers/kube-apiserver.go#L185)
 we only need to configure this IP in any interface. To make the solution not
 dependent on CNI an already existing interface may be used, like loopback.
-Upon start, MicroShift API server controller will first configure the service
-network IP in the loopback interface with a 32-bit netmask, then launch the API
+Upon start, MicroShift API server controller will first configure the new
+apiserver IP in the loopback interface with a /32 netmask, then launch the API
 server.
 
-By doing so, the API server service network resolves to a local IP (which
-happens to be the same IP), while the external traffic still uses the external
-IP, which is the node IP. This removes the ambiguity problem and allows the
-external certificate to include the node IP in the SAN. The internal
-certificate remains unchanged, as it already includes the service IP, which is
-now a valid IP within the node.
+By doing so, the apiserver service network resolves to a local IP while the
+external traffic still uses the external IP, which is the node IP. This
+removes the ambiguity problem and allows the external certificate to include
+the node IP in the SAN. The internal certificate remains unchanged, as it
+already includes the service IP, which is now a valid IP within the node.
 
 From a pod's perspective, it is irrelevant whether the IP is local or not. All
 a pod needs is to be able to reach the IP in order to connect to the API
@@ -263,7 +287,7 @@ introducing a new configuration option both use cases would fit into
 MicroShift.
 
 For single node the IP needs to be internal and it was already described how
-to use the service CIDR to extract the API server IP. No additional
+to use the service CIDR to extract the new apiserver IP. No additional
 configuration is needed.
 
 For more than one node the internal IPs are not enough, in this case there can
@@ -274,12 +298,12 @@ option shall be used to force an API server IP instead of the service network
 default.
 
 If the configuration option is used to force a non-default IP, loopback
-interface would remain unchanged and no additional IPs will be added to it.
+interface will remain unchanged and no additional IPs will be added to it.
 
 Options to have this configuration done include:
 1. Manually configure IPs before MicroShift starts.
    While this may be a pre-requisite, the dynamic nature of IPs makes it
-   unusable. IP addresses may change at any time, making it impractical to
+   troublesome. IP addresses may change at any time, making it impractical to
    expect or require the interfaces to be manually/statically configured
    before starting. If in single node, it also needs to read MicroShift
    configuration to extract the service network CIDR.
@@ -290,8 +314,7 @@ Options to have this configuration done include:
 1. Have MicroShift configure the secondary IP.
    While MicroShift does not own the OS, all the available information to
    properly configure the interface address (if needed) lives here. It needs
-   the service network CIDR, the API server IP, and the new configuration
-   option.
+   the service network CIDR, and the new configuration option.
 
 ### Workflow Description
 > _Disclaimer:_ Workflows described here illustrate automatic processes. This
@@ -449,6 +472,22 @@ N/A
    having more than one node. As per the kubernetes docs, it is forbidden to
    use localhost IPs as endpoints for a service.
    [Reference](https://kubernetes.io/docs/concepts/services-networking/service/#custom-endpointslices)
+
+* Use a reserved IP from service network.
+  Instead of using a new IP that requires configuration in the host, one could
+  think of using a static service network IP. The apiserver needs to be 100%
+  guaranteed to be free of collisions, as it is a key component in the control
+  plane. Service network IPs are dynamic by nature and allocated on a per use
+  fashion by apiserver itself. We could think of reserving an IP for apiserver
+  and the only way to do this is to create a fake service. For this you also
+  need apiserver, which would require bootstrapping: start apiserver with an
+  arbitrary IP from the service network, create the service, then restart
+  apiserver with the IP from that service. This has two main drawbacks:
+  * Long start times and complexity.
+  * Since service network CIDR is configurable, we are removing one entry from
+    it, which could be problematic in restricted/small subnets.
+  Not even ServiceIPStaticSubrange feature gate helps, as it does not guarantee
+  zero risk collisions.
 
 ## Infrastructure Needed [optional]
 N/A
