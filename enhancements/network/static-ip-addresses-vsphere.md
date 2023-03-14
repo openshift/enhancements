@@ -70,7 +70,7 @@ As an OpenShift administrator, I want to scale nodes with static IPs so that I c
 To faciliate the configuration of static IP address, network device configuration definitions are created for each node in the install-config.yaml. A `hosts`
 slice will be introduced to the installer platform specification to allow network device configurations to be specified for a nodes.
 
-For the bootstrap and control plane nodes, static IPs are passed to the node via the `guestinfo.afterburn.initrd.network-kargs` extraconfig parameter.  [Afterburn](https://github.com/coreos/afterburn/blob/main/src/providers/vmware/amd64.rs) recognizes this parameter when the node initially boots. 
+For the bootstrap and control plane nodes, static IP configuration is passed to the node on the [kernel command line](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/networking_guide/sec-configuring_ip_networking_from_the_kernel_command_line) via the `guestinfo.afterburn.initrd.network-kargs` extraconfig parameter.  [Afterburn](https://github.com/coreos/afterburn/blob/main/src/providers/vmware/amd64.rs) recognizes this parameter when the node initially boots. 
 
 When static network device configuration is required, Machines can not be created via MachineSets.
 The installer must create the initial set of compute Machines manually and an administrator
@@ -118,7 +118,7 @@ type NetworkDeviceSpec struct {
 	// Required when DHCP4 is false.
 	// +optional
 	// +kubebuilder:validation:Format=ipv4
-	gateway4 string `json:"gateway4,omitempty"`
+	Gateway4 string `json:"gateway4,omitempty"`
 
 	// gateway4 is the IPv4 gateway used by this device.
 	// Required when DHCP6 is false.
@@ -131,28 +131,13 @@ type NetworkDeviceSpec struct {
 	// Required when DHCP4 and DHCP6 are both Disabled.
 	// + Validation is applied via a patch, we validate the format as either ipv4 or ipv6
 	// +optional
-	ipaddrs []string `json:"ipAddrs,omitempty"`
+	IPAddrs []string `json:"ipAddrs,omitempty"`
 
 	// nameservers is a list of IPv4 and/or IPv6 addresses used as DNS
 	// nameservers.
 	// Please note that Linux allows only three nameservers (https://linux.die.net/man/5/resolv.conf).
 	// +optional
-	nameservers []string `json:"nameservers,omitempty"`
-}
-
-// NetworkRouteSpec defines a static network route.
-type NetworkRouteSpec struct {
-	// To is an IPv4 or IPv6 address.
-  // +kubebuilder:validation:Format=ip
-  // +optional
-	To string `json:"to"`
-	// Via is an IPv4 or IPv6 address.
-  // +kubebuilder:validation:Format=ip
-  // +optional
-	Via string `json:"via"`
-
-	// Metric is the weight/priority of the route.
-	Metric int32 `json:"metric"`
+	Nameservers []string `json:"nameservers,omitempty"`
 }
 
 ~~~
