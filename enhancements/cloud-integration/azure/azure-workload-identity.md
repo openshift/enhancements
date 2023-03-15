@@ -12,8 +12,12 @@ reviewers: # Include a comment about what domain expertise a reviewer is expecte
   - "@dmage, for image registry operator, please look at resource group being removed from credential secret and lookup from infrastructure object."
   - "@Miciah, for ingress operator."
   - "@patrickdillon, for installer."
+  - "@abhat, for cncc + cloud network operator."
+
 approvers:
-  - TBD, who can serve as an approver?
+  - "@sdodson"
+  - "@deads2k"
+  - "@jharrington22"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - None
 creation-date: 2022-12-08
@@ -70,7 +74,6 @@ In this proposal, the Cloud Credential Operator's command-line utility (`ccoctl`
 
 OpenShift operators as well as the Installer will be updated to create Azure clients using a bound `ServiceAccount` token that has been associated with a Managed Identity (identified by `clientID`) in Azure. Operators or repositories that we expect will need changes, listed in [CCO-235](https://issues.redhat.com/browse/CCO-235):
 
-- [Installer](https://github.com/openshift/installer)
 - [cloud-credential-operator](https://github.com/openshift/cloud-credential-operator)
 - [cluster-image-registry-operator](https://github.com/openshift/cluster-image-registry-operator)
 - [cluster-ingress-operator](https://github.com/openshift/cluster-ingress-operator)
@@ -83,6 +86,8 @@ OpenShift operators as well as the Installer will be updated to create Azure cli
 - [cloud-controller-manager-operator](https://github.com/openshift/cluster-cloud-controller-manager-operator)
 - [cloud-provider-azure](https://github.com/kubernetes-sigs/cloud-provider-azure/)
 - [cluster-api-provider-azure](https://github.com/kubernetes-sigs/cluster-api-provider-azure)
+- [cluster-network-operator](https://github.com/openshift/cluster-network-operator/)
+- [cloud-network-config-controller](https://github.com/openshift/cloud-network-config-controller)
 
 Managed Identity details such as the `clientID`, `tenantID` and path
 to the mounted Service Account token necessary for creating a client
