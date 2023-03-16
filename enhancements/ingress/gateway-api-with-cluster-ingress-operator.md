@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@knobunc"
 creation-date: 2022-12-13
-last-updated: 2023-02-15
+last-updated: 2023-03-21
 tracking-link:
   - https://issues.redhat.com/browse/NE-1105
   - https://issues.redhat.com/browse/NE-1107
@@ -198,7 +198,7 @@ connection to the "example-app" service.
 
 ### Non-Goals
 
-* Gateway API features that are not yet beta status are not supported.
+* Gateway API features that are not yet beta status (as of Gateway API v0.5.1) are not supported.
   * [GRPCRoute](https://gateway-api.sigs.k8s.io/references/spec/#gateway.networking.k8s.io/v1alpha2.GRPCRoute),
     [TCPRoute](https://gateway-api.sigs.k8s.io/references/spec/#gateway.networking.k8s.io/v1alpha2.TCPRoute),
     [TLSRoute](https://gateway-api.sigs.k8s.io/references/spec/#gateway.networking.k8s.io/v1alpha2.TLSRoute),
@@ -462,27 +462,16 @@ compatibility, the Ingress Operator must do one of the following:
 Placement, possible migration, and ownership of the SMCP need to be clarified in
 this enhancement.  This is an open design question.
 
-#### Managing the ServiceMeshMemberRoll
+#### Managing Istio's Control Plane Scope
 
-OSSM 2.3 only watches resources in namespaces specified in an
-ServiceMeshMemberRoll CR associated with the ServiceMeshControlPlane; see
-[OSSM-924](https://issues.redhat.com/browse/OSSM-924).  We hope that this limitation will be removed from OSSM in time
-for this enhancement; this is an open release-planning question.  Otherwise, the
-Ingress Operator or cluster admin must add each namespace with HTTPRoute objects
-that Istio should reconcile to the ServiceMeshMemberRoll, and the approach we
-take and ownership of ServiceMeshMemberRoll need to be clarified in this
-enhancement; this is an open design question.
+OSSM has traditionally only watched resources in namespaces specified in a
+ServiceMeshMemberRoll CR associated with the ServiceMeshControlPlane; however,
+OSSM recently added support for a cluster-scoped control plane mode in [OSSM-1320](https://issues.redhat.com/browse/OSSM-1320).
+In cluster-scoped mode, Istiod watches all namespaces so that Gateway API objects
+will be reconciled in any namespaces, removing the need for ServiceMeshMemberRolls.
 
-#### Gateway API v1alpha2 CRDs
-
-Istio fails to become ready if the expected CRDs do not all exist.  OSSM 2.3 is
-based on a version of Istio that expects the Gateway API v1alpha2 CRDs to exist.
-In particular, Gateway API v1alpha2 includes the following CRDs that were not
-promoted to Gateway API v1beta1: tcproutes, tlsroutes, and udproutes.  For the
-time being, this means that it is necessary to install the v1alpha2 CRDs in
-order for OSSM 2.3 to function. We hope that OSSM will have a new release based
-on a newer version of Istio in time for this enhancement. This is an open
-release-planning question.
+Cluster-scoped mode is a Tech Preview feature in OSSM 2.3 and fully supported in
+OSSM 2.4.
 
 #### Security Policy
 
@@ -695,24 +684,31 @@ Then Istio manages Gateway API resources for all namespaces with no further
 configuration needed.  (ServiceMeshMember and ServiceMeshMemberRoll CRs can
 still be created to add a namespace to a mesh.)
 
-**Resolution**: TBD.
+**Resolution**: No. We do not need to create ServiceMeshMember or ServiceMeshMemberRoll
+CRs. OSSM recently added support for a cluster-scoped control plane mode in [OSSM-1320](https://issues.redhat.com/browse/OSSM-1320)
+for both OSSM 2.3.1 and OSSM 2.4. It circumvents the role of these CRs by enabling
+cluster-wide watches for Gateway API resources as mentioned above.
 
 #### Can we use the Gateway API v1beta1 CRDs?
 
-OSSM 2.3 is based on Istio 1.14, which only supports Gateway API v1alpha2
-whereas OSSM 2.4 is based on Istio 1.16, which supports Gateway API v1beta1.
+OSSM 2.3 is based on Istio 1.14, which recently added Gateway API v1beta1 support,
+and OSSM 2.4 is based on Istio 1.16, which also supports Gateway API v1beta1.
 Supporting v1beta1 is highly desirable, and OSSM 2.4 brings many other changes
-that are of interest for this enhancement.  If we continue to use OSSM 2.3, we
-will need to continue to install the Gateway API v1alpha2 CRDs.  We need to
-determine whether we will be able to use OSSM 2.4 for this enhancement.
+that are of interest for this enhancement. We need to determine whether we will
+be able to use OSSM 2.4 for this enhancement. Istio 1.14, the version found in
+OSSM 2.3, is now [EOL](https://istio.io/latest/news/support/announcing-1.14-eol-final/)
+which is less than desirable for dev preview. 
 
-If OSSM 2.4 is not released in time for OpenShift 4.13, we may resort to using a
-pre-release development build of OSSM 2.4 for dev preview.  While not ideal,
-OSSM 2.4 has sufficient advantages to outweigh the disadvantages of using a
-development build in the context of a dev preview.
+If OSSM 2.4 is not released in time for OpenShift 4.13, we may resort to using
+OSSM 2.3 or a pre-release development build of OSSM 2.4 for dev preview.  While
+using a pre-release version is not ideal, OSSM 2.4 has sufficient advantages to
+outweigh the disadvantages of using development build in the context of a dev
+preview.
 
-**Resolution**: TBD.  We will most likely use a pre-release developer build of
-OSSM 2.4.
+**Resolution**: Yes. OSSM 2.3.1 is based on Istio 1.14.5, which has support for
+Gateway API v1beta1. OSSM 2.4 is based on Istio 1.16, which also supports Gateway
+API v1beta1. More specifically, both OSSM versions support Gateway API v0.5.1.
+We will support the v1beta1 CRDs that are promoted in Gateway API v0.5.1.
 
 #### Should we use the "openshift-ingress" namespace for Gateway CRs?
 
@@ -791,13 +787,14 @@ gates and understand whether just installing the gatewayclasses CRD may be
 problematic for some clusters.
 
 **Resolution**: Yes, we should use a feature gate.  It is not just the installation of
-the CRDs that must be considered.  The additional controllers and watchers needed for
+the CRDs that must be considered.  The additional controllers and watches needed for
 managing Gateway API resources should be avoided if not needed. In addition, having an
-official feature gate is useful for setting expectations about whether a cluster may be
-upgraded. In Dev and Tech Preview, a cluster with this feature should not be upgradeable.
+official feature gate is useful for setting expectations about whether a cluster is supported
+and may be upgraded. In Dev and Tech Preview, a cluster with this feature enabled is not
+supported and should not be upgradeable.
 Finally, if a user wants to install the Gateway API CRDs on their cluster for experimenting
 with an implementation other than OSSM/Istio, we should permit them to do this without
-interference from OpenShift Gateway API on OSSM.
+interference from OpenShift or OSSM.
 
 In Dev Preview we choose to use the `CustomNoUpgrade` variety of feature gate primarily
 because our other choice was named `TechPreviewNoUpgrade`, and we felt this would cause some
@@ -808,14 +805,13 @@ graduated in maturity to Tech Preview.
 The list of feature gate constraints includes:
 
 * The feature gate should be named `GatewayAPI` for all iterations of the feature.
-* The GatewayAPI feature gate should be a `CustomNoUpgrade` variety in Dev Preview,
-a `TechPreviewNoUpgrade` variety in Tech Preview, and removed before GA.
-* The GatewayAPI feature gate will be used to bar the installation of the GatewayAPI CRDs.
+* The GatewayAPI feature gate should be on by default in GA, but off by default in Dev and Tech Preview.
+* The GatewayAPI feature gate should be a `CustomNoUpgrade` kind in Dev Preview,
+and a `TechPreviewNoUpgrade` kind in Tech Preview.
+* The GatewayAPI feature gate will be used to bar the installation of the GatewayAPI CRDs by the Ingress Operator.
 * The GatewayAPI feature gate will be used to bar the installation, configuration, or watch of OpenShift Service Mesh
-components.
-* The GatewayAPI feature gate will be used to bar special operation of the LoadBalancer and DNS.
-* The GatewayAPI feature gate will be used to lift the restriction of DNSRecords to an owning
-ingresscontroller.
+components by the Ingress Operator.
+* The GatewayAPI feature gate will be used to bar special operation of the LoadBalancer and DNS by the Ingress Operator.
 
 ### Test Plan
 
