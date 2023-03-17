@@ -105,9 +105,9 @@ the webhook.
 
 The Cloud Credential Operator's command-line utility (`ccoctl`) will be extended with subcommands for Azure which provide methods for,
 - Generating a key pair to be used for `ServiceAccount` token signing for a fresh OpenShift cluster.
-- Creating an Azure blob storage container to serve as the identity provider in which to publish OIDC and JWKS documents needed to establish trust at a publically available address. This subcommand will output a modified cluster `Authentication` CR, containing a `serviceAccountIssuer` pointing to the Azure blob storage container's URL to be provided as a manifest for installation.
+- Creating an Azure blob storage container to serve as the identity provider in which to publish OIDC and JWKS documents needed to establish trust at a publicly available address. This subcommand will output a modified cluster `Authentication` CR, containing a `serviceAccountIssuer` pointing to the Azure blob storage container's URL to be provided as a manifest for installation.
 - Creating Managed Identity infrastructure with federated credentials for OpenShift operator `ServiceAccounts` (identified by namespace & name) and to output secrets containing the `clientID` of the Managed Identity to be provided as manifests for the installer. This command will process `CredentialsRequest` custom resources to identify service accounts that will be associated with Managed
-  Identities in Azure as federated credentials. For self-managed installation, `CredentialsRequests` will be exracted from the release image.
+  Identities in Azure as federated credentials. For self-managed installation, `CredentialsRequests` will be extracted from the release image.
 
 ```sh
 $ ./ccoctl azure
