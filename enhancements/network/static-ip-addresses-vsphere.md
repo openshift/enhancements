@@ -149,7 +149,7 @@ platform:
     hosts:
     - role: bootstrap
       networkDevice:
-        ipaddrs:
+        ipAddrs:
         - 192.168.101.240/24
         gateway4: 192.168.101.1
         nameservers:
@@ -157,7 +157,7 @@ platform:
     - role: control-plane
       failureDomain: us-east-1a
       networkDevice:
-        ipaddrs:
+        ipAddrs:
         - 192.168.101.241/24
         gateway4: 192.168.101.1
         nameservers:
@@ -165,7 +165,7 @@ platform:
     - role: control-plane
       failureDomain: us-east-1b
       networkDevice:
-        ipaddrs:
+        ipAddrs:
         - 192.168.101.242/24
         gateway4: 192.168.101.1
         nameservers:
@@ -173,28 +173,28 @@ platform:
     - role: control-plane
       failureDomain: us-east-1c
       networkDevice:
-        ipaddrs:
+        ipAddrs:
         - 192.168.101.243/24
         gateway4: 192.168.101.1
         nameservers:
         - 192.168.101.2
     - role: compute
       networkDevice:
-        ipaddrs:
+        ipAddrs:
         - 192.168.101.244/24
         gateway4: 192.168.101.1
         nameservers:
         - 192.168.101.2
     - role: compute
       networkDevice:
-        ipaddrs:
+        ipAddrs:
         - 192.168.101.245/24
         gateway4: 192.168.101.1
         nameservers:
         - 192.168.101.2
     - role: compute
       networkDevice:
-        ipaddrs:
+        ipAddrs:
         - 192.168.101.246/24
         gateway4: 192.168.101.1
         nameservers:
@@ -225,7 +225,7 @@ spec:
       network:
         devices:
           - networkName: lab
-            ipaddrs:
+            ipAddrs:
             - 192.168.101.244/24
             gateway4: 192.168.101.1
             nameservers:
