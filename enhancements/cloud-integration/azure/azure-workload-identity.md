@@ -21,7 +21,7 @@ approvers:
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - None
 creation-date: 2022-12-08
-last-updated: 2023-03-17
+last-updated: 2023-03-29
 tracking-link:
   - https://issues.redhat.com/browse/CCO-187
 see-also:
@@ -72,7 +72,7 @@ Previous enhancements have implemented short-lived credential support via [STS f
 
 In this proposal, the Cloud Credential Operator's command-line utility (`ccoctl`) will be extended with subcommands for Azure which will provide methods for generating the Azure infrastructure (blob container OIDC, managed identities and federated credentials) and secret manifests necessary to create an Azure cluster that utilizes Azure Workload Identity for core OpenShift operator authentication.
 
-OpenShift operators as well as the Installer will be updated to create Azure clients using a bound `ServiceAccount` token that has been associated with a Managed Identity (identified by `clientID`) in Azure. Operators or repositories that we expect will need changes, listed in [CCO-235](https://issues.redhat.com/browse/CCO-235):
+OpenShift operators will be updated to create Azure clients using a bound `ServiceAccount` token that has been associated with a Managed Identity (identified by `clientID`) in Azure. Operators or repositories that we expect will need changes, listed in [CCO-235](https://issues.redhat.com/browse/CCO-235):
 
 - [cloud-credential-operator](https://github.com/openshift/cloud-credential-operator)
 - [cluster-image-registry-operator](https://github.com/openshift/cluster-image-registry-operator)
