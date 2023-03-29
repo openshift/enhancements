@@ -67,7 +67,7 @@ Please read that proposal for details not covered here.
 - Keep direct control of management cluster forwarding on the management cluster.
   - hosted cluster has no direct access to control plane configuration.
   - data plane resources can request forwarding by the management cluster.
-  - management cluster HLO automatically validates data-plane requests, and enables them if they are supported.
+  - management cluster HLO automatically validates data-plane requests, and enables them if they are safe.
 
 ### Non-Goals
 
@@ -172,6 +172,13 @@ Two new CLO features are needed:
 
 **NOTE**: See also "Risks and Mitigations" in [api-audit-log-policy](/api-audit-log-policy.md)
 
+#### STS Authentication
+
+CLO needs to refresh tokens from the HCP in order to communicate w/ CloudWatch.
+Transplant the relevant code from the modified splunk-exporter used for Hypershift GA.
+
+Tracked by:  [LOG-4029 Support STS Cloudwatch authentication for logging in Managed Clusters](https://issues.redhat.com/browse/LOG-4029)
+
 ### Drawbacks
 
 ## Design Details
@@ -204,14 +211,23 @@ Downgrading: removes new features but otherwise works as expected.
 
 ### Version Skew Strategy
 
-The CLO version on the management cluster may differ from the hosted cluster(s).
-The only link between the two is the new HLF resource: created on the data plane but consumed by the HLO on the management cluster.
+The CLO's installed on management and hosted clusters may be different versions.
 
-Issues could arise if
-- the HLF is newer, contains configuration not known to the HLO.
-- the HLF is older, contains configuration no longer supported by the HLO.
+The CLO on the _management_ cluster forwards
+- All logs required by the provider, configured by `ClusterLogForwarderTemplate` on _management_ cluster
+- API-audit logs _only_ for the customer, configured by `HypershiftLogForwarder` on _hosted_ cluster
 
-Note however that the HLO's role is exactly to validate and edit configuration if need be before applying it.
+The CLO on the _hosted_ cluster forwards
+- All non-API-audit logs, configured by `ClusterLogForwarder` on the _hosted_ cluster.
+
+If the hosted/managent CLO versions are different, the customer can
+- Create `ClusterLogForwarder` based on the _hosted_ CLO version.
+- Create `HypershiftLogForwarder` based on the _management_ CLO version.
+
+This might be confusing but there is a clear separation of resources associated with each version.
+- There's no situation where the customer is blocked from upgrading their hosted CLO.
+- A customer could be blocked from sending API-audit logs (only) to a new type of log store if the SD CLO is old.
+
 To manage version skew we will:
 - minimize API change via normal API compatibility practices.
 - identify supported version range, code the HLO to correct or reject configuration version mismatches in that range.

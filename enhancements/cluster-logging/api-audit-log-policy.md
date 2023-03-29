@@ -31,6 +31,7 @@ Service Delivery uses  this configuration internally for managed clusters.
 The goals of this proposal are:
 - Make the Kubernetes audit policy available for customer log forwarding.
 - Allow customers and Service Delivery to configure _independent_ policies and destinations for audit logs.
+- Make it possible for OSD and Customers to both use the CLO for log forwarding.
 
 This proposal applies to all types of OpenShift cluster.
 There is a [separate proposal with additional details for hypershift clusters](hypershift-audit-logs.md)
@@ -126,10 +127,19 @@ Note: all of the above should support multiple distinct policies, so unique name
 
 ### Risks and Mitigations
 
-#### STS Authentication
+#### Separation of OSD and Customer logging operators
+In classic ROSA, if OSD adopts the CLO for their logging needs, there may be a version problem:
+- customer does not want to upgrade CLO
+- OSD needs a more recent version of CLO.
 
-CLO needs to refresh tokens from the HCP in order to communicate w/ CloudWatch.
-Transplant the relevant code from the modified splunk-exporter used for Hypershift GA.
+This problem is not addressed by this proposal, but needs to be addressed.
+
+Some avenues to explore:
+- Create separate operators using different API groups to distinguish the API types. \
+  Similar approach was used for the observability opertor:
+  - [MON-2792 OBO support for monitoring.coreos.com group](https://issues.redhat.com/browse/MON-2792)
+  - [HOSTEDCP-624 Support monitoring.rhobs Resources](https://issues.redhat.com/browse/HOSTEDCP-624)
+- OLM 1.x has multi-operator-version features
 
 #### Data security
 
@@ -195,22 +205,7 @@ Nothing new.
 
 ### Version Skew Strategy
 
-The CLO's installed on management and hosted clusters may be different versions.
-
-The CLO on the _management_ cluster forwards
-- All logs required by the provider, configured by `ClusterLogForwarderTemplate` on _management_ cluster
-- API-audit logs _only_ for the customer, configured by `HypershiftLogForwarder` on _hosted_ cluster
-
-The CLO on the _hosted_ cluster forwards
-- All non-API-audit logs, configured by `ClusterLogForwarder` on the _hosted_ cluster.
-
-If the hosted/managent CLO versions are different, the customer can
-- Create `ClusterLogForwarder` based on the _hosted_ CLO version.
-- Create `HypershiftLogForwarder` based on the _management_ CLO version.
-
-This might be confusing but there is a clear separation of resources associated with each version.
-- There's no situation where the customer is blocked from upgrading their hosted CLO.
-- A customer could be blocked from sending API-audit logs (only) to a new type of log store if the SD CLO is old.
+Nothing new.
 
 ### Operational Aspects of API Extensions
 
