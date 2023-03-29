@@ -288,8 +288,6 @@ config secret while also respecting the environment variables that would be set 
 
 ### Open Questions [optional]
 
-- From where should CCO source the mutating admission webhook for deployment? In order to generate our own build of the image backing the webhook we would have to fork [Azure/azure-workload-identity](https://github.com/Azure/azure-workload-identity)([dockerfile](https://github.com/Azure/azure-workload-identity/blob/main/docker/webhook.Dockerfile)).
-
 ### Test Plan
 
 An e2e test job will be created similar to the [e2e-gcp-manual-oidc](https://github.com/openshift/release/pull/22552) that,
@@ -311,12 +309,11 @@ An e2e test job will be created similar to the [e2e-gcp-manual-oidc](https://git
 
 #### Tech Preview -> GA
 
+Azure workload identity will be introduced as [TechPreviewNoUpgrade](https://github.com/openshift/api/blob/fefb3487546079495fb80ca0f1155ecd7417b9d8/config/v1/types_feature.go#L111) and then promoted once it is demonstrated to be working reliably.
+
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 - Available by default
-- Backhaul SLI telemetry
-- Document SLOs for the component
-- Conduct load testing
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 **For non-optional features moving to GA, the graduation criteria must include
@@ -344,11 +341,17 @@ None.
 
 #### Support Procedures
 
-- How to detect that operator credentials are incorrect / insufficient?
-  - ClusterOperators will be degraded when credentials are not present / insufficient.
-- How to detect that the mutating webhook is degraded?
-  - Webhook has `failurePolicy=Ignore` and will not block pod creation when degraded.
-  - Webhook should be deployed with replicas >= 2 and a PDB to ensure highly available.
+##### How to detect that operator credentials are incorrect / insufficient?
+
+Operators will be degraded when credentials are insufficient / incorrect because operators will be unable to authenticate using the provided credentials or the permissions granted to the associated identity were insufficient. CCO will not monitor the state of the credentials on-cluster because CCO will be disabled based on clusters operating in `manual` credentials mode.
+
+##### How to detect that the mutating webhook is degraded?
+
+CCO will be degraded when unable to deploy the Azure pod identity mutating webhook (similar to the [AWS pod identity webhook controller](https://github.com/openshift/cloud-credential-operator/blob/4fb2c25c6f169e0b3e363b552b20603153e961d8/pkg/operator/awspodidentity/awspodidentitywebhook_controller.go#L254)) but will not monitor the health of the deployment.
+
+Additionally,
+  - Webhook will set `failurePolicy=Ignore` and will not block pod creation when degraded.
+  - Webhook should be deployed with replicas >= 2 and a PDB to ensure that the webhook deployment is highly available.
 
 ## Implementation History
 
