@@ -350,8 +350,8 @@ Operators will be degraded when credentials are insufficient / incorrect because
 CCO will be degraded when unable to deploy the Azure pod identity mutating webhook (similar to the [AWS pod identity webhook controller](https://github.com/openshift/cloud-credential-operator/blob/4fb2c25c6f169e0b3e363b552b20603153e961d8/pkg/operator/awspodidentity/awspodidentitywebhook_controller.go#L254)) but will not monitor the health of the deployment.
 
 Additionally,
-  - Webhook will set `failurePolicy=Ignore` and will not block pod creation when degraded.
-  - Webhook should be deployed with replicas >= 2 and a PDB to ensure that the webhook deployment is highly available.
+- Webhook will set `failurePolicy=Ignore` and will not block pod creation when degraded.
+- Webhook should be deployed with replicas >= 2 and a PDB to ensure that the webhook deployment is highly available.
 
 ## Implementation History
 
