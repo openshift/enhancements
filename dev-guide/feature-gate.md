@@ -25,8 +25,7 @@ After this enhancement, it will only be necessary to vendor into cluster-config-
 
 ## Motivation
 
-Reduce the effort required to add and promote feature gates, to encourage and eventually require using
-feature gates to introduce new features into OCP.
+Reduce the effort required to add and promote feature gates.
 
 ### User Stories
 
