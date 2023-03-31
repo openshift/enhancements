@@ -31,12 +31,10 @@ feature gates to introduce new features into OCP.
 ### User Stories
 
 As a staff engineer or release manager, I want to have no-developer-action result in features of unproven reliability
-inaccessible-by-default in long-lived clusters.
+inaccessible-by-default in upgradeable clusters.
 
 As a developer, I want to have a low friction way to add a feature gate to TechPreviewNoUpgrade and to promote a feature
 gate to on-by-default.
-
-As an API approver, I want to have evidence of feature reliability before promoting feature gates to on-by-default. 
 
 ### Goals
 
@@ -67,7 +65,8 @@ with a single PR, so /payload testing functions properly.
 1. Open PR to openshift/api to add your feature gate to [TechPreviewNoUpgrade](https://github.com/openshift/api/blob/master/config/v1/types_feature.go#L117).
    The PR should be confined to just the feature gate change and should include a link to a merged enhancement.
 2. Nag api-approvers with link to your PR right away and then every 24h or so until they merge it.
-3. Automation vendors openshift/api into cluster-config-operator in a few hours.
+3. Automation vendors openshift/api into cluster-config-operator and opens a PR in a few hours.
+   If policy allows it, machine /lgtm-ing is also desired.
 
 Notice that we're down to a single PR to add or promote a featuregate.
 
@@ -96,7 +95,7 @@ To do this we will
    5. make it easy to wire a hook to handle FeatureGate updates if exit isn't desired
 4. Update existing operators to use the library-go implementation to consume feature gates in this way
 5. Update the installer to pass full FeatureGate manifests to the five-ish operators that participate in rendering
-   This is needed to ensure that cluster-config-operator is updated, all the bootstrap processes will have the same
+   This is needed to ensure that when cluster-config-operator is updated, all the bootstrap processes will have the same
    feature gates enabled.
 
 #### openshift/api
@@ -226,6 +225,8 @@ several initial operators, including
 There is incentive to use this mechanism when introducing TechPreviewNoUpgrade features because consuming feature gates
 this way is less work.
 
+We're done when all operators using feature gates are reading from FeatureGate.Status instead of vendoring the list.
+
 #### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
@@ -278,3 +279,16 @@ None identified.
 ## Infrastructure Needed [optional]
 
 Phase two automation requires a bot similar to the TRT bot to automatically open PRs.
+
+## Appendix
+
+### Why do we not mix and match feature gates?
+1. Having a single set vastly reduces the testing matrix.
+   This allows us to maintain stability of our TechPreview features and has been largely successful.
+2. You can't mix and match schemas or other manifests.
+   This applies to all manifests, but schemas make it obvious.
+   If gate/A requires new-field/one in type/first and gate/B requires new-field/two in type/first, then you logically need
+   need manifests for no gates, gate/A only, gate/B only, and gate/A and gate/B.
+   This is conceptually the case for resource, leading to a significant increase in the manifests (more likely a new approach
+   to manifest creation).
+3. Makes it impossible to turn on a feature gate that you think is GA, but is actually TechPreview.
