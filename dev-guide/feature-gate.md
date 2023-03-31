@@ -39,7 +39,7 @@ gate to on-by-default.
 ### Goals
 
 1. have a low friction way to add a feature gate to TechPreviewNoUpgrade
-2. have to promote a feature gate to on-by-default
+2. have a low friction to promote a feature gate to on-by-default
 3. allow feature gates to move from TechPreviewNoUpgrade to Default without releases as TechPreviewNoUpgrade first.
 
 ### Non-Goals
