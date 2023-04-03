@@ -27,7 +27,7 @@ see-also:
 
 ## Summary
 
-Enable the automated backups of etcd snapshots and other metadata necessary to restore an openshift cluster from a quorum loss scenario.
+Enable the automated backups of etcd snapshots and other metadata necessary to restore an OpenShift self-hosted cluster from a quorum loss scenario.
 
 ## Motivation
 
@@ -52,11 +52,13 @@ node.
 - Save cluster backups to PersistentVolumes or cloud storage
   - This would be a future enhancement or extension to the API
 - Automate cluster restoration
+  - Not targeted for a future enhancement at this time
+- Provide automated backups for non-self hosted architectures like Hypershift
 
 
 ### User Stories
 
-- As a cluster administrator I want to initiate a cluster backup without requiring a root shell on a control plane node so as to minimize the risk involved
+- As a cluster administrator I want to initiate a one-time cluster backup without requiring a root shell on a control plane node so as to minimize the risk involved
 - As a cluster administrator I want to schedule recurring cluster backups so that I have a recent cluster state to recover from in the event of quorum loss (i.e. losing a majority of control-plane nodes)
 - As a cluster administrator I want to have failure to take cluster backups for more than a configurable period to be reported to me via critical alerts
 
@@ -65,101 +67,147 @@ node.
 
 ### Workflow Description
 
-To enable automated backups a new singleton CRD can be used to specify the backup schedule and other configuration as well as monitor the status of the backup operations. 
+#### One time backups
 
-A new controller in the cluster-etcd-operator would then reconcile this CRD to save backups locally per the specified configuration.
+To enable one-time backup requests via an API, a new CRD, `EtcdBackupRequest` (open to better name suggestions), will be used to trigger one-time backup requests.
+
+A new controller in the cluster-etcd-operator, `EtcdBackupRequestController`, will reconcile backup requests as follows:
+- Watch for new `EtcdBackupRequest` CRs as created by an admin
+- Create a backup Job configured for the backup request spec
+- Track the backup progress, failure or success on the `EtcdBackupRequest` status
+
+**TODO:** Decide if `EtcdBackupRequest` needs to be cluster-scoped?
+
+#### Scheduled backups
+
+To enable recurring backups a new cluster-scoped singleton CRD `EtcdBackupSchedule` (open to better name suggestions) will be used to specify the backup schedule, retention policy and other related configuration.
+
+A new controller in the cluster-etcd-operator `EtcdBackupScheduleController` would then reconcile the `EtcdBackupSchedule` CRD with the following workflow:
+- Watches the `EtcdBackupSchedule` CR as created by an admin
+- Creates a [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) that would in turn create etcd backup requests `EtcdBackupRequest` at the desired schedule
+- Updates the CronJob for any changes in the schedule
+- Fulfils the specified retention policy by pruning existing backup files before creating a new `EtcdBackupRequest`
+- Prunes completed `EtcdBackupRequest` CRs older than a default time period e.g 24hrs
+  - **TODO:** Should this period be configurable?
+
 
 ### API Extensions
 
-A new CRD `EtcdBackup` will be introduced to the API group `config.openshift.io` with the version `v1alpha1`. The CRD would be feature-gated until the prerequisite e2e test has an acceptable pass rate. 
+#### EtcdBackupSchedule API
 
-The spec and status structures will be as listed below:
+The `EtcdBackupSchedule` CRD will be introduced to the API group `config.openshift.io` with the version `v1alpha1`. The CRD would be feature-gated with the annotation `release.openshift.io/feature-set: TechPreviewNoUpgrade` until the prerequisite e2e test has an acceptable pass rate. See the Test Plan and Graduation Criteria sections for more details.
 
+The spec will be as listed below, while the status will be empty since the status of individual backups will be tracked on the `EtcdBackupRequest` status block.
+
+**TODO**: While config CRs don't normally seem to have a status block, where do we track the cumulative status e.g total number of backups saved?
 
 ```Go
-// EtcdBackupSpec represents the configuration of the EtcdBackup CRD.
-type EtcdBackupSpec struct {
-
-    // Reason defines the reason for the most recent backup.
-    // Setting this to a value different from the most recent reason will trigger a one-time backup
-    // The default "" means no backup is triggered
-    // +kubebuilder:default:=""
-    // +optional
-    Reason string `json:"reason"`
+// EtcdBackupScheduleSpec represents the configuration of the EtcdBackupSchedule CRD.
+type EtcdBackupScheduleSpec struct {
     
     // Schedule defines the recurring backup schedule in Cron format
       // every 2 hours: 0 */2 * * *
       // every day at 3am: 0 3 * * *
     // Setting to an empty string "" means disabling scheduled backups
     // Default: ""
-    // TODO: Define how we do validation for the format (e.g validation webhooks)
+    // TODO: Define CEL validation for the cron format
     // and the limits on the frequency to disallow unrealistic schedules (e.g */2 * * * * every 2 mins)
-    // TODO: What is the behavior if the backup doesn't complete in the specified interval
+    // TODO: Discuss in multiple backups section. What is the behavior if the backup doesn't complete in the specified interval
         // e.g: every 1hr but the backup takes 2hrs to complete
         // Wait for the current one to complete?
-        // And do we generate an alert even if MaxDurationToCompleteBackup is not set, since the scheduled interval has passed?
     Schedule string `json:"schedule"`
     
-    // MaxDurationToCompleteBackup sets the max duration after which if
-    // an initiated backup has not successfully completed a critical alert will be generated.
-    // The format is as accepted by time.ParseDuration(), e.g "1h10m"
-    // See https://pkg.go.dev/time#ParseDuration
-    // Setting to "0" disables the alert.
-    // Default: "1h"
-    // TODO: Validation on min and max durations.
-        // The max should be smaller than the scheduled interval
-        // for the next backup else the alert will never be generated
-    MaxDurationToCompleteBackup string `json: "maxDurationWithoutBackup"`
-    
-    // RetentionCount defines the maximum number of backups to retain.
-    // If the number of successful backups matches retentionCount 
-    // the oldest backup will be removed before a new backup is initiated.
-    // The count here is for the total number of backups
-    // TODO: Validation on min and max counts.
-    // TODO: Retention could also be based on the total size, or time period
-        // e.g retain 500mb of backups, or discard backups older than a month
-        // If we want to extend this API in the future we should make retention
-        // a type so we can add more optional fields later
-    RetentionCount int `json: "retentionCount"`
-    
+    // RetentionPolicy defines the retention policy for retaining and deleting existing backups.
+    // +optional
+    RetentionPolicy RetentionPolicy `json: "retentionPolicy"`
 }
+
+// RetentionPolicy defines the retention policy for retaining and deleting existing backups.
+// This struct is a discriminated union that allows users to select the type of retention policy from the supported types.
+// +union
+type RetentionPolicy struct {
+  // RetentionType sets the type of retention policy. The currently supported and valid values are "retentionCount"
+	// Currently, the only valid policies are retention by count (RetentionCount) and by size (RetentionSizeGb). More policies or types may be added in the future.
+	// +unionDiscriminator
+	// +kubebuilder:validation:Required
+  // +kubebuilder:validation:Enum:=RetentionCount;RetentionSizeGb
+	RetentionType RetentionType `json:"retentionType"`
+	
+  // RetentionCount defines the maximum number of backups to retain.
+  // If the number of successful backups matches retentionCount 
+  // the oldest backup will be removed before a new backup is initiated.
+  // The count here is for the total number of backups
+  // +kubebuilder:validation:Minimum=1
+  // +optional
+  RetentionCount int `json: "retentionCount,omitempty"`
+
+  // RetentionSizeGb defines the total size in Gb of backups to retain.
+  // If the current total size backups exceeds RetentionSizeGb then 
+  // the oldest backup will be removed before a new backup is initiated.
+  // +kubebuilder:validation:Minimum=0.1
+  // +optional
+  RetentionSizeGb float64 `json: "retentionSizeGb,omitempty"`
+
+  // TODO: Can the union members be unspecified, and if so what would they default to?
+  // Add // +kubebuilder:default=<value>
+	
+}
+
+// RetentionType is the enumeration of valid retention policy types
+// +enum
+// +kubebuilder:validation:Enum:="RetentionCount";"RetentionSizeGb"
+type RetentionType string
+
+const (
+  RetentionTypeCount RetentionType = "RetentionCount"
+  RetentionTypeSize RetentionType = "RetentionSizeGb"
+)
+
 ```
 
-**TODO:** How do we feature gate the entire type?
-For a field within a non-gated type it seems to be the tag [`// +openshift:enable:FeatureSets=TechPreviewNoUpgrade`](https://github.com/openshift/api/blob/master/example/v1/types_stable.go#L33). No such tag visible on the [whole type gated example](https://github.com/openshift/api/blob/1957a8d7445bf2332f027f93a24d7573f77a0dc0/example/v1alpha1/types_notstable.go#L19).
+#### EtcdBackupRequest API
 
+The `EtcdBackupRequest` CRD will be introduced to the API group `backup.etcd.openshift.io` with the version `v1alpha1`. The CRD would be feature-gated with the annotation `release.openshift.io/feature-set: TechPreviewNoUpgrade` until the prerequisite e2e test has an acceptable pass rate.
+
+The spec and status will be as listed below:
 
 ```Go
-// EtcdBackupStatus represents the status of the EtcdBackup CRD.
-type EtcdBackupStatus struct {
+// EtcdBackupRequestSpec represents the configuration of the EtcdBackupRequest CRD.
+type EtcdBackupRequestSpec struct {
 
-    // Conditions represents the observations of the EtcdBackup's current state.
+    // Reason defines the reason for the most recent backup.
+    // TODO: Do we need to specify a reason? This is more metadata than spec to reconcile.
+    // We could just have a spec-less CR as created by the admin or the EtcdBackupSchedule per the schedule.
+    // The reason could be tagged into an annotation if needed.
+    Reason string `json:"reason"`
+
+}
+
+// EtcdBackupRequestStatus represents the status of the EtcdBackupRequest CRD.
+type EtcdBackupRequestStatus struct {
+
+    // Conditions represents the observations of the EtcdBackupRequest's current state.
     // TODO: Identify different condition types/reasons that will be needed.
     // +optional
     Conditions []metav1.Condition `json:"conditions,omitempty"`
     
-    // ObservedGeneration is the most recent generation observed for this
-    // EtcdBackup. It corresponds to the EtcdBackup's .metadata.generation that the condition was set based upon.
-    // This lets us know whether the latest condition is stale.
-    // +optional
-    ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
     // TODO: How do we track the state of the current/last backup?
         // Would condition states be enough? e.g Created/In-progress/Complete/Failed/Unknown
     // Track metadata on last successful backup?
         // node name, path, size, timestamp
-    // With backup retention do we also track the last backup removed?
+
 }
 ```
 
 
 ### Implementation Details/Notes/Constraints [optional]
 
-#### Backup controller
-
-A backup controller in the cluster-etcd-operator will reconcile the CRD to execute the backup schedule and report the status of ongoing backups and failures to the `EtcdBackup` status.
-
 There are different options to explore on how we want to execute saving the backup snapshot and any other required metadata. As well as how we enforce the schedule.
+
+#### Multiple Backup Requests
+
+**TODO:** In the presence of multiple backup requests `EtcdBackupRequest`, specify how we want to update all but the newest backup request as aborted/won't update.
 
 #### Execution method
 
@@ -191,9 +239,14 @@ The backup pod needs to be able to save the backup data onto the host filesystem
 
 **TODO:** Does anything prevent us from doing this e.g authorization or security issues.
 
-#### Alerting
+#### Failure to backup and alerting
 
-TBD
+If a backup job fails to complete after a default timeout interval e.g 5 mins the backup controller should set a `BackupControllerDegraded` condition on the `etcds.operator.openshift.io/v1` `cluster` CR. 
+The time to complete a backup should typically be in the range of 30s ( see [upstream FAQ on snapshot timeout](https://etcd.io/docs/v3.5/faq/#what-does-the-etcd-warning-snapshotting-is-taking-more-than-x-seconds-to-finish--mean)). However depending on the size of the data and the hardware this may take longer.
+
+**TODO:** Should we provide an operator flag for overriding the default backup timeout for large or slow clusters?
+
+**TODO:** Specify the custom alerting rule for generating an alert from the `BackupControllerDegraded` condition.
 
 ### Risks and Mitigations
 
@@ -223,6 +276,8 @@ This test would effectively run through the backup and restore procedure as foll
 - Step through the recovery procedure from the saved backup
 - Ensure that the control-plane has recovered and is stable
 - Validate that we have restored the cluster to the previous state so that it does not have the post-backup changes
+  - Ideally want a way to have all clients/operators restart their watches as they may be trying to watch revisions that do not exist post backup. Restarting the individual operators is one solution but it does not scale well for a large number of workloads on the cluster.
+  - Another potential idea is to artificially increase the etcd store revisions before brining up the API server to invalidate and refresh the storage cache. Requires more testing and experimentation.
 
 See the [restore test design doc](https://docs.google.com/document/d/1NkdOwo53mkNBCktV5tkUnbM4vi7bG4fO5rwMR0wGSw8/edit?usp=sharing) for a more detailed breakdown on the restore test and the validation requirements.
 
@@ -234,15 +289,18 @@ Along with the e2e restore test, comprehensive unit testing of the backup contro
 
 ### Graduation Criteria
 
-**TODO:** Need to clarify how feature gating relates to dev preview -> tech preview -> GA.
+The first version of the new API(s) will be `v1alpha1` which will be introduced behind the `TechPreviewNoUpgrade` feature gate.
 
 #### Dev Preview -> Tech Preview
 
-- TBD
+- NA
 
 #### Tech Preview -> GA
 
-- TBD
+The pre-requisite for graduating from Tech Preview will be a track record of reliably restoring from backups generated by the automated backups feature.
+The pass rate for the e2e restore test outlined in the Test Plan should be at 99% before we graduate the feature to GA.
+
+Additionally we may also want to iterate on gathering feedback on the user experience to improve the API before we GA.
 
 ### Upgrade / Downgrade Strategy
 
@@ -255,8 +313,6 @@ TBD
 ### Operational Aspects of API Extensions
 
 TBD
-
-**TODO:** Mention where the conditions for the `EtcdBackups` controller being degraded would be set. Most likely on the `etcd.operator.openshift.io`  `Etcd/cluster` CRD where all the other CEO controllers set their degraded status.
 
 #### Failure Modes
 
