@@ -8,7 +8,7 @@ reviewers:
   - "@mhrivnak"
   - "@rvanderp3"
   - "@mtulio"
-  - "@deads2k, to review library-go, KCMO related parts andopenshift/api changes" 
+  - "@deads2k, to review library-go, KCMO related parts andopenshift/api changes"
   - "@JoelSpeed, to review CCM, MAPO related parts and openshift/api changes"
   - "@sinnykumari, to review MCO related parts"
   - "@danwinship, to review CNO related parts"
@@ -287,7 +287,7 @@ Machine Api Operator is responsible for deploying and maintaining the set of mac
 - machine controller
 
 From the list above, only the "machine controller" is cloud-provider dependent, however, for now, Machine Api Operator
-won't deploy anything if it encounters "None" or an unrecognized platform type. 
+won't deploy anything if it encounters "None" or an unrecognized platform type.
 
 In the future, "External" platform type, in conjunction with an enabled capability,
 would serve as a signal for Machine Api Operator to deploy only provider-agnostic
@@ -299,7 +299,7 @@ replicate everything that MAO does.
 Cluster Storage Operator will go to no-op state if it encounters PlatformType "None" or an unknown PlatformType.
 
 At this point, nothing requires storage to be there during cluster installation, and storage (CSI) drivers might be supplemented
-later via OLM or some other way as day two operation. 
+later via OLM or some other way as day two operation.
 
 No particular changes in regards to the "External" platform type introduction are expected there.
 
@@ -385,6 +385,27 @@ const (
 Additionally, the respective external platform spec and status should be added to the infrastructure resource.
 
 ```go
+// ExternalPlatformSpec holds the desired state for the generic External infrastructure provider.
+type ExternalPlatformSpec struct{
+    // PlatformName holds the arbitrary string represented cloud provider name, expected to be set at the installation time.
+    // Intended to serve only for informational purposes and not expected to be used for decision-making.
+    // +kubebuilder:default:="Unknown"
+    // +optional
+    PlatformName string `json:"platformName,omitempty"`
+}
+
+type PlatformSpec struct {
+    ...
+    // External contains settings specific to the generic External infrastructure provider.
+    // +optional
+    External *ExternalPlatformSpec `json:"external,omitempty"`
+}
+```
+
+For the sake of consistency, status should be introduced as well, and will
+define the settings set at installation time:
+
+```go
 type CloudControllerManagerMode string
 
 const (
@@ -396,46 +417,29 @@ const (
     CloudControllerManagerNone CloudControllerManagerMode = "None"
 )
 
-type CloudControllerManagerSettings struct {
-    // State determines whether or not an external Cloud Controller Manager is expected to 
-    // be presented in the cluster.
-    // For engaging an external Cloud Controller Manager, certain flags are expected to be set to the kubelets.
+// CloudControllerManagerStatus holds the state of Cloud Controller Manager (a.k.a. CCM or CPI) related settings
+type CloudControllerManagerStatus struct {
+    // state determines whether or not an external Cloud Controller Manager is expected to
+    // be installed within the cluster.
     // https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/#running-cloud-controller-manager
     //
-    // When set to "External", the respective operator (machine config operator) should set `--cloud-provider=external` flag to the kubelet.
-    // When omitted or disabled, no `cloud-provider` flag should be set.
-    // +kubebuilder:validation:Enum=External;None
+    // When set to "External", new nodes will be tainted as uninitialized when created,
+    // preventing them from running workloads until they are initialized by the cloud controller manager.
+    // When omitted or set to "None", new nodes will be not tainted
+    // and no extra initialization from the cloud controller manager is expected.
+    // +kubebuilder:default:=""
+    // +default=""
+    // +kubebuilder:validation:Enum="";External;None
     // +optional
-    State CloudControllerManagerMode `json:"state,omitempty"`
+    State CloudControllerManagerState `json:"state"`
 }
-
-
-// ExternalPlatformSpec holds the desired state for the generic External infrastructure provider.
-type ExternalPlatformSpec struct{
-    // PlatformName holds the arbitrary string represented cloud provider name, expected to be set at the installation time.
-    // Intended to serve only for informational purposes and not expected to be used for decision-making.
-    // +kubebuilder:default:="Unknown"
-    // +optional
-    PlatformName string `json:"platformName,omitempty"`
-    // CloudControllerManager contains settings specific to the external Cloud Controller Manager (a.k.a. CCM or CPI)
-    // +optional
-    CloudControllerManager CloudControllerManagerSettings `json:"cloudControllerManager"`
-}
-
-type PlatformSpec struct {
-    ...
-    // External contains settings specific to the generic External infrastructure provider.
-    // +optional
-    External *ExternalPlatformSpec `json:"external,omitempty"`
-}
-```
-
-For the sake of consistency, status should be introduced as well. For now, this will be empty.
-
-```go
 
 // ExternalPlatformStatus holds the current status of the generic External infrastructure provider.
-type ExternalPlatformStatus struct{}
+type ExternalPlatformStatus struct {
+    // CloudControllerManager contains settings specific to the external Cloud Controller Manager (a.k.a. CCM or CPI)
+    // +optional
+    CloudControllerManager CloudControllerManagerStatus `json:"cloudControllerManager"`
+}
 
 type PlatformStatus struct {
     ...
@@ -572,6 +576,17 @@ the decision about temporarily removing `CloudControllerManagerSpec` from the `I
 OCP 4.13 will not contain the `CloudControllerManagerSpec` part.
 
 - [PR for removing CloudControllerManagerSpec](https://github.com/openshift/api/pull/1409)
+
+### Add CloudControllerManagerStatus into the infrastructure resource
+
+- Remove CloudControllerManagerSpec from the ExternalPlatformSpec because
+  this setting is not meant to be updated after cluster installation
+- Introduce CloudControllerManagerStatus to hold the setting which will be
+  defined at installation time
+
+This change will target OCP 4.14.
+
+- [related PR](https://github.com/openshift/api/pull/1434)
 
 ## Alternatives
 
