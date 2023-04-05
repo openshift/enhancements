@@ -1,6 +1,6 @@
-# OKD Enhancement Proposals
+# OpenShift Enhancement Proposals
 
-An OKD Enhancement Proposal is a way to propose, communicate, and coordinate on new efforts for the OKD project.
+An OpenShift Enhancement Proposal is a way to propose, communicate, and coordinate on new efforts for the OpenShift project.
 
 It is inspired from our experience with the Kubernetes Enhancement process where many of our community participants collaborate each day.
 
@@ -27,7 +27,7 @@ If it has broad impact, place it in the root of [the `enhancements` directory](.
 
 ### Do I have to use the Oxford comma?
 
-Yes. OKD is an open, inclusive, and diverse community, and there is absolutely no room for ambiguous clauses.
+Yes. OpenShift is an open, inclusive, and diverse community, and there is absolutely no room for ambiguous clauses.
 
 ### Is it “bare metal”, “baremetal”, “bare-metal”, “Baremetal”, or “BareMetal”?
 
