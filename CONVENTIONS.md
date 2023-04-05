@@ -546,3 +546,39 @@ used SCC there would be a delay before it could start. In recent versions of OCP
 (4.6+) this delay has been virtually eliminated, the usage of runlevels should
 not be required at all hence the primary alternative is to simply try the
 workload without any runlevel specified.
+
+#### Metrics
+
+Core operators deployed by the CVO as well as their operands are encouraged to
+expose metrics using the [Prometheus exposition
+format](https://prometheus.io/docs/instrumenting/exposition_formats/). Metrics
+are useful for alerting and telemetry. Operators can deploy [service
+monitors](https://docs.openshift.com/container-platform/latest/rest_api/monitoring_apis/servicemonitor-monitoring-coreos-com-v1.html)
+to have their metrics collected by the in-cluster Prometheus pods running in
+the `openshift-monitoring` namespace.
+
+When a core operator exposes Prometheus metrics, it should comply with the following requirements:
+
+1. It should use HTTPS. Metrics are confidential, particularly labels which can
+   be identifiable and promising future state of "nothing confidential ever" is
+   implausible.
+2. It should require authentication and it should support TLS client certificate
+   authentication to avoid a dependency on the Kubernetes API server (see
+   [Handling kube-apiserver disruption](#handling-kube-apiserver-disruption)).
+   It may support bearer token authentication but the in-cluster Prometheus
+   should be configured with TLS client certificate only (the certificate path to
+   use is `/etc/prometheus/secrets/metrics-client-certs/tls.crt` and the key
+   path is `/etc/prometheus/secrets/metrics-client-certs/tls.key`).
+3. It should support local authorization and always allow the well-know metrics
+   scraping identity
+   (`system:serviceaccount:openshift-monitoring:prometheus-k8s`) to access the
+   /metrics endpoint. It may support delegated authorization check.
+
+The same requirements apply for operands managed by a core operator.
+
+Optional operators are strongly recommended to follow these requirements.
+
+For guidance about how to implement the requirements in practice, refer to the
+RHOBS handbook's ["Collecting metrics with
+Prometheus"](https://rhobs-handbook.netlify.app/products/openshiftmonitoring/collecting_metrics.md/)
+page.
