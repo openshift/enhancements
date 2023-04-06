@@ -413,6 +413,21 @@ in terms of the action that OpenShift and the platform will take.
 This is an easy way to help users understand the effects of their actions and provide additional value over them using
 the platform specific APIs directly.
 
+### No functions
+
+Do not add functions to the openshift/api.  Functions seem innocuous, but they have significant side effects over time.
+
+1. Dependency chain.
+   We want our dependency chain on openshift/api to be as short as possible to avoid conflicts when they are vendored
+   into other projects.
+2. Building interfaces on APIs.
+   Building interfaces on top of our structs is an anti-goal.  Even the interfaces we have today, `runtime.Object` and
+   `meta.Accessor`, cause pain when mismatched levels result in structs dropping in and out of type compliance
+
+The simplest line is "no functions".
+Functions can be added in a separate repo, possibly library-go if there are sufficient consumers.
+Helpers for accessing labels and annotations are not recommended.
+
 ## Exceptions to Kubernetes API Conventions
 
 ### Use JSON Field Names in Godoc
