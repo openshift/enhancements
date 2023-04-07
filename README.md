@@ -1,16 +1,16 @@
 # Enhancements Tracking and Backlog
 
-Enhancement tracking repository for OKD.
+Enhancement tracking repository for OpenShift, including OKD and OCP.
 
 Inspired by the [Kubernetes enhancement](https://github.com/kubernetes/enhancements) process.
 
 This repository provides a rally point to discuss, debate, and reach consensus
-for how OKD [enhancements](./enhancements) are introduced.  OKD combines
+for how OpenShift [enhancements](./enhancements) are introduced.  OpenShift combines
 Kubernetes container orchestration services with a broad set of ecosystem
 components in order to provide an enterprise ready Kubernetes distribution built
-for extension.  OKD assembles innovation across a wide array of repositories and
+for extension.  OpenShift assembles innovation across a wide array of repositories and
 upstream communities.  Given the breadth of the distribution, it is useful to
-have a centralized place to describe OKD enhancements via an actionable design
+have a centralized place to describe OpenShift enhancements via an actionable design
 proposal.
 
 Enhancements may take multiple releases to ultimately complete and thus provide
@@ -24,7 +24,7 @@ For a quick-start, FAQ, and template references, see [the guidelines](guidelines
 
 ## Why are Enhancements Tracked?
 
-As the project evolves, its important that the OKD community understands how we
+As the project evolves, its important that the OpenShift community understands how we
 build, test, and document our work.  Individually it is hard to understand how
 all parts of the system interact, but as a community we can lean on each other
 to build the right design and approach before getting too deep into an
@@ -102,8 +102,9 @@ definition of OpenShift in some way, add a new required dependency, or
 change the way customers are supported.  Use your best judgement to
 determine the level of approval needed.  If you’re not sure, ask a
 staff engineer to help find a good approver by posting in
-`#forum-arch` on the CoreOS Slack server and tagging
-`@aos-staff-engineers`.
+`#forum-arch` on the RedHat Slack server and tagging
+`@aos-staff-engineers`.  If you are external to RedHat, you can use the
+`#openshift-users` forum on the kubernetes.slack.com instance.
 
 The set of reviewers for an enhancement proposal can be anyone that
 has an interest in this work or the expertise to provide a useful
