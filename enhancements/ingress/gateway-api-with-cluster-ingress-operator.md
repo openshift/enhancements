@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@knobunc"
 creation-date: 2022-12-13
-last-updated: 2023-03-21
+last-updated: 2023-04-12
 tracking-link:
   - https://issues.redhat.com/browse/NE-1105
   - https://issues.redhat.com/browse/NE-1107
@@ -100,12 +100,7 @@ metadata:
   name: gateway
   namespace: openshift-ingress
 spec:
-  selector:                                                         # (1)
-    istio: ingressgateway
-  gatewayClassName: istio                                           # (2)
-  addresses:
-  - value: istio-ingressgateway.openshift-ingress.svc.cluster.local # (3)
-    type: Hostname
+  gatewayClassName: openshift-default
   listeners:
   - name: http
     hostname: "*.gwapi.example.com"
@@ -126,9 +121,6 @@ spec:
       namespaces:
         from: All
 ```
-[1]: The requirement to specify `selector.istio` is an Istio-ism that needs to be investigated. \
-[2]: The requirement to specify `gatewayClassName: istio` is another Istio-ism that is addressed by [istio/istio#38134](https://github.com/istio/istio/issues/38134) and [istio/istio#41884](https://github.com/istio/istio/pull/41884). \
-[3]: The requirement to specify the "istio-ingressgateway" service's DNS name in `spec.addresses` is another Istio-ism that needs to be discussed.
 
 Then a project admin can attach an HTTPRoute to the Gateway.
 
@@ -241,14 +233,15 @@ be warranted.
 ### Changes to the Ingress Operator
 
 With this enhancement, the Ingress Operator is responsible for managing Gateway
-API CRDs, installing OpenShift Service Mesh Operator, managing a
+API CRDs, installing the OpenShift Service Mesh Operator, managing a
 LoadBalancer-type service for a Gateway, and managing DNS for the same.  This
 requires the following changes:
 
-* Refactor the existing service and DNS management logic to enable its re-use.
-* Add a new controller to manage Gateway API CRDs and install and configure Service Mesh Operator.
-* Add a new controller to manage DNS for Gateways.
+* Refactor the existing DNS management logic to enable its re-use.
+* Add a new controller to manage Gateway API CRDs.
+* Add a new controller to install and configure the OpenShift Service Mesh Operator.
 * Modify the DNS controller not to require an associated IngressController.
+* Add a new controller to manage DNS for Gateways.
 
 These changes are explained in more detail in the following sections.
 
@@ -266,34 +259,137 @@ The initial enhancement provides a subset of the options that are available with
 the IngressController API.  In particular, using a LoadBalancer-type service is
 supported; using a NodePort-type service or host networking is not.
 
-#### New Controller to Manage Gateway API CRDs and OpenShift Service Mesh
+#### New Controller to Manage Gateway API CRDs
 
-This enhancement adds a new controller to do the following:
-
-1. Create the gatewayclasses CRD.
-2. Reconcile GatewayClasses by installing OSSM and other CRDs when appropriate.
-
-This controller creates the gatewayclasses CRD when it starts, which enables the
-cluster admin to create a new GatewayClass.  When the cluster admin does this
-and specifies a controller name that OpenShift owns, the Ingress Operator then
-does the following:
-
-1. Install the Gateway API CRDs other than the gatewayclasses CRD, namely the gateways and httproutes CRDs.
-2. Create a Subscription to install OSSM.
-3. Create a ServiceMeshControlPlane to configure OSSM (what if it already exists?; see [Open Questions](#open-questions)).
-4. Create a LoadBalancer-type service (or OSSM may create it; see [Open Questions](#open-questions)).
-5. Create a DNSRecord for the service (see the following subsection).
+This enhancement adds a new controller to create the gatewayclasses CRD.  For
+dev preview, this controller watches for the "GatewayAPI" feature to be enabled
+in the cluster featuregate.  When the feature is enabled, this controller
+installs the Gateway API CRDs, including the gatewayclasses CRD, which enables
+the cluster admin to create a new GatewayClass.
 
 The Ingress Operator effectively owns the Gateway API CRDs.  It installs
 versions of the CRDs that are compatible with the OSSM version that it installs,
 and if the CRDs are already installed, the operator may overwrite them.
 
-When OSSM is installed, it deploys the Istio control-plane and Envoy proxy.  The
-Ingress Operator configures the ServiceMeshControlPlane to enable Gateway API
-support, which means that Istio watches Gateway and HTTPRoute objects and
-configures Envoy accordingly.  Configuring a load balancer and DNS enables
+#### New Controller to Install and Configure OpenShift Service Mesh
+
+The enhancement adds another new controller to reconcile GatewayClasses by
+installing OpenShift Service Mesh (OSSM) when appropriate.  When the cluster
+admin creates a GatewayClass that specifies the
+"openshift.io/gateway-controller" controller name, this controller then does the
+following:
+
+1. Create a Subscription to install OSSM.
+2. Create a ServiceMeshControlPlane to configure OSSM.
+
+When OSSM is installed, it deploys the Istio control-plane.  The Ingress
+Operator configures the ServiceMeshControlPlane to enable Gateway API support,
+which means that Istio watches Gateway and HTTPRoute objects and configures
+Envoy accordingly.  The Ingress Operator also configures the
+ServiceMeshControlPlane to enable Istio's "[Automated Deployment](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#automated-deployment)" feature,
+which means that Istio automatically creates an Envoy proxy deployment and a
+LoadBalancer-type service for each Gateway.  Suppose the cluster admin creates a
+Gateway that specifies a GatewayClass with OpenShift's controller name:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: gateway
+  namespace: openshift-ingress
+spec:
+  gatewayClassName: openshift-default
+  # ...
+```
+
+Then OSSM configures Istio and Envoy and creates a LoadBalancer-type service:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    gateway.istio.io/managed: openshift.io-gateway-controller
+  name: gateway
+  namespace: openshift-ingress
+  ownerReferences:
+  - apiVersion: gateway.networking.k8s.io/v1alpha2    # [1]
+    kind: Gateway
+    name: gateway
+spec:
+  type: LoadBalancer
+  # ...
+```
+[1]: The `apiVersion` shown here may change in a future version of OSSM as a result of fixing [OCPBUGS-8681](https://issues.redhat.com/browse/OCPBUGS-8681).
+
+The Ingress Operator then configures DNS for this service (see [New Controller
+to Manage DNS Records for Gateway Listeners](#new-controller-to-manage-dns-records-for-gateway-listeners)).  With the Ingress Operator and
+Service Mesh Operator together configuring a load balancer and DNS, this enables
 clients to connect through Envoy to backend applications as specified by the
 Gateway and HTTPRoute objects.
+
+Following is the ServiceMeshControlPlane CR that the Ingress Operator creates:
+
+```yaml
+apiVersion: maistra.io/v2
+kind: ServiceMeshControlPlane
+metadata:
+  name: openshift-gateway
+  namespace: openshift-ingress
+spec:
+  addons:
+    grafana:
+      enabled: false
+    jaeger:
+      name: jaeger
+      install: null
+    kiali:
+      enabled: false
+    prometheus:
+      enabled: false
+  gateways:
+    egress:
+      enabled: false
+    ingress:
+      enabled: true
+      ingress: true
+      service:
+        type: LoadBalancer
+  mode: ClusterWide
+  policy:
+    type: Istiod
+  profiles:
+  - default
+  proxy:
+    accessLogging:
+      envoyService:
+        enabled: true
+      file:
+        name: /dev/stdout
+  runtime:
+    components:
+      pilot:
+        container:
+          env:
+            PILOT_ENABLE_GATEWAY_API: "true"
+            PILOT_ENABLE_GATEWAY_API_DEPLOYMENT_CONTROLLER: "true"
+            PILOT_ENABLE_GATEWAY_API_STATUS: "true"
+            PILOT_GATEWAY_API_CONTROLLER_NAME: openshift.io/gateway-controller
+            PILOT_GATEWAY_API_DEFAULT_GATEWAYCLASS: openshift-default
+  security:
+    manageNetworkPolicy: false
+  tracing:
+    type: None
+  version: v2.4
+```
+
+The above configuration enables Gateway API with a cluster-scoped control-plane.
+This means that OSSM watches Gateway API resources in all namespaces.  The above
+configuration also enables the ingress proxy for service mesh; a namespace can
+subsequently be added to the mesh using ServiceMeshMember and
+ServiceMeshMemberRoll CRs following existing practices (see [Adding services to
+a service mesh](https://docs.openshift.com/container-platform/4.12/service_mesh/v2x/ossm-create-mesh.html) and [Managing users and profiles](https://docs.openshift.com/container-platform/4.12/service_mesh/v2x/ossm-profiles-users.html#ossm-control-plane-profiles_ossm-profiles-users) in the Service Mesh
+product documentation).
 
 #### DNS Controller Changes
 
@@ -304,9 +400,24 @@ each DNSRecord have an associated IngressController and be in the
 
 To add DNS management for Gateway API, the DNS controller must allow a DNSRecord
 to be associated with a Gateway (as opposed to an IngressController) and be in
-the same namespace as its Gateway.  This is a relatively minor change.
+the same namespace (i.e. "openshift-ingress") as its Gateway.  This is a
+relatively minor change.
 
-#### New Controller to Manage DNS records for Gateway Listeners
+During testing of this enhancement, a separate issue was discovered that
+sometimes caused problems when a Gateway was deleted and the DNS controller
+subsequently attempted to delete the associated DNS records in Route 53 on AWS.
+Normally, to delete a DNS record in Route 53, the DNS controller looks up the
+target hosted zone id of the ELB associated with the DNS name.  However, Istio
+sometimes deletes the ELB before the DNS controller can delete the DNS record,
+and so the ELB no longer exists when the controller needs to look up the ELB's
+target hosted zone.  To address this issue, the DNS controller was changed to
+store the ELB's target hosted zone id in an annotation on the associated
+DNSRecord CR when upserting a DNS record in Route 53.  If a subsequent lookup of
+this id fails for any reason, the controller now falls back to using the
+annotation value.  This change not only resolves the issue for Gateways but also
+makes DNS record deletion more robust on AWS for IngressControllers.
+
+#### New Controller to Manage DNS Records for Gateway Listeners
 
 This enhancement adds a new controller to manage DNS records for the host names
 specified in Gateway listeners.  For example, suppose a Gateway has the
@@ -319,9 +430,6 @@ metadata:
   name: example-gateway
   namespace: openshift-ingress
 spec:
-  addresses:
-  - value: istio-ingressgateway.openshift-ingress.svc.cluster.local
-    type: Hostname
   listeners:
   - name: stage-http
     hostname: "*.stage.example.com"
@@ -334,30 +442,53 @@ spec:
     port: 443
 ```
 
-In this configuration, the Gateway specifies that it uses the
-"istio-ingressgateway" service and defines three listeners with two different
-host names: `*.stage.example.com` and `*.prod.example.com`.  Suppose the
-"istio-ingressgateway" has the following service (again, some extraneous details
-are abbreviated):
+In this configuration, the Gateway defines three listeners with two different
+host names: `*.stage.example.com` and `*.prod.example.com`, as well as two
+different TCP ports: 80 and 443.  For this Gateway, Istio creates the following
+service (again, some extraneous details are abbreviated in the following
+example):
 
 ```yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: istio-ingressgateway
+  labels:
+    gateway.istio.io/managed: openshift.io-gateway-controller
+  name: example-gateway
   namespace: openshift-ingress
+  ownerReferences:
+  - apiVersion: gateway.networking.k8s.io/v1alpha2
+    kind: Gateway
+    name: example-gateway
 spec:
   ports:
-  - name: http
+  - name: status-port
+    port: 15021
+  - name: stage-http
     port: 80
-  - name: https
+  - name: stage-https
     port: 443
+  selector:
+    istio.io/gateway-name: example-gateway
   type: LoadBalancer
 status:
   loadBalancer:
     ingress:
     - hostname: lb.example.com
 ```
+
+Note that the service defines each port once.  When multiple listeners specify
+the same port, Istio names the service port using the name of the first listener
+that specifies the port.  Multiplexing different host names using the same port
+number is done using TLS SNI or the HTTP `host` request header.  In addition,
+Istio adds a port named "status-port", which load balancers can use for health
+checks.  Istio automatically deletes the service when the Gateway is deleted.
+
+Note that making this service configurable is a non-goal for dev preview.
+Options such as service type, whether to use PROXY protocol, timeouts, and other
+cloud-specific parameters may be made configurable as a follow-up to this
+enhancement in tech preview; see
+["Do we need a new config object? How can the cluster admin configure OSSM?"](#do-we-need-a-new-config-object--how-can-the-cluster-admin-configure-ossm).
 
 Then this new controller creates a DNSRecord for each host name, targeting the
 service load-balancer, similar to the following:
@@ -368,27 +499,37 @@ items:
 - apiVersion: ingress.operator.openshift.io/v1
   kind: DNSRecord
   metadata:
-    name: example-gateway-9bb4cbc66
+    annotations:
+      ingress.operator.openshift.io/target-hosted-zone-id: Z1H1FL5HABSF5
+    labels:
+      gateway.istio.io/managed: openshift.io-gateway-controller
+      istio.io/gateway-name: example-gateway
+    name: example-gateway-57b76476b6-wildcard
     namespace: openshift-ingress
     ownerReferences:
     - apiVersion: v1
       kind: Service
-      name: istio-ingressgateway
+      name: example-gateway
   spec:
-    dnsName: '*.stage.example.com.'
+    dnsName: '*.stage.example.com'
     targets:
     - lb.example.com
 - apiVersion: ingress.operator.openshift.io/v1
   kind: DNSRecord
   metadata:
-    name: example-gateway-6bbdf64d6c
+    annotations:
+      ingress.operator.openshift.io/target-hosted-zone-id: Z1H1FL5HABSF5
+    labels:
+      gateway.istio.io/managed: openshift.io-gateway-controller
+      istio.io/gateway-name: example-gateway
+    name: example-gateway-5bfc88bc87-wildcard
     namespace: openshift-ingress
     ownerReferences:
     - apiVersion: v1
       kind: Service
-      name: istio-ingressgateway
+      name: example-gateway
   spec:
-    dnsName: '*.prod.example.com.'
+    dnsName: '*.prod.example.com'
     targets:
     - lb.example.com
 ```
@@ -398,10 +539,18 @@ which creates corresponding DNS records using the cloud platform API (e.g. Route
 53 on AWS).
 
 To avoid duplicate DNSRecord CRs, the operator hashes the host name and uses the
-hashed value as part of the DNSRecord CR's name.  For example, "9bb4cbc66" is
+hashed value as part of the DNSRecord CR's name.  For example, "57b76476b6" is
 the hash of "*.stage.example.com", generated similarly to the way [the
-Kubernetes deployment controller generates pod template
-hashes](https://github.com/kubernetes/kubernetes/blob/3f6738b8e6c7f3412ec700c757ae22460cf73e1b/pkg/controller/controller_utils.go#L1157-L1172).
+Kubernetes deployment controller generates pod template hashes](https://github.com/kubernetes/kubernetes/blob/3f6738b8e6c7f3412ec700c757ae22460cf73e1b/pkg/controller/controller_utils.go#L1157-L1172), using the
+following function:
+
+```go
+func Hash(dnsName string) string {
+	hasher := fnv.New32a()
+	hasher.Write([]byte(dnsName))
+	return rand.SafeEncodeString(fmt.Sprint(hasher.Sum32()))
+}
+```
 
 To ensure that DNS records are removed when the corresponding listeners are
 removed, the DNSRecord CR specifies an owner reference on the service, and the
@@ -622,18 +771,30 @@ customizing these parameters.
 For the time being, we may defer the ability to customize the parameters
 described above and address the question in a followup EP for tech preview.
 
-**Resolution**: TBD.
+**Resolution**: Deferred until tech preview.  For dev preview, we do not allow
+customization of the SMCP.  The Ingress Operator specifies a fixed set of
+configuration options on the SMCP to enable Gateway API for ingress, with
+cluster-wide watches for Gateway API CRs, and also to enable mesh; individual
+namespaces can be added to this mesh using ServiceMeshMember and
+ServiceMeshMemberRoll CRs.  We will revisit the possibility of allowing the
+cluster admin to configure parameters on the SMCP in tech preview once we have
+some end-user feedback regarding what parameters end-users want to be able to
+customize on the SMCP.
 
 Introducing a new config CRD would lead to another question: _How would we
 expose SMCP parameters without duplicating a significant number of definitions
 from the SMCP CRD?_
 
 The [Service Mesh control plane profiles](https://docs.openshift.com/container-platform/4.12/service_mesh/v2x/ossm-profiles-users.html#ossm-control-plane-profiles_ossm-profiles-users) is potentially useful to resolve
-this last question.  For example, the Ingress Operator could check for a profile
-in a well known location, and the cluster admin could put a profile in that
-location in order to configure the SMCP that the Ingress Operator manages.
+this last question.  For example, the Service Mesh Operator could provide a set
+of profiles covering popular configurations, and the Ingress Operator could
+provide an API for the cluster admin to choose a subset of these profiles in
+order to configure the SMCP that the Ingress Operator manages.
 
-**Resolution**: TBD.
+**Resolution**: Deferred until tech preview.  For dev preview, we hard-code the
+"default" profile.  In the future, we may allow the cluster admin to specify
+which profiles to enable in order to opt in to or opt out of specific features,
+such as mesh and various addons.
 
 #### Do we need to integrate with an existing service-mesh control-plane?
 
