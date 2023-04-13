@@ -5,7 +5,8 @@ authors:
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - @sinnykumari
 approvers:
-  - TBD, who can serve as an approver?
+  - @sdodson 
+  - @mrunalp 
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - TBD
 creation-date: 2022-12-01
