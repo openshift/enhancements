@@ -77,7 +77,7 @@ operand instances to have a unique set of credential per instance, I want my sol
 As a customer of OpenShift layered products I can confidently upgrade the operator even if the next version requires
 elevated permissions be provided.
 
-As an operator author I have a set of best practices and tools that help me develop a compliant operator
+As an operator author I have a set of best practices and tools that help me develop a compliant operator.
 
 As a monitor of OpenShift layered products I can identify which operators are compliant with STS best practices and 
 tools. 
