@@ -60,8 +60,7 @@ OpenShift layered product Kubernetes Operators into my ROSA STS clusters, while 
  
 As a customer of OpenShift on supported cloud providers, overall I expect OpenShift as a platform to function equally well
 with tokenized cloud auth as it does with "mint-mode" IAM credentials. I expect the same from the Kubernetes Operators 
-under the Red Hat brand (that need to reach cloud APIs) in that tokenized workflows are equally integrated and workable 
-as with "mint-mode" IAM credentials.
+under the Red Hat brand (that need to reach cloud APIs).
  
 As the managed services, including HyperShift teams, offering a downstream opinionated, supported and managed lifecycle 
 of OpenShift (in the forms of ROSA, ARO, OSD on GCP, HyperShift, etc), the OpenShift platform should have as close as 
