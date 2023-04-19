@@ -55,13 +55,17 @@ make adding operators (via OLM) simpler on an STS enabled cluster.
 
 ### User Stories
 
-* As a cluster admin I know which OLM Operators support tokenized authentication for my cloud.
-* As a cluster admin of a cluster using tokenized cloud auth I know what's required to install and upgrade OLM Operators whenever those operators manage resources that authenticate against my cloud.
-* As an Operator developer, I have a standard framework to define tokenized authentication requirements and consume them, per supported cloud.
-* As an Operator Hub browser I know which operators support tokenized cloud auth and on which clouds.
-* As the Hypershift team, where the only credential mode for clusters/customers is STS (on AWS) , the Red Hat branded
-  Operators that must reach the AWS API, should be enabled to work with STS credentials in a consistent, and automated
-  fashion that allows customer to use those operators as easily as possible, driving the use of layered products.
+* As a cluster admin, I want to know which OLM Operators support tokenized authentication for my cloud, so that I can
+  provide token-based access for cloud resources for them.
+* As a cluster admin of a cluster using tokenized cloud auth, I want to know what's required to install and upgrade OLM 
+  Operators whenever those operators manage resources that authenticate against my cloud so they can function properly
+* As an Operator developer, I want to have a standard framework to define tokenized authentication requirements and
+  consume them, per supported cloud, so that my operator will work on token-based authentication clusters.
+* As an Operator Hub browser, I want to know which operators support tokenized cloud auth and on which clouds so I can
+  see only a filtered list of operators that will work on the given cluster.
+* As the HyperShift team, where the only credential mode for clusters/customers is STS (on AWS), I want the Red Hat 
+  branded Operators that must reach the AWS API, to be enabled to work with STS credentials in a consistent, and automated
+  fashion so that customer can use those operators as easily as possible, driving the use of layered products.
 
 ### Goals
 
