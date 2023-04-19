@@ -107,7 +107,7 @@ $ oc get authentication cluster -o jsonpath --template='{ .spec.serviceAccountIs
 abutcher-oidc.s3.us-east-1.amazonaws.com
 ```
 
-``. This will operate in one of two ways depending on which other
+This will operate in one of two ways depending on which other
 parts of this EP for other components are adopted: specifically HyperShift/Rosa adding CCO with these token-aware
 changes or continuing with the current support for the pod identity webhook.
 
@@ -140,6 +140,7 @@ enabled cluster. New guidelines would include the following to use CCO Token mod
 - changing CRD to add CredentialRequest references and putting those referenced
 - CredentialRequests into a defined directory in the bundle
 - Add a bundle annotation claiming token-based authentication support
+- Add a bundle annotation indicating which permissions are required
 - add the projected ServiceAccount volume to deployment;
 - handle the Secret themselves (like today’s CCO Mint mode, read and use the credentials in the Secret whose name they 
   know from the CredentialsRequest and is in the same Namespace)
@@ -151,6 +152,17 @@ versions.
 ### Workflow Description
 
 Making a layered operator ready to work on an STS enabled cluster will involve the following steps:
+
+Operator installation under the proposed system:
+1. user goes to console and starts operator install
+2. console detects token-based (STS) cluster, and token-based-supporting operator
+3. console prompts user to create roles+supply ARN-type string
+4. console creates subscription with ARN-type string embedded as a spec.config.env
+5. operator deployment is created with ARN-type string in env
+6. operator creates `CredentialsRequest` including the ARN-type string
+7. Cloud Credential Operator populates Secret based on `CredentialsRequest`
+8. operator loads Secret, makes cloud service requests
+
 
 For the operator author team:
 - Add CredentialRequests to the bundle, known location;
