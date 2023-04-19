@@ -55,37 +55,13 @@ make adding operators (via OLM) simpler on an STS enabled cluster.
 
 ### User Stories
 
-As a customer of OpenShift layered products, I need to be able to fluidly, reliably and consistently install and use 
-OpenShift layered product Kubernetes Operators into my ROSA STS clusters, while keeping a STS workflow throughout.
- 
-As a customer of OpenShift on supported cloud providers, overall I expect OpenShift as a platform to function equally well
-with tokenized cloud auth as it does with "mint-mode" IAM credentials. I expect the same from the Kubernetes Operators 
-under the Red Hat brand (that need to reach cloud APIs).
- 
-As the managed services, including HyperShift teams, offering a downstream opinionated, supported and managed lifecycle 
-of OpenShift (in the forms of ROSA, ARO, OSD on GCP, HyperShift, etc), the OpenShift platform should have as close as 
-possible, native integration with core platform operators when clusters use tokenized cloud auth, driving the use of 
-layered products.
-
-As the Hypershift team, where the only credential mode for clusters/customers is STS (on AWS) , the Red Hat branded 
-Operators that must reach the AWS API, should be enabled to work with STS credentials in a consistent, and automated 
-fashion that allows customer to use those operators as easily as possible, driving the use of layered products.
-
-As an operator team that may already be supporting cloud credential provisioning, including a manner for allowing
-operand instances to have a unique set of credential per instance, I want my solution to keep working (Quay Operator).
-
-As a customer of OpenShift layered products I can confidently upgrade the operator even if the next version requires
-elevated permissions be provided.
-
-As an operator author I have a set of best practices and tools that help me develop a compliant operator.
-
-As a monitor of OpenShift layered products I can identify which operators are compliant with STS best practices and 
-tools. 
-
-As a cluster admin, it's clear when installing an operator if it is STS compliant (i.e. either doesn't need cloud 
-resources or does and is following the best practices).
-
-As an OpenShift user I want the STS enablement solution to be as cloud-agnostic as possible.
+* As a cluster admin I know which OLM Operators support tokenized authentication for my cloud.
+* As a cluster admin of a cluster using tokenized cloud auth I know what's required to install and upgrade OLM Operators whenever those operators manage resources that authenticate against my cloud.
+* As an Operator developer, I have a standard framework to define tokenized authentication requirements and consume them, per supported cloud.
+* As an Operator Hub browser I know which operators support tokenized cloud auth and on which clouds.
+* As the Hypershift team, where the only credential mode for clusters/customers is STS (on AWS) , the Red Hat branded
+  Operators that must reach the AWS API, should be enabled to work with STS credentials in a consistent, and automated
+  fashion that allows customer to use those operators as easily as possible, driving the use of layered products.
 
 ### Goals
 
@@ -96,8 +72,8 @@ While providing the above goal, allow for multi-tenancy. In this sense multi-ten
 provide different cloud provider credentials per operand such that operator users may uniquely access non-shared cloud
 resources.
 
-Operator authors have a way to notify, guide, and assist Day-2 Operator admins in providing the required cloud provider credentials matched to their permission
-needs for install and update.
+Operator authors have a way to notify, guide, and assist Day-2 Operator admins in providing the required cloud provider
+credentials matched to their permission needs for install and update.
 
 Ideally, a solution here will work in both HyperShift (STS always) and non-HyperShift clusters.
 
@@ -110,42 +86,49 @@ for HyperShift)
 
 ## Proposal
 
-**Cloud Credential Operator (CCO) changes**: Add a "Token" mode, distinct from disabled/manual mode that will look for 
-and process CredentialRequests referenced in Operator CRs. This will operate in one of two ways depending on which other
-parts of this EP for other components are adopted: specifically HyperShift/Rosa adding CCO with Token mode or continuing
-with the current support for the pod identity webhook.
+**Cloud Credential Operator (CCO) changes**: Adds a token-aware mode, while nominally set in "Manual" mode, CCO will
+look for and process CredentialRequests referenced in Operator CRs when:
 
-CCO Token mode will work by adding a "role-arn"-type field on operator added CredentialsRequest objects. This is a new
-API field on the CredentialsRequest spec. When CCO acquires a CredentialsRequest it will mint a Secret (as today 
-mostly) with new functionality: Adding to the Secret a path to the projected ServiceAccount token (static for OCP) 
-and a roleARN (from the new field on the CredentialsRequest).
+```bash
+# infrastructure platform is AWS
+$ oc get infrastructure cluster -o jsonpath --template '{ .status.platform }'
+AWS
 
-Validation of CredentialsRequest by Token mode CCO? Maybe. Currently, CCO gets some permissions under ROSA (unused),
-could expand these permissions to include tools like AWS's Policy Simulator such that it could validate a role has 
-permissions, and with this CCO could be the alerting mechanism for a changed CredentialsRequest without sufficient 
+# credentialsMode is "Manual"
+$ oc get cloudcredential cluster -o jsonpath --template '{ .spec.credentialsMode }'
+Manual
+
+# serviceAccountIssuer is non empty
+$ oc get authentication cluster -o jsonpath --template='{ .spec.serviceAccountIssuer }'
+abutcher-oidc.s3.us-east-1.amazonaws.com
+```
+
+``. This will operate in one of two ways depending on which other
+parts of this EP for other components are adopted: specifically HyperShift/Rosa adding CCO with these token-aware
+changes or continuing with the current support for the pod identity webhook.
+
+CCO's token-aware mode will work by adding a "role-arn"-type field on operator added CredentialsRequest objects.
+This is a new API field on the CredentialsRequest spec. When CCO acquires a CredentialsRequest it will create a Secret 
+(as today mostly) with new functionality: Adding to the Secret a path to the projected ServiceAccount token 
+(static for OCP) and a roleARN (from the new field on the CredentialsRequest).
+
+Validation of CredentialsRequest by this new token-aware CCO? Maybe. Currently, CCO gets some permissions under ROSA
+(unused), could expand these permissions to include tools like AWS's Policy Simulator such that it could validate a role
+has permissions, and with this CCO could be the alerting mechanism for a changed CredentialsRequest without sufficient 
 permissions.
 
-**Pod Identity Webhook mode** (Deployed on classic ROSA, ROSA on HyperShift, standard OCP and Hypershift)
-
-Will work by annotating the ServiceAccount triggering the projection of the service account tokens into pods created for
-the operator (same method and resultant actions as: https://github.com/openshift/hypershift/pull/1351) the README here 
-gives an AWS specific example: https://github.com/openshift/aws-pod-identity-webhook)
-
-Possibly some changes to logic for Pod Identity Webhooks as needed for fine-grained credential
-management to allow for multi-tenancy (see definition earlier). Also, need to add pod identity webhooks targeting other
-cloud providers and change the annotations to more generic naming.
-
-**HyperShift changes**: Include Cloud Credential Operator with "Token" mode (see above). Allows for processing of 
+**HyperShift changes**: Include Cloud Credential Operator with token-aware mode (see above). Allows for processing of 
 CredentialsRequest objects added by operators.
 
 **OperatorHub and Console changes**: Allow for import of additional, well-known, bundle annotations which will result 
 in ENV variables on the Subscription object. Show operator is enabled for Token-based use based on Console determining 
-cluster is running in token-based authentication enabled cluster by reading the `.spec.serviceAccountIssuer` from the Authentication CR, `.spec.platformSpec.type` from the Infrastructure CR,`.spec.credentialsMode` from the CloudCredentials CR  AND
-bundle has token-based auth enabled annotation. This info should be written to a new field on Subscription objects.
-The Subscription fields will allow UX for the information needed by CCO or webhook, for input of the cloud credentials. 
-Generate a manual ack for operator upgrade when cloud resources are involved. This can be determined by parsing the 
-Subscription objects. Ensures admin signs off that cloud resources are provisioned and working as intended before an 
-operator upgrade.
+cluster is running in token-based authentication enabled cluster by reading the `.spec.serviceAccountIssuer` from the 
+Authentication CR, `.spec.platformSpec.type` from the Infrastructure CR,`.spec.credentialsMode` from the 
+CloudCredentials CR  AND bundle has token-based auth enabled annotation. This info should be written to a new field on 
+Subscription objects. The Subscription fields will allow UX for the information needed by CCO or webhook, for input of 
+the cloud credentials. Generate a manual ack for operator upgrade when cloud resources are involved. This can be 
+determined by parsing the Subscription objects. Ensures admin signs off that cloud resources are provisioned and working
+as intended before an operator upgrade.
 
 **Operator team/ Operator SDK changes**: Follow new guidelines for allowing for the operator to work on token auth 
 enabled cluster. New guidelines would include the following to use CCO Token mode:
@@ -488,9 +471,16 @@ History`.
 
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement.
+This could be implemented by with chanes to Pod Identity Webhook (Deployed on classic ROSA, ROSA on HyperShift, 
+standard OCP and Hypershift)
+
+Will work by annotating the ServiceAccount triggering the projection of the service account tokens into pods created for
+the operator (same method and resultant actions as: https://github.com/openshift/hypershift/pull/1351) the README here
+gives an AWS specific example: https://github.com/openshift/aws-pod-identity-webhook)
+
+Possibly some changes to logic for Pod Identity Webhooks as needed for fine-grained credential
+management to allow for multi-tenancy (see definition earlier). Also, need to add pod identity webhooks targeting other
+cloud providers and change the annotations to more generic naming.
 
 ## Infrastructure Needed [optional]
 
