@@ -8,12 +8,15 @@ reviewers: # Include a comment about what domain expertise a reviewer is expecte
   - "@bparees" # for OLM, OperatorHub changes
   - "@csrwng" # for HyperShift changes
   - "@spadgett" # for Console changes
+  - "@abutcher" # for CCO changes
 approvers:
   - "@sdodson"
+  - "@joelanford"
+  - "@bparees"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - "@abutcher" # for CCO API changes, or please suggest alternative
+  - "@JoelSpeed " # for CredentialsRequest changes
 creation-date: 2023-01-21
-last-updated: 2023-02-15
+last-updated: 2023-04-19
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/OCPBU-4
   - https://issues.redhat.com/browse/PORTENABLE-471
