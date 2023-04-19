@@ -171,14 +171,14 @@ For OperatorHub, Console:
 This graph shows the system as it needs to work (AWS only), not the proposed solution workflow:
 ```mermaid
 graph  LR
-  sa([ServiceAccount Signing Keys])- Public <br> Key ->s3[S3 Bucket w/ OIDC Config];
-  sa([ServiceAccount Signing Keys])- Private <br> Key ->token_signing;
+  sa([ServiceAccount Signing Keys]) -- Public <br> Key -->s3[S3 Bucket w/ OIDC Config];
+  sa([ServiceAccount Signing Keys]) -- Private <br> Key -->token_signing;
   service<-.->config
   service<-.->Pod
   Pod-->role
   subgraph cluster [AWS]
   s3;
-  iam_id[IAM Identity Provider] -Trust Tokens<br>Signed->s3;
+  iam_id[IAM Identity Provider] -- Trust Tokens<br>Signed -->s3;
   role[IAM Role For Pod]<-->service[AWS Services];
   end
   subgraph cluster2 [OpenShift]
