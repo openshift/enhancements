@@ -8,7 +8,8 @@ approvers:
   - "@sdodson"
   - "@mrunalp"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - TBD
+  - "@sdodson"
+  - "@mrunalp"
 creation-date: 2022-12-01
 last-updated: 2022-12-01
 tracking-link:
