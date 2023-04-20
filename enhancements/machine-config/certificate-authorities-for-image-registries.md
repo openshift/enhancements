@@ -13,6 +13,7 @@ creation-date: 2022-12-01
 last-updated: 2022-12-01
 tracking-link:
   - https://issues.redhat.com/browse/MCO-499
+  - https://issues.redhat.com/browse/IR-351
 see-also:
 replaces:
 superseded-by:
