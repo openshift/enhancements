@@ -3,6 +3,7 @@ title: tokenized-auth-enablement-operators-on-cloud
 authors:
   - "@bentito"
   - "@jharrington22"
+  - "@gallettilance"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - "@joelanford" # for OLM, OperatorHub changes
   - "@bparees" # for OLM, OperatorHub changes
@@ -41,33 +42,56 @@ superseded-by:
 
 ## Summary
 
-Amazon Web Services (AWS) Secure Token Service (STS) allows you to request temporary limited-privilege credentials. A concrete 
-example is write permission on an S3 bucket on AWS. STS is supported on all the major cloud providers where OpenShift is
-deployed. Currently, several Red Hat operators provide detailed instructions for how to use the operator on STS-enabled
-clusters. The process is designed to have manual operations performed by the customer. This enhancement seeks to bring common standards to the process of enabling an
-operator to access cloud provider resources, by enabling automation, UX and logic for the process. 
+Many Cloud Providers offer services that allow authentication via Temporary Access Tokens (TAT).
+
+For example, Amazon Web Services (AWS) Secure Token Service (STS) allows you to request temporary limited-privilege credentials. A concrete 
+example is write permission on an S3 bucket on AWS. STS is supported on all the major cloud providers where OpenShift is deployed.
+
+Currently, several Red Hat operators provide detailed instructions for how to use the operator on clusters where CCO is in Manual Mode.
+The process is designed to have manual operations performed by the customer that are inconsistent across layered product operators.
+
+This enhancement seeks to bring a unified set of standards and tooling to the process of enabling an
+operator to access cloud provider resources using TAT, and improve the UX for consumers of these operators. 
 
 ## Motivation
 
-Several important Red Hat operators have normal operating modes where they assure their operands have required cloud 
-resources to perform properly. Currently, when a cluster is installed on a cloud platform an admin is required to 
-follow instructions (for example [1]) to provide STS-based credentials to the operator such that needed resources can be
-accessed by the operand. This enhancement seeks to normalize this process across operators, so users of several of them
-have the same experience and similar steps to perform. We aim to automate and reduce those steps as much as possible to 
-make adding operators (via OLM) simpler on an STS enabled cluster.
+Several Red Hat operators have normal operating modes where they assure their operands have required cloud 
+resources to perform properly. In Mint Mode, CCO will automatically create the IAM roles and credentials required for the operator to assume the role and authenticate with the Cloud Provider.
+
+In Manual mode or more generally on clusters that support TAT (CCO not necessarily installed), an admin installing an operator is required to:
+
+1. Extract the CredentialsRequest from the operator's image or codebase in order to know what IAM role is appropriate for the operator to assume
+2. If using CCOCLT:
+  a. Find and download a compatible CCOCTL binary
+  b. Accept that CCOCTL is a binary you downloaded that has god-mode access to your Cloud Provider
+  c. Use CCOCTL to create the IAM Role
+  d. Use CCOCTL to create the secret with the credentials expected by the operator in mint mode
+3. Else apply the equivalent commands to CCOCTL
+
+Here is a diagram for how this works on AWS:
+
+![](STS_today.jpg)
+
+This enhancement seeks to unify this process across operators so users of several of them have the same experience and similar steps to perform.
+We aim to automate and reduce those steps as much as possible to 
+make installing operators (via OLM) simpler on clusters where TAT authentication is supported.
 
 ### User Stories
 
+* As a cluster admin, I want to know which OLM Operators are safe to install because they will not be interacting with the Cloud Provider on a cluster that only supports TAT authentication with the Cloud Provider
 * As a cluster admin, I want to know which OLM Operators support tokenized authentication for my cloud, so that I can
   provide token-based access for cloud resources for them.
 * As a cluster admin of a cluster using tokenized cloud auth, I want to know what's required to install and upgrade OLM 
   Operators whenever those operators manage resources that authenticate against my cloud so they can function properly
+* As a cluster admin, I want the experience of TAT authentication to be as similar as possible from one Cloud Provider to the other, so that I can minimize Cloud Specific knowledge and focus more on OpenShift.
 * As an Operator developer, I want to have a standard framework to define tokenized authentication requirements and
   consume them, per supported cloud, so that my operator will work on token-based authentication clusters.
 * As an Operator Hub browser, I want to know which operators support tokenized cloud auth and on which clouds so I can
   see only a filtered list of operators that will work on the given cluster.
-* As the HyperShift team, where the only credential mode for clusters/customers is STS (on AWS), I want the Red Hat 
-  branded Operators that must reach the AWS API, to be enabled to work with STS credentials in a consistent, and automated
+* As an Operator Hub browser, I want to be informed / reminded in the UI that the cluster only supports TAT authentication with the Cloud Provider, so that I don't confuse the cluster with one that will try to mint long lived credentials.
+* As an Operator Hub browser, I want to be able to easily provide what's required to the OLM operators I install through the UI.
+* As the HyperShift team, where CCO is not installed so the only supported authentication mode is via TAT, I want the Red Hat 
+  branded Operators that must reach the Cloud Provider API, to be enabled to work with TAT credentials in a consistent, and automated
   fashion so that customer can use those operators as easily as possible, driving the use of layered products.
 
 ### Goals
@@ -76,19 +100,20 @@ Allow Day-2 Operators to access cloud provider resources as seamlessly as possib
 updated on STS enabled clusters.
 
 While providing the above goal, allow for multi-tenancy. In this sense multi-tenancy means that an operator may
-provide different cloud provider credentials per operand such that operator users may uniquely access non-shared cloud
-resources.
+enable its operands to communicate with the cloud provider instead of communicating with the cloud itself. Operands would use the same set of credentials as the operator. 
+The operator will need to maintain its own logic to minimize conflicts when sharing credentials with operands.
 
 Operator authors have a way to notify, guide, and assist Day-2 Operator admins in providing the required cloud provider
 credentials matched to their permission needs for install and update.
 
-Ideally, a solution here will work in both HyperShift (STS always) and non-HyperShift clusters.
+Ideally, a solution here will work in both HyperShift (TAT always) and non-HyperShift clusters.
 
 ### Non-Goals
 
-Day 1 operators are not included in this proposal, they are pre-provisioned for STS enabled clusters (at least 
+Day 1 operators are not included in this proposal, they are pre-provisioned for TAT enabled clusters (at least 
 for HyperShift)
 
+Bring Your Own Credentials (BYOC) where an operator can manage and distribute credentials to its operands are out of scope.
 
 
 ## Proposal
@@ -114,7 +139,7 @@ This will operate in one of two ways depending on which other
 parts of this EP for other components are adopted: specifically HyperShift/Rosa adding CCO with these token-aware
 changes or continuing with the current support for the pod identity webhook.
 
-CCO's token-aware mode will work by adding a "role-arn"-type field on operator added CredentialsRequest objects.
+CCO's token-aware mode will work by adding, for example for STS, a "role-arn"-type field on operator added CredentialsRequest objects.
 This is a new API field on the CredentialsRequest spec. When CCO acquires a CredentialsRequest it will create a Secret 
 (as today mostly) with new functionality: Adding to the Secret a path to the projected ServiceAccount token 
 (static for OCP) and a roleARN (from the new field on the CredentialsRequest).
@@ -127,15 +152,19 @@ permissions.
 **HyperShift changes**: Include Cloud Credential Operator with token-aware mode (see above). Allows for processing of 
 CredentialsRequest objects added by operators.
 
-**OperatorHub and Console changes**: Allow for import of additional, well-known, bundle annotations which will result 
-in ENV variables on the Subscription object. Show operator is enabled for Token-based use based on Console determining 
-cluster is running in token-based authentication enabled cluster by reading the `.spec.serviceAccountIssuer` from the 
-Authentication CR, `.spec.platformSpec.type` from the Infrastructure CR,`.spec.credentialsMode` from the 
-CloudCredentials CR  AND bundle has token-based auth enabled annotation. This info should be written to a new field on 
-Subscription objects. The Subscription fields will allow UX for the information needed by CCO or webhook, for input of 
-the cloud credentials. Generate a manual ack for operator upgrade when cloud resources are involved. This can be 
-determined by parsing the Subscription objects. Ensures admin signs off that cloud resources are provisioned and working
-as intended before an operator upgrade.
+**OperatorHub and Console changes**: Allow for input from user of additional fields during install depending on the Cloud Provider which will result 
+in ENV variables on the Subscription object that are required in the CredentialsRequests created by the Operator. Setting the Subscription config.ENV will allow UX for 
+the information needed by CCO or webhook, for input of the cloud credentials
+while not having to change the Subscription API.
+
+Show in OperatorHub that the cluster is in a mode that supports token-based authentication by reading the `.spec.serviceAccountIssuer` from the 
+Authentication CR, `.spec.platformSpec.type` from the Infrastructure CR,`.spec.credentialsMode` from the CloudCredentials CR
+
+Show that the operator is enabled for Token-based use by reading the CSV annotation provided by the operator author.
+
+Generate a manual ack for operator upgrade when cloud resources are involved. This can be determined by parsing the Subscription objects.
+Ensures admin signs off that cloud resources are provisioned and working as intended before an operator upgrade.
+This could be by setting the default subscription mode to Manual in the UI for operators that support TAT.
 
 **Operator team/ Operator SDK changes**: Follow new guidelines for allowing for the operator to work on token auth 
 enabled cluster. New guidelines would include the following to use CCO Token mode:
@@ -144,7 +173,7 @@ enabled cluster. New guidelines would include the following to use CCO Token mod
 - CredentialRequests into a defined directory in the bundle
 - Add a bundle annotation claiming token-based authentication support
 - Add a bundle annotation indicating which permissions are required
-- add the projected ServiceAccount volume to deployment;
+- add the projected ServiceAccount volume to the Deployment embedded the CSV;
 - handle the Secret themselves (like today’s CCO Mint mode, read and use the credentials in the Secret whose name they 
   know from the CredentialsRequest and is in the same Namespace)
 - Guidance to operator authors to structure controller code to alert on missing cloud credentials, not crash.
@@ -153,6 +182,10 @@ SDK to support this new template. SDK to validate and in particular: alert on an
 versions.
 
 ### Workflow Description
+
+This diagram shows the steps a user will need to take in the proposed flow (specific to STS):
+
+![](STS_tomorrow.jpg)
 
 Making a layered operator ready to work on an STS enabled cluster will involve the following steps:
 
