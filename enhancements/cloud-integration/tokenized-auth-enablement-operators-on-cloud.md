@@ -263,22 +263,20 @@ graph  LR
   class cluster2 cluster1;
 ```
 
-#### Variation [optional]
-
-If the cluster creator uses a standing desk, in step 1 above they can
-stand instead of sitting down.
-
 ### API Extensions
 
-"Role-ARN-like" field added CCO CredentialsRequest API (name not finalized yet, ARN is AWS specific)
-This field allows CCO to ...
+Added to the CredentialsRequest API 
 
+Adding to the `spec` field, the following subfields:
 
-### Implementation Details/Notes/Constraints [optional]
+`cloudTokenString`;<br>
+`cloudTokenPath`
 
-What are the caveats to the implementation? What are some important details that
-didn't come across above. Go in to as much detail as necessary here. This might
-be a good place to talk about core concepts and how they relate.
+On AWS STS, the `cloudTokenString` would be something like:
+`arn:aws:iam::269733383066:role/newstscluster-openshift-logging-role-name`<br>
+This provides the role information which linked by policy to access various cloud resources.
+
+`cloudTokenPath` provides the path to a JWT web token needed to access the resources.
 
 ### Risks and Mitigations
 
@@ -308,6 +306,12 @@ burden?  Is it likely to be superceded by something else in the near future?
 
 ## Design Details
 
+We have two PoC items:<br>
+How CCO changes might be implemented: https://github.com/openshift/cloud-credential-operator/pull/525
+
+How Cluster Logging Operator can be changed to work with this modified CCO: 
+https://github.com/gallettilance/cluster-logging-operator/tree/sts
+
 ### Open Questions [optional]
 
 This is where to call out areas of the design that require closure before deciding
@@ -317,19 +321,14 @@ to implement the design.  For instance,
 
 ### Test Plan
 
-**Note:** *Section not required until targeted at a release.*
-
 Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
-- What additional testing is necessary to support managed OpenShift service-based offerings?
-
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
-
-All code is expected to have adequate tests (eventually with coverage
-expectations).
+- CCO should add unit tests for the new manner of working when in Manual mode but the 3-way test indicates running on
+  a TAT enabled cluster.
+- CCO should add e2e tests for the new manner of working when in Manual mode but the 3-way test indicates running on
+  a TAT enabled cluster.
+- CI will need to add a TAT mode for various cloud providers as a base for the e2e tests.
+- A "canary" operator should be fielded in CI with e2e tests such that we have signal on breaking changes in TAT enabled
+  clusters.
 
 ### Graduation Criteria
 
