@@ -66,11 +66,11 @@ operator is required to:
 
 Extract the CredentialsRequest from the operator's image or codebase in order to know what IAM role is appropriate for 
 the operator to assume
-xIf using the Cloud Credential Utility, `ccoclt`:
-1. Find and download a compatible `ccoclt` binary
-2. Accept that `ccoclt` is a binary you downloaded that has god-mode access to your Cloud Provider
-3. Use `ccoclt` to create the IAM Role
-4. Use `ccoclt` to create the secret with the credentials expected by the operator in mint mode
+if using the [Cloud Credential Operator Utility](https://github.com/openshift/cloud-credential-operator/blob/master/docs/ccoctl.md), `ccoctl`:
+1. Find and download a compatible `ccoctl` binary
+2. Accept that `ccoctl` is a binary you downloaded that has god-mode access to your Cloud Provider
+3. Use `ccoctl` to create the IAM Role
+4. Use `ccoctl` to create the secret with the credentials expected by the operator in mint mode
 
 Here is a diagram for how this works on AWS:
 
