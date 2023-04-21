@@ -24,12 +24,12 @@ superseded-by:
   - None
 ---
 
-# MicroShift updateability in libostree based systems
+# MicroShift updateability in ostree based systems
 
 ## Summary
 
 This enhancement focuses on high level overview of updating
-MicroShift running on libostree based systems such as RHEL 4 Edge.
+MicroShift running on ostree based systems such as RHEL 4 Edge.
 Enhancement covers backup and restore of MicroShift data,
 version migration (upgrade and downgrade) of MicroShift and 
 its consequences (migration of data between schema versions),
@@ -37,7 +37,7 @@ and interactions with GreenBoot and operating system.
 
 ## Motivation
 
-MicroShift 4.14 is scheduled for general availability (GA).
+MicroShift is working towards a general availability (GA) release.
 As GA product, it is expected that it can be updated to
 provide security patches, functional updates, and bug fixes
 without needing to redeploy.
@@ -54,80 +54,267 @@ certain version of MicroShift.
 * As a MicroShift administrator, I want to safely update MicroShift
   so that I can get bug fixes, new features, and security patches.
 * As a MicroShift administrator, I want automated backups of 
-  MicroShift data so that I can rollback in case of problems.
+  MicroShift data so in case of a greenboot failure system will rollback
+  and backup will be restored.
 
 ### Goals
 
 Goal of the enhancement is to describe implementation roadmap for
-integrating MicroShift with libostree and greenboot in order to provide
+integrating MicroShift with ostree and greenboot in order to provide
 functionality to:
-- safely update MicroShift version (by backing up the data and
+- Safely update MicroShift version (by backing up the data and
   restoring it in case of rollback)
-- migrating internal data (like Kubernetes storage or etcd schema) to
+- Migrating internal data (like Kubernetes storage or etcd schema) to
   newer version
-- block upgrades in case of version bump being too big.
+- Block upgrades in case of version bump being too big
+
+Design aims to implement following principles:
+- Keep it simple, optimize later
+- MicroShift does not own the OS or host
+- MicroShift and all its components are version, upgraded, and rolled back together
+- Be defensive, fail fast
+- Rely on outside intervention as a last resort
 
 ### Non-Goals
 
 * Building allowed/blocked version migration graph
 * Handling readiness, and backup and rollback of 3rd party applications
-  (although we'll provide guides how to do it)
-* Defining updateability for non-libostree systems
+  (although end user documentation should be provided)
+* Defining updateability for non-ostree systems
+* Protecting against data corruption
 
 ## Proposal
 
 ### Workflow Description
 
-**MicroShift administrator** is a human responsible for preparing
-libostree commits and scheduling devices to use these commits.
+#### User perspective
 
-1. MicroShift administrator prepares a new libostree commit.
-1. MicroShift administrator schedules device to reboot and use new libostree commit.
-1. Device boots to new commit.
-1. MicroShift takes actions without any additional intervention.
+**MicroShift administrator** is a human responsible for preparing
+ostree commits and scheduling devices to use these commits.
+
+1. MicroShift administrator prepares a new ostree commit
+1. MicroShift administrator schedules device to reboot and use new ostree commit
+1. Device boots to new commit
+1. Operating System, greenboot, and MicroShift take actions without any additional intervention
+
+#### Implementation perspective
+
+**First boot into commit with MicroShift**
+
+1. First ostree commit is installed
+1. First ostree commit boots
+1. MicroShift starts
+   - No backup action (did not previously run, so there is nothing to backup, and did not previously fail so no restore needed)
+1. MicroShift startup succeeds
+1. All greenboot checks pass
+1. Greenboot runs green scripts
+   - MicroShift green script sets backup mode to "backup"
+
+**Simple host reboot (cont of previous flow)**
+
+1. First ostree commit shuts down
+1. First ostree commit boots
+1. MicroShift starts up
+   - Backup mode is "backup",
+   - Backup script runs, creating a backup compatible with the first ostree commit
+1. MicroShift startup succeeds
+1. All greenboot checks pass
+1. Greenboot runs green scripts
+   - MicroShift green script sets backup mode to "backup" (no change)
+
+**Failed upgrade (cont of previous flow)**
+
+1. Second ostree commit is staged
+1. First ostree commit shuts down
+1. Second ostree commit boots
+1. MicroShift starts up
+   - Backup mode is "backup",
+   - Backup script runs, creating a backup compatible with the first ostree commit
+1. MicroShift startup fails
+1. Greenboot runs red scripts
+    - Set backup mode to "restore"
+1. (Failures may need to repeat to trigger rollback.)
+1. Second ostree commit shuts down
+1. First ostree commit boots
+1. MicroShift starts
+   - Backup mode is "restore",
+   - Backup tool restores the backup compatible with the first ostree commit
+1. MicroShift starts successfully
+1. Greenboot runs green scripts
+   - Set backup mode to "backup"
+
+**Successful upgrade (cont of previous flow)**
+
+1. Third ostree commit is staged
+1. First ostree commit shuts down
+1. Third ostree commit boots
+1. MicroShift starts
+   - Backup mode is "backup",
+   - Backup script runs, creating a backup compatible with the first ostree commit
+1. MicroShift startup succeeds
+1. Green boot runs green scripts
+   - Set backup mode to "backup" (no change)
+
+**Failed restore on rollback (cont of "simple host reboot")**
+
+1. Second ostree commit is staged
+1. First ostree commit shuts down
+1. Second ostree commit boots
+1. MicroShift pre-run
+   - Backup mode is "backup",
+   - Backup script runs, creating a backup compatible with the first ostree commit
+1. MicroShift data migration or startup fail (upgrade was allowed)
+1. Greenboot runs red scripts
+    - Set backup mode to "restore"
+1. Second ostree commit shuts down
+
+1. Following repeats `GREENBOOT_MAX_BOOT_ATTEMPTS - 1` times
+   1. Second ostree commit boots
+   1. MicroShift pre-run
+      - Backup mode is "restore",
+      - Backup compatible with the first ostree commit is restored
+   1. MicroShift data migration or startup fail (upgrade was allowed)
+   1. Greenboot runs red scripts
+      - Set backup mode to "restore"
+
+1. Greenboot issues rollback (too many failed boots)
+1. Second ostree commit shuts down
+1. First ostree commit boots
+1. MicroShift pre-run
+   - Backup mode is "restore"
+   - Backup tool **fails to restore the backup** compatible with the first ostree commit
+1. MicroShift cluster doesn't start
+1. MicroShift / healthcheck detects that restore after rollback
+1. MicroShift greenboot healthcheck is overridden to return success
+   - Endless reboot and rollback loop is avoided
+1. Manual intervention is needed
+
+Otherwise following will happen:
+
+12. MicroShift's greenboot healthcheck fails
+0. Greenboot runs red scripts
+    - Set backup mode to "restore" and reboot the host
+0. (Failures repeat and rollback is issued)
+0. **First (!!!)** ostree commit shuts down
+0. **Second (!!!)** ostree commit boots
+0. Repeats ad infinitum
+
+**Fail first startup, FDO (FIDO Device Onboard) deployment**
+
+1. An ostree commit without MicroShift is installed on the device at the factory.
+1. The device boots at a customer site.
+1. An agent in the ostree commit performs FIDO device onboarding or a similar process to determine the workload.
+1. An ostree commit with MicroShift installed is staged.
+1. The sans-MicroShift commit shuts down.
+1. The with-MicroShift commit starts up.
+1. MicroShift starts
+   - No backup action (did not previously run, so there is nothing to backup, and did not previously fail so no restore needed)
+1. MicroShift startup fails
+1. Greenboot runs red scripts
+   - Set backup mode to "restore"
+1. (Failures may need to repeat to trigger rollback.)
+1. The with-MicroShift ostree commit shuts down
+1. The sans-MicroShift ostree commit boots
+1. The agent stages with-MicroShift ostree commit 2
+1. The sans-MicroShift ostree commit shuts down
+1. The with-MicroShift ostree commit 2 starts up.
+1. MicroShift starts
+   - The backup mode is "restore"
+   - There is no backup.
+   - (Open Question) XOR
+     - Remove MicroShift data and start with clean slate
+     - Try running with existing data
+       - What if greenboot fails? Deleting data allows fresh start
+
+**Visual summary**
 
 ```mermaid
 flowchart TD
-  START([System boots])
-  
-  run[Start cluster]
-  backup[Backup\n/var/lib/microshift]
-  restore[Restore\n/var/lib/microshift]
-  data-migration[Migrate data]
-  microshift-ready[Persist metadata]
+  start([System boots])
 
-  data-dir?{/var/lib/microshift/}
-  prev-boot?{Was previous\nboot successful?}
-  backup?{Does backup exist?}
+  pre-run[microshift pre-run]
+  run[microshift run]
+
+  exit[Exit with error]
+  red[Red scripts\nNext boot: 'restore']
+  reboot([Greenboot reboot system])
+  override-healthcheck[Exit and override healthcheck]
+  system-runs-without-microshift([System proceeds to run\nwithout MicroShift.\n\nManual intervention required])
+
+  classDef danger fill:red
+  class exit,red,reboot,override-healthcheck,system-runs-without-microshift danger
+
+  green[Green scripts\nNext boot: 'backup']
+  continue-running([System and MicroShift\nproceed to run successfully])
+  classDef good fill:green
+  class continue-running,green good
+  
+%% Actions
+
+  do-backup[Backup data]
+  do-restore[Restore data]
+  do-data-migration[Migrate data]
+  do-persist-version[Persist version metadata]
+  do-clean-data[Remove /var/lib/microshift?\nor try running without cleanup?]
+
+%% Decisions
+
+  data-dir-exists?{/var/lib/microshift/}
+  backup-or-restore?{Backup or restore\nbased on previous boot}
+  backup-exists?{Does backup exist?}
   version?{Compare\nMicroShift's version:\nmetadata vs binary}
   data-migration?{Was\nmigration\nsuccessful?}
-  ready?{Is MicroShift\nfully functional?\ngreenboot check?}
+  healthy?{"Is MicroShift healthy?\n(greenboot check)"}
+  missing-metadata-version?{Upgrade\nfrom 4.13 is\nsupported}
+  restore-ok?{Restore\nsucceeded?}
+  backup-ok?{Backup\nsucceeded?}
+  rollback?{Is it a rollback?}
 
-  stop([STOP\n\ncommunicate fail to greenboot\nleading to reboot w/ restore\n3 reboots => rollback])
+%% Transitions
 
-  START --> data-dir?
-  data-dir? -- Doesn't exists --> run
-  data-dir? -- Exists         --> prev-boot?
+  start --> pre-run --> data-dir-exists?
 
-  prev-boot? -- Yes --> backup  --> version?
-  prev-boot? -- No  --> backup?
-  prev-boot? -- N/A --> what-now[???]
-  
-  backup? -- Yes --> restore --> version?
-  backup? -- No --> clean[Remove /var/lib/microshift?\nor try running without cleanup?] --> run
+  data-dir-exists? -- Doesn't exists --> run
+  data-dir-exists? -- Exists         --> backup-or-restore?
 
-  version? -- Versions are the same                  --> run
-  version? -- Binary is older or blocked             --> stop
-  version? -- Binary is newer or allowed             --> data-migration
-  version? -- Metadata is missing\nassume 4.13->4.14 --> data-migration
+  backup-or-restore? -- "Restore (red)"    --> do-restore
+  backup-or-restore? -- "Backup (green)"   --> do-backup
+  backup-or-restore? -- Missing\nData exists,\nbut no info persisted about what to do\nFits upgrade from 4.13 flow --> do-backup
 
-  data-migration --> data-migration?
+  do-backup --> backup-ok?
+  backup-ok?  -- Yes --> version?
+  backup-ok?  -- No --> exit
+
+  do-restore                             --> backup-exists?
+  backup-exists? -- No --> do-clean-data --> run
+  backup-exists? -- Yes --> restore-ok? 
+  restore-ok? -- Yes --> version?
+  restore-ok? -- No --> rollback?
+  rollback? -. No .-> exit
+  rollback? -. Yes .-> override-healthcheck
+  override-healthcheck --> system-runs-without-microshift
+
+  version? -- Versions are the same                 --> run
+  version? -. Binary is older                       .-> exit
+  version? -- Binary is newer                       --> do-data-migration
+  version? -. Upgrade is blocked                    .-> exit
+  version? -- Upgrade is allowed                    --> do-data-migration
+  version? -- "Metadata is missing\n(assume 4.13)"  --> missing-metadata-version?
+
+  missing-metadata-version? -- Yes --> do-data-migration
+  missing-metadata-version? -. No .-> exit
+
+  do-data-migration --> data-migration?
   data-migration? -- Yes --> run
-  data-migration? -- No  --> stop
+  data-migration? -. No  .-> exit
 
-  run --> ready?
-  ready? -- Yes --> microshift-ready
-  ready? -- No  --> stop
+  run --> healthy?
+  healthy? -- Yes --> green -->  continue-running
+  healthy? -- Yes --> do-persist-version
+  healthy? -. No  .-> red
+
+  exit -.-> red
+  red --> reboot
 ```
 
 ### API Extensions
@@ -136,62 +323,66 @@ None
 
 ### Implementation Details/Notes/Constraints [optional]
 
-
 ### Risks and Mitigations
 
-<!-- What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
+Since this is a must-have functionality, the risks are not foreseeing fail scenarios in advance and implementation bugs.
 
-How will security be reviewed and by whom?
-
-How will UX be reviewed and by whom?
-
-Consider including folks that also work outside your immediate sub-project. -->
+To mitigate the risks, a thorough review of the enhancement must be done by MicroShift, OpenShift, and RHEL teams,
+and making sure testing strategy is sound and prioritized equally with the feature development.
 
 ### Drawbacks
 
-<!-- The idea is to find the best form of an argument why this enhancement should
-_not_ be implemented.  
-
-What trade-offs (technical/efficiency cost, user experience, flexibility, 
-supportability, etc) must be made in order to implement this? What are the reasons
-we might not want to undertake this proposal, and how do we overcome them?  
-
-Does this proposal implement a behavior that's new/unique/novel? Is it poorly
-aligned with existing user expectations?  Will it be a significant maintenance
-burden?  Is it likely to be superceded by something else in the near future? -->
-
+N/A
 
 ## Design Details
 
-### Definitions:
-- **Rollback**: going back from commit N to N-1, due to greenboot assessing system to not be functional
-- **Upgrade**: running newer version of MicroShift than previously (e.g. in previous boot)
-- **Downgrade**: running older version of MicroShift than previously (e.g. in previous boot)
+### Definitions
+
+- **ostree commit**: TODO
+- **ostree deployment**: TODO
+- **Rollback**: booting previous ostree commit due to greenboot assessing system to not be functional
+- **Upgrade**: running newer version of MicroShift than previously as a result of booting another ostree commit
+- **Downgrade**: running older version of MicroShift than previously as a result of booting another ostree commit
 - **Backup**: backing up `/var/lib/microshift`
 - **Restore**: restoring `/var/lib/microshift`
-
+- **Version Metadata**: File residing in MicroShift data dir containing version of MicroShift that successfully started (cluster was healthy)
+- **MicroShift greenboot healthcheck**: Program verifying the status of MicroShift's cluster
 
 ### Preface
 
-Every action related to procedure described in this enhancement is performed on system start,
-rather than on shutdown. **TODO: Why**
+Every action related to procedure described in this enhancement is 
+performed after system's boot rather than immediately before shutdown. 
+Greenboot's healthchecks, green and red scripts are executed independent of MicroShift's processes.
+Actions related to backup, restore, and data migration are performed with MicroShift 
+partially running, i.e. only etcd and kube-apiserver are running.
 
-Actions other than greenboot's check, and green and red scripts are 
-performed with MicroShift cluster being completely offline or 
-in a state of partial functionality (only etcd and kube-apiserver running).
+Only one backup of MicroShift data will be stored at a given moment
+due to high probability of devices having limited storage.
+
+### System rollback and failed data restore detection
+
+TODO: How to not fall into endless loop of rollbacks 
 
 ### Integration with greenboot
 
 Depending on result of greenboot's healthcheck either "green" (successful boot) or "red" (unsuccessful) scripts are executed before rebooting the system.
+
 MicroShift will integrate with that system to persist an action to perform on next boot:
 - "green": on next boot, before MicroShift starts, make a backup of MicroShift's data
 - "red": on next boot, before MicroShift starts, restore MicroShift's data from backup
 
-### Backup and restore of /var/lib/microshift
+Functionality will be implemented by placing in `/etc/greenboot/green.d` and `/etc/greenboot/red.d`
+bash scripts containing with simple logic or, if needed,
+executing commands `microshift greenboot green` and `microshift greenboot red` in case of needing to put more information into file with action for next boot.
+Alternatively, a symlinks to `microshift` binary can be made and MicroShift modified to run specific command depending on content of argv[0] (just like BusyBox).
 
-Decision whether to backup or restore is based on metadata persisted by green or red script.
+File containing said information should not be part of MicroShift data directory
+as we don't to be a part of backup.
+
+### Backup and restore of MicroShift data
+
+Decision whether to backup or restore is based on file persisted during previous boot (see "Integration with greenboot").
+When file is read to make a decision (but not during dry run), it shall be removed.
 
 As a result of investigation and aiming for simplicity for initial implementation,
 it was decided that backing up MicroShift's data will be done by leveraging using copy-on-write (CoW) functionality.
@@ -200,16 +391,25 @@ CoW is a feature of filesystem (supported by XFS and Btrfs) and it can be used b
 `--reflink=auto` will be used over `--reflink=always` to gracefully fall back to regular copying on filesystems
 not supporting CoW (ext4, ZFS).
 Backup will be done in `/var/lib/microshift.bak` or similar - it needs to be within the same filesystem/mount.
-Only one backup will be kept. Consequent boots will overwrite the backup dir.
+Only one backup will be kept. Consequent boots will overwrite the backup dir (only if the action is "backup").
 
 End user documentation needs to include guidance on setting up filesystem to fullfil requirements for using copy-on-write (e.g. making sure some filesystem options are not disabled).
 
-### MicroShift version persistence
+### MicroShift version metadata persistence
 
-When "pre-run" process is finished successfully and MicroShift is started,
-it will persist version stored in a binary to a file in MicroShift data dir.
+When MicroShift is up and running healthy, it will persist its own version and ID of current ostree commit into data dir as a file, e.g.:
+```json
+{
+  "microshift": "4.14.0",
+  "ostree_commit": "1a2b",
+}
+```
 
-By persisting version, upon next boot, a decision can be made whether a storage migration should be performed or not, or stop MicroShift from running at all in case of "version downgrade".
+MicroShift version will be used on consequent reboots to determine:
+- is upgrade is allowed or blocked
+- should storage migration be performed
+
+ID of ostree commit will be used to... TODO: Think if we can use it for "System rollback and failed data restore" scenario
 
 ### Allowing and blocking upgrades (change of MicroShift version)
 
@@ -230,7 +430,7 @@ Data migration shall include:
 
 ### Open Questions [optional]
 
-- Do we want to persist libostree commit ref in the metadata?
+- Do we want to persist ostree commit ref in the metadata?
   - Can we make some part of the process safer, more robust, by comparing previous and current commit ref?
   - Are we good with having previous boot MicroShift version persisted?
 - If green/red info is not persisted, and it's not a first boot (/var/lib/microshift exists), what should we do?
@@ -238,27 +438,55 @@ Data migration shall include:
     - Same - start cluster
     - Different - refuse to start? Try to migrate (but create backup before)?
 
+- Should we use greenboot's green/red scripts to persist action for next boot?
+  - They have no information about what failed, so if it wasn't MicroShift, then we do unnecessary restore (possibly losing some data)
+
+- Do we want to persist the history of boots or defer to checking `boot_counter`?
+  - Red + no `boot_counter` => first boot after rollback
+  - Do we want to read kernel cmdline?
+    - Seems to be internal detail of implementation
+
+- How to we avoid endless reboots in any case? Are they possible?
+  - Maybe we can persist short history of previous boots/actions on boot?
+    - How that would protect us? If we refuse the start, greenboot checks will fail, so maybe we need override it?
+
+- How should `microshift pre-run` be executed?
+  - `microshift.service` - `ExecStartPre`
+    - No need to add new systemd service files.
+    - It will run on each `systemctl restart microshift` which is not desirable (will it run when systemd restarts MicroShift?)
+  - `microshift-pre-run.service`
+    - Running on boot, just once, before `microshift.service`
+    - Not repeated on MicroShift restart
+    - New service file
+
 ### Test Plan
 
-TODO
+#### Unit tests
 
-<!-- **Note:** *Section not required until targeted at a release.*
+Aiming to write as much as possible in Go, we should strive for maximum testability: 
+- Separate code paths for planning (e.g. should it do a backup or restore?) 
+  and acting (actually perform backup) - e.g. interface with two methods Plan(), Act()
+  - This will allow testing decisions and actions separately
+  - This will allow easy implementation of --dry-run describing what would happen
+- Due to many interactions with filesystem, a virtual filesystem or 
+  some form of shim should be investigated to improve testability of
+  these parts in unit tests.
 
-Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
-- What additional testing is necessary to support managed OpenShift service-based offerings?
+#### Integration tests focused on each of the areas (backup, restore, migrate)
 
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
+<!--
+Ideas:
+Failed backup: `/var/lib/microshift.bak` is not-writable
+Failed restore: `/var/lib/microshift.bak` is not-readable
+-->
 
-All code is expected to have adequate tests (eventually with coverage
-expectations). -->
+#### End to end tests
+Following tests should be implemented in CI:
+- TODO
 
 ### Graduation Criteria
 
-Functionality needs to be GA in 4.14.
+Functionality will be GA from the beginning.
 
 - All areas of functionality implemented and available for usage
 - Sufficient test coverage - unit tests (where possible, virtualing/mocking filesystem encouraged), integration tests, e2e tests (CI, QE)
@@ -348,15 +576,38 @@ TODO
 
 ## Implementation History
 
-N/A
+- [MicroShift Upgrade and Rollback Enhancement](https://github.com/openshift/enhancements/pull/1312)
 
 ## Alternatives
 
-TODO 
-<!-- Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement. -->
+### Performing backup on shutdown
+Reasons for backing up MicroShift's data on boot rather on shutdown:
+- Smaller risk of backup process being killed or shutdown not waiting for backup to finish,
+   therefore greater confidence that backup will happen.
+- Easier integration
+  - As a part of MicroShift's pre-run procedure (executed just before MicroShift)
+    result of backup will be more noticeable because MicroShift won't start
+    (as opposed to it failing during shutdown).
+  - Running backup on shutdown will require to setup new systemd units that will run before shutdown.
+  - Running backup on boot (pre-run) means it could be contained within existing `microshift.service` (as `ExecStartPre`) - but it might make more sense to have separate service file.
+- Copy-on-Write was chosen as backup strategy meaning that it won't perform any version specific procedures.
+  - Even if such procedures would be executed, in case of MicroShift upgrade, new version must be be to read 
+    data of older version in order to perform storage migration.
+
+### Backup using tar, etcd snapshot, etc..
+
+TODO
 
 ## Infrastructure Needed [optional]
 
 N/A
+
+## Future Optimizations
+
+- Use result of MicroShift's greenboot check to decide on backup/restore next boot.
+  - Current implementation uses greenboot's green/red scripts and they have no knowledge what caused unhealthy boot
+
+- Incorporate MicroShift's greenboot check into `microshift` binary as a separate command.
+  - It'll get access to source of truth about "what MicroShift components" should run (e.g. optional TopoLVM)
+
+- Supporting 4.y to 4.y+2 or 4.y+3 upgrades
