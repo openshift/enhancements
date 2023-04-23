@@ -280,7 +280,10 @@ flowchart TD
 
 ### API Extensions
 
-None
+Metadata persisted on filesystem related to the functionality described 
+in this enhancement such as version metadata, next boot action, and any other,
+is considered internal implementation detail and not an API to be consumed.
+Content (schema) and location of these files are subject to change.
 
 ### Implementation Details/Notes/Constraints [optional]
 
