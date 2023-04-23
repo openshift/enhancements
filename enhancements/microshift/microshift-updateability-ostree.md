@@ -412,14 +412,46 @@ MicroShift version will be used on consequent reboots to determine:
 
 ID of ostree commit will be used to... TODO: Think if we can use it for "System rollback and failed data restore" scenario
 
-### Allowing and blocking upgrades (change of MicroShift version)
+### Allowing and blocking MicroShift version migration (upgrade/downgrade)
 
-Decision to allow or block an upgrade (change) will be based on persisted MicroShift version.
-- If binary's version is newer, allow storage migration.
-- If binary's version is older, refuse to start MicroShift.
-- If persisted version is on a list (embedded in binary) of blocked version migrations, refuse to start MicroShift.
-- If persisted version is on a list (embedded in binary) of allowed version migrations, allow storage migration.
-- If persisted version is missing and version of binary is 4.14, assume 4.13 was persisted and allow storage migration.
+MicroShift's version migration is defined as change of binary's version,
+whether it is going forward (upgrade) or backward (downgrade).
+As such, only upgrade is supported.
+
+To differentiate between rollback and downgrade:
+- rollback is when backup metadata contains older MicroShift version (same as binary to which it rolled back to),
+- downgrade is when backup metadata contains newer MicroShift version.
+
+To go in greater detail why rollback is supported and downgrade is not:
+- Rollback performed due to unhealthy (red) boot
+  - Red scripts will persist a "restore" action to perform on next boot.
+  - System is booted into older ostree commit with older MicroShift
+  - MicroShift pre-run procedure runs:
+    - Restore is performed (version in metadata is the same as one in the binary)
+    - Data migration procedure compares version in metadata and binary
+    - Data migration isn't performed, because versions match.
+- Downgrade would follow a healthy (green) boot
+  - Green scripts will persist a "backup" action to perform on next boot
+  - System is booted into older ostree commit with older MicroShift
+  - MicroShift pre-run procedure runs:
+    - Backup is performed (version in metadata is newer than a binary)
+    - Data migration procedure compares version in metadata and binary
+    - Data migration refuses to proceed because `backup version` > `binary version`.
+
+Decision to perform or refuse an data migration
+to schema compatible with newly loaded MicroShift version
+will be based on following facts:
+- version persisted in MicroShift's data dir (version that created/successfully ran using the data),
+  also referred to as (version) metadata
+- version of currently installed MicroShift binary
+- embedded in MicroShift binary list of blocked "from" versions
+
+A general flow will have following form:
+1. If persisted version is missing, assume 4.13.
+1. If version of `microshift` binary is older than version in metadata, **refuse to start MicroShift**.
+1. If persisted version is on a list of blocked version migrations, **refuse to start MicroShift**.
+1. If binary is the same version as persisted in metadata, **no need for a data migration**.
+1. Otherwise upgrade is allowed and data migration will be performed.
 
 ### Data migration
 
@@ -594,6 +626,32 @@ Reasons for backing up MicroShift's data on boot rather on shutdown:
 - Copy-on-Write was chosen as backup strategy meaning that it won't perform any version specific procedures.
   - Even if such procedures would be executed, in case of MicroShift upgrade, new version must be be to read 
     data of older version in order to perform storage migration.
+
+### Supporting downgrades
+
+Decision to not support downgrades is based on following:
+- Greatly increased effort of maintenance, testing, and more challenges to ensure quality with negligible gain
+- Beyond needing to maintain a list of blocked upgrades,
+  a binary would need to store list of older versions for which it can produce (migrate to) compatible data,
+  - Initially 4.y+1 and 4.y.z+N upgrades are supported,
+    so question would be: to which version it should migrate in opposite direction?
+    That question would need to be answered be the administrator
+    and would require very well documented procedure on how pick right versions
+- Process would be unsymmetrically more difficult than upgrade, consider:
+  - Version A supports `v2`
+  - Version B supports `v1` and `v2`
+  - Version C supports `v1`
+  - To downgrade from version A to C
+    - Shutdown ostree commit A, boot commit B
+    - Instruct MicroShift to just downgrade data from `v2` to `v1`, without running cluster (to not make migration too long)
+    - Persist metadata that version C will accept
+    - Shutdown ostree commit B, boot commit C
+    - MicroShift C would validate metadata to make sure it's compatible
+- Stemming from previous bullet - version metadata would need to go beyond simple MicroShift version of X.Y.Z
+  to not only tracking versions of all resources, but perhaps versions of the embedded components as well.
+  It could be a case of internal implementation details that would support newer and older behavior in newer version,
+  but result in bugs when going back to older version.
+
 
 ### Backup using tar, etcd snapshot, etc..
 
