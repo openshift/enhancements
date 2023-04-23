@@ -429,9 +429,9 @@ Aiming to write as much as possible in Go, we should strive for maximum testabil
   and acting (actually perform backup) - e.g. interface with two methods Plan(), Act()
   - This will allow testing decisions and actions separately
   - This will allow easy implementation of --dry-run describing what would happen
-- Due to many interactions with filesystem, a virtual filesystem or 
-  some form of shim should be investigated to improve testability of
-  these parts in unit tests.
+- Due to many interactions with filesystem, filesystem abstraction should be investigated
+  so unit tests can use in-memory filesystem rather than host's to make testing easier
+  and more robust.
 
 #### Integration tests focused on each of the areas (backup, restore, migrate)
 
