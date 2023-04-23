@@ -89,7 +89,7 @@ Design aims to implement following principles:
 * Building allowed/blocked version migration graph
 * Handling readiness, and backup and rollback of 3rd party applications
   (although end user documentation should be provided)
-* Defining updateability for non-ostree systems
+* Defining updateability for non-ostree systems is left to a future enhancement
 * Protecting against data corruption
 
 ## Proposal
@@ -302,7 +302,7 @@ N/A
 - **ostree deployment**: TODO
 - **Rollback**: booting previous ostree commit due to greenboot assessing system to not be functional
 - **Upgrade**: running newer version of MicroShift than previously as a result of booting another ostree commit
-- **Downgrade**: running older version of MicroShift than previously as a result of booting another ostree commit
+- **Downgrade**: running older version of MicroShift than previously as a result of booting another ostree commit, not as part of a Rollback
 - **Backup**: backing up `/var/lib/microshift`
 - **Restore**: restoring `/var/lib/microshift`
 - **Version Metadata**: File residing in MicroShift data dir containing version of MicroShift that successfully started (cluster was healthy)
@@ -313,7 +313,7 @@ N/A
 Every action related to procedure described in this enhancement is 
 performed after system's boot rather than immediately before shutdown. 
 Greenboot's healthchecks, green and red scripts are executed independent of MicroShift's processes.
-Actions related to backup, restore, and data migration are performed with MicroShift 
+Actions related to backup, restore, and data migration may be performed with MicroShift 
 partially running, i.e. only etcd and kube-apiserver are running.
 
 Only one backup of MicroShift data will be stored at a given moment
@@ -561,7 +561,7 @@ Reasons for backing up MicroShift's data on boot rather on shutdown:
   - Running backup on shutdown will require to setup new systemd units that will run before shutdown.
   - Running backup on boot (pre-run) means it could be contained within existing `microshift.service` (as `ExecStartPre`) - but it might make more sense to have separate service file.
 - Copy-on-Write was chosen as backup strategy meaning that it won't perform any version specific procedures.
-  - Even if such procedures would be executed, in case of MicroShift upgrade, new version must be be to read 
+  - Even if such procedures would be executed, in case of MicroShift upgrade, new version must be able to read 
     data of older version in order to perform storage migration.
 
 ### Supporting downgrades
