@@ -325,7 +325,8 @@ None
 
 ### Risks and Mitigations
 
-Since this is a must-have functionality, the risks are not foreseeing fail scenarios in advance and implementation bugs.
+Being a GA feature from the beginning the risks are not foreseeing fail scenarios in advance and implementation bugs
+that are not caught and fixed through graduation process.
 
 To mitigate the risks, a thorough review of the enhancement must be done by MicroShift, OpenShift, and RHEL teams,
 and making sure testing strategy is sound and prioritized equally with the feature development.
