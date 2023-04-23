@@ -42,6 +42,15 @@ As GA product, it is expected that it can be updated to
 provide security patches, functional updates, and bug fixes
 without needing to redeploy.
 
+MicroShift is intended to be a part of Red Hat Device Edge
+which is based on RHEL For Edge which features ostree and as such
+provides rollbacks to go back to previous ostree deployment.
+Even though, OpenShift does not support downgrade or rollback,
+MicroShift must support it in some form. Explicit downgrade 
+will not be supported, and rollback will be supported only when
+newer ostree commits is unhealthy and backup consistent with previously
+ran MicroShift is present.
+
 To allow for such operations, we need to define how we'll
 achieve that goal. We can define several areas we need to focus on:
 backing up and restoring MicroShift's data, handling version changes
