@@ -155,50 +155,6 @@ ostree commits and scheduling devices to use these commits.
 1. Green boot runs green scripts
    - Set backup mode to "backup" (no change)
 
-**Failed restore on rollback (cont of "simple host reboot")**
-
-1. Second ostree commit is staged
-1. First ostree commit shuts down
-1. Second ostree commit boots
-1. MicroShift pre-run
-   - Backup mode is "backup",
-   - Backup script runs, creating a backup compatible with the first ostree commit
-1. MicroShift data migration or startup fail (upgrade was allowed)
-1. Greenboot runs red scripts
-    - Set backup mode to "restore"
-1. Second ostree commit shuts down
-
-1. Following repeats `GREENBOOT_MAX_BOOT_ATTEMPTS - 1` times
-   1. Second ostree commit boots
-   1. MicroShift pre-run
-      - Backup mode is "restore",
-      - Backup compatible with the first ostree commit is restored
-   1. MicroShift data migration or startup fail (upgrade was allowed)
-   1. Greenboot runs red scripts
-      - Set backup mode to "restore"
-
-1. Greenboot issues rollback (too many failed boots)
-1. Second ostree commit shuts down
-1. First ostree commit boots
-1. MicroShift pre-run
-   - Backup mode is "restore"
-   - Backup tool **fails to restore the backup** compatible with the first ostree commit
-1. MicroShift cluster doesn't start
-1. MicroShift / healthcheck detects that restore after rollback
-1. MicroShift greenboot healthcheck is overridden to return success
-   - Endless reboot and rollback loop is avoided
-1. Manual intervention is needed
-
-Otherwise following will happen:
-
-12. MicroShift's greenboot healthcheck fails
-0. Greenboot runs red scripts
-    - Set backup mode to "restore" and reboot the host
-0. (Failures repeat and rollback is issued)
-0. **First (!!!)** ostree commit shuts down
-0. **Second (!!!)** ostree commit boots
-0. Repeats ad infinitum
-
 **Fail first startup, FDO (FIDO Device Onboard) deployment**
 
 1. An ostree commit without MicroShift is installed on the device at the factory.
@@ -237,12 +193,10 @@ flowchart TD
 
   exit[Exit with error]
   red[Red scripts\nNext boot: 'restore']
-  reboot([Greenboot reboot system])
-  override-healthcheck[Exit and override healthcheck]
-  system-runs-without-microshift([System proceeds to run\nwithout MicroShift.\n\nManual intervention required])
+  reboot([Greenboot reboots system\nunless it's rollback\notherwise manual intervention is required])
 
   classDef danger fill:red
-  class exit,red,reboot,override-healthcheck,system-runs-without-microshift danger
+  class exit,red,reboot danger
 
   green[Green scripts\nNext boot: 'backup']
   continue-running([System and MicroShift\nproceed to run successfully])
@@ -268,7 +222,6 @@ flowchart TD
   missing-metadata-version?{Upgrade\nfrom 4.13 is\nsupported}
   restore-ok?{Restore\nsucceeded?}
   backup-ok?{Backup\nsucceeded?}
-  rollback?{Is it a rollback?}
 
 %% Transitions
 
@@ -282,17 +235,14 @@ flowchart TD
   backup-or-restore? -- Missing\nData exists,\nbut no info persisted about what to do\nFits upgrade from 4.13 flow --> do-backup
 
   do-backup --> backup-ok?
-  backup-ok?  -- Yes --> version?
-  backup-ok?  -- No --> exit
+  backup-ok? -- Yes --> version?
+  backup-ok? -. No .-> exit
 
   do-restore                             --> backup-exists?
   backup-exists? -- No --> do-clean-data --> run
   backup-exists? -- Yes --> restore-ok? 
   restore-ok? -- Yes --> version?
-  restore-ok? -- No --> rollback?
-  rollback? -. No .-> exit
-  rollback? -. Yes .-> override-healthcheck
-  override-healthcheck --> system-runs-without-microshift
+  restore-ok? -. No .-> exit
 
   version? -- Versions are the same                 --> run
   version? -. Binary is older                       .-> exit
@@ -360,10 +310,6 @@ partially running, i.e. only etcd and kube-apiserver are running.
 Only one backup of MicroShift data will be stored at a given moment
 due to high probability of devices having limited storage.
 
-### System rollback and failed data restore detection
-
-TODO: How to not fall into endless loop of rollbacks 
-
 ### Integration with greenboot
 
 Depending on result of greenboot's healthcheck either "green" (successful boot) or "red" (unsuccessful) scripts are executed before rebooting the system.
@@ -398,19 +344,10 @@ End user documentation needs to include guidance on setting up filesystem to ful
 
 ### MicroShift version metadata persistence
 
-When MicroShift is up and running healthy, it will persist its own version and ID of current ostree commit into data dir as a file, e.g.:
-```json
-{
-  "microshift": "4.14.0",
-  "ostree_commit": "1a2b",
-}
+When MicroShift is up and running healthy, it will persist its own version into a file within data dir, e.g.:
 ```
-
-MicroShift version will be used on consequent reboots to determine:
-- is upgrade is allowed or blocked
-- should storage migration be performed
-
-ID of ostree commit will be used to... TODO: Think if we can use it for "System rollback and failed data restore" scenario
+4.14.0
+```
 
 ### Allowing and blocking MicroShift version migration (upgrade/downgrade)
 
@@ -473,15 +410,6 @@ Data migration shall include:
 
 - Should we use greenboot's green/red scripts to persist action for next boot?
   - They have no information about what failed, so if it wasn't MicroShift, then we do unnecessary restore (possibly losing some data)
-
-- Do we want to persist the history of boots or defer to checking `boot_counter`?
-  - Red + no `boot_counter` => first boot after rollback
-  - Do we want to read kernel cmdline?
-    - Seems to be internal detail of implementation
-
-- How to we avoid endless reboots in any case? Are they possible?
-  - Maybe we can persist short history of previous boots/actions on boot?
-    - How that would protect us? If we refuse the start, greenboot checks will fail, so maybe we need override it?
 
 - How should `microshift pre-run` be executed?
   - `microshift.service` - `ExecStartPre`
