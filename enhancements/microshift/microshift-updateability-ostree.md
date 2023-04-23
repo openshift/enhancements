@@ -386,7 +386,7 @@ To go in greater detail why rollback is supported and downgrade is not:
     - Data migration procedure compares version in metadata and binary
     - Data migration refuses to proceed because `backup version` > `binary version`.
 
-Decision to perform or refuse an data migration
+Decision to perform or refuse a data migration
 to schema compatible with newly loaded MicroShift version
 will be based on following facts:
 - version persisted in MicroShift's data dir (version that created/successfully ran using the data),
@@ -414,6 +414,7 @@ Data migration shall include:
 - Do we want to persist ostree commit ref in the metadata?
   - Can we make some part of the process safer, more robust, by comparing previous and current commit ref?
   - Are we good with having previous boot MicroShift version persisted?
+
 - If green/red info is not persisted, and it's not a first boot (/var/lib/microshift exists), what should we do?
   - Compare versions (metadata vs binary)
     - Same - start cluster
@@ -553,6 +554,7 @@ TODO
 ## Alternatives
 
 ### Performing backup on shutdown
+
 Reasons for backing up MicroShift's data on boot rather on shutdown:
 - Smaller risk of backup process being killed or shutdown not waiting for backup to finish,
    therefore greater confidence that backup will happen.
