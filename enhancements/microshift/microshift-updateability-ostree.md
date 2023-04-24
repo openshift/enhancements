@@ -416,7 +416,7 @@ executing commands `microshift greenboot green` and `microshift greenboot red` i
 Alternatively, a symlinks to `microshift` binary can be made and MicroShift modified to run specific command depending on content of argv[0] (just like BusyBox).
 
 File containing said information should not be part of MicroShift data directory
-as we don't to be a part of backup.
+as we don't to it be a part of backup.
 
 ### Backup and restore of MicroShift data
 
