@@ -121,6 +121,33 @@ ostree commits and scheduling devices to use these commits.
 1. Greenboot runs green scripts
    - MicroShift green script sets backup mode to "backup"
 
+**Failed first boot into commit with MicroShift**
+
+1. First ostree commit is installed
+1. First ostree commit boots
+1. MicroShift starts
+   - No backup action (did not previously run, so there is nothing to backup, and did not previously fail so no restore needed)
+1. MicroShift startup fails
+1. Greenboot runs red scripts
+    - Set backup mode to "restore"
+1. `redboot-auto-reboot`
+  - `boot_counter` is unset (it's only set when a new commit is staged, before rebooting into it)
+  - manual intervention required
+1. Admin manually reboots the device
+1. First ostree commit boots
+1. MicroShift starts
+   - Backup mode is "restore"
+   - There's no backup, so nothing to restore
+   - Delete MicroShift data to allow clean start
+1. MicroShift starts
+1. System is
+   - healthy
+     - green scripts, "backup"
+   - unhealthy
+     - red scripts, "restore"
+     - `boot_counter` is unset (it's only set when a new commit is staged, before rebooting into it)
+     - manual intervention required
+
 **Simple host reboot (cont of previous flow)**
 
 1. First ostree commit shuts down
