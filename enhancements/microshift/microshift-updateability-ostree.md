@@ -696,9 +696,30 @@ Decision to not support downgrades is based on following:
   but result in bugs when going back to older version.
 
 
-### Backup using tar, etcd snapshot, etc..
+### Alternative backup methods
 
-TODO
+#### Copy-on-write
+
+Pros:
+- Underlying blocks are shared, so initially backup takes very little to no additional space
+Cons:
+- Not supported by all filesystems - requirement needs documenting
+
+#### etcdctl snapshot save/restore
+
+Pros
+- Database snapshot is much smaller than copy of database
+Cons:
+- Saved and restore etcd database doesn't contain whole history
+- Would require to ship `etcdctl` increasing footprint of MicroShift
+  which doesn't not happen at the moment
+
+#### Creating a tar file with data dir
+
+Pros:
+- backup in form of a single file
+Cons:
+- Without compression is weights as much as data dir
 
 ## Infrastructure Needed [optional]
 
