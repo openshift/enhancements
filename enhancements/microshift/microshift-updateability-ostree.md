@@ -531,6 +531,9 @@ Data migration shall include:
     - Not repeated on MicroShift restart
     - New service file
 
+- Should current greenboot healthcheck for MicroShift needs to be extended to
+  check and more importantly log version skew problems so it's easier to debug?
+
 ### Test Plan
 
 #### Unit tests
