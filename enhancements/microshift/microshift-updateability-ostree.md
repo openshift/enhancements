@@ -440,6 +440,18 @@ Restore is analogous operation, just in different direction - copying contents o
 
 End user documentation needs to include guidance on setting up filesystem to fullfil requirements for using copy-on-write (e.g. making sure some filesystem options are not disabled).
 
+### Contents of MicroShift data backup
+
+- Etcd database shall be backed up fully, rather just creating a snapshot to preserve
+  history and other data that could be lost.
+- Kubeconfigs and certificates needs to be backup and restored in order to keep communication working.
+  MicroShift could regenerate them, but it would mean that kubeconfigs used to remotely access cluster
+  will become invalid.
+  - Following approach might mean that certificates might need to be amended to update the
+    Subject Alternative Names (SAN) list.
+
+Based on reasons above, it was decided that whole `/var/lib/microshift` will be backed up.
+
 ### MicroShift version metadata persistence
 
 When MicroShift is up and running healthy, it will persist its own version into a file within data dir, e.g.:
