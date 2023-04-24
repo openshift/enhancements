@@ -400,6 +400,16 @@ MicroShift will integrate with that system to persist an action to perform on ne
 - "green": on next boot, before MicroShift starts, make a backup of MicroShift's data
 - "red": on next boot, before MicroShift starts, restore MicroShift's data from backup
 
+Consequence of this approach is when new commit is booted, a data compatible with previous commit is backed up
+and attempts will be made to migrate working data to newer version before starting MicroShift.
+If new commit is unhealthy, red script will persist "restore" action, thus on next boot to new commit,
+MicroShift's data compatible with old commit will be restored resulting in new attempt to
+migrate the data before starting MicroShift.
+Such approach will allow to attempt data migration procedure multiple times and protect MicroShift
+from being unhealthy due to failed migration.
+It is at a cost of potentially loosing some data that might be produced between MicroShift start and
+host deemed unhealthy by greenboot.
+
 Functionality will be implemented by placing in `/etc/greenboot/green.d` and `/etc/greenboot/red.d`
 bash scripts containing with simple logic or, if needed,
 executing commands `microshift greenboot green` and `microshift greenboot red` in case of needing to put more information into file with action for next boot.
