@@ -84,7 +84,7 @@ To enable recurring backups a new cluster-scoped singleton CRD `EtcdBackupSchedu
 
 A new controller in the cluster-etcd-operator `EtcdBackupScheduleController` would then reconcile the `EtcdBackupSchedule` CRD with the following workflow:
 - Watches the `EtcdBackupSchedule` CR as created by an admin
-- Creates a [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) that would in turn create etcd backup requests `EtcdBackupRequest` at the desired schedule
+- Creates a [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) that would in turn create `EtcdBackupRequest` CRs at the desired schedule
 - Updates the CronJob for any changes in the schedule
 - Fulfils the specified retention policy by pruning existing backup files before creating a new `EtcdBackupRequest`
 - Prunes completed `EtcdBackupRequest` CRs older than a default time period e.g 24hrs
@@ -203,15 +203,12 @@ type EtcdBackupRequestStatus struct {
 
 ### Implementation Details/Notes/Constraints [optional]
 
-There are different options to explore on how we want to execute saving the backup snapshot and any other required metadata. As well as how we enforce the schedule.
+There are different options to explore on how we want to execute saving the backup snapshot and any other required metadata. As well as how we enforce the schedule and retention policy.
 
-#### Multiple Backup Requests
 
-**TODO:** In the presence of multiple backup requests `EtcdBackupRequest`, specify how we want to update all but the newest backup request as aborted/won't update.
+#### Executing the backup cmd
 
-#### Execution method
-
-Create a backup pod that runs the backup script on a designated master node to save the backup file on the node's host filesystem:
+Create a backup Job that runs the the backup script on a designated master node to save the backup file on the node's host filesystem:
 - The CEO already has an existing [upgradebackupcontroller][upgradebackupcontroller] that deploys a [backup pod][backup pod] that runs the [backup script][backup script].
   - It may be simpler to reuse that but we may need to modify the backup script to save or append additional metadata.
   - Making changes to a bash script without unit tests would make it harder to maintain.
@@ -221,6 +218,49 @@ As an alternative we could implement an equivalent Go cmd for the backup pod to 
 - We would be maintaining two potentially different backup procedures this way. The backup script won't be replaced by the `EtcdBackup` API since it can still be used in a quorum-loss scenario where the API server is down.
 
 Since it is an implementation detail with no API impact we can start with utilizing the backup script for simplicity and codify it later.
+
+#### Saving the backup and retention
+
+When deciding how to save the backup files on the control-plane host machine(s) there are two different approaches with different impacts on the visibility of backups, availability, and maintenance burdens of the retention policies.
+
+### Saving across all nodes
+
+One method is to spread out the saved backups on all available control-plane nodes. This would involve:
+- Scanning all control-plane nodes for existing backup files
+- Pruning the backup file from the node with the oldest backup
+- Saving a new backup on the node that has the oldest most-recent-backup
+
+E.g given the following nodes N(x) with backups B(t) where x is the node suffix and t is the backup timestamp:
+- N1[B1, B5], N2[B2, B4], N3[B3, B6]
+- We would select N1 to prune since B1 is the oldest of (B1,B2,B3)
+- We would select N2 as the node to save the latest backup on since B4 is the oldest of (B4,B5,B6).
+
+This approach has the benefit of spreading out backups across nodes which reduces the likelihood of losing the most recent backup in the event of losing access to a node. However it also has the following drawbacks:
+
+- Gathering the state of the backup files is more complicated:
+  - The backup controller could serially schedule a pod on each node to try and gather the backup state. It's unclear how the controller would gather that state (e.g have each pod write to a configmap).
+- Serially scheduling on each node to gather the state increases the time to perform a backup
+- If a node is unhealthy and is unschedulable then the backup may be stalled as we need to gather the state by scheduling on all nodes
+- Providing visibility into the state of the backup files for the admin is non-trivial:
+  - We would require a status object that lists all nodes and the ordered list of backup filenames per node.
+
+### Saving to a local PV
+
+Alternatively the backup files can be saved at a single location on cluster on a [local Persistent Volume](https://kubernetes.io/docs/concepts/storage/volumes/#local). Saving to a single volume for local storage has the following pros as compared to distributing backups across the control-plane nodes:
+
+- Simplifies the retention logic for locally stored backups. This reduces the maintenance burden of having different retention strategies for locally saved backups vs off-cluster (e.g nfs or gcePersistentDisk volumes).
+- Using a PV also grants the flexibility to do lifecycle management of backups e.g what to do with the old backups if a new schedule is created for a different volume.
+- The saved backups state is more visible from a single location by looking at the PV contents vs looking at all nodes to piece the order of saved backups.
+- For local backups if the cluster is unhealthy the automated backups won't be stalled:
+  - If another node besides the one with the local volume is unavailable we can still save the backup.
+  - If that node with the local volume is inaccessible, we can still provision a new volume on another available node and update the spec to save backups to the new location. 
+- Can leverage [volume snapshots](https://kubernetes.io/docs/concepts/storage/volume-snapshots/) or volume cloning to improve availability of saved backups.
+
+**TODO:** If we go this route, outline the workflow of statically provisioning a local volume, a storage class, and how to specify the PVC in the EtcdBackup/EtcdSchedule spec to use that location for saving backups.
+
+#### Multiple Backup Requests
+
+**TODO:** In the presence of multiple backup requests `EtcdBackupRequest`, specify how we want to update all but the newest backup request as aborted/won't update.
 
 #### Backup schedule
 
@@ -233,11 +273,7 @@ To enforce the specified schedule we can utilize [CronJobs](https://kubernetes.i
 
 See the Open Questions section for load balancing concerns.
 
-#### Saving the backup
 
-The backup pod needs to be able to save the backup data onto the host filesystem. To achieve this the backup pod can be mounted with a [hostPath Volume](https://kubernetes.io/docs/concepts/storage/volumes/#hostpath).
-
-**TODO:** Does anything prevent us from doing this e.g authorization or security issues.
 
 #### Failure to backup and alerting
 
