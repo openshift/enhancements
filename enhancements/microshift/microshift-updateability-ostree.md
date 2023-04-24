@@ -136,23 +136,63 @@ ostree commits and scheduling devices to use these commits.
 **Failed upgrade (cont of previous flow)**
 
 1. Second ostree commit is staged
+1. Greenboot sets `boot_counter=3`
 1. First ostree commit shuts down
+
+1. Grub decrements `boot_counter` to `2`
 1. Second ostree commit boots
 1. MicroShift starts up
-   - Backup mode is "backup",
+   - Backup mode is "backup"
    - Backup script runs, creating a backup compatible with the first ostree commit
-1. MicroShift startup fails
+   - Data is migrated to newer version, it may or may not succeed
+   - Cluster starts if migration succeeded
+1. Second ostree is unhealthy
+   (for whatever reason: failed data migration, container image problems, components not related to MicroShift failed)
 1. Greenboot runs red scripts
     - Set backup mode to "restore"
-1. (Failures may need to repeat to trigger rollback.)
 1. Second ostree commit shuts down
-1. First ostree commit boots
-1. MicroShift starts
-   - Backup mode is "restore",
+
+1. Grub decrements `boot_counter` to `1`
+1. Second ostree commit boots
+1. MicroShift starts up
+   - Backup mode is "restore"
    - Backup tool restores the backup compatible with the first ostree commit
-1. MicroShift starts successfully
-1. Greenboot runs green scripts
-   - Set backup mode to "backup"
+   - Data is migrated to newer version, it may or may not succeed
+   - Cluster starts if migration succeeded
+1. Second ostree is unhealthy
+   (for whatever reason: failed data migration, container image problems, components not related to MicroShift failed)
+1. Greenboot runs red scripts
+    - Set backup mode to "restore"
+1. Second ostree commit shuts down
+
+1. Grub decrements `boot_counter` to `0`
+1. Second ostree commit boots
+1. MicroShift starts up
+   - Backup mode is "restore"
+   - Backup tool restores the backup compatible with the first ostree commit
+   - Data is migrated to newer version, it may or may not succeed
+   - Cluster starts if migration succeeded
+1. Second ostree is unhealthy
+   (for whatever reason: failed data migration, container image problems, components not related to MicroShift failed)
+1. Greenboot runs red scripts
+    - Set backup mode to "restore"
+1. Second ostree commit shuts down
+
+1. Grub decrements `boot_counter` to `-1`
+1. **First** ostree commit boots
+1. `greenboot-rpm-ostree-grub2-check-fallback` sees `boot_counter == -1`
+   - runs `rpm-ostree rollback` which at this point changes the ostree tree to match current boot so `reboot` is actually not needed
+   - unsets `boot_counter`
+1. MicroShift starts up
+   - Backup mode is "restore"
+   - Backup tool restores the backup compatible with the first ostree commit
+   - Cluster starts
+1. ostree commit is
+   - healthy
+     - green scripts run, backup mode set to backup
+   - unhealthy
+     - red scripts run, backup mode set to restore
+     - `redboot-auto-reboot`: `boot_counter` is unset, manual intervention required
 
 **Successful upgrade (cont of previous flow)**
 
