@@ -39,7 +39,7 @@ and interactions with GreenBoot and operating system.
 
 ## Motivation
 
-MicroShift is working towards a general availability (GA) release.
+MicroShift team is working towards a general availability (GA) release.
 As GA product, it is expected that it can be updated to
 provide security patches, functional updates, and bug fixes
 without needing to redeploy.
@@ -82,7 +82,7 @@ functionality to:
 Design aims to implement following principles:
 - Keep it simple, optimize later
 - MicroShift does not own the OS or host
-- MicroShift and all its components are version, upgraded, and rolled back together
+- MicroShift and all its components are versioned, upgraded, and rolled back together
 - Be defensive, fail fast
 - Rely on outside intervention as a last resort
 
@@ -92,7 +92,8 @@ Design aims to implement following principles:
 * Handling readiness, and backup and rollback of 3rd party applications
   (although end user documentation should be provided)
 * Defining updateability for non-ostree systems is left to a future enhancement
-* Protecting against data corruption
+* Protecting against data corruption - we rely on file system 
+  to maintain the backed up file integrity
 
 ## Proposal
 
