@@ -413,6 +413,10 @@ as we don't to be a part of backup.
 Decision whether to backup or restore is based on file persisted during previous boot (see "Integration with greenboot").
 When file is read to make a decision (but not during dry run), it shall be removed.
 
+In case of unhealthy first ostree commit there might occur situation that MicroShift upon start is instructed
+to restore the backup which doesn't exist. In such case MicroShift will delete its data directory to
+perform a clean start.
+
 As a result of investigation and aiming for simplicity for initial implementation,
 it was decided that backing up MicroShift's data will be done by leveraging using copy-on-write (CoW) functionality.
 
