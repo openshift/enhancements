@@ -394,6 +394,8 @@ not supporting CoW (ext4, ZFS).
 Backup will be done in `/var/lib/microshift.bak` or similar - it needs to be within the same filesystem/mount.
 Only one backup will be kept. Consequent boots will overwrite the backup dir (only if the action is "backup").
 
+Restore is analogous operation, just in different direction - copying contents of `/var/lib/microshift.bak` to `/var/lib/microshift`.
+
 End user documentation needs to include guidance on setting up filesystem to fullfil requirements for using copy-on-write (e.g. making sure some filesystem options are not disabled).
 
 ### MicroShift version metadata persistence
