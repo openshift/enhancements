@@ -756,15 +756,21 @@ Aiming to write as much as possible in Go, we should strive for maximum testabil
   so unit tests can use in-memory filesystem rather than host's to make testing easier
   and more robust.
 
-#### Integration tests focused on each of the areas (backup, restore, migrate)
+#### Functional tests focused on each of the areas (backup, restore, migrate)
 
-Ideas:
-Failed backup: `/var/lib/microshift.bak` is not-writable
-Failed restore: `/var/lib/microshift.bak` is not-readable
+Functional tests need to be assessed in terms of effort and impact.
+
+Given that implementation of the enhancement for ostree based systems has significantly
+greater priority than implementation for regular RPM systems,
+there's little incentive to work on exposing functionalities in form of `backup`, 
+`restore`, and `migrate` commands.
+By not providing a way to manually trigger these processes, ability to perform functional
+tests in isolation might be severely limited or even impossible without entering territory 
+of end to end tests.
 
 #### End to end tests
-Following tests should be implemented in CI:
-- TODO
+
+Sequences from "Workflows in detail" should be implemented in CI.
 
 ### Graduation Criteria
 
