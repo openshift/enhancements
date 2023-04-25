@@ -312,25 +312,17 @@ on upstream migration rules.
 It means that it will be possible to use different Z versions of MicroShift with the same
 data unless there's a breaking change making it impossible, in such case it should be documented.
 
-To go in greater detail why rollback is supported and downgrade is not:
-- Rollback is performed due to manual admin action (TODO) or unhealthy (red) boot:
-  - Red scripts will persist a "restore" action to perform on next boot.
-  - System is booted into older ostree commit with older MicroShift
-  - MicroShift pre-run procedure runs:
-    - Restore is performed (version in metadata is the same as one in the binary)
-    - Data migration procedure compares version in metadata and binary
-    - Data migration isn't performed, because versions match.
-- Downgrade would follow a healthy (green) boot
-  - Green scripts will persist a "backup" action to perform on next boot
-  - System is booted into older ostree commit with older MicroShift
-  - MicroShift pre-run procedure runs:
-    - Backup is performed (version in metadata is newer than a binary)
-    - Data migration procedure compares version in metadata and binary
-    - Data migration refuses to proceed because `backup version` > `binary version`.
+Given above we can define:
+- rollback as booting older deployment due to admin actions or unhealthy (red) boot
+- upgrade as MicroShift version change from X.Y to X.Y+1 and resulting in data migration
+- downgrade as MicroShift version change from X.Y to X.Y-1 (or older) which is unsupported
 
-Decision to perform or refuse a data migration
-to schema compatible with newly loaded MicroShift version
-will be based on following facts:
+Both rollback and downgrade maybe look similar in terms of version change,
+the difference is that for rollback a matching backups exists,
+whereas for downgrade a data migration would have to be performed
+
+Decision to perform or refuse a data migration to schema compatible with newly loaded 
+MicroShift version will be based on following facts:
 - version persisted in MicroShift's data dir (version that created/successfully ran using the data),
   also referred to as (version) metadata
 - version of currently installed MicroShift binary
@@ -341,7 +333,7 @@ A general flow will have following form:
 1. If version of `microshift` binary is older than version in metadata, **refuse to start MicroShift**.
 1. If persisted version is on a list of blocked version migrations, **refuse to start MicroShift**.
 1. If binary is the same version as persisted in metadata, **no need for a data migration**.
-1. Otherwise upgrade is allowed and data migration will be performed.
+1. Otherwise attempt to migrate the data.
 
 
 ### Open Questions [optional]
@@ -934,16 +926,13 @@ Reasons for backing up MicroShift's data on boot rather on shutdown:
   - Even if such procedures would be executed, in case of MicroShift upgrade, new version must be able to read 
     data of older version in order to perform storage migration.
 
-### Supporting downgrades
+### Supporting downgrades (going from X.Y to X.Y-1...)
 
 Decision to not support downgrades is based on following:
-- Greatly increased effort of maintenance, testing, and more challenges to ensure quality with negligible gain
-- Beyond needing to maintain a list of blocked upgrades,
-  a binary would need to store list of older versions for which it can produce (migrate to) compatible data,
-  - Initially 4.y+1 and 4.y.z+N upgrades are supported,
-    so question would be: to which version it should migrate in opposite direction?
-    That question would need to be answered be the administrator
-    and would require very well documented procedure on how pick right versions
+- Greatly increased effort of maintenance, testing, and more challenges to ensure quality
+  with negligible gain
+- Binaries cannot be amended after releases, so only way to specify allowed downgrades
+  would be by documenting them and requiring administrator to consult the documentation.
 - Process would be unsymmetrically more difficult than upgrade, consider:
   - Version A supports `v2`
   - Version B supports `v1` and `v2`
