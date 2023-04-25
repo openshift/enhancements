@@ -166,32 +166,48 @@ due to high probability of devices having limited storage.
 
 ### Integration with greenboot
 
-TODO: Link greenboot x microshift enhancement
-TODO: Why integrate with greenboot
+[greenboot](https://github.com/fedora-iot/greenboot) is "Generic Health Checking Framework for systemd".
+It is used on ostree based systems (like CoreOS, RHEL For Edge, Fedora Silverblue) to assess system's
+health and, if needed, rollback to previous ostree deployment.
 
-Depending on result of greenboot's healthcheck either "green" (successful boot) or "red" (unsuccessful) scripts are executed before rebooting the system.
+For more information about greenboot and current MicroShift's integration with it see 
+[Integrating MicroShift with Greenboot](https://github.com/openshift/enhancements/blob/master/enhancements/microshift/microshift-greenboot.md) 
+enhancement.
 
-MicroShift will integrate with that system to persist an action to perform on next boot:
-- "green": on next boot, before MicroShift starts, make a backup of MicroShift's data
-- "red": on next boot, before MicroShift starts, restore MicroShift's data from backup
+In general, greenboot after boot runs scripts that are verifying if system is healthy
+and, depending on result, runs either set of green (healthy) or red (unhealthy) scripts.
+Healthy system can be also referred to as "green boot", whereas unhealthy as "red boot".
 
-Consequence of this approach is when new commit is booted, a data compatible with previous commit is backed up
-and attempts will be made to migrate working data to newer version before starting MicroShift.
-If new commit is unhealthy, red script will persist "restore" action, thus on next boot to new commit,
-MicroShift's data compatible with old commit will be restored resulting in new attempt to
-migrate the data before starting MicroShift.
-Such approach will allow to attempt data migration procedure multiple times and protect MicroShift
-from being unhealthy due to failed migration.
-It is at a cost of potentially loosing some data that might be produced between MicroShift start and
-host deemed unhealthy by greenboot.
+We propose to use "green" and "red" scripts to decide if MicroShift's data 
+should be backed up (green) or restored (red). For reasons mentioned in section 
+"Alternatives - Performing backup on shutdown" it was concluded that both 
+backup and restore should happen on system start, rather than shutdown.
+It means that green or red script persists an action that will be performed 
+on next boot of the system.
 
-Functionality will be implemented by placing in `/etc/greenboot/green.d` and `/etc/greenboot/red.d`
-bash scripts containing with simple logic or, if needed,
-executing commands `microshift greenboot green` and `microshift greenboot red` in case of needing to put more information into file with action for next boot.
-Alternatively, a symlinks to `microshift` binary can be made and MicroShift modified to run specific command depending on content of argv[0] (just like BusyBox).
+As a consequence, whether the next boot happens to be different or the same
+ostree deployment, it will produce a backup compatible with previously booted deployment
+and then attempt to perform a data migration if needed.
+It also means that consecutive red boots of new ostree deployment will restore the data,
+attempt to migrate it, and run MicroShift, i.e. each boot starts from the same place, just
+like it would be a first boot of that ostree deployment.
+This provides a safety net in case of invalid data migration - it will be attempted again,
+on each boot following red boot.
 
-File containing said information should not be part of MicroShift data directory
-as we don't to it be a part of backup.
+Potential risk is possibility of losing data that might've been produced during window
+of MicroShift start and system reboot. However, only applies to MicroShift's data,
+because Kubernetes application's data isn't persisted in etcd.
+
+"Next boot action" will be persisted in `/var/lib/microshift.next_boot`, so it will be
+outside MicroShift's data directory to reduce number of operations related to making a backup
+by not needing to remove it.
+Data in `/var/lib/microshift.next_boot` will be persisted by by newly implemented commands:
+- `microshift greenboot green`
+- `microshift greenboot red`
+
+To fully integrate with greenboot, two new bash scripts will be placed in
+`/etc/greenboot/green.d` and `/etc/greenboot/red.d`.
+These scripts will only call `microshift`'s commands
 
 ### Backup and restore of MicroShift data
 
