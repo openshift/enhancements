@@ -145,12 +145,11 @@ N/A
 
 - **ostree commit**: TODO
 - **ostree deployment**: TODO (Remember, new deployment might include K8s apps not previously running)
-- **Rollback**: booting older, already running on a device, ostree deployment - either due to greenboot or manual intervention
-- **Upgrade**: running newer version of MicroShift than previously as a result of booting another ostree commit
-- **Downgrade**: running older version of MicroShift than previously as a result of booting another ostree commit, not as part of a Rollback
+- **Rollback**: booting older (that already ran on the device) ostree deployment - either due to greenboot or manual intervention
 - **Backup**: backing up `/var/lib/microshift`
 - **Restore**: restoring `/var/lib/microshift`
-- **Version Metadata**: File residing in MicroShift data dir containing version of MicroShift and ID of ostree deployment
+- **Data migration** - procedure of transitioning MicroShift's data to be compatible with newer binary
+- **Version metadata**: File residing in MicroShift data dir containing version of MicroShift and ID of ostree deployment
 - **MicroShift greenboot healthcheck**: Program verifying the status of MicroShift's cluster
 
 ### Preface
@@ -290,30 +289,31 @@ it will persist its own version into a file within data dir, e.g.:
   - migration needs to be blocked,
   - migration can be attempted.
 
-### Allowing and blocking MicroShift storage migration (upgrade/downgrade)
+### Data migration ("upgrade" or "downgrade")
 
-_TODO: 1 backup per ostree deployment and manual rollback_
+Data migration is process of transforming data from one schema version to another.
+It includes following areas:
+- Storage migration - upgrade of Kubernetes objects (e.g. from `v1beta1` to `v1`)
+  - It's performed by reading Resource in older version and writing newer version
+  - MicroShift will reuse existing 
+    [Kube Storage Version Migrator](https://github.com/openshift/kubernetes-kube-storage-version-migrator)
+    and [its Operator](https://github.com/openshift/cluster-kube-storage-version-migrator-operator).
+- etcd schema - although it's not verify likely in near future
+  - etcd project documents how to migrate from v2 to v3, 
+    but we'll also ask OpenShift etcd team for guidance.
 
-Process of deploying and using newer version of MicroShift involves possibility of
-storage migration, i.e. updating Kubernetes objects inside etcd database to a newer version.
+When new ostree deployment is staged and booted, it might or might not feature different
+version of MicroShift. If it's different, it might be newer or older.
+To keep process of data migration, its maintenance, testing matrix sane, we'll only allow
+data migration in one direction: forward in regards to Y stream.
+For now, maximum allowed version skew is Y+1, but it might change in the future depending
+on upstream migration rules.
 
-It is assumed that newer MicroShift (Kubernetes) version must be able to read previous objects,
-so this imposes a maximum possible jump in versions.
-
-
-
-
-
-MicroShift's version migration is defined as change of binary's version,
-whether it is going forward (upgrade) or backward (downgrade).
-As such, only upgrade is supported.
-
-To differentiate between rollback and downgrade:
-- rollback is when backup metadata contains older MicroShift version (same as binary to which it rolled back to),
-- downgrade is when backup metadata contains newer MicroShift version.
+It means that it will be possible to use different Z versions of MicroShift with the same
+data unless there's a breaking change making it impossible, in such case it should be documented.
 
 To go in greater detail why rollback is supported and downgrade is not:
-- Rollback performed due to unhealthy (red) boot
+- Rollback is performed due to manual admin action (TODO) or unhealthy (red) boot:
   - Red scripts will persist a "restore" action to perform on next boot.
   - System is booted into older ostree commit with older MicroShift
   - MicroShift pre-run procedure runs:
@@ -343,13 +343,6 @@ A general flow will have following form:
 1. If binary is the same version as persisted in metadata, **no need for a data migration**.
 1. Otherwise upgrade is allowed and data migration will be performed.
 
-### Data migration
-
-Data migration shall include:
-- Storage version - update of Kubernetes objects by reading Resource in older version and writing newer version
-  - Leveraging existing [Kube Storage Version Migrator](https://github.com/openshift/kubernetes-kube-storage-version-migrator) and [its Operator](https://github.com/openshift/cluster-kube-storage-version-migrator-operator).
-- etcd schema - comparing v2 and v3, most likely if/when etcd v4 is released
-  - etcd project documents how to migrate from v2 to v3, but we'll also ask OpenShift etcd team for guidance.
 
 ### Open Questions [optional]
 
@@ -376,6 +369,10 @@ Data migration shall include:
 
 - Should current greenboot healthcheck for MicroShift needs to be extended to
   check and more importantly log version skew problems so it's easier to debug?
+
+- Should amount of backups (1 per ostree deployment) be configurable?
+  Should it only be for deployments that are present in ostree command?
+  Can ostree server provide more deployment "history"?
 
 ### Workflows in detail
 
