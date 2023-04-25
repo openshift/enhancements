@@ -211,27 +211,51 @@ These scripts will only call `microshift`'s commands
 
 ### Backup and restore of MicroShift data
 
-_TODO: 1 backup per ostree deployment_
+To integrate fully with greenboot and ostree deployments MicroShift needs to be able to
+back up and restore its data.
+If new ostree deployment fails to be healthy and system is rolled back to previous
+deployment, MicroShift must also roll back in time to data compatible with 
+the older deployment.
+Because device administrator might want to manually go back to older deployment,
+it means that a backup for that particular deployment must be kept until it disappears
+from ostree. It results in requirement of keeping backup for each deployment separately
+regardless of the MicroShift version they feature.
 
-Decision whether to backup or restore is based on file persisted during previous boot (see "Integration with greenboot").
-When file is read to make a decision (but not during dry run), it shall be removed.
+Because difference between two deployments might not be MicroShift itself, but applications
+that run on top of MicroShift, MicroShift's data is tied to ostree deployment rather 
+than MicroShift version.
 
-In case of unhealthy first ostree commit there might occur situation that MicroShift upon start is instructed
-to restore the backup which doesn't exist. In such case MicroShift will delete its data directory to
-perform a clean start.
+Decision whether to backup or restore is based on file persisted during previous boot
+(see "Integration with greenboot").
+That file will be removed after successful operation of backup or restore.
+
+There might happen situations when backing up data fails, which will block start of MicroShift
+and result in redboot. It might that after reboot, there might be no backup to restore from.
+**What should we do, before starting MicroShift, in such case is an open question**:
+- Delete the data directory
+  - It case result in loss of MicroShift data, which might be problematic
+    if application used PVC and is given a new one after static manifests are applied.
+- Keep the data dir
+  - Risking that the problem will continue to happen resulting in manual intervention
 
 As a result of investigation and aiming for simplicity for initial implementation,
-it was decided that backing up MicroShift's data will be done by leveraging using copy-on-write (CoW) functionality.
+it was decided that backing up MicroShift's data will be done by leveraging using 
+copy-on-write (CoW) functionality.
 
-CoW is a feature of filesystem (supported by XFS and Btrfs) and it can be used by providing a `--reflink=` param to `cp` option.
-`--reflink=auto` will be used over `--reflink=always` to gracefully fall back to regular copying on filesystems
-not supporting CoW (ext4, ZFS).
-Backup will be done in `/var/lib/microshift.bak` or similar - it needs to be within the same filesystem/mount.
-Only one backup will be kept. Consequent boots will overwrite the backup dir (only if the action is "backup").
+CoW is a feature of filesystem (supported by XFS and Btrfs) and it can be used by 
+providing a `--reflink=` param to `cp` option.
+`--reflink=auto` will be used over `--reflink=always` to gracefully fall back to regular
+copying on filesystems not supporting CoW (ext4, ZFS).
+Since CoW is backed by filesystem, it works only within that filesystem.
+For this reason, data will be backed up to directory named after ostree deployment ID 
+inside `/var/lib/microshift.bak/` dir, e.g.
+`/var/lib/microshift.bak/rhel-8497faf62210000ffb5274c8fb159512fd6b9074857ad46820daa1980842d889.0`
 
-Restore is analogous operation, just in different direction - copying contents of `/var/lib/microshift.bak` to `/var/lib/microshift`.
+Restore operation works the same, just in the other direction - copying contents of 
+`/var/lib/microshift.bak/ostree-deploy-id/` to `/var/lib/microshift/`.
 
-End user documentation needs to include guidance on setting up filesystem to fullfil requirements for using copy-on-write (e.g. making sure some filesystem options are not disabled).
+End user documentation needs to include guidance on setting up filesystem to fullfil 
+requirements for using copy-on-write (e.g. making sure some filesystem options are not disabled).
 
 ### Contents of MicroShift data backup
 
