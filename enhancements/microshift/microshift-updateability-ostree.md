@@ -144,13 +144,13 @@ N/A
 ### Definitions
 
 - **ostree commit**: TODO
-- **ostree deployment**: TODO
-- **Rollback**: booting previous ostree commit due to greenboot assessing system to not be functional
+- **ostree deployment**: TODO (Remember, new deployment might include K8s apps not previously running)
+- **Rollback**: booting older, already running on a device, ostree deployment - either due to greenboot or manual intervention
 - **Upgrade**: running newer version of MicroShift than previously as a result of booting another ostree commit
 - **Downgrade**: running older version of MicroShift than previously as a result of booting another ostree commit, not as part of a Rollback
 - **Backup**: backing up `/var/lib/microshift`
 - **Restore**: restoring `/var/lib/microshift`
-- **Version Metadata**: File residing in MicroShift data dir containing version of MicroShift that successfully started (cluster was healthy)
+- **Version Metadata**: File residing in MicroShift data dir containing version of MicroShift and ID of ostree deployment
 - **MicroShift greenboot healthcheck**: Program verifying the status of MicroShift's cluster
 
 ### Preface
@@ -165,6 +165,9 @@ Only one backup of MicroShift data will be stored at a given moment
 due to high probability of devices having limited storage.
 
 ### Integration with greenboot
+
+TODO: Link greenboot x microshift enhancement
+TODO: Why integrate with greenboot
 
 Depending on result of greenboot's healthcheck either "green" (successful boot) or "red" (unsuccessful) scripts are executed before rebooting the system.
 
@@ -232,12 +235,25 @@ _TODO: 1 backup per ostree deployment_
 
 When MicroShift is up and running healthy, it will persist its own version into a file within data dir, e.g.:
 ```
-4.14.0
+{
+  "microshift": "4.14.0",
+  "ostree": "deployment-id"
+}
 ```
 
-### Allowing and blocking MicroShift version migration (upgrade/downgrade)
+### Allowing and blocking MicroShift storage migration (upgrade/downgrade)
 
 _TODO: 1 backup per ostree deployment and manual rollback_
+
+Process of deploying and using newer version of MicroShift involves possibility of
+storage migration, i.e. updating Kubernetes objects inside etcd database to a newer version.
+
+It is assumed that newer MicroShift (Kubernetes) version must be able to read previous objects,
+so this imposes a maximum possible jump in versions.
+
+
+
+
 
 MicroShift's version migration is defined as change of binary's version,
 whether it is going forward (upgrade) or backward (downgrade).
@@ -314,16 +330,169 @@ Data migration shall include:
 
 ### Workflows in detail
 
-**First boot into commit with MicroShift**
+**First ostree deployment**
 
-1. First ostree commit is installed
-1. First ostree commit boots
-1. MicroShift starts
-   - No backup action (did not previously run, so there is nothing to backup, and did not previously fail so no restore needed)
-1. MicroShift startup succeeds
-1. All greenboot checks pass
-1. Greenboot runs green scripts
-   - MicroShift green script sets backup mode to "backup"
+:arrow_forward: First boot
+
+1. Device is freshly provisioned
+1. 1st ostree deployment boots
+1. `microshift pre-run`
+   - Data doesn't exist yet
+   - Version comparison: nothing to do
+   - Action: missing/none - _1st boot, so green/red scripts haven't ran yet_
+   - Nothing to migrate
+   - Exits with success
+1. `microshift run`
+   - Write `binary.version` to `data.version`
+1. Alternative scenarios
+
+   - System and MicroShift are healthy
+     1. Green scripts
+         - Persist action: backup
+
+   - System or MicroShift are unhealthy
+     1. Red scripts
+        - Persist action: restore
+     1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
+     1. System requires manual intervention
+     1. **TODO: What should admin do?**
+        - Admin simply reboots the device
+          1. 1st ostree deployment boots
+          1. `microshift pre-run`
+             - Data exists
+             - Backup does not exist
+             - Action: restore - but there's nothing to restore
+             - **XOR - open question**
+               - Remove data dir
+               - Keep existing data 
+             - `microshift run`
+             - _back to "Alternative scenarios"_
+
+:arrow_forward: Reboot: second boot, backup fails
+
+> First boot was green, "backup" action was persisted
+
+1. 1st ostree deployment shuts down
+1. 1st ostree deployment boots
+1. `microshift pre-run`
+   - Data exists
+   - Action: backup
+     - **__Fails due to any reason (disk space, permissions, etc.)__**
+   - Exits with error
+1. MicroShift doesn't start
+1. MicroShift greenboot check fails
+1. Red scripts: persist action: restore
+1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
+1. System requires manual intervention
+1. TODO: What to do as admin?
+
+
+:arrow_forward: Reboot: second boot, backup succeeds
+
+1. 1st ostree deployment shuts down
+1. 1st ostree deployment boots
+1. `microshift pre-run`
+   - Data exists
+   - Action: backup
+   - Version comparison: `data.version == binary.version`
+   - Data migration not needed
+   - Exits with success
+1. `microshift run`
+1. Alternatives
+
+   - System and MicroShift are healthy
+     1. Green scripts
+        - Persist action: backup
+
+   - System or MicroShift are unhealthy
+     1. Red scripts
+        - Persist action: restore
+     1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
+     1. System requires manual intervention
+     1. TODO: What to do as admin?
+
+
+**Second ostree deployment is staged**
+
+Pre-steps:
+
+1. 2nd deployment is staged
+1. Greenboot sets `boot_counter`  
+1. 1st deployment shuts down
+1. 2nd deployment boots
+
+:arrow_forward: Backup succeeds, no MicroShift change, no cluster app change
+
+> No changes are made to MicroShift version or apps running within the cluster, 
+> so new ostree deployment might feature unrelated changes or RPMs
+
+1. `microshift pre-run`
+   - Data exists
+   - Action: backup
+   - Version comparison: `data.version == binary.version`
+   - Data migration not needed
+   - Exits with success
+1. `microshift run`
+1. Alternatives
+
+   - System and MicroShift are healthy
+     1. Green scripts
+        - Persist action: backup
+
+   - System or MicroShift are unhealthy
+     1. Red scripts
+        - Persist action: restore
+     1. Greenboot reboots system multiple times (always red boot)
+     1. `boot_counter` reaches `-1`
+     1. grub boots previous deployment (rollback)
+     1. `microshift pre-run`
+        - Data exists
+        - Action: restore backup matching deployment ID
+        - Data migration not needed
+        - Exits with success
+     1. `microshift run`
+        - Whether the boot is green or red - it'll require manual intervention (no `boot_counter`)
+
+:arrow_forward: First deployment was active only for one boot, backup fails
+
+1. `microshift pre-run`
+   - Data exists
+   - Action: backup
+     - **__Fails due to any reason (disk space, permissions, etc.)__**
+   - Exits with error
+1. MicroShift doesn't start
+1. MicroShift greenboot check fails
+1. Red scripts: persist action: restore
+1. Greenboot reboots system multiple times (always red boot)
+1. `boot_counter` reaches `-1`
+1. grub boots previous (1st) deployment (rollback)
+1. `microshift pre-run`
+   - Data exists
+   - Action: restore - but there's no backup
+   - **XOR - open question**
+     - Remove data dir
+     - Keep existing data 
+1. `microshift run`
+
+:arrow_forward: MicroShift RPM changed
+
+1. `microshift pre-run`
+   - Data exists
+   - Action: backup
+   - Compare `data.version` and `binary.version`
+     - `data.version` doesn't exist - assume `4.13`
+     - `data.version` is on a list of blocked upgrades - blocked
+     - Binary is newer by more than 1 Y-stream - blocked
+     - Binary is older (at least `Y-1`) - blocked
+     - Binary is the same `X.Y` as data - allowed, no need for migration
+     - Binary is newer by 1 Y-stream - allowed, run migration
+
+1. `microshift run`
+1. _See other flows_
+
+
+**Staged ostree deployment without MicroShift version change, but new K8s apps**
+**Staged ostree deployment without MicroShift version change, no new K8s apps, new RPMs installed unrelated to MicroShift**
 
 **Failed first boot into commit with MicroShift**
 
@@ -352,7 +521,7 @@ Data migration shall include:
      - `boot_counter` is unset (it's only set when a new commit is staged, before rebooting into it)
      - manual intervention required
 
-**Simple host reboot (cont of "First boot into commit with MicroShift")**
+<!-- **Simple host reboot (cont of "First boot into commit with MicroShift")**
 
 1. First ostree commit shuts down
 1. First ostree commit boots
@@ -362,7 +531,7 @@ Data migration shall include:
 1. MicroShift startup succeeds
 1. All greenboot checks pass
 1. Greenboot runs green scripts
-   - MicroShift green script sets backup mode to "backup" (no change)
+   - MicroShift green script sets backup mode to "backup" (no change) -->
 
 **Failed upgrade (cont of previous flow)**
 
