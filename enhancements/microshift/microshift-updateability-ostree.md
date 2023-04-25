@@ -271,15 +271,24 @@ Based on reasons above, it was decided that whole `/var/lib/microshift` will be 
 
 ### MicroShift version metadata persistence
 
-_TODO: 1 backup per ostree deployment_
-
-When MicroShift is up and running healthy, it will persist its own version into a file within data dir, e.g.:
+When MicroShift is up and running healthy, 
+it will persist its own version into a file within data dir, e.g.:
 ```
 {
   "microshift": "4.14.0",
-  "ostree": "deployment-id"
+  "ostree": "rhel-8497faf62210000ffb5274c8fb159512fd6b9074857ad46820daa1980842d889.0"
 }
 ```
+
+- value of `ostree` will be used during
+  - backup to create directory matching the deployment, and later by
+  - rollback or restore to select right backup without needing to traverse every backup
+    and inspecting metadata.
+
+- value of `microshift` will be used during data migration to decide if
+  - migration can be skipped,
+  - migration needs to be blocked,
+  - migration can be attempted.
 
 ### Allowing and blocking MicroShift storage migration (upgrade/downgrade)
 
