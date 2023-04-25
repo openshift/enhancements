@@ -528,173 +528,75 @@ Pre-steps:
 1. `microshift run`
 1. _See other flows_
 
+**Rollback to first deployment, failed restore**
 
-**Staged ostree deployment without MicroShift version change, but new K8s apps**
-**Staged ostree deployment without MicroShift version change, no new K8s apps, new RPMs installed unrelated to MicroShift**
+1. 2nd deployment boots
+1. `microshift pre-run`
+   - Data exists
+   - Action: backup
+   - Version comparison: `data.version == binary.version`
+   - Data migration not needed
+   - Exits with success
+1. `microshift run`
+1. System or MicroShift are unhealthy
+1. Red scripts, persist action: restore
+1. Greenboot reboots system multiple times (always red boot)
+1. `boot_counter` reaches `-1`
+1. grub boots previous deployment (rollback)
+1. `microshift pre-run`
+   - Data exists
+   - Action: restore
+     - Restore failed for whatever reason
+       - Can't find the backup
+       - Permissions
+       - Disk space
+       - Anything else
+   - Exit with error
+1. MicroShift does not run
+1. System is unhealthy (red)
+1. `boot_counter` is unset (cleared right after boot by greenboot)
+1. Manual intervention is required
+1. Actions that admin might take
+   - If backup exists: fix permissions, free disk space and start MicroShift
+   - If backup doesn't exist - **it's a bug, so we shouldn't get here**
+     - Remove `next_boot_action` file, remove data dir, start MicroShift from scratch?
 
-**Failed first boot into commit with MicroShift**
-
-1. First ostree commit is installed
-1. First ostree commit boots
-1. MicroShift starts
-   - No backup action (did not previously run, so there is nothing to backup, and did not previously fail so no restore needed)
-1. MicroShift startup fails
-1. Greenboot runs red scripts
-    - Set backup mode to "restore"
-1. `redboot-auto-reboot`
-  - `boot_counter` is unset (it's only set when a new commit is staged, before rebooting into it)
-  - manual intervention required
-1. Admin manually reboots the device
-1. First ostree commit boots
-1. MicroShift starts
-   - Backup mode is "restore"
-   - There's no backup, so nothing to restore
-   - Delete MicroShift data to allow clean start
-1. MicroShift starts
-1. System is
-   - healthy
-     - green scripts, "backup"
-   - unhealthy
-     - red scripts, "restore"
-     - `boot_counter` is unset (it's only set when a new commit is staged, before rebooting into it)
-     - manual intervention required
-
-<!-- **Simple host reboot (cont of "First boot into commit with MicroShift")**
-
-1. First ostree commit shuts down
-1. First ostree commit boots
-1. MicroShift starts up
-   - Backup mode is "backup",
-   - Backup script runs, creating a backup compatible with the first ostree commit
-1. MicroShift startup succeeds
-1. All greenboot checks pass
-1. Greenboot runs green scripts
-   - MicroShift green script sets backup mode to "backup" (no change) -->
-
-**Failed upgrade (cont of previous flow)**
-
-1. Second ostree commit is staged
-1. Greenboot sets `boot_counter=3`
-1. First ostree commit shuts down
-
-1. Grub decrements `boot_counter` to `2`
-1. Second ostree commit boots
-1. MicroShift starts up
-   - Backup mode is "backup"
-   - Backup script runs, creating a backup compatible with the first ostree commit
-   - Data is migrated to newer version, it may or may not succeed
-   - Cluster starts if migration succeeded
-1. Second ostree is unhealthy
-   (for whatever reason: failed data migration, container image problems, components not related to MicroShift failed)
-1. Greenboot runs red scripts
-    - Set backup mode to "restore"
-1. Second ostree commit shuts down
-
-1. Grub decrements `boot_counter` to `1`
-1. Second ostree commit boots
-1. MicroShift starts up
-   - Backup mode is "restore"
-   - Backup tool restores the backup compatible with the first ostree commit
-   - Data is migrated to newer version, it may or may not succeed
-   - Cluster starts if migration succeeded
-1. Second ostree is unhealthy
-   (for whatever reason: failed data migration, container image problems, components not related to MicroShift failed)
-1. Greenboot runs red scripts
-    - Set backup mode to "restore"
-1. Second ostree commit shuts down
-
-1. Grub decrements `boot_counter` to `0`
-1. Second ostree commit boots
-1. MicroShift starts up
-   - Backup mode is "restore"
-   - Backup tool restores the backup compatible with the first ostree commit
-   - Data is migrated to newer version, it may or may not succeed
-   - Cluster starts if migration succeeded
-1. Second ostree is unhealthy
-   (for whatever reason: failed data migration, container image problems, components not related to MicroShift failed)
-1. Greenboot runs red scripts
-    - Set backup mode to "restore"
-1. Second ostree commit shuts down
-
-1. Grub decrements `boot_counter` to `-1`
-1. **First** ostree commit boots
-1. `greenboot-rpm-ostree-grub2-check-fallback` sees `boot_counter == -1`
-   - runs `rpm-ostree rollback` which at this point changes the ostree tree to match current boot so `reboot` is actually not needed
-   - unsets `boot_counter`
-1. MicroShift starts up
-   - Backup mode is "restore"
-   - Backup tool restores the backup compatible with the first ostree commit
-   - Cluster starts
-1. ostree commit is
-   - healthy
-     - green scripts run, backup mode set to backup
-   - unhealthy
-     - red scripts run, backup mode set to restore
-     - `redboot-auto-reboot`: `boot_counter` is unset, manual intervention required
-
-**Failed backup**
-
-TODO:
-- 1st boot, 1st commit
-- Staging 2nd commit
-- 2nd boot, 2nd commit (1st boot for 2nd commit)
-- Action is backup
-- Backup fails for any reason
-
-- 1st boot, 1st commit
-- 2nd boot, 1st commit
-- Action is backup
-- Backup fails for any reason
-
-**Failed restore**
-
-TODO: Just fail until rollback and then fail, but stop?
-
-**Successful upgrade (cont of "Simple host reboot")**
-
-1. Third ostree commit is staged
-1. First ostree commit shuts down
-1. Third ostree commit boots
-1. MicroShift starts
-   - Backup mode is "backup",
-   - Backup script runs, creating a backup compatible with the first ostree commit
-1. MicroShift startup succeeds
-1. Green boot runs green scripts
-   - Set backup mode to "backup" (no change)
 
 **Fail first startup, FDO (FIDO Device Onboard) deployment**
 
-1. An ostree commit without MicroShift is installed on the device at the factory.
+1. An ostree deployment/image without MicroShift is installed on the device at the factory.
 1. The device boots at a customer site.
-1. An agent in the ostree commit performs FIDO device onboarding or a similar process to determine the workload.
-1. An ostree commit with MicroShift installed is staged.
-1. The sans-MicroShift commit shuts down.
-1. The with-MicroShift commit starts up.
-1. MicroShift starts
-   - No backup action (did not previously run, so there is nothing to backup, and did not previously fail so no restore needed)
-1. MicroShift startup fails
+1. An agent in the ostree commit performs FIDO device onboarding or a 
+   similar process to determine the workload.
+1. 1st ostree deployment with MicroShift installed is staged.
+   - greenboot sets `boot_counter`
+1. The sans-MicroShift deployment shuts down.
+1. The with-MicroShift deployment starts up.
+1. `microshift pre-run`
+   - No data
+   - No backup action
+   - No need for data migration
+   - Exits with success
+1. `microshift run`
+1. System is unhealthy
 1. Greenboot runs red scripts
    - Set backup mode to "restore"
-1. (Failures may need to repeat to trigger rollback.)
-1. The with-MicroShift ostree commit shuts down
-1. The sans-MicroShift ostree commit boots
-1. The agent stages with-MicroShift ostree commit 2
+1. Red boots continue to happen
+1. `boot_counter` falls to `-1`
+1. grub boots ostree deployment sans-MicroShift
+1. The agent stages 2nd ostree deployment with-MicroShift
+   - greenboot sets `boot_counter`
 1. The sans-MicroShift ostree commit shuts down
-1. The with-MicroShift ostree commit 2 starts up.
-1. MicroShift starts
-   - The backup mode is "restore"
-   - There is no backup.
-   - (Open Question) XOR
-     - Remove MicroShift data and start with clean slate
-     - Try running with existing data
-       - What if greenboot fails? Deleting data allows fresh start
-
-**Manual rollback**
-
-<!-- 
-TODO 
-Implies 1 backup per ostree deployment
--->
+1. The 2nd ostree deployment with-MicroShift starts up.
+1. `microshift pre-run`
+   - Data exists
+   - Persisted action: restore (left over of 1st ostree deployment with-MicroShift)
+   - There is no backup
+   - Alternatives
+     - Remove the data and allow for `microshift run`, system might end up green or red
+     - Keep the data and allow for `microshift run`, system might end up green or red
+     - Fail to start because of "restore without backup"
+       - **Not acceptable in this scenario - from customer's point of view that's a bug**
 
 **Visual summary**
 
