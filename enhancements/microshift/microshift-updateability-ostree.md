@@ -878,6 +878,17 @@ TODO
 
 ## Alternatives
 
+### Using MicroShift greenboot healthcheck to decide whether to backup or restore
+
+Although system might be unhealthy due to reasons unrelated to MicroShift, it cannot
+make decision to backup or restore depending on the healthcheck rather than on green/red scripts.
+This is because device as a whole must go forward or rollback.
+
+In situation when MicroShift is healthy and system is not, MicroShift's healthcheck would persist
+backup. This could result in a situation when system rollback to previous ostree deployment,
+which might feature different set of Kubernetes applications running on top of MicroShift
+resulting in running application that should not run.
+
 ### Performing backup on shutdown
 
 Reasons for backing up MicroShift's data on boot rather on shutdown:
