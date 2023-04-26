@@ -197,16 +197,21 @@ Potential risk is possibility of losing data that might've been produced during 
 of MicroShift start and system reboot. However, only applies to MicroShift's data,
 because Kubernetes application's data isn't persisted in etcd.
 
-"Next boot action" will be persisted in `/var/lib/microshift.next_boot`, so it will be
-outside MicroShift's data directory to reduce number of operations related to making a backup
-by not needing to remove it.
-Data in `/var/lib/microshift.next_boot` will be persisted by by newly implemented commands:
-- `microshift greenboot green`
-- `microshift greenboot red`
+To integrate with greenboot, bash scripts will be placed in `/etc/greenboot/green.d` and
+`/etc/greenboot/red.d`.
+Depending on code complexity, they may include actual logic or just invoke 
+`microshift greenboot {green,red}` commands which would implement the logic.
 
-To fully integrate with greenboot, two new bash scripts will be placed in
-`/etc/greenboot/green.d` and `/etc/greenboot/red.d`.
-These scripts will only call `microshift`'s commands
+Both green and red scripts (or programs) will write to `/var/lib/microshift.bak/next_boot`.
+The file is outside of MicroShift data directory to reduce number of operations related to 
+making a backup by not needing to remove it.
+
+Green will persist following info:
+- "backup"
+- current ostree deployment id
+
+Red will persist following info:
+- "restore"
 
 ### Backup and restore of MicroShift data
 
@@ -221,8 +226,8 @@ from ostree. It results in requirement of keeping backup for each deployment sep
 regardless of the MicroShift version they feature.
 
 Because difference between two deployments might not be MicroShift itself, but applications
-that run on top of MicroShift, MicroShift's data is tied to ostree deployment rather 
-than MicroShift version.
+that run on top of MicroShift, MicroShift's backups are tied to ostree deployments rather 
+than MicroShift versions.
 
 Decision whether to backup or restore is based on file persisted during previous boot
 (see "Integration with greenboot").
@@ -246,9 +251,20 @@ providing a `--reflink=` param to `cp` option.
 `--reflink=auto` will be used over `--reflink=always` to gracefully fall back to regular
 copying on filesystems not supporting CoW (ext4, ZFS).
 Since CoW is backed by filesystem, it works only within that filesystem.
-For this reason, data will be backed up to directory named after ostree deployment ID 
-inside `/var/lib/microshift.bak/` dir, e.g.
-`/var/lib/microshift.bak/rhel-8497faf62210000ffb5274c8fb159512fd6b9074857ad46820daa1980842d889.0`
+
+To keep track of which backup is intended for which deployment, backup will be placed in a
+directory named after ostree deployment ID inside `/var/lib/microshift.bak/` dir, e.g.
+`/var/lib/microshift.bak/rhel-8497faf62210000ffb5274c8fb159512fd6b9074857ad46820daa1980842d889.0`.
+
+If MicroShift starts and notices that data directory exists, metadata doesn't exist,
+`next-boot` file is missing, it will be assumed that it's a 4.13 to 4.14 upgrade.
+In such case ID of rollback deployment will be used but the automatic rollback will not
+work as 4.13 will not include restore capabilities.
+
+Additionally, a symlink `/var/lib/microshift.bak/latest` will point to the most recent
+backup. This will allow redboots of staged deployment to restore backup of previous
+deployment to use as a starting point (to protect and retry in case of failed data
+migration).
 
 Restore operation works the same, just in the other direction - copying contents of 
 `/var/lib/microshift.bak/ostree-deploy-id/` to `/var/lib/microshift/`.
@@ -270,24 +286,19 @@ Based on reasons above, it was decided that whole `/var/lib/microshift` will be 
 
 ### MicroShift version metadata persistence
 
-When MicroShift is up and running healthy, 
-it will persist its own version into a file within data dir, e.g.:
-```
-{
-  "microshift": "4.14.0",
-  "ostree": "rhel-8497faf62210000ffb5274c8fb159512fd6b9074857ad46820daa1980842d889.0"
-}
+When MicroShift is up and running healthy, green script will persist version into a file 
+within data dir, e.g. `/var/lib/microshift/.version`:
+```plaintext
+4.14.0
 ```
 
-- value of `ostree` will be used during
-  - backup to create directory matching the deployment, and later by
-  - rollback or restore to select right backup without needing to traverse every backup
-    and inspecting metadata.
+Value will be used during data migration to decide if
+- migration can be skipped,
+- migration needs to be blocked,
+- migration can be attempted.
 
-- value of `microshift` will be used during data migration to decide if
-  - migration can be skipped,
-  - migration needs to be blocked,
-  - migration can be attempted.
+Creating the file by green script will indicate what was the MicroShift version that
+successfully ran using the data.
 
 ### Data migration ("upgrade" or "downgrade")
 
