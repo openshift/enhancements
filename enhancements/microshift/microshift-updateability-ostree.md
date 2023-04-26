@@ -338,93 +338,91 @@ A general flow will have following form:
 
 ### Open Questions [optional]
 
+#### If green/red info is not persisted, and it's not a first boot (/var/lib/microshift exists), what should we do?
+- Compare versions (metadata vs binary)
+  - Same - start cluster
+  - Different - refuse to start? Try to migrate (but create backup before)?
 
-- If green/red info is not persisted, and it's not a first boot (/var/lib/microshift exists), what should we do?
-  - Compare versions (metadata vs binary)
-    - Same - start cluster
-    - Different - refuse to start? Try to migrate (but create backup before)?
+#### How should `microshift pre-run` be executed?
+- `microshift.service` - `ExecStartPre`
+  - No need to add new systemd service files.
+  - It will run on each `systemctl restart microshift` which is not desirable (will it run when systemd restarts MicroShift?)
+- `microshift-pre-run.service`
+  - Running on boot, just once, before `microshift.service`
+  - Not repeated on MicroShift restart
+  - New service file
 
-- How should `microshift pre-run` be executed?
-  - `microshift.service` - `ExecStartPre`
-    - No need to add new systemd service files.
-    - It will run on each `systemctl restart microshift` which is not desirable (will it run when systemd restarts MicroShift?)
-  - `microshift-pre-run.service`
-    - Running on boot, just once, before `microshift.service`
-    - Not repeated on MicroShift restart
-    - New service file
+#### Should MicroShift healthcheck check and log version skew problems so it's easier to debug?
 
-- Should current greenboot healthcheck for MicroShift needs to be extended to
-  check and more importantly log version skew problems so it's easier to debug?
+#### Should backups be kept only for deployments present in ostree command?
+- Is it possible that deployment can be reintroduced?
+  - I.e. it will have the same id and admin might want to rollback to it?
 
-- Should amount of backups (1 per ostree deployment) be configurable?
-  Should it only be for deployments that are present in ostree command?
-  Can ostree server provide more deployment "history"?
-
-- What should we do if: data exists, action is "restore" but backup does not exist? 
-  - It's different from scenario where backup exists, but it fails to be restored
-  - See flows below for more context:
-    - "Rollback to first deployment, failed restore"
-    - "Fail first startup, FDO (FIDO Device Onboard) deployment"
-  - Ideas so far:
-    - Remove the data and allow for `microshift run`
-      - Potential data loss?
-        - MicroShift data is not a biggest problem, it would be more of an inconvenience
-          due to cert regeneration, but static manifests will be applied again
-        - Bigger impact: customer's app loosing reference to PVC it was using
-          - This is also loaded scenario, because if we restore, everything should restore
-            so app shouldn't rely on "future" (from its version perspective) data
-          - Let's assume that thin-snapshot is made, and the same PVC goes across ostree
-            deploys. Rollback/restore would restore thin-snapshot, so app should be
-            just where it was before upgrade, but now it's given a new PVC because TopoLVM
-            relies on in-cluster data which was wiped.
-    - Keep the data and allow for `microshift run`
-      - Scenario: MicroShift attempting to use incompatible (newer) data - **not possible (in theory)**
-        - 1st deployment only ran for 1 boot, so it's up for the 2nd deployment to make its backup
-        - 2nd ostree deployment is staged, booted, etc.
-        - backup fails
-          - redboot -> restore
-          - there's nothing to restore, back to start of the open question
-        - backup succeeds, data is migrated, MicroShift starts, system ends up unhealthy
-          - redboot -> restore
-          - on every following boots will restore (because there's backup) -
-            **(Side question: how do we restore a backup not belonging to THIS deployment?
-              It is now in dir named after PREVIOUS ostree deployment id. Creation datetime?)**
-          - eventually rolled back to 1st deployment, backup IS there,
-            so this isn't the question at hand
-      - Given ^, the data will be compatible with rolled back deployment
-        and it must be a good data because system was healthy (green -> "backup")
-    - Fail to start because of "restore without backup"
-      - **Not acceptable in scenario FIDO**
-      - In FIDO example, data should be cleaned up.
-        - How can we plug into this?
-          - Maybe plug into systemd with `Before=ostree-finalize-staged.service` 
-            and when triggered cleanup "restore" status?
-            (But it means it would have to be present in the sans-MicroShift deployment
-            which wouldn't happen)
-            - If new deployment is staged, and we have "restore" action, 
-              then clear the action so MicroShift will "just run"?
-            - Or, if new deployment is staged, and we have "restore" action,
-              then clear the action AND clear MicroShift data (stop/kill first)?
-          - What if `red` script would inspect grub env vars for `boot_counter`
-            - If boot is red, and `boot_counter == 0`, it means system will shortly 
-              rollback, so `red`:
-              - would check if backup exists for rollback deployment (based on rpm-ostree output)
-              - if "backup for rollback deployment" doesn't exist, then
-                don't persist `restore` (empty next_boot file)
-              - check if rollback deployment contains MicroShift RPM
-                - if not, delete MicroShift data
-                - otherwise keep the data (because it's still should be correct with 
-                  rollback deployment, because backup wasn't made, so the data migration 
-                  didn't run)
-  - To not have a backup to restore, making back up must fail?
-    - Failed backup -> failed greenboot -> red script -> "restore"
-      - Can we break that chain?
+#### What should we do if: data exists, action is "restore" but backup does not exist? 
+- It's different from scenario where backup exists, but it fails to be restored
+- See flows below for more context:
+  - "Rollback to first deployment, failed restore"
+  - "Fail first startup, FDO (FIDO Device Onboard) deployment"
+- Ideas so far:
+  - Remove the data and allow for `microshift run`
+    - Potential data loss?
+      - MicroShift data is not a biggest problem, it would be more of an inconvenience
+        due to cert regeneration, but static manifests will be applied again
+      - Bigger impact: customer's app loosing reference to PVC it was using
+        - This is also loaded scenario, because if we restore, everything should restore
+          so app shouldn't rely on "future" (from its version perspective) data
+        - Let's assume that thin-snapshot is made, and the same PVC goes across ostree
+          deploys. Rollback/restore would restore thin-snapshot, so app should be
+          just where it was before upgrade, but now it's given a new PVC because TopoLVM
+          relies on in-cluster data which was wiped.
+  - Keep the data and allow for `microshift run`
+    - Scenario: MicroShift attempting to use incompatible (newer) data - **not possible (in theory)**
+      - 1st deployment only ran for 1 boot, so it's up for the 2nd deployment to make its backup
+      - 2nd ostree deployment is staged, booted, etc.
+      - backup fails
+        - redboot -> restore
+        - there's nothing to restore, back to start of the open question
+      - backup succeeds, data is migrated, MicroShift starts, system ends up unhealthy
+        - redboot -> restore
+        - on every following boots will restore (because there's backup) -
+          **(Side question: how do we restore a backup not belonging to THIS deployment?
+            It is now in dir named after PREVIOUS ostree deployment id. Creation datetime?)**
+        - eventually rolled back to 1st deployment, backup IS there,
+          so this isn't the question at hand
+    - Given ^, the data will be compatible with rolled back deployment
+      and it must be a good data because system was healthy (green -> "backup")
+  - Fail to start because of "restore without backup"
+    - **Not acceptable in scenario FIDO**
+    - In FIDO example, data should be cleaned up.
+      - How can we plug into this?
+        - Maybe plug into systemd with `Before=ostree-finalize-staged.service` 
+          and when triggered cleanup "restore" status?
+          (But it means it would have to be present in the sans-MicroShift deployment
+          which wouldn't happen)
+          - If new deployment is staged, and we have "restore" action, 
+            then clear the action so MicroShift will "just run"?
+          - Or, if new deployment is staged, and we have "restore" action,
+            then clear the action AND clear MicroShift data (stop/kill first)?
+        - What if `red` script would inspect grub env vars for `boot_counter`
+          - If boot is red, and `boot_counter == 0`, it means system will shortly 
+            rollback, so `red`:
+            - would check if backup exists for rollback deployment (based on rpm-ostree output)
+            - if "backup for rollback deployment" doesn't exist, then
+              don't persist `restore` (empty next_boot file)
+            - check if rollback deployment contains MicroShift RPM
+              - if not, delete MicroShift data
+              - otherwise keep the data (because it's still should be correct with 
+                rollback deployment, because backup wasn't made, so the data migration 
+                didn't run)
+- To not have a backup to restore, making back up must fail?
+  - Failed backup -> failed greenboot -> red script -> "restore"
+    - Can we break that chain?
 
 ### Workflows in detail
 
-**First ostree deployment**
+#### First ostree deployment
 
-:arrow_forward: First boot
+##### First boot
 
 1. Device is freshly provisioned
 1. 1st ostree deployment boots
@@ -460,7 +458,7 @@ A general flow will have following form:
              - `microshift run`
              - _back to "Alternative scenarios"_
 
-:arrow_forward: Reboot: second boot, backup fails
+##### Reboot: second boot, backup fails
 
 > First boot was green, "backup" action was persisted
 
@@ -479,7 +477,7 @@ A general flow will have following form:
 1. TODO: What to do as admin?
 
 
-:arrow_forward: Reboot: second boot, backup succeeds
+##### Reboot: second boot, backup succeeds
 
 1. 1st ostree deployment shuts down
 1. 1st ostree deployment boots
@@ -504,7 +502,7 @@ A general flow will have following form:
      1. TODO: What to do as admin?
 
 
-**Second ostree deployment is staged**
+#### Second ostree deployment is staged
 
 Pre-steps:
 
@@ -513,7 +511,7 @@ Pre-steps:
 1. 1st deployment shuts down
 1. 2nd deployment boots
 
-:arrow_forward: Backup succeeds, no MicroShift change, no cluster app change
+##### Backup succeeds, no MicroShift change, no cluster app change
 
 > No changes are made to MicroShift version or apps running within the cluster, 
 > so new ostree deployment might feature unrelated changes or RPMs
@@ -545,7 +543,7 @@ Pre-steps:
      1. `microshift run`
         - Whether the boot is green or red - it'll require manual intervention (no `boot_counter`)
 
-:arrow_forward: First deployment was active only for one boot, backup fails
+##### First deployment was active only for one boot, backup fails
 
 1. `microshift pre-run`
    - Data exists
@@ -566,7 +564,7 @@ Pre-steps:
      - Keep existing data 
 1. `microshift run`
 
-:arrow_forward: MicroShift RPM changed
+##### MicroShift RPM changed
 
 1. `microshift pre-run`
    - Data exists
@@ -582,7 +580,7 @@ Pre-steps:
 1. `microshift run`
 1. _See other flows_
 
-**Rollback to first deployment, failed restore**
+#### Rollback to first deployment, failed restore
 
 1. 2nd deployment boots
 1. `microshift pre-run`
@@ -616,7 +614,7 @@ Pre-steps:
      - Remove `next_boot_action` file, remove data dir, start MicroShift from scratch?
 
 
-**Fail first startup, FDO (FIDO Device Onboard) deployment**
+#### Fail first startup, FDO (FIDO Device Onboard) deployment
 
 1. An ostree deployment/image without MicroShift is installed on the device at the factory.
 1. The device boots at a customer site.
