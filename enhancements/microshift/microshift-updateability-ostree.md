@@ -347,9 +347,6 @@ A general flow will have following form:
     - Same - start cluster
     - Different - refuse to start? Try to migrate (but create backup before)?
 
-- Should we use greenboot's green/red scripts to persist action for next boot?
-  - They have no information about what failed, so if it wasn't MicroShift, then we do unnecessary restore (possibly losing some data)
-
 - How should `microshift pre-run` be executed?
   - `microshift.service` - `ExecStartPre`
     - No need to add new systemd service files.
