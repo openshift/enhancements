@@ -349,10 +349,36 @@ A general flow will have following form:
 
 ### Open Questions [optional]
 
+#### Should 4.13 -> 4.14 be supported?
+- Even if we handle "no metadata, no backup, existing data, no next-boot-action" and make
+  a backup, upon rollback 4.13 won't be able to restore it, so it would try to use 4.14's
+  data.
+  - Is manual intervention acceptable (admin manually copying backup to data)?
+  - We most likely don't want to implement special case for that (`pre-run` would save 
+    that persist it was 4.13 previously and red script would restore before shutting down)
+
 #### If green/red info is not persisted, and it's not a first boot (/var/lib/microshift exists), what should we do?
 - Compare versions (metadata vs binary)
   - Same - start cluster
-  - Different - refuse to start? Try to migrate (but create backup before)?
+  - Different - means that both binaries implement the enhancement,
+    so this could be considered a bug.
+  - Metadata is also missing
+    - Assume data was created by 4.13, do a backup and follow data migration rules
+
+#### When should version metadata file be created
+- By the green script
+  - Existence of file would indicate that data belongs to healthy deployment
+    - What upon reboot? Should file be cleared to be later recreated by green script?
+      - Blind assumption `.version exists == healthy data` might be too implicit and lead
+        to wrong conclusions
+- On start of `microshift run` or shortly after with addition from green and red scripts
+  - `{ "version": "X.Y.Z", "status": "unknown"}` would be created at first
+  - Green script would change `.status` to `healthy`
+  - Red script would change `.status` to `unhealthy`
+  - Pros:
+    - Explicit
+  - Cons:
+    - More complicated schema - weak con
 
 #### How should `microshift pre-run` be executed?
 - `microshift.service` - `ExecStartPre`
@@ -364,16 +390,19 @@ A general flow will have following form:
   - New service file
 
 #### Should MicroShift healthcheck check and log version skew problems so it's easier to debug?
+- Why not?
 
 #### Should backups be kept only for deployments present in ostree command?
 - Is it possible that deployment can be reintroduced?
   - I.e. it will have the same id and admin might want to rollback to it?
 
-#### What should we do if: data exists, action is "restore" but backup does not exist? 
+#### Data exists, action is "restore", but backup does not exists
 - It's different from scenario where backup exists, but it fails to be restored
 - See flows below for more context:
-  - "Rollback to first deployment, failed restore"
-  - "Fail first startup, FDO (FIDO Device Onboard) deployment"
+  - ["Rollback to first deployment, failed restore"](#rollback-to-first-deployment-failed-restore)
+  - ["Fail first startup, FDO (FIDO Device Onboard) deployment"](#fail-first-startup-fdo-fido-device-onboard-deployment)
+- Note: this logic is part of `microshift pre-run` which exit code will affect if 
+  `microshift run` executes or not
 - Ideas so far:
   - Remove the data and allow for `microshift run`
     - Potential data loss?
@@ -406,7 +435,8 @@ A general flow will have following form:
     - **Not acceptable in scenario FIDO**
     - In FIDO example, data should be cleaned up.
       - How can we plug into this?
-        - Maybe plug into systemd with `Before=ostree-finalize-staged.service` 
+        - **IDEA 1**<br>
+          Maybe plug into systemd with `Before=ostree-finalize-staged.service` 
           and when triggered cleanup "restore" status?
           (But it means it would have to be present in the sans-MicroShift deployment
           which wouldn't happen)
@@ -414,22 +444,132 @@ A general flow will have following form:
             then clear the action so MicroShift will "just run"?
           - Or, if new deployment is staged, and we have "restore" action,
             then clear the action AND clear MicroShift data (stop/kill first)?
-        - What if `red` script would inspect grub env vars for `boot_counter`
-          - If boot is red, and `boot_counter == 0`, it means system will shortly 
-            rollback, so `red`:
-            - would check if backup exists for rollback deployment (based on rpm-ostree output)
-            - if "backup for rollback deployment" doesn't exist, then
+        - **IDEA 2**<br>
+          What if `red` script would inspect grub env vars for `boot_counter`
+          - `boot_counter == 0` means system will shortly rollback, so:
+            - check if backup exists for rollback deployment (based on rpm-ostree output)
+            - check if "backup for rollback deployment" doesn't exist, then
               don't persist `restore` (empty next_boot file)
             - check if rollback deployment contains MicroShift RPM
               - if not, delete MicroShift data
               - otherwise keep the data (because it's still should be correct with 
                 rollback deployment, because backup wasn't made, so the data migration 
                 didn't run)
+          - `boot_counter > 0`
+            - keep old behavior: just persist `restore`?
+            - or have the same logic as above - `restore` only if there's a backup 
+              to restore from?
+              - [Data exists, action is missing (not persisted or removed), backup does not exists](#data-exists-action-is-missing-not-persisted-or-removed-backup-does-not-exists)
+          - `boot_counter` is missing
+            - it means it's not a deployment that was staged, so it might be the 1st
+              deployment
+            - it also means, there will be no reboots and system will require manual
+              intervention
+            - so it's up to admin to investigate and resolve the issues
+              - if issue happens to be failing MicroShift, admin should delete the data
+                before rebooting
+              - otherwise data can be kept
+            - either way, neither backup nor restore should be persisted for next boot action
+              - [Data exists, action is missing (not persisted or removed), backup does not exists](#data-exists-action-is-missing-not-persisted-or-removed-backup-does-not-exists)
+            - given [FIDO scenario](#fail-first-startup-fdo-fido-device-onboard-deployment)
+              it means that rollback deployment might not have MicroShift scripts,
+              so our red script would need to make a decision based on:
+              - does backup exists for rollback deployment
+              - does rollback deployment feature MicroShift RPM
+                - if it does and it's 4.13 then we need extra logic on top to make data
+                  compatible for -> 4.13 -> 4.14 scenario (so 4.14 assumes correctly it
+                  migrated from 4.13)
 - To not have a backup to restore, making back up must fail?
   - Failed backup -> failed greenboot -> red script -> "restore"
     - Can we break that chain?
 
+#### Data exists, action is missing (not persisted or removed), backup does not exists
+- In this scenario, we lack the information about health of previous boot, but 
+  we know there was a previous boot because data exists
+- If we end up supporting upgrade 4.13 -> 4.14, this is what will happen as first thing.
+  - In case of 4.13 -> 4.14, metadata will also be missing
+- Missing action, missing backup, missing metadata - expected for 4.13 -> 4.14
+- For other migrations:
+  - Missing metadata == MicroShift wasn't healthy on previous boot
+  - Missing action - this is related to one of the solutions proposed in 
+    ["Data exists, action is "restore", but backup does not exists"](#data-exists-action-is-restore-but-backup-does-not-exists)
+    
 ### Workflows in detail
+
+#### Manual interventions - 1st deployment or rollback (no more greenboot reboots)
+
+##### Addressing MicroShift's health
+
+1. Depending on MicroShift's health admin might:
+   - unhealthy
+     - delete MicroShift's data, to allow fresh start
+     - investigate and address problems with MicroShift cluster
+   - healthy
+     - keep MicroShift's data
+   - unhealthy application running on top of MicroShift
+     - investigate and address problems with the app, and restart the device to re-trigger
+       greenboot checks
+
+##### Backup exists, restore succeeds, but system is unhealthy
+
+> Scenarios:
+> - System was rolled back to 1st deployment (no more greenboot reboots) 
+>   and action is `restore`
+> - 1st and only ostree deployment with MicroShift:
+>   - 1st boot OK, **manual** reboot
+>   - 2nd boot: backup, system NOK, **manual** reboot
+>   - 3rd boot: restore, system NOK
+
+1. `microshift pre-run`
+   - Data restored
+   - Exits with success
+1. `microshift run`
+1. System or MicroShift are unhealthy
+1. Red scripts
+   - Persist action: restore
+1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
+1. System requires manual intervention
+
+   - Admin simply reboots the device
+     1. 1st ostree deployment boots
+     1. `microshift pre-run`
+        - Data exists
+        - Backup exists
+        - Action: restore
+     1. `microshift run`
+     1. It might be green or red again, so back to the beginning of the flow
+
+   - Admin addresses the issue
+     1. [MicroShift's health](#addressing-microshifts-health)
+     1. Other components - admin's judgement
+     1. Reboots the device
+
+##### Backup exists, restore fails, so MicroShift is unhealthy
+
+> Scenarios:
+> - System was rolled back to 1st deployment (no more greenboot reboots) 
+>   and action is `restore`
+> - 1st and only ostree deployment with MicroShift:
+>   - 1st boot OK, **manual** reboot
+>   - 2nd boot: backup, system NOK, **manual** reboot
+>   - 3rd boot: restore, system NOK
+
+1. `microshift pre-run`
+   - Restore fails
+   - Exits with error
+1. `microshift run` is **not executed**
+1. MicroShift is unhealthy
+1. Red scripts
+   - Persist action: restore
+1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
+1. System requires manual intervention
+1. Admin addresses underlying issues: frees up disk space, fixes permissions, etc.
+1. Reboots the device
+   - Persisted action is still `restore`, so new attempt will be made on next boot
+
+##### Backup is missing, restore fails, so MicroShift is unhealthy
+
+See open question ["Data exists, action is "restore", but backup does not exists"](#data-exists-action-is-restore-but-backup-does-not-exists)
 
 #### First ostree deployment
 
@@ -444,30 +584,21 @@ A general flow will have following form:
    - Nothing to migrate
    - Exits with success
 1. `microshift run`
-   - Write `binary.version` to `data.version`
-1. Alternative scenarios
+1. Alternative scenarios<a name="first-boot-alt"></a>
 
    - System and MicroShift are healthy
      1. Green scripts
-         - Persist action: backup
+         - `/var/lib/microshift.aux/next-boot` <- backup + deploy id
+         - `/var/lib/microshift/.version` <- 4.X.Y
+     1. [system is rebooted, backup fail](#reboot-second-boot-backup-fails)
+     1. [system is rebooted, backup succeeds](#reboot-second-boot-backup-succeeds)
 
    - System or MicroShift are unhealthy
      1. Red scripts
-        - Persist action: restore
+         - `/var/lib/microshift.aux/next-boot` <- restore
      1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
-     1. System requires manual intervention
-     1. **TODO: What should admin do?**
-        - Admin simply reboots the device
-          1. 1st ostree deployment boots
-          1. `microshift pre-run`
-             - Data exists
-             - Backup does not exist
-             - Action: restore - but there's nothing to restore
-             - **XOR - open question**
-               - Remove data dir
-               - Keep existing data 
-             - `microshift run`
-             - _back to "Alternative scenarios"_
+     1. System requires manual intervention.
+        See [Manual interventions](#manual-interventions---1st-and-only-deployment-or-rollback)
 
 ##### Reboot: second boot, backup fails
 
@@ -482,11 +613,11 @@ A general flow will have following form:
    - Exits with error
 1. MicroShift doesn't start
 1. MicroShift greenboot check fails
-1. Red scripts: persist action: restore
+1. Red scripts
+   - `/var/lib/microshift.aux/next-boot` <- restore
 1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
-1. System requires manual intervention
-1. TODO: What to do as admin?
-
+1. System requires manual intervention.
+   See [Manual interventions](#manual-interventions---1st-and-only-deployment-or-rollback)
 
 ##### Reboot: second boot, backup succeeds
 
@@ -509,9 +640,8 @@ A general flow will have following form:
      1. Red scripts
         - Persist action: restore
      1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
-     1. System requires manual intervention
-     1. TODO: What to do as admin?
-
+     1. System requires manual intervention.
+        See [Manual interventions](#manual-interventions---1st-and-only-deployment-or-rollback)
 
 #### Second ostree deployment is staged
 
@@ -552,7 +682,9 @@ Pre-steps:
         - Data migration not needed
         - Exits with success
      1. `microshift run`
-        - Whether the boot is green or red - it'll require manual intervention (no `boot_counter`)
+        - Whether the boot is green or red - it'll require
+          [manual intervention](#manual-interventions---1st-deployment-or-rollback-no-more-greenboot-reboots)
+          (no `boot_counter`).
 
 ##### First deployment was active only for one boot, backup fails
 
@@ -570,9 +702,7 @@ Pre-steps:
 1. `microshift pre-run`
    - Data exists
    - Action: restore - but there's no backup
-   - **XOR - open question**
-     - Remove data dir
-     - Keep existing data 
+   - See open question [Data exists, action is "restore", but backup does not exists](#data-exists-action-is-restore-but-backup-does-not-exists)
 1. `microshift run`
 
 ##### MicroShift RPM changed
@@ -580,7 +710,7 @@ Pre-steps:
 1. `microshift pre-run`
    - Data exists
    - Action: backup
-   - Compare `data.version` and `binary.version`
+   - Compare `version` in data dir and binary
      - `data.version` doesn't exist - assume `4.13`
      - `data.version` is on a list of blocked upgrades - blocked
      - Binary is newer by more than 1 Y-stream - blocked
@@ -608,30 +738,22 @@ Pre-steps:
 1. grub boots previous deployment (rollback)
 1. `microshift pre-run`
    - Data exists
-   - Action: restore
-     - Restore failed for whatever reason
-       - Can't find the backup
-       - Permissions
-       - Disk space
-       - Anything else
+   - Restore failed for whatever reason
    - Exit with error
 1. MicroShift does not run
 1. System is unhealthy (red)
 1. `boot_counter` is unset (cleared right after boot by greenboot)
-1. Manual intervention is required
-1. Actions that admin might take
-   - If backup exists: fix permissions, free disk space and start MicroShift
-   - If backup doesn't exist - **it's a bug, so we shouldn't get here**
-     - Remove `next_boot_action` file, remove data dir, start MicroShift from scratch?
+1. Manual intervention is required.
+   See [Backup exists, restore fails, so MicroShift is unhealthy](#backup-exists-restore-fails-so-microshift-is-unhealthy).
 
 
 #### Fail first startup, FDO (FIDO Device Onboard) deployment
 
-1. An ostree deployment/image without MicroShift is installed on the device at the factory.
+1. An ostree deployment without MicroShift is installed on the device at the factory.
 1. The device boots at a customer site.
 1. An agent in the ostree commit performs FIDO device onboarding or a 
    similar process to determine the workload.
-1. 1st ostree deployment with MicroShift installed is staged.
+1. **1st** ostree deployment with MicroShift installed is staged.
    - greenboot sets `boot_counter`
 1. The sans-MicroShift deployment shuts down.
 1. The with-MicroShift deployment starts up.
@@ -647,12 +769,12 @@ Pre-steps:
 1. Red boots continue to happen
 1. `boot_counter` falls to `-1`
 1. grub boots ostree deployment sans-MicroShift
-1. The agent stages 2nd ostree deployment with-MicroShift
+1. The agent stages **2nd** ostree deployment with-MicroShift
    - greenboot sets `boot_counter`
 1. The sans-MicroShift ostree commit shuts down
-1. The 2nd ostree deployment with-MicroShift starts up.
+1. The **2nd** ostree deployment with-MicroShift starts up.
 1. `microshift pre-run`
-   - Data exists
+   - Data exists (left over of 1st ostree deployment with-MicroShift)
    - Persisted action: restore (left over of 1st ostree deployment with-MicroShift)
    - There is no backup
    - Alternatives
@@ -660,6 +782,10 @@ Pre-steps:
      - Keep the data and allow for `microshift run`, system might end up green or red
      - Fail to start because of "restore without backup"
        - **Not acceptable in this scenario - from customer's point of view that's a bug**
+
+See open questions:
+- [Data exists, action is "restore", but backup does not exists](#data-exists-action-is-restore-but-backup-does-not-exists)
+- [Data exists, action is missing (not persisted or removed), backup does not exists](#data-exists-action-is-missing-not-persisted-or-removed-backup-does-not-exists)
 
 **Visual summary**
 
@@ -672,7 +798,7 @@ flowchart TD
 
   exit[Exit with error]
   red[Red scripts\nNext boot: 'restore']
-  reboot([Greenboot reboots system\nunless it's rollback\notherwise manual intervention is required])
+  reboot([Greenboot reboots system\nunless it's rollback, then\nmanual intervention is required])
 
   classDef danger fill:red
   class exit,red,reboot danger
@@ -681,6 +807,10 @@ flowchart TD
   continue-running([System and MicroShift\nproceed to run successfully])
   classDef good fill:green
   class continue-running,green good
+
+  open-question([See open questions])
+  classDef open fill:yellow
+  class open-question open
   
 %% Actions
 
@@ -688,14 +818,14 @@ flowchart TD
   do-restore[Restore data]
   do-data-migration[Migrate data]
   do-persist-version[Persist version metadata]
-  do-clean-data[Remove /var/lib/microshift?\nor try running without cleanup?]
+  %% do-clean-data[Remove /var/lib/microshift?\nor try running without cleanup?]
 
 %% Decisions
 
   data-dir-exists?{/var/lib/microshift/}
-  backup-or-restore?{Backup or restore\nbased on previous boot}
+  backup-or-restore?{Backup or restore?}
   backup-exists?{Does backup exist?}
-  version?{Compare\nMicroShift's version:\nmetadata vs binary}
+  version?{Compare versions:\nmetadata vs binary}
   data-migration?{Was\nmigration\nsuccessful?}
   healthy?{"Is MicroShift healthy?\n(greenboot check)"}
   missing-metadata-version?{Upgrade\nfrom 4.13 is\nsupported}
@@ -709,16 +839,17 @@ flowchart TD
   data-dir-exists? -- Doesn't exists --> run
   data-dir-exists? -- Exists         --> backup-or-restore?
 
-  backup-or-restore? -- "Restore (red)"    --> do-restore
-  backup-or-restore? -- "Backup (green)"   --> do-backup
-  backup-or-restore? -- Missing\nData exists,\nbut no info persisted about what to do\nFits upgrade from 4.13 flow --> do-backup
+  backup-or-restore? -- "Restore"    --> do-restore
+  backup-or-restore? -- "Backup"   --> do-backup
+  backup-or-restore? -- Missing\nData exists,\nbut no info persisted about what to do\nONLY OK IF BINARY IS 4.14\nASSUME DATA IS 4.13 --> do-backup
 
   do-backup --> backup-ok?
   backup-ok? -- Yes --> version?
   backup-ok? -. No .-> exit
 
   do-restore                             --> backup-exists?
-  backup-exists? -- No --> do-clean-data --> run
+  %% backup-exists? -- No --> do-clean-data --> run
+  backup-exists? -- No --> open-question
   backup-exists? -- Yes --> restore-ok? 
   restore-ok? -- Yes --> version?
   restore-ok? -. No .-> exit
@@ -807,7 +938,7 @@ See section "allowing and blocking upgrades".
 
 #### Failure Modes
 
-TODO
+TODO (For now refer to [manual interventions flows](#manual-interventions---1st-deployment-or-rollback-no-more-greenboot-reboots))
 
 <!-- - Describe the possible failure modes of the API extensions.
 - Describe how a failure or behaviour of the extension will impact the overall cluster health
@@ -818,7 +949,7 @@ TODO
 
 #### Support Procedures
 
-TODO
+TODO (For now refer to [manual interventions flows](#manual-interventions---1st-deployment-or-rollback-no-more-greenboot-reboots))
 
 <!-- Describe how to
 - detect the failure modes in a support situation, describe possible symptoms (events, metrics,
