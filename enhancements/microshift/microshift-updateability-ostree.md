@@ -338,9 +338,6 @@ A general flow will have following form:
 
 ### Open Questions [optional]
 
-- Do we want to persist ostree commit ref in the metadata?
-  - Can we make some part of the process safer, more robust, by comparing previous and current commit ref?
-  - Are we good with having previous boot MicroShift version persisted?
 
 - If green/red info is not persisted, and it's not a first boot (/var/lib/microshift exists), what should we do?
   - Compare versions (metadata vs binary)
