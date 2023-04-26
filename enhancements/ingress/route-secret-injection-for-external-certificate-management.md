@@ -13,9 +13,9 @@ approvers:
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - '@joelspeed'
 creation-date: 2022-12-13
-last-updated: 2023-01-27
+last-updated: 2023-04-24
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - https://issues.redhat.com/browse/CFE-704
+  - https://issues.redhat.com/browse/CM-16
 ---
 
 # Route Secret Injection For External Certificate Management
@@ -42,7 +42,8 @@ workflow. This is cumbersome activity if users have a huge number of workloads a
 is also error prone.
 
 This enhancement adds the support to OpenShift Routes for third-party certificate
-management solutions like cert-manager.
+management solutions like cert-manager by extending the Route API to read the serving
+certificate data via a secret reference.
 
 ### User Stories
 
@@ -57,37 +58,32 @@ management solutions like cert-manager.
   mode of operation for certification management so that I can switch between manual certificate
   management and third-party certificate management.
 
+- As an Openshift engineer, I want to be update the router so that it is able read secrets directly
+  if all the preconditions have been met by the router serviceaccount.
+
 - As an OpenShift engineer, I want to be able to update Route API so that I can integrate
   OpenShift Routes with third-party certificate management solutions like cert-manager.
-
-- An an OpenShift engineer, I want to be able to watch routes and process routes having valid
-  annotations so that the certificate data is injected into the route CR.
 
 - As an OpenShift engineer, I want to be able to run e2e tests as part of openshift/origin
   so that testcases are executed to signal feature health by CI executions.
 
 ### Goals
 
-- Provide users with a configurable option in Route API to provide externally managed certificate data.
-- Provide users with a mechanism to switch between using externally managed certificates and
-  manually managed certificates on OpenShift routes and vice-versa.
-- Provide smooth roll out of new certificates on OpenShift router when managed certificates
-  are renewed.
-- Provide latest certificate type information on the Route.
+- Provide users with a configurable option in Route API to reference externally managed certificates via secrets.
 
 ### Non-Goals
 
 - Provide certificate life cycle management controls on the Route API (expiryAfter, renewBefore, etc).
-- Provide migration of certificates from current solution.
+- Provide smooth roll out of new certificates on OpenShift router when referenced certificates
+  are renewed (secret containing the certificate is updated).
 
 ## Proposal
 
-This enhancement proposes introducing a new controller (secret-injector) in [route-controller-manager](https://github.com/openshift/route-controller-manager)
-to manage a new annotation (secret-reference) on the Route object. This annotation
-enables the users to provide a reference to a Secret containing the serving cert/key
-pair that will be injected to `.spec.tls` and will be served by OpenShift router.
-This annotation will be given a higher preference if route CR also has `.spec.tls.certificate`
-and `.spec.tls.key` fields set.
+This enhancement proposes extending the openshift/router to read serving certificate data either
+from the Route `.spec.tls.certificate` and `.spec.tls.key` or from a new field `.spec.tls.certificateRef`
+which is a `kubernetes.io/tls` type secret reference. This `certificateRef` field will enables the
+users to provide a reference to a Secret containing the serving cert/key pair that will be parsed
+and served by OpenShift router.
 
 ### Workflow Description
 
@@ -95,7 +91,7 @@ End users have 2 possible variations for the creation of the route:
 
 - Create a route for the user workload and this is completely managed by the end user.
 - Create an ingress for the user workload and a managed route is created automatically
-  by the ingress-to-route controller.
+  by the ingress-to-route controller. [Depends on the open question]
 
 Both these workflows will support integrating with third party certificate management
 solutions like cert-manager with the secret-reference annotation described under [API Extensions](#api-extensions).
@@ -104,14 +100,22 @@ solutions like cert-manager with the secret-reference annotation described under
 
 - The end user must have generated the serving certificate as a pre requisite
   using third-party systems like cert-manager.
-- In cert-manager's case, the [Certificate](https://cert-manager.io/docs/usage/certificate/#creating-certificate-resources) CR must be created in the same namespace
-  where the Route is going to be created.
+- In cert-manager's case, the [Certificate](https://cert-manager.io/docs/usage/certificate/#creating-certificate-resources)
+  CR must be created in the same namespace where the Route is going to be created.
+- The end user must create a role and in the same namespace as the secret containing the certificate from earlier,
+  ```bash
+  oc create role secret-reader --verb=get,list,watch --resource=secrets --resourceName=<secret-name>
+  ```
+- The end user must create a rolebinding in the same namespace as the secret
+  and bind the router serviceaccount to the above created role.
+  ```bash
+  oc create rolebinding foo-secret-reader --role=secret-reader --serviceaccount=openshift-ingress:router --namespace=<current-namespace>
+  ```
 - To expose a user workload, the user would create a new Route with the
-  secret-reference annotation referencing the generated secret that was created
+  `.spec.tls.certificateRef` referencing the generated secret that was created
   in the previous step.
 - If the secret that is referenced exists and has a successfully generated
-  cert/key pair, the secret-injector controller copies the certificate data
-  into the route at `.spec.tls.certificate` and `.spec.tls.key`.
+  cert/key pair, the router will serve this certificate if all preconditions are met.
 
 **When an Ingress is used to expose user workload**
 
@@ -122,32 +126,8 @@ solutions like cert-manager with the secret-reference annotation described under
 - To expose a user workload, a new Ingress with the generated secret
   referenced in `.spec.tls.secretName` needs to be created.
 - If the secret CR that is referenced exists and has a successfully generated
-  cert/key pair, the ingress-to-route controller copies this certificate data
-  into the route at `.spec.tls.certificate` and `.spec.tls.key`.
-
-_Note_: The same workflow would apply to updating an existing Route to integrate
-with cert-manager. The new certificate data will overwrite the `.spec.tls.certificate`
-and `.spec.tls.key` in the route CR since the secret-reference annotation gets a
-higher preference.
-
-#### Certificate Life cycle
-
-Post integrating with third-party solutions like cert-manager, the end user can also
-disable automatic certificate management. This can be done in 2 ways,
-
-- The end user can delete the secret-reference annotation on the Route.
-- The end user deletes the secret that was associated with the Certificate CR.
-
-**Deleting the secret-reference annotation on the Route**
-The end user can delete the annotation on the Route, this will result
-in clearing `.spec.tls.certificate` and `.spec.tls.key` and resort to
-using the default certificates that are generated by the cluster-ingress-operator.
-
-**Deleting the generated secret that contains the serving cert/key pair**
-The end user can delete the secret containing the certificate data, this will result
-in clearing `.spec.tls.certificate` and `.spec.tls.key` and resort to using the
-default certificates that are generated by the cluster-ingress-operator. Also the secret-reference
-annotation that was added by the user will not be deleted by the secret-injector controller.
+  cert/key pair, the ingress-to-route controller adds this secret name to
+  the created route `.spec.tls.certificateRef`.
 
 #### Variation [optional]
 
@@ -155,240 +135,111 @@ N.A
 
 ### API Extensions
 
-A secret-reference annotation of type `string` to be introduced as part of the integration
-to support third-party certificate management systems,
+A `.spec.tls.certificateRef` field is added to Route `.spec.tls` which can be used to provide a secret name
+containing the certificate data instead of using `.spec.tls.certificate` and `spec.tls.key`.
 
-```yaml
-annotations:
-  route.openshift.io/tls-secret-name: <secret-name>
+```go
+type TLSConfig struct {
+	// ...
+
+    // certificateRef provides certificate contents as a secret reference.
+    // This should be a single serving certificate, not a certificate
+	// chain. Do not include a CA certificate.
+
+    //
+    // +kubebuilder:validation:Optional
+	// +openshift:enable:FeatureSets=TechPreviewNoUpgrade
+	// +optional
+	CertificateRef *corev1.LocalObjectReference `json:"certificateRef,omitempty" protobuf:"bytes,7,opt,name=certificateRef"`
+}
 ```
 
-_Note_: The default value would be N/A. The secret is required to be created
+_Note_: The default value would be `nil`. The secret is required to be created
 in the same namespace as that of the Route. The secret must be of type
 `kubernetes.io/tls` and the tls.key and the tls.crt key must be provided in
 the `data` (or `stringData`) field of the Secret configuration.
 
-This annotation can be applied by the end user on Route. The controller that
-will be introduced as part of this enhancement will be responsible for the
-processing of this annotation on the Route.
+If neither `.spec.tls.certificateRef` or `.spec.tls.certificate` and `.spec.tls.key` are
+provided the router will serve the default generated secret.
 
-The Route API will also be updated to denote certificate status under `.status`,
-
-```go
-
-// RouteStatus provides relevant info about the status of a route, including which routers
-// acknowledge it.
-type RouteStatus struct {
-    // ...
-
-    // CertificateConditions describes the type of certificate that is being served
-    // by the router(s) associated with this route.
-    Certificate []RouteCertificateCondition `json:"certificate,omitempty" protobuf:"bytes,2,rep,name=certificate"`
-}
-
-// RouteCertificateConditionType is a valid value forRouteCertificateCondition
-type RouteCertificateConditionType string
-
-// RouteCertificateCondition contains details of the certificate being served by routers associated with
-// this route.
-type RouteCertificateCondition struct {
-	// Type is the type of the condition.
-    // Possible values include Default, Custom and Managed.
-	Type RouteCertificateConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=RouteCertificateConditionType"`
-	// Status is the status of the condition.
-	// Can be True, False, Unknown.
-	Status corev1.ConditionStatus `json:"status" protobuf:"bytes,2,opt,name=status,casttype=k8s.io/api/core/v1.ConditionStatus"`
-	// (brief) reason for the condition's last transition, and is usually a machine and human
-	// readable constant
-	Reason string `json:"reason,omitempty" protobuf:"bytes,3,opt,name=reason"`
-	// Human readable message indicating details about last transition.
-	Message string `json:"message,omitempty" protobuf:"bytes,4,opt,name=message"`
-	// RFC 3339 date and time when this condition last transitioned
-	LastTransitionTime *metav1.Time `json:"lastTransitionTime,omitempty" protobuf:"bytes,5,opt,name=lastTransitionTime"`
-}
-
-const (
-    // DefaultCertificate denotes that the user has not provided
-    // any custom certificate and the default generated certificate is being
-    // served on the route.
-    DefaultCertificate RouteCertificateConditionType = "Default"
-
-    // CustomCertificate denotes that there is a custom certificate
-    // being served on the route.
-    CustomCertificate RouteCertificateConditionType = "Custom"
-
-    // ManagedCertificate denotes that the route.openshift.io/tls-secret-name
-    // annotation is applied and is used to inject a third-party managed secret
-    // containing the certificate data that is being served on the route.
-    ManagedCertificate RouteCertificateConditionType = "Managed"
-)
-
-```
+All valid and invalid scenarios will be depicted via the existing `RouteIngressCondition`.
 
 #### Variation
 
-##### Alternative to the tls-secret-reference annotation
-
-**_Note_**: This idea has been dropped in favor of a secret reference through an annotation.
-
-The alternative to the annotation was to provide a new API field in the Route API,
-through which the user could provide the certificate reference.
-
-```go
-type CertificateReference struct {
-	// certificate resource name.
-	// +optional
-	Name string `json:"name,omitempty" protobuf:"bytes,1,opt,name=name"`
-}
-
-Type RouteSpec struct {
-	// ...
-
-	CertificateRef CertificateReference `json:"certificateRef,omitempty" protobuf:"bytes,5,opt,name=certificateRef"`
-}
-```
-
-The reasoning for the field was mainly for future proofing the API to handle integrations
-with other third-party certificate management systems. But this API introduces inconsistency
-between how Ingresses are supported by cert-manager via `.spec.tls.secretName` and when using
-Routes, the user would have to provide the Certificate CR reference.
-
-This also adds coupling with external third-party API(s) and limits future enhancement to be
-a more generic solution for integrating with third-party certificate management systems.
-
-##### Alternative to new status condition types
-
-An alternative to introducing 3 new condition types, would be to use `metadata.managedFields`
-on Route to denote to the user which fields are managed by the secret-injector controller and
-server-side apply would be used by the controller during updates to ensure that `.spec.tls.certificate`
-and `.spec.tls.secret` are always managed by the controller as long as the annotation is present.
-
-This although helps in avoiding addition of new condition types will result in a few inconsistencies,
-
-- When transitioning from using managed certificates to manually managing custom certificates,
-  the `.managedFields` will still depict `.spec.tls` as managed by the controller since the update
-  operation done by the user is only on the `.metadata.annotations`.
-- Also since `oc` defaults to `--server-side=false`, mixing CSA and SSA results in ambiguous `.managedFields`.
+N.A
 
 ### Implementation Details/Notes/Constraints [optional]
 
-The new controller (secret-injector) will be responsible for watching routes and processing those
-that have the valid annotation for `tls-secret-name`. This controller will also update
-`.status` of the route to contain the latest information on the certificate in use.
+The router will read the secret referenced in `.spec.tls.certificateRef` if present and
+if the following pre-conditions are met it uses this certificate us configure haproxy.
 
-Since the secrets are the primary resource for the secret-injector controller, the new controller
-will also set up watches and re-sync routes in the same namespace as that of the secret (similar
-to ingress-to-route controller).
+- The secret created should be in the same namespace as that of the route.
+- The secret created is of type `kubernetes.io/tls`.
+- The router serviceaccount must have permission to read this secret particular secret.
+  - The role and rolebinding to provide this access must be provided by the user.
 
-The new controller will watch all routes and process all routes in order to update
-`.status.certificate`. The ones with the annotation will have additional
-logic to update `.spec.tls.certificate` and `.spec.tls.key` based on the following pre-conditions,
+The router will not have any active watches on the secret and will only
+do a single look up when a route has been updated. The router will maintain
+a secret hash in order to be able to reload if the secret content has changed.
 
-- The secret-reference annotation is present.
-- Secret mentioned in the annotation exists and is valid (contains the required fields mentioned [here](#api-extensions))
+The `ServiceAliasConfig` creation logic will be updated in the router to also parse
+the secret referenced in `.spec.tls.certificateRef`. The router will
+use the default certificates only when neither `.spec.tls.certificate` or `.spec.tls.certificateRef`
+are provided.
 
-In scenarios where the user deletes the annotation, it is the controller's
-responsibility to reset `.spec.tls` and this will be driven based on `.status` i.e.
-the latest certificate status condition has to be `ManagedCertificate` and since the required annotation is
-not present this results in the `.spec.tls.certificate` and `.spec.tls.key` being cleared
-out and the `.status` updated to `DefaultCertificate`.
-
-If the user deletes the secret associated with the Route without deleting the
-`route.openshift.io/tls-secret-name` annotation, the secret-injector controller will
-clear out `.spec.tls.certificate` and `.spec.tls.key` since the following pre-conditions
-are met,
-
-- The secret-reference annotation is present.
-- Secret mentioned in the annotation doesn't exist
-- The latest condition on Route's `.status.certificate` has `ManagedCertificate`=`True`
-
-This results in the router using the default certificates that are generated and
-the `.status` updated as well.
-
-As a follow up to the above scenario when the secret-reference annotation added by the user is retained
-by the secret-injector controller and because the referenced secret is not present,
-the controller will publish an `Event` so that the end user is notified regarding this
-switch to using the default generated certificates. The `.status` is also updated to `DefaultCertificate`.
-
-When transitioning from using a managed certificate to manually managed certificate, the user
-is expected to delete the secret-reference annotation and provide new certificate/key pair under `.spec.tls`.
-If the previously used `.spec.tls.certificate` and `.spec.tls.key` is not replaced
-by the user, the secret-injector controller will clear `.spec.tls.certificate` and `.spec.tls.key`
-and route will serve the default certificates that are generated by cluster-ingress-operator.
-If the `.spec.tls.certificate` and `.spec.tls.key` are replaced as well, then the
-controller will update the `.status.certificate` to `CustomCertificate`
-
-The new secret-injector controller will not reconcile Routes that are owned by the
-ingress-to-route controller.
+The route validating admission webhook will verify if the `router` serviceaccount
+route has permissions to read the secret that is referenced at `.spec.tls.certificateRef`.
+This is only performed if `.spec.tls.certificateRef` is non-nil and non-empty.
+In addition to the rbac validation, the admission webhook will also validate if only one
+of the certificate fields (`.spec.tls.certificate` and `.spec.tls.certificateRef`) is specified.
 
 ### Risks and Mitigations
 
-N.A
+The TechPreview feature will not handle secret updates, meaning upon certificate renewal/rotation
+the router will not load the new certificates until the route is updated.
 
 ### Drawbacks
 
-This introduces an inconsistency between Ingress and Route CRD with respect to how
-a secret reference can be provided with the certificate data. The ingress has a field
-`.spec.tls.secretName` where as the Route will have an annotation.
+The user will need to manually create, provide and maintain the rbac required by the
+router so that it can access secrets securely. This becomes tedious when users have
+1000s of Routes.
 
 ## Design Details
 
 ### Open Questions [optional]
 
-1. Does this warrant making changes to the ingress-to-route controller in how
-   `.spec.tls.secretName` is processed? Currently, the controller reads the secret
-   data and copies it over to the Route that is created. Since this enhancement
-   introduces a difference between managed certificate provided via secrets and  
-   manually provided secrets, this distinction isn't possible with Routes created
-   via Ingresses. [CLOSED]
-
-   - Proposed change
-     The ingress-to-route controller will also process the secret-reference annotation and if
-     present copies it over to the route that is created. This annotation will take
-     precedence over `.spec.tls.secretName` and this offers enough distinction between
-     third-party/manual certificate management.
-
-**Answer**: The behaviour of the ingress-to-route controller will be retained as is and
-no changes will be done.
-
-2. How/where to implement e2e tests for [route-controller-manager](https://github.com/openshift/route-controller-manager)?
-   [CLOSED]
-
-**Answer**: The e2e tests will be added to openshift/origin.
+- Performance testing of openshift-router?
+- What does taking Tech Preview to GA look like?
+- Do we make changes to the ingress-to-route controller as well?
 
 ### Test Plan
 
-This enhancement will be tested in isolation of cert-manager-operator as part of
-core OCP payload. This will also be tested with cert-manager-operator as part of the
-operators e2e test suite.
+Update router tests in openshift/origin and supplement all existing certificate related tests
+with new tests utilizing `.spec.tls.certificateRef`. Ensure the tests cover the following scenarios,
 
-1. Test Route API without interfacing with Ingresses
-
-   a. Create a edge terminated route that is using default certificates.
-   b. Update route with the secret-reference annotation and ensure the `.spec.tls` and `.status`
-   is updated.
-   c. Verify that the associated openshift routers are also serving the updated
-   certificates and not the default certificates.
-   d. Update certificate data and verify if the certificates served by the router
-   are updated as well.
-   d. Delete the annotation and ensure that the route `.spec.tls` and `.status`
-   denotes the usage of default certificates. Also verify the associated
-   openshift router is serving the default certificates.
-
-Various other transitions, `Custom`->`Managed`-`Custom` will also be tested.
+- Updating routes from default certificates to certificate referenced via secrets and vice-versa.
 
 ### Graduation Criteria
 
-This is a user facing change and will directly go to GA. This feature requires an
-update to Openshift Docs.
+This feature will initially be released as Tech Preview only.
 
 #### Dev Preview -> Tech Preview
 
-N/A. This feature will go directly to GA.
+N/A. This feature will go directly to Tech Preview.
 
 #### Tech Preview -> GA
 
-N/A. This feature will go directly to GA.
+The router will need additional logic to handle secret updates using single item
+list/watch for every referenced secret. This pattern needs to be brought over
+from kubelet's [secret_manager.go](https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/secret/secret_manager.go)
+
+Once this pattern is added to the router, the test plan needs to be updated
+to cover all scenarios involving updating referenced secrets.
+
+The ingress-to-route controller in the route-controller-manager will need to
+be updated to ensure that the created routes use `.spec.tls.certificateRef`
+instead of `.spec.tls.certificate`. Additional tests will need to be added into
+o/origin for this scenario.
 
 #### Removing a deprecated feature
 
@@ -396,15 +247,14 @@ N/A.
 
 ### Upgrade / Downgrade Strategy
 
-On downgrades, all routes using `route.openshift.io/tls-secret-name` annotation will continue to use the custom certificates
-indefinitely unless the route is manually edited and the `.spec.tls` is updated.
+On downgrades, all routes specifying `.spec.tls.certificateRef` will switch over to use the default certificates
+unless the route is manually edited and the `.spec.tls` is updated.
+
+Upgrade strategy not considered since this feature is going to be added as TechPreviewNoUpgrade.
 
 ### Version Skew Strategy
 
-This enhancement isn't affected by version skew of core Kubernetes components
-during updates/upgrades. The new controller will be capable to re-synchronize
-the required components if required and without this controller the annotation
-would basically do nothing.
+This feature will be added as TechPreviewNoUprade.
 
 ### Operational Aspects of API Extensions
 
@@ -417,16 +267,9 @@ adds a hard dependency in order of operation. In scenarios where the secret has 
 by third-party solutions like cert-manager, the route would not be successfully created due
 to the dependency on the route.
 
-> A solution to this could be that upon failure to use the secret due to various reasons,
-> the controller defaults to using the default generated certificates and updating the route
-> status appropriately. The controller also publishes an event indicating the switch has been made.
-
 #### Support Procedures
 
-The new introduced `RouteCertificateConditionType` types will provide the required information into
-the current state of route objects with respect to certificates. While using third-party solutions
-like cert-manager for certificate management the `RouteCertificateCondition` will indicate which type
-of certificate is associated with the route.
+N.A
 
 ## Implementation History
 
@@ -434,7 +277,15 @@ N.A
 
 ## Alternatives
 
-N.A
+An alternative proposal is to introduce a new controller (secret-injector) in [route-controller-manager](https://github.com/openshift/route-controller-manager)
+to manage a new annotation (secret-reference) on the Route object. This annotation
+enables the users to provide a reference to a Secret containing the serving cert/key
+pair that will be injected to `.spec.tls` and will be served by OpenShift router.
+This annotation will be given a higher preference if route CR also has `.spec.tls.certificate`
+and `.spec.tls.key` fields set.
+
+This approach was dropped after much deliberation as it introduces a confused deputy problem
+as well as opens a security flaw where a user could read the contents of an arbitrary secret.
 
 ## Infrastructure Needed [optional]
 
