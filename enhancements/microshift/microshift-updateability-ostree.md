@@ -157,11 +157,13 @@ N/A
 Every action related to procedure described in this enhancement is 
 performed after system's boot rather than immediately before shutdown. 
 Greenboot's healthchecks, green and red scripts are executed independent of MicroShift's processes.
-Actions related to backup, restore, and data migration may be performed with MicroShift 
-partially running, i.e. only etcd and kube-apiserver are running.
 
-Only one backup of MicroShift data will be stored at a given moment
-due to high probability of devices having limited storage.
+Actions related to backup and restore will be performed with MicroShift components not
+running to protect data integrity. Shortly after, etcd and kube-apiserver will be started
+to perform a data migration, if needed.
+
+Edge devices are usually resource constrained, however to provide ability of rolling back,
+backup of MicroShift data will be kept per ostree deployment existing on the device.
 
 ### Integration with greenboot
 
