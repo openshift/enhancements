@@ -269,8 +269,10 @@ migration).
 Restore operation works the same, just in the other direction - copying contents of 
 `/var/lib/microshift.bak/ostree-deploy-id/` to `/var/lib/microshift/`.
 
-End user documentation needs to include guidance on setting up filesystem to fullfil 
-requirements for using copy-on-write (e.g. making sure some filesystem options are not disabled).
+End user documentation needs to include:
+- guidance on setting up filesystem to fullfil requirements for using copy-on-write
+  (e.g. making sure some filesystem options are not disabled).
+- remark that in case of missing CoW support, full backup will be made.
 
 ### Contents of MicroShift data backup
 
