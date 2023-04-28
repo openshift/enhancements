@@ -256,10 +256,15 @@ func getAuthorizerForResource(config Config) (autorest.Authorizer, error) {
 
 #### Mutating admission webhook
 
-CCO will deploy and lifecycle the [Azure Workload Identity mutating admission webhook](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html) on Azure clusters such that users can annotate workload `ServiceAccounts` with Managed Identity details necessary for creating clients. When the mutating admission webhook finds these annotations on a
-`ServiceAccount` referenced by a pod being created, environment variables are set for the pod for the `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE`.
+CCO will also deploy and lifecycle the [Azure Workload Identity mutating admission webhook](https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html) on Azure clusters such that user workloads can annotate workload `ServiceAccounts` with Managed Identity details necessary for creating clients. When the mutating admission webhook finds these annotations on a
+`ServiceAccount` referenced by a pod being created, environment variables are set for the pod for the `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE`. The webhook also projects the service account token to the well-known path. Users should ensure that the `ServiceAccount` is annotated prior to creation of any pod requiring authentication or otherwise ensure that pods are
+recreated afterwards.
 
 This will be similar to how CCO deploys the [AWS Pod Identity webhook](https://github.com/openshift/aws-pod-identity-webhook) which we have forked for use by user workloads.
+
+OpenShift's own ClusterOperators do not leverage the webhook, they are expected to natively support bound service account tokens.
+
+
 
 #### Variation [optional]
 
