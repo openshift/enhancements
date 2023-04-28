@@ -48,10 +48,11 @@ MicroShift is intended to be a part of Red Hat Device Edge
 which is based on RHEL For Edge which features ostree and as such
 provides rollbacks to go back to previous ostree deployment.
 Even though, OpenShift does not support downgrade or rollback,
-MicroShift must support it in some form. Explicit downgrade 
-will not be supported, and rollback will be supported only when
-newer ostree commits is unhealthy and backup consistent with previously
-ran MicroShift is present.
+MicroShift must support it in some form.
+Explicit downgrade for Y versions will not be supported, 
+and rollback will be supported only when newer ostree commit 
+is unhealthy and backup consistent with previously ran 
+MicroShift is present.
 
 To allow for such operations, we need to define how we'll
 achieve that goal. We can define several areas we need to focus on:
@@ -64,9 +65,8 @@ certain version of MicroShift.
 
 * As a MicroShift administrator, I want to safely update MicroShift
   so that I can get bug fixes, new features, and security patches.
-* As a MicroShift administrator, I want automated backups of 
-  MicroShift data so in case of a greenboot failure system will rollback
-  and backup will be restored.
+* As a MicroShift administrator, I want my system to roll back 
+  to a previous good configuration when greenboot fails.
 
 ### Goals
 
@@ -228,8 +228,8 @@ from ostree. It results in requirement of keeping backup for each deployment sep
 regardless of the MicroShift version they feature.
 
 Because difference between two deployments might not be MicroShift itself, but applications
-that run on top of MicroShift, MicroShift's backups are tied to ostree deployments rather 
-than MicroShift versions.
+that run on top of MicroShift from images and manifests embedded in the ostree deployment,
+MicroShift's backups are tied to ostree deployments rather than MicroShift versions.
 
 Decision whether to backup or restore is based on file persisted during previous boot
 (see "Integration with greenboot").
@@ -291,7 +291,7 @@ Based on reasons above, it was decided that whole `/var/lib/microshift` will be 
 ### MicroShift version metadata persistence
 
 When MicroShift is up and running healthy, green script will persist version into a file 
-within data dir, e.g. `/var/lib/microshift/.version`:
+within data dir, e.g. `/var/lib/microshift/version`:
 ```plaintext
 4.14.0
 ```
@@ -858,7 +858,7 @@ flowchart TD
   restore-ok? -- Yes --> version?
   restore-ok? -. No .-> exit
 
-  version? -- Versions are the same                 --> run
+  version? -- X.Y match                             --> run
   version? -. Binary is older                       .-> exit
   version? -- Binary is newer                       --> do-data-migration
   version? -. Upgrade is blocked                    .-> exit
