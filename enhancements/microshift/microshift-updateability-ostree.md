@@ -278,13 +278,16 @@ End user documentation needs to include:
 
 ### Contents of MicroShift data backup
 
-- Etcd database shall be backed up fully, rather just creating a snapshot to preserve
+- etcd database shall be backed up fully, rather just creating a snapshot to preserve
   history and other data that could be lost.
 - Kubeconfigs and certificates needs to be backup and restored in order to keep communication working.
   MicroShift could regenerate them, but it would mean that kubeconfigs used to remotely access cluster
   will become invalid.
   - Following approach might mean that certificates might need to be amended to update the
     Subject Alternative Names (SAN) list.
+- Versions of binaries don't impact decision whether to perform snapshot or copy whole data
+  directory because "newer" version will need to read the existing data anyway to
+  perform the data migration.
 
 Based on reasons above, it was decided that whole `/var/lib/microshift` will be backed up.
 
