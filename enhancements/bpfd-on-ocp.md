@@ -358,6 +358,74 @@ From Enhancement Proposal 1133:
   customers away (and would be awkward, messaging-wise: "BPF is great! You can't
   use it!").
 
+#### Mitigating the Trampoline Pod Threat
+
+The [Trampoline Pod Threat](https://drive.google.com/file/d/1ohMZ4DnKMvE2GIu6CO5v4n760N_xvTxE/view?usp=sharing)
+can occur when privileged pods contain elevated kubernetes cluster RBAC
+permissions. Once a node and ensuing pod is exploited, the privileged
+credentials can be used to escape ("bounce") a single node's isolation and
+compromise other nodes in the cluster.
+
+This threat can be mitigated by removing functionality from and limiting the
+permissions of daemonsets. The following describes bpfd's strategy for combating
+this threat.
+
+Bpfd's deployment includes a daemonset with two containers, bpfd and bpfd-agent,
+which is managed via a centralized operator deployment.  It also introduces two
+new CRDs which are described [further above](#api-extensions). Specifically the
+BpfProgramConfig CRD can be used to alter bpfd state across the entire cluster,
+while the BpfProgram CRD is only used to store per node metadata. 
+
+Below are the kubebuilder tags which are used to generate RBAC privileges used
+by both the bpfd-daemon and bpfd-operator service accounts.
+
+bpfd-operator: 
+
+```go
+//+kubebuilder:rbac:groups=bpfd.io,resources=bpfprograms,verbs=get;list;watch
+//+kubebuilder:rbac:groups=bpfd.io,resources=bpfprogramconfigs,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=bpfd.io,resources=bpfprogramconfigs/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=bpfd.io,resources=bpfprogramconfigs/finalizers,verbs=update
+//+kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
+//+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
+//+kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete
+```
+
+bpfd-daemon:
+
+```go
+//+kubebuilder:rbac:groups=bpfd.io,resources=bpfprograms,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=bpfd.io,resources=bpfprograms/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=bpfd.io,resources=bpfprograms/finalizers,verbs=update
+//+kubebuilder:rbac:groups=bpfd.io,resources=bpfprogramconfigs,verbs=get;list;watch
+//+kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
+//+kubebuilder:rbac:groups=core,resources=secrets,namespace=bpfd,verbs=get
+```
+
+For the purposes of mitigating the trampoline pod threat we are most concerned
+with the daemonset permissions, since with privileged daemonsets attackers are
+guaranteed access to a trampoline pod regardless of which node is compromised.
+Therefore we will not analyze the "bounciness" of the bpfd-operator RBAC here.
+
+In the bpfd daemonset, the bpfd-agent container reads user input from the global 
+bpfProgramConfig object and then writes per node state to its own 
+bpfProgram Object. It also has permissions to get, list, and watch nodes for
+node selection labels and the ability to get secrets **only from the bpfd namespace**
+in order to authenticate with private remote image registries.
+
+The privileges granted to the bpfd-daemon service account around bpfd specific
+APIs are secure.  The bpfd-agent is unable to write to a bpfProgramConfig object
+which minimizes it's "bounciness" since that's the only bpfd object which could
+effect other nodes in the cluster.  Same goes for the node privilege, which only
+allows the service account token to observe nodes and node events. The
+permission to get secrets is the one with highest risk for "bounciness"; however
+this is mitigated by ensuring the privilege is contained only to the "bpfd"
+namespace.
+
+As feature development continues bpfd's RBAC may expand even further, we will
+continue to analyze + document any critical permissions granted to containers in
+the bpfd deployment.
+
 ### Drawbacks
 
 TBD
