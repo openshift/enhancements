@@ -358,7 +358,7 @@ From Enhancement Proposal 1133:
   customers away (and would be awkward, messaging-wise: "BPF is great! You can't
   use it!").
 
-#### A Section on mitigating the Trampoline Pod Threat
+#### Mitigating the Trampoline Pod Threat
 
 The [Trampoline Pod Threat](https://drive.google.com/file/d/1ohMZ4DnKMvE2GIu6CO5v4n760N_xvTxE/view?usp=sharing)
 can occur when privileged pods contain elevated kubernetes cluster RBAC
