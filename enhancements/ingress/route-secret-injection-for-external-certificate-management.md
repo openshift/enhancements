@@ -13,9 +13,9 @@ approvers:
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - '@joelspeed'
 creation-date: 2022-12-13
-last-updated: 2023-04-24
+last-updated: 2023-05-03
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - https://issues.redhat.com/browse/CM-16
+  - https://issues.redhat.com/browse/CM-815
 ---
 
 # Route Secret Injection For External Certificate Management
@@ -61,6 +61,9 @@ certificate data via a secret reference.
 - As an Openshift engineer, I want to be update the router so that it is able read secrets directly
   if all the preconditions have been met by the router serviceaccount.
 
+- As an OpenShift engineer, I want to update the route admission webhook to add new validations
+  required for `.spec.tls.certificateRef`.
+
 - As an OpenShift engineer, I want to be able to update Route API so that I can integrate
   OpenShift Routes with third-party certificate management solutions like cert-manager.
 
@@ -70,12 +73,14 @@ certificate data via a secret reference.
 ### Goals
 
 - Provide users with a configurable option in Route API to reference externally managed certificates via secrets.
+- Provide smooth roll out of new certificates on OpenShift router when referenced certificates
+  are renewed (secret containing the certificate is updated).
 
 ### Non-Goals
 
 - Provide certificate life cycle management controls on the Route API (expiryAfter, renewBefore, etc).
-- Provide smooth roll out of new certificates on OpenShift router when referenced certificates
-  are renewed (secret containing the certificate is updated).
+- Modify ingress-to-route controller behaviour to use `.spec.tls.certificateRef`
+- Extend this feature to cover CA certificate or destination CA certificate in the Route API.
 
 ## Proposal
 
@@ -87,19 +92,12 @@ and served by OpenShift router.
 
 ### Workflow Description
 
-End users have 2 possible variations for the creation of the route:
+The following workflow describes the integration with third party
+certificate management solutions like cert-manager with the certificate
+reference field described under [API Extensions](#api-extensions).
 
-- Create a route for the user workload and this is completely managed by the end user.
-- Create an ingress for the user workload and a managed route is created automatically
-  by the ingress-to-route controller. [Depends on the open question]
-
-Both these workflows will support integrating with third party certificate management
-solutions like cert-manager with the secret-reference annotation described under [API Extensions](#api-extensions).
-
-**When a Route is directly used to expose user workload**
-
-- The end user must have generated the serving certificate as a pre requisite
-  using third-party systems like cert-manager.
+- The end user must have generated the serving certificate generated
+  as a pre requisite using third-party systems like cert-manager.
 - In cert-manager's case, the [Certificate](https://cert-manager.io/docs/usage/certificate/#creating-certificate-resources)
   CR must be created in the same namespace where the Route is going to be created.
 - The end user must create a role and in the same namespace as the secret containing the certificate from earlier,
@@ -117,18 +115,6 @@ solutions like cert-manager with the secret-reference annotation described under
 - If the secret that is referenced exists and has a successfully generated
   cert/key pair, the router will serve this certificate if all preconditions are met.
 
-**When an Ingress is used to expose user workload**
-
-- The end user must have generated the serving certificate as a pre requisite
-  using third-party systems like cert-manager.
-- In cert-manager's case, the [Certificate](https://cert-manager.io/docs/usage/certificate/#creating-certificate-resources) CR must be created in the same namespace
-  where the Ingress is going to be created.
-- To expose a user workload, a new Ingress with the generated secret
-  referenced in `.spec.tls.secretName` needs to be created.
-- If the secret CR that is referenced exists and has a successfully generated
-  cert/key pair, the ingress-to-route controller adds this secret name to
-  the created route `.spec.tls.certificateRef`.
-
 #### Variation [optional]
 
 N.A
@@ -144,12 +130,11 @@ type TLSConfig struct {
 
     // certificateRef provides certificate contents as a secret reference.
     // This should be a single serving certificate, not a certificate
-	// chain. Do not include a CA certificate.
-
+    // chain. Do not include a CA certificate.
     //
     // +kubebuilder:validation:Optional
-	// +openshift:enable:FeatureSets=TechPreviewNoUpgrade
-	// +optional
+    // +openshift:enable:FeatureSets=TechPreviewNoUpgrade
+    // +optional
 	CertificateRef *corev1.LocalObjectReference `json:"certificateRef,omitempty" protobuf:"bytes,7,opt,name=certificateRef"`
 }
 ```
@@ -171,53 +156,78 @@ N.A
 ### Implementation Details/Notes/Constraints [optional]
 
 The router will read the secret referenced in `.spec.tls.certificateRef` if present and
-if the following pre-conditions are met it uses this certificate us configure haproxy.
+if the following pre-conditions (validated in the admission webhook) are met it uses
+this certificate us configure haproxy.
 
 - The secret created should be in the same namespace as that of the route.
 - The secret created is of type `kubernetes.io/tls`.
 - The router serviceaccount must have permission to read this secret particular secret.
   - The role and rolebinding to provide this access must be provided by the user.
 
-The router will not have any active watches on the secret and will only
-do a single look up when a route has been updated. The router will maintain
-a secret hash in order to be able to reload if the secret content has changed.
+The router will bootstrap a watch based secret manager to ensure it can keep the
+certificate/secret up-to-date. This means the router pod will maintain active watches
+for every secret that is referenced by a route.
+
+Every active watch will be linked to a route, meaning the watch based secret manager
+will be linked to the lifecycle of the route. For every new route that is created,
+the secret manager will start a watch if the route uses `.spec.tls.certificateRef`.
+For every update route event, the secret manager only increments the reference count.
+If a route is deleted, the secret manager will unregister the route and teardown the
+watch associated with it.
 
 The `ServiceAliasConfig` creation logic will be updated in the router to also parse
 the secret referenced in `.spec.tls.certificateRef`. The router will
 use the default certificates only when neither `.spec.tls.certificate` or `.spec.tls.certificateRef`
 are provided.
 
-The route validating admission webhook will verify if the `router` serviceaccount
-route has permissions to read the secret that is referenced at `.spec.tls.certificateRef`.
-This is only performed if `.spec.tls.certificateRef` is non-nil and non-empty.
-In addition to the rbac validation, the admission webhook will also validate if only one
-of the certificate fields (`.spec.tls.certificate` and `.spec.tls.certificateRef`) is specified.
+Extend the `ExtendedValidateRoute()` in the router to also cover validating secret and
+its content. In addition to this, the route validating admission webhook will verify if
+the `router` serviceaccount route has permissions to read the secret that is
+referenced at `.spec.tls.certificateRef`. This is only performed if `.spec.tls.certificateRef`
+is non-nil and non-empty. In addition to the rbac validation, the admission webhook
+will also validate if only one of the certificate fields (`.spec.tls.certificate`
+and `.spec.tls.certificateRef`) is specified.
 
 ### Risks and Mitigations
 
-The TechPreview feature will not handle secret updates, meaning upon certificate renewal/rotation
-the router will not load the new certificates until the route is updated.
+TBD
 
 ### Drawbacks
 
 The user will need to manually create, provide and maintain the rbac required by the
 router so that it can access secrets securely. This becomes tedious when users have
-1000s of Routes.
+100s of Routes.
+
+The workaround for this is to document various levels of rbac that can be provided,
+
+- Grant router service account access to secret by secret-name (explicit rbac)
+- Grant router service account access to all secrets in a fixed namespace (implicit rbac)
+
+The above variations need to be documented for the end user as part of OpenShift documentation.
 
 ## Design Details
 
 ### Open Questions [optional]
 
-- Performance testing of openshift-router?
-- What does taking Tech Preview to GA look like?
+- Performance testing of openshift-router in tech-preview? Is there
+  a workflow present where we can gather some early metrics (memory, cpu)? This will help in
+  preemptively addressing performance concerns before going GA.
+
 - Do we make changes to the ingress-to-route controller as well?
+  > The ingress-to-route behaviour will remain as is i.e. it will not make use of
+  > the newly introduced field.
 
 ### Test Plan
 
 Update router tests in openshift/origin and supplement all existing certificate related tests
 with new tests utilizing `.spec.tls.certificateRef`. Ensure the tests cover the following scenarios,
 
-- Updating routes from default certificates to certificate referenced via secrets and vice-versa.
+- Updating routes from default certificates to certificate referenced via
+  secrets and vice-versa.
+- Updating secret/certificate referenced in routes and verify serving
+  certificate has been updated.
+- Updating secret/certificate with incorrect information and verify route
+  is not admitted due to validation failure. (eg: mismatched hostnames)
 
 ### Graduation Criteria
 
@@ -227,19 +237,19 @@ This feature will initially be released as Tech Preview only.
 
 N/A. This feature will go directly to Tech Preview.
 
-#### Tech Preview -> GA
+#### Tech Preview -> GA (Future work)
 
-The router will need additional logic to handle secret updates using single item
-list/watch for every referenced secret. This pattern needs to be brought over
-from kubelet's [secret_manager.go](https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/secret/secret_manager.go)
-
-Once this pattern is added to the router, the test plan needs to be updated
-to cover all scenarios involving updating referenced secrets.
+The router will need to undergo performance testing as part of OCP payload
+to ensure the memory implications of creating and maintains all the active watches
+is verified to be efficient.
 
 The ingress-to-route controller in the route-controller-manager will need to
 be updated to ensure that the created routes use `.spec.tls.certificateRef`
 instead of `.spec.tls.certificate`. Additional tests will need to be added into
 o/origin for this scenario.
+
+This behaviour should be extended to both `.spec.tls.caCertificate` and
+`.spec.tls.destinationCACertificate` to ensure uniformity and improve security.
 
 #### Removing a deprecated feature
 
@@ -258,14 +268,42 @@ This feature will be added as TechPreviewNoUprade.
 
 ### Operational Aspects of API Extensions
 
-N.A
+Route admission webhook will be modified to validate the following scenarios,
+
+- Check if secret/certificate referenced under `.spec.tls.certificateRef` exists.
+- Check if secret/certificate referenced under `.spec.tls.certificateRef` is of the correct type.
+- Check if router service account has permissions to read referenced secret.
+- Check if route only one of the fields set,
+  - `.spec.tls.certificate` and `.spec.tls.key`
+  - `.spec.tls.certificateRef`
+
+SLOs TBD 
 
 #### Failure Modes
 
-When using routes with third-party certificate management solutions like cert-manager, this
-adds a hard dependency in order of operation. In scenarios where the secret has not been created
-by third-party solutions like cert-manager, the route would not be successfully created due
-to the dependency on the route.
+##### Referenced secret not present
+
+In scenarios where the secret has not been created by third-party solutions
+like cert-manager, the route would not be successfully created due to the
+dependency. This route will be rejected by the route admission webhook with an
+`FieldValueNotFound` error and will contain the reason as `referenced secret not present`.
+
+In addition to this validation, the router will also validate the same to
+cover an edge case. If a route fails this validation, it is not processed
+further and the error will be reflected on the route `.status` with the same reason.
+
+##### Insufficient router permission
+
+As part of the route admission webhook, if the router does not have permission
+to read the secret referenced under `.spec.tls.certificateRef`, the route is
+rejected with an `FieldValueForbidden` error and reason as `insufficient permission
+to read resource`.
+
+##### Incorrect secret type
+
+As part of `ExtendedValidateRoute()`, the router validates the content of the secret
+that is referenced under `.spec.tls.certificateRef`. Failure will result in the route
+not being admitted and this will reflect under route `.status` as `FieldValueInvalid`.
 
 #### Support Procedures
 
@@ -277,6 +315,8 @@ N.A
 
 ## Alternatives
 
+### Secret Injector
+
 An alternative proposal is to introduce a new controller (secret-injector) in [route-controller-manager](https://github.com/openshift/route-controller-manager)
 to manage a new annotation (secret-reference) on the Route object. This annotation
 enables the users to provide a reference to a Secret containing the serving cert/key
@@ -284,8 +324,15 @@ pair that will be injected to `.spec.tls` and will be served by OpenShift router
 This annotation will be given a higher preference if route CR also has `.spec.tls.certificate`
 and `.spec.tls.key` fields set.
 
-This approach was dropped after much deliberation as it introduces a confused deputy problem
-as well as opens a security flaw where a user could read the contents of an arbitrary secret.
+> This approach was dropped after much deliberation as it introduces a confused deputy problem
+> as well as opens a security flaw where a user could read the contents of an arbitrary secret.
+
+### Extend oc CLI
+
+As an alternative to requiring the user create the role and rolebinding to grant the router
+access to the secrets, this behaviour can be baked into `oc create route`. This will reduce
+the number of manual steps and will be less error prone. But here's the catch, how widely
+is `oc create route` used and do users who manage 100s of routes really use it.
 
 ## Infrastructure Needed [optional]
 
