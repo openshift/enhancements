@@ -418,6 +418,7 @@ const (
 )
 
 // CloudControllerManagerStatus holds the state of Cloud Controller Manager (a.k.a. CCM or CPI) related settings
+// +kubebuilder:validation:XValidation:rule="has(self.state) == has(oldSelf.state)",message="state cannot be added or removed once set"
 type CloudControllerManagerStatus struct {
     // state determines whether or not an external Cloud Controller Manager is expected to
     // be installed within the cluster.
@@ -427,14 +428,14 @@ type CloudControllerManagerStatus struct {
     // preventing them from running workloads until they are initialized by the cloud controller manager.
     // When omitted or set to "None", new nodes will be not tainted
     // and no extra initialization from the cloud controller manager is expected.
-    // +kubebuilder:default:=""
-    // +default=""
     // +kubebuilder:validation:Enum="";External;None
+    // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="state is immutable once set"
     // +optional
     State CloudControllerManagerState `json:"state"`
 }
 
 // ExternalPlatformStatus holds the current status of the generic External infrastructure provider.
+// +kubebuilder:validation:XValidation:rule="has(self.cloudControllerManager) == has(oldSelf.cloudControllerManager)",message="cloudControllerManager added or removed once set"
 type ExternalPlatformStatus struct {
     // CloudControllerManager contains settings specific to the external Cloud Controller Manager (a.k.a. CCM or CPI)
     // +optional
