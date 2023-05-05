@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2022-07-26
-last-updated: 2022-09-14
+last-updated: 2023-05-05
 tracking-link: 
   - https://issues.redhat.com/browse/ODC-5897
 status: implementable
@@ -69,16 +69,22 @@ only to users with specific permissions.
 Additional perspectives can be dynamically added with the 
 [Perspective extension](https://github.com/openshift/console/blob/master/frontend/packages/console-dynamic-plugin-sdk/src/extensions/perspectives.ts).
 
+#### Story 4
+
+As a cluster admin, I want to disable the guided tour of a perspective.
+The main purpose for that in [RFE-3883](https://issues.redhat.com/browse/RFE-3883) was to show an alternative guided tour to the user.
+
 ### Goals
 
 - Allow cluster admins to hide the user perspectives.
 - Provide a way that cluster admins can do this based on resource permissions (RBAC).
+- Enable them to disable just the default guided tour.
 
 ### Non-Goals
 
 - Validating the console resource in the operator and inform the cluster admins with an error because the operator
 doesn't know the available perspectives provided by the console plugins.
-- Allow cluster admins to customize the navigation menu along with perspectives for users or groups.
+- Allow cluster admins to customize the navigation menu along with perspectives for users or groups. Checkout `pinned-resources.md` for that customization option.
 
 ## Proposal
 
@@ -127,32 +133,26 @@ To disable perspective for users with limited permissions we need a list of opti
 Each perspective conforms to the following schema:
 
 - `id: string` , defines the id of perspective to disable. Incorrect or unknown ids will be ignored.
-
 - `visibility: object` , defines the state of perspective along with access review checks if needed for that perspective.
+   - `state: Enabled/Disabled/AccessReview` , defines the perspective is enabled or disabled or access review check is required.
+   - `accessReview: object`, defines required and missing access review checks.
+      - `required: authV1.ResourceAttributes[]` , defines a list of permission checks. The perspective will only be shown when all checks are successful.
+      - `missing: authV1.ResourceAttributes[]` , defines a list of permission checks. The perspective will only be shown when at least one check fails.
 
-- `state: Enabled/Disabled/AccessReview` , defines the perspective is enabled or disabled or access review check is required.
+      `required` and  `missing` can work together esp. in the case where you 
+      want to show another perspective to users without specific permissions.
 
-// +optional
-- `accessReview: object`, defines required and missing access review checks.
+   If `state: AccessReview`, either of `required` or  `missing` should be present.
 
-// +optional
-- `required: authV1.ResourceAttributes[]` , defines a list of permission checks. The perspective will only be shown when all checks are successful.
+   For example, a plugin or customer adds a new `Monitoring` perspective, which works only with specific permissions.
 
-// +optional
-- `missing: authV1.ResourceAttributes[]` , defines a list of permission checks. The perspective will only be shown when at least one check fails.
+   The admin can then define that this perspective is shown with some `required` permissions.
 
-`required` and  `missing` can work together esp. in the case where you 
-want to show another perspective to users without specific permissions.
+   But to show another limited `Monitoring` (same name, different ID!) perspective to all the others, 
+   the admin can define a `missing` check so that the users without access to 
+   specific resources see it - but the users with access to the first `Monitoring` perspective doesn't see both.
 
-If `state: AccessReview`, either of `required` or  `missing` should be present.
-
-For example, a plugin or customer adds a new `Monitoring` perspective, which works only with specific permissions.
-
-The admin can then define that this perspective is shown with some `required` permissions.
-
-But to show another limited `Monitoring` (same name, different ID!) perspective to all the others, 
-the admin can define a `missing` check so that the users without access to 
-specific resources see it - but the users with access to the first `Monitoring` perspective doesn't see both.
+- `guidedTour: Enabled/Disabled` , defines if the guided tour of this perspective will be shown (`Enabled`) or not (`Disabled`).
 
 ### API Extensions
 
@@ -210,6 +210,24 @@ spec:
                 resource: clusterroles
                 verb: list
 ```
+
+Example yaml to disable the guided tours:
+
+```yaml
+apiVersion: operator.openshift.io/v1
+kind: Console
+metadata: 
+  name: cluster
+  ...
+spec:
+  customization:
+    perspectives:
+      - id: admin
+        guidedTour: Disabled
+      - id: dev
+        guidedTour: Disabled
+```
+
 ### Risks and Mitigations
 
 **Default perspective**: When all the perspectives are hidden from a user or for all users, we always show Admin perspective by default and if admin has to 
