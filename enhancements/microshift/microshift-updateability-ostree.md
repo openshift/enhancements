@@ -14,7 +14,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - None
 creation-date: 2023-04-14
-last-updated: 2023-04-14
+last-updated: 2023-05-05
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/USHIFT-518
 see-also:
@@ -143,8 +143,7 @@ N/A
 
 ### Definitions
 
-- **ostree commit**: TODO
-- **ostree deployment**: TODO (Remember, new deployment might include K8s apps not previously running)
+- **ostree deployment**: ostree commit present on disk and available as boot entry
 - **Rollback**: booting older (that already ran on the device) ostree deployment - either due to greenboot or manual intervention
 - **Backup**: backing up `/var/lib/microshift`
 - **Restore**: restoring `/var/lib/microshift`
@@ -165,6 +164,79 @@ to perform a data migration, if needed.
 Edge devices are usually resource constrained, however to provide ability of rolling back,
 backup of MicroShift data will be kept per ostree deployment existing on the device.
 
+### Phases of execution
+
+1. `microshift admin pre-run`
+   - Executed as separate systemd unit (`microshift-ostree-pre-run.service`)
+   - If fails, it blocks start up of `microshift.service`
+   - Performs
+     - Backup or restore
+     - Data migration (if needed)
+1. `microshift run`
+   - `microshift.service` systemd unit
+   - Persists version right after starting
+
+In parallel:
+1. Greenboot healthcheck
+   - Check health of MicroShift
+1. Greenboot scripts (red or green) depending on healthcheck
+   - Persist health of the system (used during next pre-run to determine actions)
+   
+### Deployments health history
+
+MicroShift will keep history of deployments health in `/var/lib/microshift-backups/health.json`.
+It fulfils two functions: persist data across boots and allow deciding on action to perform for
+MicroShift data (backup, restore, delete or leave as is).
+
+```json
+{
+  "deployments": [
+    {
+      "id": "rhel-d1",
+      "microshift": "unknown | healthy | unhealthy",
+      "system": "unknown | healthy | unhealthy",
+      "last_boot": "yyyy-mm-dd HH:MM:SS"
+    },
+    {
+      "id": "rhel-d0",
+      "microshift": "unknown | healthy | unhealthy",
+      "system": "unknown | healthy | unhealthy",
+      "last_boot": "yyyy-mm-dd HH:MM:SS"
+    }
+  ]
+}
+```
+
+- `last_deployment` is an ID of a deployment during which file was last updated
+- `deployments` stores health during specific deployment
+
+### MicroShift version persistence
+
+When data migration is complete or MicroShift is about to start the cluster,
+it will persist version of `microshift` executable and ID of current
+ostree deployment to `/var/lib/microshift/version.json`.
+Purpose of these value is to answer "with what MicroShift version the data is compatible with,
+regardless whether it was healthy or unhealthy".
+MicroShift version will be used to decide if data migration can be skipped, attempted, or should be blocked.
+Deployment ID will be used during more complicated procedures related to restoring or backing up data.
+
+Example of `/var/lib/microshift/version.json`:
+```json
+{
+  "microshift": "4.14.0",
+  "deployment": "rhel-d1"
+}
+```
+
+### Action log
+
+MicroShift will keep a log of important actions during execution in
+`/var/lib/microshift-backups/actions.log`. It will store history log about actions related to
+backing up, restoring, migrating, starting, checking health, and so one for support purposes.
+
+Specifics such as log messages and form in codebase are an implementation detail and out of scope
+of the enhancement. 
+
 ### Integration with greenboot
 
 [greenboot](https://github.com/fedora-iot/greenboot) is "Generic Health Checking Framework for systemd".
@@ -179,12 +251,10 @@ In general, greenboot after boot runs scripts that are verifying if system is he
 and, depending on result, runs either set of green (healthy) or red (unhealthy) scripts.
 Healthy system can be also referred to as "green boot", whereas unhealthy as "red boot".
 
-We propose to use "green" and "red" scripts to decide if MicroShift's data 
-should be backed up (green) or restored (red). For reasons mentioned in section 
-"Alternatives - Performing backup on shutdown" it was concluded that both 
-backup and restore should happen on system start, rather than shutdown.
-It means that green or red script persists an action that will be performed 
-on next boot of the system.
+MicroShift will plug into greenboot green/red scripts integration to persist information about system's health. 
+For reasons mentioned in section "Alternatives - Performing backup on shutdown" it was concluded that both 
+backup and restore should happen on system start, rather than shutdown, therefore information persisted by green or red
+script will be used on next boot of the system.
 
 As a consequence, whether the next boot happens to be different or the same
 ostree deployment, it will produce a backup compatible with previously booted deployment
@@ -197,23 +267,12 @@ on each boot following red boot.
 
 Potential risk is possibility of losing data that might've been produced during window
 of MicroShift start and system reboot. However, only applies to MicroShift's data,
-because Kubernetes application's data isn't persisted in etcd.
+because user's application data isn't persisted in etcd.
 
-To integrate with greenboot, bash scripts will be placed in `/etc/greenboot/green.d` and
-`/etc/greenboot/red.d`.
-Depending on code complexity, they may include actual logic or just invoke 
-`microshift greenboot {green,red}` commands which would implement the logic.
-
-Both green and red scripts (or programs) will write to `/var/lib/microshift.bak/next_boot`.
-The file is outside of MicroShift data directory to reduce number of operations related to 
-making a backup by not needing to remove it.
-
-Green will persist following info:
-- "backup"
-- current ostree deployment id
-
-Red will persist following info:
-- "restore"
+To integrate with greenboot, bash scripts will be placed in `/etc/greenboot/green.d` and `/etc/greenboot/red.d`.
+These scripts will execute `microshift admin persist-system-health --healthy|--unhealthy` command which will persist
+current boot's health into `/var/lib/microshift-backups/health.json`.
+File is kept outside of `/var/lib/microshift/` to keep backup management data and runtime data separate.
 
 ### Backup and restore of MicroShift data
 
@@ -223,26 +282,22 @@ If new ostree deployment fails to be healthy and system is rolled back to previo
 deployment, MicroShift must also roll back in time to data compatible with 
 the older deployment.
 Because device administrator might want to manually go back to older deployment,
-it means that a backup for that particular deployment must be kept until it disappears
-from ostree. It results in requirement of keeping backup for each deployment separately
-regardless of the MicroShift version they feature.
+it means that backups for many deployments will be kept. 
+
+OSTree usually keeps only two deployments (three if one is staged, or more if deployment is pinned).
+However, deployment could disappear from the system (wasn't pinned, is too old to be kept) but later reintroduced
+by admin (deployment's ID is based on checksum which would be the same), it should be configurable to only keep backups
+of deployments present in local `rpm-ostree status` output (automatic pruning) or defer to manual cleanup.
+In future, more options could be added to configure backup persistency policy.
 
 Because difference between two deployments might not be MicroShift itself, but applications
 that run on top of MicroShift from images and manifests embedded in the ostree deployment,
 MicroShift's backups are tied to ostree deployments rather than MicroShift versions.
 
-Decision whether to backup or restore is based on file persisted during previous boot
-(see "Integration with greenboot").
-That file will be removed after successful operation of backup or restore.
+Decision whether to backup or restore is based on contents of `health.json` which contains health of past deployment
+that ran MicroShift (see "Integration with greenboot").
 
-There might happen situations when backing up data fails, which will block start of MicroShift
-and result in redboot. It might that after reboot, there might be no backup to restore from.
-**What should we do, before starting MicroShift, in such case is an open question**:
-- Delete the data directory
-  - It case result in loss of MicroShift data, which might be problematic
-    if application used PVC and is given a new one after static manifests are applied.
-- Keep the data dir
-  - Risking that the problem will continue to happen resulting in manual intervention
+#### Copy-on-Write
 
 As a result of investigation and aiming for simplicity for initial implementation,
 it was decided that backing up MicroShift's data will be done by leveraging using 
@@ -255,18 +310,8 @@ copying on filesystems not supporting CoW (ext4, ZFS).
 Since CoW is backed by filesystem, it works only within that filesystem.
 
 To keep track of which backup is intended for which deployment, backup will be placed in a
-directory named after ostree deployment ID inside `/var/lib/microshift.bak/` dir, e.g.
-`/var/lib/microshift.bak/rhel-8497faf62210000ffb5274c8fb159512fd6b9074857ad46820daa1980842d889.0`.
-
-If MicroShift starts and notices that data directory exists, metadata doesn't exist,
-`next-boot` file is missing, it will be assumed that it's a 4.13 to 4.14 upgrade.
-In such case ID of rollback deployment will be used but the automatic rollback will not
-work as 4.13 will not include restore capabilities.
-
-Additionally, a symlink `/var/lib/microshift.bak/latest` will point to the most recent
-backup. This will allow redboots of staged deployment to restore backup of previous
-deployment to use as a starting point (to protect and retry in case of failed data
-migration).
+directory named after ostree deployment ID inside `/var/lib/microshift-backups/` dir, e.g.
+`/var/lib/microshift-backups/rhel-8497faf62210000ffb5274c8fb159512fd6b9074857ad46820daa1980842d889.0`.
 
 Restore operation works the same, just in the other direction - copying contents of 
 `/var/lib/microshift.bak/ostree-deploy-id/` to `/var/lib/microshift/`.
@@ -276,36 +321,18 @@ End user documentation needs to include:
   (e.g. making sure some filesystem options are not disabled).
 - remark that in case of missing CoW support, full backup will be made.
 
-### Contents of MicroShift data backup
+#### Contents of MicroShift data backup
 
-- etcd database shall be backed up fully, rather just creating a snapshot to preserve
-  history and other data that could be lost.
-- Kubeconfigs and certificates needs to be backup and restored in order to keep communication working.
-  MicroShift could regenerate them, but it would mean that kubeconfigs used to remotely access cluster
-  will become invalid.
-  - Following approach might mean that certificates might need to be amended to update the
-    Subject Alternative Names (SAN) list.
+- etcd database will be backed up by copying whole etcd working directory to preserve
+  history and other data that could be lost if snapshot would be performed and restored.
+- kubeconfigs and certificates needs to be backed up and restored to keep communication working.
+  MicroShift could regenerate them, but it would result in invalidating existing kubeconfigs and breaking communication.
+  - Following approach may result in need to update certificates' Subject Alternative Names (SAN) list.
 - Versions of binaries don't impact decision whether to perform snapshot or copy whole data
   directory because "newer" version will need to read the existing data anyway to
   perform the data migration.
 
 Based on reasons above, it was decided that whole `/var/lib/microshift` will be backed up.
-
-### MicroShift version metadata persistence
-
-When MicroShift is up and running healthy, green script will persist version into a file 
-within data dir, e.g. `/var/lib/microshift/version`:
-```plaintext
-4.14.0
-```
-
-Value will be used during data migration to decide if
-- migration can be skipped,
-- migration needs to be blocked,
-- migration can be attempted.
-
-Creating the file by green script will indicate what was the MicroShift version that
-successfully ran using the data.
 
 ### Data migration ("upgrade" or "downgrade")
 
@@ -353,7 +380,6 @@ A general flow will have following form:
 1. If binary is the same version as persisted in metadata, **no need for a data migration**.
 1. Otherwise attempt to migrate the data.
 
-
 ### Open Questions [optional]
 
 #### Should 4.13 -> 4.14 be supported?
@@ -364,38 +390,6 @@ A general flow will have following form:
   - We most likely don't want to implement special case for that (`pre-run` would save 
     that persist it was 4.13 previously and red script would restore before shutting down)
 
-#### If green/red info is not persisted, and it's not a first boot (/var/lib/microshift exists), what should we do?
-- Compare versions (metadata vs binary)
-  - Same - start cluster
-  - Different - means that both binaries implement the enhancement,
-    so this could be considered a bug.
-  - Metadata is also missing
-    - Assume data was created by 4.13, do a backup and follow data migration rules
-
-#### When should version metadata file be created
-- By the green script
-  - Existence of file would indicate that data belongs to healthy deployment
-    - What upon reboot? Should file be cleared to be later recreated by green script?
-      - Blind assumption `.version exists == healthy data` might be too implicit and lead
-        to wrong conclusions
-- On start of `microshift run` or shortly after with addition from green and red scripts
-  - `{ "version": "X.Y.Z", "status": "unknown"}` would be created at first
-  - Green script would change `.status` to `healthy`
-  - Red script would change `.status` to `unhealthy`
-  - Pros:
-    - Explicit
-  - Cons:
-    - More complicated schema - weak con
-
-#### How should `microshift pre-run` be executed?
-- `microshift.service` - `ExecStartPre`
-  - No need to add new systemd service files.
-  - It will run on each `systemctl restart microshift` which is not desirable (will it run when systemd restarts MicroShift?)
-- `microshift-pre-run.service`
-  - Running on boot, just once, before `microshift.service`
-  - Not repeated on MicroShift restart
-  - New service file
-
 #### Should MicroShift healthcheck check and log version skew problems so it's easier to debug?
 - Why not?
 
@@ -403,252 +397,564 @@ A general flow will have following form:
 - Is it possible that deployment can be reintroduced?
   - I.e. it will have the same id and admin might want to rollback to it?
 
-#### Data exists, action is "restore", but backup does not exists
-- It's different from scenario where backup exists, but it fails to be restored
-- See flows below for more context:
-  - ["Rollback to first deployment, failed restore"](#rollback-to-first-deployment-failed-restore)
-  - ["Fail first startup, FDO (FIDO Device Onboard) deployment"](#fail-first-startup-fdo-fido-device-onboard-deployment)
-- Note: this logic is part of `microshift pre-run` which exit code will affect if 
-  `microshift run` executes or not
-- Ideas so far:
-  - Remove the data and allow for `microshift run`
-    - Potential data loss?
-      - MicroShift data is not a biggest problem, it would be more of an inconvenience
-        due to cert regeneration, but static manifests will be applied again
-      - Bigger impact: customer's app loosing reference to PVC it was using
-        - This is also loaded scenario, because if we restore, everything should restore
-          so app shouldn't rely on "future" (from its version perspective) data
-        - Let's assume that thin-snapshot is made, and the same PVC goes across ostree
-          deploys. Rollback/restore would restore thin-snapshot, so app should be
-          just where it was before upgrade, but now it's given a new PVC because TopoLVM
-          relies on in-cluster data which was wiped.
-  - Keep the data and allow for `microshift run`
-    - Scenario: MicroShift attempting to use incompatible (newer) data - **not possible (in theory)**
-      - 1st deployment only ran for 1 boot, so it's up for the 2nd deployment to make its backup
-      - 2nd ostree deployment is staged, booted, etc.
-      - backup fails
-        - redboot -> restore
-        - there's nothing to restore, back to start of the open question
-      - backup succeeds, data is migrated, MicroShift starts, system ends up unhealthy
-        - redboot -> restore
-        - on every following boots will restore (because there's backup) -
-          **(Side question: how do we restore a backup not belonging to THIS deployment?
-            It is now in dir named after PREVIOUS ostree deployment id. Creation datetime?)**
-        - eventually rolled back to 1st deployment, backup IS there,
-          so this isn't the question at hand
-    - Given ^, the data will be compatible with rolled back deployment
-      and it must be a good data because system was healthy (green -> "backup")
-  - Fail to start because of "restore without backup"
-    - **Not acceptable in scenario FIDO**
-    - In FIDO example, data should be cleaned up.
-      - How can we plug into this?
-        - **IDEA 1**<br>
-          Maybe plug into systemd with `Before=ostree-finalize-staged.service` 
-          and when triggered cleanup "restore" status?
-          (But it means it would have to be present in the sans-MicroShift deployment
-          which wouldn't happen)
-          - If new deployment is staged, and we have "restore" action, 
-            then clear the action so MicroShift will "just run"?
-          - Or, if new deployment is staged, and we have "restore" action,
-            then clear the action AND clear MicroShift data (stop/kill first)?
-        - **IDEA 2**<br>
-          What if `red` script would inspect grub env vars for `boot_counter`
-          - `boot_counter == 0` means system will shortly rollback, so:
-            - check if backup exists for rollback deployment (based on rpm-ostree output)
-            - check if "backup for rollback deployment" doesn't exist, then
-              don't persist `restore` (empty next_boot file)
-            - check if rollback deployment contains MicroShift RPM
-              - if not, delete MicroShift data
-              - otherwise keep the data (because it's still should be correct with 
-                rollback deployment, because backup wasn't made, so the data migration 
-                didn't run)
-          - `boot_counter > 0`
-            - keep old behavior: just persist `restore`?
-            - or have the same logic as above - `restore` only if there's a backup 
-              to restore from?
-              - [Data exists, action is missing (not persisted or removed), backup does not exists](#data-exists-action-is-missing-not-persisted-or-removed-backup-does-not-exists)
-          - `boot_counter` is missing
-            - it means it's not a deployment that was staged, so it might be the 1st
-              deployment
-            - it also means, there will be no reboots and system will require manual
-              intervention
-            - so it's up to admin to investigate and resolve the issues
-              - if issue happens to be failing MicroShift, admin should delete the data
-                before rebooting
-              - otherwise data can be kept
-            - either way, neither backup nor restore should be persisted for next boot action
-              - [Data exists, action is missing (not persisted or removed), backup does not exists](#data-exists-action-is-missing-not-persisted-or-removed-backup-does-not-exists)
-            - given [FIDO scenario](#fail-first-startup-fdo-fido-device-onboard-deployment)
-              it means that rollback deployment might not have MicroShift scripts,
-              so our red script would need to make a decision based on:
-              - does backup exists for rollback deployment
-              - does rollback deployment feature MicroShift RPM
-                - if it does and it's 4.13 then we need extra logic on top to make data
-                  compatible for -> 4.13 -> 4.14 scenario (so 4.14 assumes correctly it
-                  migrated from 4.13)
-- To not have a backup to restore, making back up must fail?
-  - Failed backup -> failed greenboot -> red script -> "restore"
-    - Can we break that chain?
-
-#### Data exists, action is missing (not persisted or removed), backup does not exists
-- In this scenario, we lack the information about health of previous boot, but 
-  we know there was a previous boot because data exists
-- If we end up supporting upgrade 4.13 -> 4.14, this is what will happen as first thing.
-  - In case of 4.13 -> 4.14, metadata will also be missing
-- Missing action, missing backup, missing metadata - expected for 4.13 -> 4.14
-- For other migrations:
-  - Missing metadata == MicroShift wasn't healthy on previous boot
-  - Missing action - this is related to one of the solutions proposed in 
-    ["Data exists, action is "restore", but backup does not exists"](#data-exists-action-is-restore-but-backup-does-not-exists)
-    
 ### Workflows in detail
 
-#### Manual interventions - 1st deployment or rollback (no more greenboot reboots)
+##### Decision tree
+
+Metadata schema reminder
+```json
+// /var/lib/microshift-backups/health.json
+{
+  "deployments": [
+    {
+      "deployment_id": "rhel-d1",
+      "microshift": "unknown | healthy | unhealthy",
+      "system": "unknown | healthy | unhealthy",
+      "last_boot": "yyyy-mm-dd HH:MM:SS"
+    },
+    {
+      "deployment_id": "rhel-d0",
+      "microshift": "unknown | healthy | unhealthy",
+      "system": "unknown | healthy | unhealthy",
+      "last_boot": "yyyy-mm-dd HH:MM:SS"
+    }
+  ]
+}
+
+// /var/lib/microshift/version.json
+{
+  "microshift": "4.14.0",
+  "deployment": "rhel-d1"
+}
+```
+
+Abbreviations, glossary:
+- `microshift/` -> `/var/lib/microshift/`
+- `version.json` -> `/var/lib/microshift/version.json`
+- `backups/` -> `/var/lib/microshift-backups/`
+- `health.json` -> `/var/lib/microshift-backups/health.json`
+- `prev-boot-deploy` - deployment in `health.json` with most recent `boot` timestamp in `health.json`
+- `current-deploy` - currently running deployment
+   - if absent in `health.json`, it means it's 1st boot of the deployment
+   - if present, it's a subsequent boot and will be the same as `prev-boot-deploy`
+- `earlier-deploy` - deployment that was before `prev-boot-deploy`
+  - if `current-deploy` exists in `health.json`, then this is deployment that system is being
+    upgraded from and will automatically roll back to
+  - if `current-deploy` is not present in `health.json` (so ostree history looks like `current`, 
+    `prev-boot`, and `earlier` deployments), it might no longer exist according to ostree
+    (only `current` and `prev-boot` which is a rollback deployment)
+
+`microshift pre-run`:
+1. if neither `microshift/` nor `backups/` exist
+   > *first boot*
+   - **exit 0** :leftwards_arrow_with_hook:	
+
+1. if `microshift/` exists, `version.json`, `health.json` does not
+   > *assume it's 4.13*
+   - create `version.json`: `{ "microshift": "4.13", "deployment": "4.13"}`
+   - backup `microshift-backups/4.13`
+   - proceed to data migration
+
+1. load `version` and `health.json`
+
+1. if `prev-boot-deploy.system` is `healthy`
+   - backup to `microshift-backups/prev-boot-deploy.id`
+   - special case - rollback on demand
+     - `current-deploy.id` is different from `prev-boot-deploy.id`, and
+       `current-deploy.system` was healthy, and
+       `backups/current-deploy/` exists, and
+       `microshift` in `backups/current-deploy/version.json` 
+        is older than `microshift/version.json`, then
+        restore `backups/current-deploy/`
+   - proceed to data migration
+
+1. else if `prev-boot-deploy.system` is `unknown`
+   > MicroShift started, but system didn't get to a point when green/red script update `health.json`.
+   > It might've been power loss or hard reboot.
+   - `current-deploy.id` is the same as `prev-boot-deploy.id`
+     * exit 0 and allow `microshift run`
+   - `current-deploy.id` differs from `prev-boot-deploy.id`
+     > Assuming it wasn't "quickly stage new deployment and do hard reboot" because that would be irresponsible.
+     > Power loss might've happen on last boot before rollback (`boot_counter=0`) and now it's rollback deployment.
+     * Assume `prev-boot-deploy.system` is `unhealthy`, go to next point
+
+1. `prev-boot-deploy.system` is `unhealthy`
+   > Ideally, we'd like to restore `backups/current-deploy/`.
+
+   - `current-deploy` != `prev-boot-deploy`
+     > Previous boot was unhealthy, but this is boot is different deployment.
+
+     - `current-deploy` does not exist in `health.json`
+       > First boot of new deployment, `prev-boot-deploy` was unhealthy == new deployment staged over (possibly) unhealthy.
+       > Admin didn't address the issues or forgot to mark `prev-boot` as healthy - either way,
+       > for MicroShift it's `unhealthy` and we don't want to upgrade from such data.
+       * Backup `microshift/` as `backups/unhealthy__prev-boot-deploy/`.
+       * Delete data, start clean.
+
+     - `current-deploy` exists in `health.json`
+       > Deployment already ran on the system.
+       > System rolled back automatically or on demand (by admin).
+
+       - `current-deploy` was `healthy`
+         - `backups/current-deploy/` exists
+           * Restore from `backups/current-deploy/`
+
+         - `backups/current-deploy/` does not exist
+           > Reminder: `prev-boot-deploy` was unhealthy, `current-deploy` was healthy and is missing backup
+           - `version.json` matches `current-deploy.id`
+             > Means that `prev-boot-deploy` possibly failed to make a backup. `version.json` is untouched so no migration attempt.
+             * Backup `backups/current-deploy/`, continue running off `microshift/`
+           - `version.json` does not match `current-deploy.id`
+             > Migrated without backup? Bug or user interference.
+             * Abort
+
+       - `current-deploy` was `unhealthy`
+         > `prev-boot-deploy` was staged over `unhealthy` `current-deploy` without metadata cleanup
+         > and now system rolled back.
+         > After addressing issues, admin should mark deployment as healthy, so **this shouldn't happen**.
+         > Let's assume admin addressed the issues but forgot to mark as healthy.
+
+         - `version.json` matches `current-deploy.id`
+           * Move `backups/current-deploy/` to `backups/last_healthy__current-deploy/`
+           * Backup `microshift/` to `backups/current-deploy/`
+           * Proceed with `microshift run`
+
+         - `version.json` does not match `current-deploy.id`
+           > Other deployment attempted to migrate data
+           - `backups/current-deploy/` exists
+             > It was `healthy` at least once, but not on last run. Rolling back to last healthy state.
+             * Restore from `backups/current-deploy/`
+
+           - `backups/current-deploy/` does not exist
+             * Delete data, start clean.
+
+   - `current-deploy` == `prev-boot-deploy`
+     > Because `current-deploy` is already present in `health.json`, it's 2nd, 3rd,... boot of the deployment (not 1st).
+
+     - `backups/current-deploy/` exists
+       > Deployment was healthy at least once already.
+       > It means greenboot removed `boot_counter` and current boot isn't due to greenboot's automatic reboot.
+       > After addressing issues, admin should mark deployment as healthy, so this shouldn't happen.
+       > Let's assume admin addressed the issues but forgot to mark as healthy and just rebooted the device.
+       * No backup, no restore, skip migration, allow `microshift run`
+         > If admin addressed issues, it should be healthy again.
+         > If issue persists, it'll end up unhealthy requiring manual intervention
+         > (which is the same result if we'd block `microshift run`).
+
+     - `backups/current-deploy/` doesn't exist
+       > Deployment was always unhealthy.
+
+       - `earlier-deploy` does not exist in `health.json`
+         > For MicroShift it's first deployment it's running, but it doesn't mean it's the only deployment.
+         > (there could be previous (rollback) deployment without MicroShift)
+         >
+         > ostree status:
+         > 1. `current` == `prev-boot` - currently running, last boot unhealthy, greenboot didn't accept it yet
+         > 1. (optionally) `earlier` - (auto) rollback - **without MicroShift**
+         * delete data, try from clean state
+
+       - `earlier-deploy` exists in `health.json`
+         > For MicroShift it looks like it ran already on the device, but `earlier-deploy` might or might not be
+         > the rollback deployment.
+         >
+         > ostree status:
+         > 1. `current` == `prev-boot` - currently running, last boot unhealthy, greenboot didn't accept it yet
+         > 1. (auto) rollback (might be `earlier` or not)
+
+         - `earlier-deploy` == other deploy (not active) from `rpm-ostree status`
+           > ostree status:
+           > 1. `current` == `prev-boot` - currently running, last boot unhealthy, greenboot didn't accept it yet
+           > 1. `earlier` - (auto) rollback
+           >
+           > Let's sum it up: it's 2nd or 3rd boot of `current-deploy` and it's `unhealthy` since 1st boot.
+           > It was staged directly from `earlier` which also ran MicroShift.
+
+           - `earlier-deploy` was healthy
+             - `microshift/version.json` matches `earlier-deploy`
+               > `current-deploy` didn't get to data migration, maybe backup failed.
+               > `backups/earlier-deploy` may or may not be most recent backup of data.
+               * backup `microshift/` as `backups/earlier-deploy/`
+               * proceed to data migration
+
+             - `version.json` doesn't match `earlier-deploy`
+               - `backups/earlier-deploy/` exists
+                 > Failed data migration or runtime problem. Retry upgrade like it's 1st boot.
+                 * Restore data from `backups/earlier-deploy/` and proceed to data migration.
+               - `backups/earlier-deploy/` doesn't exist
+                 > This might mean that migration ran without prior backup - bug or user's interference.
+                 * exit 1, block `microshift run`
+           - `earlier-deploy` was unhealthy
+             > Admin staged newer deployment over unhealthy one without prior cleanup.
+             > This should be caught earlier by: `prev-boot.system == unhealthy` and `current` missing from `health.json`
+             * just in case: exit 1, block `microshift run`
+
+         - `earlier-deploy` != other deploy (not active) from `rpm-ostree status`
+           > Matches "FIDO" scenario from workflows.
+           > Admin didn't cleanup MicroShift's artifacts.
+           > This should be caught by `current-deploy` != `prev-boot-deploy`
+           >
+           > ostree status:
+           > 1. `current` == `prev-boot` - currently running
+           > 1. (auto) rollback
+           - delete `microshift/` and start clean
+
+1. compare binary's `version` with value of `microshift` in `version.json`
+   - binary's `Y` is smaller: **exit 1** :stop_sign:	
+   - binary's `Y` is bigger by more than `1`: **exit 1** :stop_sign:	
+   - `version.json` is present in binary's "list of blocked migrations": **exit 1** :stop_sign:	
+   - `Y`s are the same: **exit 0** :leftwards_arrow_with_hook:
+1. Perform data migration
+   - Update `version.json`: `{ "microshift": "migrating-from-4.Y1.Z1-to-4.Y2.Z2", "deployment: "$current"}`
+   - Success: **exit 0** :leftwards_arrow_with_hook:
+     - Update `version.json`: `{ "microshift": "4.Y2.Z2", "deployment: "$current"}`
+   - Failure: **exit 1** :stop_sign:	
+     - Update `version.json`: `{ "microshift": "failed-migrating-from-4.Y1.Z1-to-4.Y2.Z2", "deployment: "$current"}`
+
+`microshift run`
+1. If data exists and `version.json` doesn't match binary's `version`
+   > Means that data's version is different and migration is needed
+   - **exit 1**
+1. Create data dir if necessary
+1. Create `version.json` if needed
+1. Add new or update entry in `health.json`:
+   ```json
+    {
+      "deployment_id": "$current",
+      "microshift": "unknown",
+      "system": "unknown",
+      "last_boot": "yyyy-mm-dd HH:MM:SS"
+    }
+   ```
+1. Continue regular flow
+
+`microshift healthcheck`
+1. Assess health of MicroShift
+1. Update `health.json`: `deployments[$current].microshift` <- with `healthy` or `unhealthy`
+
+`microshift persist-system-health`
+1. Update `health.json`: `deployments[$current].system` <- with `healthy` or `unhealthy`
+
+
+#### Manual interventions
 
 ##### Addressing MicroShift's health
 
-1. Depending on MicroShift's health admin might:
-   - unhealthy
-     - delete MicroShift's data, to allow fresh start
-     - investigate and address problems with MicroShift cluster
-   - healthy
-     - keep MicroShift's data
-   - unhealthy application running on top of MicroShift
-     - investigate and address problems with the app, and restart the device to re-trigger
-       greenboot checks
+Depending on MicroShift's health admin might:
+- unhealthy
+  - delete MicroShift's data, to allow fresh start
+  - investigate and address problems with MicroShift cluster
+- healthy
+  - keep MicroShift's data
+- unhealthy application running on top of MicroShift
+  - investigate and address problems with the app
+
+After admin addresses issues it should either:
+- re-trigger greenboot healthcheck (`systemctl restart greenboot-healthcheck`), or
+- mark deployment as `healthy` using `microshift admin mark-deploy-as-healthy`
+  (so next boot has correct information about previous boot health)
+
+If admin addressed issues, but forget to update deployment's health before booting into different deployment,
+a backup of `unhealthy` deployment will be made with prefix `unhealthy__`.
 
 ##### Backup exists, restore succeeds, but system is unhealthy
 
 > Scenarios:
-> - System was rolled back to 1st deployment (no more greenboot reboots) 
->   and action is `restore`
+> - System was rolled back to 1st deployment
+>   (no more greenboot reboots, previous deployment was `unhealthy` -> restore) 
 > - 1st and only ostree deployment with MicroShift:
 >   - 1st boot OK, **manual** reboot
->   - 2nd boot: backup, system NOK, **manual** reboot
->   - 3rd boot: restore, system NOK
+>   - 2nd boot: data backed up, system NOK, **manual** reboot
+>   - 3rd boot: data restored, system NOK
 
 1. `microshift pre-run`
-   - Data restored
-   - Exits with success
+   - `prev-boot-deploy.system` is unhealthy -> restore `current-deploy`
+   - `backups/current-deploy` exists and is successfully restored
+   - exit 0
 1. `microshift run`
-1. System or MicroShift are unhealthy
-1. Red scripts
-   - Persist action: restore
+   - Updates `version.json`, `health.json`, etc.
+1. System is unhealthy (red)
 1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+   rhel-d1/
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d1",
+         "microshift": "(un)healthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 02:00:00"
+       },
+       // optionally
+       {
+         "id": "rhel-d2",
+         "microshift": "(un)healthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 01:00:00"
+       }
+       // end optionally
+    ]}
+   ```
 1. System requires manual intervention
 
    - Admin simply reboots the device
      1. 1st ostree deployment boots
      1. `microshift pre-run`
-        - Data exists
-        - Backup exists
-        - Action: restore
+        - `prev-boot-deploy.system` is `unhealthy` -> plan to restore
+        - `backups/rhel-d1` exists, restore successful
      1. `microshift run`
-     1. It might be green or red again, so back to the beginning of the flow
+     1. System might be healthy or unhealthy again, so back to the beginning of the flow
 
    - Admin addresses the issue
      1. [MicroShift's health](#addressing-microshifts-health)
      1. Other components - admin's judgement
      1. Reboots the device
+     1. `microshift pre-run`
+        - `prev-boot-deploy.system` is `unhealthy` -> plan to restore
+        - `backups/rhel-d1` exists, restore successful
+     1. `microshift run`
+     1. System might be healthy or unhealthy again, so back to the beginning of the flow
 
 ##### Backup exists, restore fails, so MicroShift is unhealthy
 
 > Scenarios:
-> - System was rolled back to 1st deployment (no more greenboot reboots) 
->   and action is `restore`
+> - System was rolled back to 1st deployment
+>   (no more greenboot reboots, previous deployment was `unhealthy` -> restore) 
 > - 1st and only ostree deployment with MicroShift:
 >   - 1st boot OK, **manual** reboot
->   - 2nd boot: backup, system NOK, **manual** reboot
->   - 3rd boot: restore, system NOK
+>   - 2nd boot: data backed up, system NOK, **manual** reboot
+>   - 3rd boot: failed to restore data, system NOK
 
 1. `microshift pre-run`
-   - Restore fails
-   - Exits with error
+   - `prev-boot-deploy.system` is unhealthy -> restore `current-deploy`
+   - `backups/current-deploy` exists but restoring fails
+   - exit 0
 1. `microshift run` is **not executed**
-1. MicroShift is unhealthy
-1. Red scripts
-   - Persist action: restore
+1. MicroShift is unhealthy, therefore system is also unhealthy
 1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
 1. System requires manual intervention
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+   rhel-d1/
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d1",
+         "microshift": "unhealthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 02:00:00"
+       },
+       // optionally
+       {
+         "id": "rhel-d2",
+         "microshift": "unhealthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 01:00:00"
+       }
+       // end optionally
+    ]}
+   ```
 1. Admin addresses underlying issues: frees up disk space, fixes permissions, etc.
 1. Reboots the device
-   - Persisted action is still `restore`, so new attempt will be made on next boot
+1. `microshift pre-run`
+   - `prev-boot-deploy.system` is unhealthy -> restore `current-deploy`
+   - `backups/current-deploy` exists, restore successful
+   - exit 0
+1. `microshift run`
 
-##### Backup is missing, restore fails, so MicroShift is unhealthy
+##### 1st deployment is unhealthy, admin wants to stage another one
 
-See open question ["Data exists, action is "restore", but backup does not exists"](#data-exists-action-is-restore-but-backup-does-not-exists)
+> Scenario:
+> - 1st deployment on system is unhealthy beyond recovery
+> - Admin decides to try another deployment with different MicroShift build
+
+1. 1st deployment is unhealthy
+1. Greenboot doesn't reboot because there's only one (no rollback, no `boot_counter`)
+1. Admin stops MicroShift: `systemctl stop microshift`
+1. Admin removes `microshift/` and `microshift-backups/`
+1. Admin stages 2nd deployment
+1. System is rebooted
+2. 2nd deployment starts
+1. `microshift pre-run`
+   - Neither `microshift/` nor `microshift-backups/` exist
+   - Assume first boot
+   - Exit 0, allow `microshift run`
+1. `microshift run`
+
+##### Rollback on demand
+
+> Scenario:
+> - System is running on 2nd deployment
+> - Both 1st and 2nd deployment are healthy
+>   (backup exists for 1st, backup for 2nd may or may not yet exist)
+> - Admin wants to rollback to 1st deployment
+
+1. 2nd deployment is running and healthy
+1. Admin runs `rpm-ostree rollback` or equivalent
+1. 2nd deployment shuts down, 1st deployment boots
+1. `microshift pre-run`
+   - `prev-boot-deploy.system` is `healthy`
+     - backing up `microshift/` to `backups/prev-boot-deploy.id/`
+   - `current-deploy.id` is different from `prev-boot-deploy.id`, and
+     `current-deploy.system` was healthy, and
+     `backups/current-deploy/` exists, and
+     `microshift` in `backups/current-deploy/version.json` is older than `microshift/version.json`, then
+     restore `backups/current-deploy/`
+   - no need to migrate data because `version.json` matches executable's version
+1. `microshift run`
 
 #### First ostree deployment
 
-##### First boot
+##### First deployment, first boot
 
 1. Device is freshly provisioned
-1. 1st ostree deployment boots
+1. Deployment `rhel-d1` starts
 1. `microshift pre-run`
-   - Data doesn't exist yet
-   - Version comparison: nothing to do
-   - Action: missing/none - _1st boot, so green/red scripts haven't ran yet_
-   - Nothing to migrate
-   - Exits with success
-1. `microshift run`
-1. Alternative scenarios<a name="first-boot-alt"></a>
-
+   - neither `microshift/` nor `microshift-backups/` exist
+   - exit 0
+1. MicroShift starts
+   - Creates data dir structure
+   - Creates `version.json`:
+     ```json
+     { "microshift": "4.14.0", "deployment": "rhel-d1"}
+     ```
+   - Creates `health.json` with:
+     ```json
+     {
+       "deployments": [
+         {
+           "deployment_id": "rhel-d1",
+           "microshift": "unknown",
+           "system": "unknown",
+           "last_boot": "2023-07-01 00:00:00"
+         }
+       ]
+     }
+     ```
+   - Continue regular start up
+1. MicroShift healthcheck for greenboot
+   - `health.yaml`: `deployments[$current].microshift` <- `healthy|unhealthy`
+1. Greenboot green/red scripts
+   - `health.yaml`: `deployments[$current].system` <- `healthy|unhealthy`
+1. Alternative scenarios
    - System and MicroShift are healthy
-     1. Green scripts
-         - `/var/lib/microshift.aux/next-boot` <- backup + deploy id
-         - `/var/lib/microshift/.version` <- 4.X.Y
      1. [system is rebooted, backup fail](#reboot-second-boot-backup-fails)
      1. [system is rebooted, backup succeeds](#reboot-second-boot-backup-succeeds)
 
    - System or MicroShift are unhealthy
-     1. Red scripts
-         - `/var/lib/microshift.aux/next-boot` <- restore
      1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
      1. System requires manual intervention.
-        See [Manual interventions](#manual-interventions---1st-and-only-deployment-or-rollback)
 
-##### Reboot: second boot, backup fails
+##### First deployment, second boot (reboot): backup fails
 
-> First boot was green, "backup" action was persisted
+> First boot was healthy
 
 1. 1st ostree deployment shuts down
 1. 1st ostree deployment boots
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [{
+         "id": "rhel-d1",
+         "microshift": "healthy",
+         "system": "healthy",
+         "last_boot": "2023-07-01 00:00:00"
+       }]}
+   ```
 1. `microshift pre-run`
-   - Data exists
-   - Action: backup
-     - **__Fails due to any reason (disk space, permissions, etc.)__**
-   - Exits with error
-1. MicroShift doesn't start
-1. MicroShift greenboot check fails
-1. Red scripts
-   - `/var/lib/microshift.aux/next-boot` <- restore
+   - `prev-boot-deploy.system == healthy` -> backup for `prev-boot-deploy.id`
+     - Copy `/var/lib/microshift` to `/var/lib/microshift-backups/rhel-d1`
+     - Fails ^
+   - exit 1
+1. `microshift.service` doesn't run
+1. MicroShift healthcheck for greenboot
+   - `/var/lib/microshift-backups/health.yaml`: `deployments[$current].microshift` <- `unhealthy`
+1. Greenboot green/red scripts
+   - `/var/lib/microshift-backups/health.yaml`: `deployments[$current].system` <- `unhealthy`
 1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
 1. System requires manual intervention.
-   See [Manual interventions](#manual-interventions---1st-and-only-deployment-or-rollback)
 
 ##### Reboot: second boot, backup succeeds
 
+> First boot was healthy
+
 1. 1st ostree deployment shuts down
 1. 1st ostree deployment boots
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [{
+         "id": "rhel-d1",
+         "microshift": "healthy",
+         "system": "healthy",
+         "last_boot": "2023-07-01 00:00:00"
+       }]}
+   ```
 1. `microshift pre-run`
-   - Data exists
-   - Action: backup
-   - Version comparison: `data.version == binary.version`
-   - Data migration not needed
-   - Exits with success
+   - `prev-boot-deploy.system == healthy` -> backup for `prev-boot-deploy.id`
+     - Copy `/var/lib/microshift` to `/var/lib/microshift-backups/rhel-d1`
+   - Compare `version.json.microshift` with `binary.version`
+     - The same - no migration
+   - exit 0
 1. `microshift run`
-1. Alternatives
+   - Updates `version.json`
+   - Updates `health.json`: 
+     ```json
+     {
+      "id": "rhel-d1",
+      "microshift": "unknown",
+      "system": "unknown",
+      "last_boot": "2023-07-01 01:00:00"
+     }
+     ```
+1. MicroShift healthcheck for greenboot
+   - `/var/lib/microshift-backups/health.yaml`: `deployments[$current].microshift` <- `healthy|unhealthy`
+1. Greenboot green/red scripts
+   - `/var/lib/microshift-backups/health.yaml`: `deployments[$current].system` <- `healthy|unhealthy`
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
 
-   - System and MicroShift are healthy
-     1. Green scripts
-        - Persist action: backup
+   // ls /var/lib/microshift-backups/
+   health.json
+   rhel-d1/
 
-   - System or MicroShift are unhealthy
-     1. Red scripts
-        - Persist action: restore
-     1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
-     1. System requires manual intervention.
-        See [Manual interventions](#manual-interventions---1st-and-only-deployment-or-rollback)
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [{
+         "id": "rhel-d1",
+         "microshift": "healthy | unhealthy",
+         "system": "healthy | unhealthy",
+         "last_boot": "2023-07-01 01:00:00"
+       }]}
+   ```
+1. Optional: System is unhealthy
+   - Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
+   - System requires manual intervention.
 
 #### Second ostree deployment is staged
 
@@ -664,225 +970,627 @@ Pre-steps:
 > No changes are made to MicroShift version or apps running within the cluster, 
 > so new ostree deployment might feature unrelated changes or RPMs
 
+
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [{
+         "id": "rhel-d1",
+         "microshift": "healthy",
+         "system": "healthy",
+         "last_boot": "2023-07-01 00:00:00"
+       }]}
+   ```
 1. `microshift pre-run`
-   - Data exists
-   - Action: backup
-   - Version comparison: `data.version == binary.version`
-   - Data migration not needed
-   - Exits with success
+   - `prev-boot-deploy.system == healthy` -> backup for `prev-boot-deploy.id`
+     - Copy `/var/lib/microshift` to `/var/lib/microshift-backups/rhel-d1`
+   - Compare `version.json` with `binary.version`
+     - The same - no migration
+   - exit 0
 1. `microshift run`
-1. Alternatives
+   - Updates `version.json`: `{"microshift": "4.14.0", "deployment": "rhel-d2"}`
+   - Adds to `health.json`: 
+     ```json
+     {
+      "id": "rhel-d2",
+      "microshift": "unknown",
+      "system": "unknown",
+      "last_boot": "2023-07-01 01:00:00"
+     }
+     ```
+1. MicroShift healthcheck for greenboot
+   - `health.yaml`: `deployments[$current].microshift` <- `healthy|unhealthy`
+1. Greenboot green/red scripts
+   - `health.yaml`: `deployments[$current].system` <- `healthy|unhealthy`
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d2"}
 
-   - System and MicroShift are healthy
-     1. Green scripts
-        - Persist action: backup
+   // ls /var/lib/microshift-backups/
+   health.json
+   rhel-d1/
 
-   - System or MicroShift are unhealthy
-     1. Red scripts
-        - Persist action: restore
-     1. Greenboot reboots system multiple times (always red boot)
-     1. `boot_counter` reaches `-1`
-     1. grub boots previous deployment (rollback)
-     1. `microshift pre-run`
-        - Data exists
-        - Action: restore backup matching deployment ID
-        - Data migration not needed
-        - Exits with success
-     1. `microshift run`
-        - Whether the boot is green or red - it'll require
-          [manual intervention](#manual-interventions---1st-deployment-or-rollback-no-more-greenboot-reboots)
-          (no `boot_counter`).
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+        "id": "rhel-d2",
+        "microshift": "(un)healthy",
+        "system": "(un)healthy",
+        "last_boot": "2023-07-01 02:00:00"
+       },
+       {
+         "id": "rhel-d1",
+         "microshift": "healthy",
+         "system": "healthy",
+         "last_boot": "2023-07-01 01:00:00"
+       }
+   ]}
+   ```
+
+(Optional)
+1. System is unhealthy
+1. Greenboot reboots system
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d2"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+   rhel-d1/
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+        "id": "rhel-d2",
+        "microshift": "unhealthy",
+        "system": "unhealthy",
+        "last_boot": "2023-07-01 02:00:00"
+       },
+       {
+         "id": "rhel-d1",
+         "microshift": "healthy",
+         "system": "healthy",
+         "last_boot": "2023-07-01 01:00:00"
+       }
+   ]}
+   ```
+1. `microshift pre-run`
+   - `prev-boot-deploy.system == unhealthy` -> restore `current-deploy`
+   - `backups/rhel-d2/` does not exist - can't restore
+   - Compare `most_recent(deployment).id` and `current-deploy` - the same, so it's Nth boot of red deployment
+     try to restore backup for previous deployment
+   - Get second to most recent deployment: `rhel-d1` 
+   - It was `healthy`, `/var/lib/microshift-backups/rhel-d1/` exists, 
+     `version.json` doesn't match `rhel-d1` -> restore previous
+   - Restore `/var/lib/microshift-backups/rhel-d1` -> `/var/lib/microshift`
+   - Compare `version.json` with `binary.version`
+     - The same - no migration
+   - exit 0
+1. `microshift run`
+   - Updates `version.json`: `{"microshift": "4.14.0", "deployment": "rhel-d2"}`
+   - Adds to `health.json`: 
+     ```json
+     {
+      "id": "rhel-d2",
+      "microshift": "unknown",
+      "system": "unknown",
+      "last_boot": "2023-07-01 01:00:00"
+     }
+     ```
+1. MicroShift healthcheck for greenboot
+   - `/var/lib/microshift-backups/health.yaml`: `deployments[$current].microshift` <- `healthy|unhealthy`
+1. Greenboot green/red scripts
+   - `/var/lib/microshift-backups/health.yaml`: `deployments[$current].system` <- `healthy|unhealthy`
+1. **System was unhealthy (red) each boot**
+   - `boot_counter` reaches `-1`
+   - **grub boots `rhel-d1` (rollback)**
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d2"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+   rhel-d1/
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+        "id": "rhel-d2",
+        "microshift": "unhealthy",
+        "system": "unhealthy",
+        "last_boot": "2023-07-01 02:00:00"
+       },
+       {
+         "id": "rhel-d1",
+         "microshift": "healthy",
+         "system": "healthy",
+         "last_boot": "2023-07-01 01:00:00"
+       }
+   ]}
+   ```
+1. `microshift pre-run`
+   - `prev-boot-deploy.system == unhealthy` -> restore `$current-deploy`
+   - `/var/lib/microshift-backups/rhel-d1/` exists
+   - Restore `/var/lib/microshift-backups/rhel-d1` -> `/var/lib/microshift`
+   - exit 0
+1. `microshift run`
+   - Updates `version.json`: `{"microshift": "4.14.0", "deployment": "rhel-d1"}`
+   - Updates `health.json`: 
+     ```json
+     {
+      "id": "rhel-d1",
+      "microshift": "unknown",
+      "system": "unknown",
+      "last_boot": "2023-07-01 02:00:00"
+     }
+     ```
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+   rhel-d1/
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+        "id": "rhel-d2",
+        "microshift": "unhealthy",
+        "system": "unhealthy",
+        "last_boot": "2023-07-01 02:00:00"
+       },
+       {
+         "id": "rhel-d1",
+         "microshift": "unknown",
+         "system": "unknown",
+         "last_boot": "2023-07-01 03:00:00"
+       }
+   ]}
+   ```
 
 ##### First deployment was active only for one boot, backup fails
 
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d1",
+         "microshift": "healthy",
+         "system": "healthy",
+         "last_boot": "2023-07-01 00:00:00"
+       }
+   ]}
+   ```
 1. `microshift pre-run`
-   - Data exists
-   - Action: backup
-     - **__Fails due to any reason (disk space, permissions, etc.)__**
-   - Exits with error
-1. MicroShift doesn't start
-1. MicroShift greenboot check fails
-1. Red scripts: persist action: restore
+   - `prev-boot-deploy.system == healthy` -> backup for `prev-boot-deploy.id`
+     - `mkdir -p /var/lib/microshift/backups/`
+     - `cp -r --reflink=auto --preserve /var/lib/microshift/live /var/lib/microshift/backups/deploy1`
+     - Fails ^
+   - exit 1
+1. `microshift run` doesn't start
+1. MicroShift healthcheck fails, greenboot red script
+1. System is rebooted
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d2",
+         "microshift": "unhealthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 01:00:00"
+       },
+       {
+         "id": "rhel-d1",
+         "microshift": "healthy",
+         "system": "healthy",
+         "last_boot": "2023-07-01 00:00:00"
+       }
+   ]}
+   ```
+1. `microshift pre-run`
+   - Most recent deploy is `unhealthy` - restore `$current-deploy-id`?
+   - `/var/lib/microshift-backups/rhel-d2/` does not exist - can't restore
+   - Compare `most_recent(deployment).id` and `$current-deployment-id` - the same,
+     so let's try restore backup for previous deployment
+   - Get second to most recent deployment: `rhel-d1` 
+   - It was `healthy` but `/var/lib/microshift-backups/rhel-d1/` does not exist *(backup failed)*
+   - Deployment ID from `health.json` matches what's in `version.json`
+   - Assume `/var/lib/microshift/` is still healthy and try to back up
+   - Backup fails again
 1. Greenboot reboots system multiple times (always red boot)
 1. `boot_counter` reaches `-1`
 1. grub boots previous (1st) deployment (rollback)
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d2",
+         "microshift": "unhealthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 04:00:00"
+       },
+       {
+         "id": "rhel-d1",
+         "microshift": "healthy",
+         "system": "healthy",
+         "last_boot": "2023-07-01 00:00:00"
+       }
+   ]}
+   ```
 1. `microshift pre-run`
-   - Data exists
-   - Action: restore - but there's no backup
-   - See open question [Data exists, action is "restore", but backup does not exists](#data-exists-action-is-restore-but-backup-does-not-exists)
-1. `microshift run`
-
-##### MicroShift RPM changed
-
-1. `microshift pre-run`
-   - Data exists
-   - Action: backup
-   - Compare `version` in data dir and binary
-     - `data.version` doesn't exist - assume `4.13`
-     - `data.version` is on a list of blocked upgrades - blocked
-     - Binary is newer by more than 1 Y-stream - blocked
-     - Binary is older (at least `Y-1`) - blocked
-     - Binary is the same `X.Y` as data - allowed, no need for migration
-     - Binary is newer by 1 Y-stream - allowed, run migration
-
-1. `microshift run`
-1. _See other flows_
+   - Most recent deploy is `unhealthy` - try to restore `$current-deploy-id`
+   - `/var/lib/microshift-backups/rhel-d1/` does not exist - can't restore
+   - See if `deployments` contains `$current-deploy-id` - yes
+   - Was it `healthy`? Yes
+   - Check if `$current-deploy-id` is in `version.json` - yes
+   - Assume `/var/lib/microshift/` is still healthy and try to back up
+   - Backup fails again
+   - exit 1
+1. Manual intervention needed
 
 #### Rollback to first deployment, failed restore
 
 1. 2nd deployment boots
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d1",
+         "microshift": "healthy",
+         "system": "healthy",
+         "last_boot": "2023-07-01 00:00:00"
+       }
+   ]}
+   ```
 1. `microshift pre-run`
-   - Data exists
-   - Action: backup
-   - Version comparison: `data.version == binary.version`
-   - Data migration not needed
-   - Exits with success
+   - `most_recent(deployment).system` is `healthy` -> backup
+     - Copy `/var/lib/microshift` to `/var/lib/microshift-backups/rhel-d1`
+     - No migration
+   - Exit 0
 1. `microshift run`
-1. System or MicroShift are unhealthy
-1. Red scripts, persist action: restore
+1. System is unhealthy
 1. Greenboot reboots system multiple times (always red boot)
 1. `boot_counter` reaches `-1`
 1. grub boots previous deployment (rollback)
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d2"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+   rhel-d1/
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d2",
+         "microshift": "(un)healthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 00:00:00"
+       },
+       {
+         "id": "rhel-d1",
+         "microshift": "healthy",
+         "system": "healthy",
+         "last_boot": "2023-07-01 00:00:00"
+       }
+   ]}
+   ```
 1. `microshift pre-run`
-   - Data exists
-   - Restore failed for whatever reason
-   - Exit with error
-1. MicroShift does not run
+   - `most_recent(deployment).system` is `unhealthy` -> restore `$current_deployment` (`rhel-d1`)
+     - Delete `/var/lib/microshift`
+     - Copy `/var/lib/microshift-backups/rhel-d1` -> `/var/lib/microshift`
+     - Failure
+   - Exit 1
+1. `microshift run` doesn't start
 1. System is unhealthy (red)
-1. `boot_counter` is unset (cleared right after boot by greenboot)
+1. `boot_counter` is unset *(it's already a rollback)*
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d2"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+   rhel-d1/
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d2",
+         "microshift": "(un)healthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 01:00:00"
+       },
+       {
+         "id": "rhel-d1",
+         "microshift": "unhealthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 02:00:00"
+       }
+   ]}
+   ```
 1. Manual intervention is required.
    See [Backup exists, restore fails, so MicroShift is unhealthy](#backup-exists-restore-fails-so-microshift-is-unhealthy).
 
 
 #### Fail first startup, FDO (FIDO Device Onboard) deployment
 
-1. An ostree deployment without MicroShift is installed on the device at the factory.
-1. The device boots at a customer site.
+1. ostree deployment without MicroShift (`rhel-d0`) is installed on the device at the factory
+1. The device boots at a customer site
 1. An agent in the ostree commit performs FIDO device onboarding or a 
-   similar process to determine the workload.
-1. **1st** ostree deployment with MicroShift installed is staged.
+   similar process to determine the workload
+1. ostree deployment with MicroShift installed (`rhel-d1`) is staged
    - greenboot sets `boot_counter`
-1. The sans-MicroShift deployment shuts down.
-1. The with-MicroShift deployment starts up.
+1. The sans-MicroShift (`rhel-d0`) deployment shuts down
+1. The with-MicroShift deployment (`rhel-d1`) starts up
 1. `microshift pre-run`
-   - No data
-   - No backup action
-   - No need for data migration
-   - Exits with success
+   - First boot scenario
 1. `microshift run`
-1. System is unhealthy
-1. Greenboot runs red scripts
-   - Set backup mode to "restore"
-1. Red boots continue to happen
+   - Create dir structure, `version.json`, `health.json`, etc.
+1. System is unhealthy, red scripts
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d1",
+         "microshift": "unhealthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 00:00:00"
+       }
+   ]}
+   ```
+1. Greenboot reboots the system, but red boots continue to happen
 1. `boot_counter` falls to `-1`
-1. grub boots ostree deployment sans-MicroShift
-1. The agent stages **2nd** ostree deployment with-MicroShift
+1. grub boots ostree deployment sans-MicroShift (`rhel-d0`)
+1. The agent stages **2nd** ostree deployment with-MicroShift (`rhel-d2`)
    - greenboot sets `boot_counter`
-1. The sans-MicroShift ostree commit shuts down
-1. The **2nd** ostree deployment with-MicroShift starts up.
+1. The sans-MicroShift deployment (`rhel-d0`) shuts down
+1. The **2nd** ostree deployment with-MicroShift (`rhel-d2`) starts up.
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
+
+   // ls /var/lib/microshift-backups/
+   health.json
+
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d1",
+         "microshift": "unhealthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 01:00:00"
+       }
+   ]}
+   ```
 1. `microshift pre-run`
    - Data exists (left over of 1st ostree deployment with-MicroShift)
-   - Persisted action: restore (left over of 1st ostree deployment with-MicroShift)
-   - There is no backup
-   - Alternatives
-     - Remove the data and allow for `microshift run`, system might end up green or red
-     - Keep the data and allow for `microshift run`, system might end up green or red
-     - Fail to start because of "restore without backup"
-       - **Not acceptable in this scenario - from customer's point of view that's a bug**
+   - `prev-boot-deploy.system` is `unhealthy` -> restore `$current_deployment` (`rhel-d2`)
+     - `/var/lib/microshift-backups/rhel-d2` doesn't exist
+     - `deployments[rhel-d2]` doesn't exist *(microshift didn't run on this deploy yet)*
+     - Get second to most recent deployment - doesn't exist, there's only one and it's unhealthy
+     - Delete `/var/lib/microshift`
+   - exit 0
+1. `microshift run`
+   - Creates `version.json`, updates `health.json`, etc.
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d2"}
 
-See open questions:
-- [Data exists, action is "restore", but backup does not exists](#data-exists-action-is-restore-but-backup-does-not-exists)
-- [Data exists, action is missing (not persisted or removed), backup does not exists](#data-exists-action-is-missing-not-persisted-or-removed-backup-does-not-exists)
+   // ls /var/lib/microshift-backups/
+   health.json
 
-**Visual summary**
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d1",
+         "microshift": "unhealthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 01:00:00"
+       },
+       {
+         "id": "rhel-d2",
+         "microshift": "unknown",
+         "system": "unknown",
+         "last_boot": "2023-07-01 03:00:00"
+       }
+   ]}
+   ```
+1. System is unhealthy, red scripts
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d2"}
 
-```mermaid
-flowchart TD
-  start([System boots])
+   // ls /var/lib/microshift-backups/
+   health.json
 
-  pre-run[microshift pre-run]
-  run[microshift run]
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d1",
+         "microshift": "unhealthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 01:00:00"
+       },
+       {
+         "id": "rhel-d2",
+         "microshift": "unhealthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 03:00:00"
+       }
+   ]}
+   ```
+1. Greenboot reboots the system, but red boots continue to happen
+1. `boot_counter` falls to `-1`
+1. grub boots ostree deployment sans-MicroShift (`rhel-d0`)
+1. The agent stages **3rd** ostree deployment with-MicroShift (`rhel-d3`)
+   - greenboot sets `boot_counter`
+1. The sans-MicroShift deployment (`rhel-d0`) shuts down
+1. The **3rd** ostree deployment with-MicroShift (`rhel-d3`) starts up.
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d2"}
 
-  exit[Exit with error]
-  red[Red scripts\nNext boot: 'restore']
-  reboot([Greenboot reboots system\nunless it's rollback, then\nmanual intervention is required])
+   // ls /var/lib/microshift-backups/
+   health.json
 
-  classDef danger fill:red
-  class exit,red,reboot danger
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d1",
+         "microshift": "unhealthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 01:00:00"
+       },
+       {
+         "id": "rhel-d2",
+         "microshift": "unhealthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 03:00:00"
+       }
+   ]}
+   ```
+1. `microshift pre-run`
+   - Data exists (left over of 2nd ostree deployment with-MicroShift)
+   - `prev-boot-deploy.system` is `unhealthy` -> restore `$current_deployment` (`rhel-d3`)
+     - `/var/lib/microshift-backups/rhel-d3` doesn't exist
+     - `deployments[rhel-d3]` doesn't exist *(microshift didn't run on this deploy yet)*
+     - Get second to most recent deployment - `deployments[rhel-d2]` was also unhealthy
+     - Delete `/var/lib/microshift`
+   - exit 0
+1. `microshift run`
+   - Creates `version.json`, updates `health.json`, etc.
 
-  green[Green scripts\nNext boot: 'backup']
-  continue-running([System and MicroShift\nproceed to run successfully])
-  classDef good fill:green
-  class continue-running,green good
+#### Flow 4.13 -> 4.14 -rollback-> 4.13 -> 4.14
 
-  open-question([See open questions])
-  classDef open fill:yellow
-  class open-question open
-  
-%% Actions
+1. Deployment with MicroShift 4.13 (`rhel-d0`) is running
+1. Deployment with MicroShift 4.14 (`rhel-d1`) is staged
+1. `rhel-d0` shuts down, `rhel-d1` boots
+1. Current state
+   ```plaintext
+   /var/lib/microshift/              exists
+   /var/lib/microshift/version.json  missing
+   /var/lib/microshift-backups/      missing
+   ```
+1. `microshift pre-run`
+   - `microshift/` exists, `version.json` and `health.json` do not
+     - create `version.json` with `{"microshift": "4.13", "deployment": "4.13"}`
+     - action: backup
+   - Copy `/var/lib/microshift` to `/var/lib/microshift-backups/4.13`
+   - Compare `version.json` with `microshift version`
+     - Attempt storage migration
+1. `microshift run`
+1. System is unhealthy due to different reasons:
+   - Upgrade was blocked or storage migration failed
+   - MicroShift was unhealthy
+   - Something else was unhealthy
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.14.0", "deployment": "rhel-d1"}
 
-  do-backup[Backup data]
-  do-restore[Restore data]
-  do-data-migration[Migrate data]
-  do-persist-version[Persist version metadata]
-  %% do-clean-data[Remove /var/lib/microshift?\nor try running without cleanup?]
+   // ls /var/lib/microshift-backups/
+   health.json
+   4.13/
 
-%% Decisions
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d1",
+         "microshift": "(un)healthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 01:00:00"
+       }
+   ]}
+   ```
+1. System is rebooted, red boot continue
+1. Rollback to `rhel-d0` deployment
+1. `microshift run`
+   - Fails due to data inconsistency
+1. Manual intervention is needed
+   - Admin overwrites `/var/lib/microshift` with `microshift-backups/4.13`
+1. Deployment with MicroShift 4.14 (`rhel-d2`) is staged
+1. `rhel-d0` shuts down, `rhel-d2` boots
+1. Current state
+   ```json
+   // /var/lib/microshift/version.json
+   {"microshift": "4.13", "deployment": "4.13"}
 
-  data-dir-exists?{/var/lib/microshift/}
-  backup-or-restore?{Backup or restore?}
-  backup-exists?{Does backup exist?}
-  version?{Compare versions:\nmetadata vs binary}
-  data-migration?{Was\nmigration\nsuccessful?}
-  healthy?{"Is MicroShift healthy?\n(greenboot check)"}
-  missing-metadata-version?{Upgrade\nfrom 4.13 is\nsupported}
-  restore-ok?{Restore\nsucceeded?}
-  backup-ok?{Backup\nsucceeded?}
+   // ls /var/lib/microshift-backups/
+   health.json
+   4.13/
 
-%% Transitions
-
-  start --> pre-run --> data-dir-exists?
-
-  data-dir-exists? -- Doesn't exists --> run
-  data-dir-exists? -- Exists         --> backup-or-restore?
-
-  backup-or-restore? -- "Restore"    --> do-restore
-  backup-or-restore? -- "Backup"   --> do-backup
-  backup-or-restore? -- Missing\nData exists,\nbut no info persisted about what to do\nONLY OK IF BINARY IS 4.14\nASSUME DATA IS 4.13 --> do-backup
-
-  do-backup --> backup-ok?
-  backup-ok? -- Yes --> version?
-  backup-ok? -. No .-> exit
-
-  do-restore                             --> backup-exists?
-  %% backup-exists? -- No --> do-clean-data --> run
-  backup-exists? -- No --> open-question
-  backup-exists? -- Yes --> restore-ok? 
-  restore-ok? -- Yes --> version?
-  restore-ok? -. No .-> exit
-
-  version? -- X.Y match                             --> run
-  version? -. Binary is older                       .-> exit
-  version? -- Binary is newer                       --> do-data-migration
-  version? -. Upgrade is blocked                    .-> exit
-  version? -- Upgrade is allowed                    --> do-data-migration
-  version? -- "Metadata is missing\n(assume 4.13)"  --> missing-metadata-version?
-
-  missing-metadata-version? -- Yes --> do-data-migration
-  missing-metadata-version? -. No .-> exit
-
-  do-data-migration --> data-migration?
-  data-migration? -- Yes --> run
-  data-migration? -. No  .-> exit
-
-  run --> healthy?
-  healthy? -- Yes --> green -->  continue-running
-  healthy? -- Yes --> do-persist-version
-  healthy? -. No  .-> red
-
-  exit -.-> red
-  red --> reboot
-```
+   // /var/lib/microshift-backups/health.json
+   { "deployments": [
+       {
+         "id": "rhel-d1",
+         "microshift": "(un)healthy",
+         "system": "unhealthy",
+         "last_boot": "2023-07-01 01:00:00"
+       }
+   ]}
+   ```
+1. `microshift pre-run`
+   - `microshift/` `version.json` and `health.json` exist
+   - `prev-boot-deploy` is `unhealthy`, we want to restore `$current-deploy` (`rhel-d2`)
+   - `microshift-backups/$current-deploy` doesn't exist
+   - `$current-deploy` is not in `deployments`
+   - check if `version` contains `4.13`
+   - if `microshift version` supports upgrade from `4.13`, attempt to migrate data
+   - depending on success of ^, cause a rollback by blocking `microshift run`,
+     or allow it and start running
 
 ### Test Plan
 
@@ -1039,6 +1747,19 @@ Pros:
 Cons:
 - Without compression is weights as much as data dir
 
+### TODO: Symlinking live data to specific deployment data
+
+### TODO: Executing pre-run as part of run (aka why is pre-run separate systemd unit)
+
+
+<!-- #### How should `microshift pre-run` be executed? -->
+- `microshift.service` - `ExecStartPre`
+  - No need to add new systemd service files.
+  - It will run on each `systemctl restart microshift` which is not desirable (will it run when systemd restarts MicroShift?)
+- `microshift-pre-run.service`
+  - Running on boot, just once, before `microshift.service`
+  - Not repeated on MicroShift restart
+  - New service file
 ## Infrastructure Needed [optional]
 
 N/A
