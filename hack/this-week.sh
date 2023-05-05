@@ -3,8 +3,9 @@
 set -o pipefail
 set -x
 
+TODAY=$(date +%F)
 SECONDS_PER_DAY=86400
-REPORT_FILE=$(date +%F).md
+REPORT_FILE=${TODAY}.md
 DAYSBACK="$1"
 
 if [ -z "$DAYSBACK" ]; then
@@ -25,3 +26,7 @@ if [ -z "$DAYSBACK" ]; then
 fi
 
 (cd ./tools; go run ./main.go report --days-back $DAYSBACK) > this-week/${REPORT_FILE}
+
+git checkout -b twie-${TODAY}
+git add this-week/${REPORT_FILE}
+git commit -m "this-week: ${TODAY}"
