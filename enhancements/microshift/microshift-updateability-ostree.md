@@ -486,10 +486,9 @@ Abbreviations, glossary:
 
      - `current-deploy` does not exist in `health.json`
        > First boot of new deployment, `prev-boot-deploy` was unhealthy == new deployment staged over (possibly) unhealthy.
-       > Admin didn't address the issues or forgot to mark `prev-boot` as healthy - either way,
-       > for MicroShift it's `unhealthy` and we don't want to upgrade from such data.
-       * Backup `microshift/` as `backups/unhealthy__prev-boot-deploy/`.
-       * Delete data, start clean.
+       > We do not support upgrade from unhealthy deployment.
+       > Admin should've heal previous deployment or delete MicroShift data before upgrade to start from clean state.
+       * Exit 1, block `microshift run`
 
      - `current-deploy` exists in `health.json`
        > Deployment already ran on the system.
@@ -506,27 +505,16 @@ Abbreviations, glossary:
              * Backup `backups/current-deploy/`, continue running off `microshift/`
            - `version.json` does not match `current-deploy.id`
              > Migrated without backup? Bug or user interference.
-             * Abort
+             * Exit 1, block `microshift run`
 
        - `current-deploy` was `unhealthy`
-         > `prev-boot-deploy` was staged over `unhealthy` `current-deploy` without metadata cleanup
-         > and now system rolled back.
-         > After addressing issues, admin should mark deployment as healthy, so **this shouldn't happen**.
-         > Let's assume admin addressed the issues but forgot to mark as healthy.
-
-         - `version.json` matches `current-deploy.id`
-           * Move `backups/current-deploy/` to `backups/last_healthy__current-deploy/`
-           * Backup `microshift/` to `backups/current-deploy/`
-           * Proceed with `microshift run`
-
-         - `version.json` does not match `current-deploy.id`
-           > Other deployment attempted to migrate data
-           - `backups/current-deploy/` exists
-             > It was `healthy` at least once, but not on last run. Rolling back to last healthy state.
-             * Restore from `backups/current-deploy/`
-
-           - `backups/current-deploy/` does not exist
-             * Delete data, start clean.
+         > `prev-boot-deploy` was staged over `unhealthy` `current-deploy` without metadata cleanup.
+         > We do no support upgrade from unhealthy deployment.
+         > Admin should've heal previous deployment or delete MicroShift data before upgrade to start from clean state.
+         >
+         > This should be caught by *`prev-boot-deploy.system` is `unhealthy` > `current-deploy` != `prev-boot-deploy` >
+         > `current-deploy` does not exist in `health.json`*
+         * Exit 1, block `microshift run`
 
    - `current-deploy` == `prev-boot-deploy`
      > Because `current-deploy` is already present in `health.json`, it's 2nd, 3rd,... boot of the deployment (not 1st).
@@ -585,8 +573,10 @@ Abbreviations, glossary:
                  * exit 1, block `microshift run`
            - `earlier-deploy` was unhealthy
              > Admin staged newer deployment over unhealthy one without prior cleanup.
-             > This should be caught earlier by: `prev-boot.system == unhealthy` and `current` missing from `health.json`
-             * just in case: exit 1, block `microshift run`
+             >
+             > This should be caught by *`prev-boot-deploy.system` is `unhealthy` > `current-deploy` != `prev-boot-deploy` >
+             > `current-deploy` does not exist in `health.json`*
+             * Exit 1, block `microshift run`
 
          - `earlier-deploy` != other deploy (not active) from `rpm-ostree status`
            > Matches "FIDO" scenario from workflows.
@@ -653,8 +643,9 @@ After admin addresses issues it should either:
 - mark deployment as `healthy` using `microshift admin mark-deploy-as-healthy`
   (so next boot has correct information about previous boot health)
 
-If admin addressed issues, but forget to update deployment's health before booting into different deployment,
-a backup of `unhealthy` deployment will be made with prefix `unhealthy__`.
+> If new deployment is staged on top of unhealthy one, MicroShift will refuse to proceed with upgrade procedures.
+> Upgrade will be only supported from healthy deployment or clean state (manually removing MicroShift's data before 
+> staging new deployment).
 
 ##### Backup exists, restore succeeds, but system is unhealthy
 
