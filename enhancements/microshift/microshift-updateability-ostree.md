@@ -737,7 +737,7 @@ After admin addresses issues it should either:
      > `version.json == microshift version`
 1. `microshift run`
 
-##### Flow 4.13 -> 4.14 -rollback-> 4.13 -> 4.14
+##### Addressing rollback after unsuccessful upgrade from 4.13
 
 > Scenario: upgrading from 4.13 to 4.14 fails resulting in rollback.
 > Workflow also describes how admin can attempt the upgrade again.
