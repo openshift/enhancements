@@ -67,7 +67,7 @@ Please read that proposal for details not covered here.
 - Keep direct control of management cluster forwarding on the management cluster.
   - hosted cluster has no direct access to control plane configuration.
   - data plane resources can request forwarding by the management cluster.
-  - management cluster HLO automatically validates data-plane requests, and enables them if they are safe.
+  - management cluster HLO automatically validates data-plane requests, and enables them if they are supported.
 
 ### Non-Goals
 
