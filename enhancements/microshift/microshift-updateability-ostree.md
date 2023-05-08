@@ -737,6 +737,38 @@ After admin addresses issues it should either:
      > `version.json == microshift version`
 1. `microshift run`
 
+##### Flow 4.13 -> 4.14 -rollback-> 4.13 -> 4.14
+
+> Scenario: upgrading from 4.13 to 4.14 fails resulting in rollback.
+> Workflow also describes how admin can attempt the upgrade again.
+
+1. 0th deployment (with MicroShift 4.13) is running
+1. 1st deployment (with MicroShift 4.14) is staged
+1. 0th shuts down, 1st boots
+1. `microshift pre-run`
+   - Backup to `backups/4.13/`
+     > `microshift/` exists, `version.json` does not
+   - If upgrade from 4.13 supported: attempt storage migration from 4.13, otherwise block `microshift run`
+1. `microshift run`
+1. System is unhealthy due to different reasons
+   - Upgrade was blocked or storage migration failed
+   - MicroShift was unhealthy
+   - Something else was unhealthy
+1. System is rebooted, system is consistently unhealthy
+1. Rollback to 0th deployment (4.13)
+1. `microshift run`
+   - (Maybe) fails due to data inconsistency
+1. MicroShift is healthy or unhealthy
+   - Admin restores `backups/4.13/`
+   - Even if healthy, admin should address the migration problem before attempting it again
+1. 2nd deployment (with MicroShift 4.14) is staged
+1. 0th shuts down, 2nd boots
+1. `microshift pre-run`
+   - Backup to `backups/4.13/`
+     > `microshift/` exists, `version.json` does not
+   - If upgrade from 4.13 supported: attempt storage migration, otherwise block `microshift run`
+
+
 #### First ostree deployment
 
 ##### First deployment, first boot
@@ -786,7 +818,7 @@ After admin addresses issues it should either:
    - Greenboot doesn't reboot device because `boot_counter` is only set when ostree deployment is staged
    - System requires manual intervention.
 
-#### Second ostree deployment is staged
+#### Second ostree deployment
 
 Pre-steps:
 
@@ -863,7 +895,7 @@ Pre-steps:
    - Exit 1 - blocks `microshift run`
 1. Manual intervention needed
 
-#### Rollback to first deployment, failed restore
+#### Staged deployment is unhealthy and leads to rollback which fails to restore
 
 1. 2nd deployment boots
 1. `microshift pre-run`
@@ -886,7 +918,11 @@ Pre-steps:
 1. System is unhealthy, `boot_counter` is unset *(it's already a rollback)*
 1. Manual intervention is required.
 
-#### Fail first startup, FDO (FIDO Device Onboard) deployment
+#### System rolls back to deployment without MicroShift leaving stale data (FIDO Device Onboard)
+
+> Following workflow addresses scenario when device is preinstalled system without MicroShift and later deployment with
+> MicroShift is staged. Deployment happens to be unhealthy which leads to rollback. Then, admin stages another
+> deployment with MicroShift, which requires it to deal with stale data.
 
 1. 1st deployment (sans-MicroShift) is installed on the device at the factory
 1. The device boots at a customer site
@@ -937,34 +973,6 @@ Pre-steps:
      > `current-deploy not in health.json` &&
      > `prev-boot-deploy != ostree rollback deployment`
 1. `microshift run`
-
-#### Flow 4.13 -> 4.14 -rollback-> 4.13 -> 4.14
-
-1. 0th deployment (with MicroShift 4.13) is running
-1. 1st deployment (with MicroShift 4.14) is staged
-1. 0th shuts down, 1st boots
-1. `microshift pre-run`
-   - Backup to `backups/4.13/`
-     > `microshift/` exists, `version.json` does not
-   - If upgrade from 4.13 supported: attempt storage migration from 4.13, otherwise block `microshift run`
-1. `microshift run`
-1. System is unhealthy due to different reasons
-   - Upgrade was blocked or storage migration failed
-   - MicroShift was unhealthy
-   - Something else was unhealthy
-1. System is rebooted, system is consistently unhealthy
-1. Rollback to 0th deployment (4.13)
-1. `microshift run`
-   - (Maybe) fails due to data inconsistency
-1. MicroShift is healthy or unhealthy
-   - Admin restores `backups/4.13/`
-   - Even if healthy, admin should address the migration problem before attempting it again
-1. 2nd deployment (with MicroShift 4.14) is staged
-1. 0th shuts down, 2nd boots
-1. `microshift pre-run`
-   - Backup to `backups/4.13/`
-     > `microshift/` exists, `version.json` does not
-   - If upgrade from 4.13 supported: attempt storage migration, otherwise block `microshift run`
 
 ### Test Plan
 
