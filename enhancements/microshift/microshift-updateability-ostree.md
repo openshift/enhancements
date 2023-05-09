@@ -322,236 +322,150 @@ Decision flow describing whether to block or attempt data migration can be summa
 - Skip migration if X.Y are the same
 - Attempt data migration otherwise
 
+#### Staging new ostree commits on top of unhealthy systems
+
+Automated handling of MicroShift data in case of unhealthy system is
+complicated due to ambiguity regarding admin's intention and each option has
+different trade offs without clear winner.
+
+For that reason, when needing to stage a new commit on top of unhealthy system
+one of two actions must be performed:
+- system must be brought to healthy state, or
+- MicroShift data should be deleted completely resulting in clean start which
+  is the same as first run.
+
+Only exception is when rollback commit doesn't feature MicroShift.
+This special case handles scenarios when device is preinstalled with system
+without MicroShift, then commit with MicroShift runs, but is unhealthy so it
+rolls back to factory system, later another commit with MicroShift is staged
+and runs, but it should not be held back by stale data.
+
 ### Open Questions [optional]
 
 ### Workflows in detail
 
 #### Decision tree
 
-Abbreviations, glossary:
-- `microshift/` -> `/var/lib/microshift/`
-- `version.json` -> `/var/lib/microshift/version.json`
-- `backups/` -> `/var/lib/microshift-backups/`
-- `health.json` -> `/var/lib/microshift-backups/health.json`
-- `prev-boot-commit` - commit in `health.json` with most recent `boot` timestamp in `health.json`
-- `current-commit` - currently running commit
-  - if absent in `health.json`, it means it's 1st boot of the commit
-  - if present, it's a subsequent boot and will be the same as `prev-boot-commit`
-- `earlier-commit` - commit that was before `prev-boot-commit`
-  - if `current-commit` exists in `health.json`, then this is commit that system is being
-    upgraded from and will automatically roll back to
-  - if `current-commit` is not present in `health.json` (so ostree history looks like `current`,
-    `prev-boot`, and `earlier` commits), it might no longer exist according to ostree
-    (only `current` and `prev-boot` which is a rollback commit)
+###### Backup management
 
-`microshift pre-run`:
-1. Neither `microshift/` nor `backups/` exist
-   > *First boot*
-   - **exit 0** :leftwards_arrow_with_hook:
+- "Data" refers to MicroShift's data
+- Unless stated otherwise, "previous boot" and "current" commits and
+  "commit before current one" are referring to contents of "history of commits"
+  which is managed by MicroShift (therefore only updated when commit is featuring MicroShift).
 
-1. `microshift/` exists and `version.json` does not:
-   > *Assume it's 4.13*
-   - Backup data to `backups/4.13/`
-   - Proceed to data migration
+---
 
-1. Load `version` and `health.json`
+1. If data does not exist
+   - MicroShift is running for the first time on the device.
+   - There's nothing to backup or migrate, skip to running cluster.
 
-1. `prev-boot-commit.system == healthy`
-   - Backup to `microshift-backups/prev-boot-commit.id`
-   - Special case - rollback on demand
-     - `current-commit.id` is different from `prev-boot-commit.id`, and
-       `current-commit.system` was healthy, and
-       `backups/current-commit.id/` exists, and
-       `microshift` in `backups/current-commit/version.json`
-        is older than `microshift/version.json`, then
-        restore `backups/current-commit.id/`
-   - Proceed to data migration
+1. If data exists but is missing version metadata:
+   Assume it's 4.13, make a backup (use `4.13` as ID), proceed to [data migration](#data-migration-1).
 
-1. `prev-boot-commit.system == unknown`
-   > MicroShift started, but system didn't get to a point when green/red script update `health.json`.
-   > It might've been power loss or hard reboot.
-   - `current-commit.id` is the same as `prev-boot-commit.id`
-     * exit 0 and allow `microshift run`
-   - `current-commit.id` differs from `prev-boot-commit.id`
-     > Assuming it wasn't "quickly stage new commit and do hard reboot" because that would be irresponsible.
-     > Power loss might've happen on last boot before rollback (`boot_counter=0`) and now it's rollback commit.
-     * Assume `prev-boot-commit.system` is `unhealthy`, go to next point
+1. If previous boot was healthy:
+   **backup data for previous boot**, check if next point is applicable, proceed to [data migration](#data-migration-1).
 
-1. `prev-boot-commit.system == unhealthy`
-   > Ideally, we'd like to restore `backups/current-commit.id/`.
+1. (Regardless of previous boot health)<a name="current-commit-different-restore"></a>
+   If currently running commit is different from previous boot's commit
+   (rolled back), and backup exist for current commit:
+   **restore data for current commit**, skip data migration, [start cluster](#starting-the-cluster).
 
-   - `current-commit != prev-boot-commit`
-     > Previous boot was unhealthy, but this is boot is different commit.
+1. If health of previous boot is unknown (e.g. system was unexpectedly rebooted before health check)
+   and commit of current and previous boot is the same:
+   skip to [data migration](#data-migration-1), i.e. retry start up, but check version skews just in case.
+   Otherwise assume it was unhealthy and proceed to the next point.
 
-     - `current-commit not in health.json`
-       - `prev-boot-commit == ostree rollback commit`
-         > First boot of new commit, `prev-boot-commit` was unhealthy == new commit staged over (possibly) unhealthy.
-         > We do not support upgrade from unhealthy commit.
-         > Admin should've heal previous commit or delete MicroShift data before upgrade to start from clean state.
-         * Exit 1, block `microshift run`
-       - `prev-boot-commit != ostree rollback commit`
-         > First boot of new commit, `prev-boot-commit` was unhealthy but it's different from rollback commit.
-         > Fits "FIDO" scenario flow. Admin didn't cleanup MicroShift's data.
-         * Delete data and start clean
+(Following checks assume that previous boot was unhealthy)
 
-     - `current-commit in health.json`
-       > commit already ran on the system.
-       > System rolled back automatically or on demand (by admin).
+1. If commits of current and previous boots are different, and there's no backup for current commit
+   1. If "history of commits" contains current commit and version metadata matches current boot:
+      **backup data for current commit and [start cluster](#starting-the-cluster)**
+      > It means that current commit was already running on the device.
+      > If the backup is missing, it means that either system was unhealthy or new commit failed to make a backup.
+      > The former is unsupported scenario (system should be healthy or MicroShift data cleaned up),
+      > so only the latter is considered.
 
-       - `current-commit.system == healthy`
-         - `backups/current-commit.id/` exists
-           * Restore from `backups/current-commit.id/`
+   1. If "history of commits" does not contain current commit
+      > Previous boot was unhealthy and it's first boot for current commit
+      > (otherwise it would be in "history of commits")
+      1. Previous boot's commit is not a rollback commit: **delete data and [start cluster](#starting-the-cluster)**.
+         > It means that on actual previous boot didn't run MicroShift.
+         > This fits FIDO scenario.
 
-         - `backups/current-commit.id/` does not exist
-           > Reminder: `prev-boot-commit` was unhealthy, `current-commit` was healthy and is missing backup
-           - `version.json` matches `current-commit.id`
-             > Means that `prev-boot-commit` possibly failed to make a backup. `version.json` is untouched so no migration attempt.
-             * Backup `backups/current-commit.id/`, continue running off `microshift/`
-           - `version.json` does not match `current-commit.id`
-             > Migrated without backup? Bug or user interference.
-             * Exit 1, block `microshift run`
+1. Commits of current and previous boots are the same (current commit booted more than once in a row)
+   1. If backup for current commit exists: **restore**
+      > - If this is greenboot's reboot, then backup was created before this commit was staged and deployed.
+      >   So commit must've been reintroduced and [data would be restored early in the process](#current-commit-different-restore).
+      >   - Being in this place in decision tree means that either restore failed or system was unhealthy.
+      >     Restoring again seems to best bet.
+      >
+      > - If this is manual reboot, then system was healthy,
+      >   then manually rebooted, backed data up and end up unhealthy,
+      >   again rebooted resulting in being in this place in decision tree.
+      >   - Admin should address problems before rebooting the system
+      >     (and retrigger greenboot first, to refresh system's health)
+      >   - Restoring data seems okay - going back to last healthy state.
 
-       - `current-commit.system == unhealthy`
-         > `prev-boot-commit` was staged over `unhealthy` `current-commit` without metadata cleanup.
-         > We do no support upgrade from unhealthy commit.
-         > Admin should've heal previous commit or delete MicroShift data before upgrade to start from clean state.
-         >
-         > This should be caught by *`prev-boot-commit.system` is `unhealthy` > `current-commit` != `prev-boot-commit` >
-         > `current-commit` does not exist in `health.json`*
-         * Exit 1, block `microshift run`
+   1. If backup for current commit does not exist
+      > There's no proof of the commit being ever healthy
 
-   - `current-commit == prev-boot-commit`
-     > Because `current-commit` is already present in `health.json`, it's 2nd, 3rd,... boot of the commit (not 1st).
+      1. If "history of commits" does not know about commit before current one: **delete data and [start cluster](#starting-the-cluster)**
+         > First commit with MicroShift running on the system, system is consistently unhealthy.
 
-     - `backups/current-commit.id/` exists
-       > commit was healthy at least once already.
-       > It means greenboot removed `boot_counter` and current boot isn't due to greenboot's automatic reboot.
-       > After addressing issues, admin should mark commit as healthy, so this shouldn't happen.
-       > Let's assume admin addressed the issues but forgot to mark as healthy and just rebooted the device.
-       * No backup, no restore, skip migration, allow `microshift run`
-         > If admin addressed issues, it should be healthy again.
-         > If issue persists, it'll end up unhealthy requiring manual intervention
-         > (which is the same result if we'd block `microshift run`).
+      1. If "history of commits" has entry about commit before current one
+         > MicroShift was already running on the device.
+         > But it doesn't mean system will rollback to that "commit before current one"
 
-     - `backups/current-commit.id/` doesn't exist
-       > commit was always unhealthy - it wasn't "accepted" by greenboot, so it might still rollback.
-       > Because admin should heal the commit before manually rebooting, we assume it's reboot due to greenboot.
+         1. "Commit before current one" is the same as rollback according to ostree
+            1. If version metadata matches "commit before current one": **backup data and proceed to [data migration](#data-migration-1)**
+               > Previous boot of current commit might have been unhealthy because it failed to make a backup.
 
-       - `earlier-commit not in health.json`
-         > For MicroShift it's first commit it's running, but it doesn't mean it's the only commit
-         > (rollback commit might be without MicroShift).
-         >
-         > ostree status:
-         > 1. `current-commit` == `prev-boot-commit` - currently running,
-         >    last boot unhealthy, greenboot didn't accept it yet so it might still rollback
-         > 1. (optionally) rollback (possibly without MicroShift)
-         * Delete data, try from clean state
+            1. Otherwise: **restore backup of "commit before current one"**
+               > Give chance to migrate data and start cluster again.
+               > Assumption that admin upgraded from healthy system is important here.
 
-       - `earlier-commit in health.json`
-         > For MicroShift it looks like it ran already on the device, but `earlier-commit` might or might not be
-         > the rollback commit.
-         >
-         > ostree status:
-         > 1. `current-commit` == `prev-boot-commit` - currently running, last boot unhealthy, greenboot didn't accept it yet
-         > 1. (auto) rollback (might be `earlier` or not)
+         1. "Commit before current one" is not the rollback: **delete data and [start cluster](#starting-the-cluster)**
+            > Means that rollback does not feature MicroShift.
+            > This is "retry boot" of FIDO scenario.
 
-         - `earlier-commit == ostree rollback commit`
-           > ostree status:
-           > 1. `current` == `prev-boot` - currently running, last boot unhealthy, greenboot didn't accept it yet
-           > 1. `earlier` - (auto) rollback
-           >
-           > Let's sum it up: it's 2nd or 3rd boot of `current-commit` and it's `unhealthy` since 1st boot.
-           > It was staged directly from `earlier` which also ran MicroShift.
+##### Data migration
 
-           - `earlier-commit` was healthy
-             - `microshift/version.json[commit] == earlier-commit.id`
-               > `current-commit` didn't get to data migration, maybe backup failed.
-               > `backups/earlier-commit.id` may or may not be most recent backup of data.
-               * Backup `microshift/` as `backups/earlier-commit.id/`
-               * Proceed to data migration
-
-             - `microshift/version.json[commit] != earlier-commit.id`
-               - `backups/earlier-commit.id/` exists
-                 > Failed data migration or runtime problem. Retry upgrade like it's 1st boot.
-                 * Restore data from `backups/earlier-commit.id/` and proceed to data migration.
-               - `backups/earlier-commit.id/` doesn't exist
-                 > This might mean that migration ran without prior backup - bug or user's interference.
-                 * Exit 1, block `microshift run`
-           - `earlier-commit` was unhealthy
-             > Admin staged newer commit over unhealthy one without prior cleanup.
-             >
-             > This should be caught by *`prev-boot-commit.system` is `unhealthy` > `current-commit` != `prev-boot-commit` >
-             > `current-commit` does not exist in `health.json`*
-             * Exit 1, block `microshift run`
-
-         - `earlier-commit != ostree rollback commit`
-           > Matches "FIDO" scenario from workflows.
-           > Admin didn't cleanup MicroShift's artifacts.
-           > This should be caught by `current-commit` != `prev-boot-commit`
-           >
-           > ostree status:
-           > 1. `current` == `prev-boot` - currently running
-           > 1. (auto) rollback
-           - delete `microshift/` and start clean
-
-1. compare binary's `version` with value of `microshift` in `version.json`
-   - binary's `Y` is smaller: **exit 1** :stop_sign:
-   - binary's `Y` is bigger by more than `1`: **exit 1** :stop_sign:
-   - `version.json` is present in binary's "list of blocked migrations": **exit 1** :stop_sign:
-   - `Y`s are the same: **exit 0** :leftwards_arrow_with_hook:
+1. Compare version persisted in metadata with MicroShift's binary
+   - Binary's `Y` is smaller: **abort and block cluster start up**
+   - Binary's `Y` is bigger by more than `1`: **abort and block cluster start up**
+   - Version in metadata is present in "list of prohibited migrations:
+     **abort and block cluster start up**
+   - `Y`s are the same: **skip to cluster start up**
 1. Perform data migration
-   - Update `version.json`: `{ "microshift": "migrating-from-4.Y1.Z1-to-4.Y2.Z2", "commit: "$current"}`
-   - Success: **exit 0** :leftwards_arrow_with_hook:
-     - Update `version.json`: `{ "microshift": "4.Y2.Z2", "commit: "$current"}`
-   - Failure: **exit 1** :stop_sign:
-     - Update `version.json`: `{ "microshift": "failed-migrating-from-4.Y1.Z1-to-4.Y2.Z2", "commit: "$current"}`
 
-`microshift run`
-1. If data exists and `version.json` doesn't match binary's `version`
-   > Means that data's version is different and migration is needed
-   - **exit 1**
+##### Starting the cluster
+1. If metadata exists and it doesn't match version of the binary: **abort**
+   > Extra check to make sure that migration was performed
 1. Create data dir if necessary
-1. Create `version.json` if needed
-1. Add new or update entry in `health.json`:
-   ```json
-    {
-      "commit_id": "$current",
-      "microshift": "unknown",
-      "system": "unknown",
-      "last_boot": "yyyy-mm-dd HH:MM:SS"
-    }
-   ```
+1. Create or update metadata (version and "history of commits")
 1. Continue regular flow
 
-`microshift healthcheck`
-1. Assess health of MicroShift
-1. Update `health.json`: `commits[$current].microshift` <- with `healthy` or `unhealthy`
+##### Health check
+1. Assess health of MicroShift and persist the result to "history of commits"
 
-`microshift persist-system-health`
-1. Update `health.json`: `commits[$current].system` <- with `healthy` or `unhealthy`
-
+##### MicroShift's green and red scripts
+1. Write system's health to "history of commits"
 
 #### Manual interventions
 
 ##### Addressing MicroShift's health
 
 Depending on MicroShift's health admin might:
-- unhealthy
-  - delete MicroShift's data, to allow fresh start
-  - investigate and address problems with MicroShift cluster
-- healthy
-  - keep MicroShift's data
-- unhealthy application running on top of MicroShift
+- Unhealthy
+  - Delete MicroShift's data to allow fresh start
+  - Investigate and address problems with MicroShift cluster
+- Healthy
+  - Keep MicroShift's data
+- Unhealthy application running on top of MicroShift
   - investigate and address problems with the app
 
-After admin addresses issues it should either:
-- re-trigger greenboot healthcheck (`systemctl restart greenboot-healthcheck`), or
-- mark commit as `healthy` using `microshift admin mark-commit-as-healthy`
-  (so next boot has correct information about previous boot health)
-
-> If new commit is staged on top of unhealthy one, MicroShift will refuse to proceed with upgrade procedures.
-> Upgrade will be only supported from healthy commit or clean state (manually removing MicroShift's data before 
-> staging new commit).
+After resolving the issues, admin should re-trigger greenboot healthcheck.
+If admin wishes to migrate from unhealthy system, MicroShift's data should be cleaned up.
 
 ##### Backup exists, restore succeeds, but system is unhealthy
 
@@ -567,7 +481,7 @@ After admin addresses issues it should either:
    - Restore from `backups/current-commit.id/`
      > `prev-boot-commit.system == unhealthy` &
      > `current-commit != prev-boot-commit` &
-     > `current-commit exists in health.json and was healthy` &
+     > `current-commit exists in history.file and was healthy` &
      > `backups/current-commit.id/ exists`
 1. `microshift run`
 1. System is unhealthy (red)
@@ -632,9 +546,9 @@ After admin addresses issues it should either:
      > `current-commit != prev-boot-commit` &
      > `current-commit.system == healthy` &
      > `backups/current-commit.id/ exists` &
-     > `backups/current-commit.id/version.json is older than microshift/version.json`
+     > `backups/current-commit.id/version.file is older than microshift/version.file`
    - No need to migrate data
-     > `version.json == microshift version`
+     > `version.file == microshift version`
 1. `microshift run`
 
 ##### Addressing rollback after unsuccessful upgrade from 4.13
@@ -647,7 +561,7 @@ After admin addresses issues it should either:
 1. 0th shuts down, 1st boots
 1. `microshift pre-run`
    - Backup to `backups/4.13/`
-     > `microshift/` exists, `version.json` does not
+     > `microshift/` exists, `version.file` does not
    - If upgrade from 4.13 supported: attempt storage migration from 4.13, otherwise block `microshift run`
 1. `microshift run`
 1. System is unhealthy due to different reasons
@@ -665,7 +579,7 @@ After admin addresses issues it should either:
 1. 0th shuts down, 2nd boots
 1. `microshift pre-run`
    - Backup to `backups/4.13/`
-     > `microshift/` exists, `version.json` does not
+     > `microshift/` exists, `version.file` does not
    - If upgrade from 4.13 supported: attempt storage migration, otherwise block `microshift run`
 
 
@@ -711,7 +625,7 @@ After admin addresses issues it should either:
    - Backup to `backups/prev-boot-commit.id/`
      > `prev-boot-commit.system == healthy`
    - No data migration
-     > `version.json == microshift version`
+     > `version.file == microshift version`
 1. `microshift run`
 1. Greenboot: health checks and green/red scripts
 1. Optional: System is unhealthy
@@ -736,7 +650,7 @@ Pre-steps:
    - Backup to `backups/prev-boot-commit.id/`
      > `prev-boot-commit.system == healthy`
    - No data migration
-     > `version.json == microshift version`
+     > `version.file == microshift version`
 1. `microshift run`
 1. Greenboot: health checks and green/red scripts
 
@@ -747,7 +661,7 @@ Pre-steps:
      > `prev-boot-commit.system == unhealthy` &
      > `current-commit == prev-boot-commit` &
      > `backups/current-commit.id/ doesn't exist` &
-     > `health.json[earlier-commit] doesn't exist`
+     > `history.file[earlier-commit] doesn't exist`
 1. `microshift run`
 1. Greenboot: health checks and green/red scripts
 1. **System was unhealthy (red) each boot**
@@ -757,7 +671,7 @@ Pre-steps:
    - Restore from `backups/current-commit.id/`
      > `prev-boot-commit.system == unhealthy` &
      > `current-commit != prev-boot-commit` &
-     > `health.json[current-commit] exists and was healthy` &
+     > `history.file[current-commit] exists and was healthy` &
      > `backups/current-commit.id/ exists`
 1. `microshift run`
 
@@ -775,10 +689,10 @@ Pre-steps:
      > `prev-boot-commit.system == unhealthy` &
      > `current-commit == prev-boot-commit` &
      > `backups/current-commit/ doesn't exist` &
-     > `health.json[earlier-commit] exists` &
+     > `history.file[earlier-commit] exists` &
      > `earlier-commit == ostree status' rollback` &
      > `earlier-commit.system == healthy` &
-     > `version.json[commit] matches earlier-commit.id`
+     > `version.file[commit] matches earlier-commit.id`
      - Fails again
    - Exit 1 - blocks `microshift run`
 1. Greenboot reboots system multiple times
@@ -787,10 +701,10 @@ Pre-steps:
    - Backup data to `backups/current-commit.id/`
      > `prev-boot-commit.system == unhealthy` &&
      > `current-commit != prev-boot-commit` &&
-     > `health.json[current-commit] exists` &&
+     > `history.file[current-commit] exists` &&
      > `current-commit.system == healthy` &&
      > `backups/current-commit/ does not exist` &&
-     > `version.json == current-commit.id`
+     > `version.file == current-commit.id`
      - Fails again
    - Exit 1 - blocks `microshift run`
 1. Manual intervention needed
@@ -810,7 +724,7 @@ Pre-steps:
    - Restore from `backups/current-commit.id/`
      > `prev-boot-commit.system == unhealthy`
      > `current-commit != prev-boot-commit`
-     > `health.json[current-commit] exists`
+     > `history.file[current-commit] exists`
      > `current-commit.system == healthy`
      > `backups/current-commit.id/ exists`
      - Fails
@@ -835,7 +749,7 @@ Pre-steps:
    - First boot
      > Neither `microshift/` nor `backups/` exist
 1. `microshift run`
-   - Create dir structure, `version.json`, `health.json`, etc.
+   - Create dir structure, `version.file`, `history.file`, etc.
 1. System is unhealthy, red scripts
 1. Greenboot reboots system multiple times (always red boot),
    `boot_counter` reaches `-1`,
@@ -849,7 +763,7 @@ Pre-steps:
    - Delete data and start clean
      > `prev-boot-commit.system == unhealthy` &&
      > `current-commit != prev-boot-commit` &&
-     > `current-commit not in health.json` &&
+     > `current-commit not in history.file` &&
      > `prev-boot-commit != ostree rollback commit`
 1. `microshift run`
 1. System is unhealthy, greenboot reboots the system (3rd commit)
@@ -858,7 +772,7 @@ Pre-steps:
      > `prev-boot-commit.system == unhealthy` &&
      > `current-commit == prev-boot-commit` &&
      > `backups/current-commit.id/ does not exist` &&
-     > `earlier-commit in health.json` &&
+     > `earlier-commit in history.file` &&
      > `earlier-commit.system != ostree rollback commit`
 1. `microshift run`
 1. System is unhealthy consistently, `boot_counter` falls to `-1`, grub boots 1st commit (sans-MicroShift)
@@ -870,7 +784,7 @@ Pre-steps:
    - Delete data and start clean
      > `prev-boot-commit.system == unhealthy` &&
      > `current-commit != prev-boot-commit` &&
-     > `current-commit not in health.json` &&
+     > `current-commit not in history.file` &&
      > `prev-boot-commit != ostree rollback commit`
 1. `microshift run`
 
