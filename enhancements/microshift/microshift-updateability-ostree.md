@@ -773,26 +773,17 @@ MicroShift, which requires it to deal with stale data.
 
 #### Unit tests
 
-Aiming to write as much as possible in Go, we should strive for maximum testability:
-- Separate code paths for planning (e.g. should it do a backup or restore?)
-  and acting (actually perform backup) - e.g. interface with two methods Plan(), Act()
-  - This will allow testing decisions and actions separately
-  - This will allow easy implementation of --dry-run describing what would happen
-- Due to many interactions with filesystem, filesystem abstraction should be investigated
-  so unit tests can use in-memory filesystem rather than host's to make testing easier
-  and more robust.
+Implementation in Go should be preferred over bash and new functionality should
+be implemented with unit-testability in mind but not at the expense of
+maintainability.
 
 #### Functional tests focused on each of the areas (backup, restore, migrate)
 
-Functional tests need to be assessed in terms of effort and impact.
-
-Given that implementation of the enhancement for ostree based systems has significantly
-greater priority than implementation for regular RPM systems,
-there's little incentive to work on exposing functionalities in form of `backup`,
-`restore`, and `migrate` commands.
-By not providing a way to manually trigger these processes, ability to perform functional
-tests in isolation might be severely limited or even impossible without entering territory
-of end to end tests.
+Although upgradeability implementation for ostree-based systems has higher
+priority than for regular RPM systems, exposing individual functionalities such
+as backing up, restoring, or migrating the data should be not expensive in
+terms of effort so testing individual areas in isolation might be possible
+but it must be assessed if effort is better spent developing end to end tests.
 
 #### End to end tests
 
@@ -825,25 +816,23 @@ N/A
 
 ### Version Skew Strategy
 
-See section "allowing and blocking upgrades".
+See [data migration](#data-migration).
 
 ### Operational Aspects of API Extensions
 
 #### Failure Modes
 
-Failure to perform backup, restore, or data migration will result in MicroShift
-not starting and failing greenboot check might result in rollback if problems happened
-on a commit that was just staged and booted to or system waiting for manual
-intervention if there's no rollback commit.
+If backing up, restoring, or migrating the data fails, it block start up of the
+cluster, which will lead to unhealthy system and (optionally) rolling back.
 
-In such scenario, admin must perform manual steps to investigate and address root cause.
-It is up to MicroShift team to document possible issues and how to resolve them.
+It might happen that system requires manual intervention from the admin.
+Recommended recovery scenarios should be included in the documentation.
 
-Also refer to [manual interventions flows](#manual-interventions---1st-commit-or-rollback-no-more-greenboot-reboots).
+See [manual interventions](#manual-interventions).
 
 #### Support Procedures
 
-For now refer to [manual interventions flows](#manual-interventions---1st-commit-or-rollback-no-more-greenboot-reboots).
+See [manual interventions](#manual-interventions).
 
 ## Implementation History
 
@@ -851,54 +840,53 @@ For now refer to [manual interventions flows](#manual-interventions---1st-commit
 
 ## Alternatives
 
-### Using MicroShift greenboot healthcheck to decide whether to backup or restore
+### Deciding to backup or restore based on MicroShift health, rather than system's
 
-Although system might be unhealthy due to reasons unrelated to MicroShift, it cannot
-make decision to backup or restore depending on the healthcheck rather than on green/red scripts.
-This is because device as a whole must go forward or rollback.
+Although system might be unhealthy due to reasons unrelated to MicroShift,
+MicroShift data must be aligned with current ostree commit at all times.
+Therefore decision to backup or restore must be based on overall system health.
 
-In situation when MicroShift is healthy and system is not, MicroShift's healthcheck would persist
-backup. This could result in a situation when system rollback to previous ostree commit,
-which might feature different set of Kubernetes applications running on top of MicroShift
-resulting in running application that should not run.
+Otherwise, if MicroShift is healthy and system is not, MicroShift's
+healthcheck would persist backup. This could result in a situation when system
+rollback to previous ostree commit, which might feature different set of
+Kubernetes applications running on top of MicroShift resulting in running
+application that should not run.
 
 ### Performing backup on shutdown
 
-Reasons for backing up MicroShift's data on boot rather on shutdown:
-- Smaller risk of backup process being killed or shutdown not waiting for backup to finish,
-   therefore greater confidence that backup will happen.
-- Easier integration
-  - As a part of MicroShift's pre-run procedure (executed just before MicroShift)
-    result of backup will be more noticeable because MicroShift won't start
-    (as opposed to it failing during shutdown).
-  - Running backup on shutdown will require to setup new systemd units that will run before shutdown.
-  - Running backup on boot (pre-run) means it could be contained within existing `microshift.service` (as `ExecStartPre`) - but it might make more sense to have separate service file.
-- Copy-on-Write was chosen as backup strategy meaning that it won't perform any version specific procedures.
-  - Even if such procedures would be executed, in case of MicroShift upgrade, new version must be able to read
-    data of older version in order to perform storage migration.
+Backing up on shutdown presents bigger set of risks (although individual
+severity of the risks was not assessed):
+
+- Greater chance for being killed or shut down happening before backup finishes.
+- MicroShift does not provide any alerting, so backup failure could be easily
+  missed when happening just before shutdown (next boot start would need to
+  handle that).
 
 ### Supporting downgrades (going from X.Y to X.Y-1...)
 
 Decision to not support downgrades is based on following:
-- Greatly increased effort of maintenance, testing, and more challenges to ensure quality
-  with negligible gain
-- Binaries cannot be amended after releases, so only way to specify allowed downgrades
-  would be by documenting them and requiring administrator to consult the documentation.
+- Greatly increased effort of maintenance, testing, and more challenges to
+  ensure quality with negligible gain
+- Binaries cannot be amended after releases, so only way to specify allowed
+  downgrades would be by documenting them and requiring administrator to
+  consult the documentation.
 - Process would be unsymmetrically more difficult than upgrade, consider:
   - Version A supports `v2`
   - Version B supports `v1` and `v2`
   - Version C supports `v1`
   - To downgrade from version A to C
     - Shutdown ostree commit A, boot commit B
-    - Instruct MicroShift to just downgrade data from `v2` to `v1`, without running cluster (to not make migration too long)
+    - Instruct MicroShift to just downgrade data from `v2` to `v1`,
+      without running cluster (to not make migration too long)
     - Persist metadata that version C will accept
     - Shutdown ostree commit B, boot commit C
     - MicroShift C would validate metadata to make sure it's compatible
-- Stemming from previous bullet - version metadata would need to go beyond simple MicroShift version of X.Y.Z
-  to not only tracking versions of all resources, but perhaps versions of the embedded components as well.
-  It could be a case of internal implementation details that would support newer and older behavior in newer version,
-  but result in bugs when going back to older version.
-
+- Consequence of previous bullet - version metadata would need to go beyond
+  simple MicroShift version of X.Y.Z to not only tracking versions of all
+  resources, but perhaps versions of the embedded components as well.
+  It could be a case of internal implementation details that would support
+  newer and older behavior in newer version, but result in bugs when going back
+  to older version.
 
 ### Alternative backup methods
 
@@ -925,29 +913,36 @@ Pros:
 Cons:
 - Without compression is weights as much as data dir
 
-### TODO: Symlinking live data to specific commit data
+### Symlinking live data to specific commit data
 
-### TODO: Executing pre-run as part of run (aka why is pre-run separate systemd unit)
+Instead of making explicit backups, MicroShift could mimic ostree's way of
+managing the root filesystem: working directory would be a symlink to directory
+specific to ostree commit.
+However this posses some challenges in terms of allowing free "Z-stream traversal"
+and if healthy commits turned unhealthy due to problems with MicroShift's data
+there would not be any backup to restore from.
 
+### Pre run procedure being part of `microshift run`
 
-<!-- #### How should `microshift pre-run` be executed? -->
-- `microshift.service` - `ExecStartPre`
-  - No need to add new systemd service files.
-  - It will run on each `systemctl restart microshift` which is not desirable (will it run when systemd restarts MicroShift?)
-- `microshift-pre-run.service`
-  - Running on boot, just once, before `microshift.service`
-  - Not repeated on MicroShift restart
-  - New service file
+By putting pre run and run procedures together, there would be no way to
+specifically signal that pre run failed and block starting the cluster.
+Instead, systemd would restart the MicroShift service and possibly result in
+inconsistency in "history of commits".
+It is further amplified by the fact that greenboot runs health checks only once,
+on start, so it might means that also the data is in unexpected state due to
+attempts to migrate the data which might end up with different result than
+just after system start. This means that procedures should be robust and
+reproducible, not affected by what is current uptime of the system.
+
 ## Infrastructure Needed [optional]
 
 N/A
 
 ## Future Optimizations
 
-- Use result of MicroShift's greenboot check to decide on backup/restore next boot.
-  - Current implementation uses greenboot's green/red scripts and they have no knowledge what caused unhealthy boot
-
-- Incorporate MicroShift's greenboot check into `microshift` binary as a separate command.
-  - It'll get access to source of truth about "what MicroShift components" should run (e.g. optional TopoLVM)
-
-- Supporting 4.y to 4.y+2 or 4.y+3 upgrades
+- Reimplement current greenboot health check for MicroShift in Go language as
+  `microshift`'s binary separate command to make it more aware of
+  "what MicroShift components should be running" in current configuration
+  (e.g. optional TopoLVM or future pluggability)
+- Support 4.y to 4.y+2 or 4.y+3 upgrades (depends on upgrade strategies
+  of upstream components)
