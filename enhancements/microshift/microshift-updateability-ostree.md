@@ -423,9 +423,13 @@ and runs, but it should not be held back by stale data.
 ###### Backup management
 
 - "Data" refers to MicroShift's data
-- Unless stated otherwise, "previous boot" and "current" commits and
-  "commit before current one" are referring to contents of "history of commits"
-  which is managed by MicroShift (therefore only updated when commit is featuring MicroShift).
+- Terms such as _previous boot_, _previous boot's commit_, and
+  _previous commit with MicroShift_ are related to MicroShift's "history of commits"
+  (therefore only updated when commit runs MicroShift).
+- _Current boot's commit_ is what currently runs on the device
+- _Rollback_ refers to ostree's rollback, i.e. older commit that will be booted
+  if newly staged commit is unhealthy.
+- Not covered "else" conditions will result in error and not starting the cluster.
 
 ---
 
@@ -440,39 +444,51 @@ and runs, but it should not be held back by stale data.
    **backup data for previous boot**, check if next point is applicable, proceed to [data migration](#data-migration-1).
 
 1. (Regardless of previous boot health)<a name="current-commit-different-restore"></a>
-   If currently running commit is different from previous boot's commit
-   (rolled back), and backup exist for current commit:
-   **restore data for current commit**, skip data migration, [start cluster](#starting-the-cluster).
+   If current boot's commit is different from previous boot's commit and backup exist for current commit:
+   **restore data for current commit, skip data migration, [start cluster](#starting-the-cluster)**.
+   > Existence of backup for "current boot's commit" means commit already ran on the device and was healthy.
 
 1. If health of previous boot is unknown (e.g. system was unexpectedly rebooted before health check)
    and commit of current and previous boot is the same:
-   skip to [data migration](#data-migration-1), i.e. retry start up, but check version skews just in case.
+   **skip to [data migration](#data-migration-1), i.e. retry start up, but check version skews just in case**.
    Otherwise assume it was unhealthy and proceed to the next point.
 
-(Following checks assume that previous boot was unhealthy)
+**(Rest of the checks assume that previous boot was unhealthy)**
 
-1. If commits of current and previous boots are different, and there's no backup for current commit
-   1. If "history of commits" contains current commit and version metadata matches current boot:
-      **backup data for current commit and [start cluster](#starting-the-cluster)**
-      > It means that current commit was already running on the device.
-      > If the backup is missing, it means that either system was unhealthy or new commit failed to make a backup.
-      > The former is unsupported scenario (system should be healthy or MicroShift data cleaned up),
-      > so only the latter is considered.
+1. [If commits of current and previous boots are different](#current-previous-different)
+1. [If commits of current and previous boots are the same](#current-previous-same)
 
-   1. If "history of commits" does not contain current commit
-      > The previous boot was unhealthy and this is the first boot for the current commit
-      > (otherwise it would be in "history of commits")
-      1. Previous boot's commit is not a rollback commit: **delete data and [start cluster](#starting-the-cluster)**.
-         > We only expect to end up in this state if the previously boot commit didn't run MicroShift at all.
-         > This fits the FIDO device onboarding (FDO) scenario. It is safe to delete
-         > the database in this state because its contents cannot be used by the
-         > current commit and rolling back to that other commit will not result in
-         > a running MicroShift.
+**If _current boot's commit_ and _previous boot's commit_ are different<a name="current-previous-different"></a>**
 
-(Following checks assume that commits of current and previous boots are the same,
-i.e. current commit booted more than once in a row)
+Backup of _current boot's commit_ does not exists, otherwise [it would be already restored](#current-commit-different-restore).
 
-1. If backup for current commit exists: **restore**
+1. If _current boot's commit_ does not exist in "history of commits"
+   and _previous boot's commit_ is not _rollback commit_:
+   **delete data and [start cluster](#starting-the-cluster)**
+   > It's first time MicroShift is running on this specific commit.
+   >
+   > We only expect to end up in this state if the previously boot commit didn't run MicroShift at all.
+   > This fits the FIDO device onboarding (FDO) scenario. It is safe to delete
+   > the database in this state because its contents cannot be used by the
+   > current commit and rolling back to that other commit will not result in
+   > a running MicroShift.
+
+1. If _current boot's commit_ exists in "history of commits" and version metadata matches _current boot's commit_:
+   **backup data for current commit and [start cluster](#starting-the-cluster)**
+   > It means that current commit was already running on the device.
+   > If the backup is missing, it means that either system was unhealthy or new commit failed to make a backup.
+   > The former is unsupported scenario (system should be healthy or MicroShift data cleaned up),
+   > so only the latter is considered.
+
+**If _current boot's commit_ and _previous boot's commit_ are the same<a name="current-previous-same"></a>**
+
+It means that current commit booted more than once in a row.
+
+1. If backup for _current boot's commit_ exists: **restore**
+   > This means that if backup exists it is always restored regardless of the
+   > system's health (except when it was unknown)
+   > ([see optional restore after backing up](#current-commit-different-restore)).
+   >
    > - If this is greenboot's reboot, then backup was created before this commit was staged and deployed.
    >   So commit must've been reintroduced and [data would be restored early in the process](#current-commit-different-restore).
    >   - Being in this place in decision tree means that either restore failed or system was unhealthy.
@@ -485,25 +501,25 @@ i.e. current commit booted more than once in a row)
    >     (and retrigger greenboot first, to refresh system's health)
    >   - Restoring data seems okay - going back to last healthy state.
 
-1. If backup for current commit does not exist
+1. If backup for _current boot's commit_ does not exist
    > There's no proof of the commit being ever healthy
 
-   1. If "history of commits" does not know about commit before current one: **delete data and [start cluster](#starting-the-cluster)**
+   1. If "history of commits" only knows _current boot's commit_: **delete data and [start cluster](#starting-the-cluster)**
       > First commit with MicroShift running on the system, system is consistently unhealthy.
 
-   1. If "history of commits" has entry about commit before current one
+   1. If "history of commits" knows about _previous commit with MicroShift_
       > MicroShift was already running on the device.
-      > But it doesn't mean system will rollback to that "commit before current one"
+      > But it doesn't mean system will rollback to that _previous commit with MicroShift_
 
-      1. "Commit before current one" is the same as rollback according to ostree
-         1. If version metadata matches "commit before current one": **backup data and proceed to [data migration](#data-migration-1)**
+      1. _Previous commit with MicroShift_ is the same as _rollback_
+         1. If version metadata matches _previous commit with MicroShift_: **backup data and proceed to [data migration](#data-migration-1)**
             > Previous boot of current commit might have been unhealthy because it failed to make a backup.
 
-         1. Otherwise: **restore backup of "commit before current one"**
+         1. Otherwise: **restore backup of _previous commit with MicroShift_**
             > Give chance to migrate data and start cluster again.
             > Assumption that admin upgraded from healthy system is important here.
 
-      1. "Commit before current one" is not the rollback: **delete data and [start cluster](#starting-the-cluster)**
+      1. _Previous commit with MicroShift_ is not the _rollback_ **delete data and [start cluster](#starting-the-cluster)**
          > Means that rollback does not feature MicroShift.
          > This is "retry boot" of FIDO scenario.
 
