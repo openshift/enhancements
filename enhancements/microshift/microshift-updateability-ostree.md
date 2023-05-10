@@ -249,11 +249,12 @@ N/A
 
 ### Phases of execution
 
-1. `microshift-ostree-pre-run.service`
-   - Failure blocks `microshift.service`
+1. Pre run phase
+   - Failure blocks start of MicroShift's cluster
    - Backs up or restores data
    - Migrates data to newer schemas if needed
-1. `microshift.service`
+1. Run phase
+   - Start of MicroShift's cluster
 
 In parallel:
 1. greenboot runs MicroShift health check
