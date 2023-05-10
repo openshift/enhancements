@@ -301,7 +301,7 @@ and deleting backups would prevent restoring healthy data for the commit.
 This could be a configurable option, but rules of pruning old backups are out
 of scope of this enhancement.
 
-It is worth noting that although MicroShift's data is focus of the enhancement,
+It is worth noting that although enhancement focuses on MicroShift's data,
 backups will be tied to specific ostree commits.
 Linking backups to ostree commits will ensure that staging and rolling back
 is "all or nothing" and MicroShift does not accidentally run applications
@@ -329,7 +329,7 @@ End user documentation needs to include:
 #### Backup contents
 
 Entire MicroShift data directory will be backed up, this includes etcd database,
-and certificates and kubeconfigs.
+certificates, and kubeconfigs.
 
 - Copying entire etcd working directory will preserve history and other metadata
   that would have been lost when using etcd snapshots.
@@ -438,7 +438,8 @@ and runs, but it should not be held back by stale data.
    - There's nothing to backup or migrate, skip to running cluster.
 
 1. If data exists but is missing version metadata:
-   Assume it's 4.13, make a backup (use `4.13` as ID), proceed to [data migration](#data-migration-1).
+   Assume it's 4.13, back up the data and update "history of commits" (use `4.13` as ID),
+   and proceed to [data migration](#data-migration-1).
 
 1. If previous boot was healthy:
    **backup data for previous boot**, check if next point is applicable, proceed to [data migration](#data-migration-1).
@@ -521,7 +522,7 @@ It means that current commit booted more than once in a row.
 
       1. _Previous commit with MicroShift_ is not the _rollback_ **delete data and [start cluster](#starting-the-cluster)**
          > Means that rollback does not feature MicroShift.
-         > This is "retry boot" of FIDO scenario.
+         > This is "retry boot" of FDO scenario.
 
 ##### Data migration
 
@@ -534,6 +535,7 @@ It means that current commit booted more than once in a row.
 1. Perform data migration
 
 ##### Starting the cluster
+
 1. If metadata exists and it doesn't match version of the binary: **abort**
    > Extra check to make sure that migration was performed
 1. Create data dir if necessary
@@ -541,12 +543,18 @@ It means that current commit booted more than once in a row.
 1. Continue regular flow
 
 ##### Health check
+
 1. Assess health of MicroShift and persist the result to "history of commits"
 
 ##### MicroShift's green and red scripts
+
 1. Write system's health to "history of commits"
 
 #### Manual interventions
+
+Following section describes scenarios where admin's intervention is needed because:
+- system no longer can heal itself by rebooting or rolling back to previous deployment, or
+- admin wants to try different system image because current one is unhealthy.
 
 ##### Addressing MicroShift's health
 
@@ -562,323 +570,204 @@ Depending on MicroShift's health admin might:
 After resolving the issues, admin should re-trigger greenboot healthcheck.
 If admin wishes to migrate from unhealthy system, MicroShift's data should be cleaned up.
 
-##### Backup exists, restore succeeds, but system is unhealthy
+##### System is unhealthy after rollback and restoring the backup
 
-> Scenarios:
-> - System was rolled back to 1st commit
->   (no more greenboot reboots, previous commit was `unhealthy` -> restore)
-> - 1st and only ostree commit with MicroShift:
->   - 1st boot OK, **manual** reboot
->   - 2nd boot: data backed up, system NOK, **manual** reboot
->   - 3rd boot: data restored, system NOK
+Following workflow describes possible admin actions when system rolled back to
+previously considered healthy commit, but even after restoring (healthy) data
+it was unhealthy. Because it's a rollback, greenboot won't reboot the device.
 
-1. `microshift pre-run`
-   - Restore from `backups/current-commit.id/`
-     > `prev-boot-commit.system == unhealthy` &
-     > `current-commit != prev-boot-commit` &
-     > `current-commit exists in history.file and was healthy` &
-     > `backups/current-commit.id/ exists`
-1. `microshift run`
-1. System is unhealthy (red)
-1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree commit is staged
-1. System requires manual intervention
-
-   - If the admin simply reboots the device
-     1. 1st ostree commit boots
-     1. `microshift pre-run`
-        - Do nothing
-          > `prev-boot-commit.system == unhealthy` &
-          > `current-commit != prev-boot-commit` &
-          > `backups/current-commit.id/ exists`
-          >
-          > Admin should address the issue and either retrigger greenboot or manually mark commit as healthy
-          > as part of manual intervention procedure.
-     1. `microshift run`
+1. Rollback deployment boots.
+1. _Current boot's commit_ is different from _previous boot's commit_
+   and backup for _current boot's commit_ exists, so MicroShift pre run procedure
+   restore the backup.
+1. MicroShift start the cluster.
+1. System is unhealthy again, but greenboot doesn't reboot the device
+   (`boot_counter` is only set when ostree commit is staged)
+1. System requires manual intervention.
 
    - If the admin addresses the issue
      1. [MicroShift's health](#addressing-microshifts-health)
      1. Other components - admin's judgement
-     1. Admin retriggers greenboot or manually marks commit as healthy
-     1. Reboots the device
-     1. `microshift pre-run`
-        - Backup to `backups/prev-boot-commit.id/`
-          > `prev-boot-commit.system == healthy`
-     1. `microshift run`
+     1. Admin retriggers greenboot health checks, they should pass
+     1. Admin reboots the device
+     1. Previous boot was healthy - back up the data
+     1. MicroShift cluster starts
 
-##### 1st commit is unhealthy, admin wants to stage another one
+   - If the admin simply reboots the device without fixing problems
+     1. _Current boot's commit_ is the same as _previous boot's commit_
+        and backup exists, so it restores the backup
+     1. MicroShift cluster starts
 
-> Scenario:
-> - 1st commit on system is unhealthy beyond recovery
-> - Admin decides to try another commit with different MicroShift build
 
-1. 1st commit is unhealthy
-1. Greenboot doesn't reboot because there's only one (no rollback, no `boot_counter`)
-1. Admin stops MicroShift: `systemctl stop microshift`
-1. Admin resets the system by removing `microshift/` and `microshift-backups/`
-1. Admin stages 2nd commit
-1. System is rebooted
-1. 2nd commit starts
-1. `microshift pre-run`
-   - First boot
-     > Neither `microshift/` nor `microshift-backups/` exist
-1. `microshift run`
+##### Commit pre-loaded to device is unhealthy, admin wants to stage a different one
 
-##### Rollback on demand
+Device was pre-loaded with a commit that includes MicroShift.
+Because it is the only commit existing on the device, there's nothing to roll back to.
+To address this, admin wants to stage another commit with MicroShift.
 
-> Scenario:
-> - System is running on 2nd commit
-> - Both 1st and 2nd commit are healthy
->   (backup exists for 1st, backup for 2nd may or may not yet exist)
-> - Admin wants to rollback to 1st commit
+1. Pre-loaded commit is unhealthy
+1. greenboot doesn't perform reboots to heal the device
+1. Admin stops the MicroShift
+1. Admin removes MicroShift's data
+1. Admin stages another commit and reboots the device
+1. New commit starts
+1. There is no existing MicroShift's data, it is like first boot,
+   so MicroShift starts the cluster.
 
-1. 2nd commit is running and healthy
-1. Admin runs `rpm-ostree rollback` or equivalent
-1. 2nd commit shuts down, 1st commit boots
-1. `microshift pre-run`
-   - Backup to `backups/prev-boot-commit.id/`
-     > `prev-boot-commit.system == healthy`
-   - Restore from `backups/current-commit.id/`
-     > `current-commit != prev-boot-commit` &
-     > `current-commit.system == healthy` &
-     > `backups/current-commit.id/ exists` &
-     > `backups/current-commit.id/version.file is older than microshift/version.file`
-   - No need to migrate data
-     > `version.file == microshift version`
-1. `microshift run`
+##### Admin wants to manually roll back
 
-##### Addressing rollback after unsuccessful upgrade from 4.13
+Both rollback and currently running commits are healthy,
+but admin wishes to roll back to the previous commit.
 
-> Scenario: upgrading from 4.13 to 4.14 fails resulting in rollback.
-> Workflow also describes how admin can attempt the upgrade again.
+1. Second commit is running and healthy
+1. Admin runs `rpm-ostree rollback` command or equivalent and reboot the device
+1. Device boots first commit
+1. _Previous boot_ was healthy so data is backed up
+1. _Current boot's commit_ is different from _previous boot's commit_
+   and backup for _current_ exists, so it is restored
+1. MicroShift starts the cluster
 
-1. 0th commit (with MicroShift 4.13) is running
-1. 1st commit (with MicroShift 4.14) is staged
-1. 0th shuts down, 1st boots
-1. `microshift pre-run`
-   - Backup to `backups/4.13/`
-     > `microshift/` exists, `version.file` does not
-   - If upgrade from 4.13 supported: attempt storage migration from 4.13, otherwise block `microshift run`
-1. `microshift run`
-1. System is unhealthy due to different reasons
+##### Upgrade from 4.13 failed and system rolled back to 4.13
+
+Following scenario describes failed upgrade from 4.13
+and provides information on what should admin do to retry upgrade.
+
+1. Commit with MicroShift 4.13 is running
+1. Admin prepares and stages new commit that includes newer MicroShift,
+   and reboots the device.
+1. MicroShift's data exists, but metadata with version is missing,
+   so it is assumed that upgrade is from 4.13.
+   - Back up 4.13 data
+   - If upgrade from 4.13 is supported, then try to migrate the data.
+     Otherwise refuse (renders system unhealthy and causes a rollback).
+1. MicroShift starts the cluster
+1. System ends up unhealthy for any reason. It could be that:
    - Upgrade was blocked or storage migration failed
    - MicroShift was unhealthy
    - Something else was unhealthy
-1. System is rebooted, system is consistently unhealthy
-1. Rollback to 0th commit (4.13)
-1. `microshift run`
-   - (Maybe) fails due to data inconsistency
-1. MicroShift is healthy or unhealthy
-   - Admin restores `backups/4.13/`
-   - Even if healthy, admin should address the migration problem before attempting it again
-1. 2nd commit (with MicroShift 4.14) is staged
-1. 0th shuts down, 2nd boots
-1. `microshift pre-run`
-   - Backup to `backups/4.13/`
-     > `microshift/` exists, `version.file` does not
-   - If upgrade from 4.13 supported: attempt storage migration, otherwise block `microshift run`
+1. Device is rebooted by greenboot
+1. Because _previous boot_ was unhealthy,
+   there is no backup for _current boot's commit_,
+   _previous commit with MicroShift_ is the same as _rollback_:
+   restore backup of _previous commit with MicroShift_ and attempt to perform
+   the upgrade again.
+1. System happens to be consistently unhealthy and rolls back to commit with 4.13
+1. MicroShift cluster starts, we cannot predict if it fails or not
+1. Regardless if system is healthy or not, admin still wants to upgrade.
+1. Admin manually restores backup compatible with 4.13 and addresses everything
+   that might have affected status of upgrade.
+1. Admin prepares and stages another commit with newer MicroShift,
+   and reboots the device.
+1. MicroShift's data exists, but metadata with version is missing,
+   so it is assumed that upgrade is from 4.13.
+   - Back up 4.13 data
+   - If upgrade from 4.13 is supported, then try to migrate the data.
+     Otherwise refuse (renders system unhealthy and causes a rollback).
 
+#### Device runs pre-loaded commit with MicroShift
 
-#### First ostree commit
+Following section describes expected flows when device is running MicroShift
+for the first time.
 
-##### First commit, first boot
+##### First boot of the pre-loaded commit with MicroShift
 
-1. Device is freshly provisioned
-1. 1st commit starts
-1. `microshift pre-run`
-   - First boot
-     > Neither `microshift/` nor `microshift-backups/` exist
-1. `microshift run`
-1. Greenboot: health checks and green/red scripts
-1. Alternative scenarios
+1. Device is pre-loaded with commit including MicroShift and booted.
+1. MicroShift's data does not exist, so cluster is simply started.
+1. Greenboot performs health checks
+1. Depending on system's health
    - System is healthy
      1. [First commit, second boot (reboot): backup fails](#first-commit-second-boot-reboot-backup-fails)
      1. [First commit, second boot (reboot): backup succeeds](#first-commit-second-boot-reboot-backup-succeeds)
    - System is unhealthy
-     1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree commit is staged
+     1. Greenboot doesn't reboot device (`boot_counter` is only set when ostree commit is staged)
      1. System requires manual intervention.
 
-##### First commit, second boot (reboot): backup fails
+##### Device is rebooted (non-greenboot) and it fails to back up the data
 
-> First boot was healthy
+Continuation of [First boot of the pre-loaded commit with MicroShift](#first-boot-of-the-pre-loaded-commit-with-microshift)
+with assumption that system was healthy before the reboot.
 
-1. Device is rebooted into the same (1st) commit
-1. `microshift pre-run`
-   - A backup is attempted but fails
-1. Greenboot: health checks and red scripts
-1. Greenboot doesn't reboot device because `boot_counter` is only set when ostree commit is staged
+1. Devices is rebooted and boots the same commit
+1. Previous boot was healthy, but attempt to back up the data fails,
+   cluster doesn't start.
+1. Greenboot performs health checks and system is unhealthy.
+   Greenboot doesn't reboot device (`boot_counter` is only set when ostree commit is staged)
 1. System requires manual intervention.
 
-##### First commit, second boot (reboot): backup succeeds
+##### Device is rebooted (non-greenboot) and backs up data successfully
 
-> First boot was healthy
+Continuation of [First boot of the pre-loaded commit with MicroShift](#first-boot-of-the-pre-loaded-commit-with-microshift)
+with assumption that system was healthy before the reboot.
 
-1. Device is rebooted into the same (1st) commit
-1. `microshift pre-run`
-   - Backup to `backups/prev-boot-commit.id/`
-     > `prev-boot-commit.system == healthy`
-   - No data migration
-     > `version.file == microshift version`
-1. `microshift run`
-1. Greenboot: health checks and green/red scripts
-1. Optional: System is unhealthy
-   - Greenboot doesn't reboot device because `boot_counter` is only set when ostree commit is staged
-   - System requires manual intervention.
+1. Devices is rebooted and boots the same commit
+1. _Previous boot_ was healthy, so data is backed up.
+1. Cluster starts.
+1. Greenboot performs health checks.
+1. If the system is unhealthy, then it requires manual intervention.
 
-#### Second ostree commit
+#### Another commit with MicroShift is staged on the device
 
-Pre-steps:
+Following scenarios assume that first commit was healthy,
+admin prepares and stages (behind the scenes greenboot sets `boot_counter`)
+new commit and reboots the device.
 
-1. **1st commit is healthy**
-1. 2nd commit is staged (behind the scenes greenboot sets `boot_counter`)
-1. 1st commit shuts down
-1. 2nd commit boots
+##### New commit successfully starts
 
-##### Backup succeeds, no MicroShift change, no cluster app change
+1. _Previous boot_ was healthy, so data is backed up.
+1. If MicroShift's version changed, data migration is successful.
+1. Cluster starts
+1. Greenboot performs health checks.
 
-> No changes are made to MicroShift version or apps running within the cluster,
-> so new ostree commit might feature unrelated changes or RPMs
+If the system was unhealthy:
+1. Greenboot reboots the system
+1. If the system continues to be unhealthy, it will roll back
+1. First commit boots
+1. _Previous boot's commit_ is different from _current boot's commit_
+   and backup for _current_ exists: restore backup
+1. Cluster starts
 
-1. `microshift pre-run`
-   - Backup to `backups/prev-boot-commit.id/`
-     > `prev-boot-commit.system == healthy`
-   - No data migration
-     > `version.file == microshift version`
-1. `microshift run`
-1. Greenboot: health checks and green/red scripts
+##### Previous commit was booted only once and and new commit fails to back up the data
 
-(Optional)
-1. System is unhealthy, greenboot reboots the system
-1. `microshift pre-run`
-   - Delete data, try from clean
-     > `prev-boot-commit.system == unhealthy` &
-     > `current-commit == prev-boot-commit` &
-     > `backups/current-commit.id/ doesn't exist` &
-     > `history.file[earlier-commit] doesn't exist`
-1. `microshift run`
-1. Greenboot: health checks and green/red scripts
-1. **System was unhealthy (red) each boot**
-   - `boot_counter` reaches `-1`
-   - **grub boots 1st commit (rollback)**
-1. `microshift pre-run`
-   - Restore from `backups/current-commit.id/`
-     > `prev-boot-commit.system == unhealthy` &
-     > `current-commit != prev-boot-commit` &
-     > `history.file[current-commit] exists and was healthy` &
-     > `backups/current-commit.id/ exists`
-1. `microshift run`
+Following scenario assumes that before second commit previous one was only booted
+once.
 
-##### First commit was active only for one boot, backup fails
+1. _Previous boot_ was healthy, but backing up data fails. Cluster is not started.
+1. Greenboot performs health checks and system is unhealthy, so it reboots the system.
+1. _Previous boot_ was unhealthy,
+   _previous boot's commit_ is the same as _current boot's commit_,
+   backup for _current_ does not exist,
+   data's version matches _previous commit with MicroShift_:
+   attempt to make a backup of the data but fails again.
+1. Greenboot performs health checks.
+   System is consistently unhealthy and rolls back to _previous commit with MicroShift_.
+1. _Previous boot_ was unhealthy, so it won't be backed up.
+1. _Previous boot's commit_ is different from _current boot's commit_,
+   but there is no backup for _current boot's commit_.
+1. _Current boot's commit_ matches data's version so it attempts to back up
+   the data and the run using it.
+1. If system ends up unhealthy, then it needs manual intervention
 
-1. `microshift pre-run`
-   - Backup data to `backups/prev-boot-commit.id/`
-     > `prev-boot-commit.system == healthy`
-     - Fails
-   - Exit 1 - blocks `microshift run`
-1. MicroShift healthcheck fails, greenboot red script
-1. System is rebooted
-1. `microshift pre-run`
-   - Backup data to `backups/prev-boot-commit.id/`
-     > `prev-boot-commit.system == unhealthy` &
-     > `current-commit == prev-boot-commit` &
-     > `backups/current-commit/ doesn't exist` &
-     > `history.file[earlier-commit] exists` &
-     > `earlier-commit == ostree status' rollback` &
-     > `earlier-commit.system == healthy` &
-     > `version.file[commit] matches earlier-commit.id`
-     - Fails again
-   - Exit 1 - blocks `microshift run`
-1. Greenboot reboots system multiple times
-   (always red boot, `boot_counter` reaches `-1`, grub boots previous (1st) commit (rollback))
-1. `microshift pre-run`
-   - Backup data to `backups/current-commit.id/`
-     > `prev-boot-commit.system == unhealthy` &&
-     > `current-commit != prev-boot-commit` &&
-     > `history.file[current-commit] exists` &&
-     > `current-commit.system == healthy` &&
-     > `backups/current-commit/ does not exist` &&
-     > `version.file == current-commit.id`
-     - Fails again
-   - Exit 1 - blocks `microshift run`
-1. Manual intervention needed
+#### System rolls back to commit without MicroShift leaving stale data (FIDO Device Onboarding)
 
-#### Staged commit is unhealthy and leads to rollback which fails to restore
+Following workflow addresses scenario when device is preinstalled system without
+MicroShift and later commit with MicroShift is staged. commit happens to be
+unhealthy which leads to rollback. Then, admin stages another commit with
+MicroShift, which requires it to deal with stale data.
 
-1. 2nd commit boots
-1. `microshift pre-run`
-   - Backup
-     > `prev-boot-commit.system == healthy`
-1. `microshift run`
-1. System is unhealthy
-1. Greenboot reboots system multiple times (always red boot),
-   `boot_counter` reaches `-1`,
-    grub boots previous commit (rollback)
-1. `microshift pre-run`
-   - Restore from `backups/current-commit.id/`
-     > `prev-boot-commit.system == unhealthy`
-     > `current-commit != prev-boot-commit`
-     > `history.file[current-commit] exists`
-     > `current-commit.system == healthy`
-     > `backups/current-commit.id/ exists`
-     - Fails
-   - Exit 1 (blocks `microshift run`)
-1. System is unhealthy, `boot_counter` is unset *(it's already a rollback)*
-1. Manual intervention is required.
-
-#### System rolls back to commit without MicroShift leaving stale data (FIDO Device Onboard)
-
-> Following workflow addresses scenario when device is preinstalled system without MicroShift and later commit with
-> MicroShift is staged. commit happens to be unhealthy which leads to rollback. Then, admin stages another
-> commit with MicroShift, which requires it to deal with stale data.
-
-1. 1st commit (sans-MicroShift) is installed on the device at the factory
-1. The device boots at a customer site
-1. An agent in the ostree commit performs FIDO device onboarding or a similar process to determine the workload
-1. 2nd commit (with-MicroShift) is staged
-   - greenboot sets `boot_counter`
-1. 1st commit (sans-MicroShift) shuts down
-1. 2nd commit (with-MicroShift) starts
-1. `microshift pre-run`
-   - First boot
-     > Neither `microshift/` nor `backups/` exist
-1. `microshift run`
-   - Create dir structure, `version.file`, `history.file`, etc.
-1. System is unhealthy, red scripts
-1. Greenboot reboots system multiple times (always red boot),
-   `boot_counter` reaches `-1`,
-    grub boots previous commit (rollback)
-1. 1st commit (sans-MicroShift) starts
-1. 3rd commit (with-MicroShift) is staged
-   - greenboot sets `boot_counter`
-1. 1st commit (sans-MicroShift) shuts down
-1. 3rd commit (with-MicroShift) starts
-1. `microshift pre-run`
-   - Delete data and start clean
-     > `prev-boot-commit.system == unhealthy` &&
-     > `current-commit != prev-boot-commit` &&
-     > `current-commit not in history.file` &&
-     > `prev-boot-commit != ostree rollback commit`
-1. `microshift run`
-1. System is unhealthy, greenboot reboots the system (3rd commit)
-1. `microshift pre-run`
-   - Delete data and start clean
-     > `prev-boot-commit.system == unhealthy` &&
-     > `current-commit == prev-boot-commit` &&
-     > `backups/current-commit.id/ does not exist` &&
-     > `earlier-commit in history.file` &&
-     > `earlier-commit.system != ostree rollback commit`
-1. `microshift run`
-1. System is unhealthy consistently, `boot_counter` falls to `-1`, grub boots 1st commit (sans-MicroShift)
-1. 4th commit (with-MicroShift) is staged
-   - greenboot sets `boot_counter`
-1. 1st commit (sans-MicroShift) shuts down
-1. 4th commit (with-MicroShift) starts
-1. `microshift pre-run`
-   - Delete data and start clean
-     > `prev-boot-commit.system == unhealthy` &&
-     > `current-commit != prev-boot-commit` &&
-     > `current-commit not in history.file` &&
-     > `prev-boot-commit != ostree rollback commit`
-1. `microshift run`
+1. Device is pre-loaded at the factory with commit sans-MicroShift.
+1. The device boots at a customer site, FIDO Device Onboarding is performed,
+   commit with-MicroShift is staged and device is rebooted.
+1. Commit with-MicroShift starts
+1. There is no MicroShift data yet on the device, so it just starts the cluster.
+1. System is unhealthy.
+1. Greenboot reboots system multiple times but is consistently unhealthy,
+   so device rolls back to sans-MicroShift commit.
+1. Another, new commit with-MicroShift is staged and device is rebooted.
+1. Backup for _current boot's commit_ does not exist,
+   _current boot's commit_ and _previous boot's commit_ are different,
+   "history of commits" does not know about _current boot's commit_,
+   and _previous boot's commit_ is not the _rollback commit_:
+   **delete the data and start the cluster**.
 
 ### Test Plan
 
