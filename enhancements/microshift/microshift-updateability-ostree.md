@@ -158,15 +158,7 @@ to a previous known-good state for MicroShift's data.
 
 - Because a user may stage multiple ostree deployments on a host and boot them in
   any order, we will keep multiple backups to ensure that we can roll back to a
-  state compatible with any ostree deployment### Integration with greenboot
-
-greenboot integrates with systemd, ostree, and grub to provide auto-healing
-capabilities of newly staged and booted deployment in form of reboot:
-if system is still unhealthy after specified amount of reboots, it
-will be rolled back to previous ostree deployment (commit).
-
-Because greenboot already exists as an integral part of Red Hat Device Edge
-systems, we will integrate with it, rather than creating a new system..
+  state compatible with any ostree deployment
 - Because we want to minimize the impact of backups on storage requirements,
   we will keep only 1 backup per ostree deployment.
 
