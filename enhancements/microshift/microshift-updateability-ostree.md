@@ -469,41 +469,43 @@ and runs, but it should not be held back by stale data.
          > current commit and rolling back to that other commit will not result in
          > a running MicroShift.
 
-1. Commits of current and previous boots are the same (current commit booted more than once in a row)
-   1. If backup for current commit exists: **restore**
-      > - If this is greenboot's reboot, then backup was created before this commit was staged and deployed.
-      >   So commit must've been reintroduced and [data would be restored early in the process](#current-commit-different-restore).
-      >   - Being in this place in decision tree means that either restore failed or system was unhealthy.
-      >     Restoring again seems to best bet.
-      >
-      > - If this is manual reboot, then system was healthy,
-      >   then manually rebooted, backed data up and end up unhealthy,
-      >   again rebooted resulting in being in this place in decision tree.
-      >   - Admin should address problems before rebooting the system
-      >     (and retrigger greenboot first, to refresh system's health)
-      >   - Restoring data seems okay - going back to last healthy state.
+(Following checks assume that commits of current and previous boots are the same,
+i.e. current commit booted more than once in a row)
 
-   1. If backup for current commit does not exist
-      > There's no proof of the commit being ever healthy
+1. If backup for current commit exists: **restore**
+   > - If this is greenboot's reboot, then backup was created before this commit was staged and deployed.
+   >   So commit must've been reintroduced and [data would be restored early in the process](#current-commit-different-restore).
+   >   - Being in this place in decision tree means that either restore failed or system was unhealthy.
+   >     Restoring again seems to best bet.
+   >
+   > - If this is manual reboot, then system was healthy,
+   >   then manually rebooted, backed data up and end up unhealthy,
+   >   again rebooted resulting in being in this place in decision tree.
+   >   - Admin should address problems before rebooting the system
+   >     (and retrigger greenboot first, to refresh system's health)
+   >   - Restoring data seems okay - going back to last healthy state.
 
-      1. If "history of commits" does not know about commit before current one: **delete data and [start cluster](#starting-the-cluster)**
-         > First commit with MicroShift running on the system, system is consistently unhealthy.
+1. If backup for current commit does not exist
+   > There's no proof of the commit being ever healthy
 
-      1. If "history of commits" has entry about commit before current one
-         > MicroShift was already running on the device.
-         > But it doesn't mean system will rollback to that "commit before current one"
+   1. If "history of commits" does not know about commit before current one: **delete data and [start cluster](#starting-the-cluster)**
+      > First commit with MicroShift running on the system, system is consistently unhealthy.
 
-         1. "Commit before current one" is the same as rollback according to ostree
-            1. If version metadata matches "commit before current one": **backup data and proceed to [data migration](#data-migration-1)**
-               > Previous boot of current commit might have been unhealthy because it failed to make a backup.
+   1. If "history of commits" has entry about commit before current one
+      > MicroShift was already running on the device.
+      > But it doesn't mean system will rollback to that "commit before current one"
 
-            1. Otherwise: **restore backup of "commit before current one"**
-               > Give chance to migrate data and start cluster again.
-               > Assumption that admin upgraded from healthy system is important here.
+      1. "Commit before current one" is the same as rollback according to ostree
+         1. If version metadata matches "commit before current one": **backup data and proceed to [data migration](#data-migration-1)**
+            > Previous boot of current commit might have been unhealthy because it failed to make a backup.
 
-         1. "Commit before current one" is not the rollback: **delete data and [start cluster](#starting-the-cluster)**
-            > Means that rollback does not feature MicroShift.
-            > This is "retry boot" of FIDO scenario.
+         1. Otherwise: **restore backup of "commit before current one"**
+            > Give chance to migrate data and start cluster again.
+            > Assumption that admin upgraded from healthy system is important here.
+
+      1. "Commit before current one" is not the rollback: **delete data and [start cluster](#starting-the-cluster)**
+         > Means that rollback does not feature MicroShift.
+         > This is "retry boot" of FIDO scenario.
 
 ##### Data migration
 
