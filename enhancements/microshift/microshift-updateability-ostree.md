@@ -100,6 +100,97 @@ Design aims to implement following principles:
 
 ## Proposal
 
+### Integration with greenboot
+
+greenboot integrates with systemd, ostree, and grub to provide auto-healing
+capabilities of newly staged and booted deployment in form of reboot:
+if system is still unhealthy after specified amount of reboots, it
+will be rolled back to previous ostree deployment (commit).
+
+Because greenboot already exists as an integral part of Red Hat Device Edge
+systems, we will integrate with it, rather than creating a new system.
+
+greenboot determines system health with health check scripts and MicroShift
+already provides such script. For more information about greenboot and current
+MicroShift integration see [Integrating MicroShift with Greenboot](./microshift-greenboot.md).
+
+After health check, either "green" (system is healthy) or "red" (system is unhealthy)
+scripts are executed. MicroShift will provide "green" and "red" scripts which
+will persist the overall system's health for the current ostree commit.
+
+### Triggers for greenboot failures
+
+System images can introduce different types of changes, including:
+1. New OS content unrelated to MicroShift
+2. Different configuration settings for MicroShift
+3. Different versions of MicroShift (higher or lower)
+4. Different versions of applications running on MicroShift (higher or lower)
+5. More, fewer, or different applications
+
+Any of those transitions could result in a greenboot failure.
+
+Because MicroShift cannot detect the cause of the failure, and cannot influence
+how greenboot handles the failure, all failures will be handled by reverting
+to a previous known-good state for MicroShift's data.
+
+### Version change support
+
+- Because we want to maintain upgrade expectations with Kubernetes and OpenShift,
+  we will only support changing versions one Y version at a time (x.y to x.y+1).
+- Because we cannot guarantee that the data formats between Y versions are
+  compatible after an upgrade, we will only support rolling back to a previous
+  Y version when restoring from a backup.
+- Because we may need to support "manual" changes to correct for regressions
+  within a Y version, and because we expect the storage format and other data
+  to be forward and backward compatible within a Y version, we will support
+  changing from any Z version to any other Z version for the same version of Y,
+  including downgrading.
+- Because we may need to block certain upgrade sequences, similar to OpenShift's
+  upgrade graph, but we cannot ensure access to that upgrade graph from edge
+  systems and we cannot prevent an attempted upgrade via a new ostree deployment,
+  we will incorporate a mechanism to block specific upgrades by listing version
+  numbers _from which_ a new version cannot be upgraded (X.Y+1.Z may include
+  X.Y.Z in its "block" list). When a new version detects that the system is
+  upgrading from a version in that block list, it will refuse to start and
+  cause a greenboot failure.
+
+### Backup retention
+
+- Because a user may stage multiple ostree deployments on a host and boot them in
+  any order, we will keep multiple backups to ensure that we can roll back to a
+  state compatible with any ostree deployment### Integration with greenboot
+
+greenboot integrates with systemd, ostree, and grub to provide auto-healing
+capabilities of newly staged and booted deployment in form of reboot:
+if system is still unhealthy after specified amount of reboots, it
+will be rolled back to previous ostree deployment (commit).
+
+Because greenboot already exists as an integral part of Red Hat Device Edge
+systems, we will integrate with it, rather than creating a new system..
+- Because we want to minimize the impact of backups on storage requirements,
+  we will keep only 1 backup per ostree deployment.
+
+### Backup format
+
+- Because we want the backup process to be simple and we want to minimize the
+  space used by each backup, we will use `cp` with reflinks to create copy-on-write
+  versions of all of the content being backed up.
+
+### Kubernetes storage format upgrades
+
+- Because we need to support API version deprecation and removal in Kubernetes
+  and OpenShift APIs, we will run the storage version migrator to update all
+  data in the database when a Y version update is detected.
+
+### Order of actions
+
+- To ensure backup and restore process does not result in data corruption, it
+  will be performed with MicroShift cluster not running.
+- To allow database upgrades only etcd and kube-apiserver will be active during
+  data migration.
+- System start was chosen as point in time that above actions will happen,
+  just before starting MicroShift cluster.
+
 ### Workflow Description
 
 **MicroShift administrator** is a human responsible for preparing
@@ -156,17 +247,6 @@ N/A
 - **Version metadata**: file storing MicroShift's version and ostree commit ID
 - **MicroShift greenboot healthcheck**: program verifying the status of MicroShift's cluster
 
-### Preface
-
-Actions described below are performed after system starts.
-Backing up and restoring MicroShift's data is performed with MicroShift cluster
-not running to avoid operating on open files.
-Next, etcd and kube-apiserver might be started without rest of the components
-to perform data migration. Success or failure of the procedures impacts whether
-MicroShift will be allowed to start in normal mode (cluster).
-
-Greenboot (health checks, green and red scripts) runs independent of MicroShift.
-
 ### Phases of execution
 
 1. `microshift-ostree-pre-run.service`
@@ -183,31 +263,20 @@ In parallel:
 
 ### History of ostree commits (deployments)
 
-As mentioned in the preface, backing up and restoring data will happen on system boot.
+As already mentioned, backing up and restoring data will happen on system boot.
 It means that next boot makes backup compatible with previously booted
 commit/MicroShift, but it restores data compatible with itself (currently running).
 
-Decision whether to backup or restore will be mostly based on health of previous boot.
+Decision whether to backup or restore will be primarily based on health of previous boot.
 This means that MicroShift needs to keep history of running ostree commits
 (featuring MicroShift) and their health. The software also needs access to the
 history information to know when database format migrations are needed.
 To support both decisions, a structured text file outside of the etcd database
 will be used to persist the history information between various deployments.
 
-Information about system's health will be based on
-[greenboot](https://github.com/fedora-iot/greenboot) ("Generic Health Checking
-Framework for systemd").greenboot integrates with systemd, ostree, and grub to
-provide auto-healing capabilities of newly staged and booted deployment in form
-of reboot. If system is still unhealthy after specified amount of reboots, it
-will be rolled back to previous ostree deployment (commit).
-greenboot determines system health with health check scripts - MicroShift already
-provides such script. After health check, either "green" (system is healthy) or
-"red" (system is unhealthy) scripts are executed.
-MicroShift will provide "green" and "red" scripts which will persist the overall
-system's health for the current ostree commit.
-For more information about greenboot and current MicroShift integration see
-[Integrating MicroShift with Greenboot](https://github.com/openshift/enhancements/blob/master/enhancements/microshift/microshift-greenboot.md)
-enhancement.
+Information about system's health will be obtained by greenboot integration
+in form of "green" (system is healthy) and "red" (system is unhealthy) scripts
+which will persist the overall system's health for the current ostree commit.
 
 ### Backing up and restoring MicroShift data
 
