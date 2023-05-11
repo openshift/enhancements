@@ -794,7 +794,7 @@ N/A
 
 ### Version Skew Strategy
 
-See [data migration](#data-migration).
+See [Migrating data between versions](#migrating-data-between-versions).
 
 ### Operational Aspects of API Extensions
 
