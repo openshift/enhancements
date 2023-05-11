@@ -132,8 +132,8 @@ It is worth noting that although enhancement focuses on MicroShift's data,
 backups will be tied to specific ostree commits.
 Linking backups to ostree commits will ensure that staging and rolling back
 is "all or nothing" and MicroShift does not accidentally run applications
-belonging to another commits. Especially that difference between two commits
-might not be MicroShift itself, but the applications that run on top of it.
+belonging to different commits (especially different might not be MicroShift
+itself, but the applications that run on top of it).
 Also see [Deciding to backup or restore based on MicroShift health, rather than system's](#deciding-to-backup-or-restore-based-on-microshift-health-rather-than-systems)
 alternative.
 
@@ -255,11 +255,11 @@ assumed that it was created by MicroShift 4.13 and tested with Y-stream skew
 rule.
 
 Because we may need to counteract regressions within a Y version and because
-MicroShift is minimal version of OpenShift so risk of Z-stream incompatibilities
-is greatly reduced, at the time of writing the enhancement,
+MicroShift is minimal version of OpenShift (so risk of Z-stream incompatibilities
+is greatly reduced), at the time of writing the enhancement,
 switching between different Z streams will be possible regardless of the
-direction (older to newer, newer to older) and any divergence from this rule
-should be documented.
+direction (older to newer, newer to older) and anything making this impossible
+(like breaking change or backport) should be documented.
 
 Because we may need to block certain upgrade sequences, similar to OpenShift's
 upgrade graph, but we cannot ensure access to that upgrade graph from edge
@@ -269,8 +269,8 @@ numbers _from which_ a new version cannot be upgraded (X.Y+1.Z may include
 X.Y.Z in its "block" list).
 
 If migration is blocked or fails, MicroShift cluster won't start.
-This will render system unhealthy and, if rebooting the device does not affect
-result of the migration, result in system rolling back to previous deployment.
+This will render system unhealthy and (if data migration doesn't succeed after
+greenboot's reboot) cause system to roll back.
 
 Decision flow describing whether to block or attempt data migration can be summarized as:
 - If version metadata is missing, assume 4.13
@@ -338,14 +338,14 @@ N/A
 - **Version metadata**: file storing MicroShift's version and ostree commit ID
 - **MicroShift greenboot healthcheck**: program verifying the status of MicroShift's cluster
 
-### Phases of execution
+### General overview of actions order
 
-1. Pre run phase
-   - Failure blocks start of MicroShift's cluster
-   - Backs up or restores data
-   - Migrates data to newer schemas if needed
-1. Run phase
-   - Start of MicroShift's cluster
+1. System boots
+1. "Pre run" phase (failure will block "run" phase)
+   - Data is backed up, restore, or (in special cases) cleared.
+   - If needed, data is migrated to newer version.
+1. "Run" phase
+   - All MicroShift components start
 
 In parallel:
 1. greenboot runs MicroShift health check
@@ -375,21 +375,24 @@ checking health, etc. It will be used for support procedures.
 
 ### Staging new ostree commits on top of unhealthy systems
 
-Automated handling of MicroShift data in case of unhealthy system is
-complicated due to ambiguity regarding admin's intention and each option has
+Fully automated handling of MicroShift data in case of upgrading from unhealthy
+system is complicated because admin's intention is unknown and each option has
 different trade offs without clear winner.
 
 For that reason, when needing to stage a new commit on top of unhealthy system
 one of two actions must be performed:
 - system must be brought to healthy state, or
-- MicroShift data should be deleted completely resulting in clean start which
-  is the same as first run.
+- MicroShift data should be deleted completely resulting in clean start
+  (effectively "first run").
 
-Only exception is when rollback commit doesn't feature MicroShift.
+The only exception from this rule is when, from MicroShift's metadata perspective,
+previous commit was unhealthy, but in reality previous commit (i.e. rollback
+according to the ostree) doesn't feature MicroShift.
 This special case handles scenarios when device is preinstalled with system
 without MicroShift, then commit with MicroShift runs, but is unhealthy so it
 rolls back to factory system, later another commit with MicroShift is staged
-and runs, but it should not be held back by stale data.
+and runs, and it is expected that it will handle stale data gracefully and start
+from clean state.
 
 ### Workflows in detail
 
