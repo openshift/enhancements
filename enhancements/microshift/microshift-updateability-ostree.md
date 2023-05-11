@@ -398,7 +398,7 @@ from clean state.
 
 #### Decision tree
 
-###### Backup management
+##### Backup management
 
 - "Data" refers to MicroShift's data
 - Terms such as _previous boot_, _previous boot's commit_, and
