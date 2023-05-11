@@ -61,7 +61,7 @@ certificate data via a secret reference.
 - As an Openshift engineer, I want to be update the router so that it is able read secrets directly
   if all the preconditions have been met by the router serviceaccount.
 
-- As an OpenShift engineer, I want to update the route admission webhook to add new validations
+- As an OpenShift engineer, I want to update the route validation in the api-server to add new validations
   required for `.spec.tls.certificateRef`.
 
 - As an OpenShift engineer, I want to be able to update Route API so that I can integrate
@@ -125,17 +125,32 @@ A `.spec.tls.certificateRef` field is added to Route `.spec.tls` which can be us
 containing the certificate data instead of using `.spec.tls.certificate` and `spec.tls.key`.
 
 ```go
+
+// TLSConfig defines config used to secure a route and provide termination
+//
+// +kubebuilder:validation:XValidation:rule="has(self.termination) && has(self.insecureEdgeTerminationPolicy) ? !((self.termination=='passthrough') && (self.insecureEdgeTerminationPolicy=='Allow')) : true", message="cannot have both spec.tls.termination: passthrough and spec.tls.insecureEdgeTerminationPolicy: Allow"
+// +kubebuilder:validation:XValidation:rule="has(self.certificate) && has(self.certificateRef) ? false : true", message="cannot have both spec.tls.certificate and spec.tls.certificateRef"
 type TLSConfig struct {
 	// ...
 
-    // certificateRef provides certificate contents as a secret reference.
-    // This should be a single serving certificate, not a certificate
-    // chain. Do not include a CA certificate.
-    //
-    // +kubebuilder:validation:Optional
-    // +openshift:enable:FeatureSets=TechPreviewNoUpgrade
-    // +optional
+	// certificateRef provides certificate contents as a secret reference.
+	// This should be a single serving certificate, not a certificate
+	// chain. Do not include a CA certificate. The secret referenced should
+	// be present in the same namespace as that of the Route.
+	//
+	// +openshift:enable:FeatureSets=TechPreviewNoUpgrade
+	// +optional
 	CertificateRef *corev1.LocalObjectReference `json:"certificateRef,omitempty" protobuf:"bytes,7,opt,name=certificateRef"`
+}
+
+// LocalObjectReference contains enough information to let you locate the
+// referenced object inside the same namespace.
+// +structType=atomic
+type LocalObjectReference struct {
+	// Name of the referent.
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+	// +optional
+	Name string `json:"name,omitempty" protobuf:"bytes,1,opt,name=name"`
 }
 ```
 
@@ -156,13 +171,8 @@ N.A
 ### Implementation Details/Notes/Constraints [optional]
 
 The router will read the secret referenced in `.spec.tls.certificateRef` if present and
-if the following pre-conditions (validated in the admission webhook) are met it uses
+if the following pre-conditions (validated in the API server) are met it uses
 this certificate us configure haproxy.
-
-- The secret created should be in the same namespace as that of the route.
-- The secret created is of type `kubernetes.io/tls`.
-- The router serviceaccount must have permission to read this secret particular secret.
-  - The role and rolebinding to provide this access must be provided by the user.
 
 The router will bootstrap a watch based secret manager to ensure it can keep the
 certificate/secret up-to-date. This means the router pod will maintain active watches
@@ -180,17 +190,28 @@ the secret referenced in `.spec.tls.certificateRef`. The router will
 use the default certificates only when neither `.spec.tls.certificate` or `.spec.tls.certificateRef`
 are provided.
 
-Extend the `ExtendedValidateRoute()` in the router to also cover validating secret and
-its content. In addition to this, the route validating admission webhook will verify if
-the `router` serviceaccount route has permissions to read the secret that is
-referenced at `.spec.tls.certificateRef`. This is only performed if `.spec.tls.certificateRef`
-is non-nil and non-empty. In addition to the rbac validation, the admission webhook
-will also validate if only one of the certificate fields (`.spec.tls.certificate`
-and `.spec.tls.certificateRef`) is specified.
+Validations done by the router as part of [ExtendedValidateRoute()](https://github.com/openshift/router/blob/c407ebbc5d8d85daea2ef2d1ba539444a06f4d25/pkg/router/routeapihelpers/validation.go#L158) (contents of secret),
+
+- Verify certificate and key (PEM encode/decode)
+- Verify private key matches public certificate
+
+Validations done by API server as part of [ValidateRoute()](https://github.com/openshift/openshift-apiserver/blob/aac3dd5bf0547e928103a0f718ca104b1bb13930/pkg/route/apis/route/validation/validation.go#L21),
+
+- The secret created should be in the same namespace as that of the route.
+- The secret created is of type `kubernetes.io/tls`.
+- The router serviceaccount must have permission to read this secret particular secret.
+  - The role and rolebinding to provide this access must be provided by the user.
+- CEL validations will enforce that both `.spec.tls.certificate` and `.spec.tls.certificateRef`
+  are not specified on the route.
 
 ### Risks and Mitigations
 
-TBD
+There is a possibility of an invalid route being processed by the router (edge case),
+if any changes are done to the rbac or the referenced secret is deleted after the API
+server validation but before router has processed the route (maybe router pod is not running)
+then this can lead to the router processing this incorrect route.
+
+> Will need to duplicate the validations present on the API server to the router.
 
 ### Drawbacks
 
@@ -227,7 +248,7 @@ with new tests utilizing `.spec.tls.certificateRef`. Ensure the tests cover the 
 - Updating secret/certificate referenced in routes and verify serving
   certificate has been updated.
 - Updating secret/certificate with incorrect information and verify route
-  is not admitted due to validation failure. (eg: mismatched hostnames)
+  is not admitted due to validation failure. (eg: mismatched public and private key, etc)
 
 ### Graduation Criteria
 
@@ -268,7 +289,7 @@ This feature will be added as TechPreviewNoUprade.
 
 ### Operational Aspects of API Extensions
 
-Route admission webhook will be modified to validate the following scenarios,
+Route validation in the API server will be modified to validate the following scenarios,
 
 - Check if secret/certificate referenced under `.spec.tls.certificateRef` exists.
 - Check if secret/certificate referenced under `.spec.tls.certificateRef` is of the correct type.
@@ -277,7 +298,7 @@ Route admission webhook will be modified to validate the following scenarios,
   - `.spec.tls.certificate` and `.spec.tls.key`
   - `.spec.tls.certificateRef`
 
-SLOs TBD 
+TODO: SLOs
 
 #### Failure Modes
 
@@ -285,7 +306,7 @@ SLOs TBD
 
 In scenarios where the secret has not been created by third-party solutions
 like cert-manager, the route would not be successfully created due to the
-dependency. This route will be rejected by the route admission webhook with an
+dependency. This route will be rejected by the API server with an
 `FieldValueNotFound` error and will contain the reason as `referenced secret not present`.
 
 In addition to this validation, the router will also validate the same to
@@ -294,7 +315,7 @@ further and the error will be reflected on the route `.status` with the same rea
 
 ##### Insufficient router permission
 
-As part of the route admission webhook, if the router does not have permission
+As part of the API server validation, if the router does not have permission
 to read the secret referenced under `.spec.tls.certificateRef`, the route is
 rejected with an `FieldValueForbidden` error and reason as `insufficient permission
 to read resource`.
