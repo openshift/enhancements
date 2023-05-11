@@ -52,12 +52,12 @@ Rate limits mean that:
 
 * The cost and volume of logging can be predicted more accurately in advance.
 * Noisy containers cannot produce unbounded log traffic and unfairly drown out other containers.
-* Log streams that are not needed can be ignored, reducing the load on the logging infrastructure.
+* Setting an input rate limit to 0 will ignore (not collect) those logs, which reduces the load on the logging infrastructure.
 * High-value logs can be preferred over low-value logs by assigning higher rate limits.
 
 ### Goals
 
-Control log rates and overflow policy at *two* points in the log forwarder:
+Control log rates at *two* points in the log forwarder:
 
 * Output: controlling the flow rate *per destination* to selected outputs.
   * Limit the rate of outbound logs to match output network and storage capacity.
@@ -84,10 +84,15 @@ Our API assumes that limits are expressed in records.
 Users must estimate the average size of a record in their system to make byte-size predictions.
 This is less convenient than giving byte limits, but still feasible.
 
-#### Blocking flow control
+#### Blocking and Flow Control Policy
 
-This proposal does not include a `block` policy, which would back-pressure containers that exceed rate limits, forcing them to block on stout/std err and slow down to keep within the rate limit.
-This may be added as a feature in future proposals.
+This proposal only supports flow control by dropping records.
+
+In future we may add a `policy` field with options `drop` and `block`.
+The `block` policy, which would back-pressure containers that exceed rate limits.
+This would force containers to block on stout/std err and slow down to keep within the rate limit.
+
+Policies are not part of this enhancement, dropping records is the implied and only option.
 
 ## Proposal
 
@@ -98,97 +103,78 @@ This may be added as a feature in future proposals.
 ``` yaml
   outputs:
     - name: offsite
-	  type: kafka
-	  limit:
-        policy: drop
+      type: kafka
+      limit:
         maxRecordsPerSecond: 10M
 ```
 
 **Note**: flow rules applied to *outputs* specify a *per destination* limit.
 
-#### Limit for default output to 10,000,000 records/s to respect local store limits
-
-``` yaml
-  outputs:
-    - name: default
-	  limit:
-        policy: drop
-        maxRecordsPerSecond: 10M
-```
-
-#### Ignore (don't send) logs to default output
-
-``` yaml
-  outputs:
-    - name: default
-	  limit:
-        policy: ignore
-```
-
-
-**Note**: we need to add the ability to set a flow rule on the special "default" output.
-
 #### Ignore (don't collect) logs from containers with certain labels
 
 ``` yaml
   inputs:
-	- application:
-		selector:
-		  matchLabels: { boring: true }
-	  limitPerContainer:
-      policy: ignore
-      maxRecordsPerSecond: 0
+    - name: ignoreBoring
+      application:
+        selector:
+          matchLabels: { boring: true }
+      limitPerContainer:
+          maxRecordsPerSecond: 0
 ```
 
 **Notes**
-* Flow rules applied to *inputs* specify a *per container/group* limit.
-* Inputs and input selectors are already part of the ClusterLogForwarder API.
-* If multiple input limits apply to a container, the _lowest_ limit is applied.
-  Example: the same container is selected by two inputs, one by namespace and one by label.
+* Flow rules applied to *inputs* specify a *per container* or *per group* limit.
 
 #### Set a per-container limit for containers in selected namespaces
 
 ``` yaml
   inputs:
-	- application:
-	  namespaces: [ boring, tedious, tiresome ]
-	  limitPerContainer:
-      policy: drop
-		  maxRecordsPerSecond: 10
-  - application:
-		namespaces: [ important, exciting ]
-	  limitPerContainer:
-      policy: drop
-      maxRecordsPerSecond: 1000
+    - name: slow
+      application:
+        namespaces: [ boring, tedious, tiresome ]
+      limitPerContainer:
+        maxRecordsPerSecond: 10
+    - name: fast
+      application:
+        namespaces: [ important, exciting ]
+      limitPerContainer:
+          maxRecordsPerSecond: 1000
 ```
 
 #### Set a per-container limit for containers with certain labels
 
 ``` yaml
   inputs:
-	- application:
-		selector:
-		  matchLabels: { importance: low }
+  - name: notImportant
+    application:
+      selector:
+        matchLabels: { importance: low }
     limitPerContainer:
-      policy: drop
       maxRecordsPerSecond: 10
-  - application:
-	  selector:
-	  	matchLabels: { importance: high }
+  - name: veryImportant
+    application:
+      selector:
+        matchLabels: { importance: high }
     limitPerContainer:
-      policy: drop
-		  maxRecordsPerSecond: 1000
+      maxRecordsPerSecond: 1000
 ```
 
-#### Set a group limit for all containers
+#### Set a group limit for low-importance containers
 
 ``` yaml
   inputs:
-	- application:
-    limitGroup:
-      policy: drop
-      maxRecordsPerSecond: 10M
+    - name: notImportant
+      application:
+        selector:
+          matchLabels: { importance: low }
+      limitGroup:
+        maxRecordsPerSecond: 10M
 ```
+
+**Notes**
+* A group limit limits the *total aggregated log volume* for all containers in the group.
+* If the number of containers in the group grows large, they containers may be unable to log usefully.
+* To set an aggregated limit on outgoing logs, use an *output* limit instead of an input  group limit.
 
 ### API Extensions
 
@@ -206,7 +192,7 @@ New API struct type `RateLimit` with fields:
 `ClusterLogForwarder.input.Application` new optional field:
 - `perContainerLimit`: (RateLimit, optional) limit applied to _each container_ selected by this input.
   No container selected by this input can exceed this limit.
-- `GroupLimit`: (RateLimit, optional) flow control limit applied _to the aggregated log flow_ through this input.
+- `groupLimit`: (RateLimit, optional) flow control limit applied _to the aggregated log flow_ through this input.
   No guarantee of _fairness_ in log collection by this rate limit.
 
 `ClusterLogForwarder.output` new optional field:
