@@ -118,6 +118,12 @@ After health check, either "green" (system is healthy) or "red" (system is unhea
 scripts are executed. MicroShift will provide "green" and "red" scripts which
 will persist the overall system's health for the current ostree commit.
 
+Due to how ostree systems are updated (booted into new root filesystem),
+MicroShift cannot prevent users from following unsupported upgrade paths.
+Instead, version of the data on disk will be compared with version of
+the binary and, in case of unsupported upgrade, refuse to proceed causing
+system to be unhealthy and eventually rolling back.
+
 ### Triggers for greenboot failures
 
 System images can introduce different types of changes, including:
