@@ -69,8 +69,9 @@ MicroShift and will provide necessary information to manage backups.
 
 * As a MicroShift administrator, I want to safely update MicroShift
   so that I can get bug fixes, new features, and security patches.
-* As a MicroShift administrator, I want my system to roll back
-  to a previous good configuration when greenboot fails.
+* As a MicroShift administrator, if system running new commit is unhealthy,
+  I want it to roll back to a previous healthy state expecting MicroShift to be
+  just like before the failed upgrade.
 
 ### Goals
 
