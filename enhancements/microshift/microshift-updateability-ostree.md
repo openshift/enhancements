@@ -86,7 +86,8 @@ functionality to:
 Design aims to implement following principles:
 - Keep it simple, optimize later
 - MicroShift does not own the OS or host
-- MicroShift and all its components are versioned, upgraded, and rolled back together
+- MicroShift and all its components (including etcd) are versioned, upgraded,
+  and rolled back together
 - Be defensive, fail fast
 - Rely on outside intervention as a last resort
 
