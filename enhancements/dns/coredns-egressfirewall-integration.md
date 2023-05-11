@@ -273,9 +273,9 @@ rules. The OVN-K master will also delete the corresponding ``EgressFirewallDNSNa
 
 ### API Extensions
 
-The validation of ``DNSName`` field in ``EgressFirewallDestination`` will be updated to accept wildcard DNS names as well.
-It will be updated from ``^([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$`` which accepts only regular DNS names to
-``^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$``.
+The validation of [``DNSName``](https://github.com/ovn-org/ovn-kubernetes/blob/master/go-controller/pkg/crd/egressfirewall/v1/types.go#L74-L76) field in
+``EgressFirewallDestination`` will be updated to accept wildcard DNS names as well. It will be updated from ``^([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$`` which
+accepts only regular DNS names to ``^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$``.
 
 ````go
 // EgressFirewallDestination is the endpoint that traffic is either allowed or denied to
@@ -288,6 +288,7 @@ type EgressFirewallDestination struct {
 	// but won't match "sub2.sub1.example.com"
 	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$
 	DNSName string `json:"dnsName,omitempty"`
+	// ..
 }
 ````
 The details of the ``EgressFirewallDNSName`` CRD can be found in the [Proposal](#proposal) section.
@@ -313,13 +314,13 @@ The ``egressfirewall`` plugin will watch the ``EgressFirewallDNSName`` CRs and w
 CRs (either regular or wildcard DNS names or both), then it will update the ``.status`` of the ``EgressFirewallDNSName`` CR(s) if there's any change
 in the corresponding IPs and/or the next lookup time information (TTL + last lookup time). The process is explained in the [Workflow Description](#workflow-description) section.
 
-The details about the regular and wildcard DNS names will be stored in two separate maps by the plugin. Whenever there is a DNS lookup, if there is
-no ``EgressFirewallDNSName`` CRs created, then the `egressfirewall` plugin will just send the received response to the lookup. A DNS name will be
-checked for a match in both the maps. If there is no match then also the plugin will just send the received response to the lookup. However, when a
-match is found (in either of the maps or in both), then the corresponding ``EgressFirewallDNSName`` CR is updated with the current IPs along with the
-corresponding TTL and current time as the last lookup time, if the same information is not already available. If the `.status` of a ``EgressFirewallDNSName``
-CR is updated, then the plugin will wait until the `Available` condition of the CR becomes true. Once the condition becomes true only then the response
-to the DNS lookup will be sent.
+`SharedIndexInformer` will be used for tracking events related to ``EgressFirewallDNSName`` CRs. The details about the regular and wildcard DNS names will be stored
+in two separate maps by the plugin. Whenever there is a DNS lookup, if there is no ``EgressFirewallDNSName`` CRs created, then the `egressfirewall` plugin will just
+send the received response to the lookup. A DNS name will be checked for a match in both the maps. If there is no match then also the plugin will just send the
+received response to the lookup. However, when a match is found (in either of the maps or in both), then the corresponding ``EgressFirewallDNSName`` CR is updated
+with the current IPs along with the corresponding TTL and current time as the last lookup time, if the same information is not already available. If the `.status`
+of a ``EgressFirewallDNSName`` CR is updated, then the plugin will wait until the `Available` condition of the CR becomes true. Once the condition becomes true only
+then the response to the DNS lookup will be sent.
 
 #### OVN-K master
 
@@ -425,6 +426,109 @@ The following 2 scenarios may occur during the upgrade process:
 
 ## Alternatives
 
+The following solutions are alternatives for the proposed solution.
+
+### [The existing system](https://docs.openshift.com/container-platform/4.12/networking/ovn_kubernetes_network_provider/configuring-egress-firewall-ovn.html#domain-name-server-resolution_configuring-egress-firewall-ovn)
+
+In the existing system, OVN-K polls for each DNS name used in EgressFirewall rules based on the corresponding TTL. When there is a change in the
+associated IP addresses then the `AddressSet` corresponding to each DNS name is updated.
+
+#### Pros
+
+* Works well for regular DNS names with infrequent IP changes.
+
+#### Cons
+
+* Wildcard DNS names are not supported.
+* EgressFirewall rules with DNS names with frequent IP change may not be properly enforced.
+
+### SOCKS or HTTP proxy
+
+Users/customers can use a SOCKS or HTTP proxy for DNS requests. The proxy can be configured to allow or deny DNS names.
+
+#### Pros
+
+* Works well for DNS names with frequent IP changes.
+
+#### Cons
+
+* Not part of core OpenShift services.
+* Less transparent for clients.
+
+
+### Modify DNS response
+
+The new CoreDNS plugin not only snoops on the DNS requests, but modifies the response based on the EgressFirewall rules. If a client requests for
+a denied DNS name then the DNS response with `REFUSED` error code.
+
+#### Pros
+
+* Works well for DNS names with frequent IP changes.
+
+#### Cons
+
+* As mentioned previously, deny rules for DNS names have some problems.
+* If only allow rules are supported, then all the DNS requests for names which are not mentioned in the allow rules should be sent a response with
+`REFUSED` error code. This may not be obvious for the users.
+* If client uses different DNS resolver then this will not work.
+
+
+### [DNS Flow](https://github.com/freedge/dnsflow)
+
+DNS Flow uses [dnstap](https://coredns.io/plugins/dnstap/) CoreDNS plugin to mirror all the DNS traffic to the `dnsflow` DaemonSet. Every 10 seconds, a
+`dnsflow` pod lists the pod IPs for a namespace and maps the DNS name, used in the EgressFirewall allow rule for that namespace, to all the
+pod IPs for that namespace. If the DNS name is used in the EgressFirewall allow rule for other namespaces, then all pod IPs of those namespaces
+will also be mapped to the DNS name. When the DNS name in the DNS traffic matches the DNS name in an EgressFirewall allow rule then ovs allow rule
+is added by the `dnsflow` pod by directly calling ovs-ofctl.
+
+#### Pros
+
+* Works well for DNS names with frequent IP changes.
+
+#### Cons
+
+* Additional delay is added due to receiving the DNS traffic through a socket connection on a separate pod.
+* The pod IPs and EgressFirewall allow rules are checked every 10 seconds. Any changes in between will not be reflected in the ovs rules immediately.
+* The existing ovs rules are not removed if an EgressFirewall allow rule is removed.
+
+### [Cilium](https://docs.cilium.io/en/latest/security/policy/language/#dns-based)
+
+A Cilium agent runs on each node and a DNS Proxy is provided in each agent. The proxy records the IP addresses related to Egress DNS policies and uses
+them to enforce the DNS policies. The Cilium agent also [re-resolves](https://github.com/cilium/cilium/blob/HEAD/pkg/policy/api/egress.go#L137-L161)
+the DNS names on a short interval of time (5 seconds) ignoring their TTL. The IPs are used in the underlying rules for the Egress policies. Only DNS
+allow rules are supported by Cilium.
+
+
+#### Pros
+
+* Works well for DNS names with frequent IP changes.
+* Wildcard DNS names are supported. 
+
+#### Cons
+
+* Additional delay added for sending the DNS traffic to the DNS proxy on the Cilium agent for recording the IP addresses related to Egress DNS policies.
+* Other limitations are mentioned [here](https://github.com/cilium/cilium/blob/HEAD/pkg/policy/api/egress.go#L151-L158)
+
+
+### gRPC connection between OVN-K and CoreDNS
+
+Communication between OVN-K master and CoreDNS happens over a gRPC connection rather than the proposed `EgressFirewallDNSName` CR. Whenever there's a DNS
+lookup for a DNS Name which is used in an EgressFirewall rule and the IPs associated with DNS name changes, then CoreDNS sends this information to the
+OVN-K master. After the underlying ACL rules are updated the OVN-K master responds to the same CoreDNS pod with an OK message. Then the CoreDNS
+pod responds to the original DNS lookup request.
+
+#### Pros
+
+* Works well for DNS names with frequent IP changes.
+* Wildcard DNS names are supported. 
+
+#### Cons
+
+* The `EgressFirewallDNSName` CR works as a common knowledge base for the CoreDNS pods and OVN-K master. Without it, the CoreDNS pods and OVN-K have to
+independently store the same information. Since a DNS lookup request is handled by one CoreDNS pod, the updated IP information will only be available to
+that CoreDNS pod. Thus there should be a way for the CoreDNS pods to share this information amongst each other.
+* If the CoreDNS pods does not store the IP information of the DNS names, then whenever there is a DNS lookup for a DNS name used in an EgressFirewall rule,
+the IP information will always be needed to be sent to OVN-K master. This will add delay to all the DNS lookups of the DNS names used in EgressFirewall rules.
 
 ## Infrastructure Needed [optional]
 
