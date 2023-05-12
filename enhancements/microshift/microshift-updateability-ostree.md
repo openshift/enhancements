@@ -171,7 +171,7 @@ running commit).
 Decision whether to backup or restore will be primarily based on health of previous boot.
 To achieve that MicroShift will keep history of running ostree commits
 (featuring MicroShift) and their health. MicroShift also needs access to the
-history information to know when database format migrations are needed.
+history information to know when data format migrations are needed.
 To support both decisions, a structured text file outside of the etcd database
 will be used to persist the history information between various deployments.
 
@@ -291,8 +291,9 @@ Upgrade:
 1. MicroShift administrator prepares a new ostree commit
 1. MicroShift administrator schedules device to reboot and use new ostree commit
 1. Device boots new commit
-1. Operating System, greenboot, and MicroShift take actions (migrating database
-   content, causing a rollback, etc.) without any additional intervention
+1. Operating System, greenboot, and MicroShift take actions (backing up and/or
+   restoring data, migrating the data, causing a rollback, etc.) without any
+   additional intervention
 
 Manual rollback:
 
@@ -448,7 +449,7 @@ Backup of _current boot's commit_ does not exists, otherwise [it would be alread
    >
    > We only expect to end up in this state if the previously boot commit didn't run MicroShift at all.
    > This fits the FIDO device onboarding (FDO) scenario. It is safe to delete
-   > the database in this state because its contents cannot be used by the
+   > the data in this state because its contents cannot be used by the
    > current commit and rolling back to that other commit will not result in
    > a running MicroShift.
 
