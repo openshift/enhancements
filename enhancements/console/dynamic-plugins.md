@@ -23,7 +23,7 @@ status: implemented
 - [x] Design details are appropriately documented from clear requirements
 - [x] Test plan is defined
 - [x] Graduation criteria for dev preview, tech preview, GA
-- [x] User-facing documentation is created in [openshift-docs](https://docs.openshift.com/container-platform/4.12/web_console/dynamic-plug-ins.html)
+- [x] User-facing documentation is created in [openshift-docs](https://docs.openshift.com/container-platform/4.12/web_console/dynamic-plug-in/dynamic-plug-in.html)
 
 ## Summary
 
