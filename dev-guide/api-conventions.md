@@ -428,6 +428,34 @@ The simplest line is "no functions".
 Functions can be added in a separate repo, possibly library-go if there are sufficient consumers.
 Helpers for accessing labels and annotations are not recommended.
 
+### No annotation-based APIs
+
+Do not use annotations for extending an API. Annotations may seem as a good candidate for introducing experimental/new
+API. Nevertheless, migration from annotations to formal schema usually never happens as it requires breaking changes
+in customer deployments.
+
+1. Validation does not always come with definition. User set values can be too broad and hard to limit later on.
+2. Lack of discoverability. There's no pre-existing schema that can be published.
+3. Validation is limited. Certain kinds of validators aren't allowed on annotations, so hooks are more frequently used instead.
+4. Hard to extend. An annotation value (a string) can not be extended with additional fields under a parent.
+5. Unclear versioning. Annotation keys can omit versioning. Or, there are multiple ways to specify a version.
+6. Users can "squat" on annotations by adding an unvalidated annotation value for a key that is used in a future version.
+
+#### Example
+
+[Enabling HTTP Strict Transport Security (HSTS) policy](https://docs.openshift.com/container-platform/4.11/networking/routes/route-configuration.html) through an annotation:
+
+```yaml
+apiVersion: v1
+kind: Route
+metadata:
+  annotations:
+    haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+```
+
+The annotation was introduced in OpenShift 3.X. At the time annotations were very popular as a means to provide experimental configuration.
+Nevertheless, after customer adoption the configuration was never migrated to a formal schema to avoid breaking changes.
+
 ## Exceptions to Kubernetes API Conventions
 
 ### Use JSON Field Names in Godoc
