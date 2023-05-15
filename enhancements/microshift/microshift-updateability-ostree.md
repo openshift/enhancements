@@ -6,9 +6,9 @@ reviewers: # Include a comment about what domain expertise a reviewer is expecte
   - "@pacevedom, MicroShift team"
   - "@ggiguash, MicroShift team"
   - "@copejon, MicroShift team"
-  - "@dusk125, etcd team"
+  - "@dusk125, etcd team, please look at backing up and restoring from etcd point of view"
   - "@oglok, author of previous enhancement"
-  - "@runcom, RHEL expert"
+  - "@runcom, RHEL expert, please look at the integration with the RHEL 4 Edge"
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
   - "@dhellmann"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
