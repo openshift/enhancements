@@ -70,8 +70,8 @@ MicroShift and will provide necessary information to manage backups.
 * As a MicroShift administrator, I want to safely update MicroShift
   so that I can get bug fixes, new features, and security patches.
 * As a MicroShift administrator, if system running new commit is unhealthy,
-  I want it to roll back to a previous healthy state expecting MicroShift to be
-  just like before the failed upgrade.
+  I want it to roll back to a previous healthy state expecting MicroShift
+  cluster (including etcd database) to match the state before upgrade attempt.
 
 ### Goals
 
@@ -150,6 +150,9 @@ systems, we will integrate with it, rather than creating a new system.
 greenboot determines system health using health check scripts and MicroShift
 already provides such script. For more information about greenboot and existing
 integration see [Integrating MicroShift with Greenboot](./microshift-greenboot.md).
+It is worth noting that MicroShift health check for greenboot is part of MicroShift
+RPMs, so in case of a bug MicroShift team is able to provide fix with next
+release, and health checks do not have to be compatible with other versions of MicroShift.
 
 After health check, either "green" (system is healthy) or "red" (system is unhealthy)
 scripts are executed. MicroShift will provide "green" and "red" scripts which
@@ -201,6 +204,10 @@ This method was chosen because it's easy to use, doesn't require additional
 tools (it's also not impacted by version changes), and should make backing up
 fail rarely because by sharing filesystem blocks it's initially very small
 (its size increases as original data changes).
+
+To decrease chance of producing corrupted backup (like power loss during the
+operation), at first, backups will be made to temporary directory, and then
+renamed to final name.
 
 End user documentation needs to include:
 - guidance on picking and configuring filesystem to fullfil requirements
@@ -318,6 +325,14 @@ that are not caught and fixed through graduation process.
 
 To mitigate the risks, a thorough review of the enhancement must be done by MicroShift, OpenShift, and RHEL teams,
 and making sure testing strategy is sound and prioritized equally with the feature development.
+
+Due to nature of Copy-on-Write, initial size of the backup is smallest it can get.
+As MicroShift continues to run of and change data directory, due to changes on filesystem,
+size of the backup will increase. Systems doing considerable amount of writes to etcd
+(only via kube-apiserver; like featuring a lot of operators and CRDs) might b
+especially affected.  To address that, we should provide guidance on maintaining
+the backups (it might involve manual step by step guide or providing a command
+that would prune backup, e.g. ones for commits that no longer exists on the system).
 
 ### Drawbacks
 
