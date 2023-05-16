@@ -135,7 +135,7 @@ type EgressFirewallDNSName struct {
 
 // EgressFirewallDNSNameSpec is a desired state description of EgressFirewallDNSName.
 type EgressFirewallDNSNameSpec struct {
-	// Name is the DNS name used in a EgressFirewall rule.
+	// name is the DNS name used in a EgressFirewall rule.
 	Name string `json:"name"`
 }
 
@@ -433,11 +433,11 @@ The following solutions are alternatives for the proposed solution.
 In the existing system, OVN-K polls for each DNS name used in EgressFirewall rules based on the corresponding TTL. When there is a change in the
 associated IP addresses then the `AddressSet` corresponding to each DNS name is updated.
 
-#### Pros
+#### Pros of the existing system
 
 * Works well for regular DNS names with infrequent IP changes.
 
-#### Cons
+#### Cons of the existing system
 
 * Wildcard DNS names are not supported.
 * EgressFirewall rules with DNS names with frequent IP change may not be properly enforced.
@@ -446,11 +446,11 @@ associated IP addresses then the `AddressSet` corresponding to each DNS name is 
 
 Users/customers can use a SOCKS or HTTP proxy for DNS requests. The proxy can be configured to allow or deny DNS names.
 
-#### Pros
+#### Pros of SOCKS or HTTP proxy
 
 * Works well for DNS names with frequent IP changes.
 
-#### Cons
+#### Cons of SOCKS or HTTP proxy
 
 * Not part of core OpenShift services.
 * Less transparent for clients.
@@ -461,11 +461,11 @@ Users/customers can use a SOCKS or HTTP proxy for DNS requests. The proxy can be
 The new CoreDNS plugin not only snoops on the DNS requests, but modifies the response based on the EgressFirewall rules. If a client requests for
 a denied DNS name then the DNS response with `REFUSED` error code.
 
-#### Pros
+#### Pros of modifying DNS response
 
 * Works well for DNS names with frequent IP changes.
 
-#### Cons
+#### Cons of modifying DNS response
 
 * As mentioned previously, deny rules for DNS names have some problems.
 * If only allow rules are supported, then all the DNS requests for names which are not mentioned in the allow rules should be sent a response with
@@ -481,11 +481,11 @@ pod IPs for that namespace. If the DNS name is used in the EgressFirewall allow 
 will also be mapped to the DNS name. When the DNS name in the DNS traffic matches the DNS name in an EgressFirewall allow rule then ovs allow rule
 is added by the `dnsflow` pod by directly calling ovs-ofctl.
 
-#### Pros
+#### Pros of DNS Flow
 
 * Works well for DNS names with frequent IP changes.
 
-#### Cons
+#### Cons of DNS Flow
 
 * Additional delay is added due to receiving the DNS traffic through a socket connection on a separate pod.
 * The pod IPs and EgressFirewall allow rules are checked every 10 seconds. Any changes in between will not be reflected in the ovs rules immediately.
@@ -499,12 +499,12 @@ the DNS names on a short interval of time (5 seconds) ignoring their TTL. The IP
 allow rules are supported by Cilium.
 
 
-#### Pros
+#### Pros of Cilium
 
 * Works well for DNS names with frequent IP changes.
 * Wildcard DNS names are supported. 
 
-#### Cons
+#### Cons of Cilium
 
 * Additional delay added for sending the DNS traffic to the DNS proxy on the Cilium agent for recording the IP addresses related to Egress DNS policies.
 * Other limitations are mentioned [here](https://github.com/cilium/cilium/blob/HEAD/pkg/policy/api/egress.go#L151-L158)
@@ -517,12 +517,12 @@ lookup for a DNS Name which is used in an EgressFirewall rule and the IPs associ
 OVN-K master. After the underlying ACL rules are updated the OVN-K master responds to the same CoreDNS pod with an OK message. Then the CoreDNS
 pod responds to the original DNS lookup request.
 
-#### Pros
+#### Pros of gRPC connection between OVN-K and CoreDNS
 
 * Works well for DNS names with frequent IP changes.
 * Wildcard DNS names are supported. 
 
-#### Cons
+#### Cons of gRPC connection between OVN-K and CoreDNS
 
 * The `EgressFirewallDNSName` CR works as a common knowledge base for the CoreDNS pods and OVN-K master. Without it, the CoreDNS pods and OVN-K have to
 independently store the same information. Since a DNS lookup request is handled by one CoreDNS pod, the updated IP information will only be available to
