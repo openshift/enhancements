@@ -1,4 +1,9 @@
-# User tag management controller
+# Metadata Controller
+
+The metadata controller provides capability to add, update, delete and reconcile metadata required for cloud resources.
+The scope of the present proposal is to enable continuous management of user-defined tags for cloud resources. The APIs in the
+proposal have been deliberately designed to be modular for extensibility in the early versions. The API will be refined and updated
+based on use-cases towards beta versions.
 
 ## Summary
 
