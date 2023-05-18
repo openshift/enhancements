@@ -181,7 +181,7 @@ operator upgrade. This could be by setting the default subscription mode to Manu
 TAT.
 
 **Operator team / Operator SDK changes**: Follow new guidelines for allowing for the operator to work on token auth 
-enabled cluster. New guidelines would include the following to use CCO Token mode:
+enabled cluster. New guidelines would include the following to use CCO has detected cluster is using time-based tokens:
 
 - changing CRD to add CredentialRequest references and putting those referenced
 - CredentialRequests into a defined directory in the bundle
@@ -217,18 +217,15 @@ Operator installation under the proposed system:
 For the operator author team:
 - Add CredentialRequests to the bundle, known location;
 - Add "role-arn"-type fields to the CredentialRequests
-- Add references to the CredentialRequests in the CRD spec;
 - Use SDK to validate bundle to catch permission changes or mis-configuration
 - Add eventing to report status on a CR to indicate lacking STS credentials for fully operational deploy or update.
 
 For the Cloud Credential Operator:
-- Add a Token mode that will watch for CredentialRequests (as per mint mode) and then resolve time-based tokens
-  per cloud platform. 
-- Make Secret resource available for the operator via pod identity webhook. 
-- Pod identity webhook logic to account for per-operand tenancy permissions.
+- Allow detection that a cluster is using time-based tokens and create a Secret containing the ARN + token path per 
+ cloud platform.
 
 For Operator Administrator:
-- Supply cloud credentials for STS (ARN ID, etc) in the known location and change CR to reflect this.
+- Supply cloud credentials for STS (ARN ID, etc) in the known location.
 
 For OperatorHub, Console:
 - Prompt for missing credentials that prevent fully operational install on STS cluster. Same for upgrades.
