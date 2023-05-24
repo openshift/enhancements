@@ -33,20 +33,18 @@ cloud resources for other tag processors.
 
 As a cluster admin, I want all tags to be added via metadata CR, which helps to reconcile the tag key and values.
 
-As a cluster admin, I want to delete tags, which are not required on the cloud resources.
-
 As a cluster admin, I want to add tags on selected resources, which are identified using specified labels/classifiers.
+
+As a cluster admin, I want the tag list to be lexicographically sorted, to have a deterministic set of tags applied
+when tag list size exceeds the maximum allowed limit on cloud resource.
+
+As a cluster admin, I want the tag list to be lexicographically sorted, to have a deterministic set of tags appended to
+existing tags for cloud resources when the tag list exceeds the maximum allowed limit on cloud resource.
+
+As a cluster admin, I want to delete tags, which are not required on the cloud resources.
 
 As a cluster admin, I want to be able to ignore cloud resource from all tag operations, which helps to avoid overwriting values 
 set by cloud service provider's policies.
-
-As a cluster admin, I want the tag list to be lexicographically sorted, to have a deterministic set of tags applied 
-when tag list size exceeds the maximum allowed limit on cloud resource.
-
-As a cluster admin, I want the tag list to be lexicographically sorted, to have a deterministic set of tags appended to 
-existing tags for cloud resources when the tag list exceeds the maximum allowed limit on cloud resource.
-
-As a cluster admin, I want to use a CLI, that helps to securely login to cloud service provider and perform configuration and management operations for tags.
 
 ### Goals
 
@@ -60,14 +58,11 @@ the controller's API.
 ### Non-goals
 
 1. Managing metadata which are not related to cloud resource tagging.
-2. Data-related metadata for stored objects and records, for example, S3 bucket vs S3 object.
-3. Sub-set of input tags to be applied on selected cloud resource.
-4. Managing conflict with cloud service provider tagging policies.
-5. Preservation of pre-existing tags or tags added using external tools.
-6. Regular expression or wildcard characters for classifier tag.
-7. Retry mechanism for failed operation during reconciliation.
-8. Provide metrics collection and audit logging features for controller and user operations.
-9. UI frontend for managing tags.
+2. Sub-set of input tags to be applied on selected cloud resource.
+3. Any conflict with cloud service provider tagging policies will not be managed by controller.
+4. Regular expression or wildcard characters for classifier tag.
+5. Metrics collection and audit logging features for controller and user operations.
+6. UI frontend for managing tags.
 
 ## Proposal 
 
@@ -95,7 +90,7 @@ Controller supports different opcodes for actions to add, update and delete tags
 3. "delete" - Controller removes tags from the cloud resources. In case of specific errors, user intervention may be required to remove tags manually
 from the cloud resources.
 
-### High-level workflow
+### Workflow Description
 
 #### Bootstrap
 1. User starts the controller with cloud service provider credentials and sync period set.
@@ -112,9 +107,9 @@ from the cloud resources.
 2. User creates `CloudMetadata` configuration with controller configuration.
 3. Controller updates ready condition to false in `MetadataStatus.status`.
 4. Controller validates tag entries from `AWSMetadata.spec.resourcetags` and populates a new list of tags to be added to cloud resource.
-5. Controller trims the tag list as per maximum limit policy specific to cloud resource.
-6. Controller performs lexicographic sorting.
-7. Controller replaces the tag list on the cloud resource.
+5. Controller appends tags to existing list and trims as per maximum limit policy specific to cloud resource.
+6. Controller performs lexicographic sorting on the trimmed tag list.
+7. Controller adds/updates the tag list on the cloud resource.
 8. Controller updates the tag list to `AWSMetadata.status`.
 9. Controller updates ready condition to true in `MetadataStatus.status`.
 
@@ -136,14 +131,14 @@ no distinction made between pre-existing tags and tags in `AWSMetadataSpec` for 
 
 #### Classifier tag behaviour
 
-Classifier tags are used to enable controller to get applicable cloud resources to manage tags. Classifier tags are mandatory and should
+Classifier tags are used to identify cloud resources for which the controller should manage the tags. Classifier tags are mandatory and should
 be added to cloud resource. Controller does not support any wildcard characters in classifier strings.
 When multiple classifiers are used, a logical OR condition is applied for the classifiers.
 
 #### Reconciliation
 
-Reconciliation of tags is ignored when ready condition is set to false at `MetadataStatus.status`. Reconciliation of tags is based on active tag list in `AWSMetadata.status.resourcetags`. On deletion of AWSMetadataRef
-or invalid reference, controller does not perform any reconciliation. Ready condition is set to false at `MetadataStatus.status`.
+Reconciliation of tags is based on active tag list in `AWSMetadata.status.resourcetags`. Reconciliation of tags is ignored when ready condition is set to false at `CloudMetadata.MetadataStatus.status`. On deletion of AWSMetadataRef
+there is no reconciliation of tags. If AWSMetadataRef refers to non-existing `AWSMetadata` object , controller fails with error condition and updates `CloudMetadata.MetadataStatus.status` to false.
 
 #### No cloud provider configured
 
@@ -326,47 +321,63 @@ type ControllerConfig struct {
 
 ### Risks and mitigations
 
-TBD
+1. Any user with permission to edit custom resource can influence tags on cloud resources with wide-scoped classifiers.
 
 ### Drawbacks
 
 1. User intervention maybe required in some cases for failure resolution of opcode driven operations.
-2. Any user with permission to edit custom resource can influence tags on cloud resources with wide-scoped classifiers.
-3. HA is not supported for the controller.
-4. Override of global configurations specific to cloud provider are not supported.
-5. Controller fails with error and expects the lowest allowed number of tags that can be tagged on cloud resource. For example,
-if a cloud resource has reached allowed limit, the controller does not apply tags to the cloud resource and other cloud resources
-that bear the classifier tag.
+2. HA is not supported for the controller.
+3. Override of global configurations specific to cloud provider are not supported.
+4. Preservation of pre-existing tags or tags added using external tools on cloud resources is not guaranteed. 
+If the tags are managed by controller, pre-existing tags can be updated via update operation.
+5. Cloud provider tag policies will conflict with operations supported by controller. A review of the policies is required 
+before usage of the controller.
 
 ## Design details
 
 ### Open questions
 
-1. Does controller override tags set on machine set spec which currently allows tags to supersede infrastructure object?
-2. 
+1. Should controller override tags added on machine set spec which supersedes infrastructure object?
+
 ### Test plan
 
-TBD
+1. Unit tests.
+2. Integration tests for resources created by OpenShift installer and operators. 
 
 ### Graduation criteria
 
-TBD 
+The proposal is for Dev Preview.
+
+#### Dev Preview
+
+1. A stand-alone controller that can be deployed on OpenShift.
+2. Integration with existing implementation of tag management in OpenShift.
 
 #### Dev Preview -> Tech Preview
+N/A
 
 ## Upgrade / Downgrade Strategy
-TBD
+N/A
 
 ## Version skew strategy
-NA
+N/A
 
 ## Operational Aspects of API Extensions
-TBD
+
+`CloudMetadata.status` represents operational aspects of the controller and `AWSMetadata.status` represents operational aspects of operations
+defined in `AWSMetadata.spec.opcode`
 
 ## Implementation History
-TBD
+
+In OpenShift, the tags are added when the cloud resources are created by installer or the operator. The tags are maintained at `infrastructure.status.aws.resourcetags` and 
+cannot be updated.
 
 ## Alternatives
 
 1. Customers can alternatively use cloud service provider or external tools. For example, in AWS, AWS tag editor can be used to edit tags, configure 
 EventBridge rules and processor services to handle tag updates.
+
+## Future work
+1. Controller is able to perform tag policy management.
+2. Controller metrics collection and audit logging.
+3. UI-based frontend integration to manage tags.
