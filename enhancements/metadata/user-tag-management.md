@@ -23,7 +23,7 @@ In the following proposal, the controller supports mainly
 Users should be able to maintain lifecycle of tags for cloud resources created during installation or by other day-2 kubernetes
 controllers and operators using kubernetes API.
 
-### User stories
+### User Stories
 
 As a cluster admin, I want to add tags to the cloud resources created at cluster installation,  which help
 for cost calculation and reports.
@@ -55,7 +55,7 @@ set by cloud service provider's policies.
 the controller's API.
 4. Provide CLI for operations, cloud service provide authentication and ability to edit custom resource with ease.
 
-### Non-goals
+### Non-Goals
 
 1. Managing metadata which are not related to cloud resource tagging.
 2. Sub-set of input tags to be applied on selected cloud resource.
@@ -152,7 +152,7 @@ Controller does not delete, update or reconcile classifier tags. Controller refe
 
 TBD
 
-### API
+### API Extensions
 
 #### Example
 
@@ -319,7 +319,7 @@ type ControllerConfig struct {
 }
 ```
 
-### Risks and mitigations
+### Risks and Mitigations
 
 1. Any user with permission to edit custom resource can influence tags on cloud resources with wide-scoped classifiers.
 
@@ -332,19 +332,19 @@ type ControllerConfig struct {
 5. Cloud provider tag policies will conflict with operations supported by controller. A review of the policies is required 
 before usage of the controller.
 
-## Design details
+## Design Details
 
 ### Open questions
 
 1. Should controller override tags added on machine set spec which supersedes infrastructure object?
 2. Should the controller override new tags added using external controllers on a controller-managed cloud resource? 
 
-### Test plan
+### Test Plan
 
 1. Unit tests.
 2. Integration tests for resources created by OpenShift installer and operators. 
 
-### Graduation criteria
+### Graduation Criteria
 
 The proposal is for Dev Preview.
 
@@ -356,13 +356,23 @@ The proposal is for Dev Preview.
 #### Dev Preview -> Tech Preview
 N/A
 
-## Upgrade / Downgrade Strategy
+#### Tech Preview -> GA
 N/A
 
-## Version skew strategy
+#### Removing a deprecated feature
 N/A
 
-## Operational Aspects of API Extensions
+### Upgrade / Downgrade Strategy
+N/A
+
+### Version Skew Strategy
+N/A
+
+#### Failure Modes
+
+#### Support Procedures
+
+### Operational Aspects of API Extensions
 
 `CloudMetadata.status` represents operational aspects of the controller and `AWSMetadata.status` represents operational aspects of operations
 defined in `AWSMetadata.spec.opcode`
