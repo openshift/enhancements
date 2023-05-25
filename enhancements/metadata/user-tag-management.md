@@ -325,11 +325,10 @@ type ControllerConfig struct {
 
 ### Drawbacks
 
-1. User intervention maybe required in some cases for failure resolution of opcode driven operations.
+1. User intervention is required in some cases for failure resolution of opcode driven operations.
 2. HA is not supported for the controller.
 3. Override of global configurations specific to cloud provider are not supported.
-4. Preservation of pre-existing tags or tags added using external tools on cloud resources is not guaranteed. 
-If the tags are managed by controller, pre-existing tags can be updated via update operation.
+4. Pre-existing tags or tags added using external tools on cloud resources can be updated using the controller.
 5. Cloud provider tag policies will conflict with operations supported by controller. A review of the policies is required 
 before usage of the controller.
 
@@ -338,6 +337,7 @@ before usage of the controller.
 ### Open questions
 
 1. Should controller override tags added on machine set spec which supersedes infrastructure object?
+2. Should the controller override new tags added using external controllers on a controller-managed cloud resource? 
 
 ### Test plan
 
@@ -366,6 +366,9 @@ N/A
 
 `CloudMetadata.status` represents operational aspects of the controller and `AWSMetadata.status` represents operational aspects of operations
 defined in `AWSMetadata.spec.opcode`
+
+`AWSMetadata.spec.resourcetags` lists tags that are considered for the opcode. It may not have all tags for cloud resource.
+`AWSMetadata.status.resourcetags` lists all tags applied on cloud resource using controller.
 
 ## Implementation History
 
