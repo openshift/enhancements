@@ -62,17 +62,12 @@ Deploy the CSI snapshot controller and CSI plugin sidecar with MicroShift out of
 
 #### Deploy MicroShift with Snapshotting
 
-_Assuming_
-
-* A running MicroShift cluster
-* A running workload with an attached volume, backed by an LVM thin volume
-
 _Workflow_
 
 1. Install MicroShift RPMs
 2. Start the MicroShift systemd service
 3. Observe the CSI Snapshot controller pod reaches the Ready state
-4. Observe the topolvm-controller pod reaches the Ready state
+4. Observe the topolvm-controller and csi-snapshot-controller pods reach the Ready state
 
 #### Snapshot, Dynamic
 
