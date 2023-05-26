@@ -22,9 +22,11 @@ see-also: []
 
 ## Summary
 
-MicroShift is a small form-factor, single-node OpenShift targeting IoT and Edge Computing use cases characterized by tight resource constraints, unpredictable network connectivity, and single-tenant workloads. See [kubernetes-for-devices-edge.md](./kubernetes-for-device-edge.md) for more detail.
+MicroShift is a small form-factor, single-node OpenShift targeting IoT and Edge Computing use cases characterized by tight resource constraints, unpredictable
+network connectivity, and single-tenant workloads. See [kubernetes-for-devices-edge.md](./kubernetes-for-device-edge.md) for more detail.
 
-This document proposes the integration of the CSI Snapshot Controller to support backup and restore scenarios for cluster workloads.  The snapshot controller, along with the CSI external snapshot sidecar, will provide an API driven pattern for managing stateful workload data.
+This document proposes the integration of the CSI Snapshot Controller to support backup and restore scenarios for cluster workloads.  The snapshot controller,
+along with the CSI external snapshot sidecar, will provide an API driven pattern for managing stateful workload data.
 
 
 ## Motivation
@@ -38,7 +40,8 @@ downstream support.
 
 ### User Stories
 
-As an edge device owner running stateful workloads on MicroShift, I want to create in-cluster snapshots of that state and to restore workloads to that state utilizing existing Kubernetes patterns.
+As an edge device owner running stateful workloads on MicroShift, I want to create in-cluster snapshots of that state 
+and to restore workloads to that state utilizing existing Kubernetes patterns.
 
 ### Goals
 
@@ -47,8 +50,9 @@ As an edge device owner running stateful workloads on MicroShift, I want to crea
 
 ### Non-Goals
 
-* Enable backup/restore workflows outside of MicroShift
-* Provide a workflow for exporting data outside of a MicroShift cluster
+* Enable backup/restore workflows external to MicroShift
+* Provide a workflow for exporting data from a MicroShift cluster
+* Provide a means of opting out.  This falls under platform composability and is out of scope
 
 ## Proposal
 
@@ -59,10 +63,12 @@ Deploy the CSI snapshot controller and CSI plugin sidecar with MicroShift out of
 #### Deploy MicroShift with Snapshotting
 
 _Assuming_
+
 * A running MicroShift cluster
 * A running workload with an attached volume, backed by an LVM thin volume
 
 _Workflow_
+
 1. Install MicroShift RPMs
 2. Start the MicroShift systemd service
 3. Observe the CSI Snapshot controller pod reaches the Ready state
@@ -184,7 +190,7 @@ deletionPolicy: Delete
 
 #### VolumeSnapshot
 
-Similar to the PersistentVolumeClaim object, the VolumeSnapshot CRD defines a developer request for a snapshot. The CSI Snapshot Controller Operator runs the CSI snapshot controller, which handles the binding of a VolumeSnapshot CRD with an appropriate VolumeSnapshotContent CRD. The binding is a one-to-one mapping.
+Similar to the PersistentVolumeClaim object, the VolumeSnapshot CRD defines a developer request for a snapshot. The CSI snapshot controller handles the binding of a VolumeSnapshot CRD with an appropriate VolumeSnapshotContent CRD. The binding is a one-to-one mapping.
 
 The VolumeSnapshot CRD is namespaced. A developer uses the CRD as a distinct request for a snapshot.
 
@@ -240,32 +246,101 @@ spec:
 
 - Increased overhead.  The CSI snapshot controller and sidecar increase the on-disk footprint by a
 total of 360Mb.  At idle, the components use a negligible amount of CPU (>1% CPU on a 2 core machine)
-and roughly 18Mb.  Under load, the 
+and roughly 18Mb.
 
 ### Drawbacks
 
 ## Design Details
 
+### CSI Snapshotter Components
+
+As mentioned above, CSI Volume Snapshot logic is divided between two runtimes: the CSI Volume Snapshot Controller 
+and the CSI Volume Snapshot sidecar.  These runtimes are pre-packaged in container images and available through the
+OpenShift container registry.  Additionally, a validating webhook verifies the correctness of CRD instances.
+
+The total additional cluster components are:
+
+1. CSI VolumeSnapshot Controller Deployment
+2. CSI VolumeSnapshot Validating Webhook Deployment, responsible for validating CRD instances
+3. CSI VolumeSnapshot Validating Webhook Service, to enable communication with kube-apiserver
+4. CSI VolumeSnapshot Validating Webhook API, to registery webhook with kube-apiserver
+5. CSI VolumeSnapshot Validating Webhook ClusterRole and ClusterRoleBinding
+6. CSI VolumeSnapshot Controller Service Account
+7. CSI VolumeSnapshot Controller ClusterRole and ClusterRoleBinding
+8. CSI VolumeSnapshot Controller Role and RoleBinding
+9. VolumeSnapshot CRD
+10. VolumeSnapshotContent CRD
+11. VolumeSnapshotClass CRD
+12. CSI Volume Snapshot Sidecar container, included in the LVMS Controller deployment spec.
+
+### MicroShift Assets
+
+MicroShift manages the deployment of embedded component assets through an interface called the Service Manager.  The logic 
+behind this interface deploys components in an order that respects interdependencies, waits for services to start, and intelligently
+stops services on interrupt.  MicroShift's default CSI storage service is already managed by the service manager. 
+
+MicroShift's CSI service manager will deploy the CSI Volume Snapshot components.  The files will be stored under the
+`microshift/assets/components/csi-external-snapshot-controller` directory.  The following files will be added: 
+
+1. `csi_controller_deployment.yaml` specifies the CSI Snapshot Controller
+2. `serviceaccount.yaml` specifies the controller's service account
+3. `05_operand_rbac.yaml` provides RBAC configuration to the CSI controller 
+4. `webhook_config.yaml`
+5. `webhook_deployment.yaml`
+6. `volumesnapshotclasses_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshotClass CRD 
+7. `volumesnapshotcontents_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshotContents CRD
+8. `volumesnapshots_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshot CRD
+
+The controller will be deployed prior to LVMS.  Because LVMS does not depend on the controller to be running prior to its deployment,
+it is not necessary to wait for the controller to reach a ready state before starting LVMS.  Starting these components 
+concurrently will also shorten overall startup time.
+
 ### Test Plan
 
-Snapshotting functionality will be tested under the Openshift conformance test suite.
+Smoke tests will be written and run as part of pre-submit tasks on MicroShift CI.  At a minimum, the tests should
+verify that a VolumeSnapshot created from an existing PVC containing data:
+
+1. results in the snapshotting of the underlying volume
+2. is addressable and accessible via a consumer PVC
+3. enables rollback of data on the original volume
 
 ### Graduation Criteria
 
 #### Dev Preview -> Tech Preview
 
+- Ability to utilize the enhancement end to end
+- End user documentation, relative API stability
+- Sufficient test coverage
+- Gather feedback from users rather than just developers
+- Write symptoms-based alerts for the component(s)
+
 #### Tech Preview -> GA
 
-#### Full GA
-
+- More testing (upgrade, downgrade, scale)
+- Sufficient time for feedback
 - Available by default
+- Document SLOs for the component
+- Conduct load testing
+- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 #### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 
+**Images**
+
 The CSI Snapshot controller and sidecar are pieces of the Kubernetes CSI implementation.  OpenShift
 maintains downstream versions of these images and tracks them as part of OCP releases.
+
+**Manifests**
+
+MicroShift's rebase automation specifies repos in the OpenShift github organization from which specific manifests are obtained.
+For the CSI Snapshot Controller, we will specify https://github.com/openshift/cluster-csi-snapshot-controller-operator/tree/release-$RELEASE/assets
+as the remote source from which to derive the controller manifests.
+
+LVMS does not provide its manifests as plain yaml files.  Instead, these are encoded into the logic of the operator, which
+is not deployed on MicroShift.  This makes retrieving them automatically difficult.  For this reason, the LVMS manifests 
+are derived once from a running instance of the controller and stored under `microshift/assets/components/lvms/`.
 
 ### Version Skew Strategy
 
