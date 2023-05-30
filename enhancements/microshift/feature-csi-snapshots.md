@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2023-05-10
-last-updated: 2023-05-25
+last-updated: 2023-05-30
 tracking-link:
   - https://issues.redhat.com/browse/USHIFT-1140
 see-also: []
@@ -66,8 +66,8 @@ snapshotting, cloning, and restoring workload state.
 _Prerequisites_
 
 * A device owner has created an LVM volume group and a thin-pool on this volume group.
-* The `/etc/microshift/lvmd.yaml` config includes a `deviceClass` to represent the thin-pool.  The lvmd.yaml may be a mix 
-of thin and thick `deviceClasses`.
+* The `/etc/microshift/lvmd.yaml` config includes a `deviceClass` to represent the thin-pool.  The lvmd.yaml may 
+contain a mix of thin and thick `deviceClasses`.
 
 ```
 device-classes:
@@ -86,20 +86,43 @@ _Workflow_
 3. Observe the CSI Snapshot controller pod reaches the Ready state
 4. Observe the topolvm-controller and csi-snapshot-controller pods reach the Ready state
 
-#### Create a Snapshot, Dynamic
+#### Create a Snapshot Dynamically from a PVC
 
 _Prerequisites_
 
 * A running MicroShift cluster
-* A running workload with an attached volume, backed by an LVM thin volume
+* A PVC created using a CSI driver that supports VolumeSnapshot objects.
+* A storage class to provision the storage back end.
+* No pods are using the persistent volume claim (PVC) that you want to take a snapshot of.
+
+> Do not create a volume snapshot of a PVC if a pod is using it. Doing so might cause data corruption because the PVC 
+> is not quiesced (paused). Be sure to first tear down a running pod to ensure consistent snapshots.
 
 _Workflow_
 
-1. A user creates a VolumeSnapshot, specifying the source PVC and VolumeSnapshotClass
-2. The CSI Snapshot Controller creates a VolumeSnapshotContent instance
-3. The snapshot driver creates a new backing volume and clones the data from the source PVC’s volume
-4. The CSI Snapshot Controller binds the VolumeSnapshotContent and the VolumeSnapshot together, signaling completion
-5. The VolumeSnapshot may now be referenced by PVCs as a data source
+1. Create a VolumeSnapshot object:
+   
+   **_volumesnapshot-dynamic.yaml_**
+   ```yaml
+   apiVersion: snapshot.storage.k8s.io/v1
+   kind: VolumeSnapshot
+   metadata:
+     name: mysnap
+   spec:
+     volumeSnapshotClassName: csi-hostpath-snap
+     source:
+       persistentVolumeClaimName: myclaim
+   ```
+
+- **volumeSnapshotClassName:** The request for a particular class by the volume snapshot. If the 
+  volumeSnapshotClassName setting is absent and there is a default volume snapshot class, a snapshot is created with 
+  the default volume snapshot class name. But if the field is absent and no default volume snapshot class exists, 
+  then no snapshot is created.
+
+- **persistentVolumeClaimName:** The name of the PersistentVolumeClaim object bound to a persistent volume. This 
+  defines what you want to create a snapshot of. Required for dynamically provisioning a snapshot.
+
+2. Create the object you saved in the previous step by entering the following command:
 
 #### Create a Snapshot, Static
 
@@ -135,12 +158,12 @@ _Workflow_
 #### Deploying
 
 The CSI Snapshot Controller and TopoLVM components are deployed by default on MicroShift. The manifests for these 
-components are baked into the MicroShift binary and are deployed upon first-boot. This follows the existing pattern 
+components are baked into the MicroShift binary and are deployed upon startup. This follows the existing pattern 
 for MicroShift’s control-plane elements.
 
 The CSI Snapshotter configuration is managed via the VolumeSnapshotClass API. This API serves a similar purpose as 
 StorageClasses and allows admins to specify dynamic snapshotting parameters at runtime.  MicroShift will deploy a 
-default VolumeSnapshotClass on first-boot. This instance will reference the default StorageClass that is already 
+default VolumeSnapshotClass on startup. This instance will reference the default StorageClass that is already 
 deployed by MicroShift to enable snapshotting out of the box.
 
 The MicroShift deployment model utilizes rpm-ostree layers. Following the existing deployment pattern, 
