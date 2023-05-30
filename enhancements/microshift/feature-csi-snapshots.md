@@ -28,7 +28,6 @@ network connectivity, and single-tenant workloads. See [kubernetes-for-devices-e
 This document proposes the integration of the CSI Snapshot Controller to support backup and restore scenarios for cluster workloads.  The snapshot controller,
 along with the CSI external snapshot sidecar, will provide an API driven pattern for managing stateful workload data.
 
-
 ## Motivation
 
 CSI snapshot functionality was originally excluded from the CSI driver integration in MicroShift to
@@ -56,11 +55,26 @@ and to restore workloads to that state utilizing existing Kubernetes patterns.
 
 ## Proposal
 
-Deploy the CSI snapshot controller and CSI plugin sidecar with MicroShift out of the box to provide users with a means of snapshotting, cloning, and restoring workload state.  Resource conscious users should be able to opt out of deploying these components.
+Deploy the CSI snapshot controller and CSI plugin sidecar with MicroShift out of the box to provide users with a means of snapshotting, cloning, and restoring workload state.
 
 ### Workflow Description
 
-#### Deploy MicroShift with Snapshotting
+#### Deploy MicroShift with Snapshotting Support
+
+_Prerequisites_
+
+* A device owner has created an LVM volume group and a thin-pool on this volume group.
+* The lvmd.yaml config includes a `deviceClass` to represent the thin-pool.  The lvmd.yaml may be a mix of thin and thick `deviceClasses`.
+
+```
+device-classes:
+- name: ssd-thin
+  volume-group: myvg1
+  type: thin
+  thin-pool:
+    name: pool0
+    overprovision-ratio: 50.0
+```
 
 _Workflow_
 
@@ -69,9 +83,9 @@ _Workflow_
 3. Observe the CSI Snapshot controller pod reaches the Ready state
 4. Observe the topolvm-controller and csi-snapshot-controller pods reach the Ready state
 
-#### Snapshot, Dynamic
+#### Create a Snapshot, Dynamic
 
-_Assuming_
+_Prerequisites_
 
 * A running MicroShift cluster
 * A running workload with an attached volume, backed by an LVM thin volume
@@ -84,17 +98,17 @@ _Workflow_
 4. The CSI Snapshot Controller binds the VolumeSnapshotContent and the VolumeSnapshot together, signaling completion
 5. The VolumeSnapshot may now be referenced by PVCs as a data source
 
-#### Snapshot, Static
+#### Create a Snapshot, Static
 
-_Assuming_
+_Prerequisites_
 
 * A running MicroShift cluster
-* A pre-provisioned VolumeSnapshotContent API obj, representing a backend volume containing pre-populated data
-* The CSI Snapshot controller is not deployed
+* An existing LVM thin-pool from which we can create thin-volume snapshots.
 
 _Workflow_
 
-1. The user creates a VolumeSnapshot, specifying the VolumeSnapshotContent name as the source
+1. The user manually creates a snapshot of the backing volume using LVM commands
+2. The user creates a VolumeSnapshot, specifying the VolumeSnapshotContent name as the source
 2. The user creates a PVC, specifying the VolumeSnapshot as the dataSource.
 3. The storage driver creates a new backing volume and clones the data from the dataSource to the new volume
 4. The VolumeSnapshot will is now available as a PVC data source.
