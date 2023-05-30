@@ -22,20 +22,21 @@ see-also: []
 
 ## Summary
 
-MicroShift is a small form-factor, single-node OpenShift targeting IoT and Edge Computing use cases characterized by tight resource constraints, unpredictable
-network connectivity, and single-tenant workloads. See [kubernetes-for-devices-edge.md](./kubernetes-for-device-edge.md) for more detail.
+MicroShift is a small form-factor, single-node OpenShift targeting IoT and Edge Computing use cases characterized 
+by tight resource constraints, unpredictable network connectivity, and single-tenant workloads. See 
+[kubernetes-for-devices-edge.md](./kubernetes-for-device-edge.md) for more detail.
 
-This document proposes the integration of the CSI Snapshot Controller to support backup and restore scenarios for cluster workloads.  The snapshot controller,
-along with the CSI external snapshot sidecar, will provide an API driven pattern for managing stateful workload data.
+This document proposes the integration of the CSI Snapshot Controller to support backup and restore scenarios for 
+cluster workloads.  The snapshot controller, along with the CSI external snapshot sidecar, will provide an API 
+driven pattern for managing stateful workload data.
 
 ## Motivation
 
-CSI snapshot functionality was originally excluded from the CSI driver integration in MicroShift to
-support the low-resource overhead goals of the project. However, user feedback has made it clear that
-a supportable, robust backup/restore solution is necessary.  While it would be possible to run a 
-workflow out-of-band to manage workload data, this would be reinventing the wheel and contribute
-significantly to technical debt.  CSI Snapshots are already integrated into Openshift with ongoing
-downstream support. 
+CSI snapshot functionality was originally excluded from the CSI driver integration in MicroShift to support the 
+low-resource overhead goals of the project. However, user feedback has made it clear that a supportable, robust 
+backup/restore solution is necessary.  While it would be possible to run a workflow out-of-band to manage workload 
+data, this would be reinventing the wheel and contribute significantly to technical debt.  CSI Snapshots are already 
+integrated into Openshift with ongoing downstream support. 
 
 ### User Stories
 
@@ -55,7 +56,8 @@ and to restore workloads to that state utilizing existing Kubernetes patterns.
 
 ## Proposal
 
-Deploy the CSI snapshot controller and CSI plugin sidecar with MicroShift out of the box to provide users with a means of snapshotting, cloning, and restoring workload state.
+Deploy the CSI snapshot controller and CSI plugin sidecar with MicroShift out of the box to provide users with a means of 
+snapshotting, cloning, and restoring workload state.
 
 ### Workflow Description
 
@@ -64,7 +66,8 @@ Deploy the CSI snapshot controller and CSI plugin sidecar with MicroShift out of
 _Prerequisites_
 
 * A device owner has created an LVM volume group and a thin-pool on this volume group.
-* The lvmd.yaml config includes a `deviceClass` to represent the thin-pool.  The lvmd.yaml may be a mix of thin and thick `deviceClasses`.
+* The `/etc/microshift/lvmd.yaml` config includes a `deviceClass` to represent the thin-pool.  The lvmd.yaml may be a mix 
+of thin and thick `deviceClasses`.
 
 ```
 device-classes:
@@ -131,35 +134,34 @@ _Workflow_
 
 #### Deploying
 
-The CSI Snapshot Controller and TopoLVM components are deployed by default on MicroShift. The
-manifests for these components are baked into the MicroShift binary and are deployed upon first-boot.
-This follows the existing pattern for MicroShift’s control-plane elements.
+The CSI Snapshot Controller and TopoLVM components are deployed by default on MicroShift. The manifests for these 
+components are baked into the MicroShift binary and are deployed upon first-boot. This follows the existing pattern 
+for MicroShift’s control-plane elements.
 
-The CSI Snapshotter configuration is managed via the VolumeSnapshotClass API. This API serves a
-similar purpose as StorageClasses and allows admins to specify dynamic snapshotting parameters at
-runtime.  MicroShift will deploy a default VolumeSnapshotClass on first-boot. This instance will
-reference the default StorageClass that is already deployed by MicroShift to enable snapshotting out
-of the box.
+The CSI Snapshotter configuration is managed via the VolumeSnapshotClass API. This API serves a similar purpose as 
+StorageClasses and allows admins to specify dynamic snapshotting parameters at runtime.  MicroShift will deploy a 
+default VolumeSnapshotClass on first-boot. This instance will reference the default StorageClass that is already 
+deployed by MicroShift to enable snapshotting out of the box.
 
-The MicroShift deployment model utilizes rpm-ostree layers. Following the existing deployment
-pattern,  VolumeSnapshotClass manifests can be packaged and deployed onto target devices.  (See 
-[kubernetes-for-device-edge.md#workflow-description.md](./kubernetes-for-device-edge.md#workflow-description)). Application deployers can predefine VolumeSnapshotClass manifests and use
-image-builder to package them into a rpm-ostree layer.  This layer can be installed to the device,
-which writes the manifests to /etc/microshift/manifests.  This pattern is congruent with how a device
-owner would install custom StorageClasses.  It is recommended that new custom StorageClasses be
-packaged with VolumeSnapshotClasses that reference them.
+The MicroShift deployment model utilizes rpm-ostree layers. Following the existing deployment pattern, 
+VolumeSnapshotClass manifests can be packaged and deployed onto target devices.
+(See [kubernetes-for-device-edge. md#workflow-description.md](./kubernetes-for-device-edge.md#workflow-description)).
+Application deployers can predefine VolumeSnapshotClass manifests and use image-builder to package them into a 
+rpm-ostree layer.  This layer can be installed to the device, which writes the manifests to 
+/etc/microshift/manifests. This pattern is congruent with how a device owner would install custom StorageClasses. It 
+is recommended that new custom StorageClasses be packaged with VolumeSnapshotClasses that reference them.
 
 #### Upgrading
 
-The CSI Snapshot component images are packaged and versioned with each OpenShift release and can be 
-extracted from the ocp-release image. This allows MicroShift to use existing rebase tooling to
-upgrade the CSI Snapshot components in step with OCP releases.
+The CSI Snapshot component images are packaged and versioned with each OpenShift release and can be extracted from 
+the ocp-release image. This allows MicroShift to use existing rebase tooling to upgrade the CSI Snapshot components 
+in step with OCP releases.
 
 #### Configuring
 
-Cluster admins will use the VolumeSnapshotClass API to set dynamic configurations for snapshot
-creation. Driver-specific configuration is available through the ‘parameters’ sub-field, which is a
-string:string map and is defined by the particular storage provider.
+Cluster admins will use the VolumeSnapshotClass API to set dynamic configurations for snapshot creation. 
+Driver-specific configuration is available through the ‘parameters’ sub-field, which is a string:string map and is 
+defined by the particular storage provider.
 
 #### Deploying Applications
 
@@ -195,11 +197,15 @@ driver: hostpath.csi.k8s.io [1]
 deletionPolicy: Delete
 ```
 
-1. The name of the CSI driver that is used to create snapshots of this **VolumeSnapshotClass** object. The name must be the same as the Provisioner field of the storage class that is responsible for the PVC that is being snapshotted.
+1. The name of the CSI driver that is used to create snapshots of this **VolumeSnapshotClass** object. The name 
+must be the same as the Provisioner field of the storage class that is responsible for the PVC that is being 
+snapshotted.
 
 #### VolumeSnapshot
 
-Similar to the PersistentVolumeClaim object, the VolumeSnapshot CRD defines a developer request for a snapshot. The CSI snapshot controller handles the binding of a VolumeSnapshot CRD with an appropriate VolumeSnapshotContent CRD. The binding is a one-to-one mapping.
+Similar to the PersistentVolumeClaim object, the VolumeSnapshot CRD defines a developer request for a snapshot. The 
+CSI snapshot controller handles the binding of a VolumeSnapshot CRD with an appropriate VolumeSnapshotContent CRD. 
+The binding is a one-to-one mapping.
 
 The VolumeSnapshot CRD is namespaced. A developer uses the CRD as a distinct request for a snapshot.
 
@@ -214,12 +220,11 @@ spec:
     persistentVolumeClaimName: myclaim [2]
 ```
 
-1. The request for a particular class by the volume snapshot. If the **volumeSnapshotClassName** 
-setting is absent and there is a default volume snapshot class, a snapshot is created with the
-default volume snapshot class name. But if the field is absent and no default volume snapshot class
-exists, then no snapshot is created.
-2. The name of the **PersistentVolumeClaim** object bound to a persistent volume. This defines what
-you want to create a snapshot of. Required for dynamically provisioning a snapshot.
+1. The request for a particular class by the volume snapshot. If the **volumeSnapshotClassName** setting is absent 
+and there is a default volume snapshot class, a snapshot is created with the default volume snapshot class name. 
+But if the field is absent and no default volume snapshot class exists, then no snapshot is created.
+2. The name of the **PersistentVolumeClaim** object bound to a persistent volume. This defines what you want to 
+create a snapshot of. Required for dynamically provisioning a snapshot.
 
 #### VolumeSnapshotContent
 
@@ -284,9 +289,10 @@ The total additional cluster components are:
 
 ### MicroShift Assets
 
-MicroShift manages the deployment of embedded component assets through an interface called the Service Manager.  The logic 
-behind this interface deploys components in an order that respects interdependencies, waits for services to start, and intelligently
-stops services on interrupt.  MicroShift's default CSI storage service is already managed by the service manager. 
+MicroShift manages the deployment of embedded component assets through an interface called the Service Manager. The 
+logic behind this interface deploys components in an order that respects interdependencies, waits for services to 
+start, and intelligently stops services on interrupt.  MicroShift's default CSI storage service is already managed 
+by the service manager. 
 
 MicroShift's CSI service manager will deploy the CSI Volume Snapshot components.  The files will be stored under the
 `microshift/assets/components/csi-external-snapshot-controller` directory.  The following files will be added: 
@@ -300,9 +306,9 @@ MicroShift's CSI service manager will deploy the CSI Volume Snapshot components.
 7. `volumesnapshotcontents_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshotContents CRD
 8. `volumesnapshots_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshot CRD
 
-The controller will be deployed prior to LVMS.  Because LVMS does not depend on the controller to be running prior to its deployment,
-it is not necessary to wait for the controller to reach a ready state before starting LVMS.  Starting these components 
-concurrently will also shorten overall startup time.
+The controller will be deployed prior to LVMS.  Because LVMS does not depend on the controller to be running prior 
+to its deployment, it is not necessary to wait for the controller to reach a ready state before starting LVMS.  
+Starting these components concurrently will also shorten overall startup time.
 
 ### Test Plan
 
@@ -343,13 +349,14 @@ maintains downstream versions of these images and tracks them as part of OCP rel
 
 **Manifests**
 
-MicroShift's rebase automation specifies repos in the OpenShift github organization from which specific manifests are obtained.
-For the CSI Snapshot Controller, we will specify https://github.com/openshift/cluster-csi-snapshot-controller-operator/tree/release-$RELEASE/assets
+MicroShift's rebase automation specifies repos in the OpenShift github organization from which specific manifests 
+are obtained. For the CSI Snapshot Controller, we will specify 
+https://github.com/openshift/cluster-csi-snapshot-controller-operator/tree/release-$RELEASE/assets 
 as the remote source from which to derive the controller manifests.
 
-LVMS does not provide its manifests as plain yaml files.  Instead, these are encoded into the logic of the operator, which
-is not deployed on MicroShift.  This makes retrieving them automatically difficult.  For this reason, the LVMS manifests 
-are derived once from a running instance of the controller and stored under `microshift/assets/components/lvms/`.
+LVMS does not provide its manifests as plain yaml files.  Instead, these are encoded into the logic of the operator, 
+which is not deployed on MicroShift.  This makes retrieving them automatically difficult.  For this reason, the LVMS 
+manifests are derived once from a running instance of the controller and stored under `microshift/assets/components/lvms/`.
 
 ### Version Skew Strategy
 
