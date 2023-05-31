@@ -121,7 +121,7 @@ conflicts when sharing credentials with operands.
 Operator authors have a way to notify, guide, and assist OLM Operator admins in providing the required cloud provider
 credentials matched to their permission needs for install and update.
 
-Ideally, a solution here will work in both HyperShift (TAT always) and non-HyperShift clusters.
+Ideally, a solution here will work in both HyperShift (TAT always) and non-HyperShift(but TAT-enabled) clusters.
 
 ### Non-Goals
 
