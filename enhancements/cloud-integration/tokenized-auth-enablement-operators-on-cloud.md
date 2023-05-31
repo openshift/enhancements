@@ -68,7 +68,7 @@ Extract the CredentialsRequest from the operator's image or codebase in order to
 the operator to assume
 if using the [Cloud Credential Operator Utility](https://github.com/openshift/cloud-credential-operator/blob/master/docs/ccoctl.md), `ccoctl`:
 1. Find and download a compatible `ccoctl` binary
-2. Accept that `ccoctl` is a binary you downloaded that has god-mode access to your Cloud Provider
+2. Accept that `ccoctl` requires elevated privileges to create roles with necessary permissions.
 3. Use `ccoctl` to create the IAM Role
 4. Use `ccoctl` to create the secret with the credentials expected by the operator
 
