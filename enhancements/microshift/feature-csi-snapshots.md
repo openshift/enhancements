@@ -86,7 +86,9 @@ _Workflow_
 3. Observe the CSI Snapshot controller pod reaches the Ready state
 4. Observe the topolvm-controller and csi-snapshot-controller pods reach the Ready state
 
-#### Create a Snapshot Dynamically from a PVC
+#### Create a Snapshot Dynamically
+
+This section describes how to create snapshot directly from a VolumeSnapshotContent object.
 
 _Prerequisites_
 
@@ -124,20 +126,55 @@ _Workflow_
 
 2. Create the object you saved in the previous step by entering the following command:
 
-#### Create a Snapshot, Static
+   `$ oc create -f volumesnapshot-dynamic.yaml`
 
-_Prerequisites_
+#### Create a Volume Snapshot Manually
 
-* A running MicroShift cluster
-* An existing LVM thin-pool from which we can create thin-volume snapshots.
+This section describes how to create snapshot directly from a VolumeSnapshotContent object.
 
-_Workflow_
+1. Provide a value for the **volumeSnapshotContentName** parameter as the source for the snapshot, in addition to 
+   defining volume snapshot class as shown above.
 
-1. The user manually creates a snapshot of the backing volume using LVM commands
-2. The user creates a VolumeSnapshot, specifying the VolumeSnapshotContent name as the source
-2. The user creates a PVC, specifying the VolumeSnapshot as the dataSource.
-3. The storage driver creates a new backing volume and clones the data from the dataSource to the new volume
-4. The VolumeSnapshot will is now available as a PVC data source.
+   **_volumesnapshot-manual.yaml_**
+   ```yaml
+   apiVersion: snapshot.storage.k8s.io/v1
+   kind: VolumeSnapshot
+   metadata:
+     name: mysnap
+   spec:
+     source:
+       volumeSnapshotContentName: mycontent 
+   ```
+
+   **volumeSnapshotContentName:** The volumeSnapshotContentName parameter is required for pre-provisioned snapshots.
+
+2. Create the object you saved in the previous step by entering the following command:
+
+    `$ oc create -f volumesnapshot-manual.yaml`
+
+#### Verify a Snapshot was Created
+
+After the snapshot has been created in the cluster, additional details about the snapshot are available.
+
+1. To display details about the volume snapshot that was created, enter the following command:
+
+   `$ oc describe volumesnapshot mysnap` yeilds: 
+
+    ```yaml
+    apiVersion: snapshot.storage.k8s.io/v1
+    kind: VolumeSnapshot
+    metadata:
+      name: mysnap
+    spec:
+      source:
+        persistentVolumeClaimName: myclaim
+      volumeSnapshotClassName: csi-hostpath-snap
+    status:
+      boundVolumeSnapshotContentName: snapcontent-1af4989e-a365-4286-96f8-d5dcd65d78d6 
+      creationTime: "2020-01-29T12:24:30Z" 
+      readyToUse: true 
+      restoreSize: 1Gi
+      ```
 
 #### Restore
 
