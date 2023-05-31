@@ -103,7 +103,7 @@ For an example of how operators are currently navigating accessing cloud resourc
 * As the HyperShift team, where CCO is not installed so the only supported authentication mode is via TAT, I want the
   Red Hat branded operators that must reach the Cloud Provider API, to be enabled to work with TAT credentials in a
   consistent, and automated fashion so that customer can use those operators as easily as possible, driving the use of
-  layered products.
+  layered products. This means adding CCO, with the changes proposed here, to Manual mode to HyperShift.
 
 ### Goals
 
@@ -230,7 +230,8 @@ For Operator Administrator:
 
 For OperatorHub, Console:
 - Prompt for missing credentials that prevent fully operational install on STS cluster. Same for upgrades.
-- Badge indicating STS enabled operators (including operators that don't need cloud credentials)
+- Badge indicating "STS enabled" (this is a naming suggestion to avoid implying that non-badged operators not needing
+ cloud provider resource access would not work) operators.
 
 This graph shows the system as it needs to work (AWS only), not the proposed solution workflow:
 ```mermaid
@@ -323,7 +324,7 @@ Not implemented yet.
 ## Alternatives
 
 This could be implemented by with chanes to Pod Identity Webhook (Deployed on classic ROSA, ROSA on HyperShift, 
-standard OCP and Hypershift)
+standard OCP and HyperShift)
 
 Will work by annotating the ServiceAccount triggering the projection of the service account tokens into pods created for
 the operator (same method and resultant actions as: https://github.com/openshift/hypershift/pull/1351) the README here
