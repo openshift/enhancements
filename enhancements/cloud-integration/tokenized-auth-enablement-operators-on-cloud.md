@@ -70,7 +70,7 @@ if using the [Cloud Credential Operator Utility](https://github.com/openshift/cl
 1. Find and download a compatible `ccoctl` binary
 2. Accept that `ccoctl` is a binary you downloaded that has god-mode access to your Cloud Provider
 3. Use `ccoctl` to create the IAM Role
-4. Use `ccoctl` to create the secret with the credentials expected by the operator in mint mode
+4. Use `ccoctl` to create the secret with the credentials expected by the operator
 
 Here is a diagram for how this works on AWS:
 
