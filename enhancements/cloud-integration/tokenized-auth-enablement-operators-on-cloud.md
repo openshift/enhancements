@@ -48,9 +48,9 @@ For example, Amazon Web Services (AWS) Secure Token Service (STS) allows you to 
 credentials. A concrete example is write permission on an S3 bucket on AWS. STS is supported on all the major cloud
 providers where OpenShift is deployed.
 
-Currently, several Red Hat operators provide detailed instructions for how to use the operator on clusters where Cloud Credential Operator (CCO) is
-in Manual Mode, a mode where CCO is not capable of provisioning credentials on its own. The process has manual operations performed by the customer that are inconsistent across
-layered product operators.
+Currently, several Red Hat operators provide detailed instructions for how to use the operator on clusters where 
+Cloud Credential Operator (CCO) is in Manual Mode, a mode where CCO is not capable of provisioning credentials on its 
+own. The process has manual operations performed by the customer that are inconsistent across layered product operators.
 
 This enhancement seeks to bring a unified set of standards and tooling to the process of enabling an
 operator to access cloud provider resources using TAT, and improve the UX for consumers of these operators. 
@@ -58,8 +58,9 @@ operator to access cloud provider resources using TAT, and improve the UX for co
 ## Motivation
 
 Several Red Hat operators have normal operating modes where they assure their operands have required cloud 
-resources to perform properly. Most often, these operators use the Cloud Credential Operator's CredentialsRequest API in Mint mode to automatically create the IAM roles and credentials required for 
-the operator to assume the role and authenticate with the Cloud Provider.
+resources to perform properly. Most often, these operators use the Cloud Credential Operator's CredentialsRequest API in
+Mint mode to automatically create the IAM roles and credentials required for the operator to assume the role and 
+authenticate with the Cloud Provider.
 
 In Manual mode or more generally on clusters that support TAT (CCO not necessarily installed), an admin installing an 
 operator is required to:
@@ -80,7 +81,9 @@ This enhancement seeks to unify this process across operators so users of severa
 similar steps to perform. We aim to automate and reduce those steps as much as possible to make installing operators
 (via OLM) simpler on clusters where TAT authentication is supported.
 
-For an example of how operators are currently navigating accessing cloud resources today, see the AWS STS install instructions for the AWS EFS CSI Driver Operator (https://docs.openshift.com/container-platform/4.11/storage/container_storage_interface/persistent-storage-csi-aws-efs.html#efs-sts_persistent-storage-csi-aws-efs)
+For an example of how operators are currently navigating accessing cloud resources today, see the AWS STS install 
+instructions for the AWS EFS CSI Driver Operator (https://docs.openshift.com/container-platform/4.11/storage/container_storage_interface/persistent-storage-csi-aws-efs.html#efs-sts_persistent-storage-csi-aws-efs)
+
 ### User Stories
 
 * As a cluster admin, I want to know which OLM Operators are safe to install because they will not be interacting with
