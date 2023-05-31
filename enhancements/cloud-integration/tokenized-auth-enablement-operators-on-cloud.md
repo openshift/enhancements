@@ -80,6 +80,7 @@ This enhancement seeks to unify this process across operators so users of severa
 similar steps to perform. We aim to automate and reduce those steps as much as possible to make installing operators
 (via OLM) simpler on clusters where TAT authentication is supported.
 
+For an example of how operators are currently navigating accessing cloud resources today, see the AWS STS install instructions for the AWS EFS CSI Driver Operator (https://docs.openshift.com/container-platform/4.11/storage/container_storage_interface/persistent-storage-csi-aws-efs.html#efs-sts_persistent-storage-csi-aws-efs)
 ### User Stories
 
 * As a cluster admin, I want to know which OLM Operators are safe to install because they will not be interacting with
