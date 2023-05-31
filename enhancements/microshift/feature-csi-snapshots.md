@@ -531,10 +531,35 @@ against version skew.
 
 #### Failure Modes
 
+_Common Errors_
+
+Snapshotting failures may occur for a few reasons:
+
+- _Not Enough Storage Capacity:_ If the volume group capacity has been reached, snapshotting can failure because the 
+  storage driver refuses to create a snapshot.
+- _Invalid VolumeSnapshot Spec:_ Webhook validation checks for malformed VolumeSnapshots and will post errors to the 
+  problem object as an Event.
+
+_Diagnosis_
+
+To determine the cause of snapshot failures, use `oc describe` to examine VolumeSnapshot and VolumeSnapshotContent 
+events. 
+
+- **VolumeSnapshot:**  `$ oc describe volumesnapshot -n $NAMESPACE $NAME`
+- **VolumeSnapshotContent:** `$ oc describe volumesnapshotconent $NAME`
+
+Errors related to restoring a snapshot to a PVC will be captured in the PVC's events.
+
+- **PersistentVolumeClaim:** `$ oc describe pvc -n $NAMESPACE $NAME`
+
+If you need to delve deeper, the logs can be examined with the following command:
+
+`$ oc logs -n kube-system csi-snapshot-controller-$SUFFIX`
+
 #### Support Procedures
 
 ## Implementation History
 
 ## Alternatives
 
-There are no alternatives to deploying the Kubernetes CSI implementation of the snapshotting specification.
+MicroShift design does not support CSI snapshotting.
