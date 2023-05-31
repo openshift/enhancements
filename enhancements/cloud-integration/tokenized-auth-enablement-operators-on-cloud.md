@@ -58,7 +58,7 @@ operator to access cloud provider resources using TAT, and improve the UX for co
 ## Motivation
 
 Several Red Hat operators have normal operating modes where they assure their operands have required cloud 
-resources to perform properly. In Mint Mode, CCO will automatically create the IAM roles and credentials required for 
+resources to perform properly. Most often, these operators use the Cloud Credential Operator's CredentialsRequest API in Mint mode to automatically create the IAM roles and credentials required for 
 the operator to assume the role and authenticate with the Cloud Provider.
 
 In Manual mode or more generally on clusters that support TAT (CCO not necessarily installed), an admin installing an 
