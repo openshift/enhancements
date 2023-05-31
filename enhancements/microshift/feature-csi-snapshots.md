@@ -471,9 +471,12 @@ MicroShift's CSI service manager will deploy the CSI Volume Snapshot components.
 7. `volumesnapshotcontents_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshotContents CRD
 8. `volumesnapshots_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshot CRD
 
-The controller will be deployed prior to LVMS.  Because LVMS does not depend on the controller to be running prior 
-to its deployment, it is not necessary to wait for the controller to reach a ready state before starting LVMS.  
-Starting these components concurrently will also shorten overall startup time.
+### Deployment
+
+CSI Snapshot controller manifests will be integrated into the CSI service manager. The controller manifests will be 
+deployed as part of MicroShift's LVMS startup process.  Because LVMS does not depend on the controller to be 
+running prior to its deployment, it is not necessary to wait for the controller to reach a ready state before 
+starting LVMS.
 
 ### Test Plan
 
