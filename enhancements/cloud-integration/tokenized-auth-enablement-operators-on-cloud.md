@@ -332,6 +332,21 @@ resources to the status of an appropriate resource to let admins know there are 
 Not implemented yet.
 
 ## Alternatives
+- Leverage CredentialsRequest after Operator Installation
+
+1. Browse catalog, select Logging Operator
+2. If the cluster is TAT emit big red info box "After installation you must grant cloud access by running `ccoctl process -n openshift-logging` or optionally `ccoctl process --offline -n openshift-logging`"
+3. Install Operator
+4. Operator creates CredReq
+5. Operator reports failed / progressing state, whatever is most clear that it's awaiting creds
+6. 
+  a. Cluster Admin automatically grants permissions `ccoctl process -n openshift-logging` .status.RoleARN, .status.GCPRole, .status.AzureRole populated automatically
+  b. 1. Cluster Admin hands off permissions requirements `ccoctl process -n openshift-logging --offline`, generates cloud native permissions doc, forwards to IAM Admin
+       2. IAM Admin applies permissions, returns RoleARN, GCPRole, AzureRole to Cluster Admin
+       3. Cluster Admin actuates CredRequest via `ccoctl -n openshift-logging bind-role S3Access ARN:blahblahblah:blah` setting .status.RoleARN
+ 7. CCO does the rest
+ 
+This would set the stage for other statuses to be reported via the CredentialsRequest like "RoleOutOfSync". Not clear how we get from here to OLM inhibiting upgrades on changes though. This has the benefit that permissions are recorded in one structured authoritative location. Though perhaps if a goal is to ensure the required permissions are known prior to installation, perhaps external to the cluster, this becomes harder.
 
 This could be implemented by with chanes to Pod Identity Webhook (Deployed on classic ROSA, ROSA on HyperShift, 
 standard OCP and HyperShift)
