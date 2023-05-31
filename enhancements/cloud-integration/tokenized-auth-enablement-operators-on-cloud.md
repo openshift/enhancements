@@ -170,6 +170,8 @@ Validation of CredentialsRequest by this new token-aware CCO? Maybe. Currently, 
 has permissions, and with this CCO could be the alerting mechanism for a changed CredentialsRequest without sufficient 
 permissions.
 
+CCO should consider adding the above, three-part test as a utility function exposed in the API.
+
 **HyperShift changes**: Include Cloud Credential Operator with token-aware mode (see above). Allows for processing of 
 CredentialsRequest objects added by operators.
 
