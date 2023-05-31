@@ -88,7 +88,7 @@ _Workflow_
 
 #### Create a Snapshot Dynamically
 
-This section describes how to create snapshot directly from a VolumeSnapshotContent object.
+This section describes how to create snapshot directly from a PersistentVolumeClaim object.
 
 _Prerequisites_
 
@@ -102,7 +102,25 @@ _Prerequisites_
 
 _Workflow_
 
-1. Create a VolumeSnapshot object:
+1. Create a VolumeSnapshotClass object.  **NOTE:** MicroShift deploys a default VolumeSnapshotClass to enable LVMS 
+   snapshotting out of the box.  This step is only necessary for creating novel VolumeSnapshotClasses. 
+
+    ```yaml
+    apiVersion: snapshot.storage.k8s.io/v1
+    kind: VolumeSnapshotClass
+    metadata:
+      name: topolvm-snap
+    driver: topolvm.io 
+    deletionPolicy: Delete
+    ```
+
+   
+2. Create the object you saved in the previous step by entering the following command:
+    
+    `$ oc create -f volumesnapshotclass.yaml`
+
+
+3. Create a VolumeSnapshot object:
    
    **_volumesnapshot-dynamic.yaml_**
    ```yaml
@@ -111,18 +129,19 @@ _Workflow_
    metadata:
      name: mysnap
    spec:
-     volumeSnapshotClassName: csi-hostpath-snap
+     volumeSnapshotClassName: topolvm-snap
      source:
        persistentVolumeClaimName: myclaim
    ```
 
-- **volumeSnapshotClassName:** The request for a particular class by the volume snapshot. If the 
-  volumeSnapshotClassName setting is absent and there is a default volume snapshot class, a snapshot is created with 
-  the default volume snapshot class name. But if the field is absent and no default volume snapshot class exists, 
-  then no snapshot is created.
+   - **volumeSnapshotClassName:** The request for a particular class by the volume snapshot. If the 
+     volumeSnapshotClassName setting is absent and there is a default volume snapshot class, a snapshot is created with 
+     the default volume snapshot class name. But if the field is absent and no default volume snapshot class exists, 
+     then no snapshot is created.
 
-- **persistentVolumeClaimName:** The name of the PersistentVolumeClaim object bound to a persistent volume. This 
-  defines what you want to create a snapshot of. Required for dynamically provisioning a snapshot.
+   - **persistentVolumeClaimName:** The name of the PersistentVolumeClaim object bound to a persistent volume. This 
+     defines what you want to create a snapshot of. Required for dynamically provisioning a snapshot.
+
 
 2. Create the object you saved in the previous step by entering the following command:
 
@@ -158,8 +177,9 @@ After the snapshot has been created in the cluster, additional details about the
 
 1. To display details about the volume snapshot that was created, enter the following command:
 
-   `$ oc describe volumesnapshot mysnap` yeilds: 
+   `$ oc describe volumesnapshot mysnap` 
 
+    _Example Output:_
     ```yaml
     apiVersion: snapshot.storage.k8s.io/v1
     kind: VolumeSnapshot
@@ -176,25 +196,110 @@ After the snapshot has been created in the cluster, additional details about the
       restoreSize: 1Gi
       ```
 
-#### Restore
+#### Deleting a Volume Snapshot
 
-_Assuming_
-
-* A running MicroShift cluster
-* A bound VolumeSnapshot
+You can configure how OpenShift Container Platform deletes volume snapshots.
 
 _Workflow_
 
-1.  A user creates a Pod and PVC, specifying the VolumeSnapshot as the data source
-2. The CSI storage driver (topolvm), creates a new backing thin volume and a PV to represent the volume
-3. The CSI storage driver creates a PV to expose the backend storage at the cluster level
-4. The CSI storage driver clones the snapshot volume data to the new volume
-5. The in-tree storage controller binds the PV to the PVC
-6. The volume is mounted to the Pod’s filesystem and the Pod is started
+1. Specify the deletion policy that you require in the VolumeSnapshotClass object, as shown in the following example:
+
+    ```yaml
+    apiVersion: snapshot.storage.k8s.io/v1
+    kind: VolumeSnapshotClass
+    metadata:
+      name: 
+    driver: topolvm.io
+    deletionPolicy: Delete 
+    ```
+   **deletionPolicy:** When deleting the volume snapshot, if the Delete value is set, the underlying snapshot is 
+   deleted along with the VolumeSnapshotContent object. If the Retain value is set, both the underlying snapshot and 
+   VolumeSnapshotContent object remain.
+   If the Retain value is set and the VolumeSnapshot object is deleted without deleting the corresponding 
+   VolumeSnapshotContent object, the content remains. The snapshot itself is also retained in the storage back end.
+
+
+2. Delete the volume snapshot by entering the following command:
+
+    `$ oc delete volumesnapshot <volumesnapshot_name>`
+    
+    _Example Output:_
+
+    `volumesnapshot.snapshot.storage.k8s.io "mysnapshot" deleted`
+
+
+3. If the deletion policy is set to Retain, delete the volume snapshot content by entering the following command:
+
+    `$ oc delete volumesnapshotcontent <volumesnapshotcontent_name>`
+
+
+4. _Optional:_ If the VolumeSnapshot object is not successfully deleted, enter the following command to remove any finalizers for the leftover resource so that the delete operation can continue:
+    
+    `$ oc patch -n $PROJECT volumesnapshot/$NAME --type=merge -p '{"metadata": {"finalizers":null}}'`
+    
+    _Example Output:_
+
+    `volumesnapshotclass.snapshot.storage.k8s.io "csi-ocs-rbd-snapclass" deleted`
+
+
+#### Restore
+
+The VolumeSnapshot CRD content can be used to restore the existing volume to a previous state.
+
+After your VolumeSnapshot CRD is bound and the readyToUse value is set to true, you can use that resource to 
+provision a new volume that is pre-populated with data from the snapshot.
+
+_Prerequisites_
+
+* Logged in to a running OpenShift Container Platform cluster. 
+* A persistent volume claim (PVC) created using a Container Storage Interface (CSI) driver that supports volume 
+  snapshots. 
+* A storage class to provision the storage back end. 
+* A volumesnapshot has been created and is ready to use.
+
+_Workflow_
+
+1. Specify a VolumeSnapshot data source on a PVC as shown in the following:
+
+    _pvc-restore.yaml_
+    ```yaml
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: myclaim-restore
+    spec:
+      storageClassName: topolvm.io
+      dataSource:
+        name: mysnap 
+        kind: VolumeSnapshot 
+        apiGroup: snapshot.storage.k8s.io 
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+    ```
+
+   - **name**:  Name of the VolumeSnapshot object representing the snapshot to use as source.
+   - **kind**:  Must be set to the VolumeSnapshot value.
+   - **apiGroup**: Must be set to the snapshot.storage.k8s.io value.
+
+
+2. Create a PVC by entering the following command:
+
+    `$ oc create -f pvc-restore.yaml`
+
+
+3. Verify that the restored PVC has been created by entering the following command:
+    
+    `$ oc get pvc`
+
+   A new PVC such as myclaim-restore is displayed.
+
 
 #### Deploying
 
-The CSI Snapshot Controller and TopoLVM components are deployed by default on MicroShift. The manifests for these 
+The CSI Snapshot Controller and LVMS components are deployed by default on MicroShift. The manifests for these 
 components are baked into the MicroShift binary and are deployed upon startup. This follows the existing pattern 
 for MicroShift’s control-plane elements.
 
