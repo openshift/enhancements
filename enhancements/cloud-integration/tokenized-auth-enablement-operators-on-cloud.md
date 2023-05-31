@@ -49,7 +49,7 @@ credentials. A concrete example is write permission on an S3 bucket on AWS. STS 
 providers where OpenShift is deployed.
 
 Currently, several Red Hat operators provide detailed instructions for how to use the operator on clusters where Cloud Credential Operator (CCO) is
-in Manual Mode. The process is designed to have manual operations performed by the customer that are inconsistent across
+in Manual Mode, a mode where CCO is not capable of provisioning credentials on its own. The process is designed to have manual operations performed by the customer that are inconsistent across
 layered product operators.
 
 This enhancement seeks to bring a unified set of standards and tooling to the process of enabling an
