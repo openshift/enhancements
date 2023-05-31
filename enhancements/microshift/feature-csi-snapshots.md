@@ -517,11 +517,7 @@ maintains downstream versions of these images and tracks them as part of OCP rel
 MicroShift's rebase automation specifies repos in the OpenShift github organization from which specific manifests 
 are obtained. For the CSI Snapshot Controller, we will specify 
 https://github.com/openshift/cluster-csi-snapshot-controller-operator/tree/release-$RELEASE/assets 
-as the remote source from which to derive the controller manifests.
-
-LVMS does not provide its manifests as plain yaml files.  Instead, these are encoded into the logic of the operator, 
-which is not deployed on MicroShift.  This makes retrieving them automatically difficult.  For this reason, the LVMS 
-manifests are derived once from a running instance of the controller and stored under `microshift/assets/components/lvms/`.
+as the remote source from which to derive the controller manifests and image references.
 
 ### Version Skew Strategy
 
