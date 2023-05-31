@@ -161,6 +161,10 @@ CredentialsRequest objects. This is a new API field on the CredentialsRequest sp
 CredentialsRequest it will create a Secret (as today mostly) with new functionality: Adding to the Secret a path to the
 projected ServiceAccount token (static for OCP) and a roleARN (from the new field on the CredentialsRequest).
 
+CCO with the changes anticipated here, operating in Manual mode, will continue to ignore CredentialsRequests that do not
+contain the new STS related fields and as these are new fields, existing clusters won't have CredentialsRequests with 
+those fields already.
+
 Validation of CredentialsRequest by this new token-aware CCO? Maybe. Currently, CCO gets some permissions under ROSA
 (unused), could expand these permissions to include tools like AWS's Policy Simulator such that it could validate a role
 has permissions, and with this CCO could be the alerting mechanism for a changed CredentialsRequest without sufficient 
