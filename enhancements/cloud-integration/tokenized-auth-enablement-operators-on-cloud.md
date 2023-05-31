@@ -179,7 +179,7 @@ CredentialsRequests created by the Operator. Setting the Subscription config.ENV
 needed by CCO or webhook, for input of the cloud credentials while not having to change the Subscription API.
 
 Show in OperatorHub that the cluster is in a mode that supports token-based authentication by reading the 
-`.spec.serviceAccountIssuer` from the Authentication CR, `.spec.platformSpec.type` from the Infrastructure CR,
+`.spec.serviceAccountIssuer` from the Authentication CR, `.status.platformStatus.type` from the Infrastructure CR,
 `.spec.credentialsMode` from the CloudCredentials CR.
 
 Show that the operator is enabled for Token-based use by reading the CSV annotation provided by the operator author.
