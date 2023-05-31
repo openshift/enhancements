@@ -69,7 +69,7 @@ _Prerequisites_
 * The `/etc/microshift/lvmd.yaml` config includes a `deviceClass` to represent the thin-pool.  The lvmd.yaml may 
 contain a mix of thin and thick `deviceClasses`.
 
-```
+```yaml
 device-classes:
 - name: ssd-thin
   volume-group: myvg1
