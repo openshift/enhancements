@@ -110,8 +110,8 @@ instructions for the AWS EFS CSI Driver Operator (https://docs.openshift.com/con
 
 ### Goals
 
-Allow OLM installed operators to access cloud provider resources as seamlessly as possible when being installed, used and
-updated on STS enabled clusters.
+Allow OLM installed operators to access cloud provider resources as seamlessly as possible when being installed, used 
+and updated on STS enabled clusters.
 
 While providing the above goal, allow for multi-tenancy. In this sense multi-tenancy means that an operator may
 enable its operands to communicate with the cloud provider instead of communicating with the cloud itself. Operands 
@@ -125,12 +125,13 @@ Ideally, a solution here will work in both HyperShift (TAT always) and non-Hyper
 
 ### Non-Goals
 
-In-payload/CVO-managed operators are not included in this proposal, they are pre-provisioned for TAT enabled clusters (at least 
-for HyperShift)
+In-payload/CVO-managed operators are not included in this proposal, they are pre-provisioned for TAT enabled clusters
+(at least for HyperShift)
 
 Bring Your Own Credentials (BYOC) where an operator can manage and distribute credentials to its operands are out of
 scope.
 
+Sharing a set of credentials between all operands to aid multi-tenancy.
 
 ## Proposal
 
