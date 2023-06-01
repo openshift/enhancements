@@ -304,7 +304,7 @@ type AWSProviderSpec struct {
 // The presence of an STSRoleARN within the AWSProviderSpec initiates creation of a secret containing IAM
 // Role details necessary for assuming the IAM Role via Amazon's Secure Token Service.
 // +optional
-STSIAMRoleARN string `json:"stsIAMRoleARN"`
+STSIAMRoleARN string `json:"stsIAMRoleARN,omitempty"`
 }
 ```
 
