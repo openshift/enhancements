@@ -276,16 +276,43 @@ graph  LR
 
 Added to the CredentialsRequest API 
 
-Adding to the `spec` field, the following subfields:
+We outline this change using the AWS specific change, but other cloud provider specs will follow a similar pattern:
+Adding to the `spec.ProviderSpec` field, where `spec.ProviderSpec` would be an `AWSProviderSpec` for AWS-directed 
+CredentialsRequests:
+```go
+type CredentialsRequestSpec struct {
+...
 
-`cloudTokenString`;<br>
-`cloudTokenPath`
+// ProviderSpec contains the cloud provider specific credentials specification.
+// +kubebuilder:pruning:PreserveUnknownFields
+ProviderSpec *runtime.RawExtension `json:"providerSpec,omitempty"`
 
-On AWS STS, the `cloudTokenString` would be something like:
+...
+// CloudTokenPath (JWT token)
+// +optional
+CloudTokenPath string `json:"cloudTokenPath,omitempty"`
+}
+```
+
+and `ProviderSpec` in the AWS case would include the following:
+
+```go
+type AWSProviderSpec struct {
+...
+// STSRoleARN is the Amazon Resource Name (ARN) of an IAM Role which was created manually for the associated
+// CredentialsRequest.
+// The presence of an STSRoleARN within the AWSProviderSpec initiates creation of a secret containing IAM
+// Role details necessary for assuming the IAM Role via Amazon's Secure Token Service.
+// +optional
+STSIAMRoleARN string `json:"stsIAMRoleARN"`
+}
+```
+
+On AWS STS, the `STSIAMRoleARN` would be something like:
 `arn:aws:iam::269733383066:role/newstscluster-openshift-logging-role-name`<br>
-This provides the role information which linked by policy to access various cloud resources.
+This provides the role information linked by policy to access various cloud resources.
 
-`cloudTokenPath` provides the path to a JWT web token needed to access the resources.
+`CloudTokenPath` provides the path to a JWT web token needed to access the resources.
 
 ### Risks and Mitigations
 
