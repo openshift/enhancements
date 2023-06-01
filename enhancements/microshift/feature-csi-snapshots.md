@@ -485,6 +485,7 @@ verify that a VolumeSnapshot created from an existing PVC containing data:
 
 1. results in the snapshotting of the underlying volume
 2. is addressable and accessible via a consumer PVC
+3. enables rollback of data on the original volume
 
 ### Graduation Criteria
 
@@ -504,6 +505,8 @@ verify that a VolumeSnapshot created from an existing PVC containing data:
 - Document SLOs for the component
 - Conduct load testing
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+
+#### Removing a deprecated feature
 
 ### Upgrade / Downgrade Strategy
 
@@ -552,6 +555,10 @@ Errors related to restoring a snapshot to a PVC will be captured in the PVC's ev
 If you need to delve deeper, the logs can be examined with the following command:
 
 `$ oc logs -n kube-system csi-snapshot-controller-$SUFFIX`
+
+#### Support Procedures
+
+## Implementation History
 
 ## Alternatives
 
