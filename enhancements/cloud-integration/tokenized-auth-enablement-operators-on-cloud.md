@@ -231,7 +231,8 @@ Operator installation under the proposed system:
 
 
 For the operator author team:
-- Add CredentialRequests to the bundle, known location;
+- Add code to create a CredentialRequests (it will not be stored in the bundle 
+as part of this EP)
 - Add "role-arn"-type fields to the CredentialRequests
 - Add eventing to report status on a CR to indicate lacking STS credentials for fully operational deploy or update.
 
