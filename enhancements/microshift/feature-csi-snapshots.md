@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2023-05-10
-last-updated: 2023-05-30
+last-updated: 2023-06-02
 tracking-link:
   - https://issues.redhat.com/browse/USHIFT-1140
 see-also: []
@@ -65,7 +65,7 @@ snapshotting, cloning, and restoring workload state.
 
 _Prerequisites_
 
-* A device owner has created an LVM volume group and a thin-pool on this volume group.
+* The device owner has created an LVM volume group and a thin-pool on this volume group.
 * The `/etc/microshift/lvmd.yaml` config includes a `deviceClass` to represent the thin-pool.  The lvmd.yaml may 
 contain a mix of thin and thick `deviceClasses`.
 
@@ -81,220 +81,188 @@ device-classes:
 
 _Workflow_
 
-1. Install MicroShift RPMs
-2. Start the MicroShift systemd service
-3. Observe the CSI Snapshot controller pod reaches the Ready state
-4. Observe the topolvm-controller and csi-snapshot-controller pods reach the Ready state
+1. The user installs the MicroShift RPMs, either via os-rpmtree layer or package manager.
+2. The user starts the MicroShift systemd service
+3. MicroShift starts the Service Manager loop to begin deploying cluster resources.
+4. The Service Manager initiates the `startCSIPlugin()` service.
+5. The `startCSIPlugin()` service deploys the CSI VolumeSnapshot CSI Snapshot Controller and Validating Webhook, and a 
+   default VolumeSnapshotClass.
+   - The `startCSIPlugin()` starts LVMS immediately after. It is not necessary to wait for the CSI Controller to 
+         become **Ready** as there are no start-sequence dependencies between the 2 systems.
+4. The CSI VolumeSnapshot Controller begins listening for VolumeSnapshot API events.
+5. The user observes the CSI Snapshot Controller pod reaches the **Ready** state.
+6. The user observes the `topolvm-controller` and `csi-snapshot-controller` pods reach the **Ready** state.
+    - The `topolvm-controller` includes the `csi-external-snapshotter` sidecar container, which is why the user must 
+      verify its phase.
+      
+#### Create a Snapshot Dynamically from a PVC
 
-#### Create a Snapshot Dynamically
-
-This section describes how to create snapshot directly from a PersistentVolumeClaim object.
+This section describes how to create snapshot from a PVC utilizing a VolumeSnapshotClass to dynamically specify 
+provisioning parameters.
 
 _Prerequisites_
 
 * A running MicroShift cluster
-* A PVC created using a CSI driver that supports VolumeSnapshot objects.
-* A storage class to provision the storage back end.
-* No pods are using the persistent volume claim (PVC) that you want to take a snapshot of.
-
-> Do not create a volume snapshot of a PVC if a pod is using it. Doing so might cause data corruption because the PVC 
-> is not quiesced (paused). Be sure to first tear down a running pod to ensure consistent snapshots.
+* CSI Snapshot Controller is in **Ready** state
+* Topolvm-Controller is in **Ready** state
+* `volumeSnapshotClass` has been deployed
+* `storageClass` has been deployed
 
 _Workflow_
+ 
+1. The user creates a PVC of an arbitrary size, in Gb increments, to be the source volume from which we will 
+   create a snapshot.
+2. The user creates a Pod which consumes the PVC.  This is required because LVMS only supports 
+   `WaitForFirstConsumer` provisioning.
+3. LVMS provisions the backend storage volume and creates a `logicalVolume.topolvm.io` CR.
+4. The _csi-external-provisioner_, part of the _topolvm-controller_ pod, binds the PVC to the volume's PV.
+5. The user's workload starts and mounts the volume.
+6. The user stops the workload by deleting the consuming Pod, or if managed by a replication controller, scales the 
+   replicas to 0.
+7. The user creates a VolumeSnapshot object with the following key-values:
+   - `.spec.volumeSnapshotClassName` set to the volume snapshot class's name. If not provided, falls back to default 
+     class.
+   - `.spec.source.persistentVolumeClaimName` set to the source PVC's name.
+8. The _snapshotting validation webhook_ intercepts the API volume snapshot API request.
+9. If validation succeeds, the `volumeSnapshot` is persisted in etcd.
+   - Else: the VolumeSnapshot is rejected. (see [Failure Modes](#failure-modes)).
+10. The _CSI external snapshotter_ sidecar, part of the _topolvm-controller_ deployment, detects the `volumeSnapshot` 
+    event. It generates a `volumeSnapshotContent` object and triggers the `CreateSnapshot` CSI gRPC process.
+11. LVMS executes the `CreateSnapshot` gRPC process and creates a snapshot of the LVM thin volume.
+12. LVMS creates a `logicalVolume.topolvm.io` CR and returns the snapshot volume's metadata to the _CSI external 
+   snapshotter_.
+13. The _CSI external-snapshotter_ updates the `volumeSnapshotContent`'s `status` field to indicate it is ready.
+14. The _CSI snapshot controller_ detects the update to the `volumeSnapshotContent` status and binds the
+    `volumeSnapshot` to the `volumeSnapshotContent` instance. It sets the `volumeSnapshot`'s `status.readyToUse`
+    field to `true`. 
 
-1. Create a VolumeSnapshotClass object.  **NOTE:** MicroShift deploys a default VolumeSnapshotClass to enable LVMS 
-   snapshotting out of the box.  This step is only necessary for creating novel VolumeSnapshotClasses. 
+From here, users will follow the [Restore](#restore) procedure to consume the snapshot volume.
 
-    ```yaml
-    apiVersion: snapshot.storage.k8s.io/v1
-    kind: VolumeSnapshotClass
-    metadata:
-      name: topolvm-snap
-    driver: topolvm.io 
-    deletionPolicy: Delete
-    ```
+#### Create a Snapshot Manually from a Pre-Provisioned Snapshot
 
-   
-2. Create the object you saved in the previous step by entering the following command:
-    
-    `$ oc create -f volumesnapshotclass.yaml`
-
-
-3. Create a VolumeSnapshot object:
-   
-   **_volumesnapshot-dynamic.yaml_**
-   ```yaml
-   apiVersion: snapshot.storage.k8s.io/v1
-   kind: VolumeSnapshot
-   metadata:
-     name: mysnap
-   spec:
-     volumeSnapshotClassName: topolvm-snap
-     source:
-       persistentVolumeClaimName: myclaim
-   ```
-
-   - **volumeSnapshotClassName:** The request for a particular class by the volume snapshot. If the 
-     volumeSnapshotClassName setting is absent and there is a default volume snapshot class, a snapshot is created with 
-     the default volume snapshot class name. But if the field is absent and no default volume snapshot class exists, 
-     then no snapshot is created.
-
-   - **persistentVolumeClaimName:** The name of the PersistentVolumeClaim object bound to a persistent volume. This 
-     defines what you want to create a snapshot of. Required for dynamically provisioning a snapshot.
-
-
-2. Create the object you saved in the previous step by entering the following command:
-
-   `$ oc create -f volumesnapshot-dynamic.yaml`
-
-#### Create a Volume Snapshot Manually
-
-This section describes how to create snapshot directly from a VolumeSnapshotContent object.
-
-1. Provide a value for the **volumeSnapshotContentName** parameter as the source for the snapshot, in addition to 
-   defining volume snapshot class as shown above.
-
-   **_volumesnapshot-manual.yaml_**
-   ```yaml
-   apiVersion: snapshot.storage.k8s.io/v1
-   kind: VolumeSnapshot
-   metadata:
-     name: mysnap
-   spec:
-     source:
-       volumeSnapshotContentName: mycontent 
-   ```
-
-   **volumeSnapshotContentName:** The volumeSnapshotContentName parameter is required for pre-provisioned snapshots.
-
-2. Create the object you saved in the previous step by entering the following command:
-
-    `$ oc create -f volumesnapshot-manual.yaml`
-
-#### Verify a Snapshot was Created
-
-After the snapshot has been created in the cluster, additional details about the snapshot are available.
-
-1. To display details about the volume snapshot that was created, enter the following command:
-
-   `$ oc describe volumesnapshot mysnap` 
-
-    _Example Output:_
-    ```yaml
-    apiVersion: snapshot.storage.k8s.io/v1
-    kind: VolumeSnapshot
-    metadata:
-      name: mysnap
-    spec:
-      source:
-        persistentVolumeClaimName: myclaim
-      volumeSnapshotClassName: csi-hostpath-snap
-    status:
-      boundVolumeSnapshotContentName: snapcontent-1af4989e-a365-4286-96f8-d5dcd65d78d6 
-      creationTime: "2020-01-29T12:24:30Z" 
-      readyToUse: true 
-      restoreSize: 1Gi
-      ```
-
-#### Deleting a Volume Snapshot
-
-You can configure how OpenShift Container Platform deletes volume snapshots.
-
-_Workflow_
-
-1. Specify the deletion policy that you require in the VolumeSnapshotClass object, as shown in the following example:
-
-    ```yaml
-    apiVersion: snapshot.storage.k8s.io/v1
-    kind: VolumeSnapshotClass
-    metadata:
-      name: 
-    driver: topolvm.io
-    deletionPolicy: Delete 
-    ```
-   **deletionPolicy:** When deleting the volume snapshot, if the Delete value is set, the underlying snapshot is 
-   deleted along with the VolumeSnapshotContent object. If the Retain value is set, both the underlying snapshot and 
-   VolumeSnapshotContent object remain.
-   If the Retain value is set and the VolumeSnapshot object is deleted without deleting the corresponding 
-   VolumeSnapshotContent object, the content remains. The snapshot itself is also retained in the storage back end.
-
-
-2. Delete the volume snapshot by entering the following command:
-
-    `$ oc delete volumesnapshot <volumesnapshot_name>`
-    
-    _Example Output:_
-
-    `volumesnapshot.snapshot.storage.k8s.io "mysnapshot" deleted`
-
-
-3. If the deletion policy is set to Retain, delete the volume snapshot content by entering the following command:
-
-    `$ oc delete volumesnapshotcontent <volumesnapshotcontent_name>`
-
-
-4. _Optional:_ If the VolumeSnapshot object is not successfully deleted, enter the following command to remove any finalizers for the leftover resource so that the delete operation can continue:
-    
-    `$ oc patch -n $PROJECT volumesnapshot/$NAME --type=merge -p '{"metadata": {"finalizers":null}}'`
-    
-    _Example Output:_
-
-    `volumesnapshotclass.snapshot.storage.k8s.io "csi-ocs-rbd-snapclass" deleted`
-
-
-#### Restore
-
-The VolumeSnapshot CRD content can be used to restore the existing volume to a previous state.
-
-After your VolumeSnapshot CRD is bound and the readyToUse value is set to true, you can use that resource to 
-provision a new volume that is pre-populated with data from the snapshot.
+This section describes how to create snapshot directly from a `volumeSnapshotContent` object.
 
 _Prerequisites_
 
-* Logged in to a running OpenShift Container Platform cluster. 
-* A persistent volume claim (PVC) created using a Container Storage Interface (CSI) driver that supports volume 
-  snapshots. 
-* A storage class to provision the storage back end. 
-* A volumesnapshot has been created and is ready to use.
+* A running MicroShift cluster
+* CSI Snapshot Controller is in **Ready** state
+* Topolvm-Controller is in **Ready** state
+* Default `storageClass` has been deployed automatically
+
+> NOTE: This is a static provisioning process, meaning the source `volumeSnapshotContent` object is already present. 
+> There is not need for dynamically provisioning the `volumeSnapshotContent` and therefore we do not need to specify 
+> a `volumeSnapshotClass`.    
+
+1. The user creates a `volumeSnapshot` object with the following key-values:
+   - `.spec.source.volumeSnapshotContentName` set to the source `volumeSnapshotContent`'s name. 
+2. The _snapshotting validation webhook_ intercepts the API volume snapshot API request.
+3. If validation succeeds, the `volumeSnapshot` is persisted in etcd.
+   - Else: the VolumeSnapshot is rejected. (see [Failure Modes](#failure-modes)).
+4. The _CSI external-snapshotter_ sidecar, part of the _topolvm-controller_ deployment, detects the `volumeSnapshot`
+    event. It generates a `volumeSnapshotContent` object and triggers the `CreateSnapshot` CSI gRPC.
+5. LVMS executes the `CreateSnapshot` gRPC and creates a snapshot of the LVM thin volume.
+6. LVMS creates a `logicalVolume.topolvm.io` CR and returns the snapshot volume's metadata to the _CSI external 
+   snapshotter_.
+7. The _CSI external-snapshotter_ updates the `volumeSnapshotContent`'s `status` field to indicate it is ready.
+8. The _CSI snapshot controller_ detects the update to the `volumeSnapshotContent` status and binds the
+    `volumeSnapshot` to the `volumeSnapshotContent` instance. It sets the `volumeSnapshot`'s `status.readyToUse`
+    field to `true`. 
+
+From here, users will follow the [Restore](#restore) procedure to consume the snapshot volume.
+
+#### Deleting a Volume Snapshot
+
+> Backing logical volumes will be handled according to the deletion policy of the volumeSnapshotClass. Possible 
+> values are: "Retain", "Delete".
+
+_Prerequisites_
+
+* A running MicroShift cluster
+* CSI Snapshot Controller is in **Ready** state
+* Topolvm-Controller is in **Ready** state
+* A `volumeSnapshot` bound to a `volumeSnapshotContent`
 
 _Workflow_
 
-1. Specify a VolumeSnapshot data source on a PVC as shown in the following:
+> NOTE: `volumeSnapshot` and `volumeSnapshotContent` instances will have finalizers set on them to control the deletion 
+> sequence.
 
-    _pvc-restore.yaml_
-    ```yaml
-    apiVersion: v1
-    kind: PersistentVolumeClaim
-    metadata:
-      name: myclaim-restore
-    spec:
-      storageClassName: topolvm.io
-      dataSource:
-        name: mysnap 
-        kind: VolumeSnapshot 
-        apiGroup: snapshot.storage.k8s.io 
-      accessModes:
-        - ReadWriteOnce
-      resources:
-        requests:
-          storage: 1Gi
-    ```
+1. The user deletes the `volumeSnapshot` object. Finalizers on this object prevent immediate deletion. 
 
-   - **name**:  Name of the VolumeSnapshot object representing the snapshot to use as source.
-   - **kind**:  Must be set to the VolumeSnapshot value.
-   - **apiGroup**: Must be set to the snapshot.storage.k8s.io value.
+_If the reclaimPolicy is **Delete**:_
+
+2. The `CSI snapshot controller` detects the deletion event and deletes the bound `volumeSnapshotContent` 
+   object. Finalizers on this object prevent immediate deletion.
+3. The _CSI external-snapshotter_ detects the `volumeSnapshotContent` deletion event.  It calls the `DeleteSnapshot` CSI 
+   gRPC.
+4. LVMS executes the `DeleteSnapshot` process.  The LVM snapshot is destroyed and the process returns to the caller.
+5. The _CSI external-snapshotter_ removes the finalizer on the `VolumeSnapshotContent`, allowing it to be garbage collected
+6. The _CSI snapshot controller_ removes the finalizer on the `VolumeSnapshot`, allowing it to be garbage collected
+
+_If the reclaimPolicy is **Retain**:_
+
+2. The `CSI snapshot controller` detects the deletion event. It removes finalizers on `volumeSnapshot` and 
+   `volumeSnapshotContent` objects.
+3. The `volumeSnapshot` is garbage collected.
+4. The `volumeSnapshotContent` and backing LVM thin volume are retained.  A user can then delete the backing storage 
+   by deleting the `volumeSnapshotContent`.  
+
+#### Restore
+
+Restoring is the process of creating a new lvm volume from a snapshot that is populated with data from the snapshot. 
+This can be achieved two ways via the `spec.dataSource` PVC field.  
+
+_Prerequisites_
+
+* A `storageClass` is deployed automatically
+* A `volumeSnapshotClass` is deployed automatically
+* A `volumeSnapshot` is bound to a `volumeSnapshotContent` and `readyToUse` is `true
+
+_Workflow_
+
+1. The user creates a PVC with the following fields:
+   - `spec.storageClassName`: must be the same storage class that provisioned the source volume
+   - `spec.dataSource.name`: name of the source `volumeSnapshot`
+   - `spec.dataSource.kind`: VolumeSnapshot
+   - `spec.dataSource.apiGroup`: snapshot.storage.k8s.io
+2. The user creates a Pod to consume the PVC. Required because LVMS only supports `WaitForFirstConsumer` provisioning.
+3. The _CSI external provisioner_ sidecar, already integrated into the _topolvm-controller_, detects the PVC request,
+   and makes a `CreateVolume` gRPC call to LVMS. 
+4. _topolvm-controller_ creates a `logicalVolume.topolvm.io` CRD with the same values of the source `logicalVolume.
+   topolvm.io` instance. This ensures the new volume is created on the same node as the source.
+5. _topolvm-node_ creates a new thin-volume from the volume snapshot.
+6. _topolvm-controller_ returns the success status to the `CreateVolume` gRPC caller.
+7. The _CSI external provisioner_ creates a `persistentVolume` to track the new thin-volume
+8. The _CSI external provisioner_ binds the PVC and PV together
+9. The workload attaches the new volume and starts
 
 
-2. Create a PVC by entering the following command:
+#### Volume Cloning
 
-    `$ oc create -f pvc-restore.yaml`
+Volume cloning uses CSI volume snapshotting interfaces behind the scenes.  It enables the pre-populating of a PVC's 
+storage volume with data from an existing PVC.
 
+_Prerequisites_
 
-3. Verify that the restored PVC has been created by entering the following command:
-    
-    `$ oc get pvc`
+- A PVC has been created following one of the provisioning workflows above.
 
-   A new PVC such as myclaim-restore is displayed.
+_Workflow_
+
+1. The user creates a PVC with the following fields:
+   - `spec.storageClassName`: must be the same storage class that provisioned the source volume
+   - `spec.dataSource.name`: name of the source `persistentVolumeClaim`
+   - `spec.dataSource.kind`: PersistentVolumeClaim
+   - `spec.dataSource.apiGroup`: core
+2. The user creates a Pod to consume the PVC. Required because LVMS only supports `WaitForFirstConsumer` provisioning.
+3. The _CSI external provisioner_ sidecar, already integrated into the _topolvm-controller_, detects the PVC request,
+   and makes a `CreateVolume` gRPC call to LVMS. 
+4. _topolvm-controller_ creates a `logicalVolume.topolvm.io` CRD with the same values of the source `logicalVolume.
+   topolvm.io` instance. This ensures the new volume is created on the same node as the source.
+5. _topolvm-node_ creates a new thin-volume from the volume snapshot.
+6. _topolvm-controller_ returns the success status to the `CreateVolume` gRPC caller.
+7. The _CSI external provisioner_ creates a `persistentVolume` to track the new thin-volume
+8. The _CSI external provisioner_ binds the PVC and PV together
+9. The workload attaches the new volume and starts
 
 
 #### Deploying
