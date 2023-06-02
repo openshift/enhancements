@@ -77,6 +77,10 @@ device-classes:
   thin-pool:
     name: pool0
     overprovision-ratio: 50.0
+- name: default
+  volume-group: rhel
+  default: true
+  spare-gb: 0
 ```
 
 _Workflow_
@@ -403,12 +407,9 @@ and roughly 18Mb.
 
 The total additional cluster components are:
 
-
-9. VolumeSnapshot CRD
-10. VolumeSnapshotContent CRD
-11. VolumeSnapshotClass CRD
-
-
+1. VolumeSnapshot CRD
+2. VolumeSnapshotContent CRD
+3. VolumeSnapshotClass CRD
 
 ### CSI-Snapshot Controller
 
@@ -462,6 +463,11 @@ MicroShift's CSI service manager will deploy the CSI Volume Snapshot components.
 6. `volumesnapshotclasses_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshotClass CRD 
 7. `volumesnapshotcontents_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshotContents CRD
 8. `volumesnapshots_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshot CRD
+
+### Greenboot Changes
+
+MicroShift's greenboot scripts will be changed to include checks for the CSI Snapshot Controller and 
+WebhookValidation Pod.
 
 ### Deployment
 
@@ -543,9 +549,13 @@ Errors related to restoring a snapshot to a PVC will be captured in the PVC's ev
 
 - **PersistentVolumeClaim:** `$ oc describe pvc -n $NAMESPACE $NAME`
 
-If you need to delve deeper, the logs can be examined with the following command:
+If you need to delve deeper, the logs can be examined with the following commands:
 
-`$ oc logs -n kube-system csi-snapshot-controller-$SUFFIX`
+- CSI Snapshot Controller: `$ oc logs -n kube-system csi-snapshot-controller-$SUFFIX`
+- CSI External Snapshotter: `$ oc logs -n openshift-storage topolvm-controller-$SUFFIX csi-external-snapshotter`
+- LVMS Controller: `$ oc logs -n openshift-storage topolvm-controller-$SUFFIX topolvm-controller`
+- LVMS Node: `$ oc logs -n openshift-storage topolvm-node-$SUFFIX topolvm-node`
+- LVMS LVM Daemon: `oc logs -n openshift-storage topolvm-node-$SUFFIX lvmd`
 
 #### Support Procedures
 
