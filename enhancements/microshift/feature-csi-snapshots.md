@@ -1,14 +1,14 @@
 ---
 title: microshift-csi-snapshot-integration
 authors:
-  - @copejon
+  - copejon
 reviewers:
-  - @dhellman
-  - @pmtk
-  - @eggfoobar
-  - @pacevedom
+  - dhellman
+  - pmtk
+  - eggfoobar
+  - pacevedom
 approvers:
-  - @dhellmann
+  - dhellmann
 api-approvers:
   - None
 creation-date: 2023-05-10
