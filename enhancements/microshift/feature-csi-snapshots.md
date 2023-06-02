@@ -401,24 +401,48 @@ and roughly 18Mb.
 
 ### CSI Snapshotter Components
 
-As mentioned above, CSI Volume Snapshot logic is divided between two runtimes: the CSI Volume Snapshot Controller 
-and the CSI Volume Snapshot sidecar.  These runtimes are pre-packaged in container images and available through the
-OpenShift container registry.  Additionally, a validating webhook verifies the correctness of CRD instances.
-
 The total additional cluster components are:
 
-1. CSI VolumeSnapshot Controller Deployment
-2. CSI VolumeSnapshot Validating Webhook Deployment, responsible for validating CRD instances
-3. CSI VolumeSnapshot Validating Webhook Service, to enable communication with kube-apiserver
-4. CSI VolumeSnapshot Validating Webhook API, to registery webhook with kube-apiserver
-5. CSI VolumeSnapshot Validating Webhook ClusterRole and ClusterRoleBinding
-6. CSI VolumeSnapshot Controller Service Account
-7. CSI VolumeSnapshot Controller ClusterRole and ClusterRoleBinding
-8. CSI VolumeSnapshot Controller Role and RoleBinding
+
 9. VolumeSnapshot CRD
 10. VolumeSnapshotContent CRD
 11. VolumeSnapshotClass CRD
-12. CSI Volume Snapshot Sidecar container, included in the LVMS Controller deployment spec.
+
+
+
+### CSI-Snapshot Controller
+
+The CSI Snapshot Controller is maintained SIG-Storage upstream. Downstream OCP releases of this container 
+image will be used by MicroShift.  The controller is a standalone component responsible for watching 
+`volumeSnapshot`, `volumeSnapshotContent`, and `volumeSnapshotClass` objects.  When a `volumeSnapshot` is created, 
+the controller will trigger a snapshot operation by creating a `volumeSnapshotConent` object, which will be 
+detected by the _CSI external-snapshotter sidecar_.
+
+MicroShift will embed the controller's manifests and deploy them during startup.  They are: 
+
+1. CSI VolumeSnapshot Controller Deployment
+2. CSI VolumeSnapshot Controller Service Account
+3. CSI VolumeSnapshot Controller ClusterRole and ClusterRoleBinding
+4. CSI VolumeSnapshot Controller Role and RoleBinding
+
+### CSI-External
+
+The CSI Snapshot Validation Webhook is maintained SIG-Storage upstream. Downstream OCP releases of this container 
+image will be used by MicroShift. The container image is specified by LVMS and is included in the _topolvm-controller_ 
+deployment. It watches for `volumeSnapshotContent` and `volumeSnapshotClass` events.  When an event is detected, it 
+makes the appropriate CSI gRPC call to LVMS via a shared unix socket.
+
+### CSI-Validation-Webhook
+
+The CSI Snapshot Validation Webhook is maintained SIG-Storage upstream. Downstream OCP releases of this container 
+image will be used by MicroShift.  The webhook serves as gatekeeper to `volumeSnapshot` CREATE and UPDATE events. 
+For the specifics of validation, _see_ 
+[Kubernetes KEP](https://github.com/kubernetes/enhancements/tree/master/keps/sig-storage/1900-volume-snapshot-validation-webhook#validating-scenarios).
+
+1. Validating Webhook Deployment
+2. Validating Webhook Service
+3. ValidatingWebhookConfiguration
+4. Validating Webhook ClusterRole and ClusterRoleBinding
 
 ### MicroShift Assets
 
@@ -493,22 +517,21 @@ as the remote source from which to derive the controller manifests and image ref
 ### Version Skew Strategy
 
 The CSI Snapshot version is tracked by the ocp-release image.  This provides sufficient guardrails
-against version skew.
+against version skew. The images are versioned in step with the `volumeSnapshot` APIs.  Thus, we should always use 
+the image references from the same source as the CRD manifests to ensure compatibility.
 
 ### Operational Aspects of API Extensions
 
 #### Failure Modes
 
-_Common Errors_
+- _Not Enough Storage Capacity:_ If the volume group capacity has been reached, snapshotting can fail because the 
+  storage driver refuses to create a snapshot.  This will be observable as the VolumeSnapshot being stuck in the 
+  **Pending** phase.
 
-Snapshotting failures may occur for a few reasons:
+- _Valification Failure_: Webhook validation checks for malformed VolumeSnapshots and will post errors to the 
+  problem object as Events. 
 
-- _Not Enough Storage Capacity:_ If the volume group capacity has been reached, snapshotting can failure because the 
-  storage driver refuses to create a snapshot.
-- _Invalid VolumeSnapshot Spec:_ Webhook validation checks for malformed VolumeSnapshots and will post errors to the 
-  problem object as an Event.
-
-_Diagnosis_
+_Troubleshooting_
 
 To determine the cause of snapshot failures, use `oc describe` to examine VolumeSnapshot and VolumeSnapshotContent 
 events. 
