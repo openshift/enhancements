@@ -73,10 +73,6 @@ if using the [Cloud Credential Operator Utility](https://github.com/openshift/cl
 3. Use `ccoctl` to create the IAM Role
 4. Use `ccoctl` to create the secret with the credentials expected by the operator
 
-Here is a diagram for how this works on AWS:
-
-![](STS_today.jpg)
-
 This enhancement seeks to unify this process across operators so users of several of them have the same experience and
 similar steps to perform. We aim to automate and reduce those steps as much as possible to make installing operators
 (via OLM) simpler on clusters where TAT authentication is supported.
@@ -179,6 +175,18 @@ CredentialsRequest objects added by operators.
 Cloud Provider which will result in ENV variables on the Subscription object that are required in the 
 CredentialsRequests created by the Operator. Setting the Subscription config.ENV will allow UX for the information 
 needed by CCO or webhook, for input of the cloud credentials while not having to change the Subscription API.
+CLI Users will need to add the following to their subscription:
+
+```yaml
+ind: Subscription
+metadata:
+ name: ...
+spec:
+  config:
+    env:
+    - name: ROLEARN
+      value: "<role ARN >"
+```
 
 Show in OperatorHub that the cluster is in a mode that supports token-based authentication by reading the 
 `.spec.serviceAccountIssuer` from the Authentication CR, `.status.platformStatus.type` from the Infrastructure CR,
@@ -191,20 +199,17 @@ Subscription objects. Ensures admin signs off that cloud resources are provision
 operator upgrade. This could be by setting the default subscription mode to Manual in the UI for operators that support 
 TAT.
 
-**Operator team / Operator SDK changes**: Follow new guidelines for allowing for the operator to work on token auth 
+**Operator team changes**: Follow new guidelines for allowing for the operator to work on token auth 
 enabled cluster. New guidelines would include the following to use CCO has detected cluster is using time-based tokens:
 
-- changing CRD to add CredentialRequest references and putting those referenced
-- CredentialRequests into a defined directory in the bundle
+- Changing CSV to add CredentialRequest RBAC
+- Add CredentialRequests into a defined directory in the bundle
 - Add a bundle annotation claiming token-based authentication support
-- Add a bundle annotation indicating which permissions are required
-- add the projected ServiceAccount volume to the Deployment embedded in the CSV;
+- Add a script in the operator description to help set up the correct role
+- (Optional) Add the projected ServiceAccount volume to the Deployment embedded in the CSV;
 - handle the Secret themselves (like today’s CCO Mint mode, read and use the credentials in the Secret whose name they 
   know from the CredentialsRequest and is in the same Namespace)
-- Guidance to operator authors to structure controller code to alert on missing cloud credentials, not crash.
-
-SDK to support this new template. SDK to validate and in particular: alert on any permission changes between operator
-versions.
+- Add structure to controller code to alert on missing cloud credentials, not crash.
 
 ### Workflow Description
 
@@ -228,7 +233,6 @@ Operator installation under the proposed system:
 For the operator author team:
 - Add CredentialRequests to the bundle, known location;
 - Add "role-arn"-type fields to the CredentialRequests
-- Use SDK to validate bundle to catch permission changes or mis-configuration
 - Add eventing to report status on a CR to indicate lacking STS credentials for fully operational deploy or update.
 
 For the Cloud Credential Operator:
