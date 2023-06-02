@@ -11,7 +11,7 @@ if grep -q 'Red Hat Enterprise Linux' /etc/redhat-release; then
     yum -y install nodejs
 else
     # Fedora has a module we can use
-    dnf -y module enable nodejs:14
+    dnf -y module enable nodejs:16
     dnf -y install nodejs
 fi
 
