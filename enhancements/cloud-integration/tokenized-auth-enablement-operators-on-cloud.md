@@ -178,7 +178,7 @@ needed by CCO or webhook, for input of the cloud credentials while not having to
 CLI Users will need to add the following to their subscription:
 
 ```yaml
-ind: Subscription
+kind: Subscription
 metadata:
  name: ...
 spec:
