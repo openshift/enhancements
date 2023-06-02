@@ -5,3 +5,4 @@ enhancement-tool
 tools/bin
 tools/cover.out
 super-linter.log
+.vscode/
