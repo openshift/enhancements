@@ -55,6 +55,8 @@ own. The process has manual operations performed by the customer that are incons
 This enhancement seeks to bring a unified set of standards and tooling to the process of enabling an
 operator to access cloud provider resources using TAT, and improve the UX for consumers of these operators. 
 
+#### Tech Preview -> GA
+
 ## Motivation
 
 Several Red Hat operators have normal operating modes where they assure their operands have required cloud 
