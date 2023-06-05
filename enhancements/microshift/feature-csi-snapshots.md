@@ -396,7 +396,7 @@ spec:
 ### Risks and Mitigations
 
 - Increased overhead.  The CSI snapshot controller and sidecar increase the on-disk footprint by a
-total of 360Mb.  At idle, the components use a negligible amount of CPU (>1% CPU on a 2 core machine)
+total of 360MB.  At idle, the components use a negligible amount of CPU (>1% CPU on a 2 core machine)
 and roughly 18Mb.
 
 ### Drawbacks
