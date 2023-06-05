@@ -282,7 +282,7 @@ graph  LR
 Added to the CredentialsRequest API 
 
 We outline this change using the AWS specific change, but other cloud provider specs will follow a similar pattern:
-Adding to the `spec.ProviderSpec` field, where `spec.ProviderSpec` would be an `AWSProviderSpec` for AWS-directed 
+Adding to the `spec.ProviderSpec` field ([ref](https://github.com/openshift/cloud-credential-operator/blob/38e7f96bf73036924abcb1352222c17704e4b2e0/pkg/apis/cloudcredential/v1/types_credentialsrequest.go#L53-L55)), where `spec.ProviderSpec` would be an `AWSProviderSpec` ([ref](https://github.com/openshift/cloud-credential-operator/blob/38e7f96bf73036924abcb1352222c17704e4b2e0/pkg/apis/cloudcredential/v1/types_aws.go#L27-L31)) for AWS-directed 
 CredentialsRequests:
 ```go
 type CredentialsRequestSpec struct {
