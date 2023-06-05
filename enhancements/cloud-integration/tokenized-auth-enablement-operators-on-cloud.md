@@ -380,7 +380,8 @@ or optionally `ccoctl process --offline -n openshift-logging`
        3. Cluster Admin actuates CredRequest via `ccoctl -n openshift-logging bind-role S3Access ARN:blahblahblah:blah` setting .status.RoleARN
  7. CCO does the rest
  
-This would set the stage for other statuses to be reported via the CredentialsRequest like "RoleOutOfSync". Not clear how we get from here to OLM inhibiting upgrades on changes though. This has the benefit that permissions are recorded in one structured authoritative location. Though perhaps if a goal is to ensure the required permissions are known prior to installation, perhaps external to the cluster, this becomes harder.
+This would set the stage for other statuses to be reported via the CredentialsRequest like "RoleOutOfSync". Not clear how we get from here to OLM inhibiting upgrades on changes though. 
+This has the benefit that permissions are recorded in one structured authoritative location. Though perhaps if a goal is to ensure the required permissions are known prior to installation, perhaps external to the cluster, this becomes harder.
 
 This could be implemented by with chanes to Pod Identity Webhook (Deployed on classic ROSA, ROSA on HyperShift, 
 standard OCP and HyperShift)
