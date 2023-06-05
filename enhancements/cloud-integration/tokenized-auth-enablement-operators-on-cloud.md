@@ -346,6 +346,9 @@ Consider the following in developing a test plan for this enhancement:
 ### Graduation Criteria
 
 #### Dev Preview -> Tech Preview
+#### Tech Preview -> GA
+#### Removing a deprecated feature
+#### Support Procedures
 
 ### Upgrade / Downgrade Strategy
 
