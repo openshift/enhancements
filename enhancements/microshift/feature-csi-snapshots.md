@@ -36,7 +36,7 @@ CSI snapshot functionality was originally excluded from the CSI driver integrati
 low-resource overhead goals of the project. However, user feedback has made it clear that a supportable, robust 
 backup/restore solution is necessary.  While it would be possible to run a workflow out-of-band to manage workload 
 data, this would be reinventing the wheel and contribute significantly to technical debt.  CSI Snapshots are already 
-integrated into Openshift with ongoing downstream support. 
+integrated into OpenShift with ongoing downstream support. 
 
 ### User Stories
 
