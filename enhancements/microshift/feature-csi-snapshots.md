@@ -85,7 +85,7 @@ device-classes:
 
 _Workflow_
 
-1. The user installs the MicroShift RPMs, either via os-rpmtree layer or package manager.
+1. The user installs the MicroShift RPMs, either via ostree layer or RPM  package manager.
 2. The user starts the MicroShift systemd service
 3. MicroShift starts the Service Manager loop to begin deploying cluster resources.
 4. The Service Manager initiates the `startCSIPlugin()` service.
