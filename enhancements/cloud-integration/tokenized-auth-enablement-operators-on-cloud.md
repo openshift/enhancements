@@ -215,7 +215,7 @@ enabled cluster. New guidelines would include the following to use CCO has detec
 
 This diagram shows the steps a user will need to take in the proposed flow (specific to STS):
 
-![](STS_tomorrow.jpg)
+![STS Tomorrow](STS_tomorrow.jpg)
 
 Making a layered operator ready to work on an STS enabled cluster will involve the following steps:
 
@@ -282,7 +282,8 @@ graph  LR
 Added to the CredentialsRequest API 
 
 We outline this change using the AWS specific change, but other cloud provider specs will follow a similar pattern:
-Adding to the `spec.ProviderSpec` field ([ref](https://github.com/openshift/cloud-credential-operator/blob/38e7f96bf73036924abcb1352222c17704e4b2e0/pkg/apis/cloudcredential/v1/types_credentialsrequest.go#L53-L55)), where `spec.ProviderSpec` would be an `AWSProviderSpec` ([ref](https://github.com/openshift/cloud-credential-operator/blob/38e7f96bf73036924abcb1352222c17704e4b2e0/pkg/apis/cloudcredential/v1/types_aws.go#L27-L31)) for AWS-directed 
+Adding to the `spec.ProviderSpec` field ([ref](https://github.com/openshift/cloud-credential-operator/blob/38e7f96bf73036924abcb1352222c17704e4b2e0/pkg/apis/cloudcredential/v1/types_credentialsrequest.go#L53-L55)),<br>
+where `spec.ProviderSpec` would be an `AWSProviderSpec` ([ref](https://github.com/openshift/cloud-credential-operator/blob/38e7f96bf73036924abcb1352222c17704e4b2e0/pkg/apis/cloudcredential/v1/types_aws.go#L27-L31)) for AWS-directed TAT.<p>
 CredentialsRequests:
 ```go
 type CredentialsRequestSpec struct {
@@ -367,7 +368,8 @@ Not implemented yet.
 - Leverage CredentialsRequest after Operator Installation
 
 1. Browse catalog, select Logging Operator
-2. If the cluster is TAT emit big red info box "After installation you must grant cloud access by running `ccoctl process -n openshift-logging` or optionally `ccoctl process --offline -n openshift-logging`"
+2. If the cluster is TAT emit big red info box "After installation you must grant cloud access by running `ccoctl process -n openshift-logging` <br>
+or optionally `ccoctl process --offline -n openshift-logging`
 3. Install Operator
 4. Operator creates CredReq
 5. Operator reports failed / progressing state, whatever is most clear that it's awaiting creds
