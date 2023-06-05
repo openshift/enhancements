@@ -52,7 +52,8 @@ and to restore workloads to that state utilizing existing Kubernetes patterns.
 
 * Enable backup/restore workflows external to MicroShift
 * Provide a workflow for exporting data from a MicroShift cluster
-* Provide a means of opting out.  This falls under platform composability and is out of scope
+* Enabling MicroShift deployment without CSI Snapshotter.  This falls under platform composability and is out of scope
+* Describe MicroShift installation processes
 
 ## Proposal
 
@@ -85,17 +86,17 @@ device-classes:
 
 _Workflow_
 
-1. The user installs the MicroShift RPMs, either via ostree layer or RPM  package manager.
-2. The user starts the MicroShift systemd service
-3. MicroShift starts the Service Manager loop to begin deploying cluster resources.
-4. The Service Manager initiates the `startCSIPlugin()` service.
-5. The `startCSIPlugin()` service deploys the CSI VolumeSnapshot CSI Snapshot Controller and Validating Webhook, and a 
+1. The user installs the MicroShift RPMs and starts the MicroShift systemd service.
+2. The Service Manager initiates the `startCSIPlugin()` service.
+3. The `startCSIPlugin()` service deploys the CSI VolumeSnapshot CSI Snapshot Controller and Validating Webhook, and a 
    default VolumeSnapshotClass.
    - The `startCSIPlugin()` starts LVMS immediately after. It is not necessary to wait for the CSI Controller to 
          become **Ready** as there are no start-sequence dependencies between the 2 systems.
 4. The CSI VolumeSnapshot Controller begins listening for VolumeSnapshot API events.
 5. The user observes the CSI Snapshot Controller pod reaches the **Ready** state.
+   - `$ oc get pod -n kube-system csi-snapshot-controller-$SUFFIX`
 6. The user observes the `topolvm-controller` and `csi-snapshot-controller` pods reach the **Ready** state.
+    - `$ oc get pod -n openshift-storage topolvm-controller-$SUFFIX`
     - The `topolvm-controller` includes the `csi-external-snapshotter` sidecar container, which is why the user must 
       verify its phase.
       
@@ -283,16 +284,21 @@ deployed by MicroShift to enable snapshotting out of the box.
 The MicroShift deployment model utilizes rpm-ostree layers. Following the existing deployment pattern, 
 VolumeSnapshotClass manifests can be packaged and deployed onto target devices.
 (See [kubernetes-for-device-edge. md#workflow-description.md](./kubernetes-for-device-edge.md#workflow-description)).
-Application deployers can predefine VolumeSnapshotClass manifests and use image-builder to package them into a 
-rpm-ostree layer.  This layer can be installed to the device, which writes the manifests to 
+Application deployers can predefine VolumeSnapshotClass manifests.  These can be written the manifests to 
 /etc/microshift/manifests. This pattern is congruent with how a device owner would install custom StorageClasses. It 
 is recommended that new custom StorageClasses be packaged with VolumeSnapshotClasses that reference them.
 
 #### Upgrading
 
-The CSI Snapshot component images are packaged and versioned with each OpenShift release and can be extracted from 
-the ocp-release image. This allows MicroShift to use existing rebase tooling to upgrade the CSI Snapshot components 
-in step with OCP releases.
+CSI components are upgraded by MicroShift-internal automation.  These scripts pull the CSI image digests and 
+related manifests from the OpenShift LVMS Operator Bundle.  This helps to keep MicroShift's version of 
+CSI compatible with the default storage provisioner (LVMS). MicroShift deploys CSI `v1`, with micro-versions being 
+guaranteed backwards compatible within each major version.  Therefore, micro-version upgrades will not require user 
+intervention to protect snapshots from deletion or orphaning.
+
+Upgrading the CSI containers will introduce a small interrupt window to provisioning operations.  Therefore, 
+to mitigate any risk or orphaning resources, it is recommended that snapshotting be allowed to complete before 
+restarting MicroShift and initiating the upgrade.
 
 #### Configuring
 
