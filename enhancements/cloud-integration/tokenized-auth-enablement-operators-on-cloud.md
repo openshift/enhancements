@@ -53,9 +53,7 @@ Cloud Credential Operator (CCO) is in Manual Mode, a mode where CCO is not capab
 own. The process has manual operations performed by the customer that are inconsistent across layered product operators.
 
 This enhancement seeks to bring a unified set of standards and tooling to the process of enabling an
-operator to access cloud provider resources using TAT, and improve the UX for consumers of these operators. 
-
-#### Tech Preview -> GA
+operator to access cloud provider resources using TAT, and improve the UX for consumers of these operators.
 
 ## Motivation
 
@@ -346,6 +344,8 @@ Consider the following in developing a test plan for this enhancement:
   clusters.
 
 ### Graduation Criteria
+
+#### Dev Preview -> Tech Preview
 
 ### Upgrade / Downgrade Strategy
 
