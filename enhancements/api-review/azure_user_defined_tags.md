@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed" ## approver for api component
 creation-date: 2022-07-12
-last-updated: 2023-01-20
+last-updated: 2023-06-06
 tracking-link:
   - https://issues.redhat.com/browse/OCPPLAN-8155
   - https://issues.redhat.com/browse/CORS-2249
@@ -307,7 +307,10 @@ to 21 characters.
 - Gather feedback from the users.
 
 #### Tech Preview -> GA
-N/A. This feature is for Tech Preview, until decided for GA.
+- Sufficient time for feedback.
+- Available by default.
+- More testing (scale, perf).
+- Incorporate feedback from the users on the TechPreview content.
 
 #### Removing a deprecated feature
 
