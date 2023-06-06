@@ -321,7 +321,8 @@ For the specifics of validation, _see_
 [Kubernetes KEP](https://github.com/kubernetes/enhancements/tree/master/keps/sig-storage/1900-volume-snapshot-validation-webhook#validating-scenarios).
 
 > For a deeper explanation of CSI snapshot controller and sidecar, refer to 
-[OpenShift documentation](https://docs.openshift.com/container-platform/4.13/storage/container_storage_interface/persistent-storage-csi-snapshots.html#persistent-storage-csi-snapshots-controller-sidecar_persistent-storage-csi-snapshots).  Snapshot webhook validation is described   
+[OpenShift documentation](https://docs.openshift.com/container-platform/4.13/storage/container_storage_interface/persistent-storage-csi-snapshots.html#persistent-storage-csi-snapshots-controller-sidecar_persistent-storage-csi-snapshots).  
+> Snapshot webhook validation is described in detail [here](https://github.com/kubernetes-csi/external-snapshotter#validating-webhook).
 
 ### MicroShift Assets
 
@@ -418,6 +419,8 @@ the image references from the same source as the CRD manifests to ensure compati
 - _Valification Failure_: Webhook validation checks for malformed VolumeSnapshots and will post errors to the 
   problem object as Events. 
 
+#### Support Procedures
+
 _Troubleshooting_
 
 To determine the cause of snapshot failures, use `oc describe` to examine VolumeSnapshot and VolumeSnapshotContent 
@@ -438,7 +441,6 @@ If you need to delve deeper, the logs can be examined with the following command
 - LVMS Node: `$ oc logs -n openshift-storage topolvm-node-$SUFFIX topolvm-node`
 - LVMS LVM Daemon: `oc logs -n openshift-storage topolvm-node-$SUFFIX lvmd`
 
-#### Support Procedures
 
 ## Implementation History
 
