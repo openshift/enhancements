@@ -54,7 +54,9 @@ and to restore workloads to that state utilizing existing Kubernetes patterns.
 * Enable backup/restore workflows external to MicroShift
 * Provide a workflow for exporting data from a MicroShift cluster
 * Enabling MicroShift deployment without CSI Snapshotter.  This falls under platform composability and is out of scope
-* Describe MicroShift installation processes
+* Describe MicroShift installation and configuration processes in detail
+* Support snapshots of the root disk / partition. In the context of this document, only PersistentVolumeClaims and 
+  PersistentVolumes can be snapshot.
 
 ## Proposal
 
@@ -113,32 +115,26 @@ _Prerequisites_
 * Topolvm-Controller is in **Ready** state
 * `volumeSnapshotClass` has been deployed
 * `storageClass` has been deployed
+* The user has deployed a Pod with an attached PVC backed by a LVM thin volume.
 
 _Workflow_
  
-1. The user creates a PVC of an arbitrary size, in Gb increments, to be the source volume from which we will 
-   create a snapshot.
-2. The user creates a Pod which consumes the PVC.  This is required because LVMS only supports 
-   `WaitForFirstConsumer` provisioning.
-3. LVMS provisions the backend storage volume and creates a `logicalVolume.topolvm.io` CR.
-4. The _csi-external-provisioner_, part of the _topolvm-controller_ pod, binds the PVC to the volume's PV.
-5. The user's workload starts and mounts the volume.
-6. The user stops the workload by deleting the consuming Pod, or if managed by a replication controller, scales the 
+1. The user stops the workload by deleting the consuming Pod, or if managed by a replication controller, scales the 
    replicas to 0.
-7. The user creates a VolumeSnapshot object with the following key-values:
-   - `.spec.volumeSnapshotClassName` set to the volume snapshot class's name. If not provided, falls back to default 
+2. The user creates a `volumeSnapshot` object with the following key-values:
+   - `.spec.volumeSnapshotClassName` set to the `volumeSnapshotClass`'s name. If not provided, falls back to default 
      class.
    - `.spec.source.persistentVolumeClaimName` set to the source PVC's name.
-8. The _snapshotting validation webhook_ intercepts the API volume snapshot API request.
-9. If validation succeeds, the `volumeSnapshot` is persisted in etcd.
-   - Else: the VolumeSnapshot is rejected. (see [Failure Modes](#failure-modes)).
-10. The _CSI external snapshotter_ sidecar, part of the _topolvm-controller_ deployment, detects the `volumeSnapshot` 
-    event. It generates a `volumeSnapshotContent` object and triggers the `CreateSnapshot` CSI gRPC process.
-11. LVMS executes the `CreateSnapshot` gRPC process and creates a snapshot of the LVM thin volume.
-12. LVMS creates a `logicalVolume.topolvm.io` CR and returns the snapshot volume's metadata to the _CSI external 
+3. The _snapshotting validation webhook_ intercepts the API `volumeSnapshot` API request.
+4. If validation succeeds, the `volumeSnapshot` is persisted in etcd.
+   - Else: the `volumeSnapshot` is rejected. (see [Failure Modes](#failure-modes)).
+5. The _CSI external snapshotter_ sidecar, part of the _topolvm-controller_ deployment, detects the `volumeSnapshot` 
+    "create" event. It generates a `volumeSnapshotContent` object and triggers the `CreateSnapshot` CSI gRPC process.
+6. LVMS executes the `CreateSnapshot` gRPC process and creates a snapshot of the LVM thin volume.
+7. LVMS creates a `logicalVolume.topolvm.io` CR and returns the snapshot volume's metadata to the _CSI external 
    snapshotter_.
-13. The _CSI external-snapshotter_ updates the `volumeSnapshotContent`'s `status` field to indicate it is ready.
-14. The _CSI snapshot controller_ detects the update to the `volumeSnapshotContent` status and binds the
+8. The _CSI external-snapshotter_ updates the `volumeSnapshotContent`'s `status` field to indicate it is ready.
+9. The _CSI snapshot controller_ detects the update to the `volumeSnapshotContent` status and binds the
     `volumeSnapshot` to the `volumeSnapshotContent` instance. It sets the `volumeSnapshot`'s `status.readyToUse`
     field to `true`. 
 
@@ -243,34 +239,6 @@ _Workflow_
 9. The workload attaches the new volume and starts
 
 
-#### Volume Cloning
-
-Volume cloning uses CSI volume snapshotting interfaces behind the scenes.  It enables the pre-populating of a PVC's 
-storage volume with data from an existing PVC.
-
-_Prerequisites_
-
-- A PVC has been created following one of the provisioning workflows above.
-
-_Workflow_
-
-1. The user creates a PVC with the following fields:
-   - `spec.storageClassName`: must be the same storage class that provisioned the source volume
-   - `spec.dataSource.name`: name of the source `persistentVolumeClaim`
-   - `spec.dataSource.kind`: PersistentVolumeClaim
-   - `spec.dataSource.apiGroup`: core
-2. The user creates a Pod to consume the PVC. Required because LVMS only supports `WaitForFirstConsumer` provisioning.
-3. The _CSI external provisioner_ sidecar, already integrated into the _topolvm-controller_, detects the PVC request,
-   and makes a `CreateVolume` gRPC call to LVMS. 
-4. _topolvm-controller_ creates a `logicalVolume.topolvm.io` CRD with the same values of the source `logicalVolume.
-   topolvm.io` instance. This ensures the new volume is created on the same node as the source.
-5. _topolvm-node_ creates a new thin-volume from the volume snapshot.
-6. _topolvm-controller_ returns the success status to the `CreateVolume` gRPC caller.
-7. The _CSI external provisioner_ creates a `persistentVolume` to track the new thin-volume
-8. The _CSI external provisioner_ binds the PVC and PV together
-9. The workload attaches the new volume and starts
-
-
 #### Deploying
 
 The CSI Snapshot Controller and LVMS components are deployed by default on MicroShift. The manifests for these 
@@ -311,94 +279,14 @@ defined by the particular storage provider.
 
 ### API Extensions
 
-CSI Volume Snapshot APIs are a core component of OpenShift Container Platform and are detailed in
-[OCP documentation](https://docs.openshift.com/container-platform/4.13/storage/container_storage_interface/persistent-storage-csi-snapshots.html).
+The APIs to be added are defined under the `snapshot.storage.k8s.io/v1` API group. They are:
 
-A portion of the OpenShift documentation is provided below for additional API detail.
+1. VolumeSnapshot
+2. VolumeSnapshotClass
+3. VolumeSnapshotContent
 
-#### VolumeSnapshotClass
-
-Allows a cluster administrator to specify different attributes belonging to a VolumeSnapshot object.
-These attributes may differ among snapshots taken of the same volume on the storage system, in which
-case they would not be expressed by using the same storage class of a persistent volume claim.
-
-The VolumeSnapshotClass CRD defines the parameters for the csi-external-snapshotter sidecar to use
-when creating a snapshot. This allows the storage back end to know what kind of snapshot to
-dynamically create if multiple options are supported.
-
-Dynamically provisioned snapshots use the VolumeSnapshotClass CRD to specify
-storage-provider-specific parameters to use when creating a snapshot.
-
-The VolumeSnapshotContentClass CRD is not namespaced and is for use by a cluster administrator to
-enable global configuration options for their storage back end.
-
-```yaml
-apiVersion: snapshot.storage.k8s.io/v1
-kind: VolumeSnapshotClass
-metadata:
-  name: csi-hostpath-snap
-driver: hostpath.csi.k8s.io [1] 
-deletionPolicy: Delete
-```
-
-1. The name of the CSI driver that is used to create snapshots of this **VolumeSnapshotClass** object. The name 
-must be the same as the Provisioner field of the storage class that is responsible for the PVC that is being 
-snapshotted.
-
-#### VolumeSnapshot
-
-Similar to the PersistentVolumeClaim object, the VolumeSnapshot CRD defines a developer request for a snapshot. The 
-CSI snapshot controller handles the binding of a VolumeSnapshot CRD with an appropriate VolumeSnapshotContent CRD. 
-The binding is a one-to-one mapping.
-
-The VolumeSnapshot CRD is namespaced. A developer uses the CRD as a distinct request for a snapshot.
-
-```yaml
-apiVersion: snapshot.storage.k8s.io/v1
-kind: VolumeSnapshot
-metadata:
-  name: mysnap
-spec:
-  volumeSnapshotClassName: csi-hostpath-snap [1] 
-  source:
-    persistentVolumeClaimName: myclaim [2]
-```
-
-1. The request for a particular class by the volume snapshot. If the **volumeSnapshotClassName** setting is absent 
-and there is a default volume snapshot class, a snapshot is created with the default volume snapshot class name. 
-But if the field is absent and no default volume snapshot class exists, then no snapshot is created.
-2. The name of the **PersistentVolumeClaim** object bound to a persistent volume. This defines what you want to 
-create a snapshot of. Required for dynamically provisioning a snapshot.
-
-#### VolumeSnapshotContent
-
-A snapshot taken of a volume in the cluster that has been provisioned by a cluster administrator.
-
-Similar to the PersistentVolume object, the VolumeSnapshotContent CRD is a cluster resource that
-points to a real snapshot in the storage back end.
-
-For manually pre-provisioned snapshots, a cluster administrator creates a number of
-VolumeSnapshotContent CRDs. These carry the details of the real volume snapshot in the storage system.
-
-The VolumeSnapshotContent CRD is not namespaced and is for use by a cluster administrator.
-
-```yaml
-apiVersion: snapshot.storage.k8s.io/v1
-kind: VolumeSnapshotContent
-metadata:
-  name: new-snapshot-content-test
-  annotations:
-    - snapshot.storage.kubernetes.io/allow-volume-mode-change: "true"
-spec:
-  deletionPolicy: Delete
-  driver: hostpath.csi.k8s.io
-  source:
-    snapshotHandle: 7bdd0de3-aaeb-11e8-9aae-0242ac110002
-  sourceVolumeMode: Filesystem
-  volumeSnapshotRef:
-    name: new-snapshot-test
-    namespace: default
-```
+For a detailed description of these APIs, see 
+[OpenShift documentation](https://docs.openshift.com/container-platform/4.13/storage/container_storage_interface/persistent-storage-csi-snapshots.html#volume-snapshot-crds)
 
 ### Risks and Mitigations
 
@@ -410,15 +298,7 @@ and roughly 18Mb.
 
 ## Design Details
 
-### CSI Snapshotter Components
-
-The total additional cluster components are:
-
-1. VolumeSnapshot CRD
-2. VolumeSnapshotContent CRD
-3. VolumeSnapshotClass CRD
-
-### CSI-Snapshot Controller
+### CSI Snapshot Controller
 
 The CSI Snapshot Controller is maintained SIG-Storage upstream. Downstream OCP releases of this container 
 image will be used by MicroShift.  The controller is a standalone component responsible for watching 
@@ -426,31 +306,22 @@ image will be used by MicroShift.  The controller is a standalone component resp
 the controller will trigger a snapshot operation by creating a `volumeSnapshotConent` object, which will be 
 detected by the _CSI external-snapshotter sidecar_.
 
-MicroShift will embed the controller's manifests and deploy them during startup.  They are: 
+### CSI External Snapshotter
 
-1. CSI VolumeSnapshot Controller Deployment
-2. CSI VolumeSnapshot Controller Service Account
-3. CSI VolumeSnapshot Controller ClusterRole and ClusterRoleBinding
-4. CSI VolumeSnapshot Controller Role and RoleBinding
-
-### CSI-External
-
-The CSI Snapshot Validation Webhook is maintained SIG-Storage upstream. Downstream OCP releases of this container 
-image will be used by MicroShift. The container image is specified by LVMS and is included in the _topolvm-controller_ 
-deployment. It watches for `volumeSnapshotContent` and `volumeSnapshotClass` events.  When an event is detected, it 
+The CSI External Snapshotter is maintained SIG-Storage upstream. Downstream OCP releases of this container 
+image will be used by MicroShift. The container is deployed as a sidecar of the _topolvm-controller_. It 
+watches for `volumeSnapshotContent` and `volumeSnapshotClass` events.  When an event is detected, it 
 makes the appropriate CSI gRPC call to LVMS via a shared unix socket.
 
-### CSI-Validation-Webhook
+### CSI Validation Webhook
 
 The CSI Snapshot Validation Webhook is maintained SIG-Storage upstream. Downstream OCP releases of this container 
 image will be used by MicroShift.  The webhook serves as gatekeeper to `volumeSnapshot` CREATE and UPDATE events. 
 For the specifics of validation, _see_ 
 [Kubernetes KEP](https://github.com/kubernetes/enhancements/tree/master/keps/sig-storage/1900-volume-snapshot-validation-webhook#validating-scenarios).
 
-1. Validating Webhook Deployment
-2. Validating Webhook Service
-3. ValidatingWebhookConfiguration
-4. Validating Webhook ClusterRole and ClusterRoleBinding
+> For a deeper explanation of CSI snapshot controller and sidecar, refer to 
+[OpenShift documentation](https://docs.openshift.com/container-platform/4.13/storage/container_storage_interface/persistent-storage-csi-snapshots.html#persistent-storage-csi-snapshots-controller-sidecar_persistent-storage-csi-snapshots).  Snapshot webhook validation is described   
 
 ### MicroShift Assets
 
@@ -474,7 +345,10 @@ MicroShift's CSI service manager will deploy the CSI Volume Snapshot components.
 ### Greenboot Changes
 
 MicroShift's greenboot scripts will be changed to include checks for the CSI Snapshot Controller and 
-WebhookValidation Pod.
+WebhookValidation Pod.  Greenboot checks already exist to check the _topolvm-controller_, which includes the snapshot sidecar.
+
+This will be implemented as the addition a the `kube-system` namespace to the list of checked namespaces in the
+[microshift-running-checks.sh](https://github.com/openshift/microshift/blob/809c1b9182aa04a9d40ac101ed60cb0d7b6a9d09/packaging/greenboot/microshift-running-check.sh#L6). 
 
 ### Deployment
 
