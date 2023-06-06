@@ -90,11 +90,10 @@ device-classes:
 _Workflow_
 
 1. The user installs the MicroShift RPMs and starts the MicroShift systemd service.
-2. The Service Manager initiates the `startCSIPlugin()` service.
-3. The `startCSIPlugin()` service deploys the CSI VolumeSnapshot CSI Snapshot Controller and Validating Webhook, and a 
+2. The Service-Manager initiates the `startCSISnapshotter` service.
+3. The `startCSISnapshotter` service deploys the CSI VolumeSnapshot CSI Snapshot Controller and Validating Webhook, and a 
    default VolumeSnapshotClass.
-   - The `startCSIPlugin()` starts LVMS immediately after. It is not necessary to wait for the CSI Controller to 
-         become **Ready** as there are no start-sequence dependencies between the 2 systems.
+   - The snapshot controller is not a startup dependency of LVMS; both can be started concurrently.
 4. The CSI VolumeSnapshot Controller begins listening for VolumeSnapshot API events.
 5. The user observes the CSI Snapshot Controller pod reaches the **Ready** state.
    - `$ oc get pod -n kube-system csi-snapshot-controller-$SUFFIX`
@@ -324,15 +323,18 @@ For the specifics of validation, _see_
 [OpenShift documentation](https://docs.openshift.com/container-platform/4.13/storage/container_storage_interface/persistent-storage-csi-snapshots.html#persistent-storage-csi-snapshots-controller-sidecar_persistent-storage-csi-snapshots).  
 > Snapshot webhook validation is described in detail [here](https://github.com/kubernetes-csi/external-snapshotter#validating-webhook).
 
-### MicroShift Assets
+### Asset Management
 
-MicroShift manages the deployment of embedded component assets through an interface called the Service Manager. The 
-logic behind this interface deploys components in an order that respects interdependencies, waits for services to 
-start, and intelligently stops services on interrupt.  MicroShift's default CSI storage service is already managed 
-by the service manager. 
+MicroShift manages the deployment of embedded component assets through the [service-manager](https://github.com/openshift/microshift/blob/3e08567344fa040a10fb30e013182fa62248f403/pkg/servicemanager/type.go#L1)
+interface. The logic behind this interface deploys components in an order that respects interdependencies, waits for
+services to start, and intelligently stops services on interrupt.
 
-MicroShift's CSI service manager will deploy the CSI Volume Snapshot components.  The files will be stored under the
-`microshift/assets/components/csi-external-snapshot-controller` directory.  The following files will be added: 
+Infrastructure controllers (service-ca, DNS, routes, CSI and CNI plugins) are managed by the 
+[infrastructure service](https://github.com/openshift/microshift/blob/878630eac00ab3884072c8ca23c429d5fce4bb6d/pkg/components/controllers.go).
+The CSI Snapshotter will be appended to the list of controllers that the infrastructure service manages.
+
+The manifests will be stored under the `microshift/assets/components/csi-external-snapshot-controller` directory.  
+The following files will be added: 
 
 1. `csi_controller_deployment.yaml` specifies the CSI Snapshot Controller
 2. `serviceaccount.yaml` specifies the controller's service account
@@ -342,6 +344,10 @@ MicroShift's CSI service manager will deploy the CSI Volume Snapshot components.
 6. `volumesnapshotclasses_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshotClass CRD 
 7. `volumesnapshotcontents_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshotContents CRD
 8. `volumesnapshots_snapshot.storage.k8s.io.yaml` defines the VolumeSnapshot CRD
+
+### Vendored Packages
+
+None of the snapshotter logic will run from the MicroShift binary, meaning there will be no additional vendored dependencies.
 
 ### Greenboot Changes
 
@@ -353,7 +359,7 @@ This will be implemented as the addition a the `kube-system` namespace to the li
 
 ### Deployment
 
-CSI Snapshot controller manifests will be integrated into the CSI service manager. The controller manifests will be 
+CSI Snapshot controller manifests will be integrated into the CSI service-manager. The controller manifests will be 
 deployed as part of MicroShift's LVMS startup process.  Because LVMS does not depend on the controller to be 
 running prior to its deployment, it is not necessary to wait for the controller to reach a ready state before 
 starting LVMS.
