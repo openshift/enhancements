@@ -29,7 +29,7 @@ superseded-by: []
 
 This enhancement proposal seeks to outline the solution for a more fine grained access to LokiStack logs on OpenShift Container Platform 4, ie, have the ability as the cluster administrator to grant access to logs on a namespace basis.
 
-The proposal provide an overview of the changes TODO!!
+The proposal provides an overview of the changes required to achieve this goal as well as some implementation details.
 
 ## Motivation
 
@@ -56,7 +56,7 @@ This enhancement proposal presents a solution that enables cluster admins to hav
 
 ## Proposal
 
-Use the `ClusterLogging` custom resource definition managed by the Cluster Logging Operator to enable/disable the fine grained access to logs for the LokiStack logstore. This will be achieved by adding a new field to the CRD called `advancedLogsAccess`. This new field is a boolean with a default value of false. 
+Use the `ClusterLogging` custom resource definition managed by the Cluster Logging Operator to enable/disable the fine grained access to logs for the LokiStack logstore. This will be achieved by adding a new field to the CRD called `advancedLogsAccess`. This new field is a boolean with a default value of false.
 
 * For the first use case, where we have non-admin users, the proposed solution is to create a group for application log readers called `log-reader-group`, and grant this group the ability to read application logs by binding it to the existing ClusterRole `logging-application-logs-reader`. The cluster admin can then either add a user to the `log-reader-group` thus granting access to application logs on all namespace where they have access, or create a role binding to the user on each namespace they want to grant access to logs on.
 
@@ -73,14 +73,12 @@ metadata:
   name: instance
   namespace: openshift-logging
 spec:
-  managementState: Managed
   logStore:
     type: lokistack
     lokistack:
       name: lokistack-dev
       advancedLogsAccess: true
-  collection:
-    ...
+  ...
 ```
 
 2. The Cluster Logging Operator (CLO) deletes the `logging-all-authenticated-application-logs-reader` ClusterRoleBinding. This binding allows all authenticated users to see application logs in namespace where they have access.
@@ -94,7 +92,7 @@ metadata:
   name: log-reader-group
 users:
 ```
-The group contains no users, and is not managed by the operator once it's created. The cluster admin can then add users to the group by editing it manually.
+The group contains no users. The cluster admin can then add users to the group by editing it manually.
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -142,7 +140,7 @@ metadata:
   name: restricted-cluster-admin-group
 users:
 ```
-The group contains no users, and is not managed by the operator once it's created. The cluster admin can then add users to the group by editing it manually.
+The group contains no users. The cluster admin can then add users to the group by editing it manually.
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -176,123 +174,76 @@ subjects:
   apiGroup: rbac.authorization.k8s.io
 ```
 
+All of the resources created will not be managed by the operator once they are created. This will allow the cluster admin to have control over how and when they are used.
 
 ### API Extensions
-TODO!!!!!!!!!
 
-API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
+We will be modifying the `ClusterLogging` CRD managed by the Cluster Logging Operator by adding a new field to the CRD called `advancedLogsAccess`. This new field is a boolean with a default value of false.
+This new field will be used to enable/disable the fine grained access to logs for the LokiStack logstore.
 
-- Name the API extensions this enhancement adds or modifies.
-- Does this enhancement modify the behaviour of existing resources, especially those owned
-  by other parties than the authoring team (including upstream resources), and, if yes, how?
-  Please add those other parties as reviewers to the enhancement.
+### Implementation Details/Notes/Constraints 
 
-  Examples:
-  - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
-  - Restricts the label format for objects to X.
-  - Defaults field Y on object kind Z.
+Here's the modification for the `ClusterLogging` CRD:
 
-Fill in the operational impact of these API Extensions in the "Operational Aspects
-of API Extensions" section.
+```go
+// LokiStackStoreSpec is used to set up cluster-logging to use a LokiStack as logging storage.
+// It points to an existing LokiStack in the same namespace.
+type LokiStackStoreSpec struct {
+	// Name of the LokiStack resource.
+	//
+	// +required
+	Name string `json:"name"`
 
-### Implementation Details/Notes/Constraints [optional]
+	// Enable fine grained control over access to logs.
+	//
+	// +nullable
+	// +optional
+  AdvancedLogsAccess bool `json:"advancedLogsAccess"`
+}
+```
 
-What are the caveats to the implementation? What are some important details that
-didn't come across above. Go in to as much detail as necessary here. This might
-be a good place to talk about core concepts and how they relate.
+Here's an example of a `ClusterLogging` definition with advanced logs access enabled:
+
+```yaml
+apiVersion: logging.openshift.io/v1
+kind: ClusterLogging
+metadata:
+  name: instance
+  namespace: openshift-logging
+spec:
+  managementState: Managed
+  logStore:
+    type: lokistack
+    lokistack:
+      name: lokistack-dev
+      advancedLogsAccess: true
+  collection:
+    type: vector
+```
 
 ### Risks and Mitigations
 
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
+- Privilege escalation, ie, a restricted cluster admin being able to grant themselves the ability to access logs they should not be able to access via an RBAC modification, is something cluster admins should be aware of and manage themselves.
 
-How will security be reviewed and by whom?
-
-How will UX be reviewed and by whom?
-
-Consider including folks that also work outside your immediate sub-project.
+Other risks TBD.
 
 ### Drawbacks
 
-The idea is to find the best form of an argument why this enhancement should
-_not_ be implemented.  
+This proposition assumes that once the advanced logs access is enabled and RBAC resources are created by the operator, the resources are no longer managed by the operator. This means that the remaining responsibilities, such as keeping the list of rules in `restricted-cluster-admin` up to date, will fall onto the cluster admins.
 
-What trade-offs (technical/efficiency cost, user experience, flexibility, 
-supportability, etc) must be made in order to implement this? What are the reasons
-we might not want to undertake this proposal, and how do we overcome them?  
-
-Does this proposal implement a behavior that's new/unique/novel? Is it poorly
-aligned with existing user expectations?  Will it be a significant maintenance
-burden?  Is it likely to be superceded by something else in the near future?
+Other drawbacks TBD.
 
 
 ## Design Details
 
-### Open Questions [optional]
+### Open Questions
 
-This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance,
- > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this?
+1. When the advanced logs access is enabled and then disabled, should the operator clean up the RBAC resources or should that be the responsibility of the cluster admin.
 
 ### Test Plan
 
-**Note:** *Section not required until targeted at a release.*
-
-Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
-- What additional testing is necessary to support managed OpenShift service-based offerings?
-
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
-
-All code is expected to have adequate tests (eventually with coverage
-expectations).
-
-### Graduation Criteria
-
-N/A
-
-#### Dev Preview -> Tech Preview
-
-N/A
-
-#### Tech Preview -> GA
-
-N/A
-
-#### Removing a deprecated feature
-
-N/A
-### Upgrade / Downgrade Strategy
-
-N/A
-
-### Version Skew Strategy
-
-N/A
-
-### Operational Aspects of API Extensions
-
-N/A
-
-#### Failure Modes
-
-N/A
-
-#### Support Procedures
-
-N/A
-
-## Implementation History
-
-Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`.
+TBD
 
 ## Alternatives
 
-N/A
+TBD
