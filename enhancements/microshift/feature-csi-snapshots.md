@@ -7,6 +7,7 @@ reviewers:
   - pmtk
   - eggfoobar
   - pacevedom
+  - "jsafrane, storage team"
 approvers:
   - dhellmann
 api-approvers:
