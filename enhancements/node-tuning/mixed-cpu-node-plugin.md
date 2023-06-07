@@ -19,6 +19,8 @@ creation-date: 2023-05-03
 last-updated: 2023-06-14
 tracking-link: 
   - https://issues.redhat.com/browse/CNF-7603
+  - https://github.com/openshift/enhancements/pull/1421
+  - https://github.com/openshift-kni/mixed-cpu-node-plugin
 ---
 
 # mixed-cpu-node-plugin
@@ -86,12 +88,30 @@ that communicates with the container-runtime
 at various lifecycle stages of container e.g. CreateContainer, UpdateContainer, etc.,
 and modifies the container's cgroup to include a set of shared CPUs.
 
-The shared CPUs are part of the [reserved-cpus](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#explicitly-reserved-cpu-list) CPUs pool.
-The reason to utilize the reserved CPUs is because of CPU manager which is not aware of the CPUs
+Shared CPUs append to Kubelet [reservedSystemCpus](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#explicitly-reserved-cpu-list).
+This means that when the feature enabled, Kubelet's `reservedSystemCpus` composed of PerformanceProfile's 
+`spec.cpu.reserved` + `spec.cpu.shared`.
+The reason we utilize Kubelet `reservedSystemCpus` is because of CPU manager, which is not aware of the CPUs
 lying in this pool, so it doesn't undo or changes the allocation logic performed by the plugin.
 Therefore, the plugin assigns the shared CPUs to containers without racing/conflict
 the CPU manager behavior. 
-More about this decision at the [Alternative](mixed-cpu-node-plugin.md#alternatives) section 
+More about this decision at the [Alternative](mixed-cpu-node-plugin.md#alternatives) section
+
+There is a plan for a feature called [shared-partition](https://github.com/openshift/enhancements/pull/1421) 
+that implements additional pool.
+When shared-partition lands, Kubelet's cpu pool layout should look roughly like:
+1. `reservedSystemCpus`
+2. `guaranteedCpus` <- new pool
+3. `sharedCpus` = All CPUs - `reservedSystemCpus` - `guaranteedCpus`
+
+When shared-partition feature enabled, 
+mixed-cpu-node-plugin allocates the shared cpus from the `sharedCpus` pool and not
+from the reservedSystemCpus anymore.
+
+The following section summarizes the shared-cpus source in each flow:
+* mixed-cpu enabled -> `cpu.shared` appends to Kubelet's `reservedSystemCPUs`
+* shared-partition enabled -> Kubelet's `sharedCpus` = All cpus - `reserved` - `isolated`
+* Both enabled -> sharedCpus = All cpus - `reserved` - `isolated`
 
 The node-plugin populates a special device named `openshift.io/shared-cpus` to provide way for pods to request
 for this special type of CPUs.
@@ -123,15 +143,26 @@ The mixed-cpu-node-plugin itself is essentially a pod that runs as a DaemonSet o
 cluster-node-tuning-operator (NTO) will be modified to support the deployment of the DaemonSet and additional
 resources (ServiceAccount, RBAC resources, SecurityContextConstraint, etc.)
 NTO will also be responsible to watch, monitor and report the node-plugin's DaemonSet status.
+Additionally, since the plugin is part of OCP infrastructure pods, NTO annotates the pods with:
+```yaml
+target.workload.openshift.io/management: {
+  "effect":"PreferredDuringScheduling"
+}
+```
+See https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md for details.
 
-In addition, since both the components are related,
-mixed-cpu-node-plugin [source code](https://github.com/openshift-kni/mixed-cpu-node-plugin) would be vendor under NTO.
+Since both the components are related,
+mixed-cpu-node-plugin [source code](https://github.com/openshift-kni/mixed-cpu-node-plugin) would be vendored under NTO.
 By having different main.go + container entrypoint, NTO image can be also used as the
 mixed-cpu-node-plugin image. 
 This way saves the overhead of having a separate container image with all the maintenance cost that comes with it.
 
 In order to activate NRI in container-runtime, NTO creates MachineConfig to enable NRI in 
-the container-runtime configuration.
+the container-runtime configuration:
+```yaml
+[crio.nri]
+enable_nri = true
+```
 
 The plugin is completely optional and is off by default.
 
@@ -144,24 +175,48 @@ _"A picture is worth a thousand words"_
 ![mixed-cpu-node-plugin](mixed-cpu-node-plugin.jpg)
 
 ### API
-The PerformanceProfile extended with a new field under `spec.cpu`:
 
-`shared` - Shared define the set of CPUs that can be allocated to guaranteed pods/containers that still require
+Extend PerformanceProfile with new `workloadHints` named `mixedCpus` in order to enable
+the feature.
+
+```yaml
+workloadHints:
+  mixedCpus: true
+```
+
+Specify the shared cpus under `cpus.shared`:
+
+```yaml
+cpu:
+  shared: "2,3"
+```
+
+The CPU set value should follow the 
+[cpuset](https://github.com/openshift/cluster-node-tuning-operator/blob/master/docs/performanceprofile/performance_profile.md#cpuset) conventions.
+It defines a set of CPUs that can be allocated to guaranteed pods/containers that still require
 non-exclusive ones.
-The `shared` field follows the same rules as the other fields, meaning it cannot overlap the other
-cpu fields, contains only integral numbers, and can be specified as [cpuset](https://github.com/openshift/cluster-node-tuning-operator/blob/master/docs/performanceprofile/performance_profile.md#cpuset) conventions.
-The field is optional and None by default.
 
+The CPU set must not overlap with `spec.cpu.reserved` or `spec.cpu.isolated` and NTO
+should return an error in case it does.
+
+The reason for having a separate flag for enabling the feature, 
+is because there is a coming feature named shared-partition
+that uses the `cpu.shared` value as well.
+The features must be enabled independently, hence the `workloadHints` flag.
+
+Both workloadHints and `cpu.shared` have to be specified in order to activate the feature.
+
+PerformanceProfile example:
 ```yaml
 apiVersion: performance.openshift.io/v2
 kind: PerformanceProfile
 metadata:
-  name: example-performanceprofile
+  name: example-performance-profile
 spec:
   cpu:
     reserved: "0-1"
-    shared: "2-3"
     isolated: "4-8"
+    shared: "2-3"
   hugepages:
     defaultHugepagesSize: "1G"
     pages:
@@ -170,29 +225,38 @@ spec:
         node: 0
   realTimeKernel:
     enabled: true
+  workloadHints:
+    mixedCpus: true
   nodeSelector:
     node-role.kubernetes.io/performance: "test"
 ```
 
-Specify `shared` cpus activates the feature, signals NTO to update the `reserved-cpus` in Kubelet config, 
+Specify the `cpu.shared` and `mixedCpus: true` in `workloadHints` activates the feature,
+signals NTO to update the `reservedSystemCpus` in Kubelet config,
+reboots the nodes that are associated with the updated PerformanceProfile,
 and deploys the mixed-cpu-node-plugin.
 The logic of updating reserved-cpus pool is NTO's responsibility and would be implemented as part of this feature.
 
-Remove the `shared` reverts the changes from the `reserve-cpus`
+Remove the `cpu.shared` value,
+or `mixedCpus: true` from `workloadHints` reverts the changes from Kubelet `reservedSystemCpus`,
+reboots the nodes that are associated with the updated PerformanceProfile,
 and deletes the mixed-cpu-node-plugin from the cluster.
+
+The feature can be activated/deactivated on a running system.
 
 ### Workflow Description
 
 The premise is that OCP cluster is running, and there's an active performance-profile that already tuned the system.
 
 1. The cluster administrator wants to support both exclusive and shared cpus for workloads running on the cluster.
-2. The cluster administrator specifies the shared CPU ids under the PerformanceProfile's `spec.cpu.shared` field.
-3. The cluster administrator waits for MCO to kick in and update the nodes.
-4. The application administrator wants to deploy its DPDK application as a Guaranteed pod with shared CPUs.
-5. The application administrator specifies a request for `openshift.io/shared-cpus: 1` under the pod's `spec.containers[].resources.requests`.
-6. The application administrator is waiting for the DPDK pod to be `Running`.
-7. The DPDK's app user/developer wants to run a light-weight task (threads) on shared cpus.
-8. The DPDK's app user/developer should pin the light-weight threads to CPUs that have shown in the `OPENSHIFT_SHARED_CPUS` environment variable of the container's process.
+2. The cluster administrator specifies the shared CPU ids in the PerformanceProfile `spec.cpu.shared`.
+3. The cluster administrator waits for MCO to kick in, update and reboot the nodes.
+4. The cluster administrator waits for the node to come back from reboot.
+5. The application administrator wants to deploy their DPDK application as a Guaranteed pod with shared CPUs.
+6. The application administrator specifies a request for `openshift.io/shared-cpus: 1` under the pod's `spec.containers[].resources.requests`.
+7. The application administrator is waiting for the DPDK pod to be `Running`.
+8. The DPDK's app user/developer wants to run a light-weight task (threads) on shared cpus.
+9. The DPDK's app user/developer should pin the light-weight threads to CPUs that have shown in the `OPENSHIFT_SHARED_CPUS` environment variable of the container's process.
 
 ### API Extensions
 N/A
