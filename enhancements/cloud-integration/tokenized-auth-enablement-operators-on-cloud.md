@@ -201,13 +201,13 @@ TAT.
 enabled cluster. New guidelines would include the following to use CCO has detected cluster is using time-based tokens:
 
 - Changing CSV to add CredentialRequest RBAC
-- Add CredentialRequests into a defined directory in the bundle
+- If loading the CredentialRequests from a yaml, place it into a discoverable location in the codebase
 - Add a bundle annotation claiming token-based authentication support
 - Add a script in the operator description to help set up the correct role
 - (Optional) Add the projected ServiceAccount volume to the Deployment embedded in the CSV;
 - handle the Secret themselves (like today’s CCO Mint mode, read and use the credentials in the Secret whose name they 
   know from the CredentialsRequest and is in the same Namespace)
-- Add structure to controller code to alert on missing cloud credentials, not crash.
+- Add structure to controller code to be resilient to missing cloud credentials / not crash.
 
 ### Workflow Description
 
