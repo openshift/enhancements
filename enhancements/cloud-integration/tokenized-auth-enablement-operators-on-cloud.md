@@ -132,7 +132,7 @@ Sharing a set of credentials between all operands to aid multi-tenancy.
 ## Proposal
 
 **Cloud Credential Operator (CCO) changes**: Adds a token-aware mode, while nominally set in "Manual" mode, CCO will
-look for and process CredentialRequests referenced in Operator CRs when:
+look for CredentialRequests with ProviderSpecs containing TAT information (like ARN values for AWS, etc) when:
 
 ```bash
 # infrastructure platform is AWS
@@ -148,9 +148,7 @@ $ oc get authentication cluster -o jsonpath --template='{ .spec.serviceAccountIs
 abutcher-oidc.s3.us-east-1.amazonaws.com
 ```
 
-This will operate in one of two ways depending on which other parts of this EP for other components are adopted: 
-specifically HyperShift/Rosa adding CCO with these token-aware changes or continuing with the current support for the 
-pod identity webhook.
+This will operate in the following manner: HyperShift/Rosa adding an updated CCO with these token-aware changes.
 
 CCO's token-aware mode will work by adding, for example for STS, a "role-arn"-type field on operator added 
 CredentialsRequest objects. This is a new API field on the CredentialsRequest spec. When CCO acquires a 
