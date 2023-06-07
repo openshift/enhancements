@@ -361,7 +361,7 @@ operator, but there should be no other impacts.
 
 #### Failure Modes
 
-If the added CredentialsRequest fields contemplated in this EP are missing, operators should wait them to appear. If
+If the Secrets created by CCO on the added CredentialsRequest fields contemplated in this EP are missing, operators should wait the Secrets to appear. If
 after a timeout period, the fields are not present, the operator should write events about the lack of access to cloud 
 resources to the status of an appropriate resource to let admins know there are missing credentials.
 
