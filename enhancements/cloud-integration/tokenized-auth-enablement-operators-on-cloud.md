@@ -190,7 +190,7 @@ Show in OperatorHub that the cluster is in a mode that supports token-based auth
 `.spec.serviceAccountIssuer` from the Authentication CR, `.status.platformStatus.type` from the Infrastructure CR,
 `.spec.credentialsMode` from the CloudCredentials CR.
 
-Show that the operator is enabled for Token-based use by reading the CSV annotation provided by the operator author.
+Show that the operator is enabled for Token-based use by reading the [CSV](https://olm.operatorframework.io/docs/concepts/crds/clusterserviceversion/) annotation provided by the operator author.
 
 Generate a manual ack for operator upgrade when cloud resources are involved. This can be determined by parsing the 
 Subscription objects. Ensures admin signs off that cloud resources are provisioned and working as intended before an 
