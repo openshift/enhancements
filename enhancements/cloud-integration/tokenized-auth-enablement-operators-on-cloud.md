@@ -192,10 +192,14 @@ Show in OperatorHub that the cluster is in a mode that supports token-based auth
 
 Show that the operator is enabled for Token-based use by reading the [CSV](https://olm.operatorframework.io/docs/concepts/crds/clusterserviceversion/) annotation provided by the operator author.
 
-Generate a manual ack for operator upgrade when cloud resources are involved. This can be determined by parsing the 
-Subscription objects. Ensures admin signs off that cloud resources are provisioned and working as intended before an 
-operator upgrade. This could be by setting the default subscription mode to Manual in the UI for operators that support 
-TAT.
+Subscriptions to these types of operators will be manual by default in the UI. This is to ensure that these operators
+don't automatically get upgraded without first having the admin verify the permissions required by the next version 
+and making the requisit changes if needed prior to upgrade.
+
+Additionally, a doc will be created to:
+
+1. Parse the installplan for the next version attempted to be installed.
+2. Extract the operator description where it should be clear what cloud permissions the operator requires.
 
 **Operator team changes**: Follow new guidelines for allowing for the operator to work on token auth 
 enabled cluster. New guidelines would include the following to use CCO has detected cluster is using time-based tokens:
@@ -372,10 +376,7 @@ Consider the following in developing a test plan for this enhancement:
 ### Graduation Criteria
 
 #### Dev Preview -> Tech Preview
-This enhancement will be introduced as TechPreviewNoUpgrade.
-
-#### Tech Preview -> GA
-This feature will be introduced as part of the TechPreviewNoUpgrade featureset affecting the Cloud Credential Operator, Console, and OLM. It is expected to graduate to GA within the same release upon successfully demonstrating e2e test pass rate meets or exceeds OCP baselines.
+This enhancement will be introduced as part of the TechPreviewNoUpgrade featureset affecting the Cloud Credential Operator, Console, and OLM. It is expected to graduate to GA within the same release upon successfully demonstrating e2e test pass rate meets or exceeds OCP baselines.
 
 If the feature remains `TechPreviewNoUpgrade` OLM operators which had been updated assuming this feature is available should continue to provide admin documentation sufficient to manually enable TAT.
 #### Removing a deprecated feature
