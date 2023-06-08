@@ -292,10 +292,40 @@ type CredentialsRequestSpec struct {
 ProviderSpec *runtime.RawExtension `json:"providerSpec,omitempty"`
 
 ...
-// CloudTokenPath (JWT token)
+// cloudTokenPath is the path where the Kubernetes ServiceAccount token (JSON Web Token) is mounted
+// on the deployment for the workload requesting a credentials secret.
+// The presence of this field in combination with fields such as spec.providerSpec.stsIAMRoleARN
+// indicate that CCO should broker creation of a credentials secret containing fields necessary for
+// token based authentication methods such as with the AWS Secure Token Service (STS).
 // +optional
 CloudTokenPath string `json:"cloudTokenPath,omitempty"`
-}
+```
+
+To see how this relates back to what, for instance, AWS or Azure, need to have for their SDKs to allow access to cloud resources:
+
+The AWS STS credentials secret looks like this and CloudTokenPath ultimately ends up in the Secret CCO generates as the web_identity_token_file the AWS SDK expects.
+```text
+apiVersion: v1
+stringData:
+  credentials: |-
+    [default]
+    role_arn = <role ARN>
+    web_identity_token_file = <path to mounted service account token such /var/run/secrets/openshift/serviceaccount/token>
+kind: Secret
+type: Opaque
+```
+
+Similarly, the Azure credentials secret CCO generates contains an `azure_federated_token_file` field.
+```text
+apiVersion: v1
+data:
+  azure_client_id: <client id>
+  azure_federated_token_file: <path to mounted service account token such as /var/run/secrets/openshift/serviceaccount/token>
+  azure_region: <region>
+  azure_subscription_id: <subscription id>
+  azure_tenant_id: <tenant id>
+kind: Secret
+type: Opaque
 ```
 
 and `ProviderSpec` in the AWS case would include the following:
@@ -315,8 +345,6 @@ STSIAMRoleARN string `json:"stsIAMRoleARN,omitempty"`
 On AWS STS, the `STSIAMRoleARN` would be something like:
 `arn:aws:iam::269733383066:role/newstscluster-openshift-logging-role-name`<br>
 This provides the role information linked by policy to access various cloud resources.
-
-`CloudTokenPath` provides the path to a JWT web token needed to access the resources.
 
 ### Risks and Mitigations
 
