@@ -203,7 +203,7 @@ enabled cluster. New guidelines would include the following to use CCO has detec
 - Changing CSV to add CredentialRequest RBAC
 - If loading the CredentialRequests from a yaml, place it into a discoverable location in the codebase
 - Add a bundle annotation claiming token-based authentication support
-- Add a script in the operator description to help set up the correct role
+- Add a script in the operator description, per supported cloud provider, to help set up the correct role
 - (Optional) Add the projected ServiceAccount volume to the Deployment embedded in the CSV;
 - handle the Secret themselves (like today’s CCO Mint mode, read and use the credentials in the Secret whose name they 
   know from the CredentialsRequest and is in the same Namespace)
