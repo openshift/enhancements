@@ -78,7 +78,7 @@ similar steps to perform. We aim to automate and reduce those steps as much as p
 (via OLM) simpler on clusters where TAT authentication is supported.
 
 For an example of how operators are currently navigating accessing cloud resources today, see the AWS STS install 
-instructions for the AWS EFS CSI Driver Operator (https://docs.openshift.com/container-platform/4.11/storage/container_storage_interface/persistent-storage-csi-aws-efs.html#efs-sts_persistent-storage-csi-aws-efs)
+instructions for the [AWS EFS CSI Driver Operator](https://docs.openshift.com/container-platform/4.11/storage/container_storage_interface/persistent-storage-csi-aws-efs.html#efs-sts_persistent-storage-csi-aws-efs)
 
 ### User Stories
 
