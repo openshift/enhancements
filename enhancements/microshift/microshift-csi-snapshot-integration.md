@@ -333,7 +333,7 @@ Infrastructure controllers (service-ca, DNS, routes, CSI and CNI plugins) are ma
 [infrastructure service](https://github.com/openshift/microshift/blob/878630eac00ab3884072c8ca23c429d5fce4bb6d/pkg/components/controllers.go).
 The CSI Snapshotter will be appended to the list of controllers that the infrastructure service manages.
 
-The manifests will be stored under the `microshift/assets/components/csi-external-snapshot-controller` directory.  
+The manifests will be stored under the `microshift/assets/components/csi-snapshot-controller` directory.  
 The following files will be added: 
 
 1. `csi_controller_deployment.yaml` specifies the CSI Snapshot Controller
