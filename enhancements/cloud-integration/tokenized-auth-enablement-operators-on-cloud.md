@@ -379,7 +379,6 @@ Consider the following in developing a test plan for this enhancement:
 ### Dev Preview -> Tech Preview
 This enhancement will be introduced as TechPreviewNoUpgrade.
 
-#### Dev Preview -> Tech Preview
 This enhancement will be introduced as part of the TechPreviewNoUpgrade featureset affecting the Cloud Credential Operator, Console, and OLM. It is expected to graduate to GA within the same release upon successfully demonstrating e2e test pass rate meets or exceeds OCP baselines.
 
 If the feature remains `TechPreviewNoUpgrade` OLM operators which had been updated assuming this feature is available should continue to provide admin documentation sufficient to manually enable TAT.
