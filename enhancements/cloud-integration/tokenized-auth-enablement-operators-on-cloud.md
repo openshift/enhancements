@@ -378,10 +378,11 @@ Consider the following in developing a test plan for this enhancement:
 
 ### Graduation Criteria
 
-### Dev Preview -> Tech Preview
+#### Dev Preview -> Tech Preview
 This enhancement will be introduced as TechPreviewNoUpgrade.
 
-This enhancement will be introduced as part of the TechPreviewNoUpgrade featureset affecting the Cloud Credential Operator, Console, and OLM. It is expected to graduate to GA within the same release upon successfully demonstrating e2e test pass rate meets or exceeds OCP baselines.
+#### Tech Preview -> GA
+This enhancement will be introduced as part of the TechPreviewNoUpgrade featureset affecting the Cloud Credential Operator, Console, and OLM. It is expected to graduate to GA within the same release upon successfully demonstrating e2e test pass rate meets or exceeds OCP baselines. Additionally, given we expect CCO to run on the Management Cluster in HCP scenarios we will need to profile CCO in this mode to ensure it meets resource constraints.
 
 If the feature remains `TechPreviewNoUpgrade` OLM operators which had been updated assuming this feature is available should continue to provide admin documentation sufficient to manually enable TAT.
 #### Removing a deprecated feature
