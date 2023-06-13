@@ -167,7 +167,9 @@ permissions.
 CCO should consider adding the above, three-part test as a utility function exposed in the API.
 
 **HyperShift changes**: Include Cloud Credential Operator with token-aware mode (see above). Allows for processing of 
-CredentialsRequest objects added by operators.
+CredentialsRequest objects added by operators. 
+
+The CCO is expected to run on the control plane NS, not on the customer's worker nodes, and not be visible to the customer. However if CredentialsRequests are created on the worker nodes, the CCO will process them and yield Secrets as described elsewhere in this document.
 
 **OperatorHub and Console changes**: Allow for input from user of additional fields during install depending on the 
 Cloud Provider which will result in ENV variables on the Subscription object that are required in the 
