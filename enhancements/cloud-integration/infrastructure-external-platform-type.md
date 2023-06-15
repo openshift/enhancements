@@ -418,7 +418,7 @@ const (
 )
 
 // CloudControllerManagerStatus holds the state of Cloud Controller Manager (a.k.a. CCM or CPI) related settings
-// +kubebuilder:validation:XValidation:rule="has(self.state) == has(oldSelf.state)",message="state cannot be added or removed once set"
+// +kubebuilder:validation:XValidation:rule="(has(self.state) == has(oldSelf.state)) || (!has(oldSelf.state) && self.state != \"External\")",message="state may not be added or removed once set"
 type CloudControllerManagerStatus struct {
     // state determines whether or not an external Cloud Controller Manager is expected to
     // be installed within the cluster.
@@ -438,6 +438,8 @@ type CloudControllerManagerStatus struct {
 // +kubebuilder:validation:XValidation:rule="has(self.cloudControllerManager) == has(oldSelf.cloudControllerManager)",message="cloudControllerManager added or removed once set"
 type ExternalPlatformStatus struct {
     // CloudControllerManager contains settings specific to the external Cloud Controller Manager (a.k.a. CCM or CPI)
+    // When omitted or set to "None", new nodes will be not tainted
+    // and no extra initialization from the cloud controller manager is expected.
     // +optional
     CloudControllerManager CloudControllerManagerStatus `json:"cloudControllerManager"`
 }
@@ -584,8 +586,10 @@ OCP 4.13 will not contain the `CloudControllerManagerSpec` part.
   this setting is not meant to be updated after cluster installation
 - Introduce CloudControllerManagerStatus to hold the setting which will be
   defined at installation time
-
-This change will target OCP 4.14.
+- CloudControllerManagerStatus is available behind the feature set
+  `TechPreviewNoUpgrade`
+- Because of the feature set, the CEL on `ExternalPlatformStatus` couldn't
+  be defined, we must set it once the feature set is lifted
 
 - [related PR](https://github.com/openshift/api/pull/1434)
 
