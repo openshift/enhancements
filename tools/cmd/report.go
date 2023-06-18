@@ -50,7 +50,17 @@ func newReportCommand() *cobra.Command {
 				Rule: func(prd *stats.PullRequestDetails) bool {
 					// ignore pull requests with only changes in the
 					// hack, tools, or this-week directories
-					return prd.Group == "hack" || prd.Group == "tools" || prd.Group == "this-week"
+					if prd.Group == "hack" || prd.Group == "tools" || prd.Group == "this-week" {
+						return true
+					}
+					// ignore anything that is stale and closed
+					// because we're going to be commenting on it to
+					// nudge the author to reopen it or to remove the
+					// lifecycle status
+					if prd.Stale && (prd.State == "closed" || prd.State == "merged") {
+						return true
+					}
+					return false
 				},
 			}
 
