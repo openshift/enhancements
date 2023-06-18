@@ -174,15 +174,6 @@ func (s *Summarizer) GetModifiedFiles(pr int) (files []ModifiedFile, err error) 
 	return modifiedFiles, nil
 }
 
-func getFileContents(ref string) ([]byte, error) {
-	content, err := exec.Command("git", "show", ref).Output()
-	if err != nil {
-		exitError := err.(*exec.ExitError)
-		return nil, errors.Wrap(err, fmt.Sprintf("git show failed: %s", exitError.Stderr))
-	}
-	return content, nil
-}
-
 // extractSummary looks for a block of text starting after the line
 // "## Summary" and ending before the next header line starting with
 // "##"
@@ -267,6 +258,16 @@ func (s *Summarizer) getEnhancementFilenames(pr int) ([]string, error) {
 	return enhancementFiles, nil
 }
 
+// IsEnhancement returns a boolean indicating whether the PR is
+// modifying an enhancement file
+func (s *Summarizer) IsEnhancement(pr int) (bool, error) {
+	filenames, err := s.getEnhancementFilenames(pr)
+	if err != nil {
+		return false, fmt.Errorf("failed to determine if %d is an enhancement: %w", pr, err)
+	}
+	return len(filenames) > 0, nil
+}
+
 // GetEnhancementFilename returns the primary enhancement file in the PR.
 func (s *Summarizer) GetEnhancementFilename(pr int) (string, error) {
 	enhancementFiles, err := s.getEnhancementFilenames(pr)
@@ -277,6 +278,21 @@ func (s *Summarizer) GetEnhancementFilename(pr int) (string, error) {
 		return "", fmt.Errorf("expected 1 modified file, found %v", enhancementFiles)
 	}
 	return enhancementFiles[0], nil
+}
+
+func getFileContents(ref string) ([]byte, error) {
+	content, err := exec.Command("git", "show", ref).Output()
+	if err != nil {
+		exitError := err.(*exec.ExitError)
+		return nil, errors.Wrap(err, fmt.Sprintf("git show failed: %s", exitError.Stderr))
+	}
+	return content, nil
+}
+
+// GetFileContents returns the content of a file in the PR
+func (s *Summarizer) GetFileContents(pr int, filename string) ([]byte, error) {
+	fileRef := fmt.Sprintf("%s:%s", s.prRef(pr), filename)
+	return getFileContents(fileRef)
 }
 
 // GetSummary reads the files being changed in the pull request to
