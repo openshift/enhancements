@@ -13,7 +13,7 @@ lint: bin/golangci-lint  ## Run go lint against code
 	GOLANGCI_LINT_CACHE=$(GOLANGCI_LINT_CACHE) ./bin/golangci-lint run --exclude=G101
 
 bin/golangci-lint:
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./bin v1.31.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./bin v1.53.3
 
 test:  ## Run tests
 	go test ./...
