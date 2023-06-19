@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/google/go-github/v32/github"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/openshift/enhancements/tools/stats"
@@ -83,7 +82,7 @@ func newPullRequestsCommand() *cobra.Command {
 			}
 			err := theStats.Populate()
 			if err != nil {
-				return errors.Wrap(err, "could not generate stats")
+				return fmt.Errorf("could not generate stats: %w", err)
 			}
 
 			out := csv.NewWriter(os.Stdout)
@@ -99,7 +98,7 @@ func newPullRequestsCommand() *cobra.Command {
 				"Days to Merge",
 			})
 			if err != nil {
-				return errors.Wrap(err, "could not write field headers")
+				return fmt.Errorf("could not write field headers: %w", err)
 			}
 
 			for _, prd := range all.Requests {
@@ -138,7 +137,7 @@ func newPullRequestsCommand() *cobra.Command {
 					fmt.Sprintf("%d", daysToMerge),
 				})
 				if err != nil {
-					return errors.Wrap(err, "could not write record")
+					return fmt.Errorf("could not write record: %w", err)
 				}
 			}
 

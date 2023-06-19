@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/google/go-github/v32/github"
-	"github.com/pkg/errors"
 
 	"github.com/openshift/enhancements/tools/enhancements"
 	"github.com/openshift/enhancements/tools/util"
@@ -92,26 +91,22 @@ func (s *Stats) process(pr *github.PullRequest) error {
 func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 	isMerged, err := s.Query.IsMerged(pr)
 	if err != nil {
-		return errors.Wrap(err,
-			fmt.Sprintf("could not determine merged status of %s", *pr.HTMLURL))
+		return fmt.Errorf("could not determine merged status of %s: %w", *pr.HTMLURL, err)
 	}
 
 	issueComments, err := s.Query.GetIssueComments(pr)
 	if err != nil {
-		return errors.Wrap(err,
-			fmt.Sprintf("could not fetch issue comments on %s", *pr.HTMLURL))
+		return fmt.Errorf("could not fetch issue comments on %s: %w", *pr.HTMLURL, err)
 	}
 
 	prComments, err := s.Query.GetPRComments(pr)
 	if err != nil {
-		return errors.Wrap(err,
-			fmt.Sprintf("could not fetch PR comments on %s", *pr.HTMLURL))
+		return fmt.Errorf("could not fetch PR comments on %s: %w", *pr.HTMLURL, err)
 	}
 
 	reviews, err := s.Query.GetReviews(pr)
 	if err != nil {
-		return errors.Wrap(err,
-			fmt.Sprintf("could not fetch reviews on %s", *pr.HTMLURL))
+		return fmt.Errorf("could not fetch reviews on %s: %w", *pr.HTMLURL, err)
 	}
 
 	lgtm := false
@@ -134,9 +129,8 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 
 	modifiedFiles, err := s.Summarizer.GetModifiedFiles(int(*pr.Number))
 	if err != nil {
-		return errors.Wrap(err,
-			fmt.Sprintf("could not determine group details from modified files for %s",
-				*pr.HTMLURL))
+		return fmt.Errorf("could not determine group details from modified files for %s: %w",
+			*pr.HTMLURL, err)
 	}
 
 	// Look for whether a file has been added in the PR to determine
@@ -151,8 +145,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 
 	group, isEnhancement := enhancements.DeriveGroup(modifiedFiles)
 	if err != nil {
-		return errors.Wrap(err,
-			fmt.Sprintf("could not determine group details for %s", *pr.HTMLURL))
+		return fmt.Errorf("could not determine group details for %s: %w", *pr.HTMLURL, err)
 	}
 	if group == "" && !isEnhancement {
 		group = "housekeeping"

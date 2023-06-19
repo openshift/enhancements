@@ -5,20 +5,18 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-
-	"github.com/pkg/errors"
 )
 
 // UpdateGitRepo refreshes the local repository so all of the pull
 // requests are available.
 func UpdateGitRepo() error {
 	if err := ensureFetchSettings(); err != nil {
-		return errors.Wrap(err, "could not configure fetch settings")
+		return fmt.Errorf("could not configure fetch settings: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "updating local git repository...")
 	_, err := exec.Command("git", "remote", "update").Output()
 	if err != nil {
-		return errors.Wrap(err, "fetching config failed")
+		return fmt.Errorf("fetching config failed: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "\n")
 	return nil
@@ -29,14 +27,14 @@ func UpdateGitRepo() error {
 func findOpenShiftRemote() (string, error) {
 	rawRemotes, err := exec.Command("git", "remote").Output()
 	if err != nil {
-		return "", errors.Wrap(err, "fetching remotes failed")
+		return "", fmt.Errorf("fetching remotes failed: %w", err)
 	}
 
 	remotes := strings.Split(string(rawRemotes), "\n")
 	for _, r := range remotes {
 		rawURL, err := exec.Command("git", "remote", "get-url", r).Output()
 		if err != nil {
-			return "", errors.Wrap(err, fmt.Sprintf("fetching url for remote %q failed", r))
+			return "", fmt.Errorf("fetching url for remote %q failed: %w", r, err)
 		}
 		if strings.Contains(string(rawURL), "openshift/enhancements") {
 			return r, nil
@@ -49,14 +47,14 @@ func findOpenShiftRemote() (string, error) {
 func ensureFetchSettings() error {
 	upstream, err := findOpenShiftRemote()
 	if err != nil {
-		return errors.Wrap(err, "unable to configure fetch settings")
+		return fmt.Errorf("unable to configure fetch settings: %w", err)
 	}
 
 	configName := fmt.Sprintf("remote.%s.fetch", upstream)
 	out, err := exec.Command("git", "config", "--get-all", "--local",
 		configName).Output()
 	if err != nil {
-		return errors.Wrap(err, "fetching config failed")
+		return fmt.Errorf("fetching config failed: %w", err)
 	}
 
 	desiredRefSetting := fmt.Sprintf("+refs/pull/*/head:refs/remotes/%s/pr/*", upstream)
@@ -69,7 +67,7 @@ func ensureFetchSettings() error {
 	_, err = exec.Command("git", "config", "--add", "--local",
 		configName, desiredRefSetting).Output()
 	if err != nil {
-		return errors.Wrap(err, "failed to update git config")
+		return fmt.Errorf("failed to update git config: %w", err)
 	}
 
 	return nil
@@ -82,7 +80,7 @@ type Summarizer struct {
 func NewSummarizer() (*Summarizer, error) {
 	upstream, err := findOpenShiftRemote()
 	if err != nil {
-		return nil, errors.Wrap(err, "could not construct PR summarizer")
+		return nil, fmt.Errorf("could not construct PR summarizer: %w", err)
 	}
 	s := Summarizer{
 		upstreamRemote: upstream,
@@ -114,8 +112,8 @@ func (s *Summarizer) GetModifiedFiles(pr int) (files []ModifiedFile, err error) 
 	firstParentOut, err := exec.Command("git", "rev-list", "--first-parent", "^"+ref, "origin/master").Output()
 	if err != nil {
 		exitError := err.(*exec.ExitError)
-		return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
-			ref, exitError.Stderr))
+		return nil, fmt.Errorf("could not get files changed in %s: %s",
+			ref, exitError.Stderr)
 	}
 	firstParentLines := strings.Split(string(firstParentOut), "\n")
 	firstParent := firstParentLines[len(firstParentLines)-1]
@@ -131,16 +129,16 @@ func (s *Summarizer) GetModifiedFiles(pr int) (files []ModifiedFile, err error) 
 		oldestAncestorOut, err := exec.Command("git", "rev-list", firstParent+"^^!").Output()
 		if err != nil {
 			exitError := err.(*exec.ExitError)
-			return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
-				ref, exitError.Stderr))
+			return nil, fmt.Errorf("could not get files changed in %s: %s",
+				ref, exitError.Stderr)
 		}
 		oldestAncestor := strings.TrimSpace(string(oldestAncestorOut))
 
 		out, err := exec.Command("git", "diff", "--name-status", oldestAncestor+".."+ref).Output()
 		if err != nil {
 			exitError := err.(*exec.ExitError)
-			return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
-				ref, exitError.Stderr))
+			return nil, fmt.Errorf("could not get files changed in %s: %s",
+				ref, exitError.Stderr)
 		}
 		for _, line := range strings.Split(string(out), "\n") {
 			if line == "" {
@@ -160,8 +158,8 @@ func (s *Summarizer) GetModifiedFiles(pr int) (files []ModifiedFile, err error) 
 		out, err := exec.Command("git", "show", "--pretty=", "--name-only", ref).Output()
 		if err != nil {
 			exitError := err.(*exec.ExitError)
-			return nil, errors.Wrap(err, fmt.Sprintf("could not get files changed in %s: %s",
-				ref, exitError.Stderr))
+			return nil, fmt.Errorf("could not get files changed in %s: %s",
+				ref, exitError.Stderr)
 		}
 		for _, name := range strings.Split(string(out), "\n") {
 			trimmed := strings.TrimSpace(name)
@@ -243,7 +241,7 @@ func DeriveGroup(files []ModifiedFile) (filename string, isEnhancement bool) {
 func (s *Summarizer) getEnhancementFilenames(pr int) ([]string, error) {
 	files, err := s.GetModifiedFiles(pr)
 	if err != nil {
-		return nil, errors.Wrap(err, "could not determine the list of modified files")
+		return nil, fmt.Errorf("could not determine the list of modified files: %w", err)
 	}
 	enhancementFiles := []string{}
 	for _, f := range files {
@@ -272,7 +270,7 @@ func (s *Summarizer) IsEnhancement(pr int) (bool, error) {
 func (s *Summarizer) GetEnhancementFilename(pr int) (string, error) {
 	enhancementFiles, err := s.getEnhancementFilenames(pr)
 	if err != nil {
-		return "", errors.Wrap(err, "could not determine the list of enhancement files")
+		return "", fmt.Errorf("could not determine the list of enhancement files: %w", err)
 	}
 	if len(enhancementFiles) != 1 {
 		return "", fmt.Errorf("expected 1 modified file, found %v", enhancementFiles)
@@ -284,7 +282,7 @@ func getFileContents(ref string) ([]byte, error) {
 	content, err := exec.Command("git", "show", ref).Output()
 	if err != nil {
 		exitError := err.(*exec.ExitError)
-		return nil, errors.Wrap(err, fmt.Sprintf("git show failed: %s", exitError.Stderr))
+		return nil, fmt.Errorf("git show failed: %s", exitError.Stderr)
 	}
 	return content, nil
 }
@@ -300,13 +298,13 @@ func (s *Summarizer) GetFileContents(pr int, filename string) ([]byte, error) {
 func (s *Summarizer) GetSummary(pr int) (summary string, err error) {
 	enhancementFile, err := s.GetEnhancementFilename(pr)
 	if err != nil {
-		return "", errors.Wrap(err, "could not determine the enhancement file name")
+		return "", fmt.Errorf("could not determine the enhancement file name: %w", err)
 	}
 	summary = fmt.Sprintf("(no '## Summary' section found in %s)", enhancementFile)
 	fileRef := fmt.Sprintf("%s:%s", s.prRef(pr), enhancementFile)
 	content, err := getFileContents(fileRef)
 	if err != nil {
-		return summary, errors.Wrap(err, fmt.Sprintf("could not get content of %s", fileRef))
+		return summary, fmt.Errorf("could not get content of %s for summary: %w", fileRef, err)
 	}
 	candidate := strings.TrimSpace(extractSummary(string(content)))
 	if candidate != "" {

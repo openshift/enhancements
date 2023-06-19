@@ -18,7 +18,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/openshift/enhancements/tools/reviewers"
@@ -72,7 +71,7 @@ func newReviewersCommand() *cobra.Command {
 
 			err := query.IteratePullRequests(reviewerStats.ProcessOne)
 			if err != nil {
-				return errors.Wrap(err, "failed to retrieve pull request details")
+				return fmt.Errorf("failed to retrieve pull request details: %w", err)
 			}
 
 			// The command line ignore options override the config file.

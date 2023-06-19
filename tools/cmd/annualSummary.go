@@ -20,7 +20,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/openshift/enhancements/tools/enhancements"
@@ -121,7 +120,7 @@ var annualSummaryCmd = &cobra.Command{
 
 		summarizer, err := enhancements.NewSummarizer()
 		if err != nil {
-			return errors.Wrap(err, "unable to show PR summaries")
+			return fmt.Errorf("unable to show PR summaries: %w", err)
 		}
 
 		theStats := &stats.Stats{
@@ -137,7 +136,7 @@ var annualSummaryCmd = &cobra.Command{
 
 		err = theStats.Populate()
 		if err != nil {
-			return errors.Wrap(err, "could not generate stats")
+			return fmt.Errorf("could not generate stats: %w", err)
 		}
 
 		fmt.Fprintf(os.Stderr, "Processed %d pull requests\n", len(all.Requests))

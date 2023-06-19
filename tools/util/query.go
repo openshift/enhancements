@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/google/go-github/v32/github"
-	"github.com/pkg/errors"
 )
 
 // PullRequestQuery holds the parameters for iterating over pull requests
@@ -41,9 +40,7 @@ func (q *PullRequestQuery) IteratePullRequests(callback PRCallback) error {
 	for {
 		prs, response, err := q.Client.PullRequests.List(ctx, q.Org, q.Repo, opts)
 		if err != nil {
-			return errors.Wrap(err,
-				fmt.Sprintf(
-					"could not get pull requests for %s/%s", q.Org, q.Repo))
+			return fmt.Errorf("could not get pull requests for %s/%s: %w", q.Org, q.Repo, err)
 		}
 		for _, pr := range prs {
 			err := callback(pr)
