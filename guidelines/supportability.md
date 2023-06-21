@@ -1,4 +1,46 @@
-# What does it mean to be Tech Preview
+# Supportability Commitments
+
+This document aims to cover the support/compatibility expectations associated with features and apis.  It also covers how to
+manage those expectations with respect to upstream features/apis that may be at an alpha or beta level.
+
+At a high level, there are only two official classifications for APIs in OpenShift:
+
+* Tech Preview - The bulk of this document address this category
+* Generally Available(GA) - Our commitments to GA features and APIs are covered in our official [product](https://docs.openshift.com/container-platform/4.13/rest_api/understanding-compatibility-guidelines.html) [documentation](https://docs.openshift.com/container-platform/4.13/rest_api/understanding-api-support-tiers.html)
+
+Within the GA category, there are tiers of API support which describe when an API is allowed to change or be removed, which you can read about from the links
+above.
+
+Upstream [defines](https://kubernetes.io/blog/2020/08/21/moving-forward-from-beta/) 3 tiers of maturity:
+* alpha - off by default, can change freely, no commitment to help migrate a user to new versions
+* beta - on by default, still may change freely, but higher expectation that a GA version will arrive and users *may* be aided in a migration to a GA version
+* GA/Stable  
+
+When bringing an alpha or beta api/feature downstream, we need to carefully consider the implications and support expectations.
+
+## Enabling Upstream Alpha features
+
+There are significant risks associated with exposing customers to Alpha-level upstream features:
+* The api/feature may change in a way that breaks customer expectations/scripts/workloads
+* The api/feature may change in a way that we cannot migrate customer workloads/configuration/resources
+* The api/feature may be removed entirely in a future k8s version leaving us having to carry patches or manually help customers to move forward which may even require an entirely new cluster installation
+
+Given these risks, alpha features **MUST NOT** be turned on downstream unless behind a feature gate that can only be enabled via the TechPreviewNoUpgrade 
+or CustomNoUpgrade featuresets.  If you/your team intend to enable (without a TechPreview gate) an upstream alpha feature, downstream, you must bring the request to 
+the staff engineering group for discussion.  This can be done by adding it to the agenda of an appropriate themed architecture calls (this may not get you approval 
+but it is a good place to start the conversation about what you want to do and why), or tagging `@aos-staff-engineers` on `#forum-arch`.  Approval won't be granted 
+without a set of people who clearly own working on the feature upstream and ensuring it will be driven to beta/GA state.
+
+Enabling an upstream alpha feature by putting it behind a TechPreviewNoUpgrade feature gate is acceptable as long as the team that is enabling it understands
+they are going to be responsible for helping debug issues associated with it.
+
+## Enabling Upstream Beta features
+
+TBD - we'd like to disable these by default(and then have a relatively lower bar for enabling them), but right no there's no good way to disable the associated 
+upstream tests, so if we disabled them we'd break those tests w/o additional work to explicitly disable the associated tests.
+
+
+## What does it mean to be Tech Preview
 
 * You can change APIs that are clearly indicated as tech preview, without following a deprecating or backwards compatibility process.
   * Note: you cannot change the type of an existing field w/o changing the apiversion.  Changing types has serialization
@@ -16,14 +58,15 @@ setting the upgradeable=false condition on your ClusterOperator and utilizing th
 
 
 
-# Reasons to declare something Tech Preview
+## Reasons to declare something Tech Preview
 
 * You aren’t confident you got the API right and want flexibility to change it without having to deal with migrations
   * Bearing in mind the aforementioned restrictions on changing field types w/o revising the apiversion.
 * You aren’t confident in the implementation quality (scalability, stability, etc) and do not want to have to support customers using it in production in ways the implementation cannot handle
 
 
-# Downsides to declaring something Tech Preview
+## Downsides to declaring something Tech Preview
+
 * Since your feature requires special action to enable, you won’t get default CI coverage.  You may need to introduce your own
 CI job that enables the TP feature if you want automated coverage
 * To date we have seen very few customers enabling feature gates (in part because they block upgrading that cluster) so if your
@@ -31,10 +74,10 @@ feature is behind the cluster feature gate, you are unlikely to get meaningful f
 feature anyway.  It may be better to just hold the feature until it’s GA ready.
 
 
-# Official process/mechanism for delivering a TP feature
+## Official process/mechanism for delivering a Tech Preview feature
 
 1. Your feature must be disabled by default
-1. Enabling it must require the admin enable a specific feature gate such as [TechPreviewNoUpgrade](https://docs.openshift.com/container-platform/4.1/nodes/clusters/nodes-cluster-enabling-features.html)
+1. Enabling it must require the admin enable a specific featureset such as [TechPreviewNoUpgrade](https://docs.openshift.com/container-platform/4.1/nodes/clusters/nodes-cluster-enabling-features.html)
 1. You need to list the feature in [this set](https://github.com/openshift/api/blob/bace76a807222b30bb9bfd4926826348156fb522/config/v1/types_feature.go#L117)
 1. Your operator then needs to observe whether the feature gate is enabled and then, and only then, can it enable the feature
 meaning installing any TP CRDs and performing the TP behavior.
@@ -45,15 +88,15 @@ component should clear that data from the fields to avoid user confusion when th
 it’s not actually active/enabled.
 
 
-## Following this process means
+### Following this process means
 
 * No customer will be able use your feature by default
 * If they do enable it, they cannot upgrade their cluster, so very few will use it.  You will not likely get much user feedback
 on the feature if that is your goal.
 * Your feature will not be available in CI clusters unless you create your own specific CI job that enables the featuregate so
-you can test the feature.
-* You must not install any CRDs related to the TP feature unless the TP is enabled.
-
+you can test the feature.  We do run some periodic jobs that stand up a cluster with the TechPreviewNoUpgrade featureset enabled and then runs
+the standard e2e suite.  E.g. [this job](https://prow.ci.openshift.org/job-history/gs/origin-ci-test/logs/periodic-ci-openshift-release-master-ci-4.14-e2e-aws-sdn-techpreview)
+* You must not install any CRDs related to the TP feature unless the TP is enabled.  This can be accomplished via the [release.openshift.io/feature-gate: TechPreviewNoUpgrade](https://github.com/openshift/cluster-monitoring-operator/commit/91c6686c50769f71c37037d3ea45a3285b6bfcc5#diff-b976872ff3ab6f54379ac44c50ccffa85433e72c82062a7d05982e487122586bR10) annotation.
 
 
 # Unofficial Processes/Mechanisms
