@@ -169,16 +169,12 @@ CCO should consider adding the above, three-part test as a utility function expo
 **HyperShift changes**: Include Cloud Credential Operator with token-aware mode (see above). Allows for processing of 
 CredentialsRequest objects added by operators. 
 
-The CCO is expected to run on the control plane NS, not on the customer's worker nodes, and not be visible to the customer. We propose that multiple 
-instances of CCO be installed on the control plane each consuming the 
-kubeconfig of the worker cluster they are intended to be watching / managing. 
-The additional cost of adding CCO to Hypershift is assumed by Red Hat and not 
-by the worker nodes.
-
-CCO will be modified so that it can consume a given kubeconfig when specified. 
-Because the intention is to make this feature available with HyperShift GA it 
-will need to be backported all the way to 4.12 (contingent on CCO changes 
-moving out of the feature gate).
+The CCO is expected to run on the hosted control plane's NS on the management 
+cluster, not on the customer's worker nodes, and not be visible to the 
+customer. We propose that multiple instances of CCO be installed on the 
+management cluster each consuming the kubeconfig of the hosted control plane it 
+is intended to be watching. The additional cost of adding CCO to Hypershift is 
+assumed by Red Hat and not by the worker nodes.
 
 **OperatorHub and Console changes**: Allow for input from user of additional fields during install depending on the 
 Cloud Provider which will result in ENV variables on the Subscription object that are required in the 
@@ -362,12 +358,33 @@ On AWS STS, the `STSIAMRoleARN` would be something like:
 `arn:aws:iam::269733383066:role/newstscluster-openshift-logging-role-name`<br>
 This provides the role information linked by policy to access various cloud resources.
 
-### CCO Changes for HyperShift
+### Changes for HyperShift
 
-The kubeconfig of the worker node is mounted at a specied path on the CCO pod. 
-CCO can consume that kubeconfig when it starts the go client.
+#### CCO Stories
+
+The kubeconfig of the hosted cluster is mounted at a specied path on the CCO 
+pod. CCO can consume that kubeconfig when it starts the go client.
+
+The Pod Identity Webhook is not shipped alongside CCO in order to reduce the 
+footprint of the CCO install.
+
+#### HyperShift Stories
+
+CCO without the pod identity webhook is enabled on the HyperShift management 
+plane.
+
+When a new hosted cluster is created, a new instance of CCO is deployed with 
+the kubeconfig of that cluster mounted to the pod.
 
 ### Risks and Mitigations
+
+Enabling CCO on HyperShift incurs additional infrastructure cost. The exact 
+threshold of added cost that would be acceptable is (as of now) unknown.
+
+Profile TBD.
+
+If the threshold is exceeded, additional work on CCO to reduce this cost will 
+need to be done.
 
 ### Drawbacks
 
