@@ -251,7 +251,7 @@ deployed by MicroShift to enable snapshotting out of the box.
 
 The MicroShift deployment model utilizes rpm-ostree layers. Following the existing deployment pattern, 
 VolumeSnapshotClass manifests can be packaged and deployed onto target devices.
-(See [kubernetes-for-device-edge. md#workflow-description.md](./kubernetes-for-device-edge.md#workflow-description)).
+(See [kubernetes-for-device-edge.md#workflow-description](./kubernetes-for-device-edge.md#workflow-description)).
 Application deployers can predefine VolumeSnapshotClass manifests.  These can be written the manifests to 
 /etc/microshift/manifests. This pattern is congruent with how a device owner would install custom StorageClasses. It 
 is recommended that new custom StorageClasses be packaged with VolumeSnapshotClasses that reference them.
