@@ -5,7 +5,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/openshift/enhancements/tools/enhancements"
@@ -50,7 +49,17 @@ func newReportCommand() *cobra.Command {
 				Rule: func(prd *stats.PullRequestDetails) bool {
 					// ignore pull requests with only changes in the
 					// hack, tools, or this-week directories
-					return prd.Group == "hack" || prd.Group == "tools" || prd.Group == "this-week"
+					if prd.Group == "hack" || prd.Group == "tools" || prd.Group == "this-week" {
+						return true
+					}
+					// ignore anything that is stale and closed
+					// because we're going to be commenting on it to
+					// nudge the author to reopen it or to remove the
+					// lifecycle status
+					if prd.Stale && (prd.State == "closed" || prd.State == "merged") {
+						return true
+					}
+					return false
 				},
 			}
 
@@ -148,7 +157,7 @@ func newReportCommand() *cobra.Command {
 
 			summarizer, err := enhancements.NewSummarizer()
 			if err != nil {
-				return errors.Wrap(err, "unable to show PR summaries")
+				return fmt.Errorf("unable to show PR summaries: %w", err)
 			}
 
 			theStats := &stats.Stats{
@@ -163,7 +172,7 @@ func newReportCommand() *cobra.Command {
 
 			err = theStats.Populate()
 			if err != nil {
-				return errors.Wrap(err, "could not generate stats")
+				return fmt.Errorf("could not generate stats: %w", err)
 			}
 
 			fmt.Fprintf(os.Stderr, "Processed %d pull requests\n", len(all.Requests))

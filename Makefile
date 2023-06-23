@@ -31,7 +31,13 @@ lint: image  ## run the markdown linter
 ANNUAL_SUMMARY_FILE=this-week/$(shell expr $$(date +%Y) - 1).md
 
 .PHONY: report report-gen
-report: report-gen lint  ## run weekly newsletter report tool
+report: closed-stale report-gen lint  ## run weekly newsletter report tool
+
+closed-stale:  ## Leave comments on enhancements closed by the lifecycle bot
+	(cd tools && go run ./main.go closed-stale)
+
+show-stale:  ## Show the status of enhancements closed by the lifecycle bot
+	(cd tools && go run ./main.go closed-stale --dry-run)
 
 report-gen:
 	./hack/this-week.sh

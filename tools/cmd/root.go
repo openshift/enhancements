@@ -12,11 +12,15 @@ import (
 )
 
 var (
-	configFilename    string
-	orgName, repoName string
-	devMode           bool
+	configFilename     string
+	jiraConfigFilename string
+	orgName, repoName  string
+	devMode            bool
 
 	configSettings *config.Settings
+
+	jiraSettings *config.JiraSettings
+	jiraToken    string
 
 	rootCmd = &cobra.Command{
 		Use:   "enhancements",
@@ -31,9 +35,13 @@ func init() {
 	}
 
 	defaultConfigFilename := filepath.Join(configDir, "ocp-enhancements", "config.yml")
+	rootCmd.PersistentFlags().StringVar(&configFilename, "config", defaultConfigFilename, "config file")
+
+	// This config filename matches the name used by https://github.com/ankitpokhrel/jira-cli
+	defaultJiraConfigFilename := filepath.Join(configDir, ".jira", ".config.yml")
+	rootCmd.PersistentFlags().StringVar(&jiraConfigFilename, "jira-config", defaultJiraConfigFilename, "jira config file")
 
 	rootCmd.PersistentFlags().BoolVar(&devMode, "dev", false, "dev mode, stop after first page of PRs")
-	rootCmd.PersistentFlags().StringVar(&configFilename, "config", defaultConfigFilename, "config file")
 	rootCmd.PersistentFlags().StringVar(&orgName, "org", "openshift", "github organization")
 	rootCmd.PersistentFlags().StringVar(&repoName, "repo", "enhancements", "github repository")
 }
@@ -81,5 +89,23 @@ func initConfig() {
 	// quota and then fail for something that happens locally.
 	if err := enhancements.UpdateGitRepo(); err != nil {
 		handleError(fmt.Sprintf("Could not update local git repository: %v", err))
+	}
+}
+
+func initJiraConfig() {
+	if jiraConfigFilename == "" {
+		handleError(fmt.Sprintf("Please specify the --jira-config file name"))
+	}
+	if !fileExists(jiraConfigFilename) {
+		handleError(fmt.Sprintf("Please populate Jira config file %s following the instructions from https://github.com/ankitpokhrel/jira-cli", jiraConfigFilename))
+	}
+	settings, err := config.LoadJiraConfigFromFile(jiraConfigFilename)
+	if err != nil {
+		handleError(fmt.Sprintf("Could not load jira config file %s: %s", jiraConfigFilename, err))
+	}
+	jiraSettings = settings
+	jiraToken = os.Getenv("JIRA_API_TOKEN")
+	if jiraToken == "" {
+		handleError(fmt.Sprintf("JIRA_API_TOKEN is not set"))
 	}
 }

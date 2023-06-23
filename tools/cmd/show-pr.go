@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/openshift/enhancements/tools/enhancements"
@@ -24,11 +23,10 @@ func newShowPRCommand() *cobra.Command {
 		ValidArgs: []string{"pull-request-id"},
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return errors.New("please specify one valid pull request ID")
+				return fmt.Errorf("please specify one valid pull request ID")
 			}
 			if _, err := strconv.Atoi(args[0]); err != nil {
-				return errors.Wrap(err,
-					fmt.Sprintf("pull request ID %q must be an integer", args[0]))
+				return fmt.Errorf("pull request ID %q must be an integer: %w", args[0], err)
 			}
 			return nil
 		},
@@ -37,15 +35,15 @@ func newShowPRCommand() *cobra.Command {
 
 			prID, err := strconv.Atoi(args[0])
 			if err != nil {
-				return errors.Wrap(err,
-					fmt.Sprintf("failed to interpret pull request ID %q as a number", args[0]))
+				return fmt.Errorf("failed to interpret pull request ID %q as a number: %w",
+					args[0], err)
 			}
 
 			ghClient := util.NewGithubClient(configSettings.Github.Token)
 			ctx := context.Background()
 			pr, _, err := ghClient.PullRequests.Get(ctx, orgName, repoName, prID)
 			if err != nil {
-				return errors.Wrap(err, fmt.Sprintf("failed to fetch pull request %d", prID))
+				return fmt.Errorf("failed to fetch pull request %d: %w", prID, err)
 			}
 
 			earliestDate := time.Now().AddDate(0, 0, daysBack*-1)
@@ -77,12 +75,12 @@ func newShowPRCommand() *cobra.Command {
 				Buckets:      reportBuckets,
 			}
 			if err := theStats.ProcessOne(pr); err != nil {
-				return errors.Wrap(err, fmt.Sprintf("failed to fetch details for PR %d", prID))
+				return fmt.Errorf("failed to fetch details for PR %d: %w", prID, err)
 			}
 
 			summarizer, err := enhancements.NewSummarizer()
 			if err != nil {
-				return errors.Wrap(err, "unable to show PR summaries")
+				return fmt.Errorf("unable to show PR summaries: %w", err)
 			}
 
 			report.ShowPRs(
