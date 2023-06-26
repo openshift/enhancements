@@ -5,8 +5,10 @@ authors:
 reviewers:
   - "@ardaguclu"
   - "@bertinatto"
+  - "@bparees"
   - "@deads2k"
   - "@ingvagabund"
+  - "@mtulio"
 approvers:
   - "@deads2k"
 api-approvers:
@@ -30,9 +32,12 @@ during runtime.
 
 ## Motivation
 
-The reasoning behind this change are two-folded:
+The reasoning behind this change are two-fold:
 
-1. Short term goal is to speed up the [kubernetes updates](#kubernetes-updates).
+1. Short term goal is to speed up the [kubernetes updates](#kubernetes-updates),
+   by enabling to run the updated tests coming from kubernetes bump pull request,
+   rather than relying on current version available in OpenShift (usually one
+   minor version older).
 2. Long term goal is separating all e2e tests so that they can live in their
    [respective component repos](#tests-co-located-with-code).
 
@@ -43,7 +48,8 @@ The reasoning behind this change are two-folded:
   workflows continue working as before.
 - As an OpenShift developer, I want to be able to run newest kubernetes tests
   without the necessity to bump vendored code, to limit the amount of re-vendoring
-  work and ensure all proper test coverage.
+  work and ensure all proper test coverage/alignment of the version of the code
+  being tested with the version of the tests.
 - As an OpenShift developer, I want to be able to extend and monitor cluster
   during tests execution, to ensure high availability of the platform.
 - As an OpenShift partner or user, I want to be able to verify that my cluster is providing
@@ -59,7 +65,7 @@ The reasoning behind this change are two-folded:
 2. Remove the requirement that all test code lives in a single repository.
 3. Maintain `openshift-tests` API for running tests.
 4. Ensure that kubernetes tests are still vendored in `openshift-tests` binary,
-   to allow for a fallback when the release payload image is not reachable.
+   to allow for an explicit fallback when the release payload image is not available.
 
 ### Non-Goals
 
@@ -206,7 +212,13 @@ To achieve the first step of the proposal, we need to:
 1. Provide a library for building `<binary>-tests` which exposes two commands:
    - `list` - responsible for listing tests in JSON format;
    - `run` - run a single test, returning results in ginkgo compatible format;
-2. Provide an image annotation or similar mechanism informing where the test
+2. Provide a mechanism for labeling tests, similarly how we currently indicate
+   that a test is part of a special group. See [origin/rules.go](https://github.com/openshift/origin/blob/cc42164781a728b804d0bb07f09cf878ec8f7807/test/extended/util/annotate/rules.go)
+   or [kubernetes/rules.go](https://github.com/openshift/kubernetes/blob/8bd5514be14de7fb3105962c8fc206ef5e921a0b/openshift-hack/e2e/annotate/rules.go),
+   in combination with [the annotation mechanism](https://github.com/openshift/kubernetes/blob/8bd5514be14de7fb3105962c8fc206ef5e921a0b/openshift-hack/e2e/annotate/annotate.go).
+3. Help managing the use of disconnected images (i.e. ensure they are only referencing
+   images that are mirrored, at least for conformance tests). See [images used by e2e tests](https://github.com/openshift/origin/blob/cc42164781a728b804d0bb07f09cf878ec8f7807/test/extended/util/image/README.md).
+4. Provide an image annotation or similar mechanism informing where the test
    binary is embedded in the release payload.
 
 The proposed extensions to `openshift-tests` will require the following changes:
@@ -220,8 +232,7 @@ The proposed extensions to `openshift-tests` will require the following changes:
    into account the new tests coming from external binaries.
 4. Add logic responsible for iterating over all tests, invoking the `run`
    subcommand using the associated test's binary and reading its results.
-5. Provide a fallback path allowing to use the vendored tests, only when either
-   the release image is not available, or on demand (`OPENSHIFT_SKIP_EXTERNAL_TESTS`
+5. Provide a fallback path allowing to use the vendored tests on demand (`OPENSHIFT_SKIP_EXTERNAL_TESTS`
    environment variable, for example).
 
 ### Risks and Mitigations
@@ -257,6 +268,16 @@ The proposed extensions to `openshift-tests` will require the following changes:
   At a later point in time, it's reasonable to re-use test binaries downloaded
   in prior executions, through exposing an environment variable,
   `OPENSHIFT_EXTERNAL_TESTS_DIRECTORY` for example.
+
+- **Slowing down the overall execution time due to pulling down external binaries
+  from the release image.**
+
+  Based on the tests performed during implementation of the [proof of concept](https://github.com/openshift/origin/pull/27570),
+  the additional time required to download and extract the additional binary is
+  in tens of seconds, assuming a good internet connection is available.
+  In cases where that addition is not acceptable, `OPENSHIFT_SKIP_EXTERNAL_TESTS`,
+  which bypasses the mechanism and always uses the tests bundled in `openshift-tests`
+  binary, is an option.
 
 - **In some cases, after landing newer version of kubernetes it is possible that
   we'll be having issues with tests relying on newer kubelets, which is usually
@@ -337,6 +358,11 @@ The followup work requires:
 As mentioned in [risks section](#risks-and-mitigations), upgrade tests are relying
 on the vendored code only, it would be reasonable to address this issue in the long,
 to run the upgrade tests in a similar fashion as the other tests.
+
+Re-evaluate [goal #4](#goals) which explicitly requires providing a fallback for
+kubernetes vendored tests. Currently, at least Microshift requires us to have
+the kubernetes tests vendored since they don't provide release image from which
+we can extract the kubernetes test binaries.
 
 ### Test Plan
 
