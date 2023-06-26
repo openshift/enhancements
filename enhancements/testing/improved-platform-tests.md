@@ -226,54 +226,54 @@ The proposed extensions to `openshift-tests` will require the following changes:
 
 ### Risks and Mitigations
 
-- The current policy when the [origin](https://github.com/openshift/origin/) pull
+- **The current policy when the [origin](https://github.com/openshift/origin/) pull
   request bringing the updated k8s version breaks the CI is to revert PR. This
   policy will be harder to execute with this change because reverting the o/k
-  rebase PR can be problematic and was never tried before.
+  rebase PR can be problematic and was never tried before.**
 
-There should be fewer reasons to do any reverting, because with this new mechanism
-we should get the appropriate signal during extensive payload testing required
-to land every k8s bump PR.
+  There should be fewer reasons to do any reverting, because with this new mechanism
+  we should get the appropriate signal during extensive payload testing required
+  to land every k8s bump PR.
 
-- Some of the work that has been done to build the partner certification tool will
-  need to be updated to pull additional images with separate test binaries.
+- **Some of the work that has been done to build the partner certification tool will
+  need to be updated to pull additional images with separate test binaries.**
 
-The `openshift-tests` binary will contain the necessary logic how to retrieve those
-additional tests binaries from the release payload, so even in the offline installation
-as long as the release payload is reachable, the tests should continue working.
+  The `openshift-tests` binary will contain the necessary logic how to retrieve those
+  additional tests binaries from the release payload, so even in the offline installation
+  as long as the release payload is reachable, the tests should continue working.
 
-- Not available release image can prevent from running the tests.
+- **Not available release image can prevent from running the tests.**
 
-The proposed mechanism will contain a fallback path, which will ensure that in
-cases where the release payload is not reachable we will be able to run all the
-tests bundled within the `openshift-tests` binary. This includes the basic
-OpenShift and Kubernetes conformance tests.
+  The proposed mechanism will contain a fallback path, which will ensure that in
+  cases where the release payload is not reachable we will be able to run all the
+  tests bundled within the `openshift-tests` binary. This includes the basic
+  OpenShift and Kubernetes conformance tests.
 
-- Slowing down the local development cycle due to pulling the external test binaries.
+- **Slowing down the local development cycle due to pulling the external test binaries.**
 
-The initial proposal is to use an environment variable `OPENSHIFT_SKIP_EXTERNAL_TESTS`,
-which bypasses the mechanism and always uses the tests bundled in `openshift-tests`
-binary.
-At a later point in time, it's reasonable to re-use test binaries downloaded
-in prior executions, through exposing an environment variable,
-`OPENSHIFT_EXTERNAL_TESTS_DIRECTORY` for example.
+  The initial proposal is to use an environment variable `OPENSHIFT_SKIP_EXTERNAL_TESTS`,
+  which bypasses the mechanism and always uses the tests bundled in `openshift-tests`
+  binary.
+  At a later point in time, it's reasonable to re-use test binaries downloaded
+  in prior executions, through exposing an environment variable,
+  `OPENSHIFT_EXTERNAL_TESTS_DIRECTORY` for example.
 
-- In some cases, after landing newer version of kubernetes it is possible that
+- **In some cases, after landing newer version of kubernetes it is possible that
   we'll be having issues with tests relying on newer kubelets, which is usually
-  shipped with updated base image with some delay.
+  shipped with updated base image with some delay.**
 
-This problem will not present during PR testing, because then we always build
-the base image from scratch to ensure all components are using newest versions
-for tests. For those rare cases where tests will rely on newer functionality in
-kubelet we can either temporarily disable the test before landing the PR, or
-sync with ART to ensure the updated kubelet is shipped as quickly as possible.
+  This problem will not present during PR testing, because then we always build
+  the base image from scratch to ensure all components are using newest versions
+  for tests. For those rare cases where tests will rely on newer functionality in
+  kubelet we can either temporarily disable the test before landing the PR, or
+  sync with ART to ensure the updated kubelet is shipped as quickly as possible.
 
-- Upgrade tests, unlike other tests are executed within single test binary
-  making it harder to migrate to use external test binaries.
+- **Upgrade tests, unlike other tests are executed within single test binary
+  making it harder to migrate to use external test binaries.**
 
-The current upgrade test suite runs only a handful of tests which don't change
-that often. For that reason, we've initially decided to rely only on the vendored
-code for the upgrade tests.
+  The current upgrade test suite runs only a handful of tests which don't change
+  that often. For that reason, we've initially decided to rely only on the vendored
+  code for the upgrade tests.
 
 ### Drawbacks
 
