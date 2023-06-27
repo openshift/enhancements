@@ -96,9 +96,13 @@ for multi-node deployments.
 
 * This enhancement assumes the feature is activated as part of installing the cluster and cannot be
 activated later. However, the sizing of the pools of shared and guaranteed CPUs can be modified (a reboot
-will be required).
+will be required). Note: This limitation is due to the proposed use of extended resources to account for
+the shared/guaranteed CPUs - if another approach is chosen, it may be possible to support activation of
+the feature on an already configured cluster.
 * The use of the shared and guaranteed CPU pools will be activated at the cluster level - it cannot be
-configured for a subset of the nodes in a cluster.
+configured for a subset of the nodes in a cluster. Note that different allocations of shared and
+guaranteed CPUs would be possible on different nodes by having more than one PerformanceProfile and
+grouping the nodes into different MachineConfigPools.
 
 ## Proposal
 
@@ -118,7 +122,8 @@ When the shared CPUSet is configured, NTO will:
 * Update kubelet configuration to specify that the isolated CPUSet is to be used for guaranteed QoS
 containers using whole CPUs.
 * Update OpenShift Kubernetes API Server configuration to enable a new admission hook. Note: although this would
-work in single-node deployments, we still need to work through how enablement will work in multi-node deployments.
+work in single-node deployments, we still need to work through how enablement will work in multi-node deployments
+(waiting to decide on design approach before working that out).
 
 The Kubelet configuration will be updated to allow a new CPUSet to be specified for guaranteed Qos containers
 using whole CPUs. There are two options:
@@ -130,7 +135,7 @@ The Kubelet (mostly the [CPU manager](https://github.com/openshift/kubernetes/tr
 * Read and store the new `guaranteedCPUs` configuration.
 * Remove the `guaranteedCPUs` from the `defaultCpuSet` so that shared containers are excluded from the `guaranteedCPUs` when their affinity is set.
 * Extend the cpu_manager_state to include a new `guaranteedCpuSet` tracking the available CPUs.
-* When a guaranteed QoS container using whole CPUs is created, allocate CPUs from the `guarateedCpuSet` instead 
+* When a guaranteed QoS container using whole CPUs is created, allocate CPUs from the `guaranteedCpuSet` instead 
 of the `defaultCpuSet` and set the CPU affinity to match.
 
 The next piece is to let the Kubernetes Scheduler take the split shared and guaranteed CPUSets into account when
@@ -156,9 +161,9 @@ which will mutate each pod definition as it is created:
 equal to the number of CPUs requested in millicore units.
 * For containers with non-guaranteed CPU requests (or guaranteed fractional CPU requests) add a new resource 
 request/limit `openshift.io/shared-cpus` equal to the number of CPUs requested in millicore units. Note that 
-one of the restrictions for extended resources is that the request/limit must match - in the case of a container 
-with differing CPU requests/limits, the CPU request value will be used - this will preserve existing scheduler
-behaviour as only the CPU requests are used to choose the node a pod will run on.
+one of the restrictions for extended resources is that the request/limit must both be specified and must match - in
+the case of a container with differing CPU requests/limits, the CPU request value will be used - this will preserve
+existing scheduler behaviour as only the CPU requests are used to choose the node a pod will run on.
 
 Here are the CPU requests/limits from an example container that uses shared CPUs:
 ```yaml
@@ -185,10 +190,10 @@ for each container and will not require any modifications.
 **cluster creator** is a human user responsible for deploying a cluster.
 
 1. The cluster creator creates a Performance Profile for the NTO and specifies a shared CPU partition.
-2. The cluster creator creates a machine config manifest to write a configuration file for kubelet to specify
-the shared and isolated CPUs (TODO: or this could be the config option).
-3. The cluster creator (TODO: does what???) to enable the new admission hook.
-4. The cluster creator then creates the cluster.
+2. The cluster creator (TODO: does what???) to enable the new admission hook.
+3. The cluster creator then creates the cluster.
+4. The NTO creates a machine config manifest to write a configuration file for kubelet to specify
+the shared and isolated CPUs.
 5. The kubelet starts up, finds the configuration file and initializes the `defaultCpuSet` and `guaranteedCpuSet` 
 based on the shared/isolated CPUSets specified in the config file.
 6. The kubelet advertises `openshift.io/shared-cpus` and `openshift.io/guaranteed-cpus` extended resources 
@@ -199,17 +204,24 @@ with the `workload.openshift.io/allowed` management annotation. The admission ho
 be handled by the managementcpusoverride admission hook.
    * a pod with Burstable or BestEffort QoS. The admission hook modifies the pod,
 adding `openshift.io/shared-cpus` requests/limits for each container, matching the CPU requests.
-   * a pod with Guaranteed QoS. The admission hook modifies the pod,
-adding `openshift.io/guaranteed-cpus` requests/limits for any containers with whole CPU requests/limits and
-`openshift.io/shared-cpus` requests/limits for other containers, matching the CPU requests.
+   * a pod with Guaranteed QoS. The admission hook modifies the pod as follows:
+     * for any containers with whole CPU requests/limits it adds `openshift.io/guaranteed-cpus` requests/limits
+     * for any containers with fractional CPU requests/limits it adds `openshift.io/shared-cpus` requests/limits
 8. The scheduler sees the new pod and finds available `openshift.io/shared-cpus` and/or 
 `openshift.io/guaranteed-cpus` resources on a node. The scheduler places the pod on the node.
-9. Repeat steps 7-8 until all pods are running.
+9. Kubelet processes the pod as usual, but when a guaranteed QoS container using whole CPUs is created, it 
+allocates CPUs from the `guaranteedCpuSet` instead of the `defaultCpuSet` and sets the CPU affinity to match.
+10. Repeat steps 7-9 until all pods are running.
 
 ### API Extensions
 
 A new admission hook in the Kubernetes API Server within OpenShift will mutate pods when they are created
 to add `openshift.io/guaranteed-cpus` and/or `openshift.io/shared-cpus` requests/limits as described above.
+
+Note that the existing [Management Workload Partitioning](https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md) feature will be a dependency for this
+feature. This will ensure that the API Server (and all other platform pods) with the 
+`target.workload.openshift.io/management` annotation will be placed on the reserved CPU set, even if they are
+started before the new admission hook is running.
 
 ### Implementation Details/Notes/Constraints
 
@@ -240,9 +252,30 @@ be changed at runtime.
 
 ### Open Questions [optional]
 
-1. How will this be enabled at the openshift apiserver level? It looks like you can create an admission hook 
+#### Enabling Feature
+
+How will this be enabled at the openshift apiserver level? It looks like you can create an admission hook 
 that is disabled by default and then enabled through a config option on the API server - could that mechanism
 be used?
+
+#### Scheduler Awareness
+
+In the current proposal, the scheduler is aware of the new `openshift.io/shared-cpus` and
+`openshift.io/guaranteed-cpus` resources and will ensure that a pod is only scheduled on a node with enough
+of those resources available. However, this does not account for cases where the kubelet has a more
+restrictive Topology Manager Policy (e.g. `single-numa-node` policy). In that case, it is possible that a pod
+could be scheduled on a node that had enough total guaranteed CPUs (for example), but not enough guaranteed
+CPUs on a single NUMA node. This would result in kubelet rejecting the pod with a Topology Affinity error.
+
+One way to address this would be through the Topology Aware Scheduler and RTE/NFD - adding scheduler
+awareness of how many shared/guaranteed CPUs are available on each NUMA node. This will be explored further
+in the Topology Aware Scheduler alternative below.
+
+Note: In practice, this would only be an issue in multi-node deployments where there are pods that could
+run on a selection of nodes. In a single node deployment, the user will configure the number of shared and 
+guaranteed CPUs to match the workloads that they are planning on running on the node. The user would be 
+aware of the NUMA restrictions imposed by using the `single-numa-node` policy and would ensure their 
+configuration matched.
 
 ### Test Plan
 
@@ -342,10 +375,10 @@ then annotate each pod with `target.workload.openshift.io/management: {"effect":
 
 Here is the workflow:
 1. The cluster creator creates a Performance Profile for the NTO and specifies a shared CPU partition.
-2. The cluster creator creates a machine config manifest to configure CRI-O to partition shared workloads.
-3. The cluster creator creates a machine config manifest to write a configuration file for kubelet to specify
+2. The cluster creator then creates the cluster.
+3. The NTO creates a machine config manifest to configure CRI-O to partition shared workloads.
+4. The NTO creates a machine config manifest to write a configuration file for kubelet to specify
 the shared CPUs.
-4. The cluster creator then creates the cluster.
 5. The kubelet starts up, finds the configuration file and removes the shared CPUs from the `defaultCpuSet`,
 adding them to the `reservedSystemCPUs` instead. 
 6. The kubelet advertises `shared.workload.openshift.io/cores` extended resources on the node based on the 
@@ -360,7 +393,7 @@ with the `workload.openshift.io/allowed: shared` annotation.
    The scheduler places the pod on the node.
    * Kubelet does not do the cgroup configuration for the containers since it is a shared pod (based on the annotation).
    * CRI-O does the cgroup configuration for the containers in the pod based on the shares/limits annotated 
-   against each container.
+   against each container. Note: this is the same workflow currently used for guaranteed containers.
 8. Something schedules a pod without the new `shared` annotations.
    * The pod is scheduled as usual based on the `cpu` requests.
    * Kubelet processes the pod as usual, allocating CPUs from the `defaultCpuSet`.
@@ -401,6 +434,52 @@ NUMA alignment and hyperthreading support, along with all the cgroup configurati
 be re-implemented in the new component resulting in extra complexity and duplication.
 
 This approach also has much larger code impact than the chosen solution.
+
+### New Scheduler Plugin
+
+This option would create a new [scheduler plugin](https://github.com/kubernetes-sigs/scheduler-plugins) that
+would decide whether to admit each pod to a node based on the number of shared/guaranted CPUs in use on the
+node and how many are required by the new pod. This could be done in a
+[FilterPlugin](https://pkg.go.dev/k8s.io/kubernetes/pkg/scheduler/framework#FilterPlugin). The plugin would
+be able to do these calculations purely based on the QoS of the pod and the `cpu` requests/limits for each
+container.
+
+The question would then be how to publish the number of shared/guaranteed CPUs available on each node:
+* Using extended resources would no longer make sense, because pods would no longer be mutated to add
+requests/limits for these resources. The user would no longer have an indication of how much of these
+extended resources were in use (e.g. with the "oc describe node" command).
+* A simple option would be to have kubelet add annotations to each node (instead of publishing extended
+resources). The scheduler plugin could then use those annotations to know what was available on each
+node. Something like:
+  * openshift.io/shared-cpus: x
+  * openshift.io/guaranteed-cpus: y
+
+The next question would be how to show the user how many shared/guaranteed CPUs are in use on each node.
+Without using extended resources, I can think of a couple options:
+* We could add a new "oc" command to display the shared/guaranteed CPUs configured (by looking at the
+annotations on each node) and the shared/guaranteed CPUs in use (by looking at the pods on each node and
+their QoS class).
+* We could patch the existing "oc describe node" command to add in this information (calculated in the
+same way). But this feels ugly and it doesn't look like we actually patch the kubectl code today.
+
+It doesn't feel like either of these options for showing the shared/guaranteed CPUs is going to be
+acceptable. Additionally, this solution suffers from the Scheduler Awareness issue described in the
+Open Questions section above.
+
+### Enhance Topology Aware Scheduler
+
+This option would enhance the [Topology Aware Scheduler](https://github.com/k8stopologyawareschedwg) (TAS) and
+[Resource Topology Exporter](https://github.com/k8stopologyawareschedwg/resource-topology-exporter) (RTE) /
+[Node Feature Discovery](https://github.com/k8stopologyawareschedwg/node-feature-discovery) (NFD) to support
+shared/guaranteed CPUs.
+
+At a high level:
+* The [Node Resource Topology](https://github.com/k8stopologyawareschedwg/noderesourcetopology-api)
+would be extended to track the shared/guaranteed CPUs available/allocated on each node.
+* The TAS would be extended to make scheduling decisions based on the QoS of the pod and the `cpu`
+requests/limits for each container.
+
+Further investigation is necessary to determine the feasibility and effort required for this option.
 
 ## Infrastructure Needed [optional]
 
