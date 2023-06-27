@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2023-05-09
-last-updated: 2023-06-21
+last-updated: 2023-07-07
 tracking-link:
   - https://issues.redhat.com/browse/ODC-7241
 see-also:
@@ -36,13 +36,17 @@ The samples are one of the main entry points to create a Kubernetes resource fro
 
 The user can select one of the many samples:
 
-![Project access tab with role select field to select an access role](samples.png)
+![Screenshot of a list of samples and the how the samples attributes are mapped into a samples card](samples.png)
+
+When the user selects a sample to import an application from a Git repository:
+
+![Screenshot of a form that let the user import a git sample](samples-import-git.png)
 
 Currently, this opens a form to import a git repository. Other sample types aren't supported at the moment.
 
 ## Motivation
 
-Creating a `ConsoleSample` CRD will promote the samples feature in the Developer Console to an extendable feature similar to QuickStarts. This makes it much easier for other teams to provide their own samples, for example with their operator.
+Creating a `ConsoleSample` CRD will promote the samples feature in the Developer Console to an extendable feature similar to [Quick Starts](https://github.com/openshift/enhancements/blob/master/enhancements/console/quick-starts.md). This makes it much easier for other teams to provide their own samples, for example with their operator.
 
 Samples are no longer tied to the exact OpenShift version and could be updated with the operator. Also customers can add their own samples if needed.
 
@@ -50,18 +54,18 @@ This will also allow us to migrate from the (deprecated) [samples-operator](http
 
 ### User Stories
 
-* As an OpenShift Serverless engineer, I want to provide additional samples that are tied to an operator version, not an OpenShift release.
-* As a cluster administrator, I want to add additional samples to the Developer Console sample catalog.
+* As an OpenShift Serverless product manager, I want to provide additional samples that are tied to an operator version, not an OpenShift release, so that these sample are compatible with the operator version and are only visible to the user if the operator is installed.
+* As a cluster administrator, I want to add additional samples to the Developer Console sample catalog, so that I can showcase features of the web console to my developers.
 
 ### Goals
 
 1. This feature should allow other teams to provide their Developer Console samples without applying them to the sample-operator or the console-operator.
-2. Samples should be allowed to localize/translated.
 
 ### Non-Goals
 
-1. We don't want to turn off the support for the (deprecated) [samples-operator](https://github.com/openshift/cluster-samples-operator) right now. So the console will not provide any samples on its own (in 4.14).
+1. We don't want to turn off the support for the (deprecated) [samples-operator](https://github.com/openshift/cluster-samples-operator) right now. The console will not provide any samples on its own (in 4.14), but it might be an option to migrate these samples in the future.
 2. A way to hide installed samples. Operators creating a sample resource should have a way to opt out of their samples.
+3. Localization/translation support for samples is defered.
 
 ## Proposal
 
@@ -100,19 +104,22 @@ metadata:
   name: java-sample
 spec:
   title: Java
+  abstract: Build and run Java applications using Maven and OpenJDK.
   description: |
+    # About this sample
     Build and run Java applications using Maven and OpenJDK.
-    Sample repository: https://github.com/jboss-openshift/openshift-quickstarts
-  icon: base64 encoded image
+    # Links
+    * [Sample repository](https://github.com/jboss-openshift/openshift-quickstarts)
+  icon: data:image;base64,base64 encoded image
+  type: Source to Image
   provider: Red Hat
-  badge: Serverless function
   tags:
   - java
   - jboss
   - openjdk
   source:
     type: GitImport
-    gitimport:
+    gitImport:
       url: https://github.com/jboss-openshift/openshift-quickstarts
 ```
 
@@ -125,76 +132,109 @@ metadata:
   name: minimal-ubi-container
 spec:
   title: Minimal UBI container
+  abstract: Test the minimal Red Hat Universal Base Image (UBI).
   description: |
+    # About this sample
     The Red Hat Universal Base Image is free to deploy on Red Hat or non-Red Hat platforms
     and freely redistributable...
-  icon: base64 encoded image
+  icon: data:image;base64,base64 encoded image
+  type: UBI Container
   provider: Red Hat
-  badge: Empty container
   source:
     type: ContainerImport
-    containerimport:
+    containerImport:
       image: registry.access.redhat.com/ubi8/ubi-minimal:8.8-860
 ```
 
-### Localization
+### Attributes
 
-The `ConsoleSample` resources provide the same optional localization annotations then `ConsoleQuickStarts`.
+The following constraints are checked in the [openshift/api change](https://github.com/openshift/api/pull/1503) as well:
 
-The `console.openshift.io/name: explore-serverless` label specifies the name of the sample. This should be consistent across all translations of a given sample,
-as it allows us to avoid showing the same Quick Start content in multiple languages.
+1. `title` is the display name of the sample. It is required and can have a maximum length of **50** characters.
+2. `abstract` is a short teaser the sample. It is required and can have a maximum length of **100** characters.
 
-If a sample is not translated into a user'ss language, the english version will be shown.
+   Currently, the abstract is shown on the sample card tile below the title and provider
+3. `description` is required and can have a maximum length of **4096** characters.
+   It is a README.md-like content for additional information, links, pre-conditions, and other instructions.
+   It will be rendered as **Markdown** so that it can contain line breaks, links, and other simple formatting.
+4. `icon` is an optional base64 encoded image and shown beside the sample title.
+   The format must follow the [data: URL format](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Data_URLs).
 
-See the [internationalization](https://github.com/openshift/enhancements/blob/master/enhancements/console/internationalization.md) and [QuickStart enhancement proposal](https://github.com/openshift/enhancements/blob/master/enhancements/console/quick-starts.md) for more information.
+   `data:[<mediatype>][;base64],<base64 encoded image>`
+
+   For example:
+
+   `data:image;base64,` plus the base64 encoded SVG image.
+
+   Vector images can also be used. SVG icons must start with:
+
+   `data:image/svg+xml;base64,` plus the base64 encoded SVG image.
+
+   All sample catalog icons will be shown on a white background (also when the dark theme is used).
+   The web console ensures that different aspect radios work correctly.
+   Currently, the surface of the icon is at most 40x100px.
+
+5. `type` is an optional label to group multiple samples. It can have a maximum length of **20** characters.
+
+   Currently, the type is shown a badge on the sample card tile in the top right corner (see screenshot above).
+
+   Recommendation is a **singular term** that groups samples like "Builder Image", "Devfile" or "Serverless Function".
+
+6. `provider` is an optional label to honor who provides the sample. It can have a maximum length of **20** characters.
+
+   A provider can be a company like "Red Hat" or an organization like "CNCF" or "Knative".
+
+   Currently, the provider is only shown on the sample card tile below the title with the prefix "Provided by " (see screenshot above).
+
+7. `tags` are optional.
+
+   Tags can be used to search for samples in the samples catalog.
+
+   They will be also displayed on the samples details page.
+
+### Source types
+
+The `source` attribute is an union type and will support only two `type`s in 4.14:
+
+1. `GitImport` provides information to import an application from a Git repository.
+2. `ContainerImport` provides information to import a container image.
+
+Other types will be ignored by the web console so that it is possible that operators install `type`s and downgrade the cluster when other source types are supported in the future.
+
+#### `GitImport`
+
+All previously supported samples opens a simplified "Import from Git" flow and prefill the Git repository.
+
+When a `GitImport` sample is selected, the same form will be opened and prefilled.
+
+1. The Git `url` is required.
+2. An optional Git `revision` to clone a specific branch, tag or commit SHA, etc.
+3. An optional `contextDir`, a subfolder in the repo to build the component.
+
+There is no other attribute supported at the moment. It supports only public Git repositories.
 
 ```yaml
-apiVersion: console.openshift.io/v1
-kind: ConsoleSample
-metadata:
-  name: java-sample
-  annotations:
-    console.openshift.io/name: java-sample # optional, metadata.name is also fine
-spec:
-  title: Java sample
-  description: |
-    Build and run Java applications using Maven and OpenJDK.
-    Sample repository: https://github.com/jboss-openshift/openshift-quickstarts
-  icon: base64 encoded image
-  provider: Red Hat
-  badge: Serverless function
-  tags:
-  - java
-  - jboss
-  - openjdk
   source:
     type: GitImport
-    gitimport:
-      url: https://github.com/jboss-openshift/openshift-quickstarts
----
-apiVersion: console.openshift.io/v1
-kind: ConsoleSample
-metadata:
-  name: java-samples-de
-  annotations:
-    console.openshift.io/lang: de
-    console.openshift.io/name: java-sample # same as annotation or metadata.name above
-spec:
-  title: Java Beispiel
-  description: |
-    Beispiel Java Anwendung basierend auf Maven und OpenJDK.
-    Repository: https://github.com/jboss-openshift/openshift-quickstarts
-  icon: base64 encoded image
-  provider: Red Hat
-  badge: Serverless function
-  tags:
-  - java
-  - jboss
-  - openjdk
+    gitImport:
+      url: https://github.com/openshift-dev-console/nodejs-sample
+      revision: main # optional
+      contextDir: /backend # optional
+```
+
+#### `ContainerImport`
+
+When the user selects a `ContainerImport` sample, the **"Add"** > **"Container images"** page will be opened
+and the given container image is prefilled as "Image name from external registry".
+
+Other options like the Resource type (Deployment, DeploymentConfig or Serverless Deployment) will
+be selected based on the cluster defaults and the user preferences.
+
+```yaml
   source:
-    type: GitImport
-    gitimport:
-      url: https://github.com/jboss-openshift/openshift-quickstarts
+    type: ContainerImport
+    containerImport:
+      image: registry.access.redhat.com/ubi8/ubi-minimal:8.8-860
 ```
 
 ### Test Plan
@@ -258,7 +298,6 @@ N/A
 ## Implementation History
 
 * Initial version
-* Added localization
 
 ## Alternatives
 
