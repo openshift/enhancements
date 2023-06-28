@@ -55,13 +55,24 @@ This enhancement proposal presents a solution that enables cluster admins to hav
 
 * Prevent users with elevated privileges from escalating their privileges to access application logs that they are not supposed to have access to. 
 
+## Assumptions
+
+This proposal assumes that the existing virtual resource `logs` (API group `loki.grafana.com`) is extended to be used on a namespace basis. This would be achieved by implementing a new authorization workflow for requests in `opa-openshift`, by using namespaced `SubjectAccessReview` (SAR) API calls.
+
+Here's what the new authorization workflow would look like:
+
+![Authz workflow](images/authz-flow.png)
+
+
 ## Proposal
 
 Use the `ClusterLogging` custom resource definition managed by the Cluster Logging Operator to enable/disable the fine grained access to logs for the LokiStack logstore. This will be achieved by adding a new field to the CRD called `advancedLogsAccess`. This new field is a boolean with a default value of false.
 
-* For the first use case, where we have non-admin users, the proposed solution is to create a group for application log readers called `log-reader-group`, and grant this group the ability to read application logs by binding it to the existing ClusterRole `logging-application-logs-reader`. The cluster admin can then either add a user to the `log-reader-group` thus granting access to application logs on all namespace where they have access, or create a role binding to the user on each namespace they want to grant access to logs on.
+* Using the new SAR implementation, we can simply use RBAC configurations to achieve our goals:
 
-* For the second use case, where we have users with admin like privileges, the proposed solution is to create a new group called `restricted-cluster-admin-group`. This group has all the permissions a cluster admin has, except for application logs. We can then grant this group access to application logs on specific namespace by binding it to `logging-application-logs-reader` on the desired namespace. 
+  1. For the first use case, where we have non-admin users, the proposed solution is to create a group for application log readers called `log-reader-group`, and grant this group the ability to read application logs by binding it to the existing ClusterRole `logging-application-logs-reader`. The cluster admin can then either add a user to the `log-reader-group` thus granting access to application logs on all namespace where they have access, or create a role binding to the user on each namespace they want to grant access to logs on.
+
+  2. For the second use case, where we have users with admin like privileges, the proposed solution is to create a new group called `restricted-cluster-admin-group`. This group has all the permissions a cluster admin has, except for application logs. We can then grant this group access to application logs on specific namespace by binding it to `logging-application-logs-reader` on the desired namespace. 
 
 ### Workflow Description
 
@@ -175,7 +186,8 @@ subjects:
   apiGroup: rbac.authorization.k8s.io
 ```
 
-All of the resources created will not be managed by the operator once they are created. This will allow the cluster admin to have control over how and when they are used.
+All of the RBAC resources created will not be managed by the operator, as they are created for user convenience only. Further RBAC configuration can be used by the admin.
+This will also allow the cluster admins to have control over how and when they are used. 
 
 ### API Extensions
 
@@ -241,10 +253,7 @@ Other drawbacks TBD.
 
 1. When the advanced logs access is enabled and then disabled, should the operator clean up the RBAC resources or should that be the responsibility of the cluster admin.
 
-### Test Plan
-
-TBD
 
 ## Alternatives
 
-TBD
+* The operator doesn't create the RBAC resources listed above, and instead just deletes the `logging-all-authenticated-application-logs-reader` ClusterRoleBinding. Then the admin has the responsibility of creating the necessary RBAC resources in order to properly configure access to logs.
