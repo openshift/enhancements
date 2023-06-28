@@ -33,7 +33,7 @@ The proposal provides an overview of the changes required to achieve this goal a
 
 ## Motivation
 
-In enterprise environments, where OpenShift is used across different legal entities, it's common to have central teams that support the application teams in the respective entities. But given that some application may log sensitive data, those centralized support teams are not granted access to logs but they can only view specific objects, such as pods in the namespace.
+In enterprise environments, where OpenShift is used across different legal entities, it's common to have central teams that support the application teams in the respective entities. Support teams are granted access to view kubernetes resources, however, as some applications may log sensitive data, support teams should not have access to logs by default.
 
 Currently, access to logs in LokiStack is granted when a user has access to the given namespace or when the user is part of a specific cluster-admin Group. And even though OpenShift Container Platform 4 does allow to configure RBAC to address this issue, LokiStack does not, and therefore grants access to logs to people that should not see them.
 
@@ -41,14 +41,15 @@ This enhancement proposal presents a solution that enables cluster admins to hav
 
 ### User Stories
 
-* Use Case number one, is where a user has access to a specific namespace to see the objects included but is denied to view logs from pods (for legal reason mostly).
+* As a cluster admin, I want to deny a user from viewing logs from pods in a namespace in which they have access. This is mostly for legal reason.
 
-* Use Case number two, is where a number of people have elevated permissions and therefore are able to access pretty much all namespaces on the OpenShift cluster. Usually those people are responsible for enabling and supporting applications when onboarding to OpenShift and therefore have permissions to see most of the objects in the given namespaces. However, due to legal and data protection constrains, those users can not have access to logs and therefore LokiStack should prevent them from seeing application specific logs.
+* As a cluster admin, I want to deny a user with cluster admin like privileges access to application logs, on a namespace basis or cluster wide. This is done due to legal and data protection constrains.
 
 ### Goals
 
 * Cluster admins can grant and revoke access of the workload logs of specific namespaces to users.
 * Cluster admins can grant and revoke access of the workload logs of specific namespaces to users with elevated privileges.
+* Access should be managed using OpenShift RBAC in order to be consistent with how permissions are managed elsewhere.
 
 ### Non-Goals
 
@@ -198,7 +199,7 @@ type LokiStackStoreSpec struct {
 	//
 	// +nullable
 	// +optional
-  AdvancedLogsAccess bool `json:"advancedLogsAccess"`
+	AdvancedLogsAccess bool `json:"advancedLogsAccess"`
 }
 ```
 
