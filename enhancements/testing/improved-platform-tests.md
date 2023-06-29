@@ -368,6 +368,9 @@ kubernetes vendored tests. Currently, at least Microshift requires us to have
 the kubernetes tests vendored since they don't provide release image from which
 we can extract the kubernetes test binaries.
 
+Re-evaluate [alternative approach](#build-time-assembly---aggregating-binaries)
+to ship all test binaries inside a single image rather than multiple images.
+
 ### Test Plan
 
 Not applicable, since this is changing testing mechanism. Prior landing this PR
