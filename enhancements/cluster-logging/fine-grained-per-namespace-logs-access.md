@@ -1,5 +1,5 @@
 ---
-title: fine-grained-logs-access
+title: fine-grained-per-namespace-logs-access
 
 authors:
   - "@aminesnow"
@@ -168,6 +168,9 @@ subjects:
   apiGroup: rbac.authorization.k8s.io
 ```
 
+### API Extensions
+N/A
+
 ### Implementation Details/Notes/Constraints
 
 In the CLO, we need to disable the reconciliation of `logging-all-authenticated-application-logs-reader` ClusterRoleBinding. This reconciliation happens here:
@@ -207,7 +210,39 @@ Other drawbacks TBD.
 
 1. What happens if the SAR solution is not feasible?
 
+### Test Plan
+TBD
 
 ## Alternatives
-
 TBD
+
+### Graduation Criteria
+N/A
+
+#### Dev Preview -> Tech Preview
+N/A
+
+#### Tech Preview -> GA
+N/A
+
+#### Removing a deprecated feature
+N/A
+
+### Upgrade / Downgrade Strategy
+N/A
+
+### Version Skew Strategy
+N/A
+
+### Operational Aspects of API Extensions
+N/A
+
+#### Failure Modes
+N/A
+
+#### Support Procedures
+N/A
+
+## Implementation History
+N/A
+
