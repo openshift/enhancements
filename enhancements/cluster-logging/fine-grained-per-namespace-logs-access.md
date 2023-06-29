@@ -66,183 +66,137 @@ Here's what the new authorization workflow would look like:
 
 ## Proposal
 
-Use the `ClusterLogging` custom resource definition managed by the Cluster Logging Operator to enable/disable the fine grained access to logs for the LokiStack logstore. This will be achieved by adding a new field to the CRD called `advancedLogsAccess`. This new field is a boolean with a default value of false.
+Make the `logging-all-authenticated-application-logs-reader` ClusterRoleBinding unmanaged by the operator, and create three ClusterRoles, one for each of the three tenants (`application`, `infrastructure` and `audit`):
 
-* Using the new SAR implementation, we can simply use RBAC configurations to achieve our goals:
+* `cluster-logging-application-view`: give application logs read access.
+* `cluster-logging-infrastructure-view`: give infrastructure logs read access.
+* `cluster-logging-audit-view`: give audit logs read access.
 
-  1. For the first use case, where we have non-admin users, the proposed solution is to create a group for application log readers called `log-reader-group`, and grant this group the ability to read application logs by binding it to the existing ClusterRole `logging-application-logs-reader`. The cluster admin can then either add a user to the `log-reader-group` thus granting access to application logs on all namespace where they have access, or create a role binding to the user on each namespace they want to grant access to logs on.
+These roles can then be bound to users/groups on a namespace basis or cluster wide. 
+Using the new SAR implementation along with these roles, we can simply use RBAC configurations to achieve our goals:
 
-  2. For the second use case, where we have users with admin like privileges, the proposed solution is to create a new group called `restricted-cluster-admin-group`. This group has all the permissions a cluster admin has, except for application logs. We can then grant this group access to application logs on specific namespace by binding it to `logging-application-logs-reader` on the desired namespace. 
+  1. For the first use case, where we have non-admin users, the cluster admin can create the necessary RoleBindings for users to have access to each log type on the target namespaces.
+
+  2. For the second use case, where we have users with admin like privileges, the cluster admin can for instance create ClusterRoleBindings for users to have access to `infrastructure` and `audit` logs, and then create a RoleBinding on namespaces where they wish to grant access to `application` logs.
 
 ### Workflow Description
 
-1. The cluster administrator enables fine grained logs access in the `ClusterLogging` resource:
-
-```yaml
-apiVersion: logging.openshift.io/v1
-kind: ClusterLogging
-metadata:
-  name: instance
-  namespace: openshift-logging
-spec:
-  logStore:
-    type: lokistack
-    lokistack:
-      name: lokistack-dev
-      advancedLogsAccess: true
-  ...
-```
-
-2. The Cluster Logging Operator (CLO) deletes the `logging-all-authenticated-application-logs-reader` ClusterRoleBinding. This binding allows all authenticated users to see application logs in namespace where they have access.
-
-3. The CLO then creates a new empty group `log-reader-group` and binds it to `logging-application-logs-reader`:
-
-```yaml
-apiVersion: user.openshift.io/v1
-kind: Group
-metadata:
-  name: log-reader-group
-users:
-```
-The group contains no users. The cluster admin can then add users to the group by editing it manually.
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: logging-application-logs-reader-binding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: logging-application-logs-reader
-subjects:
-- kind: Group
-  name: log-reader-group
-  apiGroup: rbac.authorization.k8s.io
-```
-
-4. The operator also creates a new ClusterRole called `restricted-cluster-admin` and binds it to a new group `restricted-cluster-admin-group`. `restricted-cluster-admin` grants access to all api objects except for logs:
+1. The Cluster Logging Operator (CLO) creates `cluster-logging-application-view`, `cluster-logging-infrastructure-view` and `cluster-logging-audit-view` ClusterRoles:
 
 ```yaml
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: restricted-cluster-admin
+  name: cluster-logging-application-view
 rules:
 - apiGroups:
-  - ''
-  - 'admissionregistration.k8s.io/v1'
-  - 'apiextensions.k8s.io/v1'
-  - 'apiregistration.k8s.io/v1'
-  - 'apiserver.openshift.io/v1'
-  - 'apps.openshift.io/v1'
-  - 'authentication.k8s.io/v1'
-  - 'authorization.k8s.io/v1'
-  - ...
+  - loki.grafana.com
   resources:
-  - '*'
+  - application
+  resourceNames:
+  - logs
   verbs:
-  - '*'
+  - get
 ```
 
 ```yaml
-apiVersion: user.openshift.io/v1
-kind: Group
-metadata:
-  name: restricted-cluster-admin-group
-users:
-```
-The group contains no users. The cluster admin can then add users to the group by editing it manually.
-
-```yaml
+kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
 metadata:
-  name: restricted-cluster-admin-binding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: restricted-cluster-admin
-subjects:
-- kind: Group
-  name: restricted-cluster-admin-group
-  apiGroup: rbac.authorization.k8s.io
+  name: cluster-logging-infrastructure-view
+rules:
+- apiGroups:
+  - loki.grafana.com
+  resources:
+  - infrastructure
+  resourceNames:
+  - logs
+  verbs:
+  - get
 ```
 
-Now the cluster admin can allow access to specific namespaces to the `restricted-cluster-admin-group` (or to a specific user in the group) by creating a RoleBinding with the `logging-application-logs-reader`, e.g.
+```yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: cluster-logging-audit-view
+rules:
+- apiGroups:
+  - loki.grafana.com
+  resources:
+  - audit
+  resourceNames:
+  - logs
+  verbs:
+  - get
+```
+
+2. The cluster admin deletes the `logging-all-authenticated-application-logs-reader` ClusterBinding.
+
+3. The cluster admin create the necessary binding to grant access to users, e.g.:
+
+Granting `simple-user` access to `application` logs on `desired-namespace`.
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: special-perm-restricted-cluster-admin-binding
+  name: simple-user-application-logs
   namespace: desired-namespace
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: logging-application-logs-reader
+  name: cluster-logging-application-view
 subjects:
-- kind: Group # or User
-  name: restricted-cluster-admin-group # or the User's name
+- kind: User
+  name: simple-user
   apiGroup: rbac.authorization.k8s.io
 ```
 
-All of the RBAC resources created will not be managed by the operator, as they are created for user convenience only. Further RBAC configuration can be used by the admin.
-This will also allow the cluster admins to have control over how and when they are used. 
+Granting `admin-user` access to `infrastructure` logs.
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin-user-infrastructure-logs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-logging-infrastructure-view
+subjects:
+- kind: User
+  name: admin-user
+  apiGroup: rbac.authorization.k8s.io
+```
 
-### API Extensions
+### Implementation Details/Notes/Constraints
 
-We will be modifying the `ClusterLogging` CRD managed by the Cluster Logging Operator by adding a new field to the CRD called `advancedLogsAccess`. This new field is a boolean with a default value of false.
-This new field will be used to enable/disable the fine grained access to logs for the LokiStack logstore.
+In the CLO, we need to disable the reconciliation of `logging-all-authenticated-application-logs-reader` ClusterRoleBinding. This reconciliation happens here:
 
-### Implementation Details/Notes/Constraints 
-
-Here's the modification for the `ClusterLogging` CRD:
-
+`internal/logstore/lokistack/logstore_lokistack.go:64`
 ```go
-// LokiStackStoreSpec is used to set up cluster-logging to use a LokiStack as logging storage.
-// It points to an existing LokiStack in the same namespace.
-type LokiStackStoreSpec struct {
-	// Name of the LokiStack resource.
-	//
-	// +required
-	Name string `json:"name"`
+func ReconcileLokiStackLogStore(k8sClient client.Client, deletionTimestamp *v1.Time, appendFinalizer func(identifier string) error) error {
+  
+  ...
+  if err := reconcile.ClusterRoleBinding(k8sClient, lokiStackAppReaderClusterRoleBindingName, newLokiStackAppReaderClusterRoleBinding); err != nil {
+    return kverrors.Wrap(err, "Failed to create or update ClusterRoleBinding for reading application logs.")
+  }
 
-	// Enable fine grained control over access to logs.
-	//
-	// +nullable
-	// +optional
-	AdvancedLogsAccess bool `json:"advancedLogsAccess"`
+  return nil
 }
 ```
 
-Here's an example of a `ClusterLogging` definition with advanced logs access enabled:
-
-```yaml
-apiVersion: logging.openshift.io/v1
-kind: ClusterLogging
-metadata:
-  name: instance
-  namespace: openshift-logging
-spec:
-  managementState: Managed
-  logStore:
-    type: lokistack
-    lokistack:
-      name: lokistack-dev
-      advancedLogsAccess: true
-  collection:
-    type: vector
-```
 
 ### Risks and Mitigations
 
-- Privilege escalation, ie, a restricted cluster admin being able to grant themselves the ability to access logs they should not be able to access via an RBAC modification, is something cluster admins should be aware of and manage themselves.
+* Privilege escalation, ie, a restricted cluster admin being able to grant themselves the ability to access logs they should not be able to access via an RBAC modification, is something cluster admins should be aware of and manage themselves.
+
+* This proposition assumes and is dependent on the fact that the SAR is implemented and works correctly.
 
 Other risks TBD.
 
 ### Drawbacks
 
-This proposition assumes that once the advanced logs access is enabled and RBAC resources are created by the operator, the resources are no longer managed by the operator. This means that the remaining responsibilities, such as keeping the list of rules in `restricted-cluster-admin` up to date, will fall onto the cluster admins.
+* We don't automate much as this is an RBAC configuration focused proposal, so in order for cluster admins to properly configure access to logs, a comprehensive documentation is required.
 
 Other drawbacks TBD.
 
@@ -251,9 +205,9 @@ Other drawbacks TBD.
 
 ### Open Questions
 
-1. When the advanced logs access is enabled and then disabled, should the operator clean up the RBAC resources or should that be the responsibility of the cluster admin.
+1. What happens if the SAR solution is not feasible?
 
 
 ## Alternatives
 
-* The operator doesn't create the RBAC resources listed above, and instead just deletes the `logging-all-authenticated-application-logs-reader` ClusterRoleBinding. Then the admin has the responsibility of creating the necessary RBAC resources in order to properly configure access to logs.
+TBD
