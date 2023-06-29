@@ -14,6 +14,9 @@ reviewers:
 approvers:
   - "@periklis"
 
+api-approvers:
+  - "@periklis"
+
 creation-date: 2023-05-31
 last-updated: 2023-05-31
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
