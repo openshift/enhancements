@@ -97,7 +97,7 @@ issues found, which also affected the increased delays.
 By separating OpenShift tests from the ones coming from kubernetes we will:
 - shorten the time when we start running most up-to-date tests from kubernetes;
 - run all tests coming from kubernetes fork, especially those introduced in patch releases;
-- start getting the correct single already during [kubernetes update process](https://github.com/openshift/kubernetes/blob/master/REBASE.openshift.md).
+- start getting the new results already during [kubernetes update process](https://github.com/openshift/kubernetes/blob/master/REBASE.openshift.md).
 
 ### Tests co-located with code
 
@@ -155,7 +155,7 @@ sequenceDiagram
 This proposal's goal is to extend test discovery (step 1), and running the actual
 test (step 5) with external binaries, which are retrieved from the payload image.
 The improved flow would be as follows:
-1. Retrieve test binaries from the payload image.
+1. Retrieve test binaries from the images referenced by the payload image.
 2. Discover all tests, both the built-in into `openshift-tests` binary, and the
    ones provided by external binaries by executing `<binary>-tests list`.
    Split them into suites based on test names/labels.
@@ -249,9 +249,8 @@ The proposed extensions to `openshift-tests` will require the following changes:
 - **Some of the work that has been done to build the partner certification tool will
   need to be updated to pull additional images with separate test binaries.**
 
-  The `openshift-tests` binary will contain the necessary logic how to retrieve those
-  additional tests binaries from the release payload, so even in the offline installation
-  as long as the release payload is reachable, the tests should continue working.
+  The `openshift-tests` binary will contain the necessary logic to ensure that test
+  invocation is working as before.
 
 - **Not available release image can prevent from running the tests.**
 
@@ -353,6 +352,11 @@ The followup work requires:
 3. Preparing a template/demo for one of operators building on top of steps 1 and 2
    above.
 
+Additionally, to enable flows where release payload is not available, one should be
+able to point to a local directory containing external binaries that should be
+used instead. For example, through `OPENSHIFT_EXTERNAL_TESTS_DIRECTORY` environment
+variable.
+
 ### Even more future work
 
 As mentioned in [risks section](#risks-and-mitigations), upgrade tests are relying
@@ -436,3 +440,14 @@ it is built from a source tree composed from multiple repositories.
 Cons:
 - Longer test times due to the compilation of openshift-tests.
 - Consistency across all repos source which contributes to this binaries.
+
+### Build-time Assembly - Aggregating Binaries
+
+`openshift-tests` contains a traditional binary for running the tests, and all
+the additional test binaries, which are injected while building the release image.
+
+Cons:
+- Longer test times due to the compilation of openshift-tests.
+- Consistency across all repos source which contributes to this binaries.
+- Necessary changes in the build pipeline which will allow constructing binaries
+  from multiple repositories.
