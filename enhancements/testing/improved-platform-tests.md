@@ -442,7 +442,6 @@ it is built from a source tree composed from multiple repositories.
 
 Cons:
 - Longer test times due to the compilation of openshift-tests.
-- Consistency across all repos source which contributes to this binaries.
 
 ### Build-time Assembly - Aggregating Binaries
 
@@ -453,6 +452,5 @@ for running the tests, and all the additional test binaries, which are injected
 while building the release image.
 
 Cons:
-- Consistency across all repos source which contributes to this binaries.
 - Necessary changes in the build pipeline which will allow including content
   from either multiple images, or multiple repos, in a single payload image.
