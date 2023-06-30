@@ -446,11 +446,13 @@ Cons:
 
 ### Build-time Assembly - Aggregating Binaries
 
-`openshift-tests` contains a traditional binary for running the tests, and all
-the additional test binaries, which are injected while building the release image.
+Make the existing `tests` payload image (which contains the single monolithic
+`openshift-tests` binary today and can be used by customers/users/developers to
+run any/all openshift e2e tests against a cluster) contain a traditional binary
+for running the tests, and all the additional test binaries, which are injected
+while building the release image.
 
 Cons:
-- Longer test times due to the compilation of openshift-tests.
 - Consistency across all repos source which contributes to this binaries.
-- Necessary changes in the build pipeline which will allow constructing binaries
-  from multiple repositories.
+- Necessary changes in the build pipeline which will allow including content
+  from either multiple images, or multiple repos, in a single payload image.
