@@ -11,7 +11,7 @@ reviewers:
 approvers:
   - "@bparees"
 creation-date: 2020-08-18
-last-updated: 2022-11-16
+last-updated: 2023-02-22
 status: implemented
 ---
 
@@ -29,7 +29,7 @@ status: implemented
 
 OpenShift Console currently has
 [static plugins](https://github.com/openshift/console/tree/master/frontend/packages/console-plugin-sdk)
-that allow teams to contribute features to the UI such as CNV and OCS. These plugins live in a
+that allow teams to contribute features to the UI such as CNV and ODF. These plugins live in a
 [packages directory](https://github.com/openshift/console/tree/master/frontend/packages)
 inside the `openshift/console` repo and extend console through a well-defined
 plugin API. Static plugins are built with console and included in the console
@@ -71,9 +71,6 @@ contributing to a single monorepo.
 
 ### Non-Goals
 
-* Initially we don't plan to make this a public API. The target use is for Red
-  Hat operators. We might reevaluate later when dynamic plugins are more
-  mature.
 * We can't prevent breaking changes in Patternfly APIs the console exposes to plugins.
 * Plugins won't be sandboxed. They will have full JavaScript access to the DOM and network.
 * This proposal does not cover allowing plugins to contribute backend console endpoints.
@@ -178,12 +175,14 @@ between plugin and the service:
 An example proxy request path from `acm` plugin with a `search` service is:
 `/api/proxy/plugin/acm/search/pods?namespace=openshift-apiserver`
 
-Proxied request will use [service CA bundle](https://docs.openshift.com/container-platform/4.8/security/certificate_types_descriptions/service-ca-certificates.html) by default. The service must use HTTPS.
-If the service uses a custom service CA, the `caCertificate` field
-must contain the certificate bundle. In case the service proxy request
-needs to contain logged-in user's OpenShift access token, the `authorize`
-field needs to be set to `true`. The user's OpenShift access token will be
-then passed in the HTTP `Authorization` request header, for example:
+Proxied request will use
+[service CA bundle](https://docs.openshift.com/container-platform/4.8/security/certificate_types_descriptions/service-ca-certificates.html)
+by default. The service must use HTTPS. If the service uses a custom service
+CA, the `caCertificate` field must contain the certificate bundle. In case the
+service proxy request needs to contain logged-in user's OpenShift access token,
+the `authorize` field needs to be set to `true`. The user's OpenShift access
+token will be then passed in the HTTP `Authorization` request header, for
+example:
 
 `Authorization: Bearer sha256~kV46hPnEYhCWFnB85r5NrprAxggzgb6GOeLbgcKNsH0`
 
@@ -501,11 +500,6 @@ z-stream.
 
 **Mitigation**: Plugins are not enabled by default. A cluster admin must opt-in.
 
-**Risk**: Customers/ISVs will use this API before it's fully supported.
-
-**Mitigation**: Initially, we'll have an allowlist of supported plugins to make
-it clear that only these plugins should be installed.
-
 ## Design Details
 
 ### Test Plan
@@ -587,7 +581,7 @@ console will only load the correct plugin.
 * 2021-06-22 - Support localization of dynamic plugins
 * 2021-10-06 - Allow dynamic plugins to proxy to services on the cluster
 * 2022-05-13 - API enhancements for GA
-* 2023-01-17 - GA
+* 2023-01-17 - GA (OpenShift 4.12)
 
 ## Drawbacks
 
