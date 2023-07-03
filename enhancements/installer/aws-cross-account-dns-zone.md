@@ -14,11 +14,12 @@ api-approvers:
   - "@deads2k"
   - "@JoelSpeed"
 creation-date: 2023-05-08
-last-updated: 2023-05-08
+last-updated: 2023-10-04
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/CORS-2613
   - https://issues.redhat.com/browse/OCPBU-558
 see-also:
+ - "/enhancements/installer/externaldns-operator-aws-assume-role.md"
 replaces:
 superseded-by:
 ---
@@ -139,8 +140,6 @@ type AWSDNSSpec struct {
 
 ```
 
-The name of the field is discussed further in open questions.
-
 #### Install Config
 
 `platform.aws.hostedZoneRole` would be added to complement the existing `platform.aws.hostedZone` field.
@@ -162,9 +161,6 @@ platform:
     hostedZone: Z00147933I3NWOQ6M4699
     hostedZoneRole: arn:aws:iam::<account-a>:role/<role-name>
 ```
-Please see Open Questions for further discussion of the install config.
-
-
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -220,7 +216,9 @@ An example IAM Trust Policy:
 
 ### Risks and Mitigations
 
-Add-on operators needing permissions will not work unless updated to use the role ARN.
+Add-on operators needing permissions will not work unless updated to use the role ARN. The following add-on operators
+have been addressed:
+- ExternalDNS Operator (see [ExternalDNS Operator AWS Assume Role](/enhancements/dns/externaldns-operator-aws-assume-role.md))
 
 ### Drawbacks
 
@@ -231,13 +229,15 @@ platform dependencies in this config, but it should be carefully considered.
 
 ### Open Questions [optional]
 
+n/a
+
 ### Test Plan
 
 An e2e test will be setup which utilizes both AWS CI accounts.
 
 ### Graduation Criteria
 
-This functionality is targeted for 4.14 GA and for backporting to previous releases. 
+This functionality is targeted for 4.14 GA and for backporting to previous releases.
 
 #### Dev Preview -> Tech Preview
 
@@ -250,7 +250,7 @@ Behind `PrivateHostedZoneAWS` feature gate.
 
 #### Removing a deprecated feature
 
-- See open questions regarding install config
+n/a
 
 ### Upgrade / Downgrade Strategy
 
@@ -267,7 +267,7 @@ n/a
 #### Failure Modes
 
 - Installation will fail if there are any issues with role during install.
-- If there are issues with the role during day-2 operations, the cluster ingress operator will not
+- If there are issues with the role during day-2 operations, the Cluster Ingress Operator will not
 be able to create DNS records and should log appropriate error messages.
 
 #### Support Procedures
@@ -286,10 +286,18 @@ profile directly in the AWS creds. The implementation suggested in this enhancem
 preferred as it allows users to declare intent of a cross account install,
 rather than OpenShift trying to infer that from the credentials.
 
+### External ID
+
+We considered supporting configuration of an [external ID](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html)
+for the Ingress Operator when using an assumed role. AWS suggests the use of an external ID in specific scenarios to
+mitigate privilege escalation such as the [confused deputy problem](https://en.wikipedia.org/wiki/Confused_deputy_problem).
+However, for this effort, we opted not to include this functionality at the moment. The reason behind this decision is
+that it would become necessary to incorporate support for external ID throughout all the components that enable shared
+VPC (including API, Install, and Ingress Operator), and there hasn't been a specific customer need for it thus far.
+
 ### API: Infrastructure 
 
 A `privateHostedZoneRole` field containing the role ARN would be added to `AWSPlatformStatus` in the [cluster infrastructure object](https://github.com/openshift/api/blob/894b49f57a15cbce3869961e20cd9d52df6f8b0f/config/v1/types_infrastructure.go#L424).
-The name of the field is discussed further in open questions.
 
 #### OpenShift API
 
