@@ -30,15 +30,15 @@ superseded-by: []
 
 ## Summary
 
-This enhancement proposal seeks to outline the solution for a more fine grained access to LokiStack logs on OpenShift Container Platform 4, ie, have the ability as the cluster administrator to grant access to logs on a namespace basis.
+This enhancement proposal seeks to outline the solution for more fine-grained access to LokiStack logs on OpenShift Container Platform 4, ie, have the ability as the cluster administrator to grant access to logs on a namespace basis.
 
 The proposal provides an overview of the changes required to achieve this goal as well as some implementation details.
 
 ## Motivation
 
-In enterprise environments, where OpenShift is used across different legal entities, it's common to have central teams that support the application teams in the respective entities. Support teams are granted access to view kubernetes resources, however, as some applications may log sensitive data, support teams should not have access to logs by default.
+In enterprise environments, where OpenShift is used across different legal entities, it's common to have central teams that support the application teams in the respective entities. Support teams are granted access to view Kubernetes resources, however, as some applications may log sensitive data, support teams should not have access to logs by default.
 
-Currently, access to logs in LokiStack is granted when a user has access to the given namespace or when the user is part of a specific cluster-admin Group. And even though OpenShift Container Platform 4 does allow to configure RBAC to address this issue, LokiStack does not, and therefore grants access to logs to people that should not see them.
+Currently, access to logs in LokiStack is granted when a user has access to the given namespace or when the user is part of a certain group that we (`logging-team`) define as a cluster-admin group. And even though OpenShift Container Platform 4 does allow configuring RBAC to address this issue, LokiStack does not, and therefore grants access to logs to people that should not see them.
 
 This enhancement proposal presents a solution that enables cluster admins to have a more fine grained control over who accesses what logs.
 
@@ -198,13 +198,9 @@ func ReconcileLokiStackLogStore(k8sClient client.Client, deletionTimestamp *v1.T
 
 * This proposition assumes and is dependent on the fact that the SAR is implemented and works correctly.
 
-Other risks TBD.
-
 ### Drawbacks
 
 * We don't automate much as this is an RBAC configuration focused proposal, so in order for cluster admins to properly configure access to logs, a comprehensive documentation is required.
-
-Other drawbacks TBD.
 
 
 ## Design Details
