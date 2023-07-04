@@ -54,15 +54,11 @@ certificate data via a secret reference.
   for certificate management of user workloads on OpenShift so that no manual process is
   required to renew expired certificates.
 
-- As an end user of Route API, I want OpenShift Routes to support both manual and managed
-  mode of operation for certification management so that I can switch between manual certificate
-  management and third-party certificate management.
-
 - As an Openshift engineer, I want to be update the router so that it is able read secrets directly
   if all the preconditions have been met by the router serviceaccount.
 
 - As an OpenShift engineer, I want to update the route validation in the api-server to add new validations
-  required for `.spec.tls.certificateRef`.
+  required for `.spec.tls.externalCertificate`.
 
 - As an OpenShift engineer, I want to be able to update Route API so that I can integrate
   OpenShift Routes with third-party certificate management solutions like cert-manager.
@@ -79,14 +75,14 @@ certificate data via a secret reference.
 ### Non-Goals
 
 - Provide certificate life cycle management controls on the Route API (expiryAfter, renewBefore, etc).
-- Modify ingress-to-route controller behaviour to use `.spec.tls.certificateRef`
+- Modify ingress-to-route controller behaviour to use `.spec.tls.externalCertificate`
 - Extend this feature to cover CA certificate or destination CA certificate in the Route API.
 
 ## Proposal
 
 This enhancement proposes extending the openshift/router to read serving certificate data either
-from the Route `.spec.tls.certificate` and `.spec.tls.key` or from a new field `.spec.tls.certificateRef`
-which is a `kubernetes.io/tls` type secret reference. This `certificateRef` field will enables the
+from the Route `.spec.tls.certificate` and `.spec.tls.key` or from a new field `.spec.tls.externalCertificate`
+which is a `kubernetes.io/tls` type secret reference. This `externalCertificate` field will enables the
 users to provide a reference to a Secret containing the serving cert/key pair that will be parsed
 and served by OpenShift router.
 
@@ -110,7 +106,7 @@ reference field described under [API Extensions](#api-extensions).
   oc create rolebinding foo-secret-reader --role=secret-reader --serviceaccount=openshift-ingress:router --namespace=<current-namespace>
   ```
 - To expose a user workload, the user would create a new Route with the
-  `.spec.tls.certificateRef` referencing the generated secret that was created
+  `.spec.tls.externalCertificate` referencing the generated secret that was created
   in the previous step.
 - If the secret that is referenced exists and has a successfully generated
   cert/key pair, the router will serve this certificate if all preconditions are met.
@@ -121,7 +117,7 @@ N.A
 
 ### API Extensions
 
-A `.spec.tls.certificateRef` field is added to Route `.spec.tls` which can be used to provide a secret name
+A `.spec.tls.externalCertificate` field is added to Route `.spec.tls` which can be used to provide a secret name
 containing the certificate data instead of using `.spec.tls.certificate` and `spec.tls.key`.
 
 ```go
@@ -129,25 +125,26 @@ containing the certificate data instead of using `.spec.tls.certificate` and `sp
 // TLSConfig defines config used to secure a route and provide termination
 //
 // +kubebuilder:validation:XValidation:rule="has(self.termination) && has(self.insecureEdgeTerminationPolicy) ? !((self.termination=='passthrough') && (self.insecureEdgeTerminationPolicy=='Allow')) : true", message="cannot have both spec.tls.termination: passthrough and spec.tls.insecureEdgeTerminationPolicy: Allow"
-// +kubebuilder:validation:XValidation:rule="has(self.certificate) && has(self.certificateRef) ? false : true", message="cannot have both spec.tls.certificate and spec.tls.certificateRef"
+// +openshift:validation:FeatureSetAwareXValidation:featureSet=TechPreviewNoUpgrade;CustomNoUpgrade,rule="!(has(self.certificate) && has(self.externalCertificate))", message="cannot have both spec.tls.certificate and spec.tls.externalCertificate"
 type TLSConfig struct {
 	// ...
 
-	// certificateRef provides certificate contents as a secret reference.
+	// externalCertificate provides certificate contents as a secret reference.
 	// This should be a single serving certificate, not a certificate
 	// chain. Do not include a CA certificate. The secret referenced should
 	// be present in the same namespace as that of the Route.
+	// Forbidden when `certificate` is set.
 	//
-	// +openshift:enable:FeatureSets=TechPreviewNoUpgrade
+	// +openshift:enable:FeatureSets=CustomNoUpgrade;TechPreviewNoUpgrade
 	// +optional
-	CertificateRef *corev1.LocalObjectReference `json:"certificateRef,omitempty" protobuf:"bytes,7,opt,name=certificateRef"`
+	ExternalCertificate LocalObjectReference `json:"externalCertificate,omitempty" protobuf:"bytes,7,opt,name=externalCertificate"`
 }
 
 // LocalObjectReference contains enough information to let you locate the
 // referenced object inside the same namespace.
 // +structType=atomic
 type LocalObjectReference struct {
-	// Name of the referent.
+	// name of the referent.
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
 	// +optional
 	Name string `json:"name,omitempty" protobuf:"bytes,1,opt,name=name"`
@@ -159,8 +156,8 @@ in the same namespace as that of the Route. The secret must be of type
 `kubernetes.io/tls` and the tls.key and the tls.crt key must be provided in
 the `data` (or `stringData`) field of the Secret configuration.
 
-If neither `.spec.tls.certificateRef` or `.spec.tls.certificate` and `.spec.tls.key` are
-provided the router will serve the default generated secret.
+If neither `.spec.tls.externalCertificate` or `.spec.tls.certificate` and `.spec.tls.key` are
+provided the router will serve the default generated certificates.
 
 All valid and invalid scenarios will be depicted via the existing `RouteIngressCondition`.
 
@@ -170,7 +167,7 @@ N.A
 
 ### Implementation Details/Notes/Constraints [optional]
 
-The router will read the secret referenced in `.spec.tls.certificateRef` if present and
+The router will read the secret referenced in `.spec.tls.externalCertificate` if present and
 if the following pre-conditions (validated in the API server) are met it uses
 this certificate us configure haproxy.
 
@@ -180,15 +177,15 @@ for every secret that is referenced by a route.
 
 Every active watch will be linked to a route, meaning the watch based secret manager
 will be linked to the lifecycle of the route. For every new route that is created,
-the secret manager will start a watch if the route uses `.spec.tls.certificateRef`.
+the secret manager will start a watch if the route uses `.spec.tls.externalCertificate`.
 For every update route event, the secret manager only increments the reference count.
 If a route is deleted, the secret manager will unregister the route and teardown the
 watch associated with it.
 
 The `ServiceAliasConfig` creation logic will be updated in the router to also parse
-the secret referenced in `.spec.tls.certificateRef`. The router will
-use the default certificates only when neither `.spec.tls.certificate` or `.spec.tls.certificateRef`
-are provided.
+the secret referenced in `.spec.tls.externalCertificate`. The router will
+use the default certificates only when `.spec.tls.certificate` or `.spec.tls.externalCertificate`
+are not provided.
 
 Validations done by the router as part of [ExtendedValidateRoute()](https://github.com/openshift/router/blob/c407ebbc5d8d85daea2ef2d1ba539444a06f4d25/pkg/router/routeapihelpers/validation.go#L158) (contents of secret),
 
@@ -201,7 +198,7 @@ Validations done by API server as part of [ValidateRoute()](https://github.com/o
 - The secret created is of type `kubernetes.io/tls`.
 - The router serviceaccount must have permission to read this secret particular secret.
   - The role and rolebinding to provide this access must be provided by the user.
-- CEL validations will enforce that both `.spec.tls.certificate` and `.spec.tls.certificateRef`
+- CEL validations will enforce that both `.spec.tls.certificate` and `.spec.tls.externalCertificate`
   are not specified on the route.
 
 ### Risks and Mitigations
@@ -241,7 +238,7 @@ The above variations need to be documented for the end user as part of OpenShift
 ### Test Plan
 
 Update router tests in openshift/origin and supplement all existing certificate related tests
-with new tests utilizing `.spec.tls.certificateRef`. Ensure the tests cover the following scenarios,
+with new tests utilizing `.spec.tls.externalCertificate`. Ensure the tests cover the following scenarios,
 
 - Updating routes from default certificates to certificate referenced via
   secrets and vice-versa.
@@ -252,7 +249,8 @@ with new tests utilizing `.spec.tls.certificateRef`. Ensure the tests cover the 
 
 ### Graduation Criteria
 
-This feature will initially be released as Tech Preview only.
+This feature will initially be released as Tech Preview only. The e2e tests
+in openshift/origin will only be added when graduating this feature to GA.
 
 #### Dev Preview -> Tech Preview
 
@@ -260,17 +258,20 @@ N/A. This feature will go directly to Tech Preview.
 
 #### Tech Preview -> GA (Future work)
 
+The e2e tests as part of openshift/origin should be consistently passing.
 The router will need to undergo performance testing as part of OCP payload
 to ensure the memory implications of creating and maintains all the active watches
 is verified to be efficient.
 
+##### Future work
+
 The ingress-to-route controller in the route-controller-manager will need to
-be updated to ensure that the created routes use `.spec.tls.certificateRef`
+be updated to ensure that the created routes use `.spec.tls.externalCertificate`
 instead of `.spec.tls.certificate`. Additional tests will need to be added into
 o/origin for this scenario.
 
-This behaviour should be extended to both `.spec.tls.caCertificate` and
-`.spec.tls.destinationCACertificate` to ensure uniformity and improve security.
+Current implementation does not use `caCert` in the secret to populate
+`.spec.tls.caCertificate`, this can be added in the future.
 
 #### Removing a deprecated feature
 
@@ -278,7 +279,7 @@ N/A.
 
 ### Upgrade / Downgrade Strategy
 
-On downgrades, all routes specifying `.spec.tls.certificateRef` will switch over to use the default certificates
+On downgrades, all routes specifying `.spec.tls.externalCertificate` will switch over to use the default certificates
 unless the route is manually edited and the `.spec.tls` is updated.
 
 Upgrade strategy not considered since this feature is going to be added as TechPreviewNoUpgrade.
@@ -291,14 +292,12 @@ This feature will be added as TechPreviewNoUprade.
 
 Route validation in the API server will be modified to validate the following scenarios,
 
-- Check if secret/certificate referenced under `.spec.tls.certificateRef` exists.
-- Check if secret/certificate referenced under `.spec.tls.certificateRef` is of the correct type.
+- Check if secret/certificate referenced under `.spec.tls.externalCertificate` exists.
+- Check if secret/certificate referenced under `.spec.tls.externalCertificate` is of the correct type.
 - Check if router service account has permissions to read referenced secret.
 - Check if route only one of the fields set,
   - `.spec.tls.certificate` and `.spec.tls.key`
-  - `.spec.tls.certificateRef`
-
-TODO: SLOs
+  - `.spec.tls.externalCertificate`
 
 #### Failure Modes
 
@@ -316,14 +315,14 @@ further and the error will be reflected on the route `.status` with the same rea
 ##### Insufficient router permission
 
 As part of the API server validation, if the router does not have permission
-to read the secret referenced under `.spec.tls.certificateRef`, the route is
+to read the secret referenced under `.spec.tls.externalCertificate`, the route is
 rejected with an `FieldValueForbidden` error and reason as `insufficient permission
 to read resource`.
 
 ##### Incorrect secret type
 
 As part of `ExtendedValidateRoute()`, the router validates the content of the secret
-that is referenced under `.spec.tls.certificateRef`. Failure will result in the route
+that is referenced under `.spec.tls.externalCertificate`. Failure will result in the route
 not being admitted and this will reflect under route `.status` as `FieldValueInvalid`.
 
 #### Support Procedures
