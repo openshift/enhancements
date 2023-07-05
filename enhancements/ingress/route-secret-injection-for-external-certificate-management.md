@@ -181,13 +181,13 @@ following pre-conditions are met:
 
 - Validations done by the router as part of [ExtendedValidateRoute()](https://github.com/openshift/router/blob/c407ebbc5d8d85daea2ef2d1ba539444a06f4d25/pkg/router/routeapihelpers/validation.go#L158) (contents of secret),
 
+  - The secret created should be in the same namespace as that of the route.
+  - The secret created is of type `kubernetes.io/tls`.
   - Verify certificate and key (PEM encode/decode)
   - Verify private key matches public certificate
 
 - Validations done by API server as part of [ValidateRoute()](https://github.com/openshift/openshift-apiserver/blob/aac3dd5bf0547e928103a0f718ca104b1bb13930/pkg/route/apis/route/validation/validation.go#L21),
 
-  - The secret created should be in the same namespace as that of the route.
-  - The secret created is of type `kubernetes.io/tls`.
   - The router serviceaccount must have permission to read this secret particular secret.
     - The role and rolebinding to provide this access must be provided by the user.
   - CEL validations and o/library-go will enforce that both `.spec.tls.certificate` and `.spec.tls.externalCertificate`
