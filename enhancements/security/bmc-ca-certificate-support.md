@@ -13,13 +13,7 @@ api-approvers:
 tracking-link:
   - "https://issues.redhat.com/browse/RFE-3505"
 creation-date: 2023-04-13
-last-updated: 2023-05-22
-see-also:
-  - "/enhancements/this-other-neat-thing.md"
-replaces:
-  - "/enhancements/that-less-than-great-idea.md"
-superseded-by:
-  - "/enhancements/our-past-effort.md"
+last-updated: 2023-07-06
 ---
 
 # BMC CA Certificate Support
@@ -62,16 +56,16 @@ environments where such risks are unacceptable.
 
 ### Goals
 
-- Users provide CA certificates for IPI installation or node management after
+- Administrator provide CA certificates for IPI installation or node management after
   IPI, and these certificates successfully validate the SSL connections with
   baremetal BMCs.
 
-- Users update the CA certificates for their existing clusters, and the updated
+- Administrator update the CA certificates for their existing clusters, and the updated
   certificates successfully validate the SSL connections with baremetal BMCs.
 
 ### Non-Goals
 
-- Allow users to modify the CA certificate during the IPI installation process.
+- Allow administrator to modify the CA certificate during the IPI installation process.
 
 - Provide an automatic CA certificate issuance feature for IPI installation or
   cluster node management.
@@ -81,14 +75,8 @@ environments where such risks are unacceptable.
 
 ## Proposal
 
-- Modify [OpenStack Ironic][OpenStack Ironic] to add a new configuration option
-  named `default_verify_ca_path` in `ironic.conf` to allow providing a default
-  `verify_ca` path for all drivers. If `default_verify_ca_path` is set and
-  `driver_info["xxxx_verify_ca"]=true`, then use the value of
-  `default_verify_ca_path` as `verify_ca` instead of `true`. With this
-  approach, separate CA certificates can be specified for SSL connections with
-  BMCs without having to add them to the system's default certificate bundle.
-
+- Modify [OpenStack Ironic][OpenStack Ironic] to accept CA path in its
+  configuration (Implementation details will be discussed in the ironic community).
 - Modify [ironic-image][Metal3 Ironic Container] to specify the CA certificates
   in a pre-defined path to Ironic. The pre-defined path can be, e.g.
   `/certs/ca/bmc`, which is the mount point for the CA certificates in
@@ -111,15 +99,14 @@ environments where such risks are unacceptable.
     failed. This helps to identify issues early on, especially for the
     time-consuming IPI installation.
   - Modify `startironic.sh.template`:
-    - Create the CA certificate files in `/tmp/bmc` of the bootstrap VM
+    - Create the CA certificate files in of the bootstrap VM
       according to `platform.baremetal.bmcCACert`.
-    - Mount `/tmp/bmc` to `/certs/ca/bmc` when starting the Ironic container.
-    - Create a ConfigMap named `bmc-verify-ca` using `/tmp/bmc` in
-      `openshift-machine-api` namespace.
+    - Mount the CA certificate files when starting the Ironic container.
+    - Create the contents of CA certificate files as a ConfigMap.
 
 - Modify [cluster-baremetal-operator][OpenShift Cluster Baremetal Operator]
-  to ensure mounting the `bmc-verify-ca` ConfigMap to `/certs/ca/bmc` in Ironic
-  container for worker node deployment, and unmounting it when `bmc-verify-ca`
+  to ensure mounting the `bmc-verify-ca` ConfigMap into Ironic container
+  for worker node deployment, and unmounting it when `bmc-verify-ca`
   ConfigMap is deleted.
 
 ### Workflow Description
