@@ -193,16 +193,6 @@ following pre-conditions are met:
   - CEL validations and o/library-go will enforce that both `.spec.tls.certificate` and `.spec.tls.externalCertificate`
     are not specified on the route.
 
-- `ValidateHostUpdate()` will be updated to introduce a new check on the usage of `.spec.tls.externalCertificate`
-  - User will not allowed to update `spec.host` or `spec.subDomain` when
-    `externalCertificate` is non-empty. This is because if all the below conditions
-    are satisfied, we cannot validate point 3 as we don't have the older state of the
-    secret referenced in `externalCertificate`.
-    1. If the user does not have `update` permission on `custom-host` sub-resource
-    2. If the user does not have `create` permission on `custom-host` sub-resource
-    3. The user has not updated `spec.host` or `spec.subDomain`, but has updated the
-       contents of the secret referenced in `spec.tls.externalCertificate`
-
 The router being an edge component, from a security standpoint is more prone to
 being compromised. In order to avoid providing the router with escalated privileges
 to read all secrets, the router will implement a single item list/watch for secrets (secret monitor).
@@ -262,9 +252,14 @@ The above variations need to be documented for the end user as part of OpenShift
   a workflow present where we can gather some early metrics (memory, cpu)? This will help in
   preemptively addressing performance concerns before going GA.
 
+  > Will be addressed when taking feature from TP -> GA.
+
 - Do we make changes to the ingress-to-route controller as well?
+
   > The ingress-to-route behaviour will remain as is i.e. it will not make use of
   > the newly introduced field.
+
+- What should be the behaviour of `ValidationHostUpdate()` when using `externalCertificate`?
 
 ### Test Plan
 
