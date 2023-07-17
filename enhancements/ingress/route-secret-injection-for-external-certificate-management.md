@@ -164,7 +164,7 @@ provided in the `data` (or `stringData`) field of the Secret configuration.
 
 If neither `.spec.tls.externalCertificate` or `.spec.tls.certificate` and `.spec.tls.key` are
 provided the router will serve the default generated certificates. User's will not be able to
-provide both `.spec.tls.certificate/key` and `.spec.tls.externalCerificate`. API server
+provide both `.spec.tls.certificate/key` and `.spec.tls.externalCertificate`. API server
 admission validation will enforce this.
 
 All valid and invalid scenarios will be depicted via the existing `RouteIngressCondition`.
@@ -193,6 +193,21 @@ following pre-conditions are met:
   - CEL validations and o/library-go will enforce that both `.spec.tls.certificate` and `.spec.tls.externalCertificate`
     are not specified on the route.
 
+- `ValidateHostUpdate()` will be updated to introduce a new check on the usage of `.spec.tls.externalCertificate`
+  - User will not allowed to update `spec.host` or `spec.subDomain` when
+    `externalCertificate` is non-empty. This is because if all the below conditions
+    are satisfied, we cannot validate point 3 as we don't have the older state of the
+    secret referenced in `externalCertificate`.
+    1. If the user does not have `update` permission on `custom-host` sub-resource
+    2. If the user does not have `create` permission on `custom-host` sub-resource
+    3. The user has not updated `spec.host` or `spec.subDomain`, but has updated the
+       contents of the secret referenced in `spec.tls.externalCertificate`
+
+The router being an edge component, from a security standpoint is more prone to
+being compromised. In order to avoid providing the router with escalated privileges
+to read all secrets, the router will implement a single item list/watch for secrets (secret monitor).
+This uses name-scoped rbac (created by the user) to access the particular secrets.
+
 A watch based secret monitor will be introduced in the router in order to keep
 track of all the secrets referenced by the routes. This component is solely
 responsible for maintaining all the single item list-watch functions required
@@ -205,14 +220,17 @@ for every secret that is referenced by a route.
 Every active watch will be linked to a route, meaning the secret monitor
 will be linked to the lifecycle of the route. For every new route that is created,
 the secret monitor will start a watch if the route uses `.spec.tls.externalCertificate`.
-For every route created/updated referencing the same secret, the secret monitor increments
-the reference count. If a route is deleted, the secret monitor will deregister the
-route and teardown the watch associated with it only if reference count is zero.
+If a route is deleted, the secret monitor will deregister the route and teardown
+the watch associated with it.
 
 The `ServiceAliasConfig` creation logic will be updated in the router to also parse
 the secret referenced in `.spec.tls.externalCertificate`. The router will
 use the default certificates only when `.spec.tls.certificate/key` or `.spec.tls.externalCertificate`
 are not provided.
+
+The cluster-ingress-operator will propagate the relevant Tech-Preview feature gate down to the
+router. This feature gate will be added as a command-line argument called `ROUTER_EXTERNAL_CERTIFICATE`
+to the router and will not be user configurable.
 
 ### Risks and Mitigations
 
@@ -277,7 +295,7 @@ to ensure the memory implications of creating and maintains all the active watch
 is verified to be efficient.
 
 Update API godoc to document that manual intervention is required for using
-`.spec.tls.externalCerificate`.
+`.spec.tls.externalCertificate`.
 
 Update implementation details to cover internal working of secret monitor.
 
