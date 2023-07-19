@@ -228,8 +228,12 @@ spec:
     regex: "federate_samples|federate_filtered_samples"
  ```
 
-Note: the `metricRelabeling` section only keeping two metrics, while the rest is
+Note: 
+- the `metricRelabeling` section only keeping two metrics, while the rest is
 dropped.
+- the metrics in the `keep` section were obtained with the help of a script that
+  parsed all Alerts, PrometheusRules and Console dashboards to determine what
+  metrics were actually being used.
 
 Finally, a team that adopts the metrics collection profile feature should also 
 add themselves and their component to the list under 
@@ -260,25 +264,31 @@ type PrometheusK8sConfig struct {
 Each OpenShift team that wants to adopt this feature will be responsible for
 providing the different monitors. This work is not trivial. Dependencies between
 operators and their metrics exist. This makes it difficult for developers to
-determine whether a given metric must be added to the "minimal" profile or not.
-To aid teams with this problem we will provide a tool that would consume a
-monitor and generate the "minimal" monitor for that operator. However for this,
-the tool would need to have access to an up to date, installation of OpenShift
-in order to query the Prometheus instance running in the cluster.
+determine whether a given metric can be excluded from the `minimal` profile or
+not. To aid teams with this effort the monitoring team will provide:
+- a tool that would consumes a ServiceMonitor and a list of metrics and
+  generates the `minimal` ServiceMonitor for that operator.
+- an origin/CI test that validates for all Alerts and PrometheusRules that the
+  metrics used by them are present in the `keep` expression of the
+  ServiceMonitor for the `minimal` profile
+
 
 ### Risks and Mitigations
 
 - How are monitors supposed to be kept up to date? In 4.12 a metric that wasn't
   being used in an alert is now required, how does the monitor responsible for
   that metric gets updated?
-  - The tool we provide would run in CI and ensure are ServiceMonitors are up to
-    date;
+  - The origin/CI test mentioned in the previous section will fail if ther is a resouce (Alerts/PrometheusRules/Dashboards) using a metric which is not present in the ServiceMonitor;
 
 - A new profile is added, what will happen to operators that had implemented
   metrics collection profiles but did not implement the latest profile.
   - The monitoring team will use the list under 
   [Infrastruture needed](#infrastructure-needed-optional) to help the developers
   with the addoption of the new metrics collection profile.
+  - Furthermore, we plan on adding extra origin/CI tests to validate each new profile if applicable.
+
+- What happens if CMO pick-up an unsupported collection profile value?
+  - Report Degraded=False and fail reconciliation.
 
 ### Drawbacks
 
@@ -289,17 +299,14 @@ in order to query the Prometheus instance running in the cluster.
 ### Open Questions
 
 - Should we add future profiles? 
-- How will we ensure that all metrics used by the console are still present?
-- What happens if CMO pick-up an unsupported collection profile value?
-  (dicussion on
-  https://github.com/openshift/enhancements/pull/1298#discussion_r1072266853)
 
 ### Test Plan
 
 - Unit tests in CMO to validate that the correct monitors are being selected
-- E2E tests in CMO to validate that everything works correctly Unsure on this
-one... (- Testing in openshift/CI to validate that every metrics being used
-exists in the cluster?)
+- E2E tests in CMO to validate that everything works correctly 
+- For the `minimal` profile, origin/CI test to validate that every metrics used
+in a resource (Alerts/PrometheusRules/Dashboards) exist in the `keep` expresion
+of a
 
 ### Graduation Criteria
 
@@ -308,14 +315,13 @@ shouldn't impact operations.
 
 #### Tech Preview -> GA
 
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-- Backhaul SLI telemetry
-- Document SLOs for the component
-- Conduct load testing
-- User facing documentation created in
-  [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [Automation to update metrics in collection profiles](https://issues.redhat.com/browse/MON-3106)
+- [Telemetry signal for collection profile usage](https://issues.redhat.com/browse/MON-3231)
+- [Enhancement proposal for metrics collection profile](https://issues.redhat.com/browse/MON-2692)
+- [CLI tool to facilitate implementation of metrics collection profiles for OCP components](https://issues.redhat.com/browse/MON-2694)
+- [Drop TechPreview gate on collection profiles](https://issues.redhat.com/browse/MON-3215)
+- [origin/CI tool to validate collection profiles](https://issues.redhat.com/browse/MON-3105)
+- [User facing documentation created in openshift-docs](https://issues.redhat.com/browse/OBSDOCS-330)
 
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
@@ -410,8 +416,8 @@ and implementation status. Possible implementation status:
 
 | Team            | Component          | Implementation Status      |
 |-----------------|--------------------|----------------------------|
-| Monitoring Team | kubelet            | Implementation in progress |
-| Monitoring Team | etcd               | Implementation in progress |
-| Monitoring Team | kube-state-metrics | Implementation in progress |
-| Monitoring Team | node-exporter      | Implementation in progress |
-| Monitoring Team | prometheus-adapter | Implementation in progress |
+| Monitoring Team | kubelet            | Implemented                |
+| Monitoring Team | etcd               | Implemented                |
+| Monitoring Team | kube-state-metrics | Implemented                |
+| Monitoring Team | node-exporter      | Implemented                |
+| Monitoring Team | prometheus-adapter | Implemented                |
