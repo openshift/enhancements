@@ -43,10 +43,12 @@ built useful toolings around the binary.
 
 As the `oauth-server` is an authentication middle-man that mints
 OpenShift-specific access tokens, it is impossible to use tokens issued by a
-3rd party OIDC provider directly to authenticate to OpenShift clusters. Such
-a token gets forwarded directly to the `kube-apiserver` instead of the `oauth-server`,
-where the latter is at least aware of the 3rd parties that should be used as identity
-sources. But even if the token went directly to the `oauth-server`, there currently exists
+3rd party OIDC provider directly to authenticate to OpenShift clusters. When `oc`
+is configured to use a token to authenticate, it uses generic client-go credential
+handling and such a token gets forwarded directly to the `kube-apiserver` instead
+of the `oauth-server`. The latter is currently the only one aware of the 3rd parties that
+should be used as identity sources and so this authentication path would always fail.
+But even if the token went directly to the `oauth-server`, there currently exists
 no such mechanism for the `oauth-server` to mint an OpenShift-specific access
 token based on an access or ID token from a 3rd party OIDC provider. Not to
 mention that a client should not forward its access tokens to a different entity.
@@ -257,7 +259,9 @@ OIDC provider directly instead of attempting something of its own. Perhaps `oc l
 would not be used for cluster login at all.
 
 Even now, `oc` is capable of using an ID token directly if the kube-apiserver
-is configured accordingly. The main issue is with retrieving the token.
+is configured accordingly. The main issue is with retrieving the token but even
+should we decide we would not want to modify `oc login`, there are open-source
+solutions to this problem.
 
 #### oauth-proxy
 
