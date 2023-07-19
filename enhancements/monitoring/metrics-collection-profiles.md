@@ -307,9 +307,9 @@ not. To aid teams with this effort the monitoring team will provide:
 
 - Unit tests in CMO to validate that the correct monitors are being selected
 - E2E tests in CMO to validate that everything works correctly 
-- For the `minimal` profile, origin/CI test to validate that every metrics used
-in a resource (Alerts/PrometheusRules/Dashboards) exist in the `keep` expresion
-of a ServiceMonitor.
+- For the `minimal` profile, origin/CI test to validate that every metric used
+in a resource (Alerts/PrometheusRules/Dashboards) exist in the `keep` expression
+of a minimal ServiceMonitor.
 
 ### Graduation Criteria
 
