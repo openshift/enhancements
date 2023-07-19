@@ -11,6 +11,7 @@ creation-date: 2022-12-06
 last-updated: 2022-12-20
 tracking-link:
   - https://issues.redhat.com/browse/MON-2483
+  - https://issues.redhat.com/browse/MON-3043
 ---
 
 # Scrape profiles
@@ -54,10 +55,10 @@ platform operators.
 
 Furthermore to assess the viability of the scrape profile feature the monitoring
 team performed a detailed analysis of its impact in an OpenShift cluster. The
-analysis consisted in a test where an OpenShift cluster would run three replicas
+analysis consisted of a test where an OpenShift cluster would run three replicas
 of the OpenShift Prometheus instance but each replica would be configured to a
 different scrape profile (`full`, `minimal`). Then we would trigger a
-workload using kube-burner and at the end of 2 hours, we evaluated the results.
+workload using [kube-burner](https://github.com/cloud-bulldozer/kube-burner) and at the end of 2 hours, we evaluated the results.
 We concluded that in terms of resource usage, given the results obtained we can
 confidently state that the feature is quite valuable given the reduction of CPU
 by ~21% and memory by ~33% when comparing the `minimal` to the `full` profile.
@@ -130,13 +131,13 @@ data:
       scrapeProfile: full 
 ```
 
-The different profiles would be pre-defined by the OpenShift monitoring team.
+The different profile names would be pre-defined by the OpenShift monitoring team.
 Once a profile is selected CMO then updates the platform Prometheus CR to select
 pod and service monitors as the union of the 2 sets:
 - pod and service monitors with the 
   `monitoring.openshift.io/scrape-profile: <selected profile>` label.
 - pod and service monitors without the 
-  `monitoring.openshift.io/scrape-profile` profile label present.
+  `monitoring.openshift.io/scrape-profile` profile label present, to retain the default behaviour (for components that choose to not opt-in).
 
 OpenShift teams can decide if they wanted to adopt this feature. Without any
 change to a ServiceMonitor, if a user picks a profile in the CMO config, things
@@ -282,7 +283,7 @@ in order to query the Prometheus instance running in the cluster.
 ### Open Questions
 
 - Should we add future profiles? 
-- How will ensure that all metrics used by the console are still present?
+- How will we ensure that all metrics used by the console are still present?
 - What happens if CMO pick-up an unsupported scrape value? (dicussion on
   https://github.com/openshift/enhancements/pull/1298#discussion_r1072266853)
 
@@ -383,7 +384,7 @@ Initial proofs-of-concept:
     Docs](https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/prometheus-metrics-scrape-configuration-minimal)
   -  https://github.com/Azure/prometheus-collector
   - In their approach they also have [hardcoded](https://github.com/Azure/prometheus-collector/blob/66ed1a5a27781d7e7e3bb1771b11f1da25ffa79c/otelcollector/configmapparser/tomlparser-default-targets-metrics-keep-list.rb#L28)
-  set of metrics that are only consussumed when the minimal profile is enabled.
+  set of metrics that are only consumed when the minimal profile is enabled.
   However, customer are also able to extend this minimal profile with regexes to
   include metrics which might be interesting to them.
 
