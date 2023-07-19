@@ -1,5 +1,5 @@
 ---
-title: scrape-profiles
+title: metrics-collection-profiles
 authors:
   - @JoaoBraveCoding
 reviewers:
@@ -8,13 +8,13 @@ approvers:
   - TBD
 api-approvers: "None"
 creation-date: 2022-12-06
-last-updated: 2022-12-20
+last-updated: 2023-07-19
 tracking-link:
   - https://issues.redhat.com/browse/MON-2483
   - https://issues.redhat.com/browse/MON-3043
 ---
 
-# Scrape profiles
+# Metrics collection profiles
 
 ## Summary
 
@@ -53,16 +53,17 @@ scraping while limiting the impact this might have on the platform, via
 resources under the control of the cluster-monitoring-operator and other
 platform operators.
 
-Furthermore to assess the viability of the scrape profile feature the monitoring
-team performed a detailed analysis of its impact in an OpenShift cluster. The
-analysis consisted of a test where an OpenShift cluster would run three replicas
-of the OpenShift Prometheus instance but each replica would be configured to a
-different scrape profile (`full`, `minimal`). Then we would trigger a
-workload using [kube-burner](https://github.com/cloud-bulldozer/kube-burner) and at the end of 2 hours, we evaluated the results.
-We concluded that in terms of resource usage, given the results obtained we can
-confidently state that the feature is quite valuable given the reduction of CPU
-by ~21% and memory by ~33% when comparing the `minimal` to the `full` profile.
-More detail can be consulted in this
+Furthermore to assess the viability of the metrics collection profile feature
+the monitoring team performed a detailed analysis of its impact in an OpenShift
+cluster. The analysis consisted of a test where an OpenShift cluster would run
+three replicas of the OpenShift Prometheus instance but each replica would be
+configured to a different metrics collection profile (`full`, `minimal`). Then
+we would trigger a workload using
+[kube-burner](https://github.com/cloud-bulldozer/kube-burner) and at the end of
+2 hours, we evaluated the results. We concluded that in terms of resource usage,
+given the results obtained we can confidently state that the feature is quite
+valuable given the reduction of CPU by ~21% and memory by ~33% when comparing
+the `minimal` to the `full` profile. More detail can be consulted in this
 [document](https://docs.google.com/document/d/1MA-HTJQ_X7y_bwpJS2IPbGmC4qDyIMp25jisr34X2F4/edit?usp=sharing)
 
 Moreover, through Telemetry, we collect for each cluster the top 3 Prometheus
@@ -76,7 +77,7 @@ kubelet and the network daemon.
 
 - As an OpenShift cluster administrator, I want to lower the amount of resources
   consumed by Prometheus in a supported way, so I can choose between different
-  scrape profiles, e.g `full` or `minimal`.
+  metrics collection profiles, e.g `full` or `minimal`.
 - As an OpenShift developer, I want a supported way to collect a subset of the
   metrics exported by my operator and operands.
 
@@ -100,24 +101,24 @@ want to be included in a given profile.
 ## Proposal
 
 This enhancement leverages label selectors to allow cluster-monitoring-operator
-to select the appropriate monitors ([Pod|Service]Monitor) for a given scrape
-profile. 
+to select the appropriate monitors ([Pod|Service]Monitor) for a given metrics
+collection profile. 
 
 Given this, the following steps would be necessary to implement this
 enhancement:
 
 - expose a configuration option in the cluster-monitoring-operator ConfigMap
-  that allows selecting the scrape profile;
-- OCP components that would like to implement scrape profiles would have to
-  provide X monitors. Where X is the number of scrape profiles that we would
-  support.
+  that allows selecting the metrics collection profile;
+- OCP components that would like to implement metrics collection profiles would
+  have to provide X monitors. Where X is the number of metrics collection
+  profiles that we would support.
 
 ### Workflow Description
 
 The cluster-monitoring-operator (CMO) will be extended with a new field,
-`scrapeProfile` under `prometheusK8s`. This new field will then allow users to
-configure their desired scrape profile while preserving the platform
-functionality (console, HPA and alerts).
+`collectionProfile` under `prometheusK8s`. This new field will then allow users
+to configure their desired metrics collection profile while preserving the
+platform functionality (console, HPA and alerts).
 
 ```yaml
 apiVersion: v1
@@ -128,26 +129,27 @@ metadata:
 data:
   config.yaml: |
     prometheusK8s:
-      scrapeProfile: full 
+      collectionProfile: full 
 ```
 
-The different profile names would be pre-defined by the OpenShift monitoring team.
-Once a profile is selected CMO then updates the platform Prometheus CR to select
-pod and service monitors as the union of the 2 sets:
+The different profile names would be pre-defined by the OpenShift monitoring
+team. Once a profile is selected CMO then updates the platform Prometheus CR to
+select pod and service monitors as the union of the 2 sets:
 - pod and service monitors with the 
-  `monitoring.openshift.io/scrape-profile: <selected profile>` label.
-- pod and service monitors without the 
-  `monitoring.openshift.io/scrape-profile` profile label present, to retain the default behaviour (for components that choose to not opt-in).
+  `monitoring.openshift.io/collection-profile: <selected profile>` label.
+- pod and service monitors without the
+  `monitoring.openshift.io/collection-profile` profile label present, to retain
+  the default behaviour (for components that choose to not opt-in).
 
 OpenShift teams can decide if they wanted to adopt this feature. Without any
 change to a ServiceMonitor, if a user picks a profile in the CMO config, things
-should work as they did before. When an OpenShift team wants to implement scrape
-profiles, they need to provide monitors for all profiles, making sure they do
-not provide monitors without the profile label. If a team implements scrape
-profiles they must ensure that all their monitors have the label
-`monitoring.openshift.io/scrape-profile` set with the appropriate value,
-otherwise their component might end up being double scraped or not scraped at
-all.
+should work as they did before. When an OpenShift team wants to implement
+metrics collection profiles, they need to provide monitors for all profiles,
+making sure they do not provide monitors without the profile label. If a team
+implements metrics collection profiles they must ensure that all their monitors
+have the label `monitoring.openshift.io/collection-profile` set with the
+appropriate value, otherwise their component might end up being double scraped
+or not scraped at all.
 
 In the beginning the goal is to support 2 profiles:
 
@@ -167,15 +169,15 @@ metadata:
 spec:
   serviceMonitorSelector:
     matchExpressions:
-    - key: monitoring.openshift.io/scrape-profile
+    - key: monitoring.openshift.io/collection-profile
       operator: NotIn
       values:
       - "full"
 ```
  
-An OpenShift team that wants to support the scrape profiles feature would need
-to provide 2 monitors for each profile (in this example 1 service monitor per
-profile).
+An OpenShift team that wants to support the metrics collection profiles feature
+would need to provide 2 monitors for each profile (in this example 1 service
+monitor per profile).
 
 ```yaml
 ---
@@ -184,7 +186,7 @@ kind: ServiceMonitor
 metadata:
   labels:
     k8s-app: telemeter-client
-    monitoring.openshift.io/scrape-profile: full
+    monitoring.openshift.io/collection-profile: full
   name: telemeter-client
   namespace: openshift-monitoring
 spec:
@@ -205,8 +207,8 @@ kind: ServiceMonitor
 metadata:
   labels:
     k8s-app: telemeter-client
-    monitoring.openshift.io/scrape-profile: minimal
-  name: telemeter-client
+    monitoring.openshift.io/collection-profile: minimal
+  name: telemeter-client-minimal
   namespace: openshift-monitoring
 spec:
   endpoints:
@@ -229,8 +231,8 @@ spec:
 Note: the `metricRelabeling` section only keeping two metrics, while the rest is
 dropped.
 
-Finally, a team that adopts the scrape profile feature should also add 
-themselves and their component to the list under 
+Finally, a team that adopts the metrics collection profile feature should also 
+add themselves and their component to the list under 
 [Infrastruture needed](#infrastructure-needed-optional)
 
 #### Variation [optional]
@@ -243,9 +245,13 @@ NA
 
 ```go
 type PrometheusK8sConfig struct {
-  // Defines the scraping profile that will be enforced on the platform
-  // prometheus instance. Possible values are full and minimal.
-	ScrapeProfile string `json:"scrapeProfile,omitempty"`
+	// Defines the metrics collection profile that Prometheus uses to collect
+	// metrics from the platform components. Supported values are `full` or
+	// `minimal`. In the `full` profile (default), Prometheus collects all
+	// metrics that are exposed by the platform components. In the `minimal`
+	// profile, Prometheus only collects metrics necessary for the default
+	// platform alerts, recording rules, telemetry and console dashboards.
+	CollectionProfile CollectionProfile `json:"collectionProfile,omitempty"`
 }
 ```
 
@@ -269,10 +275,10 @@ in order to query the Prometheus instance running in the cluster.
     date;
 
 - A new profile is added, what will happen to operators that had implemented
-  scrape profiles but did not implement the latest profile.
+  metrics collection profiles but did not implement the latest profile.
   - The monitoring team will use the list under 
   [Infrastruture needed](#infrastructure-needed-optional) to help the developers
-  with the addoption of the new scrape profile.
+  with the addoption of the new metrics collection profile.
 
 ### Drawbacks
 
@@ -284,7 +290,8 @@ in order to query the Prometheus instance running in the cluster.
 
 - Should we add future profiles? 
 - How will we ensure that all metrics used by the console are still present?
-- What happens if CMO pick-up an unsupported scrape value? (dicussion on
+- What happens if CMO pick-up an unsupported collection profile value?
+  (dicussion on
   https://github.com/openshift/enhancements/pull/1298#discussion_r1072266853)
 
 ### Test Plan
@@ -296,7 +303,8 @@ exists in the cluster?)
 
 ### Graduation Criteria
 
-Plan to release as TechPreview as the first step: the default being `full`, it shouldn't impact operations.
+Plan to release as TechPreview as the first step: the default being `full`, it
+shouldn't impact operations.
 
 #### Tech Preview -> GA
 
@@ -306,7 +314,8 @@ Plan to release as TechPreview as the first step: the default being `full`, it s
 - Backhaul SLI telemetry
 - Document SLOs for the component
 - Conduct load testing
-- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- User facing documentation created in
+  [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
@@ -318,12 +327,13 @@ end to end tests.**
 
 ### Upgrade / Downgrade Strategy
 
-- If scrape profiles is accepted and is released to 4.13 then we must backport
-  the new [Service|Pod]Monitors selectors to 4.12. The reason being that when an
-  upgrade occurs and the new [Service|Pod]Monitors are deployed, we will not
-  want the 4.12 Prometheus-Operator to process all the new [Service|Pod]Monitors
-  as this would configure the Prometheus instances to start double scraping the
-  OpenShift components that implemented the scrape profiles feature.
+- If metrics collection profiles is accepted and is released to 4.13 then we
+  must backport the new [Service|Pod]Monitors selectors to 4.12. The reason
+  being that when an upgrade occurs and the new [Service|Pod]Monitors are
+  deployed, we will not want the 4.12 Prometheus-Operator to process all the new
+  [Service|Pod]Monitors as this would configure the Prometheus instances to
+  start double scraping the OpenShift components that implemented the metrics
+  collection profiles feature.
 - Once we backport the new [Service|Pod]Monitors selectors upgrades and
   downgrades are not expected to present a significant challenge.
 
@@ -374,12 +384,12 @@ Initial proofs-of-concept:
   - Scrapes can fail, but the user might not be mindful of this and set a high
     scrape interval;
 - Add a seperate container to prometheus-operator (p-o) that would be used by
-  p-o to modify the prometheus config according to a scrape profile.
+  p-o to modify the prometheus config according to a metrics collection profile.
   - This container would perform an analysis on what metrics were being used.
     Then it would provide prometheus operator with this list.
   - Prometheus-operator with the list provided by this new component would know
     what scraping targets it could change to keep certain metrics.
-- Recently Azure also added support for scrape profiles:
+- Recently Azure also added support for metrics collection profiles:
   - [Azure
     Docs](https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/prometheus-metrics-scrape-configuration-minimal)
   -  https://github.com/Azure/prometheus-collector
@@ -390,11 +400,10 @@ Initial proofs-of-concept:
 
 ## Infrastructure Needed [optional]
 
-### Adopted Scrape Profiles
+### Adopted metrics collection profiles
 
-Add the team and the component that will to adopt scrape profiles and
-implementation status.
-Possible implementation status: 
+Add the team and the component that will to adopt metrics collection profiles
+and implementation status. Possible implementation status: 
 - considering
 - implementation in progress
 - implemented
