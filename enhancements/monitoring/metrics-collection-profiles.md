@@ -266,7 +266,7 @@ providing the different monitors. This work is not trivial. Dependencies between
 operators and their metrics exist. This makes it difficult for developers to
 determine whether a given metric can be excluded from the `minimal` profile or
 not. To aid teams with this effort the monitoring team will provide:
-- a tool that would consumes a ServiceMonitor and a list of metrics and
+- a CLI tool that consumes a ServiceMonitor and a list of metrics and
   generates the `minimal` ServiceMonitor for that operator.
 - an origin/CI test that validates for all Alerts and PrometheusRules that the
   metrics used by them are present in the `keep` expression of the
@@ -278,14 +278,17 @@ not. To aid teams with this effort the monitoring team will provide:
 - How are monitors supposed to be kept up to date? In 4.12 a metric that wasn't
   being used in an alert is now required, how does the monitor responsible for
   that metric gets updated?
-  - The origin/CI test mentioned in the previous section will fail if ther is a resouce (Alerts/PrometheusRules/Dashboards) using a metric which is not present in the ServiceMonitor;
+  - The origin/CI test mentioned in the previous section will fail if ther is a
+    resouce (Alerts/PrometheusRules/Dashboards) using a metric which is not
+    present in the ServiceMonitor;
 
 - A new profile is added, what will happen to operators that had implemented
   metrics collection profiles but did not implement the latest profile.
   - The monitoring team will use the list under 
   [Infrastruture needed](#infrastructure-needed-optional) to help the developers
   with the addoption of the new metrics collection profile.
-  - Furthermore, we plan on adding extra origin/CI tests to validate each new profile if applicable.
+  - Furthermore, we plan on adding extra origin/CI tests to validate each new
+    profile if applicable.
 
 - What happens if CMO pick-up an unsupported collection profile value?
   - Report Degraded=False and fail reconciliation.
@@ -306,7 +309,7 @@ not. To aid teams with this effort the monitoring team will provide:
 - E2E tests in CMO to validate that everything works correctly 
 - For the `minimal` profile, origin/CI test to validate that every metrics used
 in a resource (Alerts/PrometheusRules/Dashboards) exist in the `keep` expresion
-of a
+of a ServiceMonitor.
 
 ### Graduation Criteria
 
@@ -322,9 +325,6 @@ shouldn't impact operations.
 - [Drop TechPreview gate on collection profiles](https://issues.redhat.com/browse/MON-3215)
 - [origin/CI tool to validate collection profiles](https://issues.redhat.com/browse/MON-3105)
 - [User facing documentation created in openshift-docs](https://issues.redhat.com/browse/OBSDOCS-330)
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
 
 #### Removing a deprecated feature
 
