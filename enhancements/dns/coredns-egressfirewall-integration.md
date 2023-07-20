@@ -83,154 +83,383 @@ respond with a `REFUSED`/`NXDOMAIN` response code if a EgressFirewall rule denie
 
 ## Proposal
 
-This enhancement proposes to introduce a new CoreDNS [external plugin](https://coredns.io/explugins/) (`egressfirewall`) and a new Custom Resource
-(`EgressFirewallDNSName`) to improve the integration of CoreDNS with EgressFirewall. This proposal takes the OVN Interconnect (OVN-IC)
+This enhancement proposes to introduce a new CoreDNS [external plugin](https://coredns.io/explugins/) (`ocp_dnsnameresolver`) and a new Custom Resource
+(`DNSNameResolver`) to improve the integration of CoreDNS with EgressFirewall. This proposal takes the OVN Interconnect (OVN-IC)
 architecture into consideration where there are (possibly) multiple OVN-K masters and a centralized OVN-K cluster manager. The OVN-K cluster manager will
-create a `EgressFirewallDNSName` CR for each unique DNS name (both regular and wildcard DNS names) used in
-the EgressFirewall rules. This CR will be used to store the DNS name along with the current IP addresses, the corresponding
-TTL, and the last lookup time. The `EgressFirewallDNSName` CR is meant for communication between
+create a `DNSNameResolver` CR for each unique DNS name (both regular and wildcard DNS names) used in
+the EgressFirewall rules. The same DNS name may appear in multiple EgressFirewall rules, but only a single `DNSNameResolver` CR object will be used
+for a unique DNS name. This CR will be used to store the DNS name along with the current IP addresses, the corresponding
+TTL, and the last lookup time. The `DNSNameResolver` CR is meant for communication between
 CoreDNS and OVN-K master(s).
 
 The new plugin will inspect each DNS lookup and the corresponding response for the DNS lookup from other
-plugins. If the DNS name in the query matches any `EgressFirewallDNSName` CR(s) (regular or wildcard or both), then the
-plugin will update the `.status` of the matching `EgressFirewallDNSName` CR(s) with the DNS name along with the IP addresses,
-the corresponding TTL, and the last lookup time. The OVN-K master(s) will watch the `EgressFirewallDNSName`
-CRs. Whenever the IP addresses are updated for a `EgressFirewallDNSName` CR, the OVN-K master(s) will update the underlying `AddressSet`
+plugins. If the DNS name in the query matches any `DNSNameResolver` CR(s) (regular or wildcard or both), then the
+plugin will update the `.status` of the matching `DNSNameResolver` CR(s) with the DNS name along with the IP addresses,
+the corresponding TTL, and the last lookup time. The OVN-K master(s) will watch the `DNSNameResolver`
+CRs. Whenever the IP addresses are updated for a `DNSNameResolver` CR, the OVN-K master(s) will update the underlying `AddressSet`
 referenced by the ACL rule(s) for the corresponding EgressFirewall rule(s).
 
-A new controller (`EgressFirewallDNSName` controller) will keep track of the next lookup time (TTL + last lookup time)
+A new controller (`DNSNameResolver` controller) will keep track of the next lookup time (TTL + last lookup time)
 for each regular DNS name and send a DNS lookup
 query to CoreDNS when the minimum TTL expires. However, for a wildcard DNS name a DNS lookup cannot be only performed
 on the DNS name as it will not return the IP addresses of all the subdomains. The DNS lookup of the wildcard DNS name may fail to return
 any IP address as well. If the lookup for the wildcard DNS name fails, then it will retried using the default TTL (30 minutes). If the lookup
 succeeds then the details will be added to the `.status` of the corresponding CR. Thus, the lookups will be performed on the DNS names which
-are updated in the `.status` of the corresponding wildcard `EgressFirewallDNSName` CRs.
+are updated in the `.status` of the corresponding wildcard `DNSNameResolver` CRs.
 
-The following `EgressFirewallDNSName` CRD will be added to the `dns.openshift.io` api-group.
+The following `DNSNameResolver` CRD will be added to the `network.openshift.io` api-group.
 
 ````go
-// EgressFirewallDNSName describes a DNS name used in a EgressFirewall rule. It is TechPreviewNoUpgrade only.
-type EgressFirewallDNSName struct {
+// DNSNameResolver stores the DNS name resolution information of a DNS name. It is TechPreviewNoUpgrade only.
+type DNSNameResolver struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is the standard object's metadata.
 	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// spec is the specification of the desired behavior of the EgressFirewallDNSName.
-	Spec EgressFirewallDNSNameSpec `json:"spec,omitempty"`
-	// status is the most recently observed status of the EgressFirewallDNSName.
-	Status EgressFirewallDNSNameStatus `json:"status,omitempty"`
+	// spec is the specification of the desired behavior of the DNSNameResolver.
+	// +kubebuilder:validation:Required
+	Spec DNSNameResolverSpec `json:"spec"`
+	// status is the most recently observed status of the DNSNameResolver.
+	// +optional
+	Status DNSNameResolverStatus `json:"status,omitempty"`
 }
 
-// EgressFirewallDNSNameSpec is a desired state description of EgressFirewallDNSName.
-type EgressFirewallDNSNameSpec struct {
-	// name is the DNS name used in a EgressFirewall rule.
+// DNSNameResolverSpec is a desired state description of DNSNameResolver.
+type DNSNameResolverSpec struct {
+	// name is the DNS name for which the DNS name resolution information will be stored.
+	// For a regular DNS name, only the DNS name resolution information of the regular DNS
+	// name will be stored. For a wildcard DNS name, the DNS name resolution information
+	// of all the DNS names, that matches the wildcard DNS name, will be stored.
+	// For a wildcard DNS name, the '*' will match only one label. Additionally, only a single
+	// '*' can be used at the beginning of the wildcard DNS name. For example, '*.example.com.'
+	// will match 'sub1.example.com.' but won't match 'sub2.sub1.example.com.'
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.$
 	Name string `json:"name"`
 }
 
-// EgressFirewallDNSNameStatus defines the observed status of EgressFirewallDNSName.
-type EgressFirewallDNSNameStatus struct {
-	// The list of matching DNS names and their corresponding IP addresses along with TTL and last
-	// DNS lookup time.
-	ResolvedNames []EgressFirewallDNSNameStatusItem `json:"resolvedNames,omitempty"`
+// DNSNameResolverStatus defines the observed status of DNSNameResolver.
+type DNSNameResolverStatus struct {
+	// resolvedNames contains a list of matching DNS names and their corresponding IP addresses
+	// along with TTL and last DNS lookup time.
+	// +listType=map
+	// +listMapKey=dnsName
+	// +patchMergeKey=dnsName
+	// +patchStrategy=merge
+	// +optional
+	ResolvedNames []DNSNameResolverStatusItem `json:"resolvedNames,omitempty" patchStrategy:"merge" patchMergeKey:"dnsName"`
 }
 
-// EgressFirewallDNSNameStatusItem describes the details of a resolved DNS name.
-type EgressFirewallDNSNameStatusItem struct {
-	// The resolved DNS name corresponding to the Name field of EgressFirewallDNSNameSpec.
+// DNSNameResolverStatusItem describes the details of a resolved DNS name.
+type DNSNameResolverStatusItem struct {
+	// dnsName is the resolved DNS name matching the name field of DNSNameResolverSpec.
+	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.$
 	DNSName string `json:"dnsName"`
-	// The IP addresses associated with the DNS name used in a EgressFirewall rule.
+	// ips contains the list of IP addresses associated with the dnsName.
+	// +kubebuilder:validation:Required
+	// +listType=set
 	IPs []string `json:"ips"`
-	// Minimum time-to-live value among all the IP addresses.
-	TTL int64 `json:"ttl"`
-	// Timestamp when the last DNS lookup was successfully completed.
-	LastLookupTime metav1.Time `json:"lastLookupTime"`
+	// ttlSeconds is the minimum time-to-live value among all the IP addresses.
+	// +kubebuilder:validation:Required
+	TTLSeconds int32 `json:"ttlSeconds"`
+	// lastLookupTime is the timestamp when the last DNS lookup was completed.
+	// +kubebuilder:validation:Required
+	LastLookupTime *metav1.Time `json:"lastLookupTime"`
+	// resolutionFailures keeps the count of how many times the DNS resolution failed for the
+	// dnsName field. If the DNS resolution succeeds then the field will be set to zero. Upon
+	// every failure, the value of the field will be incremented by one. Upon reaching a threshold
+	// value, the details about the DNS name will be removed.
+	ResolutionFailures int `json:"resolutionFailures,omitempty"`
+	// conditions provide information about the state of the DNS name.
+	//
+	// These are the supported conditions:
+	//
+	//   * Degraded
+	//   - True if the following conditions are met:
+	//     * The last DNS name resolution failed.
+	//   - False if any of those conditions are unsatisfied.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 ````
 
 ### Workflow Description
 
-The workflows for Create, Delete and Update events for EgressFirewall related to DNS names are explained in this section. The workflow
-for those events is shown in the following diagram with an example `EgressFirewallDNSName` CR:
+The workflows for the different components related to DNSNameResolver events are explained in this section. The workflow
+for those events is shown in the following diagram with an example `DNSNameResolver` CR:
 
 ![Workflow](./coredns-egressfirewall-integration.png)
 
-#### Create/Update of DNS name
+#### Workflow of OVN-K cluster manager
 
-* An OpenShift cluster administrator creates/updates an EgressFirewall resource for a namespace and adds rule(s) containing
-DNS name(s).
-* The OVN-K cluster manager will create corresponding `EgressFirewallDNSName` CRs for each of the DNS names in the EgressFirewall rules, if not
+The following pseudocode explains the workflow of the OVN-K cluster manager:
+```shell
+watch(EgressFirewall)
+
+if match(event.type, "create"):
+
+	for each rule in obj.egress:
+		if rule.to.dnsName != ""  && check_dns_name_resolver_exists(rule.to.dnsName) == false:
+			create_dns_name_resolver(rule.to.dnsName)
+
+else if match(event.type, "delete"):
+
+	for each rule in obj.egress:
+		if rule.to.dnsName != "" && check_dns_name_used_in_any_egress_firewall(rule.to.dnsName) == false:
+			delete_dns_name_resolver(rule.to.dnsName)
+```
+
+* The OVN-K cluster manager will watch for events related to `EgressFirewall` objects. (Note: Currently, on update of an `EgressFirewall` object, it is
+first deleted and then created again by the OVN-K master(s). Thus, only the create and delete events are handled here.)
+* When an OpenShift cluster administrator creates an EgressFirewall resource for a namespace and adds rule(s) containing DNS name(s),
+the cluster manager will receive the create event.
+* The OVN-K cluster manager will create corresponding `DNSNameResolver` CRs for each of the DNS names in the EgressFirewall rules, if not
 already created. Each CR will be created in the `openshift-ovn-kubernetes` namespace. The name of the CR will be assigned using a hash
 function (similar to the ComputeHash [here](https://github.com/openshift/kubernetes/blob/master/pkg/controller/controller_utils.go#L1157-L1172))
-prefixed by `dns-`. The `.spec.name` field of the CR will be set to the DNS name (along with a trailing `.`).
-* The `egressfirewall` CoreDNS plugin will watch for the events related to `EgressFirewallDNSName` CRs and will store the DNS name along
-with the corresponding CR name.
-* The `EgressFirewallDNSName` controller will watch for the events related to `EgressFirewallDNSName` CRs. When it will receive the Create events,
-it will perform DNS lookup for each of the DNS names corresponding to the `EgressFirewallDNSName` CRs.
-* The `egressfirewall` CoreDNS plugin will intercept the request and the response for the DNS lookups from all the pods. If the DNS name matches
-any of the `EgressFirewallDNSName` CRs, then the plugin will update the corresponding `.status`. The details of the update steps are explained below.
-* The OVN-K master(s) will watch for the events related to the `EgressFirewallDNSName` CRs. When the `.status` of a `EgressFirewallDNSName` CR is
-updated, the OVN-K master(s) will update the `AddressSet` for the DNS name, which is linked with the ACL rule(s) for the corresponding EgressFirewall
-rule(s).
-* The `EgressFirewallDNSName` controller will store the regular DNS name matching the `.spec.name` field of a `EgressFirewallDNSName` CR and the
+prefixed by `dns-`. The input to the hash function will be the DNS name. The `.spec.name` field of the CR will be set to the DNS name along with a trailing period.
+The trailing period is added because DNS servers store DNS names with a trailing period. Thus, to make it consistent, and also for ease of matching,
+the `spec.name` will be set with a trailing period.
+* When an OpenShift cluster administrator deletes an EgressFirewall resource for a namespace containing rule(s) for DNS name(s), 
+the cluster manager will receive the delete event.
+* The cluster manager will then check if the same DNS names are also used in the EgressFirewall rules in other namespaces. If the
+DNS names are not used, then the cluster manager will delete the corresponding `DNSNameResolver` CRs.
+
+#### Workflow of `DNSNameResolver` controller
+
+The following pseudocode explains the workflow of the `DNSNameResolver` controller:
+```shell
+watch(DNSNameResolver)
+run_dns_resolution_in_background()
+
+if match(event.type, "create") || match(event.type, "update"):
+
+	if check_dns_name_added(obj.spec.name) == false:
+		add_and_resolve_dns_name(obj.spec.name)
+
+	for each resolvedName in obj.status.resolvedNames:
+		ensure_dns_name_added(resolvedName)
+
+else if match(event.type, "delete"):
+
+	if is_wildcard(obj.spec.name) == true
+		|| (is_wildcard(obj.spec.name) == false && match_wildcard_dns_name(obj.spec.name) == false):
+		delete_dns_name(obj.spec.name)
+
+	if is_wildcard(obj.spec.name) == true:
+		for each resolvedName in obj.status.resolvedNames:
+			if resolvedName.dnsName != obj.spec.name && match_regular_dns_name(resolvedName.dnsName) == false:
+				delete_dns_name(obj.spec.name)
+```
+
+* The `DNSNameResolver` controller will watch for the events related to `DNSNameResolver` CRs.
+* After it receives the create/update events, it will perform DNS lookup for each of the DNS names corresponding to the `DNSNameResolver` CRs,
+if the details of the DNS names are not already added.
+* The `DNSNameResolver` controller will store the regular DNS name matching the `.spec.name` field of a `DNSNameResolver` CR and the
 corresponding current IP addresses along with the TTL and the next time to lookup. Based on the next time to lookup, the controller will perform DNS
-lookups to get the latest IP addresses and TTL information. The DNS lookup will be intercepted by the `egressfirewall` plugin and will enforce an
+lookups to get the latest IP addresses and TTL information. The DNS lookup will be intercepted by the `ocp_dnsnameresolver` plugin and will enforce an
 update of the `.status` of the CR.
-* The controller will also store the wildcard DNS name which matches the `.spec.name` field of a `EgressFirewallDNSName` CR. If the DNS lookup is
+* The controller will also store the wildcard DNS name which matches the `.spec.name` field of a `DNSNameResolver` CR. If the DNS lookup is
 successful for the wildcard DNS name, then the DNS name will be stored with the corresponding current IP addresses along with the TTL and the next time to
-lookup. If the DNS lookup is not successful, then it will be retried  after a default TTL (30 minutes). The `EgressFirewallDNSName` controller will also store
+lookup. If the DNS lookup is not successful, then it will be retried  after a default TTL (30 minutes). The `DNSNameResolver` controller will also store
 the regular DNS names, matching the wildcard DNS name's `.status.resolvedNames[*].dnsName` field, with the corresponding current IP addresses along with the
 TTL and the next time to lookup. Based on the next time to lookup, the controller will follow the same method as that of the regular DNS names to get the
 latest IP addresses and TTL information.
+* On receiving the delete event, the `DNSNameResolver` controller will remove the details stored regarding the `DNSNameResolver` CRs.
+* If the deleted event is for a `DNSNameResolver` corresponding to a regular DNS name, the `DNSNameResolver` controller will remove the details of a regular DNS
+name, if it doesn't match a `DNSNameResolver` CR corresponding to a  wildcard DNS name.
+* If the deleted event is for a `DNSNameResolver` corresponding to a wildcard DNS name, the `DNSNameResolver` controller will remove the details of a wildcard DNS
+name. It will also remove the details of the regular DNS names added to the `.status` of the CR, if each of them doesn't match a `DNSNameResolver` CR corresponding
+to a  wildcard DNS name.
 
+#### Workflow of `ocp_dnsnameresolver` CoreDNS plugin
 
-#### Delete/Update of DNS name
+The following pseudocodes explain the workflow of the `ocp_dnsnameresolver` CoreDNS plugin:
 
-* An OpenShift cluster administrator deletes an EgressFirewall resource for a namespace containing rule(s) for DNS name(s)
-OR updates an EgressFirewall resource for a namespace and deletes rule(s) containing DNS name(s).
-* The OVN-K master(s) will delete the ACL rule(s) corresponding to the EgressFirewall rule(s) containing the DNS name(s).
-* The OVN-K master(s) will then check if the same DNS names are also used in the EgressFirewall rules in other namespaces. If
-they are not used, then the OVN-K master(s) will delete the corresponding `AddressSet` for each of the DNS names in the EgressFirewall
-rules. 
-* Similar checks will be done by the OVN-K cluster manager. If DNS name is not used in any other namespaces then it will delete the
-corresponding `EgressFirewallDNSName` CRs.
-* On receiving the delete event, the `egressfirewall` plugin and the `EgressFirewallDNSName` controller will remove the details stored
-regarding the `EgressFirewallDNSName` CRs.
+##### Watch
+```shell
+watch(DNSNameResolver)
 
+if match(event.type, "create"):
 
-#### Update steps of `.status` of the `EgressFirewallDNSName` CRs by the `egressfirewall` plugin
+	if is_wildcard(obj.spec.name) == true:
+		add_wildcard_dns_name(obj.spec.name)
+	else
+		add_regular_dns_name(obj.spec.name)
 
-* The plugin gets the response of a DNS lookup from other plugins and checks the response code returned. It proceeds with further processing, only
-if a success response code is returned, else it just sends the same response received from the other plugins.
-* The plugin then checks whether the DNS lookup matches any `EgressFirewallDNSName` CR belonging to a regular DNS name or a wildcard DNS name
-or both (in the case of a regular DNS name lookup). If no match is found then it just sends the same response received from the other plugins.
-* If a regular DNS name in the lookup matches with a `EgressFirewallDNSName` CR corresponding to a regular DNS name, then the `.status` of
-the `EgressFirewallDNSName` CR will be updated with the DNS name and the corresponding current IP addresses along with the TTL and the current time
+else if match(event.type, "delete"):
+
+	if is_wildcard(obj.spec.name) == true:
+		delete_wildcard_dns_name(obj.spec.name)
+	else
+		delete_regular_dns_name(obj.spec.name)
+```
+
+* The `ocp_dnsnameresolver` CoreDNS plugin will watch for the events related to `DNSNameResolver` CRs and will store the DNS name along
+with the corresponding CR name.
+* On receiving the delete event, the `ocp_dnsnameresolver` plugin will remove the details stored regarding the `DNSNameResolver` CRs.
+
+##### DNS lookup interception
+
+```shell
+response = get_response_from_plugin_chain(dnsName)
+
+if match_regular_dns_name(dnsName) == false || match_wildcard_dns_name(dnsName) == false:
+	return response
+
+if resolution_failed(response) == false:
+
+	ips, ttl = get_ips_and_ttl(response)
+	if ttl = 0:
+		ttl = min_ttl
+	
+	if match_regular_dns_name(dnsName) == true:
+		objName = get_regular_dns_name_resolver_name(dnsName)
+		update_dns_resolver_success(objName, dnsName, ips, ttl, response)
+	
+	if match_wildcard_dns_name(dnsName) == true:
+		objName = get_wildcard_dns_name_resolver_name(dnsName)
+		update_dns_resolver_success(objName, dnsName, ips, ttl, response)
+
+else
+  	
+	if match_regular_dns_name(dnsName) == true:
+		objName = get_regular_dns_name_resolver_name(dnsName)
+		update_dns_resolver_failure(objName, dnsName, response)
+	
+	if match_wildcard_dns_name(dnsName) == true:
+		objName = get_wildcard_dns_name_resolver_name(dnsName)
+		update_dns_resolver_failure(objName, dnsName, response)
+
+return response
+```
+
+* The `ocp_dnsnameresolver` CoreDNS plugin will intercept the request and the response for the DNS lookups from all the pods. If the DNS name matches
+any of the `DNSNameResolver` CRs, then the plugin will update the corresponding `.status`. 
+* The plugin gets the response of a DNS lookup from other plugins and checks the response code returned. 
+* If it is a success response code, then the plugin checks whether the DNS lookup matches any `DNSNameResolver` CR belonging to a regular DNS name
+or a wildcard DNS name or both (in the case of a regular DNS name lookup). The IP addresses and minimum TTL among the IP addresses is obtained. If the
+TTL value is zero then it is set to a minimum TTL value (say 5 seconds). This is done to avoid immediate DNS lookups by the `DNSNameResolver`
+controller for the same DNS names. If any of the `DNSNameResolver` CRs match, then the plugin proceeds with the update process of the `.status` of the
+`DNSNameResolver` CR when the DNS lookup is successful.
+* If it is a failure response code, then the plugin checks whether the DNS lookup matches any `DNSNameResolver` CR belonging to a regular DNS name
+or a wildcard DNS name or both (in the case of a regular DNS name lookup). If any of the `DNSNameResolver` CRs match, then the plugin proceeds with
+the update process of the `.status` of the `DNSNameResolver` CR when the DNS lookup is unsuccessful.
+* The plugin then returns the same response received from the other plugins.
+
+##### Successful DNS lookup
+
+```shell
+update_dns_resolver_success(objName, dnsName, ips, ttl, response):
+	obj = get_dns_name_resolver(objName)
+	for each resolvedName in obj.status.resolvedNames:
+		
+		if resolvedName.dnsName == dnsName:
+			if match_next_lookup_time(resolvedName.lastLookupTime, resolvedName.ttl, ttl):
+				if match_ips(resolvedName.ips, ips):
+					skip_update_of_resolvedName
+				else
+					combine_ips(resolvedName.ips, ips)
+			else
+				resolvedName.ips = ips
+			resolvedName.ttl = ttl
+			resolvedName.lastLookupTime = now()
+			resolvedName.resolutionFailures = 0
+			cond = condition{type: "Degraded", status: false, reason: success_reason(response), message: success_message(response)}
+			add_condition(resolvedName.conditions, cond)
+
+		else if is_wildcard(obj.spec.name) && resolvedName.dnsName == obj.spec.name && is_regular(dnsName)
+			&& match_next_lookup_time(resolvedName.lastLookupTime, resolvedName.ttl, ttl) && match_ips(resolvedName.ips, ips):
+			skip_update_of_resolvedName
+		
+		else if is_wildcard(dnsName)
+			&& match_next_lookup_time(resolvedName.lastLookupTime, resolvedName.ttl, ttl) && match_ips(resolvedName.ips, ips):
+			remove(obj.status.resolvedNames, resolvedName)
+	
+	update_status_dns_name_resolver(obj)
+```
+
+* If a regular DNS name in the lookup matches with a `DNSNameResolver` CR corresponding to a regular DNS name, then the `.status` of
+the `DNSNameResolver` CR will be updated with the DNS name and the corresponding current IP addresses along with the TTL and the current time
 as the last lookup time.
-* If a regular DNS name in the lookup matches with a `EgressFirewallDNSName` CR corresponding to a wildcard DNS name, then the `.status` of
-the `EgressFirewallDNSName` CR will be updated, if the IP addresses received in the response doesn't match with the IP addresses and the next lookup time
+* If a regular DNS name in the lookup matches with a `DNSNameResolver` CR corresponding to a wildcard DNS name, then the `.status` of
+the `DNSNameResolver` CR will be updated, if the IP addresses received in the response doesn't match with the IP addresses and the next lookup time
 corresponding to the wildcard DNS name. Otherwise, the plugin will update the `.status` with the regular DNS name and the corresponding current IP addresses
 along with the TTL and the next lookup time based on the TTL.
-* If the DNS lookup is for a wildcard DNS name and it matches with the `EgressFirewallDNSName` CR corresponding to the wildcard DNS name,
-then the `egressfirewall` plugin will update the `.status` of the corresponding `EgressFirewallDNSName` CR with the wildcard DNS name
+* If the DNS lookup is for a wildcard DNS name and it matches with the `DNSNameResolver` CR corresponding to the wildcard DNS name,
+then the `ocp_dnsnameresolver` plugin will update the `.status` of the corresponding `DNSNameResolver` CR with the wildcard DNS name
 and the corresponding current IP addresses along with the TTL and the current lookup time as the last lookup time. If the wildcard DNS name's
 corresponding IP addresses and next lookup time (TTL + last lookup time) matches that of any other regular DNS name, added to the `.status`
-of the `EgressFirewallDNSName` CR, then the details of the regular DNS name will be removed.
+of the `DNSNameResolver` CR, then the details of the regular DNS name will be removed.
 * However, the updates will take place if there is a change in the next lookup time (TTL + last lookup time) for the DNS name or if the next
 lookup time is same for the DNS name, but the current IP addresses are different from the existing IP addresses. For the latter, the current
 IP addresses are added to the existing IP addresses of the DNS name. This will take care of the scenario where different CoreDNS pods gets
 different subsets of the IP addresses in the response to the DNS lookup of the same DNS name. The next time to lookup will be same for them
 though the IP addresses may differ due to upstream DNS load balancing.
 * Additionally, the exact matching of the next lookup time may never be successful. If the existing next lookup time of a DNS name lies
-within a threshold value (5 seconds) of the current lookup time, specifically lies in the range defined by
-`[current lookup time - threshold duration, current lookup time + threshold duration]`, then they are considered as same. 
-* For DNS names whose TTL is returned as zero, a minimum TTL value (5 seconds) is used to avoid immediate DNS lookups by the `EgressFirewallDNSName`
-controller for the same DNS names.
-* The plugin then returns the same response received from the other plugins.
+within a threshold value (say 5 seconds) of the current lookup time, specifically lies in the range defined by
+`[current lookup time - threshold duration, current lookup time + threshold duration]`, then they are considered as same.
+* The `Degraded` condition of the DNS name will be set to `false` along with the success reason and message.
+
+##### DNS lookup failure
+
+```shell
+update_dns_resolver_failure(objName, dnsName, response):
+	obj = get_dns_name_resolver(objName)
+	for each resolvedName in obj.status.resolvedNames:
+		if resolvedName.dnsName == dnsName:
+			if resolvedName.resolutionFailures == threshold:
+				remove(obj.status.resolvedNames, resolvedName)
+			else
+				resolvedName.ttl = min_ttl
+				resolvedName.lastLookupTime = now()
+				resolvedName.resolutionFailures = resolvedName.resolutionFailures + 1
+				cond = condition{type: "Degraded", status: true, reason: failure_reason(response), message: failure_message(response)}
+				add_condition(resolvedName.conditions, cond)
+	
+	update_status_dns_name_resolver(obj)
+```
+
+* If a DNS name (regular or wildcard) matches a `DNSNameResolver` CR, then the corresponding resolved name field in the `.status` will be updated.
+* If the corresponding `resolutionFailures` field has reached a threshold value (say 5), then the details of the DNS name will be removed from the
+`.status` of the `DNSNameResolver` CR.
+* Otherwise, the `ttl` field will be set to the minimum TTL value (say 5 seconds) and the `lastLookupTime` time will be set to the current time. The
+`resolutionFailures` will be incremented by one. Additionally, the `Degraded` condition of the DNS name will be set to `true` along with the failure reason 
+and message.
+
+
+#### Workflow of OVN-K master(s)
+
+The following pseudocode explains the workflow of the OVN-K master(s):
+```shell
+watch(DNSNameResolver)
+
+if match(event.type, "create") || match(event.type, "update"):
+
+	ensure_address_set(obj.spec.name)
+
+	ips = []
+	for each resolvedName in obj.status.resolvedNames:
+		add_ips(ips, resolvedName.ips)
+
+	set_ips_of_address_set(obj.spec.name, ips)
+
+else if match(event.type, "delete"):
+
+  	destroy_address_set(obj.spec.name)
+```
+
+* The OVN-K master(s) will watch for the events related to the `DNSNameResolver` CRs.
+* When the OVN-K master(s) receive(s) the create/update events, the master(s) will get the IP addresses related to the corresponding DNS name
+from the `.status` of the `DNSNameResolver` CR. The the OVN-K master(s) will then update the `AddressSet` for the DNS name, which is linked
+with the ACL rule(s) for the corresponding EgressFirewall rule(s).
+* When the OVN-K master(s) receive(s) the delete events, the OVN-K master(s) will delete the ACL rule(s) corresponding to the EgressFirewall
+rule(s) containing the DNS name(s).  The OVN-K master(s) will also delete the corresponding `AddressSet` for the corresponding DNS name.
+
 
 #### Variation [optional]
 
@@ -255,7 +484,7 @@ type EgressFirewallDestination struct {
 	// ..
 }
 ````
-The details of the `EgressFirewallDNSName` CRD can be found in the [Proposal](#proposal) section.
+The details of the `DNSNameResolver` CRD can be found in the [Proposal](#proposal) section.
 
 
 ### Implementation Details/Notes/Constraints [optional]
@@ -264,49 +493,51 @@ The implementation changes needed for the proposed enhancement are documented in
 
 #### Cluster DNS Operator
 
-Cluster DNS Operator will deploy CoreDNS with the `egressfirewall` plugin enabled by adding it to the corefile. For the EgressFirewall rules to
+Cluster DNS Operator will deploy CoreDNS with the `ocp_dnsnameresolver` plugin enabled by adding it to the corefile. For the EgressFirewall rules to
 apply consistently, even for DNS names that are resolved by custom upstreams, it will be added to all server blocks in the corefile. As the
-plugin will watch and update the `EgressFirewallDNSName` CRs in the `dns.openshift.io` api-group, proper RBAC permissions will be needed
+plugin will watch and update the `DNSNameResolver` CRs in the `network.openshift.io` api-group, proper RBAC permissions will be needed
 to be added to the `ClusterRole` for CoreDNS.
 
-The new `EgressFirewallDNSName` controller will be added to the Cluster DNS Operator. The controller will watch the `EgressFirewallDNSName` CRs,
+The new `DNSNameResolver` controller will be added to the Cluster DNS Operator. The controller will watch the `DNSNameResolver` CRs,
 and will send DNS lookup requests for the `spec.name` field. It will also re-resolve the `status.resolvedNames[*].dnsName` fields based on the
 corresponding next lookup time(TTL + last lookup time).
 
-For wildcard DNS names, the controller will query for the DNS names that get added to the `.status` of the corresponding `EgressFirewallDNSName` CR,
-including the wildcard DNS name, even if it doesn't get added to the `.status`. However, the list of the DNS names to lookup for a wildcard DNS name
-should also not become stale if a DNS name belonging its subdomain is removed. To achieve this a retry counter will be used for the DNS name
-lookups. If the lookup fails for a DNS name listed in the `.status` of a `EgressFirewallDNSName` CR for a threshold number of times (say 5),
-then the DNS name will be removed from the `.status` by the controller. However, the DNS lookup will only fail if the corresponding wildcard
-DNS name does not have an `A` or `AAAA` record. Otherwise, the response will be same as the IP addresses associated with the `A` or `AAAA` record
-of the wildcard DNS name.
+For wildcard DNS names, the controller will query for the DNS names that get added to the `.status` of the corresponding `DNSNameResolver` CR,
+including the wildcard DNS name, even if it doesn't get added to the `.status`.
 
 #### CoreDNS
 
-The new external plugin `egressfirewall` will be added to a new github repository. The plugin will be enabled by adding its details in the `plugin.cfg` file
+The new external plugin `ocp_dnsnameresolver` will be added to a new github repository. The plugin will be enabled by adding its details in the `plugin.cfg` file
 of the CoreDNS repository. As the plugin will inspect the DNS lookup queries and response from other plugins, it needs to be added before the other plugins
 (namely `forward` plugin) which takes care of the DNS lookups for the DNS names external to the cluster.
 
-The `egressfirewall` plugin will watch the `EgressFirewallDNSName` CRs and whenever there is a DNS lookup which matches one of the `EgressFirewallDNSName`
-CRs (either regular or wildcard DNS names or both), then it will update the `.status` of the `EgressFirewallDNSName` CR(s) if there's any change
+The `ocp_dnsnameresolver` plugin will watch the `DNSNameResolver` CRs and whenever there is a DNS lookup which matches one of the `DNSNameResolver`
+CRs (either regular or wildcard DNS names or both), then it will update the `.status` of the `DNSNameResolver` CR(s) if there's any change
 in the corresponding IP addresses and/or the next lookup time information (TTL + last lookup time). The process is explained in the [Workflow Description](#workflow-description) section.
 
-`SharedIndexInformer` will be used for tracking events related to `EgressFirewallDNSName` CRs. The details about the regular and wildcard DNS names will be stored
-in two separate maps by the plugin. Whenever there is a DNS lookup, if there is no `EgressFirewallDNSName` CRs created, then the `egressfirewall` plugin will just
+`SharedIndexInformer` will be used for tracking events related to `DNSNameResolver` CRs. The details about the regular and wildcard DNS names will be stored
+in two separate maps by the plugin. Whenever there is a DNS lookup, if there is no `DNSNameResolver` CRs created, then the `ocp_dnsnameresolver` plugin will just
 send the received response to the lookup. A DNS name will be checked for a match in both the maps. If there is no match then also the plugin will just send the
-received response to the lookup. However, when a match is found (in either of the maps or in both), then the corresponding `EgressFirewallDNSName` CR is updated
+received response to the lookup. However, when a match is found (in either of the maps or in both), then the corresponding `DNSNameResolver` CR is updated
 with the current IP addresses along with the corresponding TTL and current time as the last lookup time, if the same information is not already available.
+
+The plugin will ensure that the list of the DNS names to lookup for a wildcard DNS name does not become stale if a DNS name belonging its subdomain is removed.
+To achieve this a retry counter (`resolutionFailures`) will be used for the DNS name lookups. If the lookup fails for a DNS name listed in the `.status` of a
+`DNSNameResolver` CR for a threshold number of times (say 5), then the DNS name will be removed from the `.status` by the plugin. However, the DNS lookup will
+only fail if the corresponding wildcard DNS name does not have an `A` or `AAAA` record. Otherwise, the response will be same as the IP addresses associated with
+the `A` or `AAAA` record of the wildcard DNS name.
 
 #### OVN-K cluster manager
 
-For every unique DNS name used in EgressFirewall rules, OVN-K cluster manager will create a corresponding `EgressFirewallDNSName` CR.
+For every unique DNS name used in EgressFirewall rules, OVN-K cluster manager will create a corresponding `DNSNameResolver` CR.
 The name of the CR will be assigned using a hash function (similar to the ComputeHash
 [here](https://github.com/openshift/kubernetes/blob/master/pkg/controller/controller_utils.go#L1157-L1172))
-prefixed by `dns-`. It will also delete a `EgressFirewallDNSName` CR, when all the rules containing the corresponding DNS name are deleted.
+prefixed by `dns-`. The input to the hash function will be the DNS name. It will also delete a `DNSNameResolver` CR, when all the rules containing
+the corresponding DNS name are deleted.
 
 #### OVN-K master(s)
 
-The OVN-K master(s) will watch the `EgressFirewallDNSName` CRs. Whenever the `.status` of the CRs will be updated with new IP addresses and corresponding
+The OVN-K master(s) will watch the `DNSNameResolver` CRs. Whenever the `.status` of the CRs will be updated with new IP addresses and corresponding
 TTL information for a DNS name, OVN-K master(s) will update the `AddressSet` mapped to the DNS name. This `AddressSet` will be linked
 to the ACL rule(s) for the EgressFirewall rule(s) in which the DNS name is used. This will ensure that the latest IP addresses are always updated in
 the `AddressSets`.
@@ -314,15 +545,21 @@ the `AddressSets`.
 
 ### Risks and Mitigations
 
-* The `EgressFirewallDNSName` CR will be created by OVN-K Cluster manager whenever a new DNS name is used in a EgressFirewall rule. The CR will be deleted
-when the corresponding DNS name is not used in any of the EgressFirewall rules. The `EgressFirewallDNSName` CR should not be modified (created or deleted or
-updated) by an user. Doing so may lead to undesired behavior of EgressFirewall.
+* The `DNSNameResolver` CR will be created by OVN-K Cluster manager whenever a new DNS name is used in a EgressFirewall rule. The CR will be deleted
+when the corresponding DNS name is not used in any of the EgressFirewall rules. The `DNSNameResolver` CR should not be modified (created or deleted or
+updated) by a user. Doing so may lead to undesired behavior of EgressFirewall.
+* During the upgrade process if the OVN-K cluster manager and master pods are upgraded first and then the Cluster DNS operator and the CoreDNS pods, the
+EgressFirewall functionality may break. The details can be found in [Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy) section
 
 ### Drawbacks
 
 * Whenever there's a change in the IP addresses or the next lookup time (TTL + last lookup time) for a DNS name, the additional step of updating the
-related `EgressFirewallDNSName` CRs will be executed. This will add some delay to the DNS lookup process. However, this will only
+related `DNSNameResolver` CRs will be executed. This will add some delay to the DNS lookup process. However, this will only
 happen whenever there's a change in the DNS information.
+* For wildcard DNS names, it is not possible to pre-emptively find out the matching regular DNS names which have different IP addresses assigned to them
+as compared to the matching wildcard DNS names. For these regular DNS names the first lookup may originate from a workload pod, in which case the pod may
+see an initial delay until the underlying ACL rules are updated with the corresponding IP addresses. However, this will happen only for the first DNS lookup
+of a particular DNS name by any pod. Subsequently, it will be handled by the `DNSNameResolver` controller to keep the IP addresses updated.
 
 
 ## Design Details
@@ -356,22 +593,22 @@ N.A. This feature will go directly to Tech Preview.
 ### Upgrade / Downgrade Strategy
 
 Upgrade expectations:
-* On upgrade, the OVN-K cluster manager will create the corresponding `EgressFirewallDNSName` CRs for each DNS name in the
-existing EgressFirewall resources. The `EgressFirewallDNSName` controller will start the DNS lookups for the `EgressFirewallDNSName` CRs
-and the `egressfirewall` plugin will also start updating the `.status` fields of the `EgressFirewallDNSName` CRs. The scenarios arising
+* On upgrade, the OVN-K cluster manager will create the corresponding `DNSNameResolver` CRs for each DNS name in the
+existing EgressFirewall resources. The `DNSNameResolver` controller will start the DNS lookups for the `DNSNameResolver` CRs
+and the `ocp_dnsnameresolver` plugin will also start updating the `.status` fields of the `DNSNameResolver` CRs. The scenarios arising
 out of the order of the update of the various components are discussed in [Version Skew Strategy](#version-skew-strategy)
 
 Downgrade expectations:
-* On downgrade, the `EgressFirewallDNSName` CRs may still remain. However, these CRs would not have any impact on how
-EgressFirewall ACL rules are implemented in the downgraded cluster. Deleting the CR Definition of `EgressFirewallDNSName`
-from the cluster would remove all the `EgressFirewallDNSName` CRs.
+* On downgrade, the `DNSNameResolver` CRs may still remain. However, these CRs would not have any impact on how
+EgressFirewall ACL rules are implemented in the downgraded cluster. Deleting the CR Definition of `DNSNameResolver`
+from the cluster would remove all the `DNSNameResolver` CRs.
 
 ### Version Skew Strategy
 
 The following 2 scenarios may occur during the upgrade process:
 * Scenario 1: The Cluster DNS operator and the CoreDNS pods are upgraded first and then the OVN-K cluster manager and master pods.
 
-  In this scenario, the `egressfirewall` CoreDNS plugin will start inspecting each DNS lookup before the `EgressFirewallDNSName`
+  In this scenario, the `ocp_dnsnameresolver` CoreDNS plugin will start inspecting each DNS lookup before the `DNSNameResolver`
   CRs are created by the OVN-K cluster manager. The plugin will just respond with the response received from other plugins for
   the DNS lookups. As OVN-K master will be continuing the DNS lookups for DNS names with expired TTLs, CoreDNS will
   also be responding with the corresponding IP addresses and the TTLs, and the EgressFirewall functionality will still continue to work as before
@@ -379,9 +616,9 @@ The following 2 scenarios may occur during the upgrade process:
 
 * Scenario 2: The OVN-K cluster manager and master pods are upgraded first and then the Cluster DNS operator and the CoreDNS pods.
 
-  In this scenario, the OVN-K cluster manager will create `EgressFirewallDNSName` CRs for each unique DNS name used in EgressFirewall rules.
+  In this scenario, the OVN-K cluster manager will create `DNSNameResolver` CRs for each unique DNS name used in EgressFirewall rules.
   However, as the Cluster DNS operator and the CoreDNS pods are still not upgraded, CoreDNS pods will not run the
-  `egressfirewall` plugin. Thus, the EgressFirewall functionality will be broken in this scenario.
+  `ocp_dnsnameresolver` plugin. Thus, the EgressFirewall functionality will be broken in this scenario.
 
 ### Operational Aspects of API Extensions
 
@@ -483,7 +720,7 @@ allow rules are supported by Cilium.
 
 ### gRPC connection between OVN-K and CoreDNS
 
-Communication between OVN-K master and CoreDNS happens over a gRPC connection rather than the proposed `EgressFirewallDNSName` CR. Whenever there's a DNS
+Communication between OVN-K master and CoreDNS happens over a gRPC connection rather than the proposed `DNSNameResolver` CR. Whenever there's a DNS
 lookup for a DNS Name which is used in an EgressFirewall rule and the IP addresses associated with DNS name changes, then CoreDNS sends this information to the
 OVN-K master. After the underlying ACL rules are updated the OVN-K master responds to the same CoreDNS pod with an OK message. Then the CoreDNS
 pod responds to the original DNS lookup request.
@@ -495,7 +732,7 @@ pod responds to the original DNS lookup request.
 
 #### Cons of gRPC connection between OVN-K and CoreDNS
 
-* The `EgressFirewallDNSName` CR works as a common knowledge base for the CoreDNS pods and OVN-K master. Without it, the CoreDNS pods and OVN-K have to
+* The `DNSNameResolver` CR works as a common knowledge base for the CoreDNS pods and OVN-K master. Without it, the CoreDNS pods and OVN-K have to
 independently store the same information. Since a DNS lookup request is handled by one CoreDNS pod, the updated IP information will only be available to
 that CoreDNS pod. Thus there should be a way for the CoreDNS pods to share this information amongst each other.
 * If the CoreDNS pods does not store the IP information of the DNS names, then whenever there is a DNS lookup for a DNS name used in an EgressFirewall rule,
