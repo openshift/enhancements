@@ -56,7 +56,7 @@ platform operators.
 Furthermore to assess the viability of the metrics collection profile feature
 the monitoring team performed a detailed analysis of its impact in an OpenShift
 cluster. The analysis consisted of a test where an OpenShift cluster would run
-three replicas of the OpenShift Prometheus instance but each replica would be
+two replicas of the OpenShift Prometheus instance but each replica would be
 configured to a different metrics collection profile (`full`, `minimal`). Then
 we would trigger a workload using
 [kube-burner](https://github.com/cloud-bulldozer/kube-burner) and at the end of
@@ -278,8 +278,8 @@ not. To aid teams with this effort the monitoring team will provide:
 - How are monitors supposed to be kept up to date? In 4.12 a metric that wasn't
   being used in an alert is now required, how does the monitor responsible for
   that metric gets updated?
-  - The origin/CI test mentioned in the previous section will fail if ther is a
-    resouce (Alerts/PrometheusRules/Dashboards) using a metric which is not
+  - The origin/CI test mentioned in the previous section will fail if there is a
+    resource (Alerts/PrometheusRules/Dashboards) using a metric which is not
     present in the ServiceMonitor;
 
 - A new profile is added, what will happen to operators that had implemented
@@ -290,9 +290,18 @@ not. To aid teams with this effort the monitoring team will provide:
   - Furthermore, we plan on adding extra origin/CI tests to validate each new
     profile if applicable.
 
-- What happens if CMO pick-up an unsupported collection profile value?
-  - Report Degraded=False and fail reconciliation.
+- What happens if a user provides an invalid value for a matrics collection profile?
+  - CMO will reconcile and validate that the value supplied is invalid and it
+    will report Degraded=False and fail reconciliation.
 
+- Should we add future profiles? How would we validate such profiles?
+  - Our current validation strategy with only two profiles is quite linear,
+    however, things start becoming more complex and hard to mainain as we
+    introduce new profiles to the mix. 
+  - Some of the things to consider if new profiles are introduce are:
+      - How would we validate such profile?
+      - How would we ensure teams that adopted metrics collection profiles implement the new profile?
+      - How would we aid developers implementing the new profile?
 ### Drawbacks
 
 - Extra CI cycles
@@ -300,8 +309,6 @@ not. To aid teams with this effort the monitoring team will provide:
 ## Design Details
 
 ### Open Questions
-
-- Should we add future profiles? 
 
 ### Test Plan
 
