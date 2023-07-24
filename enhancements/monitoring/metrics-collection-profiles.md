@@ -8,13 +8,22 @@ approvers:
   - TBD
 api-approvers: "None"
 creation-date: 2022-12-06
-last-updated: 2023-07-19
+last-updated: 2023-07-24
 tracking-link:
   - https://issues.redhat.com/browse/MON-2483
   - https://issues.redhat.com/browse/MON-3043
 ---
 
 # Metrics collection profiles
+
+## Terms
+
+monitors - refers to the CRDs ServiceMonitor, PodMonitor and Probe from Prometheus Operator;
+
+users - refers to end-users of OpenShift who manage an OpenShift installation i.e cluster-admins;
+
+developers - refers to OpenShift developers that build the platform i.e. RedHat associates and OpenSource contributors;
+
 
 ## Summary
 
@@ -26,10 +35,10 @@ consume less memory and CPU, either by increasing the scraping interval or by
 scraping fewer targets.
 
 These modifications are currently not possible, because the OpenShift operators
-manage their service/pod monitors (either directly or via the cluster version
-operator) and any manual modification would be reverted. This proposal outlines
-a solution for allowing users to control the amount of data being collected
-which can meet their needs.
+manage their monitors (either directly or via the cluster-version-operator) and
+any manual modification would be reverted. This proposal outlines a solution for
+allowing users to control the amount of data being collected which can meet
+their needs.
 
 ## Motivation
 
@@ -37,16 +46,16 @@ OpenShift is an opinionated platform, and the default set of metrics has of
 course been crafted to match what we think the majority of users might need.
 Nevertheless, users have repeatedly asked for the ability to reduce the amount
 of memory consumed by Prometheus either by lowering the Prometheus scrape
-intervals or by modifying ServiceMonitors.
+intervals or by modifying monitors.
 
-Users currently can not control the ServiceMonitors scraped by Prometheus since
-some of the metrics collected are essential for other parts of the system to
-function properly: alerting rules, console dashboards, resource metrics API,
-horizontal/vertical pod autoscaling and Red Hat Telemetry. Users also are not
-allowed to tune the interval at which Prometheus scrapes targets as this again
-can have unforeseen results that can hinder the platform: a low scrape interval
-value may overwhelm the platform Prometheus instance while a high interval value
-may render some of the default alerts ineffective.
+Users currently can not control the aformentioned monitors scraped by Prometheus
+since some of the metrics collected are essential for other parts of the system
+to function properly: recording rules, alerting rules, console dashboards, and
+Red Hat Telemetry. Users also are not allowed to tune the interval at which
+Prometheus scrapes targets as this again can have unforeseen results that can
+hinder the platform: a low scrape interval value may overwhelm the platform
+Prometheus instance while a high interval value may render some of the default
+alerts ineffective.
 
 The goal of this proposal is to allow users to pick their desired level of
 scraping while limiting the impact this might have on the platform, via
@@ -75,11 +84,11 @@ kubelet and the network daemon.
 
 ### User Stories
 
-- As an OpenShift cluster administrator, I want to lower the amount of resources
-  consumed by Prometheus in a supported way, so I can choose between different
-  metrics collection profiles, e.g `full` or `minimal`.
-- As an OpenShift developer, I want a supported way to collect a subset of the
-  metrics exported by my operator and operands.
+- As an user, I want to lower the amount of resources consumed by Prometheus in
+  a supported way, so I can configure the clusters metrics collection profiles
+  to `minimal`.
+- As a developer, I want a supported way to collect a subset of the metrics
+  exported by my operator and operands.
 
 ### Goals
 
@@ -87,22 +96,22 @@ kubelet and the network daemon.
   being collected by the platform, in a way that allows
   cluster-monitoring-operator and other operators to provide their own
   defaulting.
-- Other components of the cluster (console, HPA, alerts) should not be
-  negatively affected by this change.
-- Openshift developers may optionally adhere to this change, developers that do
-  not adhere should not be impacted.
+- Other components of the cluster (alerts, console, HPA and VPA and telemetry)
+  should not be negatively affected by this feature.
+- Developers may optionally adhere to this feature, those that do not adhere
+  should not be impacted.
 
 ### Non-Goals
 
 - Dynamically adjusting metrics scraped at runtime based on heuristics.
 - Allowing users to explicitly set a list or a regex of metrics that they would
 want to be included in a given profile.
+- Support the addition of profiles other than `full` and `minimal`.
 
 ## Proposal
 
 This enhancement leverages label selectors to allow cluster-monitoring-operator
-to select the appropriate monitors ([Pod|Service]Monitor) for a given metrics
-collection profile. 
+to select the appropriate monitors for a given metrics collection profile. 
 
 Given this, the following steps would be necessary to implement this
 enhancement:
@@ -118,7 +127,7 @@ enhancement:
 The cluster-monitoring-operator (CMO) will be extended with a new field,
 `collectionProfile` under `prometheusK8s`. This new field will then allow users
 to configure their desired metrics collection profile while preserving the
-platform functionality (console, HPA and alerts).
+platform functionality (alerts, console, HPA and VPA and telemetry).
 
 ```yaml
 apiVersion: v1
@@ -134,15 +143,15 @@ data:
 
 The different profile names would be pre-defined by the OpenShift monitoring
 team. Once a profile is selected CMO then updates the platform Prometheus CR to
-select pod and service monitors as the union of the 2 sets:
-- pod and service monitors with the 
+select monitors as the union of the 2 sets:
+- monitors with the 
   `monitoring.openshift.io/collection-profile: <selected profile>` label.
-- pod and service monitors without the
-  `monitoring.openshift.io/collection-profile` profile label present, to retain
-  the default behaviour (for components that choose to not opt-in).
+- monitors without the `monitoring.openshift.io/collection-profile` profile
+  label present, to retain the default behaviour (for components that choose to
+  not opt-in).
 
-OpenShift teams can decide if they wanted to adopt this feature. Without any
-change to a ServiceMonitor, if a user picks a profile in the CMO config, things
+OpenShift teams can decide if they want to adopt this feature. Without any
+change to a monitor, if a user picks a profile in the CMO config, things
 should work as they did before. When an OpenShift team wants to implement
 metrics collection profiles, they need to provide monitors for all profiles,
 making sure they do not provide monitors without the profile label. If a team
@@ -151,13 +160,13 @@ have the label `monitoring.openshift.io/collection-profile` set with the
 appropriate value, otherwise their component might end up being double scraped
 or not scraped at all.
 
-In the beginning the goal is to support 2 profiles:
+The goal is to support 2 profiles:
 
 - `full` (same as today)
-- `minimal` (only collect metrics necessary for alerts, recording rules,
-  telemetry and dashboards)
+- `minimal` (only collect metrics necessary for recording rules, alerts,
+  dashboards, HPA and VPA and telemetry)
 
-When the cluster admin enables the `minimal` profile, the k8s Prometheus
+When the cluster admin enables the `minimal` profile, the Prometheus
 resource would be configured accordingly:
 
 ```yaml
@@ -176,8 +185,8 @@ spec:
 ```
  
 An OpenShift team that wants to support the metrics collection profiles feature
-would need to provide 2 monitors for each profile (in this example 1 service
-monitor per profile).
+would need to provide 2 monitors for each profile (in this example 1
+ServiceMonitor per profile).
 
 ```yaml
 ---
@@ -270,7 +279,7 @@ not. To aid teams with this effort the monitoring team will provide:
   generates the `minimal` ServiceMonitor for that operator.
 - an origin/CI test that validates for all Alerts and PrometheusRules that the
   metrics used by them are present in the `keep` expression of the
-  ServiceMonitor for the `minimal` profile
+  monitor for the `minimal` profile
 
 
 ### Risks and Mitigations
@@ -280,15 +289,7 @@ not. To aid teams with this effort the monitoring team will provide:
   that metric gets updated?
   - The origin/CI test mentioned in the previous section will fail if there is a
     resource (Alerts/PrometheusRules/Dashboards) using a metric which is not
-    present in the ServiceMonitor;
-
-- A new profile is added, what will happen to operators that had implemented
-  metrics collection profiles but did not implement the latest profile.
-  - The monitoring team will use the list under 
-  [Infrastruture needed](#infrastructure-needed-optional) to help the developers
-  with the addoption of the new metrics collection profile.
-  - Furthermore, we plan on adding extra origin/CI tests to validate each new
-    profile if applicable.
+    present in the monitor in question;
 
 - What happens if a user provides an invalid value for a metrics collection profile?
   - CMO will reconcile and validate that the value supplied is invalid and it
@@ -300,7 +301,10 @@ not. To aid teams with this effort the monitoring team will provide:
     introduce new profiles to the mix. 
   - Some of the things to consider if new profiles are introduce are:
       - How would we validate such profile?
-      - How would we ensure teams that adopted metrics collection profiles implement the new profile?
+      - What will happen to operators that had implemented metrics collection
+  profiles but did not implement the latest profile.
+      - How would we ensure teams that adopted metrics collection profiles
+        implement the new profile?
       - How would we aid developers implementing the new profile?
 ### Drawbacks
 
@@ -316,7 +320,7 @@ not. To aid teams with this effort the monitoring team will provide:
 - E2E tests in CMO to validate that everything works correctly 
 - For the `minimal` profile, origin/CI test to validate that every metric used
 in a resource (Alerts/PrometheusRules/Dashboards) exist in the `keep` expression
-of a minimal ServiceMonitor.
+of a minimal monitors.
 
 ### Graduation Criteria
 
@@ -341,13 +345,13 @@ shouldn't impact operations.
 ### Upgrade / Downgrade Strategy
 
 - If metrics collection profiles is accepted and is released to 4.13 then we
-  must backport the new [Service|Pod]Monitors selectors to 4.12. The reason
-  being that when an upgrade occurs and the new [Service|Pod]Monitors are
-  deployed, we will not want the 4.12 Prometheus-Operator to process all the new
-  [Service|Pod]Monitors as this would configure the Prometheus instances to
-  start double scraping the OpenShift components that implemented the metrics
-  collection profiles feature.
-- Once we backport the new [Service|Pod]Monitors selectors upgrades and
+  must backport the new monitors selectors to 4.12. The reason being that when
+  an upgrade occurs and the new monitors are deployed, we will not want the 4.12
+  Prometheus-Operator to process all the new monitors as this would configure
+  the Prometheus instances to start double scraping the OpenShift components
+  that implemented the metrics collection profiles feature. Done in
+  [cluster-monitoring-operator#2047](https://github.com/openshift/cluster-monitoring-operator/pull/2047)
+- Once we backport the new monitors selectors upgrades and
   downgrades are not expected to present a significant challenge.
 
 ### Version Skew Strategy
