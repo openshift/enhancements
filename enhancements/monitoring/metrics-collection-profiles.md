@@ -53,7 +53,7 @@ scraping while limiting the impact this might have on the platform, via
 resources under the control of the cluster-monitoring-operator and other
 platform operators.
 
-Furthermore to assess the viability of the metrics collection profile feature
+Furthermore, to assess the viability of the metrics collection profile feature
 the monitoring team performed a detailed analysis of its impact in an OpenShift
 cluster. The analysis consisted of a test where an OpenShift cluster would run
 two replicas of the OpenShift Prometheus instance but each replica would be
@@ -63,8 +63,8 @@ we would trigger a workload using
 2 hours, we evaluated the results. We concluded that in terms of resource usage,
 given the results obtained we can confidently state that the feature is quite
 valuable given the reduction of CPU by ~21% and memory by ~33% when comparing
-the `minimal` to the `full` profile. More detail can be consulted in this
-[document](https://docs.google.com/document/d/1MA-HTJQ_X7y_bwpJS2IPbGmC4qDyIMp25jisr34X2F4/edit?usp=sharing)
+the `minimal` to the `full` profile. More details can be consulted in this
+[document](https://docs.google.com/document/d/1MA-HTJQ_X7y_bwpJS2IPbGmC4qDyIMp25jisr34X2F4/edit?usp=sharing).
 
 Moreover, through Telemetry, we collect for each cluster the top 3 Prometheus
 jobs that generate the biggest amount of samples. With this data, we know that
@@ -290,7 +290,7 @@ not. To aid teams with this effort the monitoring team will provide:
   - Furthermore, we plan on adding extra origin/CI tests to validate each new
     profile if applicable.
 
-- What happens if a user provides an invalid value for a matrics collection profile?
+- What happens if a user provides an invalid value for a metrics collection profile?
   - CMO will reconcile and validate that the value supplied is invalid and it
     will report Degraded=False and fail reconciliation.
 
