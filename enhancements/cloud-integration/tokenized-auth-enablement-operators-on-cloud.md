@@ -34,8 +34,8 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
+- [x] Enhancement is `implementable`
+- [x] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
@@ -192,7 +192,9 @@ Show in OperatorHub that the cluster is in a mode that supports token-based auth
 `.spec.serviceAccountIssuer` from the Authentication CR, `.status.platformStatus.type` from the Infrastructure CR,
 `.spec.credentialsMode` from the CloudCredentials CR.
 
-Show that the operator is enabled for Token-based use by reading the [CSV](https://olm.operatorframework.io/docs/concepts/crds/clusterserviceversion/) annotation provided by the operator author.
+Show that the operator is enabled for Token-based use by reading the
+[CSV](https://olm.operatorframework.io/docs/concepts/crds/clusterserviceversion/) annotation
+`features.operators.openshift.io/token-auth-aws` provided by the operator author.
 
 Subscriptions to these types of operators will be manual by default in the UI. This is to ensure that these operators
 don't automatically get upgraded without first having the admin verify the permissions required by the next version 
@@ -208,12 +210,22 @@ enabled cluster. New guidelines would include the following to use CCO has detec
 
 - Changing CSV to add CredentialRequest RBAC
 - If loading the CredentialRequests from a yaml, place it into a discoverable location in the codebase
-- Add a bundle annotation claiming token-based authentication support
+- Add a bundle annotation claiming token-based authentication support:
+    ```yaml
+    apiVersion: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    metadata:
+        annotations:
+            features.operators.openshift.io/token-auth-aws: "true"
+            ...
+    ```
 - Add a script in the operator description, per supported cloud provider, to help set up the correct role
 - (Optional) Add the projected ServiceAccount volume to the Deployment embedded in the CSV;
-- handle the Secret themselves (like today’s CCO Mint mode, read and use the credentials in the Secret whose name they 
-  know from the CredentialsRequest and is in the same Namespace)
-- Add structure to controller code to be resilient to missing cloud credentials / not crash.
+- When OLM starts the operator with `ROLEARN` env. variable, handle the cloud credentials *almost* as if CCO is in Mint
+  mode:
+  - Create CredentialsRequest, now with `spec.cloudTokenPath` and `spec.providerSpec.stsIAMRoleARN` filed.
+  - Wait for Secrets referenced in the CredentialsRequest to be created by CCO.
+    - Expect the Secrets take some time to create, do not crash and report error when it takes too long.
 
 ### Workflow Description
 
