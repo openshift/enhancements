@@ -14,7 +14,7 @@ approvers:
 api-approvers:
   - '@JoelSpeed'
 creation-date: 2023-01-31
-last-updated: 2023-01-31
+last-updated: 2023-07-25
 tracking-link:
   - https://issues.redhat.com/browse/CFE-748
 see-also:
@@ -207,6 +207,18 @@ if match(event.type, "create"):
 		if rule.to.dnsName != ""  && check_dns_name_resolver_exists(rule.to.dnsName) == false:
 			create_dns_name_resolver(rule.to.dnsName)
 
+if match(event.type, "update"):
+
+	for each rule in old_obj.egress:
+		if rule.to.dnsName != "" && check_dns_name_used_in_egress_firewall(rule.to.dnsName, new_obj) == false
+			&& check_dns_name_used_in_any_egress_firewall(rule.to.dnsName) == false:
+			delete_dns_name_resolver(rule.to.dnsName)
+
+	for each rule in new_obj.egress:
+		if rule.to.dnsName != "" && check_dns_name_used_in_egress_firewall(rule.to.dnsName, old_obj) == false
+			&& check_dns_name_resolver_exists(rule.to.dnsName) == false:
+			create_dns_name_resolver(rule.to.dnsName)
+
 else if match(event.type, "delete"):
 
 	for each rule in obj.egress:
@@ -214,18 +226,17 @@ else if match(event.type, "delete"):
 			delete_dns_name_resolver(rule.to.dnsName)
 ```
 
-* The OVN-K cluster manager will watch for events related to `EgressFirewall` objects. (Note: Currently, on update of an `EgressFirewall` object, it is
-first deleted and then created again by the OVN-K master(s). Thus, only the create and delete events are handled here.)
-* When an OpenShift cluster administrator creates an EgressFirewall resource for a namespace and adds rule(s) containing DNS name(s),
-the cluster manager will receive the create event.
+* The OVN-K cluster manager will watch for events related to `EgressFirewall` objects.
+* When an OpenShift cluster administrator creates/updates an EgressFirewall resource for a namespace and adds rule(s) containing DNS name(s),
+the cluster manager will receive the create/update event.
 * The OVN-K cluster manager will create corresponding `DNSNameResolver` CRs for each of the DNS names in the EgressFirewall rules, if not
 already created. Each CR will be created in the `openshift-ovn-kubernetes` namespace. The name of the CR will be assigned using a hash
 function (similar to the ComputeHash [here](https://github.com/openshift/kubernetes/blob/master/pkg/controller/controller_utils.go#L1157-L1172))
 prefixed by `dns-`. The input to the hash function will be the DNS name. The `.spec.name` field of the CR will be set to the DNS name along with a trailing period.
 The trailing period is added because DNS servers store DNS names with a trailing period. Thus, to make it consistent, and also for ease of matching,
 the `spec.name` will be set with a trailing period.
-* When an OpenShift cluster administrator deletes an EgressFirewall resource for a namespace containing rule(s) for DNS name(s), 
-the cluster manager will receive the delete event.
+* When an OpenShift cluster administrator deletes an EgressFirewall resource for a namespace containing rule(s) for DNS name(s)
+OR updates an EgressFirewall resource for a namespace and deletes rule(s) containing DNS name(s), the cluster manager will receive the delete/update event.
 * The cluster manager will then check if the same DNS names are also used in the EgressFirewall rules in other namespaces. If the
 DNS names are not used, then the cluster manager will delete the corresponding `DNSNameResolver` CRs.
 
@@ -397,7 +408,7 @@ corresponding IP addresses and next lookup time (TTL + last lookup time) matches
 of the `DNSNameResolver` CR, then the details of the regular DNS name will be removed.
 * However, the updates will take place if there is a change in the next lookup time (TTL + last lookup time) for the DNS name or if the next
 lookup time is same for the DNS name, but the current IP addresses are different from the existing IP addresses. For the latter, the current
-IP addresses are added to the existing IP addresses of the DNS name. This will take care of the scenario where different CoreDNS pods gets
+IP addresses are added to the existing IP addresses of the DNS name. This will take care of the scenario where different CoreDNS pods get
 different subsets of the IP addresses in the response to the DNS lookup of the same DNS name. The next time to lookup will be same for them
 though the IP addresses may differ due to upstream DNS load balancing.
 * Additionally, the exact matching of the next lookup time may never be successful. If the existing next lookup time of a DNS name lies
