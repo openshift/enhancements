@@ -249,9 +249,9 @@ all the limitations on the Local Zones (instance types, EBS, network, etc).
 
 The MachineSet for the `edge` pool will also set those custom labels:
 
-- `node-role.kubernetes.io/edge=''`: used by `taint` and to quickly identify on `oc get nodes`
-- `machine.openshift.io/zone-type=local-zone`: can be used by customers to deploy custom applications across all Local Zones nodes
-- `machine.openshift.io/zone-group=<zone_group_name>`: can be used by the developer to deploy applications in custom locations
+- `node-role.kubernetes.io/edge=''`: used to `taint` the node, quickly identify in `oc get nodes`, and create affinity rules
+- `machine.openshift.io/zone-type=local-zone`: can be used to create workloads across all Local Zones nodes
+- `machine.openshift.io/zone-group=<zone_group_name>`: can be used to create workloads in custom Local Zone locations
 
 The MachineSet also must have the taint to `NoSchedule` to the label `node-role.kubernetes.io/edge=''`.
 This taint will prevent to schedule of regular cluster workloads (router, logging, monitoring)
@@ -511,8 +511,8 @@ subnets to deploy edge compute pools on the AWS Local Zones.
 
 The following items must be satisfied in this phase:
 
-- the installer must opt-in the zone group for each zone specified
-  on the configuration `compute[?name=="edge"].platform.aws.zones`.
+- the installer must check if the zone group has been opted-in for each zone specified
+  in the configuration `compute[?name=="edge"].platform.aws.zones`.
 
 - the installer must discover the preferred instance type based on the API
   [EC2 Instance Offerings](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeInstanceTypeOfferings.html) for each Local Zone provided on the
@@ -522,10 +522,15 @@ The following items must be satisfied in this phase:
 - the installer must create private subnets on Local Zones for each item provided
   on the configuration `compute[?name=="edge"].platform.aws.zones`, associating
   it to the private route table for the parent zone* when available, otherwise
-  the first private route table available.
+  the first private route table available will be selected.
 
 > *each Local Zone belongs to a parent zone in the Region and can be discovered
   by the EC2 API [DescribeAvailabilityZones](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html).
+
+- the machine set manifests for each Local Zones provided in the configuration
+  `compute[?name=="edge"].platform.aws.zones`, must expose the label of it's
+  parent zone `machine.openshift.io/parent-zone-name: <zone_name>`. This label can be
+  used to create affinity rules for workloads in Local Zone and in zones the Region.
 
 - the installer will not create any other resource than subnets in the Local Zones
   using the default IPI deployment.
@@ -612,8 +617,9 @@ spec:
     spec:
       metadata:
         labels:
-          machine.openshift.io/zone-type: local-zone
+          machine.openshift.io/parent-zone-name: us-east-1d (1)
           machine.openshift.io/zone-group: us-east-1-nyc-1
+          machine.openshift.io/zone-type: local-zone
           node-role.kubernetes.io/edge: ""
       taints:
         - key: node-role.kubernetes.io/edge
@@ -646,7 +652,7 @@ spec:
           - filters:
             - name: tag:Name
               values:
-              - ${CLUSTER_ID}-public-us-east-1-nyc-1a  (1)
+              - ${CLUSTER_ID}-public-us-east-1-nyc-1a  (2)
           publicIp: true
           tags:
           - name: kubernetes.io/cluster/${CLUSTER_ID}
@@ -655,7 +661,8 @@ spec:
             name: worker-user-data
 ```
 
-- 1: The `tag:Name` for the public subnet on the Local Zones location.
+- 1: The `parent-zone-name` is the zone that the Local Zone is connected in the region.
+- 2: The `tag:Name` for the public subnet on the Local Zones location.
 
 The compute resources will be created by the installer:
 
@@ -753,6 +760,22 @@ platform:
 Install a cluster in extending nodes to Local Zone with full automation: installer
 creates network resources needed to launch the node.
 
+Example using Local Zones `us-east-1-atl-1a` and `us-east-1-bos-1a`:
+
+- User opt-in to the Local Zone group(s) using Console or CLI:
+
+```bash
+# opt-in the zone group `us-east-1-atl-1`
+aws ec2 modify-availability-zone-group \
+    --group-name "us-east-1-atl-1" \
+    --opt-in-status opted-in
+
+# opt-in the zone group `us-east-1-bos-1`
+aws ec2 modify-availability-zone-group \
+    --group-name "us-east-1-bos-1" \
+    --opt-in-status opted-in
+```
+
 - Create the `install-config.yaml` with Local Zone names on the edge compute pool
 
 ```yaml
@@ -781,11 +804,11 @@ compute:
   - validates if each zone item on the `edge` compute pool matches the attribute `ZoneType` equals of `local-zone`, collecting the zone attributes;
   - discovers the preferred instance type for the zone based on the installer-supported list for each Local Zone calling the AWS API [EC2 Instance Offerings](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeInstanceTypeOfferings.html), storing it on the zone attribute;
   - creates the MachineSet manifest for each `edge` zone, creating the attributes:
-    - custom labels (zone-type, zone-group, node-role);
+    - custom labels (zone-type, zone-group, node-role, parent-zone-name);
     - set the taint `NoSchedule` for the label `node-role`;
-    - set the instance type for the preferred the zone
+    - set the instance type for the preferred in the zone
   - sets the cluster-network MTU size patching the Network Configuration manifest considering the overhead of the network plugin used on the deployment
-  - runs the regular flow
+  - runs the regular install flow
 
 ### API Extensions
 
@@ -1071,12 +1094,12 @@ A periodic job will be created alongside a step to create a subnet in Local Zone
 
 Test steps:
 
-- Create a VPC in the Region selected by the CI lease pool
 - Choose randomly one Local Zone location in the Region
 - Opt-in the Zone Group for the selected zone
-- Create subnets into 3 zones in the Region (Example: `us-east-1a`, `us-east-1b`, `us-east-1c`)
+- Create a VPC in the Region selected by the CI lease pool
+- Reuse the chain [`shared-vpc`](ipi-aws-pre-sharednetwork) to create subnets into zones in the Region (Example: `us-east-1b`, `us-east-1c`)
 - Create subnets into selected Local zone
-- Create the `install-config.yaml` selecting all subnet IDs (regular and local zones)
+- Reuse the step to create the `install-config.yaml` selecting all subnet IDs (regular and local zones)
 - Create the cluster
 - Run `openshift-e2e-test` step
 
@@ -1086,8 +1109,7 @@ A periodic job will be created to create the edge compute pool with Local Zone n
 
 Test steps:
 
-- Discover the Zones with type `local-zone` in the AWS Region running the CI job (selected by lease pool)
-- Select randomly one Local zone name
+- Choose randomly one Local Zone location in the Region
 - Opt-in the Zone Group for the selected zone
 - Create the `install-config.yaml` adding the `edge` compute pool with Local Zone name
 - Create the cluster
