@@ -34,6 +34,9 @@ current design in OpenShift revolves around running the [Migrator
 Operator](https://github.com/openshift/cluster-kube-storage-version-migrator-operator)
 which only deploys the Migrator controller. Migrations are then left up to the
 Operator owners to kick off when changes happen to their respective APIs.
+OpenShift also uses the Migrator to help when encryption keys get rotated for
+ETCD, this allows OpenShift to re-write the objects to ETCD after an encryption
+change.
 
 In MicroShift we don't run the full scale of OpenShift so we can trigger
 migrations on start up to make sure resources are updated for future upgrades.
@@ -154,6 +157,8 @@ we face are that we now have two services added to our code base. This does mean
 a small increase in CPU usage by the core MicroShift binary and more code for us
 to keep track of.
 
+## Design Details
+
 ### Open Questions
 
 In our look at this tool we found out that we don't run the trigger controller
@@ -191,10 +196,18 @@ N/A
 - Sufficient time for feedback
 - End-to-end tests
 
+#### Removing a deprecated feature
+
+N/A
+
 ### Upgrade / Downgrade Strategy
 
 On start, the Migrator will update and keep track of the status in the form of
 `StorageVersionMigration` resources per for API resources.
+
+### Version Skew Strategy
+
+N/A
 
 ### Operational Aspects of API Extensions
 
