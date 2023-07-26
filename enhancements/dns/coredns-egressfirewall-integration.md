@@ -14,7 +14,7 @@ approvers:
 api-approvers:
   - '@JoelSpeed'
 creation-date: 2023-01-31
-last-updated: 2023-07-25
+last-updated: 2023-07-26
 tracking-link:
   - https://issues.redhat.com/browse/CFE-748
 see-also:
@@ -540,6 +540,8 @@ the `A` or `AAAA` record of the wildcard DNS name.
 
 #### OVN-K cluster manager
 
+Add the support of a new flag `--enable-dns-name-resolver` to configure the use of `DNSNameResolver` CRD with OVN-K.
+
 For every unique DNS name used in EgressFirewall rules, OVN-K cluster manager will create a corresponding `DNSNameResolver` CR.
 The name of the CR will be assigned using a hash function (similar to the ComputeHash
 [here](https://github.com/openshift/kubernetes/blob/master/pkg/controller/controller_utils.go#L1157-L1172))
@@ -548,10 +550,16 @@ the corresponding DNS name are deleted.
 
 #### OVN-K master(s)
 
+Add the support of a new flag `--enable-dns-name-resolver` to configure the use of `DNSNameResolver` CRD with OVN-K.
+
 The OVN-K master(s) will watch the `DNSNameResolver` CRs. Whenever the `.status` of the CRs will be updated with new IP addresses and corresponding
 TTL information for a DNS name, OVN-K master(s) will update the `AddressSet` mapped to the DNS name. This `AddressSet` will be linked
 to the ACL rule(s) for the EgressFirewall rule(s) in which the DNS name is used. This will ensure that the latest IP addresses are always updated in
 the `AddressSets`.
+
+#### Cluster Network Operator
+
+To add the support of `DNSNameResolver` CRD in OVN-K, add the flag `--enable-dns-name-resolver` to the corresponding OVN-K pods.
 
 
 ### Risks and Mitigations
