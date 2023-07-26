@@ -4,6 +4,7 @@ authors:
   - eggfoobar
 reviewers:
   - "dhellmann"
+  - "sanchezl"
 approvers:
   - "dhellmann"
 api-approvers:
