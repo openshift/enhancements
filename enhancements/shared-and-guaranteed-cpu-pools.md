@@ -190,7 +190,9 @@ for each container and will not require any modifications.
 **cluster creator** is a human user responsible for deploying a cluster.
 
 1. The cluster creator creates a Performance Profile for the NTO and specifies a shared CPU partition.
-2. The cluster creator (TODO: does what???) to enable the new admission hook.
+2. The cluster creator enables the new admission hook (TODO: how???). Note: This needs to be done
+at the cluster level (not the node level) so can't be done by NTO. One option might be to apply a CR to update
+the apiserver configuration, but that is still TBD.
 3. The cluster creator then creates the cluster.
 4. The NTO creates a machine config manifest to write a configuration file for kubelet to specify
 the shared and isolated CPUs.
@@ -200,7 +202,7 @@ based on the shared/isolated CPUSets specified in the config file.
 on the node based on the shared/isolated CPUSets specified in the config file.
 7. Something schedules:
    * a pod with the `target.workload.openshift.io/management` annotation in a namespace 
-with the `workload.openshift.io/allowed` management annotation. The admission hook ignores the pod as it will
+with the `workload.openshift.io/allowed` management annotation. The admission hook ignores this pod as it will
 be handled by the managementcpusoverride admission hook.
    * a pod with Burstable or BestEffort QoS. The admission hook modifies the pod,
 adding `openshift.io/shared-cpus` requests/limits for each container, matching the CPU requests.
@@ -234,7 +236,9 @@ pods that had containers with whole CPU requests/limits.
 
 ### Risks and Mitigations
 
-Nothing yet...
+The current proposal will not be acceptable upstream (see Drawbacks below). Carrying these patches adds
+the risk of breakages with new kubernetes versions, which would require additional time to address and
+could impact release timelines.
 
 ### Drawbacks
 
@@ -250,15 +254,7 @@ be changed at runtime.
 
 ## Design Details
 
-### Open Questions [optional]
-
-#### Enabling Feature
-
-How will this be enabled at the openshift apiserver level? It looks like you can create an admission hook 
-that is disabled by default and then enabled through a config option on the API server - could that mechanism
-be used?
-
-#### Scheduler Awareness
+### Scheduler Awareness
 
 In the current proposal, the scheduler is aware of the new `openshift.io/shared-cpus` and
 `openshift.io/guaranteed-cpus` resources and will ensure that a pod is only scheduled on a node with enough
@@ -267,15 +263,32 @@ restrictive Topology Manager Policy (e.g. `single-numa-node` policy). In that ca
 could be scheduled on a node that had enough total guaranteed CPUs (for example), but not enough guaranteed
 CPUs on a single NUMA node. This would result in kubelet rejecting the pod with a Topology Affinity error.
 
-One way to address this would be through the Topology Aware Scheduler and RTE/NFD - adding scheduler
-awareness of how many shared/guaranteed CPUs are available on each NUMA node. This will be explored further
-in the Topology Aware Scheduler alternative below.
+Prior to this proposal, using the single-numa-node policy in kubelet’s Topology Manager can still result in
+a Topology Affinity error when, for example, a container requests two guaranteed CPUs but the only two CPUs
+available are on two different NUMA nodes. The scenario is the same with the enhancement - the Topology
+Affinity error can occur if there are only two openshift.io/guaranteed-cpus available but they are on two
+different NUMA nodes.
+
+If the user wants to avoid this scenario, the solution will likely be the Topology Aware Scheduler (TAS)
+which was created to address this scenario. This should work with a very small change to the kubelet - when
+reporting the cpu resources available per NUMA node through the PodResources API, instead of reporting all
+available CPUs, when this shared/guaranteed CPU feature is enabled, we would only report the available
+guaranteed CPUs. This will ensure that the TAS will only schedule pods to nodes where there are enough
+guaranteed CPUs available on the same NUMA node (when the single-numa-node policy is being used).
 
 Note: In practice, this would only be an issue in multi-node deployments where there are pods that could
 run on a selection of nodes. In a single node deployment, the user will configure the number of shared and 
 guaranteed CPUs to match the workloads that they are planning on running on the node. The user would be 
 aware of the NUMA restrictions imposed by using the `single-numa-node` policy and would ensure their 
 configuration matched.
+
+### Open Questions
+
+#### Enabling Feature
+
+How will this be enabled at the openshift apiserver level? It looks like you can create an admission hook
+that is disabled by default and then enabled through a config option on the API server - could that mechanism
+be used?
 
 ### Test Plan
 
@@ -475,11 +488,24 @@ shared/guaranteed CPUs.
 
 At a high level:
 * The [Node Resource Topology](https://github.com/k8stopologyawareschedwg/noderesourcetopology-api)
-would be extended to track the shared/guaranteed CPUs available/allocated on each node.
+could be extended to track the shared/guaranteed CPUs available/allocated on each NUMA node.
 * The TAS would be extended to make scheduling decisions based on the QoS of the pod and the `cpu`
 requests/limits for each container.
 
-Further investigation is necessary to determine the feasibility and effort required for this option.
+However, tracking shared CPUs in the NRT doesn't make sense - shared CPUs are not NUMA node specific.
+Containers using shared CPUs float across all the shared CPUs - shared CPUs are not allocated to specific
+containers. This doesn’t map well to the NRT and the role of the TAS (the TAS is not involved in
+scheduling decisions for shared CPUs).
+
+The NRT could be updated to only track the guaranteed CPUs available on each NUMA node (instead of all
+CPUs available) and that would allow the TAS to only schedule pods to workers where there are enough
+guaranteed CPUs available on the same NUMA node (when the single-numa-node policy is being used). However,
+that doesn't solve the problem of ensuring shared CPUs are not oversubscribed on a worker and doesn't
+provide the end user with visibility into the number of shared CPUs available at any point in time.
+
+Another concern with any solution that relies on TAS/NFD/RTE is that TAS/NFD/RTE can’t be deployed on
+some SNO configurations (e.g. vRAN DU) due to resource constraints. We need a solution that can be used
+in those configurations as well as larger configurations.
 
 ## Infrastructure Needed [optional]
 
