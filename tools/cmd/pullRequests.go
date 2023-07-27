@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,11 +22,10 @@ import (
 	"time"
 
 	"github.com/google/go-github/v32/github"
+	"github.com/spf13/cobra"
 
 	"github.com/openshift/enhancements/tools/stats"
 	"github.com/openshift/enhancements/tools/util"
-	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
 )
 
 const dateFmt = "2006-01-02"
@@ -83,11 +82,11 @@ func newPullRequestsCommand() *cobra.Command {
 			}
 			err := theStats.Populate()
 			if err != nil {
-				return errors.Wrap(err, "could not generate stats")
+				return fmt.Errorf("could not generate stats: %w", err)
 			}
 
 			out := csv.NewWriter(os.Stdout)
-			out.Write([]string{
+			err = out.Write([]string{
 				"ID",
 				"Title",
 				"State",
@@ -98,6 +97,9 @@ func newPullRequestsCommand() *cobra.Command {
 				"Closed",
 				"Days to Merge",
 			})
+			if err != nil {
+				return fmt.Errorf("could not write field headers: %w", err)
+			}
 
 			for _, prd := range all.Requests {
 
@@ -123,7 +125,7 @@ func newPullRequestsCommand() *cobra.Command {
 					isNew = "true"
 				}
 
-				out.Write([]string{
+				err = out.Write([]string{
 					fmt.Sprintf("%d", *prd.Pull.Number),
 					*prd.Pull.Title,
 					prd.State,
@@ -134,6 +136,9 @@ func newPullRequestsCommand() *cobra.Command {
 					closedAt,
 					fmt.Sprintf("%d", daysToMerge),
 				})
+				if err != nil {
+					return fmt.Errorf("could not write record: %w", err)
+				}
 			}
 
 			out.Flush()

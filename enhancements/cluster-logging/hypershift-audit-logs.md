@@ -35,7 +35,7 @@ The HLO combines data-plane and control-plane configuration on the control plane
 so that the CLO on the _management_ cluster can forward API audit logs for both personas.
 The CLO on the _hosted_ cluster continues to forward other logs for the consumer persona as before.
 
-**NOTE**: This proposal depends on [api-audit-log-policy](/api-audit-log-policy.md)
+**NOTE**: This proposal depends on [api-audit-log-policy](api-audit-log-policy.md)
 Please read that proposal for details not covered here.
 
 ## Motivation
