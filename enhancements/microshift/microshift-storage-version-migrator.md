@@ -5,6 +5,7 @@ authors:
 reviewers:
   - "dhellmann"
   - "sanchezl"
+  - "pmtk"
 approvers:
   - "dhellmann"
 api-approvers:
@@ -24,8 +25,8 @@ We have embedded the
 and
 [Trigger](https://github.com/openshift/kubernetes-kube-storage-version-migrator/tree/master/cmd/trigger)
 controllers in MicroShift to assure successive upgrades to MicroShift do not
-cause a situation where a an API no longer exists for resource versions stored
-in ETCD.
+cause a situation where an API no longer exists for resource versions stored in
+ETCD.
 
 ## Motivation
 
@@ -58,7 +59,8 @@ state of the resources already applied to the cluster.
 
 ### Non-Goals
 
--
+- The Migrator encryption use case is not supported by MicroShift since it does
+  not run with etcd encryption, instead we support the use of on disk encryption
 
 ## Proposal
 
@@ -73,7 +75,7 @@ would use for migrating their own resources.
 
 Areas where we can improve is by shutting down the Trigger service once the
 initial migrations are done. Given the nature of MicroShift and its deployment
-strategy, running a trigger the whole time is not necessary.
+strategy, running a trigger the whole time may not be necessary.
 
 ### Workflow Description
 
@@ -97,9 +99,15 @@ None
 
 MicroShift imports the go modules for the Migrator controller and the Trigger
 controller. The services are kicked off at launch and managed by the MicroShift
-process. The below detail describes what the Trigger and Migrator logic do
-behind the scenes, from a MicroShift perspective that is all owned by the
-respective upstream components.
+process. OpenShift on the other hand, runs only the Migrator and it runs it as a
+Deployment that is kicked off and managed by the [Kube Storave Version Migrator
+Operator](https://github.com/openshift/cluster-kube-storage-version-migrator-operator).
+It is the responsibility of Operators to then initiate storage version
+migrations.
+
+The below detail describes what the Trigger and Migrator logic do behind the
+scenes, from a MicroShift perspective that is all owned by the respective
+upstream components.
 
 On Start the Trigger controller will query the Discovery API to get a list of
 the API Server preferred API Resources, (this api request needs to be done in
@@ -165,9 +173,15 @@ to keep track of.
 In our look at this tool we found out that we don't run the trigger controller
 in OpenShift due to the potential problems that might arise from mass updates of
 large clusters and the traffic load on API Server during migrations. This really
-isn't a concern for us, but it does beg the question, do we need to run the
-trigger logic at all or is it worth us shipping `StorageVersionMigration` with
-upgrades?
+isn't as much of a concern for MicroShift since we don't run at the same scale
+as OpenShift, and MicroShift is designed to operate with a smaller API
+footprint. Queries are generally smaller and being at the edge means that the
+use case isn't a typical HA deployment where multiple teams are working on multi
+node clusters, so an update to a resource does not have the same potential to
+touch thousands of resources. Since it is the case that we run with a smaller
+embedded API footprint, do we need to run the trigger logic at all or is it
+worth MicroShift shipping `StorageVersionMigration` with upgrades when they are
+deemed to be needed for embedded components?
 
 ### Test Plan
 
