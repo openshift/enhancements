@@ -324,8 +324,12 @@ of a minimal monitors.
 
 ### Graduation Criteria
 
-Plan to release as TechPreview as the first step: the default being `full`, it
+- Released as TechPreview: the default being `full`, it
 shouldn't impact operations.
+
+- Plan to GA: this would officially support the "minimal"
+profile out-of-the-box and removes the earlier-imposed
+TechPreview gate. PTAL at the section below for more details.
 
 #### Tech Preview -> GA
 
