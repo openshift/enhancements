@@ -58,6 +58,8 @@ Which in practice can be described in runlevels:
 0000_90_*: reserved for any post-machine updates
 ```
 
+**Note**: If the run level for a component is not defined i.e. the manifest names do not start with prefix `0000_`, it will be assigned to run level `0000_50_*` during the OCP release process. This is done to make sure if an component is agnostic about the run level it runs at, it is run as part of `0000_50_*` as it helps to update more components in parallel which helps in reducing the overall update time.
+
 ## Why does the OpenShift 4 upgrade process "restart" in the middle?
 
 Since the release of OpenShift 4, a somewhat frequently asked question is: Why sometimes during an `oc adm upgrade` (cluster upgrade) does the process appear to re-start partway through?  [This bugzilla](https://bugzilla.redhat.com/show_bug.cgi?id=1690816) for example has a number of duplicates, and I've seen the question appear in chat and email forums.
