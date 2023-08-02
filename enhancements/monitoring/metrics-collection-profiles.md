@@ -302,8 +302,6 @@ not. To aid teams with this effort the monitoring team will provide:
     introduce new profiles to the mix. 
   - Some of the things to consider if new profiles are introduce are:
       - How would we validate such profile?
-      - What will happen to operators that had implemented metrics collection
-  profiles but did not implement the latest profile.
       - How would we ensure teams that adopted metrics collection profiles
         implement the new profile?
       - How would we aid developers implementing the new profile?
