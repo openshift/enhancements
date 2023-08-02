@@ -88,7 +88,8 @@ kubelet and the network daemon.
   a supported way, so I can configure the clusters metrics collection profiles
   to `minimal`.
 - As a developer, I want a supported way to collect a subset of the metrics
-  exported by my operator and operands.
+  exported by my operator and operands, while still collecting necessary metrics
+  for alerts, visualization of key indicators and Telemetry.
 
 ### Goals
 
@@ -119,8 +120,8 @@ enhancement:
 - expose a configuration option in the cluster-monitoring-operator ConfigMap
   that allows selecting the metrics collection profile;
 - OCP components that would like to implement metrics collection profiles would
-  have to provide X monitors. Where X is the number of metrics collection
-  profiles that we would support.
+  have to provide at least 1 monitor for each supported metrics collection
+  profile.
 
 ### Workflow Description
 
@@ -147,12 +148,12 @@ select monitors as the union of the 2 sets:
 - monitors with the 
   `monitoring.openshift.io/collection-profile: <selected profile>` label.
 - monitors without the `monitoring.openshift.io/collection-profile` profile
-  label present, to retain the default behaviour (for components that choose to
-  not opt-in).
+  label present, to retain the default behaviour (for components that didn't
+  opt-in for metrics collection profile).
 
 OpenShift teams can decide if they want to adopt this feature. Without any
 change to a monitor, if a user picks a profile in the CMO config, things
-should work as they did before. When an OpenShift team wants to implement
+will work as they did before. When an OpenShift team wants to implement
 metrics collection profiles, they need to provide monitors for all profiles,
 making sure they do not provide monitors without the profile label. If a team
 implements metrics collection profiles they must ensure that all their monitors
@@ -238,7 +239,7 @@ spec:
  ```
 
 Note: 
-- the `metricRelabeling` section only keeping two metrics, while the rest is
+- the `metricRelabeling`s section keeps only two metrics, while the rest is
 dropped.
 - the metrics in the `keep` section were obtained with the help of a script that
   parsed all Alerts, PrometheusRules and Console dashboards to determine what
@@ -432,7 +433,7 @@ and implementation status. Possible implementation status:
 | Team            | Component          | Implementation Status      |
 |-----------------|--------------------|----------------------------|
 | Monitoring Team | kubelet            | Implemented                |
-| Monitoring Team | etcd               | Implemented                |
+| etcd Team       | etcd               | Implemented                |
 | Monitoring Team | kube-state-metrics | Implemented                |
 | Monitoring Team | node-exporter      | Implemented                |
 | Monitoring Team | prometheus-adapter | Implemented                |
