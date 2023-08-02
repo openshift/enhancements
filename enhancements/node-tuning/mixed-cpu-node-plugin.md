@@ -97,6 +97,17 @@ Therefore, the plugin assigns the shared CPUs to containers without racing/confl
 the CPU manager behavior. 
 More about this decision at the [Alternative](mixed-cpu-node-plugin.md#alternatives) section
 
+When management and workload partitioning is enabled,
+the `reservedSystemCpus` were exclusive to management components (Kubelet/CRI-O) or pods that were labeled as management. 
+With this proposal system reserved no longer maps to Kubelet's view of a system reserved.
+Instead, there is an internal partition of `resrvedSystemCpus` in which the `reserved` cpus are dedicated
+and exclusive to a management component ([same as today](https://github.com/openshift/cluster-node-tuning-operator/blob/master/pkg/performanceprofile/controller/performanceprofile/components/machineconfig/machineconfig.go#L592)).
+While the `shared` cpus are dedicated for workloads which are asking for shared cpus.
+
+The following shows the cpu layout and what processes can be running at what cpus:
+![cpu layout](cpu_layout.jpg)
+Please check the [Risks and Mitigations](mixed-cpu-node-plugin.md#risks-and-mitigations) for additional information.
+
 There is a plan for a feature called [shared-partition](https://github.com/openshift/enhancements/pull/1421) 
 that implements additional pool.
 When shared-partition lands, Kubelet's cpu pool layout should look roughly like:
@@ -266,9 +277,8 @@ N/A
 * With this solution, the platform's housekeeping processes also runs on the shared CPUs.
 but the intent is to allocate those cpus to workload’s light-weight tasks,
 so having some latency is bearable.
-A way of mitigating that is checks whether it's possible to use workload partitioning
+A way of mitigating that is to use workload partitioning
 to ensure the platform housekeeping processes don't run on the shared cpus.
-(This statement needs to be verified)
 
 * There is no risk that workload’s tasks run on dedicated OCP’s housekeeping reserved cpus,
 because only the shared cpus exposed via cgroups to the workload’s process.
