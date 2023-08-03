@@ -11,7 +11,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - TBD
 creation-date: 2023-06-29
-last-updated: 2023-07-13
+last-updated: 2023-08-03
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/OPNET-265
 see-also:
@@ -204,6 +204,19 @@ writing their NMState configs in machine-configs instead of via a top-level
 OpenShift API perhaps this also side-steps the concerns about API style
 compatibility between OpenShift and NMState?
 
+One concern with this is that changes to machine-configs require a reboot of
+all affected nodes. We could eliminate that by making the machine-configs for
+this feature part of the [rebootless updates](https://github.com/openshift/machine-config-operator/blob/94fc0354f154e2daa923dd96defdf86448b2b327/docs/MachineConfigDaemon.md?plain=1#L147)
+list in MCO. That way if you wanted to, for example, scale out a new machine
+you would just add its config to the existing machine-config, roll that out,
+then deploy the new node. These configs will only be applied at deploy time
+anyway since Kubernetes-NMState will be used for day 2 changes, so it shouldn't
+ever be necessary to reboot a node for changes to these configs.
+
+I believe we would need to add logic for these new config to
+[this code](https://github.com/openshift/machine-config-operator/blob/a41f5af837d95e0fc4f59e4497447a26acaf5bc2/pkg/daemon/update.go#L328)
+in MCO to make changes without rebooting.
+
 ### API Extensions
 
 This will not directly modify the API of OpenShift. The API for this feature is
@@ -225,6 +238,9 @@ We will want to ensure that must-gather is collecting enough information about
 the bridge configuration for us to determine whether it is compliant with our
 guidelines, and we must have clear instructions on what is required for br-ex.
 
+Note, however, that if an incorrect bridge configuration is applied NMState
+will usually catch that and roll back the changes.
+
 ### Drawbacks
 
 OpenShift has historically avoided per-host configuration for cluster nodes.
@@ -242,16 +258,26 @@ and cannot be handled any other way.
   underway in NMState to address this, but is that mandatory for this to be
   implemented?
 
+  Previous discussions:
+  https://github.com/openshift/enhancements/pull/1267#discussion_r1013320148
+
+  Some initial work to address this concern:
+  https://github.com/nmstate/nmstate/pull/2338
+
 * Which operator is going to be responsible for deploying the NMState configuration?
   MCO will need to be involved since it needs to be included in Ignition, but
-  do we want to use machine-configs? They can't be modified on day 2 without
-  the machine config pool being degraded, but since day 2 modifications would
-  be done via Kubernetes-NMState maybe that's okay? We'll apply them once and
-  never touch them again.
+  do we want to use machine-configs? The variation discussion above covers this
+  option in more detail.
 
 * If changes are made to the bridge configuration on day 2, will OVNKubernetes
   handle those correctly without a reboot? If not, how do we orchestrate a
   reboot?
+
+  Reply from @cgoncalves:
+  > OVN-Kubernetes will not handle the replacement of the gateway interface (enp2s0 in the example above). This is an existing limitation where OVN-Kubernetes installs an OpenFlow rule in br-ex that states the gateway interface is the OVS port ID of enp2s0 (port 1) and where attaching a new interface, say enp3s0, its OVS port ID will be different hence no egress traffic forwarding.
+
+  That doesn't have to block this feature being implemented, but it's something
+  we should look into as a followup with the OVNK team.
 
 * Do all platforms have a concept of individual hosts? I know baremetal does and
   I believe VSphere as well, but I'm not sure about cloud platforms.
