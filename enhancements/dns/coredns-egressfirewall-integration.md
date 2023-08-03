@@ -3,18 +3,18 @@ title: coredns-egressfirewall-integration
 authors:
   - '@arkadeepsen'
 reviewers:
-  - '@Miciah'
-  - '@danwinship'
-  - '@JoelSpeed'
-  - '@TrilokGeer'
-  - '@jerpeter1'
+  - '@Miciah, for review and feedback on the components related to network edge'
+  - '@danwinship, for review and feedback on the components related to OVN-K'
+  - '@JoelSpeed, for review and feedback on the api changes'
+  - '@TrilokGeer, for review and feedback from the CFE team'
+  - '@jerpeter1, for review and feedback on the overall design'
 approvers:
   - '@Miciah'
   - '@danwinship'
 api-approvers:
   - '@JoelSpeed'
 creation-date: 2023-01-31
-last-updated: 2023-07-26
+last-updated: 2023-08-3
 tracking-link:
   - https://issues.redhat.com/browse/CFE-748
 see-also:
@@ -137,6 +137,8 @@ type DNSNameResolverSpec struct {
 	// will match 'sub1.example.com.' but won't match 'sub2.sub1.example.com.'
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.$
+	// +kubebuilder:validation:MaxLength=254
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.name is immutable"
 	Name string `json:"name"`
 }
 
@@ -152,39 +154,49 @@ type DNSNameResolverStatus struct {
 	ResolvedNames []DNSNameResolverStatusItem `json:"resolvedNames,omitempty" patchStrategy:"merge" patchMergeKey:"dnsName"`
 }
 
+// +kubebuilder:validation:Pattern=`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\/([0-9]|[1-2][0-9]|3[0-2])$|^s*((([0-9A-Fa-f]{1,4}:){7}(:|([0-9A-Fa-f]{1,4})))|(([0-9A-Fa-f]{1,4}:){6}:([0-9A-Fa-f]{1,4})?)|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){0,1}):([0-9A-Fa-f]{1,4})?))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){0,2}):([0-9A-Fa-f]{1,4})?))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){0,3}):([0-9A-Fa-f]{1,4})?))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){0,4}):([0-9A-Fa-f]{1,4})?))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){0,5}):([0-9A-Fa-f]{1,4})?))|(:(:|((:[0-9A-Fa-f]{1,4}){1,7}))))(%.+)?s*/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$`
+// IPAddressStr is used for validation of an IP address.
+type IPAddressStr string
+
 // DNSNameResolverStatusItem describes the details of a resolved DNS name.
 type DNSNameResolverStatusItem struct {
+	// conditions provide information about the state of the DNS name.
+	// Known .status.conditions.type is: "Degraded"
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// dnsName is the resolved DNS name matching the name field of DNSNameResolverSpec.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.$
+	// +kubebuilder:validation:MaxLength=254
 	DNSName string `json:"dnsName"`
-	// ips contains the list of IP addresses associated with the dnsName.
+	// info gives the list of associated IP addresses and the corresponding TTL and last
+	// lookup time for the dnsName.
 	// +kubebuilder:validation:Required
-	// +listType=set
-	IPs []string `json:"ips"`
+	// +listType=map
+	// +listMapKey=ip
+	Info []DNSNameResolverInfo `json:"info"`
+	// resolutionFailures keeps the count of how many consecutive times the DNS resolution failed
+	// for the dnsName. If the DNS resolution succeeds then the field will be set to zero. Upon
+	// every failure, the value of the field will be incremented by one. Upon reaching the value
+	// of 5, the details about the DNS name will be removed.
+	ResolutionFailures int `json:"resolutionFailures,omitempty"`
+}
+
+type DNSNameResolverInfo struct {
+	// ip is an IP address associated with the dnsName. The validity of the IP address expires after
+	// lastLookupTime + ttlSeconds. To refresh the information a DNS lookup will be performed on the
+	// expiration of the IP address's validity. If the information is not refreshed then it will be
+	// removed after a grace period of 1 second after the expiration of the IP address's validity.
+	// +kubebuilder:validation:Required
+	IP IPAddressStr `json:"ip"`
 	// ttlSeconds is the minimum time-to-live value among all the IP addresses.
 	// +kubebuilder:validation:Required
 	TTLSeconds int32 `json:"ttlSeconds"`
 	// lastLookupTime is the timestamp when the last DNS lookup was completed.
 	// +kubebuilder:validation:Required
 	LastLookupTime *metav1.Time `json:"lastLookupTime"`
-	// resolutionFailures keeps the count of how many times the DNS resolution failed for the
-	// dnsName field. If the DNS resolution succeeds then the field will be set to zero. Upon
-	// every failure, the value of the field will be incremented by one. Upon reaching a threshold
-	// value, the details about the DNS name will be removed.
-	ResolutionFailures int `json:"resolutionFailures,omitempty"`
-	// conditions provide information about the state of the DNS name.
-	//
-	// These are the supported conditions:
-	//
-	//   * Degraded
-	//   - True if the following conditions are met:
-	//     * The last DNS name resolution failed.
-	//   - False if any of those conditions are unsatisfied.
-	// +optional
-	// +listType=map
-	// +listMapKey=type
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 ````
 
@@ -254,6 +266,16 @@ if match(event.type, "create") || match(event.type, "update"):
 
 	for each resolvedName in obj.status.resolvedNames:
 		ensure_dns_name_added(resolvedName)
+	
+	if removal_of_ips_required(obj):
+		update_dns_resolver(obj)
+		return
+
+	remaining_time_till_grace_period, is_expiring = grace_period_expires_after(obj)
+
+	if is_expiring:
+		reconcile_event_after(remaining_time_till_grace_period)
+		return
 
 else if match(event.type, "delete"):
 
@@ -266,20 +288,33 @@ else if match(event.type, "delete"):
 			if resolvedName.dnsName != obj.spec.name && match_regular_dns_name(resolvedName.dnsName) == false:
 				delete_dns_name(obj.spec.name)
 ```
-
+*  The `DNSNameResolver` controller will run dns resolution of DNS names in the background which will refresh the `.status` field of the `DNSNameResolver`
+CRs upon expiration of the validity of the corresponding IP addresses associated to the resolved names. As the CoreDNS pods are configured using the upstream
+nameservers present in the node host's `/etc/resolv.conf` file, the upstream nameservers for different CoreDNS pods may serve different IP addresses (possibly
+with different TTLs) for the same DNS name. Thus, while refreshing the information of a DNS name, the DNS lookup requests are sent to a maximum of 5 randomly
+chosen CoreDNS pods to get as many different associated IP addresses for the DNS name as possible.
 * The `DNSNameResolver` controller will watch for the events related to `DNSNameResolver` CRs.
 * After it receives the create/update events, it will perform DNS lookup for each of the DNS names corresponding to the `DNSNameResolver` CRs,
 if the details of the DNS names are not already added.
 * The `DNSNameResolver` controller will store the regular DNS name matching the `.spec.name` field of a `DNSNameResolver` CR and the
-corresponding current IP addresses along with the TTL and the next time to lookup. Based on the next time to lookup, the controller will perform DNS
+corresponding current IP addresses along with the the TTL and the last lookup time for each IP address. Using the TTL and last lookup time of all the associated
+IP addresses of a DNS name, a next lookup time for the DNS name is also stored. Based on the next lookup time, the controller will perform DNS
 lookups to get the latest IP addresses and TTL information. The DNS lookup will be intercepted by the `ocp_dnsnameresolver` plugin and will enforce an
 update of the `.status` of the CR.
 * The controller will also store the wildcard DNS name which matches the `.spec.name` field of a `DNSNameResolver` CR. If the DNS lookup is
-successful for the wildcard DNS name, then the DNS name will be stored with the corresponding current IP addresses along with the TTL and the next time to
-lookup. If the DNS lookup is not successful, then it will be retried  after a default TTL (30 minutes). The `DNSNameResolver` controller will also store
-the regular DNS names, matching the wildcard DNS name's `.status.resolvedNames[*].dnsName` field, with the corresponding current IP addresses along with the
-TTL and the next time to lookup. Based on the next time to lookup, the controller will follow the same method as that of the regular DNS names to get the
+successful for the wildcard DNS name, then the DNS name will be stored with the corresponding current IP addresses along with the TTL and the last lookup time
+for each IP address. If the DNS lookup is not successful, then it will be retried after a default TTL (30 minutes). The `DNSNameResolver` controller will
+also store the regular DNS names, matching the wildcard DNS name's `.status.resolvedNames[*].dnsName` field, with the corresponding current IP addresses along
+with the TTL and the last time to lookup for each IP address. Using the TTL and last lookup time of all the associated IP addresses of a DNS name, a next lookup
+time for the DNS name is also stored. Based on the next lookup time, the controller will follow the same method as that of the regular DNS names to get the
 latest IP addresses and TTL information.
+* The controller will also check if any IP address is needed to be removed from the `.status` field. The validity of any IP address expires after the
+corresponding next lookup time (TTL + last lookup time). However, the IP address may still be in use. Thus, a grace period of 1 second is provided for
+each IP address and on expiration of the grace period the IP address will be removed. If any IP address satisfies this condition then it is removed from
+the `.status` of the `DNSNameResolver` CR and the object is updated.
+* If the validity (TTL + last lookup time) of any of the IP addresses have expired, but the grace period of 1 second is still not over, then the same event
+will be reconciled after the grace period has expired. This is done so that during the next reconcile the IP addresses can be removed from the `.status` of the
+`DNSNameResolver` CR.
 * On receiving the delete event, the `DNSNameResolver` controller will remove the details stored regarding the `DNSNameResolver` CRs.
 * If the deleted event is for a `DNSNameResolver` corresponding to a regular DNS name, the `DNSNameResolver` controller will remove the details of a regular DNS
 name, if it doesn't match a `DNSNameResolver` CR corresponding to a  wildcard DNS name.
@@ -324,17 +359,19 @@ if match_regular_dns_name(dnsName) == false || match_wildcard_dns_name(dnsName) 
 
 if resolution_failed(response) == false:
 
-	ips, ttl = get_ips_and_ttl(response)
-	if ttl = 0:
-		ttl = min_ttl
+	ips, ttls = get_ips_and_ttls(response)
+	for each ttl in ttls {
+		if ttl = 0:
+			ttl = min_ttl
+	}
 	
 	if match_regular_dns_name(dnsName) == true:
 		objName = get_regular_dns_name_resolver_name(dnsName)
-		update_dns_resolver_success(objName, dnsName, ips, ttl, response)
+		update_dns_resolver_success(objName, dnsName, ips, ttls, response)
 	
 	if match_wildcard_dns_name(dnsName) == true:
 		objName = get_wildcard_dns_name_resolver_name(dnsName)
-		update_dns_resolver_success(objName, dnsName, ips, ttl, response)
+		update_dns_resolver_success(objName, dnsName, ips, ttls, response)
 
 else
   	
@@ -353,8 +390,8 @@ return response
 any of the `DNSNameResolver` CRs, then the plugin will update the corresponding `.status`. 
 * The plugin gets the response of a DNS lookup from other plugins and checks the response code returned. 
 * If it is a success response code, then the plugin checks whether the DNS lookup matches any `DNSNameResolver` CR belonging to a regular DNS name
-or a wildcard DNS name or both (in the case of a regular DNS name lookup). The IP addresses and minimum TTL among the IP addresses is obtained. If the
-TTL value is zero then it is set to a minimum TTL value (say 5 seconds). This is done to avoid immediate DNS lookups by the `DNSNameResolver`
+or a wildcard DNS name or both (in the case of a regular DNS name lookup). The IP addresses and the corresponding TTLs are obtained. If the
+TTL value is zero then it is set to a minimum TTL value of 5 seconds. This is done to avoid immediate DNS lookups by the `DNSNameResolver`
 controller for the same DNS names. If any of the `DNSNameResolver` CRs match, then the plugin proceeds with the update process of the `.status` of the
 `DNSNameResolver` CR when the DNS lookup is successful.
 * If it is a failure response code, then the plugin checks whether the DNS lookup matches any `DNSNameResolver` CR belonging to a regular DNS name
@@ -365,30 +402,40 @@ the update process of the `.status` of the `DNSNameResolver` CR when the DNS loo
 ##### Successful DNS lookup
 
 ```shell
-update_dns_resolver_success(objName, dnsName, ips, ttl, response):
+update_dns_resolver_success(objName, dnsName, ips, ttls, response):
 	obj = get_dns_name_resolver(objName)
 	for each resolvedName in obj.status.resolvedNames:
 		
 		if resolvedName.dnsName == dnsName:
-			if match_next_lookup_time(resolvedName.lastLookupTime, resolvedName.ttl, ttl):
-				if match_ips(resolvedName.ips, ips):
-					skip_update_of_resolvedName
+			if is_wildcard(dnsName):
+				wildcardResolvedName = resolvedName
+			unmatched_ips = []
+			unmatched_ttls = []
+			for each ip, ttl in (ips, ttls):
+				index, matched = matches_any_ip(resolvedName.info, ip)
+				if matched:
+					if match_next_lookup_time(resolvedName.info[index].ttlSeconds, resolvedName.info[index].lastLookupTime, ttl):
+						skip_update_of_resolvedName_info
+					else
+						resolvedName.info[index].ttlSeconds = ttl
+						resolvedName.info[index].lastLookupTime = now()
 				else
-					combine_ips(resolvedName.ips, ips)
-			else
-				resolvedName.ips = ips
-			resolvedName.ttl = ttl
-			resolvedName.lastLookupTime = now()
+					add_ip(unmatched_ips, ip)
+					add_ttl(unmatched_ttls, ttl)
+			if has_ips_and_ttls(unmatched_ips, unmatched_ttls) {
+				add_dns_info(resolvedName.info, unmatched_ips, unmatched_ttls)
+			}
 			resolvedName.resolutionFailures = 0
 			cond = condition{type: "Degraded", status: false, reason: success_reason(response), message: success_message(response)}
 			add_condition(resolvedName.conditions, cond)
 
 		else if is_wildcard(obj.spec.name) && resolvedName.dnsName == obj.spec.name && is_regular(dnsName)
-			&& match_next_lookup_time(resolvedName.lastLookupTime, resolvedName.ttl, ttl) && match_ips(resolvedName.ips, ips):
+			&& resolvedName_info_ips_contain_all_ips_and_match_next_lookup_times(resolvedName.info, ips, ttls, now()):
 			skip_update_of_resolvedName
 		
 		else if is_wildcard(dnsName)
-			&& match_next_lookup_time(resolvedName.lastLookupTime, resolvedName.ttl, ttl) && match_ips(resolvedName.ips, ips):
+			&& resolvedName_info_ips_contain_all_ips_and_match_next_lookup_times(
+				wildcardResolvedName.info, resolvedName.info[*].ip, resolvedName.info[*].ttlSeconds, resolvedName.info[*].lastLookTime):
 			remove(obj.status.resolvedNames, resolvedName)
 	
 	update_status_dns_name_resolver(obj)
@@ -396,25 +443,25 @@ update_dns_resolver_success(objName, dnsName, ips, ttl, response):
 
 * If a regular DNS name in the lookup matches with a `DNSNameResolver` CR corresponding to a regular DNS name, then the `.status` of
 the `DNSNameResolver` CR will be updated with the DNS name and the corresponding current IP addresses along with the TTL and the current time
-as the last lookup time.
+as the last lookup time for each IP address.
 * If a regular DNS name in the lookup matches with a `DNSNameResolver` CR corresponding to a wildcard DNS name, then the `.status` of
-the `DNSNameResolver` CR will be updated, if the IP addresses received in the response doesn't match with the IP addresses and the next lookup time
-corresponding to the wildcard DNS name. Otherwise, the plugin will update the `.status` with the regular DNS name and the corresponding current IP addresses
-along with the TTL and the next lookup time based on the TTL.
+the `DNSNameResolver` CR will not be updated, if the set of IP addresses received in the response is a subset of the wildcard DNS name's associated
+IP addresses and the corresponding next lookup times of each IP address match. Otherwise, the plugin will update the `.status` with the regular
+DNS name and the corresponding current IP addresses along with the TTL and the current time as the last lookup time for each IP address.
 * If the DNS lookup is for a wildcard DNS name and it matches with the `DNSNameResolver` CR corresponding to the wildcard DNS name,
 then the `ocp_dnsnameresolver` plugin will update the `.status` of the corresponding `DNSNameResolver` CR with the wildcard DNS name
-and the corresponding current IP addresses along with the TTL and the current lookup time as the last lookup time. If the wildcard DNS name's
-corresponding IP addresses and next lookup time (TTL + last lookup time) matches that of any other regular DNS name, added to the `.status`
-of the `DNSNameResolver` CR, then the details of the regular DNS name will be removed.
-* However, the updates will take place if there is a change in the next lookup time (TTL + last lookup time) for the DNS name or if the next
-lookup time is same for the DNS name, but the current IP addresses are different from the existing IP addresses. For the latter, the current
-IP addresses are added to the existing IP addresses of the DNS name. This will take care of the scenario where different CoreDNS pods get
-different subsets of the IP addresses in the response to the DNS lookup of the same DNS name. The next time to lookup will be same for them
-though the IP addresses may differ due to upstream DNS load balancing.
+and the corresponding current IP addresses along with the TTL and the current time as the last lookup time for each IP address.
+* If the set of associated IP addresses of any other regular DNS name is a subset of the wildcard DNS name's associated IP addresses and the corresponding
+next lookup time (TTL + last lookup time) of each IP address match, then the details of the regular DNS name will be removed.
+* However, the updates will take place if there is a change in the next lookup time (TTL + last lookup time) for the existing IP addresses
+or if the current IP addresses are different from the existing IP addresses. For the latter, the current IP addresses are added to the existing
+IP addresses of the DNS name. This will take care of the scenario where different CoreDNS pods get different subsets of the IP addresses in the
+response to the DNS lookup of the same DNS name.
 * Additionally, the exact matching of the next lookup time may never be successful. If the existing next lookup time of a DNS name lies
-within a threshold value (say 5 seconds) of the current lookup time, specifically lies in the range defined by
-`[current lookup time - threshold duration, current lookup time + threshold duration]`, then they are considered as same.
-* The `Degraded` condition of the DNS name will be set to `false` along with the success reason and message.
+within a threshold value (say 1 second) of the new lookup time, specifically lies in the range defined by
+`[new lookup time - threshold duration, new lookup time + threshold duration]`, then they are considered as same.
+* The `Degraded` condition of the DNS name will be set to `false` along with the success reason and message. The `resolutionFailures` field for
+the DNS name will be set to 0.
 
 ##### DNS lookup failure
 
@@ -423,11 +470,13 @@ update_dns_resolver_failure(objName, dnsName, response):
 	obj = get_dns_name_resolver(objName)
 	for each resolvedName in obj.status.resolvedNames:
 		if resolvedName.dnsName == dnsName:
-			if resolvedName.resolutionFailures == threshold:
+			if resolvedName.resolutionFailures == 5:
 				remove(obj.status.resolvedNames, resolvedName)
 			else
-				resolvedName.ttl = min_ttl
-				resolvedName.lastLookupTime = now()
+				for each dns_info in resolvedName.info:
+					if matches_next_lookup_time(dns_info.ttlSeconds, dns_info.lastLookupTime, now()):
+						dns_info.ttlSeconds = min_ttl
+						dns_info.lastLookupTime = now()
 				resolvedName.resolutionFailures = resolvedName.resolutionFailures + 1
 				cond = condition{type: "Degraded", status: true, reason: failure_reason(response), message: failure_message(response)}
 				add_condition(resolvedName.conditions, cond)
@@ -436,11 +485,11 @@ update_dns_resolver_failure(objName, dnsName, response):
 ```
 
 * If a DNS name (regular or wildcard) matches a `DNSNameResolver` CR, then the corresponding resolved name field in the `.status` will be updated.
-* If the corresponding `resolutionFailures` field has reached a threshold value (say 5), then the details of the DNS name will be removed from the
+* If the corresponding `resolutionFailures` field has reached a threshold value of 5, then the details of the DNS name will be removed from the
 `.status` of the `DNSNameResolver` CR.
-* Otherwise, the `ttl` field will be set to the minimum TTL value (say 5 seconds) and the `lastLookupTime` time will be set to the current time. The
-`resolutionFailures` will be incremented by one. Additionally, the `Degraded` condition of the DNS name will be set to `true` along with the failure reason 
-and message.
+* Otherwise, the `ttlSeconds` field will be set to the minimum TTL value of 5 seconds and the `lastLookupTime` time will be set to the current time
+for each IP address whose next lookup time matches the current time. The `resolutionFailures` will be incremented by one. Additionally, the `Degraded`
+condition of the DNS name will be set to `true` along with the failure reason and message.
 
 
 #### Workflow of OVN-K master(s)
@@ -505,16 +554,19 @@ The implementation changes needed for the proposed enhancement are documented in
 #### Cluster DNS Operator
 
 Cluster DNS Operator will deploy CoreDNS with the `ocp_dnsnameresolver` plugin enabled by adding it to the corefile. For the EgressFirewall rules to
-apply consistently, even for DNS names that are resolved by custom upstreams, it will be added to all server blocks in the corefile. As the
+apply consistently, even for DNS names that are resolved by custom upstream nameservers, it will be added to all server blocks in the corefile. As the
 plugin will watch and update the `DNSNameResolver` CRs in the `network.openshift.io` api-group, proper RBAC permissions will be needed
 to be added to the `ClusterRole` for CoreDNS.
 
 The new `DNSNameResolver` controller will be added to the Cluster DNS Operator. The controller will watch the `DNSNameResolver` CRs,
 and will send DNS lookup requests for the `spec.name` field. It will also re-resolve the `status.resolvedNames[*].dnsName` fields based on the
-corresponding next lookup time(TTL + last lookup time).
+corresponding next lookup time (TTL + last lookup time).
 
 For wildcard DNS names, the controller will query for the DNS names that get added to the `.status` of the corresponding `DNSNameResolver` CR,
 including the wildcard DNS name, even if it doesn't get added to the `.status`.
+
+The controller will also remove the IP addresses whose validity has expired from the `.status` field. However, the removal will happen after a
+grace period of 1 second post the validity expiration.
 
 #### CoreDNS
 
@@ -534,7 +586,7 @@ with the current IP addresses along with the corresponding TTL and current time 
 
 The plugin will ensure that the list of the DNS names to lookup for a wildcard DNS name does not become stale if a DNS name belonging its subdomain is removed.
 To achieve this a retry counter (`resolutionFailures`) will be used for the DNS name lookups. If the lookup fails for a DNS name listed in the `.status` of a
-`DNSNameResolver` CR for a threshold number of times (say 5), then the DNS name will be removed from the `.status` by the plugin. However, the DNS lookup will
+`DNSNameResolver` CR for 5 times, then the DNS name will be removed from the `.status` by the plugin. However, the DNS lookup will
 only fail if the corresponding wildcard DNS name does not have an `A` or `AAAA` record. Otherwise, the response will be same as the IP addresses associated with
 the `A` or `AAAA` record of the wildcard DNS name.
 
@@ -575,8 +627,8 @@ EgressFirewall functionality may break. The details can be found in [Upgrade / D
 * Whenever there's a change in the IP addresses or the next lookup time (TTL + last lookup time) for a DNS name, the additional step of updating the
 related `DNSNameResolver` CRs will be executed. This will add some delay to the DNS lookup process. However, this will only
 happen whenever there's a change in the DNS information.
-* For wildcard DNS names, it is not possible to pre-emptively find out the matching regular DNS names which have different IP addresses assigned to them
-as compared to the matching wildcard DNS names. For these regular DNS names the first lookup may originate from a workload pod, in which case the pod may
+* For wildcard DNS names, it is not possible to pre-emptively find out the matching regular DNS names which have DNS records in the upstream nameservers.
+For these regular DNS names the first lookup may originate from a workload pod, in which case the pod may
 see an initial delay until the underlying ACL rules are updated with the corresponding IP addresses. However, this will happen only for the first DNS lookup
 of a particular DNS name by any pod. Subsequently, it will be handled by the `DNSNameResolver` controller to keep the IP addresses updated.
 
