@@ -100,7 +100,7 @@ None
 MicroShift imports the go modules for the Migrator controller and the Trigger
 controller. The services are kicked off at launch and managed by the MicroShift
 process. OpenShift on the other hand, runs only the Migrator and it runs it as a
-Deployment that is kicked off and managed by the [Kube Storave Version Migrator
+Deployment that is kicked off and managed by the [Kube Storage Version Migrator
 Operator](https://github.com/openshift/cluster-kube-storage-version-migrator-operator).
 It is the responsibility of Operators to then initiate storage version
 migrations.
@@ -130,7 +130,7 @@ The result of this action is stored in the status for the
 ### Risks and Mitigations
 
 We do have some risks with the feature as a whole but the mitigations are pretty
-straight forward.
+straightforward.
 
 1. A risk that we have with this feature is that currently there is no real
    upstream solution for storage version migrations. The current implementation
