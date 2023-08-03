@@ -209,8 +209,15 @@ the BMCs using the provided CA certificate before the installation begins.
 ## Design Details
 
 ### Test Plan
+- Unit Test
+  - Add UT for CBO.
 
-TBD
+- E2E test
+  - Adding e2e test during IPI deployment to verify the following:
+    - The certificate specified by the user is correctly mounted under the
+      fixed path of the ironic container.
+    - The address of the certificate in the ironic container can be passed to
+      ironic for verification.
 
 ### Graduation Criteria
 
