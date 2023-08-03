@@ -14,7 +14,7 @@ approvers:
 api-approvers:
   - '@JoelSpeed'
 creation-date: 2023-01-31
-last-updated: 2023-08-3
+last-updated: 2023-08-03
 tracking-link:
   - https://issues.redhat.com/browse/CFE-748
 see-also:
@@ -288,7 +288,7 @@ else if match(event.type, "delete"):
 			if resolvedName.dnsName != obj.spec.name && match_regular_dns_name(resolvedName.dnsName) == false:
 				delete_dns_name(obj.spec.name)
 ```
-*  The `DNSNameResolver` controller will run dns resolution of DNS names in the background which will refresh the `.status` field of the `DNSNameResolver`
+* The `DNSNameResolver` controller will run dns resolution of DNS names in the background which will refresh the `.status` field of the `DNSNameResolver`
 CRs upon expiration of the validity of the corresponding IP addresses associated to the resolved names. As the CoreDNS pods are configured using the upstream
 nameservers present in the node host's `/etc/resolv.conf` file, the upstream nameservers for different CoreDNS pods may serve different IP addresses (possibly
 with different TTLs) for the same DNS name. Thus, while refreshing the information of a DNS name, the DNS lookup requests are sent to a maximum of 5 randomly
