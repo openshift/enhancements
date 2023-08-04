@@ -207,8 +207,10 @@ The cluster logging project provides a component to gather metrics about the vol
        requests:
 ```
 * restrict the number of deployments to 1 as no more then one is required per cluster
-* upgrade existing cluster logging deployments to separate the collector from the log-file-metric-exporter
-* deploy a **LogFileMetricExporter** when there exists a **ClusterLogForwarding** or **ClusterLogging** in the namespace *openshift-logging* named *instance* and there is no **LogFileMetricExporter** CR
+* require existing cluster logging deployments to create an instance of **LogFileMetricExporter** in order to continue to generate these metrics 
+
+**Note:** This is breaking change from previous releases but will allow administrators to manage scheduling and resources and to explicitly choose to gather
+          these metrics.
 
 #### Metrics Dashboards
 
