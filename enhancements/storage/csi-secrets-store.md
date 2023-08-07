@@ -101,6 +101,9 @@ The only planned OpenShift API change is to add [secrets-store.csi.k8s.io](https
 When the operator is installed via OLM, two new CRD's are created as required by the CSI driver and provider plugins:
 [SecretProviderClasses](https://github.com/openshift/secrets-store-csi-driver/blob/main/deploy/secrets-store.csi.x-k8s.io_secretproviderclasses.yaml) and
 [SecretProviderClassPodStatuses](https://github.com/openshift/secrets-store-csi-driver/blob/main/deploy/secrets-store.csi.x-k8s.io_secretproviderclasspodstatuses.yaml).
+
+ClusterRoles are created for each CRD to grant permissions for those objects to the `view`, `edit`, and `admin` roles. A user with a `view` role will be able to read `SecretProviderClass` and `SecretProviderClassPodStatuses` objects in their namespaces and a user with an `edit` role will be able to create, modify, and delete them.
+
 Once the operator is installed and ClusterCSIDriver object is created, the operator installs a ClusterRole which is used by the CSI driver to read SecretProviderClass objects created by the user, and to create/modify/delete SecretProviderClassPodStatus objects.
 
 ### Implementation Details/Notes/Constraints [optional]
