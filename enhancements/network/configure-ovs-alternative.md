@@ -73,6 +73,12 @@ basic deployments need. A possible followup would be to reimplement
 configure-ovs.sh in terms of this new mechanism so there is a simple path
 here too, but that is not required for the initial implementation.
 
+An example of a use case this is not intended to address would be a
+single-nic deployment on a cloud platform with no unusual network settings.
+In that case manual configuration of br-ex would be an unnecessary extra
+burden on the user and the logic to handle it automatically would be fairly
+simple so using configure-ovs is far less likely to cause problems.
+
 ## Proposal
 
 This mechanism will be similar to the day-1 network configuration described
