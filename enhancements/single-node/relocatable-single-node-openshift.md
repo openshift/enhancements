@@ -15,9 +15,9 @@ tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic 
   - https://issues.redhat.com/browse/MGMT-14516
   - https://issues.redhat.com/browse/OCPBU-608
 see-also:
-  - "[Use OVN-Kubernetes external gateway bridge without a host interface for Microshift](https://github.com/openshift/enhancements/pull/1388)"
   - https://rh-ecosystem-edge.github.io/ztp-pipeline-relocatable/1.0/ZTP-for-factories.html
-  - https://github.com/RHsyseng/cluster-relocation-operator 
+  - https://github.com/RHsyseng/cluster-relocation-operator
+  - https://github.com/openshift/machine-config-operator/pull/3774
 replaces:
   - 
 superseded-by:
@@ -96,13 +96,13 @@ ____________
 
 ## Proposal
 
-### Configuring single node OpenShift to be reloactable
+### Configuring single node OpenShift to be relocatable
 
 A few configurations will be applied before the node is relocated to allow the networking changes and reconfiguration required at the edge deployment.
-These changes will be applied using a MachineConfig that will:
-1. Create an additional known IP on the br-ex bridge. 
+1. Create an additional known IP on the desired interface (using nmstate).
 2. Disable kubelet service (to prevent kubelet from starting upon deployment at the edge).
-3. Create systemd service to re-configure the SNO. 
+3. Deploy the cluster-relocation-operator that will re-configure the SNO.
+4. Create systemd service (reconfiguration service) to load the edge configuration upon deployment at the edge and trigger the site specific re-configuration.
 
 #### IP address modification
 
@@ -110,32 +110,30 @@ Currently, when a single node OpenShift boots, ovs-configuration.service creates
 and sets the node’s IP as the environment variable for kubelet.service and crio.service.
 A relocatable SNO will likely use different network settings at the factory where it is first installed and at the edge site where it is deployed.
 To accommodate these network changes, we will decouple the host’s physical interface IP address from the internal node IP used by crio and kubelet.
-During the initial installation at the factory, a MachineConfig will be applied that adds a NetworkManager configuration script that adds an IP
-to the br-ex bridge when created by ovs-configuration.service.
+[ovs-configuration systemd service will be updated](https://github.com/openshift/machine-config-operator/pull/3774) to preserve existing IP and copy it to the br-ex bridge if an address is specified in the connection file.
 This IP will be the same IP as ovs-configuration.service configured on the br-ex bridge during the installation. 
-The MachineConfig will also add an env override to kubelet.service and crio.service that sets the kubelet NODE_IP to the internal node IP 
+The MachineNetwork in the installConfig will use the network of the internal IP, this should guarantee that kubelet.service and crio.service will get the internal node IP as the NODE_IP
 added by the NetworkManager pre-up script.
-See example MachineConfig [here](https://github.com/eranco74/image-based-installation-poc/blob/master/bake/node-ip.yaml).
-This decoupling should allow OCP to keep running as if the hostIP didn't change.
+The additional internal IP allows OCP to keep running as if the host IP didn't change.
 
-[//]: # (check the implication of this change on diffrent traffic cases, what IP will be the endpoint IP services will get?, what about ingress traffic and nodePort?)
-#### Certificate expiry
-
-When deploying SNO, the kubelet and node-bootstrapper certificate signing requests need to get approved and issued for kubelet to authenticate with the kube-apiserver and for the node to register.
-The initial certificate is currently valid for 24 hours. Extending this certificate’s validity to 30 days will reduce the time needed to complete the reconfiguration process at the edge.
 
 #### SNO reconfiguration
-We will add a new systemd service to reconfigure the node upon deployment at the edge site (see [Alternatives for SNO reconfiguration](#Alternatives for SNO reconfiguration)).
-This new service will read the site-specific configuration (relocation-config) and reconfigure the following:
+
+Once the initial installation is complete the reconfiguration systemd service will be added using machine config.
+Upon deployment at the edge site the reconfiguration service will read the site-specific configuration (relocation-config) and reconfigure the following:
+(see [Alternatives for SNO reconfiguration](#Alternatives for SNO reconfiguration).
 
 1. IP address and DNS server
 The relocation config may contain the desired network configuration for the edge site.
-The re-configuration service will expect network overrides as [nmstate](https://github.com/nmstate/nmstate) config yamls.
-The reconfiguration service will apply the nmstate configs via nmstatectl as the first reconfiguration step.
+The re-configuration service will expect network overrides as [nmstate](https://github.com/nmstate/nmstate) nmconnection files.
+The reconfiguration service will apply the nmstate configs by copying them to `/etc/NetworkManager/system-connections/` and restart `NetworkManager` as the first reconfiguration step.
 Once the networking is configured, the reconfiguration service will start kubelet and wait for the kube-apiserver to be available.
 
-2. cluster Domain
-The re-configuration service will retrieve the domain for the cluster from the relocation-config. Although changing the default domain of OCP is not currently supported, we can [modify the domain](https://docs.openshift.com/container-platform/4.12/networking/ingress-operator.html) for all related components. To achieve this, several tasks are performed by the re-configuration service:
+2. Configuring API resources:
+Once the kube-apiserver is available the reconfiguration service will create a cluster-relocation CR with all the site specific configuration for the edge site.
+
+5. cluster Domain
+While changing the default domain of OCP is not currently supported, we can [modify the domain](https://docs.openshift.com/container-platform/4.12/networking/ingress-operator.html) for all related components. To achieve this, several tasks are performed by the re-configuration service:
 a. Create new certificates for the console and authentication with the new domain suffix.
 b. Add componentRoutes for the console and authentication.
 c. Add namedCert into the apiserver
@@ -147,13 +145,20 @@ Changing the pull secret is supported by OCP. In case the relocation-config cont
 4. Reconfigure the ImageContentSourcePolicy
 In case the relocation-config contains ImageContentSourcePolicy the re-configuration service will create a new ImageContentSourcePolicy resource with the updated policy.
 
-5. Hostname
+5. Add new trusted CA for a mirror registry.
+
+6. Hostname
 Changing the node hostname is not currently supported by OpenShift.
 We need to investigate the impact of this change on OpenShift.
 
-6. Cluster name
+7. Cluster name
 Changing the cluster name is not currently supported by OpenShift.
 We need to investigate the impact of this change on OpenShift.
+
+#### Certificate expiry
+
+Upon deployment at the edge site, the kubelet apiserver client and kubelet serving certificates might be expired, since the initial certificate is currently valid for 24 hours.
+In such case the new systemd service will auto approve the necessary kubelet CSRs until valid certificate is issued for kubelet to authenticate with the kube-apiserver and for the node to register.
 
 ### Workflow Description
 
