@@ -105,7 +105,8 @@ query to CoreDNS when the minimum TTL expires. However, for a wildcard DNS name 
 on the DNS name as it will not return the IP addresses of all the subdomains. The DNS lookup of the wildcard DNS name may fail to return
 any IP address as well. If the lookup for the wildcard DNS name fails, then it will retried using the default TTL (30 minutes). If the lookup
 succeeds then the details will be added to the `.status` of the corresponding CR. Thus, the lookups will be performed on the DNS names which
-are updated in the `.status` of the corresponding wildcard `DNSNameResolver` CRs.
+are updated in the `.status` of the corresponding wildcard `DNSNameResolver` CRs. When a lookup fails consistently over time, the record will
+be pruned as described in the [DNS lookup failure](#dns-lookup-failure) subsection under the [Workflow Description](#workflow-description).
 
 The following `DNSNameResolver` CRD will be added to the `network.openshift.io` api-group.
 
