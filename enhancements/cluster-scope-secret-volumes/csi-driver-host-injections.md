@@ -26,7 +26,7 @@ creation-date: 2020-03-17
 last-updated: 2021-10-06
 
 <!-- status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced -->
-status: implementable
+status: implemented
 
 
 

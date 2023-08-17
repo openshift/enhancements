@@ -10,13 +10,14 @@ approvers:
   - "@bparees"
   - "@derekwaynecarr"
 creation-date: 2020-06-25
-last-updated: 2020-09-16
-status: implementable
+last-updated: 2023-08-17
+status: replaced
 see-also:
   - /enhancements/cluster-scope-secret-volumes/csi-driver-host-injections.md
   - https://github.com/openshift/enhancements/pull/384
 replaces: []
-superseded-by: []
+superseded-by:
+  - "/enhancements/cluster-scope-secret-volumes/shared-resources-via-openshift-builds-operator.md"
 ---
 
 # Subscription Injection Operator
