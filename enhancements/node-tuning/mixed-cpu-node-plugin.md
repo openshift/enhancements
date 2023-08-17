@@ -88,6 +88,31 @@ that communicates with the container-runtime
 at various lifecycle stages of container e.g. CreateContainer, UpdateContainer, etc.,
 and modifies the container's cgroup to include a set of shared CPUs.
 
+First, the plugin appends the shared cpus into the container's OCI spec.
+Then, it modifies the cgroup
+by injecting a [CreateRuntime](https://github.com/opencontainers/runtime-spec/blob/main/config.md#createruntime-hooks)
+OCI hook into the container oci spec.
+The OCI hook changes the following settings:
+1. It increases the container's `cpu.cfs_quota_us` as a multiplication of shared cpus number and `cfs_period_us`.
+2. It repeats step 2 for the container's parent cgroup `cpu.cfs_quota_us`. (essentially the pod level cgroup quota)
+   The node plugin only injects the OCI hook, while the actual execution of the hook done by the low-level runtime (`crun`, `runc`)
+
+Let's have a look at numeric example:
+`cpu.shared` = `3,4`
+Container has 2 exclusive cpus id: `5,6`
+`cfs_period_us` = `100,000`
+`cpu.cfs_quota_us` = `200,000` (number of exclusive cpus * `cfs_period_us`)
+
+The plugin expands the [CPUs](https://github.com/containerd/nri/blob/main/pkg/api/api.pb.go#L2105)
+to include the shared CPUs so the final CPU set looks like: `3,4,5,6`.
+It also injects OCI hook,
+that increases the container's `cpu.cfs_quota_us` from `200,000` to `400,000` according to the following formula:
+`cpu.cfs_quota_us` = number_of(`cpu.shared`) * `cfs_period_us` + `cpu.cfs_quota_us`
+
+The hook modifies the cgroup `kubepods.slice/kubepods-pod<pod-id>/crio-<container-id>.scope/cpu.cfs_quota_us` value
+It also modifies the cgroup`kubepods.slice/kubepods-pod<pod-id>/cpu.cfs_quota_us` value
+using the same formula.
+
 Shared CPUs append to Kubelet [reservedSystemCpus](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#explicitly-reserved-cpu-list).
 This means that when the feature enabled, Kubelet's `reservedSystemCpus` composed of PerformanceProfile's 
 `spec.cpu.reserved` + `spec.cpu.shared`.
