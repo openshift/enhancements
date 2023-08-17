@@ -1,5 +1,5 @@
 ---
-title: ingress-dashboard
+title: NETOBSERV-1052: Deployment of a monitoring dashboard based on ingress operator metrics
 authors:
   - "@jotak"
 reviewers:
@@ -33,7 +33,8 @@ superseded-by:
 
 ## Summary
 
-Add a new dashboard in the OpenShift Console (in menu “Observe” > “Dashboards”), dedicated to metrics related to Ingress.
+The goal is to add a new dashboard in the OpenShift Console (in menu “Observe” > “Dashboards”), dedicated to metrics related to Ingress.
+Such dashboard are deployed through a configmap, a new controller will be added to the ingress operator to manage this configmap.
 
 Ingress components, such as HAProxy, already provide some metrics that are exposed and collected by Prometheus / Cluster Monitoring. Administrators should be able to get a consolidated view, using a subset of these metrics, to get a quick overview of the cluster state. This enhancement proposal is part of a wider initiative to improve the observability of networking components (cf https://issues.redhat.com/browse/OCPSTRAT-139).
 
@@ -43,17 +44,15 @@ While ingress related metrics already exist and are accessible in the OpenShift 
 
 In addition, product management has shown interest in providing and making more visible some cluster-wide statistics such as the number of routes and shards in use.
 
-This [request for enhancement](https://issues.redhat.com/browse/NE-1059) is also considered here, although it will not be entirely fulfilled as we don't intend here to create any new metric.
-
 ### Goals
 
 1. Review and select a subset of the available metrics that should be included in the new dashboard. This should ideally be done with the help of the NetEdge team expertise and/or SREs.
-2. Design a new dashboard with these metrics.
-3. Update the Ingress Operator to deploy this dashboard, making it accessible for Cluster Monitoring consumption.
+2. Design and implement a new dashboard with these metrics.
+3. Update the Ingress Operator to deploy this dashboard configmap, making it accessible for Cluster Monitoring stack.
 
 ### Non-Goals
 
-- This work is not intended to provide a comprehensive set of metrics all at once. Instead, the intent is to "start small", setting in place all the mechanisms in code, and iterate later based on feedback to add or amend elements in the dashboard without any code change.
+- This work is not intended to provide a comprehensive set of metrics all at once. Instead, the intent is to "start small", setting in place all the mechanisms in code, and iterate later based on feedback to add or amend elements in the dashboard without any changes outside of the dashboard json definition file.
 - This enhancement does not include any new metric creation or exposition: only already available metrics are considered. If discussions lead to consider the creation of new metrics, this could be the purpose of a follow-up enhancement.
 
 ### User Stories
@@ -65,7 +64,7 @@ This [request for enhancement](https://issues.redhat.com/browse/NE-1059) is also
 
 To make a new dashboard discoverable by Cluster Monitoring, a `ConfigMap` needs to be created in the namespace `openshift-config-managed`, containing a static dashboard definition in Grafana format (JSON). The dashboard datasource has to be Cluster Monitoring's Prometheus.
 
-The Ingress Operator is responsible for creating and reconciling this `ConfigMap`. We assume all metrics used in the dashboard are present unconditionally, which allows us to create a static dashboard unconditionally as well.
+The Ingress Operator is responsible for creating and reconciling this `ConfigMap`. We assume all metrics used in the dashboard are present unconditionally, which allows us to create a static dashboard unconditionally as well. The Ingress Operator would embed a static and full json dashboard. If the operator detect any change between the deployed dashboard and the embedded one, the deployed dashboard would be replaced totally by the embedded one.
 In the event where conditional display should be introduced later (e.g. an alternative to HAProxy being implemented, resulting is different metrics to display), different approaches can be discussed: the dashboard could be dynamically amended via JSON manipulation; or several dashboards could be embedded and selectively installed.
 
 The content of the dashboard will be further discussed and refined, including during review and verification.
@@ -140,8 +139,9 @@ func buildDashboard() *corev1.ConfigMap {
 	}
 	return &configMap
 }
-
 ```
+
+The controller should then deploy this configmap in the `openshift-config-managed`. Any configmap deployed in this namespace with the `console.openshift.io/dashboard` label will be automatically picked by the monitoring operator and deployed in the OpenShift Console.
 
 ### Risks and Mitigations
 
@@ -157,10 +157,17 @@ Unit test
 
 E2E Tests
 
-1. Create a new IngressController. Wait for an ingress controller pod to be deployed.
+There are two scenarios depending of the cluster network topology
+
+1. Verify that the cluster network topology is not external
 2. Verify that the new ConfigMap dashboard was created.
-3. Delete the IngressController.
-4. Verify that the ConfigMap dashboard is deleted.
+3. Delete the Configmap
+4. Verify that the ConfigMap dashboard is recreated.
+5. Modify the Configmap json
+6. Verify that the ConfigMap is reinitialized to the right value.
+
+1. Verify that the cluster network topology is external
+2. Verify that the ConfigMap was not deployed
 
 ### Graduation Criteria
 
