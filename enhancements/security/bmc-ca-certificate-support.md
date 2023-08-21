@@ -213,11 +213,13 @@ the BMCs using the provided CA certificate before the installation begins.
   - Add UT for CBO.
 
 - E2E test
-  - Adding e2e test during IPI deployment to verify the following:
-    - The certificate specified by the user is correctly mounted under the
-      fixed path of the ironic container.
-    - The address of the certificate in the ironic container can be passed to
-      ironic for verification.
+  - Configure a Redfish job to interact with Ironic.
+  - Set up sushy-tools to use a self-signed certificate, ensuring it is configured to work
+    alongside the Redfish job.
+  - Provide the bmcCACert to ironic and ensure that certificate validation is enable.
+  - Execute the end-to-end test to verify if the cluster deployment is successful.
+    Successful deployment would indirectly suggest that the certificate configuration is
+    correctly recognized and utilized by Ironic.
 
 ### Graduation Criteria
 
