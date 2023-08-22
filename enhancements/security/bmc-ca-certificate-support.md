@@ -279,12 +279,17 @@ TBD
 
 ## Alternatives
 
-An alternative approach could be to add these CA certificates through the
-`additionalTrustBundle`. However, it does not work for IPI control plane
-installation and it is also insecure to mix the CA certificates used for BMC
-verification into the cluster-wide trust bundle.
+An alternative approach would be to add these CA certificates through the `additionalTrustBundle`.
+However, this has been discussed in a similar [enhancement][OpenStack enhancement]
+and was deemed not to be the optimal way.
+For our enhancement, there are two primary reasons to consider:
+1. It cannot be applied to the BMC certificate verification during control plane creation.
+2. There is also the `additionalTrustBundlePolicy` that can be set to either Always or Proxyonly,
+  in the latter case using it for the BMCs would not make sense (and this would leave us without
+  another way to set the trust bundle for the BMCs).
 
 [OpenStack Ironic]: https://opendev.org/openstack/ironic
 [Metal3 Ironic Container]: https://github.com/metal3-io/ironic-image
 [OpenShift Installer]: https://github.com/openshift/installer
 [OpenShift Cluster Baremetal Operator]: https://github.com/openshift/cluster-baremetal-operator
+[OpenStack enhancement]: https://github.com/openshift/enhancements/blob/master/enhancements/security/openstack-self-signed-certificates.md#how-should-we-pass-the-certificate-to-the-installer
