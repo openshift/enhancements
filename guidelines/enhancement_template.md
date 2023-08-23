@@ -170,7 +170,9 @@ deploying an application in a cluster.
    applications, and gives the application administrator their
    credentials.
 
-#### Variation [optional]
+#### Variation and form factor considerations [optional]
+
+How does this proposal intersect with Standalone OCP, Microshift and Hypershift?
 
 If the cluster creator uses a standing desk, in step 1 above they can
 stand instead of sitting down.
@@ -202,6 +204,12 @@ of API Extensions" section.
 What are the caveats to the implementation? What are some important details that
 didn't come across above. Go in to as much detail as necessary here. This might
 be a good place to talk about core concepts and how they relate.
+
+#### Hypershift [optional]
+
+Does the design and implementation require specific details to account for the Hypershift use case?
+See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282
+
 
 ### Risks and Mitigations
 
