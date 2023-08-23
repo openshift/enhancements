@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed" ## approver for api component
 creation-date: 2022-07-12
-last-updated: 2023-08-01
+last-updated: 2023-08-23
 tracking-link:
   - https://issues.redhat.com/browse/OCPPLAN-8155
   - https://issues.redhat.com/browse/CORS-2455
@@ -387,8 +387,8 @@ is immutable.
 OpenShift operators(Cluster Infrastructure, Storage) that create GCP resources will apply
 these tags to all GCP resources they create.
 
-Resources which support tags and is required by OpenShift are Compute Engine Instances,
-Cloud Storage Buckets.
+Resources which support tags and is required by OpenShift are Compute VM Instances,
+Compute Disks, Compute Images, Compute Snapshots, Filestore Instances and Cloud Storage Buckets.
 
 Tag operations are restricted through quotas and the quota for tag write operation 
 `TagsWriteRequestsPerMinutePerProject` has a default limit of 600requests/minute. Rate limit
@@ -500,11 +500,13 @@ func() {
    respectively of `infrastructure.config.openshift.io/v1` resource will result in adding 
    labels and tags to all OpenShift managed GCP resources.
 3. Limitations for TechPreview
-   - Worker compute machines created by `machine-api-provider-gcp` controller will not be tagged,
-     controller will be replaced with cluster-api-provider-gcp, and requires tagging
+   - Compute VM Instances(master machines) and Cloud Storage Bucket created by `installer` will
+     not be tagged.
+   - Compute VM Instances(worker machines) created by `machine-api-provider-gcp` controller will
+     not be tagged, controller will be replaced with cluster-api-provider-gcp, and requires tagging
      support to be added in upstream.
-   - Disk, Images, Snapshots created by `gcp-pd-csi-driver` will not be tagged with the userTags,
-     requires tagging support to be added in upstream.
+   - Compute Disk, Compute Images, Compute Snapshots created by `gcp-pd-csi-driver` will not be
+     tagged with the userTags, requires tagging support to be added in upstream.
    - Filestore Instance resource created by `gcp-filestore-csi-driver` will not be tagged with
      the userTags, requires tagging support to be added in upstream.
 
@@ -544,8 +546,12 @@ func() {
   operator. In this proposal, the changes proposed and developed will be part of
   openshift-* namespace. External operators are not in scope.
   User-defined tags can be updated on the following GCP resources.
-  - Compute Engine Instances
+  - Compute VM Instances
+  - Compute Disks
+  - Compute Images
+  - Compute Snapshots
   - Cloud Storage Buckets
+  - Filestore Instances
 
 - Administrator will have to manually perform below label pertaining actions
     1. removing the undesired labels/tags from the required resources.
