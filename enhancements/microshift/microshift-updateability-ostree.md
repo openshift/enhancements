@@ -355,17 +355,55 @@ N/A
 ### General overview of actions order
 
 1. MicroShift binary starts
-1. "Data management" or "backup and/or restore" phase (failure will block next phases)
-   - Data is backed up, restored, and/or (in special cases) cleared to allow for fresh start.
-1. Version metadata in data directory and version of MicroShift's executable are compared.
-   - Invalid upgrade paths cause MicroShift to exit with error
-   - If the version change is valid, version in data directory is updated with executable's version.
+1. Data management phase (failure will block next phases)
+   - Data is backed up, restored, and/or (in special cases) cleared to allow for fresh start
+1. Version metadata management
+   - Version in data directory and version of MicroShift's executable are compared
+     to see if the difference isn't too big or it's not a downgrade
+   - If upgrade "data version" to "executable version" is present on the list of
+     blocked upgrade paths then MicroShift exits with an error
+   - If the version change is valid, version in data directory is updated with executable's version
 1. All MicroShift components start - this includes Kubernetes Storage Migrator
+   which performs migration of Kubernetes objects and CustomResources
+
+```mermaid
+flowchart TD
+    start[MicroShift Service Starts]
+
+    subgraph DM [Data Management]
+      health{Previous\nboot health}
+      backup(Backup)
+      restore(Restore)
+      clear(Clear)
+
+      health -->|Healthy| backup
+      health -->|Unhealthy| restore
+      health -->|Special cases| clear
+    end
+
+    subgraph VMM [Version Metadata Management]
+      dv(Check if executable is not too new\nor older than previous)
+      ub(Check if upgrade from\nprevious version is blocked)
+
+      dv --> ub
+    end
+
+    subgraph RUNNING [Running MicroShift cluster]
+      sc(Start MicroShift Components)
+      migration(Storage migration)
+
+      sc -->|Cluster is running| migration
+    end
+
+    start --> DM
+    DM  --> VMM
+    VMM --> RUNNING
+```
 
 In parallel:
 1. greenboot runs MicroShift health check
 1. greenboot runs red or green scripts depending on system's health
-   - MicroShift will plug into red/green scripts to persist system's health
+   - MicroShift provides red/green scripts to persist system's health
 
 ### Triggers for greenboot failures
 
