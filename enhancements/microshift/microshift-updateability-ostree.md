@@ -429,8 +429,8 @@ different trade offs without clear winner.
 
 For that reason, when needing to stage a new deployment on top of unhealthy system
 one of two actions must be performed:
-- system must be brought to healthy state, or
-- MicroShift data should be deleted completely resulting in clean start
+- Either, system must be brought to healthy state,
+- Or, MicroShift data should be deleted completely resulting in clean start
   (effectively "first run").
 
 The only exception from this rule is when, from MicroShift's metadata perspective,
@@ -535,15 +535,15 @@ from clean state.
 #### Manual interventions
 
 Following section describes scenarios where admin's intervention is needed because:
-- system no longer can heal itself by rebooting or rolling back to previous deployment, or
-- admin wants to try different system image because current one is unhealthy.
+- Either, system no longer can heal itself by rebooting or rolling back to previous deployment,
+- Or, admin wants to try different system image because current one is unhealthy.
 
 ##### Addressing MicroShift's health
 
 Depending on MicroShift's health admin might:
 - Unhealthy
-  - Delete MicroShift's data to allow fresh start, or
-  - Investigate and address problems with MicroShift cluster
+  - Either, delete MicroShift's data to allow fresh start
+  - Or, investigate and address problems with MicroShift cluster
 - Healthy
   - Keep MicroShift's data
 - Unhealthy application running on top of MicroShift
