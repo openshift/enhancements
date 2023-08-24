@@ -274,9 +274,8 @@ we will incorporate a mechanism to block specific upgrades by listing version
 numbers _from which_ a new version cannot be upgraded (X.Y+1.Z may include
 X.Y.Z in its "block" list).
 
-If start is blocked because of version skew, MicroShift cluster won't start.
-If migration fails, healthcheck script will detect that and deem system unhealthy.
-Both situations will result in rollback of the system.
+If start is blocked because of version skew, MicroShift cluster won't start
+and eventually result in system rolling back.
 
 Decision flow describing whether to block or allow start of MicroShift migration can be summarized as:
 - If version metadata is missing, assume 4.13
