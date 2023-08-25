@@ -124,7 +124,7 @@ lifecycle management of Shipwright, whose logic is implemented in the upstream
 
 ### API Extensions
 
-The OpenShift Builds will intoroduce a new configuration CRD, `OpenShiftBuild`. It will contain 
+The OpenShift Builds will introduce a new configuration CRD, `OpenShiftBuild`. It will contain 
 `spec` fields that configure the Shared Resource CSI driver in addition to Shipwright-related
 components. The operator will also deploy (directly or indirectly) the following:
 
@@ -147,7 +147,7 @@ The Shared Resource CSI driver itself will need to be removed from the OpenShift
 components will need to be re-productized as an OLM operand.
 
 Notably, the design of this operator does **_not_** intend to use OLM API dependency resolution
-to automate the deployment and management of OpenShift Pipelines. Cluster admimins will need to
+to automate the deployment and management of OpenShift Pipelines. Cluster admins will need to
 separately (and manually) install OpenShift Pipelines.
 
 
@@ -272,7 +272,7 @@ Replacing the current validating webhook with
 Rather than bundle the Shared Resources CSI driver with OpenShift Builds, the driver could be
 deployed with its own OLM operator. The primary issue with this approach is that OpenShift Builds
 would still want to deploy and manage this driver, since this is part of our strategy to make use
-of entiltements in builds simpler. This would likely add a lot of unnecessary complexity:
+of entitlements in builds simpler. This would likely add a lot of unnecessary complexity:
 
 - An additional operator CRD to reconcile (ex: `SharedResourceConfig`)
 - Version skews when OLM does its API resolution, OR
