@@ -2,6 +2,7 @@
 title: windows-node-egress-proxy
 authors:
   - "@saifshaikh48"
+  - "@mansikulkarni96"
 reviewers:
   - "@openshift/openshift-team-windows-containers"
   - "@openshift/openshift-team-network-edge, for general approach to proxy config consumption, motivation, risks, and testing"
@@ -10,7 +11,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2023-02-16
-last-updated: 2023-03-07
+last-updated: 2023-08-29
 tracking-link:
   - "https://issues.redhat.com/browse/OCPBU-22"
   - "https://issues.redhat.com/browse/WINC-802"
@@ -153,34 +154,18 @@ OLM is a subscriber to these `Proxy` settings -- it forwards the settings to the
 container will automatically get the required `NO_PROXY`, `HTTP_PROXY`, and `HTTPS_PROXY` environment variables on startup.
 In fact, OLM will update and restart the operator pod with proper environment variables if the `Proxy` resource changes.
 
-In proxy-enabled clusters, WMCO will read the values of the 3 proxy variables from its own environment and store them in the 
-[`windows-services` ConfigMap](./health-management.md#services-configmap).
-In clusters without a global proxy, these variables will not be present in the services ConfigMap.
-This will be done by adding a `EnvironmentVars` key to the top level of the services ConfigMap spec.
-The new key will be an array of name-value pairs representing environment variables to be set on Windows instances.
-```json
-{
-  "EnvironmentVars": [
-    {
-      "name": "name of the environment variable",
-      "value": "value the variable should be set to on the instance"
-    }
-  ],
-  "Services": "<existing spec>",
-  "Files": "<existing spec>",
-}
-```
+In proxy-enabled clusters, WMCO will read the values of the 3 proxy variables from its own environment and store them in 
+the name-value pairs within the `EnvironmentVars` key found in the [`windows-services` ConfigMap](./health-management.md#services-configmap) spec.
+However, in clusters without a global proxy, these variables will not be present in the services ConfigMap.
+WICD will periodically poll to check if the proxy vars have changed by comparing each variable's value on the node to 
+the expected value in the ConfigMap. If there is a discrepancy, WICD controller will reconcile and update the 
+proxy environment variable on the Windows instances.
 
-WICD, which uses the ConfigMap data to configure Windows services, will now have the added responsibility of ensuring
-the `EnvironmentVars` are correctly set on the node and its managed services. WICD will check if any env vars changed by
-comparing each variable's value on the node to the expected value in the ConfigMap. If there is a discrepancy:
-- WICD will update the env vars through a [Windows syscall](https://pkg.go.dev/golang.org/x/sys/windows#SetEnvironmentVariable)
-  which sets the environment variables system-wide, also known as the `Machine` level in Windows. 
-  There are 3 levels to Windows environment variables: `Machine`, `User`, and `Process`. `Process` inherits from 
-  `User`, which inherits from the top level of `Machine`, and sub-processes inherit from their parent process. 
-  In order to route all external node traffic through the proxy, we must set the proxy variables at the `Machine` level.
-  This will also allow the required services (including kubelet and containerd) to inherit the desired values.
-- WICD will reboot the instance so Windows services actually pick up the updated env var values from the OS registry.
+WMCO also specifies a list of environment variables monitored by WICD through the `WatchedEnvironmentVars` key in the
+services ConfigMap spec. This list will now include `NO_PROXY`, `HTTP_PROXY`, and `HTTPS_PROXY` as the names of proxy
+specific environment variables watched by WICD.
+When a proxy variable is removed from the cluster-wide proxy settings in the `Proxy` resource, WICD will take corrective 
+action to remove the proxy variable from the Windows OS registry.
 
 ### Configuring Custom Trusted Certificates
 
@@ -259,7 +244,7 @@ current WMCO upgrade strategy. Once customers are on WMCO 9.0.0, they can config
 nodes will be automatically updated by the operator to use the `Proxy` settings for egress traffic.
 
 When deconfiguring Windows instances, proxy settings will be cleared from the node. This involves undoing some node
-config steps i.e. unsetting proxy variables and deleting additional certificates from the machine's local trust store.
+config steps i.e. removing proxy variables and deleting additional certificates from the machine's local trust store.
 This scenario will occur when upgrading both BYOH and Machine-backed Windows nodes.
 
 Downgrades are generally [not supported by OLM](https://github.com/operator-framework/operator-lifecycle-manager/issues/1177),
