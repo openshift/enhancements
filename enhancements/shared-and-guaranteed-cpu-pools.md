@@ -88,8 +88,10 @@ kernel tuning applied to each pool.
 guaranteed CPUs.
 * The selection of shared vs. guaranteed CPUs should be transparent to the user - no changes to the pod
 spec should be required.
-* The configuration should be optional and activated with a feature gate.
-* Although the initial usecase for this enhancement is single-node deployments, it should also be usable
+* The feature should be implemented behind a feature gate to ensure no impact to existing functionality.
+* Even when the feature gate is enabled, the configuration should be optional as not all deployments
+will use this functionality.
+* The initial usecase for this enhancement is single-node deployments (SNO). It will also be usable
 for multi-node deployments.
 
 ### Non-Goals
@@ -126,12 +128,10 @@ work in single-node deployments, we still need to work through how enablement wi
 (waiting to decide on design approach before working that out).
 
 The Kubelet configuration will be updated to allow a new CPUSet to be specified for guaranteed Qos containers
-using whole CPUs. There are two options:
-1. If this feature can be upstreamed, the [Kubelet Configuration](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/) could be extended with a new `guaranteedCPUs` option.
-2. If this cannot be upstreamed, a new configuration file could be created and read by kubelet on startup - similar
+using whole CPUs. A new configuration file will be created and read by kubelet on startup - similar
 to the /etc/kubernetes/openshift-workload-pinning file created for The [Workload Partitioning](https://docs.openshift.com/container-platform/4.13/scalability_and_performance/ztp_far_edge/ztp-reference-cluster-configuration-for-vdu.html#ztp-sno-du-enabling-workload-partitioning_sno-configure-for-vdu) feature.
 
-The Kubelet (mostly the [CPU manager](https://github.com/openshift/kubernetes/tree/master/pkg/kubelet/cm/cpumanager) and its static policy) would be updated to:
+The Kubelet (mostly the [CPU manager](https://github.com/openshift/kubernetes/tree/master/pkg/kubelet/cm/cpumanager) and its static policy) will be updated to:
 * Read and store the new `guaranteedCPUs` configuration.
 * Remove the `guaranteedCPUs` from the `defaultCpuSet` so that shared containers are excluded from the `guaranteedCPUs` when their affinity is set.
 * Extend the cpu_manager_state to include a new `guaranteedCpuSet` tracking the available CPUs.
@@ -242,17 +242,36 @@ could impact release timelines.
 
 ### Drawbacks
 
-The changes proposed to kubelet will require us to carry patches to the upstream version. The idea of
-splitting the CPUs used by kubelet into a pre-defined shared and guaranteed pool might be considered
-upstream, but the use of the extended resources to track these is unlikely to be accepted. The
-alternative of adding a new first class resource (e.g. cpu-guaranteed) instead of extended resources
-would have huge impacts to existing code and is unlikely to be accepted.
+* The changes proposed to kubelet will require us to carry patches to the upstream version. The idea of
+  splitting the CPUs used by kubelet into a pre-defined shared and guaranteed pool might be considered
+  upstream, but the use of the extended resources to track these is unlikely to be accepted. The
+  alternative of adding a new first class resource (e.g. cpu-guaranteed) instead of extended resources
+  would have huge impacts to existing code and is unlikely to be accepted.
 
-Another drawback is that the number of shared and guaranteed CPUs can only be changed with a reboot. However,
-there is no alternative that avoids a reboot since much of the required kernel tuning is static and cannot
-be changed at runtime.
+* The number of shared and guaranteed CPUs can only be changed with a reboot. However, there is no alternative
+  that avoids a reboot since much of the required kernel tuning is static and cannot be changed at runtime.
+
+* The customer must engineer fixed sizes for the shared and guaranteed CPU pools, thus reducing the
+  elasticity of the cluster. This will partially impact
+  [Vertical Pod Autoscaling](https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler) (VPA)
+  as it will require sufficient CPU resources to be available in each pool to meet VPA requirements.
 
 ## Design Details
+
+### Enabling Feature
+
+A new feature gate will be defined for this feature (e.g. `GuaranteedCPUPool`). This feature gate will be
+initially defined as a `TechPreviewNoUpgrade` feature to ensure it does not impact existing functionality
+when the code is first delivered.
+
+There are two components changed by this feature:
+* kubelet: Changes will only be activated when the feature gate is enabled and the new configuration file
+  is present.
+* kubernetes API server (new admission hook): The admission hook will be disabled by default. It will
+  only be enabled when the feature gate is enabled and the admission hook is enabled in the API server
+  configuration.
+
+All code changes will be benign if the feature gate is not enabled or the feature has not been activated.
 
 ### Scheduler Awareness
 
@@ -282,19 +301,84 @@ guaranteed CPUs to match the workloads that they are planning on running on the 
 aware of the NUMA restrictions imposed by using the `single-numa-node` policy and would ensure their 
 configuration matched.
 
+### Kubelet Implementation Options
+
+There are two options for making the proposed changes in kubelet:
+1. Extend the existing [cpumanager static policy](https://github.com/openshift/kubernetes/blob/master/pkg/kubelet/cm/cpumanager/policy_static.go).
+2. Create a new kubelet cpumanager policy based on the static policy (e.g. `PolicyStaticGuaranteed`).
+
+The first option (extend existing cpumanager static policy) is relatively straight-forward. A brief summary of the changes:
+* Update the [PolicyStatic](https://github.com/openshift/kubernetes/blob/master/pkg/kubelet/cm/cpumanager/policy_static.go)
+  to track the default (i.e. shared) and guaranteed CPUSet separately and allocate guaranteed CPUs from the guaranteed CPUSet.
+  Roughly 50 LOC changes.
+* Update the [cpumanager state](https://github.com/openshift/kubernetes/tree/master/pkg/kubelet/cm/cpumanager/state) to
+  track the guaranteed CPUSet (in addition to the default CPUSet). Roughly 60 LOC changes.
+* Update the [node status](https://github.com/openshift/kubernetes/blob/master/pkg/kubelet/kubelet_node_status.go) to
+  publish the new extended resources. Roughly 70 LOC changes.
+* Add new unit tests for each of the above changes to existing test files.
+* Add new e2e tests for cpumanager to existing [cpumanager e2e tests](https://github.com/openshift/kubernetes/blob/master/test/e2e_node/cpu_manager_test.go).
+  These new tests would activate the feature gate for the feature to ensure the feature was being tested while in the
+  `TechPreviewNoUpgrade` state.
+
+The second option (new cpumanager policy) would require the same changes, but these changes would mostly be done in new files
+in order to reduce the changes to existing code and reduce risk. This would require:
+* Create a new cpumanager policy (e.g. `PolicyStaticGuaranteed`). This would be a clone of the existing
+  [PolicyStatic](https://github.com/openshift/kubernetes/blob/master/pkg/kubelet/cm/cpumanager/policy_static.go)
+  with the same changes as described above. Roughly 1800 LOC of duplicated code (including duplicated unit tests).
+* Create a new cpumanager state handler. This would require refactoring of the
+  [cpumanager state](https://github.com/openshift/kubernetes/tree/master/pkg/kubelet/cm/cpumanager/state) to allow
+  different implementations of the state handling code and then the changes described above. Roughly 1100 LOC of
+  duplicated code (including duplicated unit tests). The refactoring would need to be done upstream - otherwise the
+  benefits of duplicating the code would be negated by the need to carry the refactoring as a downstream change.
+* Update [cpumanager](https://github.com/openshift/kubernetes/blob/master/pkg/kubelet/cm/cpumanager/cpu_manager.go)
+  to allow the new policy to be specified at initialization time. Duplicate or refactor unit tests
+  that use the static policy to ensure the new policy meets the same requirements and add new unit tests. Roughly 50 LOC
+  changes plus 1000 LOC of duplicated or refactored test code.
+* The [node status](https://github.com/openshift/kubernetes/blob/master/pkg/kubelet/kubelet_node_status.go) code could
+  also be cloned to avoid making changes, but the benefits would be small compared to the
+  duplication of 900 LOC plus the duplication or refactoring of almost 3000 LOC of unit test code.
+* Add new unit tests for each of the above changes to the duplicated unit test files.
+* Add new e2e tests for cpumanager. The existing [cpumanager e2e tests](https://github.com/openshift/kubernetes/blob/master/test/e2e_node/cpu_manager_test.go)
+  use the static policy, so would be cloned in order to ensure the new policy met all the same requirements. Additional
+  tests would also be added. Roughly 800 LOC of duplicated test code.
+* Several other e2e test suites (e.g. pod resources, topology manager) exercise the static policy. In order to get the same
+  coverage, we would need to refactor or duplicate these test suites to test the new cpumanager policy as well.
+
+Based on the above description, creating a new cpumanager policy does not seem like a good approach:
+* Although it eliminates the changes to the existing static policy, it requires additional changes to cpumanager itself,
+  refactoring of the cpumanager state handler and the duplication or refactoring of 1000s of lines of unit test and e2e
+  test code.
+* Creating a new cpumanager policy actually reduces the amount of testing (both unit and e2e testing) for the new code,
+  unless all unit and e2e testcases that involve cpumanager are either duplicated or refactored to test both the old and
+  new policies.
+* The first option will require effort each time kubernetes is upversioned, to propagate the changes to the new kubernetes
+  release. However, this is likely to be significantly less effort than it would be to propagate changes made to code
+  that has been duplicated (e.g. cpumanager policy, cpumanager state handler, unit tests, e2e tests). Carrying a large
+  amount of duplicated code increases the risk that fixes/enhancements made to the original code are missed.
+
+Therefore, option 1 (extending the existing cpumanager static policy) is recommended.
+
 ### Open Questions
 
-#### Enabling Feature
-
-How will this be enabled at the openshift apiserver level? It looks like you can create an admission hook
-that is disabled by default and then enabled through a config option on the API server - could that mechanism
-be used?
+None
 
 ### Test Plan
 
-**Note:** *Section not required until targeted at a release.*
+#### e2e tests
 
-TO DO 
+If the recommendation to extend the existing cpumanager static policy is taken, the existing
+[cpumanager e2e tests](https://github.com/openshift/kubernetes/blob/master/test/e2e_node/cpu_manager_test.go) will ensure
+that the modifications done for this enhancement do not cause regressions to the cpumanager static policy. Additionally,
+other existing e2e test suites (e.g. pod resources, topology manager) also exercise the static policy and should help
+prevent regressions.
+
+New tests specific to this enhancement will also be added to the existing
+[cpumanager e2e tests](https://github.com/openshift/kubernetes/blob/master/test/e2e_node/cpu_manager_test.go). These new
+tests will activate the feature gate for the feature to ensure the feature is being tested while in the
+`TechPreviewNoUpgrade` state. These new tests will ensure that changes made to the common cpumanager static policy code
+will not regress the functionality that is being added in this enhancement.
+
+**Note:** *Section not required until targeted at a release.*
 
 ### Graduation Criteria
 
