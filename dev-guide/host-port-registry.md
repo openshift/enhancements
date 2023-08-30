@@ -79,6 +79,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 6388  | ironic (internal) | metal | 4.12 | baremetal provisioning, control plane only |
 | 6443  | kube-apiserver | apiserver || control plane only |
 | 9001  | machine-config-daemon oauth proxy | node || metrics |
+| 9099  | cluster-version operator | updates || metrics |
 | 9100  | node-exporter | monitoring || metrics |
 | 9101  | openshift-sdn kube-rbac-proxy | sdn || metrics, openshift-sdn only |
 | 9101  | kube-proxy | sdn || metrics, third-party network plugins only, deprecated |
