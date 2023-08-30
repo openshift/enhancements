@@ -3,12 +3,13 @@ title: windows-node-health-management
 authors:
   - "@sebsoto"
   - "@saifshaikh48"
+  - "@mansikulkarni96"
 reviewers:
   - "@openshift/openshift-team-windows-containers"
 approvers:
   - "@aravindhp"
 creation-date: 2021-12-16
-last-updated: 2021-12-16
+last-updated: 2023-08-29
 status: implementable
 ---
 
@@ -28,8 +29,9 @@ status: implementable
 The purpose of this enhancement is to ensure that all Windows nodes managed by the Windows Machine Config Operator 
 (WMCO) maintain an expected state. With health management implemented, WMCO will automatically ensure that OpenShift 
 related services running on the underlying Windows instances are configured, and have a state inline with the
-expectations of the installed WMCO version. As the shift to [containerd](container-runtime-containerd.md) is imminent,
-this enhancement is written considering containerd as the only supported container runtime.
+expectations of the installed WMCO version. Additionally, it will ensure that the environment variables defined by the
+operator are set as expected on the Windows instances. As the shift to [containerd](container-runtime-containerd.md) is 
+imminent, this enhancement is written considering containerd as the only supported container runtime.
 
 ## Motivation
 
@@ -38,8 +40,9 @@ configuring Windows instances into worker Nodes. Once the Node object exists, ba
 not have the functionality to detect and correct changes in Node state. Windows nodes should be resilient enough to not
 require manual intervention when an issue occurs, whose cause is within the scope of WMCO's control. This work serves
 as part of a larger initiative to minimize the downtime of customer workloads. There are other auxiliary benefits to
-implementing this enhancement, for example, adding new Windows services becomes an easier process for WMCO developers,
-and the node upgrade path from any WMCO version to another is codified through ConfigMap differences.
+implementing this enhancement, for example, adding new Windows services or setting new environment variables becomes 
+an easier process for WMCO developers. Additionally, the node upgrade path from any WMCO version to another is codified 
+through ConfigMap differences.
 
 ### Goals
 
@@ -51,6 +54,7 @@ and the node upgrade path from any WMCO version to another is codified through C
   + Container runtime
   + Metrics collector/exporter
 * Generate events to inform cluster administrators when Node health issues are not resolvable by WMCO.
+* Ensure environment variables defined by WMCO are set as expected on the Windows instances.
 
 ### Non-Goals
 
@@ -71,8 +75,8 @@ Windows Instance Config Daemon (WICD). WICD will have the following responsibili
   based on its definition in the services ConfigMap.
 * WICD will also maintain current responsibilities of starting kubelet as a service through the `bootstrap` command. 
   WICD will fully configure kubelet in one shot, as everything required will be available in the services ConfigMap.
-* Using the configuration provided by a ConfigMap created by WMCO, WICD maintains the state of Windows Services on the 
-  instance.
+* Using the configuration provided by a ConfigMap created by WMCO, WICD maintains the state of Windows Services and 
+  the environment variables on the instance.
 * WICD reverts all changes made to an instance when run with the `cleanup` command, and also deletes the Node
   object.
 
@@ -145,7 +149,8 @@ This will resolve a scenerio in which the ConfigMap controller is busy configuri
 deletes and recreates the service ConfigMap with incorrect values, before the controller has a chance to re-create
 the ConfigMap.
 
-The services ConfigMap contains two keys: `services`, and `files`. The values for both keys are JSON objects.
+The services ConfigMap contains two required keys: `services`, `files` and two optional keys: `environmentVars`,
+`watchedEnvironmentVars`. The values for all the keys are JSON objects.
 The `services` key contains all data required to configure the required Windows services on any instance that is to be
 added to the cluster as a Node. The proposed schema is as follows:
 ```json
@@ -225,6 +230,37 @@ validate that essential files have not been tampered with.
 }
 ```
 
+The `environmentVars` key defines the desired configurations for environment variables on Windows instances.
+WICD periodically polls to check if any environment variables have changed by comparing each variable's value on the
+node to the expected value in the ConfigMap. If there is a modification to these configurations, the WICD controller
+will ensure that the env vars are updated through a [Windows syscall](https://pkg.go.dev/golang.org/x/sys/windows#SetEnvironmentVariable)
+which sets the environment variables system-wide, also known as the `Machine` level in Windows.
+
+There are 3 levels to Windows environment variables: `Machine`, `User`, and `Process`. `Process` inherits from
+`User`, which inherits from the top level of `Machine`, and sub-processes inherit from their parent process.
+This allows the required services (including kubelet and containerd) to inherit the desired values.
+The proposed schema is as follows:
+```json
+ {
+  "name": "name of the environment variable",
+  "value": "value the variable should be set to on the instance"
+}
+```
+
+The `watchedEnvironmentVars` key comprises a list of specific environment variables monitored by WICD.
+WICD periodically polls to ensure that the environment variable names in the `EnvironmentVars` key are present in the 
+`WatchedEnvironmentVars` list. Should any of the environment variable be absent, WICD takes corrective action to
+remove the unmanaged environment variable from the Windows OS registry, thereby ensuring the environment variables 
+adhere to the ConfigMap specifications.
+```json
+{
+  "name": "name of the environment variable"
+}
+```
+
+In scenarios involving updates or removals of environment variables, WICD will reboot the instance so that Windows services
+actually pick up the updated env vars from the OS registry.
+
 #### Permissions
 
 WICD will use a new ServiceAccount to authenticate with the API server in order to pull down services ConfigMaps and
@@ -288,9 +324,10 @@ an error occurs, an event will be generated against the Node object. When reconc
 annotation. This indicates that the Node was configured according to the specifications given by that version's WMCO.
 
 On a separate thread, WICD will be periodically polling the state of Windows services. If there is any change in the
-expected state, the services will be created or modified in order to restore expected state. Since the Node/ConfigMap
-controller could be reading from and modifying Windows service state, while these periodic state checks are made,
-appropriate thread safety procedures must be followed.
+expected state, the services will be created or modified in order to restore expected state. 
+Additionally, WICD will periodically poll and rectify the expected configurations of the watched environment variables.
+Since the Node/ConfigMap controller could be reading from and modifying Windows service state, while these periodic state
+checks are made, appropriate thread safety procedures must be followed.
 
 
 ### BYOH Node de-configuration: WMCO responsibilies
@@ -307,7 +344,10 @@ and remove the Node.
 
 ### BYOH Node de-configuration: WICD responsibilities
 
-When the WICD cleanup command is executed by WMCO, all services listed in the ConfigMap will be stopped and removed.
+When the WICD cleanup command is executed by WMCO, the following operations will be executed: 
+* All services listed in the ConfigMap will be stopped and removed.
+* All environment variables defined in the ConfigMap and subsequently configured on the instance will be removed.
+
 It will then delete the instance's Node object.
 
 ### Test Plan
