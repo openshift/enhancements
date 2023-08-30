@@ -1,13 +1,13 @@
 ---
 title: converting-machine-api-to-cluster-api
 authors:
-  - @JoelSpeed
+  - "@JoelSpeed"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - TBD
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
   - TBD
 api-approvers:
-  - @deads2k
+  - "@deads2k"
 creation-date: 2023-08-30
 last-updated: 2023-08-30
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
@@ -32,7 +32,7 @@ This includes how Machines, MachineSets, MachineHealthChecks, the ControlPlaneMa
 
 [^1]: To remove the Machine API we must prove that only a suitably small number of our customers are still using the API to manage their machines.
 For example, if the number was suitably small that we could reach out to each customer individually to help them move, then it would be feasible.
-For the purposes of this document and this project, we assume that the Machine API will extist in OpenShift 4 forever,
+For the purposes of this document and this project, we assume that the Machine API will exist in OpenShift 4 forever,
 even though the backing implementation will move to Cluster API.
 
 ## Motivation
@@ -71,7 +71,7 @@ on the changed configuration, so that I can check that the features I have tuned
 #### Story 3
 
 As a cluster administrator, I would like to test the new API before rolling it out to my production clusters, so that I can build confidence in the new APIs.
-To do this, I would like to be able to add CAPI MachineSets to add new Machines to my Cluster without having to have an equivalent MAPI MachineSet to match it.
+To do this, I would like to be able to add Cluster API MachineSets to add new Machines to my Cluster without having to have an equivalent Machine API MachineSet to match it.
 
 #### Story 4
 
@@ -80,14 +80,14 @@ so that we are confident when we go to GA the new APIs, that we will not break o
 
 ### Goals
 
-* Allow users to migrate Machines between MAPI/CAPI to test the new API
+* Allow users to migrate Machines between Machine API/Cluster API to test the new API
 * Allow users a choice (initially[^3]) of when they want to migrate
-* Eventually[^3] remove the Machine API controllers and leverage the migration layer to convert MAPI machines to CAPI machines
+* Eventually[^3] remove the Machine API controllers and leverage the migration layer to convert Machine API machines to Cluster API machines
 * Allow the Cluster Autoscaler, MachineHealthCheck and ControlPlaneMachineSet to continue to work during a semi-migrated cluster state
-* Ensure that every MAPI resource is translated to a CAPI resource to allow users to test the new API
-* Allow access to newer features of CAPI that do not exist in MAPI
+* Ensure that every Machine API resource is translated to a Cluster API resource to allow users to test the new API
+* Allow access to newer features of Cluster API that do not exist in Machine API
 
-[^3]: In the first iteration of this project, the goal is to allow users to migrate individualy resources.
+[^3]: In the first iteration of this project, the goal is to allow users to migrate individually resources.
 In later iterations, the plan is to remove the Machine API controllers. The linked goals will be executed in separate releases.
 
 ### Non-Goals
@@ -95,12 +95,12 @@ In later iterations, the plan is to remove the Machine API controllers. The link
 * Setting up or configuring any part of Cluster API, this is handled in a separate enhancement
 * Modifying any of the existing deployments of Machine API within clusters
 * Deleting or modifying any existing resources within clusters (until a user chooses to do so)
-* Force creation of new MAPI machines when new CAPI MachineSets are being created[^4]
-* Port any feature from CAPI into MAPI
+* Force creation of new Machine API machines when new Cluster API MachineSets are being created[^4]
+* Port any feature from Cluster API into Machine API
 
-[^4]: We want to promote, over time, a reduction in the number of MAPI Machines, as such,
-any resources created directly in CAPI, will not be reflected into MAPI, unless they have an owner,
-and, that owner is already reflected into MAPI.
+[^4]: We want to promote, over time, a reduction in the number of Machine API Machines, as such,
+any resources created directly in Cluster API, will not be reflected into Machine API, unless they have an owner,
+and, that owner is already reflected into Machine API.
 
 ## Proposal
 
@@ -130,8 +130,8 @@ When the conversion cannot proceed for some reason, for example, a feature is in
 1. Cluster admin uses `oc edit` to update the value of the `machines.openshift.io/authoritative-api` annotation to `cluster.x-k8s.io`
 1. The validating webhook verifies the value of the annotation is valid
 1. The validating webhook observes that no Cluster API equivalent resource has been created, or, the equivalent Cluster API resource is stale
-1. The validating webhook fetches the syncrhonisation failure condition from the Machine API MachineSet and returns this, along with a reject message, to the Cluster Admin
-1. Based on the rejected API call, the cluster admin is informat that they cannot currently migrate this MachineSet
+1. The validating webhook fetches the synchronisation failure condition from the Machine API MachineSet and returns this, along with a reject message, to the Cluster Admin
+1. Based on the rejected API call, the cluster admin is informed that they cannot currently migrate this MachineSet
 1. Where appropriate, the cluster admin contacts support for additional help/timelines for availability of the missing feature
 
 ### API Extensions
@@ -184,7 +184,7 @@ overwriting anything in the non-authoritative resource that does not match with 
 
 When errors occur during synchronisation, the controller will write conditions to the Machine API resource to report the failure.
 
-On successful sychronsiation, the controller will add an annotation to the non-authoritative resource to indicate the observed generation of the last successful synchronsiation.
+On successful synchronisation, the controller will add an annotation to the non-authoritative resource to indicate the observed generation of the last successful synchronisation.
 The annotation `machine.openshift.io/synchronised-generation` will be set with a value of the generation of the authoritative resource, onto the non-authoritative resource.
 This will allow users to keep track of, and ensure that the latest changes to the authoritative resource have been synchronised.
 
@@ -195,7 +195,7 @@ When the `machine.openshift.io/synchronised-generation` is present on the author
 ##### MachineSet Synchronisation
 
 MachineSets in Machine API map to a MachineSet and InfrastructureTemplate in Cluster API.
-The synchronisation controller will create the Cluster API MachineSet with the same mame as the Machine API MachineSet to ensure a 1:1 mapping between these resources.
+The synchronisation controller will create the Cluster API MachineSet with the same name as the Machine API MachineSet to ensure a 1:1 mapping between these resources.
 The InfrastructureTemplate will be named based on the MachineSet name and a hash of the content within it [^6].
 InfrastructureTemplates are immutable, but MachineSet’s in Machine API are not, should the content of the MachineSet change,
 a new InfrastructureTemplate will be created and the old template will be removed when no longer required.
@@ -234,12 +234,12 @@ if there are discrepancies that cannot be resolved by our existing planned logic
 Machine synchronisation will happen in much the same way as in MachineSets.
 A Machine API Machine will map to a Machine and an InfrastructureMachine in Cluster API.
 
-If a Machine is owned by a MachineSet, then the existing InfrastructureTemplate from the MachineSet can be used to create the InfrastructureMachine.
-If the Machine is standalone, the template can be generated in the same way as described in the MachineSet section.
+Independent of whether the Machine is standalone or owned by a MachineSet, the InfrastructureMachine will be generated in the same way as the InfrastructureTemplate is, as described in the MachineSet section.
+We should not re-use the InfrastructureTemplate in this case as the MachineSet may no longer be using the same InfrastructureTemplate (or `providerSpec`` in Machine API) as was used to create the Machine.
 
 When Cluster API Machines are authoritative, if a Machine API Machine exists for the Cluster API Machine,
 the controller will synchronise the Machine and InfrastructureMachine content onto the Machine API Machine.
-Since the Machien API Machine represents a superset of the Cluster API resources (for supported features), there should be no errors converting in this direction.
+Since the Machine API Machine represents a superset of the Cluster API resources (for supported features), there should be no errors converting in this direction.
 
 
 ##### MachineHealthCheck Synchronisation
@@ -263,7 +263,7 @@ we expect the conversion to happen much in the same way as a regular MachineSet.
 ControlPlaneMachineSets (additionally to MachineSets) have a concept of failure domains.
 This is also a concept in Cluster API.
 When converting ControlPlaneMachineSets to Cluster API, we will ensure that the appropriate failure domain configuration is configured inside the Cluster API InfrastructureCluster,
-and that the failure domains from the ControlPlaneMachineSet Machine API configuration are reflected arcoss.
+and that the failure domains from the ControlPlaneMachineSet Machine API configuration are reflected across.
 
 When deploying Machines using the future Cluster API extension, the InfrastructureTemplate will be combined with the named failure domains on the InfrastructureCluster
 to spread the Machines across multiple failure domains.
@@ -291,10 +291,10 @@ In scenarios where both Machine API and Cluster API have been authoritative, it 
 It is also feasible that a customer may want to remove the Machine API resources after they have migrated to Cluster API and no longer require the Machine API synchronisation.
 To allow for this, if a non-authoritative Machine API parent[^8] resource is deleted, the deletion event will not be synchronised to the Cluster API equivalent and the synchronisation controller will ensure finalizers are removed as appropriate.
 In this scenario, the Cluster API equivalent will continue to operate on its own.
-To ensure users are aware of this situation, webhooks will be introduced to warn users that the deletion will not be syncrhonised.
+To ensure users are aware of this situation, webhooks will be introduced to warn users that the deletion will not be synchronised.
 
 [^8]: To allow continued operation of MachineSets, ControlPlaneMachineSets and MachineHealthChecks, if a Machine API Machine that is owned is deleted,
-then the deletion event is syncrhonised to Cluster API.
+then the deletion event is synchronised to Cluster API.
 This will allow for a MachineSet/ControlPlaneMachineSet to own mixed instances (i.e. those managed by both Machine API and Cluster API), and continue to support higher level remediation automation.
 To remove the Machine API resources, the user should delete the parent, i.e. the MachineSet or ControlPlaneMachineSet on the Machine API side.
 
@@ -316,7 +316,7 @@ New Machines created in the scale up with default to the same authoritative API 
 ##### MachineSet scale down
 
 If a MachineSet scales down, this will trigger the deletion of a Machine resource
-To ensure consistency between the two MachineSets, the synchonrisation controller will synchronise the delete event between the Cluster API and Machine API Machines.
+To ensure consistency between the two MachineSets, the synchronisation controller will synchronise the delete event between the Cluster API and Machine API Machines.
 
 ##### MachineHealthCheck remediates Machine
 
@@ -339,10 +339,10 @@ The following table describes the actions for Machines based on the API to which
 
 | Machine Type | Authoritative API | Action | Has Mirror | Has owner | Outcome |
 | --- | --- | --- | --- | --- | --- |
-| Machine API | `machine.openshift.io` | Create | No | - | Sync controller creates Cluster API equivalent and starts sychronisation from Machine API to Cluser API for future upates |
+| Machine API | `machine.openshift.io` | Create | No | - | Sync controller creates Cluster API equivalent and starts synchronisation from Machine API to Cluster API for future updates |
 | Machine API | `machine.openshift.io` | Create | Yes | - | Error - this should be rejected by a webhook |
 | Machine API | `cluster.x-k8s.io`| Create | Yes | - | Sync controller syncs Cluster API spec to Machine API Machine |
-| Machine API | `cluster.x-k8s.io`| Create | No | - | Sync controller creates Cluster API equivalent and starts sychronisation from Cluster API to Machine API for future updates |
+| Machine API | `cluster.x-k8s.io`| Create | No | - | Sync controller creates Cluster API equivalent and starts synchronisation from Cluster API to Machine API for future updates |
 | Machine API | `''` | Create | Yes | - | Annotation is set to `cluster.x-k8s.io` and follows above description |
 | Machine API | `''` | Create | No | - | Annotation is set to `machine.openshift.io` and follows above description |
 | Machine API | - | Delete | Yes | Yes | Sync controller deletes Cluster API equivalent Machine |
@@ -355,10 +355,10 @@ The following table describes the actions for Machines based on the API to which
 
 [^9]: Any Cluster API Machine that is deleted that does not have an owner, but is reflecting a Machine in Machine API,
 is likely to be a control plane Machine without a ControlPlaneMachineSet.
-In this case, to prevent accidental deletion, we do not propogate the delete event.
+In this case, to prevent accidental deletion, we do not propagate the delete event.
 This should not interfere with the semantics of any higher level abstraction or resource such as MachineHealthCheck.
 
-#### Filtering reconciles in CAPI controllers
+#### Filtering reconciles in Cluster API controllers
 
 To enable the Cluster API controllers to observe the authoritative annotation, we will need to implement a check at the beginning of the reconcile logic of each controller.
 
@@ -379,7 +379,7 @@ When the response is denied, the reconcile should be aborted.
 
 If the webhook is unavailable, the mechanism should fail close and the reconcile should be retried at a later time.
 
-#### Filtering reconciles in MAPI controllers
+#### Filtering reconciles in Machine API controllers
 
 Each controller will, at the start of the reconcile logic, check for the presence of the authoritative annotation and will either skip or continue with the reconciliation based on the presence of this annotation.
 
@@ -403,7 +403,7 @@ Both avenues above will need to be explored further before a decision is made on
 
 #### Validation of the authoritative API
 
-The authoriative API has two valid values, `machine.openshift.io` and `cluster.x-k8s.io`. Any other value is an error.
+The authoritative API has two valid values, `machine.openshift.io` and `cluster.x-k8s.io`. Any other value is an error.
 To prevent invalid values, a new validating admission webhook will be introduced to validate the value of the annotation.
 
 This webhook will be configured to accept resources from the Machine API group and check the annotation value is permitted.
@@ -417,7 +417,7 @@ the change will be rejected and requested to be retried once the synchronisation
 
 #### Synchronisation logic will need to be solid before it gets into the hand of customers
 
-To ensure that we do not break customer clusters, we need to make sure that our logic that converts the resources between MAPI and CAPI is thoroughly tested.
+To ensure that we do not break customer clusters, we need to make sure that our logic that converts the resources between Machine API and Cluster API is thoroughly tested.
 
 To ensure we don’t break customers we will write extensive tests for the conversion, primarily, we expect this to be done via unit testing, however, we will still need to test these conversions in E2E however, since the semantics of a configuration option may differ between the two APIs.
 
@@ -436,18 +436,18 @@ Once the feature is implemented in Cluster API, we can unblock the synchronisati
 
 #### Multiple controllers reconcile the same infrastructure
 
-We aim to prevent multiple controllers (being Machine API and Cluster API) simultaneously reconciling infrastructure as descibred in the [filtering][filtering] above.
+We aim to prevent multiple controllers (being Machine API and Cluster API) simultaneously reconciling infrastructure as described in the [filtering][filtering] above.
 
 However, were there to be multiple controllers reconciling the same Machine, there are three cases to consider. Create, Update and Deletion operations.
 
-In a Create operation, if both controllers attempted the create simultaneously, it could lead to an additional host being created and then orphaned within the infrastrucutre provider.
+In a Create operation, if both controllers attempted the create simultaneously, it could lead to an additional host being created and then orphaned within the infrastructure provider.
 Once a controller has created the host, it is expected to populate the provider ID and use this to look up the infrastructure in future reconciles.
 The synchronisation controller would overwrite the non-authoritative provider ID, effectively orphaning the host.
 
 In an Update operation, since the infrastructure is immutable, the updates are only gathering information.
 In this case, the synchronisation controller would overwrite the information, should it differ, in the non-authoritative API.
 This could lead to a hot loop/fight between the two controllers.
-Rate limiting should be used in the controllers to prevert rapid reconciles in this fashion.
+Rate limiting should be used in the controllers to prevent rapid reconciles in this fashion.
 
 In a Delete operation, both controllers would attempt to delete the same infrastructure.
 It is expected that this would not cause issue in most cases as the infrastructure provider should be able to handle multiple requests to delete the same object.
@@ -473,7 +473,7 @@ We need to make sure that the patch will apply cleanly in the future and that we
 We want to provide an easy method for migration for users, however, having multiple representations in OpenShift of the same infrastructure, may be confusing for end users.
 
 They may expect to be able to make changes to either resource and have them reflected.
-For that to be safe we would have to make sure all writes to objects are syncrhonous to both objects.
+For that to be safe we would have to make sure all writes to objects are synchronous to both objects.
 This is technically very challenging and has been dismissed as an alternative.
 
 Documentation will be provided to explain to users the expected behaviours and the expectations to allow them to migrate their infrastructure across.
@@ -489,21 +489,21 @@ A. TODO
 
 #### Conversion of provider specs
 
-The conversion of provider specs from Machine API to Cluster API should be able to be statically tested. We will build out extensive conversion testing via unit tests to ensure that, with a desired input, the correct conversion happens for the provider specs and the associated resourecs.
+The conversion of provider specs from Machine API to Cluster API should be able to be statically tested. We will build out extensive conversion testing via unit tests to ensure that, with a desired input, the correct conversion happens for the provider specs and the associated resources.
 
 #### Authoritative API reconciliation
 
-Machine API and Cluster API controllers already use envtest as a way to provide integraiton testing with a "real" API server.
+Machine API and Cluster API controllers already use envtest as a way to provide integration testing with a "real" API server.
 We can extend the tests here to account for the cases where the authoritative API annotation feature is in use.
 
-By extending the integration tests, we can sculpt the desired inputs for mirror resourecs existing, not existing, and authoritative in both API versions,
+By extending the integration tests, we can sculpt the desired inputs for mirror resources existing, not existing, and authoritative in both API versions,
 and then determine whether the reconcile continued or exited based on these conditions.
 
 #### Full migration E2E
 
-The beahviours outlined [above][summary-of-rules] will be tested in a new E2E test suite specifically targeted at the conversion logic.
+The behaviours outlined [above][summary-of-rules] will be tested in a new E2E test suite specifically targeted at the conversion logic.
 
-In addition to these tests, the following tests will provide a general coverage of the conversion logic and behavious defined:
+In addition to these tests, the following tests will provide a general coverage of the conversion logic and behaviours defined:
 - Scale up and down of a mirrored MachineSet
   - Copy an existing MachineSet in Machine API
   - Observe that the new MachineSet is mirrored in Cluster API
@@ -533,7 +533,7 @@ In addition to these tests, the following tests will provide a general coverage 
 ### Graduation Criteria
 
 The project will initially be introduced under a feature gate `MachineAPIMigration`.
-The new synchronisation operator will be deployed on all `TechPreviewNoUprage`/`CustomNoUpgrade` clusters,
+The new synchronisation operator will be deployed on all `TechPreviewNoUpgrade`/`CustomNoUpgrade` clusters,
 but will check for the presence of the above feature gate before operating.
 
 #### Dev Preview -> Tech Preview
@@ -549,9 +549,9 @@ Before promotion to the `TechPreviewNoUpgrade` feature set, we will ensure:
 
 Once the operator has been released under the `TechPreviewNoUpgrade` feature set, we will continue to enhance the operator
 before marking it as GA:
-- Full E2E testing of the various behaviours described regarding Machine sychronisation
+- Full E2E testing of the various behaviours described regarding Machine synchronisation
 - E2E testing of MachineSet and ControlPlaneMachineSet conversion
-- E2E testing of MachineHealthCheck workflows in mixed instance mangement clusters
+- E2E testing of MachineHealthCheck workflows in mixed instance management clusters
 - At least one platform has sufficient conversion logic to be useful and allow users on the platform to start migration
 
 Note, we will not require 100% feature parity for promotion to GA.
@@ -565,7 +565,7 @@ No features will be deprecated as a part of this enhancement.
 
 #### On Upgrade
 
-When upgrading into a release with the new sychronisation operator,
+When upgrading into a release with the new synchronisation operator,
 new Cluster API resources will be created and existing Machine API resources will be annotated.
 
 There should be no effect on the cluster as each of these operations should be a no-op.
@@ -596,7 +596,7 @@ This can be done by running the Cluster API resources at run-level 31 for the re
 
 With the introduction of the new authoritative annotation, `machines.openshift.io/authoritative-api`, this will be validated by a new Machine API webhook.
 The annotation has two defined values and any resource with an invalid value will be rejected as described [above][validating-authority].
-This webhook will run in, and be lifecycled within the new syncrhonisation controller project.
+This webhook will run in, and be lifecycled within the new synchronisation controller project.
 
 The new synchronisation controller will operator in the `openshift-machine-api` namespace alongside existing Machine API controllers.
 It forms the bases of the conversion between the two API groups, but as a controller, rather than a conversion webhook.
@@ -605,13 +605,13 @@ It's SLIs and impact on the cluster are therefore different to a traditional con
 We expect, when the synchronisation controller is failing, that it will report individual errors as conditions on the Machine API resources.
 For wider failures, it will report a condition on the `machine-api` ClusterOperator, which will be aggregated with other conditions to determine the health of the Machine API overall.
 
-There should be no impact on the operation of existing systems by the new syncrhonisation logic; it does not affect the functionality, rather it mirrors the resource for informational purposes primarily.
+There should be no impact on the operation of existing systems by the new synchronisation logic; it does not affect the functionality, rather it mirrors the resource for informational purposes primarily.
 
 [validating-authority]: #validation-of-the-authoritative-api
 
 #### Failure Modes
 
-When non-functional, the synchrnoisation controller will not update the non-authoritative resources in the cluster.
+When non-functional, the synchronisation controller will not update the non-authoritative resources in the cluster.
 This could lead to stale information being present in the non-authoritative API.
 
 This could lead to a risk that the authoritative API is switched while the data is stale.
@@ -623,17 +623,17 @@ The risk of preventing Machines from being created/updated/deleted outweighs the
 
 #### Support Procedures
 
-During failures, we expect the Machine API ClusterOperator to report status of the synchronsition controller.
+During failures, we expect the Machine API ClusterOperator to report status of the synchronisation controller.
 If the detail is not sufficient to understand the failure, logging will provide additional detail.
 
-Expected syptoms of failure include:
+Expected symptoms of failure include:
 - An inability to switch a resource authoritative API
 - Stale data in the non-authoritative API resources
 
 None of the symptoms above impact the day to day operation of a cluster.
 They only impact administrator actions to migrate between the Machine API and Cluster API.
 
-Importantly, Machine scaling should be unaffected by the failure of the syncrhonisation controller.
+Importantly, Machine scaling should be unaffected by the failure of the synchronisation controller.
 
 Given this, the severity of these failures is low.
 
@@ -641,7 +641,7 @@ Stale data may be observed by fetching the non-authoritative API resource and co
 annotation with the generation of the authoritative resource.
 Errors in conversion will be reported on the Machine API resource in the `status.conditions`.
 
-The new webhook introduced by this enahncement will have `FailPolicy=Ignore`, and therefore should not impact cluster operations when failing.
+The new webhook introduced by this enhancement will have `FailPolicy=Ignore`, and therefore should not impact cluster operations when failing.
 
 When the controller and webhook are restored, they should, unless there are persistent errors in need of human intervention, continue reconciling and restore the desired state.
 
@@ -684,7 +684,7 @@ This alternative has been dismissed based on the following reasons:
 In this solution, the Machine API controllers would be rewritten to convert Machine API resources internally to Cluster API resources.
 Once the conversion has been completed, the controllers would feed the converted Cluster API resources into the Cluster API methods, using them as a library.
 
-This alternative has been dissmissed based on:
+This alternative has been dismissed based on:
 - No migration from Machine API to Cluster API
 - No reduction in maintenance burden
 - No longer term plan to remove the Machine API controllers
@@ -693,7 +693,7 @@ This alternative has been dissmissed based on:
 ### Convert resources using a webhook
 
 Rather than using a controller to convert the resources after they have been accepted by the API server, we could use a ValidatingAdmissionWebhook to convert resources as updates are applied.
-This has the benefit of applying updates sychronously to both API groups.
+This has the benefit of applying updates synchronously to both API groups.
 
 However, it also adds additional complexity"
 - If the conversion webhook accepts the change and writes out the Cluster API resources
@@ -741,7 +741,7 @@ This approach may seem to be less complex, but has the potential to cause issues
 
 To avoid this potential, our approach suggests to have the authoritative annotation exist in only one location, on the Machine API resource.
 
-### Keep the authoritative annotation on the CAPI resource
+### Keep the authoritative annotation on the Cluster API resource
 
 Instead of keeping the authoritative annotation on the Machine API resource, we could keep it on the Cluster API resource instead.
 This would allow us to reduce the amount of code we are carrying in the forked providers, but would still require some code to be implemented here.
