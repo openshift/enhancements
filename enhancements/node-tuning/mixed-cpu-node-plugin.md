@@ -351,6 +351,14 @@ profile configured with mixed-cpus settings.
 All code changes won't take effect when a feature gate is not enabled or the feature has not been activated.
 
 ### Test Plan
+The node-plugin testing will be split into two phases:
+1. Functionally - Tests that focus on the plugin's business logic.
+Validation of cgroups settings, robustness (Kubelet restart/node reboot), scalability (In-place Resource Resize).
+Validate new API for workloads.
+
+2. Deployment - Tests that focus on plugin deployment via NTO.
+Verifying new API for PerformanceProfile, operator `Status` reported correctly,
+Feature Gate enablement, run tests from the previous section while deployment done via NTO.
 
 #### Unit testing
 We will have unit-testing for the mixed-cpu-node-plugin to guarantee the basic functionality.
