@@ -223,6 +223,32 @@ I believe we would need to add logic for these new config to
 [this code](https://github.com/openshift/machine-config-operator/blob/a41f5af837d95e0fc4f59e4497447a26acaf5bc2/pkg/daemon/update.go#L328)
 in MCO to make changes without rebooting.
 
+Scaleout in this implementation (using static IPs on baremetal to demonstrate
+as many parts of the process as possible) would look something like this:
+
+* Add the new node's configuration to the machine-config for its role.
+  * `oc edit mc 10-br-ex-worker`
+* Create and apply a secret containing the minimal static IP configuration
+  needed for the node to pull ignition.
+  * `oc apply -f ./extraworker-secret.yaml`
+* Create and apply a BareMetalHost resource with the network secret attached
+  via the `preprovisioningNetworkDataName` field.
+```
+apiVersion: metal3.io/v1alpha1
+kind: BareMetalHost
+spec:
+...
+  preprovisioningNetworkDataName: ostest-extraworker-0-network-config-secret
+```
+* Scale out the machineset to deploy the new node.
+  * `oc project openshift-machine-api`
+    `oc get machinesets`
+    `oc scale machineset [name of machineset] --replicas=[number of nodes desired after scaling]`
+
+The node will initially boot with the network configuration specified in
+`preprovisioningNetworkDataName` and then have the configuration in the
+machine-config applied.
+
 ### API Extensions
 
 This will not directly modify the API of OpenShift. The API for this feature is
@@ -253,6 +279,12 @@ OpenShift has historically avoided per-host configuration for cluster nodes.
 This is a large departure from that philosophy, but that is unavoidable.
 Certain aspects of networking (notably static IPs) are by nature host-specific
 and cannot be handled any other way.
+
+Using a machine-config to do initial deployment and a
+NodeNetworkConfigurationPolicy to make day 2 changes will require a manual sync
+of the NMState configuration. Unfortunately this is unavoidable because the
+Kubernetes-NMState operator is not part of the core payload so it (and its
+CRDs) cannot be used for initial deployment.
 
 
 ## Design Details
