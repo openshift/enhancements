@@ -1,5 +1,5 @@
 ---
-title: custom-dns
+title: cloud-custom-dns
 authors:
   - "@sadasu"
 reviewers: 
@@ -7,14 +7,9 @@ reviewers:
   - "@Miciah, for Ingress Controller aspects"
   - "@cybertron, for on-prem networking aspects"
   - "@2uasimojo, for hive expertise"
+  - "@yuqi-zhang, for MCO aspects"
 approvers:
-  - "@patrickdillon"
-  - "@sdodson"
-  - "@dhellmann"
   - "@zaneb"
-  - "@knobunc"
-  - "@Miciah"
-  - "@cybertron"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - "@joelspeed"
 creation-date: 2022-10-25
@@ -63,11 +58,16 @@ on public cloud providers.
 - As an administrator, I want to continue using the LB services provided by the
 underlying cloud platform.
 
+- As a user running their cluster on AWS GovCloud, I would like my cluster to
+be publicly accessible. Currently, with Route53, only private clusters can be
+created in AWS GovCloud.
+
+
 ### Goals
 
 - Enable AWS, Azure, and GCP customers to use their custom DNS solution in
 place of the cloud solution (For example, Route53 for AWS).
-- Provid in-cluster DNS solution for successful cluster installation without
+- Provide in-cluster DNS solution for successful cluster installation without
 dependence on customer configured infrastructure items.
 - Continue using the cloud based LB service for API, Ingress and API-Int. 
 
@@ -92,10 +92,9 @@ DNS solutions [Route53 for AWS](https://aws.amazon.com/route53/), [Azure DNS](ht
 
 The Installer configures the LBs for the API and API-Int services and the
 Ingress Controllers configure the LBs for the *.apps service. There is
-currently no way of knowing these LB IP addresses before their creation. So, 
-the customer would have to wait to configure their custom DNS solution until
-after the LBs are created by OpenShift and the cluster installation has
-completed.
+currently no way of knowing these LB IP addresses before their creation. The
+customer would have to wait to configure their custom DNS solution until after
+the LBs are created by OpenShift and the cluster installation has completed.
 
 For the cluster installation to succeed before the custom DNS solution is setup
 for `api`, `api-int` and `*.apps` resolution, OpenShift will have to provide a
@@ -194,57 +193,29 @@ this information to generate the CoreDNS CoreFile.
 
 ### API Extensions
 
-1. The AWSPlatformStatus within the PlatformStatus field of the Infrastructure
-ConfigResource (CR) is updated to contain all the DNS config required for the
-in-cluster CoreDNS solution. This same CR is available to the user post a
-successful cluster install, to configure their own DNS solution.
+1. A new ConfigMap called `lbConfigForDNS` is created by the Installer. It can
+be created in any namespace but we are choosing to create it in the same
+namespace as the CoreDNS pods. Hence, the namespace name would be constructed
+as: openshift-$platform_name-infra
 
-```go
-type AWSPlatformStatus struct {
-        <snip>
-        // AWSClusterDNSConfig contains all the DNS config required to configure a custom DNS solution.
-        // +optional
-        AWSClusterDNSConfig *ClusterDNSConfig `json:"awsClusterDNSConfig,omitempty"`
-
-        <snip>
-
-}
-
-type ClusterDNSConfig struct {
-        // APIServerDNSConfig contains information to configure DNS for API Server.
-        // This field will be set only when the userConfiguredDNS feature is enabled.
-        APIServerDNSConfig []DNSConfig `json:"apiServerDNSConfig,omitempty"`
-
-        // InternalAPIServerDNSConfig contains information to configure DNS for the Internal API Server.
-        // This field will be set only when the userConfiguredDNS feature is enabled.
-        InternalAPIServerDNSConfig []DNSConfig `json:"internalAPIServerDNSConfig,omitempty"`
-
-        // IngressDNSConfig contains information to configure DNS for cluster services.
-        // This field will be set only when the userConfiguredDNS feature is enabled.
-        IngressDNSConfig []DNSConfig `json:"ingressDNSConfig,omitempty"`
-}
-
-
-type DNSConfig struct {
-       // recordType is the DNS record type.
-       RecordType  string `json:"recordType"`
-
-       // lBIPAddress is the Load Balancer IP address for DNS config
-       LBIPAddress string `json:"lbIPAddress"`
-}
-
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: LBConfigForDNS
+  namespace: openshift-aws-infra
+data:
+  internal-api-lb-dns-name: "abc-123"
+  external-api-lb-dns-name: "xyz-456"
 ```
 
 2. Install config is updated to allow the customer to specify if an external
-user configured DNS will be used. `UserConfiguredDNS` is added to the
-install-config and will have to be explicitly set to `Enabled` to enable this
-functionality. This config is not added to any platform specific section of
-the config because there are plans to allow this functionality in Azure and GCP
-too. The validation for this config will disallow this value being `Enabled` in
-platforms that currently do not support it.
+user configured DNS will be used. `UserConfiguredDNS` is added to the platform
+portions of the install-config. The useer will have to be explicitly set it to
+`Enabled` to enable this functionality. This field is added to the AWS, Azure
+and GCP platforms.
 
 ```yaml
----
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -264,6 +235,8 @@ spec:
   - name: v1
     schema:
 <snip>
+  aws/azure/gcp:
+    properties:
       userConfiguredDNS:
         description: UserConfiguredDNS is set to `Enabled` when the customer
           wants to use a DNS solution external to the cluster and OpenShift is
@@ -276,27 +249,101 @@ spec:
         type: string
 ```
 
-3. Add a field within the `PlatformSpec` for AWS, Azure and GCP to indicate if
-custom DNS is enabled. `PlatformSpec` is within the `Spec` field of the
-Infrastructure CR. Here is the update for platform AWS.
+3. Update the PlatformStatus field within the Infrastructure CR to include
+the type of DNS solution in use and if needed, the IP addressses of the
+API, API-Int and Ingress Load Balancers.
 
 ```yaml
-// AWSPlatformSpec holds the desired state of the Amazon Web Services infrastructure provider.
-// This only includes fields that can be modified in the cluster.
-type AWSPlatformSpec struct {
-	// serviceEndpoints list contains custom endpoints which will override default
-	// service endpoint of AWS Services.
-	// There must be only one ServiceEndpoint for a service.
-	// +optional
-	ServiceEndpoints []AWSServiceEndpoint `json:"serviceEndpoints,omitempty"`
 
-        // customDNS indicates if the customer is providing their own DNS
-        // solution inplace of the default provided by the underlying platform.
-	// Its value is set by the Installer and can have 2 possible values: 
-	// "Enabled" and "Disabled" with "Disabled" being the default.
-        CustomDNS string ``json:"customDNS,omitempty"`
+type GCPPlatformStatus struct {
+<snip>
+        // cloudLoadBalancerConfig is a union that contains the IP addresses of API,
+        // API-Int and Ingress Load Balancers created on the cloud platform. These
+        // values would not be populated on on-prem platforms. These Load Balancer
+        // IPs are used to configure the in-cluster DNS instances for API, API-Int
+        // and Ingress services. `dnsType` is expected to be set to `ClusterHosted`
+        // when these Load Balancer IP addresses are populated and used.
+        // 
+        // +default={"dnsType": "PlatformDefault"}
+        // +kubebuilder:default={"dnsType": "PlatformDefault"}
+        // +openshift:enable:FeatureSets=CustomNoUpgrade;TechPreviewNoUpgrade
+        // +optional
+        // +nullable
+        CloudLoadBalancerConfig *CloudLoadBalancerConfig `json:"cloudLoadBalancerConfig,omitempty"`
+}
+
+// CloudLoadBalancerConfig contains an union discriminator indicating the type of DNS
+// solution in use within the cluster. When the DNSType is `ClusterHosted`, the cloud's
+// Load Balancer configuration needs to be provided so that the DNS solution hosted
+// within the cluster can be configured with those values.
+// +kubebuilder:validation:XValidation:rule="has(self.dnsType) && self.dnsType != 'ClusterHosted' ? !has(self.clusterHosted) : true",message="clusterHosted is permitted only when dnsType is ClusterHosted"
+// +union
+type cloudLoadBalancerConfig struct {
+        // dnsType indicates the type of DNS solution in use within the cluster. Its default value of
+        // `PlatformDefault` indicates that the cluster's DNS is the default provided by the cloud platform.
+        // It can be set to `ClusterHosted` to bypass the configuration of the cloud default DNS. In this mode,
+        // the cluster needs to provide a self-hosted DNS solution for the cluster's installation to succeed.
+        // The cluster's use of the cloud's Load Balancers is unaffected by this setting.
+        // The value is immutable after it has been set at install time.
+        // Currently, there is no way for the customer to add additional DNS entries into the cluster hosted DNS.
+        // Enabling this functionality allows the user to start their own DNS solution outside the cluster after
+        // installation is complete. The customer would be responsible for configuring this custom DNS solution,
+        // and it can be run in addition to the in-cluster DNS solution.
+        // +default="PlatformDefault"
+        // +kubebuilder:default:="PlatformDefault"
+        // +kubebuilder:validation:Enum="ClusterHosted";"PlatformDefault"
+        // +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="dnsType is immutable"
+        // +optional
+        // +unionDiscriminator
+        DNSType DNSType `json:"dnsType,omitempty"`
+
+        // clusterHosted holds the IP addresses of API, API-Int and Ingress Load
+        // Balancers on Cloud Platforms. The DNS solution hosted within the cluster
+        // use these IP addresses to provide resolution for API, API-Int and Ingress
+        // services.
+        // +optional
+        // +unionMember,optional
+        ClusterHosted *CloudLoadBalancerIPs `json:"clusterHosted,omitempty"`
+}
+
+// CloudLoadBalancerIPs contains the Load Balancer IPs for the cloud's API,
+// API-Int and Ingress Load balancers. They will be populated as soon as the
+// respective Load Balancers have been configured. These values are utilized
+// to configure the DNS solution hosted within the cluster.
+type CloudLoadBalancerIPs struct {
+        // apiIntLoadBalancerIPs holds Load Balancer IPs for the internal API service.
+        // These Load Balancer IP addresses can be IPv4 and/or IPv6 addresses.
+        // Entries in the apiIntLoadBalancerIPs must be unique.
+        // A maximum of 16 IP addresses are permitted.
+        // +kubebuilder:validation:Format=ip
+        // +listType=set
+        // +kubebuilder:validation:MaxItems=16
+        // +optional
+        APIIntLoadBalancerIPs []IP `json:"apiIntLoadBalancerIPs,omitempty"`
+
+        // apiLoadBalancerIPs holds Load Balancer IPs for the API service.
+        // These Load Balancer IP addresses can be IPv4 and/or IPv6 addresses.
+        // Could be empty for private clusters.
+        // Entries in the apiLoadBalancerIPs must be unique.
+        // A maximum of 16 IP addresses are permitted.
+        // +kubebuilder:validation:Format=ip
+        // +listType=set
+        // +kubebuilder:validation:MaxItems=16
+        // +optional
+        APILoadBalancerIPs []IP `json:"apiLoadBalancerIPs,omitempty"`
+
+        // ingressLoadBalancerIPs holds IPs for Ingress Load Balancers.
+        // These Load Balancer IP addresses can be IPv4 and/or IPv6 addresses.
+        // Entries in the ingressLoadBalancerIPs must be unique.
+        // A maximum of 16 IP addresses are permitted.
+        // +kubebuilder:validation:Format=ip
+        // +listType=set
+        // +kubebuilder:validation:MaxItems=16
+        // +optional
+        IngressLoadBalancerIPs []IP `json:"ingressLoadBalancerIPs,omitempty"`
 }
 ```
+
 ### Implementation Details/Notes/Constraints [optional]
 
 
@@ -313,7 +360,7 @@ customer's configuration of their custom DNS solution.
 
 Today, the Installer configures the LB first and the IP address of the LB is
 used to configure DNS records for the API, API-Int and `*.apps`. Since the IPs
-cannot be predicted in advance, configing the customer's external DNS before
+cannot be predicted in advance, configuring the customer's external DNS before
 cluster install is not a possibility.
 
 Then we have the option of configuring the LB manually(by the customer) and
