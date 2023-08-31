@@ -113,6 +113,16 @@ The hook modifies the cgroup `kubepods.slice/kubepods-pod<pod-id>/crio-<containe
 It also modifies the cgroup`kubepods.slice/kubepods-pod<pod-id>/cpu.cfs_quota_us` value
 using the same formula.
 
+For cgroup v2 the same changes apply but with the respective to the API changes in v2, For example,
+cgroup v1 cpu.cfs_quota_us path:
+`/sys/fs/cgroup/cpu,cpuacct/kubepods.slice/kubepods-pod<pod-id>/crio-<container-id>.scope/cpu.cfs_quota_us`
+changes to:
+`/sys/fs/cgroup/kubepods.slice/kubepods-pod<pod-id>/crio-<container-id>.scope/cpu.max`
+
+However, the cpuset changes are done by changing directly the OCI spec.
+The interaction with cgroup is done by the low-level runtime,
+hence it's transparent to the plugin and does not require separate flow for cgroup v2. 
+
 Shared CPUs append to Kubelet [reservedSystemCpus](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#explicitly-reserved-cpu-list).
 This means that when the feature enabled, Kubelet's `reservedSystemCpus` composed of PerformanceProfile's 
 `spec.cpu.reserved` + `spec.cpu.shared`.
