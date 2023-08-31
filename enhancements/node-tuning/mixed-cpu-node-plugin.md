@@ -209,8 +209,7 @@ the container-runtime configuration:
 [crio.nri]
 enable_nri = true
 ```
-
-The plugin is completely optional and is off by default.
+The plugin enablement is optional and is off by default.
 
 No changes are needed in the container-runtime, because NRI hooks already supported by the runtime
 and mixed-cpu-node-plugin implementing the NRI interface.
@@ -340,6 +339,16 @@ better integration would require more invasive changes which are out of scope no
     
 ## Design Details
 N/A
+
+### Enabling Feature
+
+A new feature gate will be defined for this feature (e.g. `MixedCPUAllocation`).
+
+There is one component affected by this feature:
+* cluster-node-tuning-operator: The operator is resposible for deploying the node-plugin only when the feature gate is enabled and performance
+profile configured with mixed-cpus settings. 
+
+All code changes won't take effect when a feature gate is not enabled or the feature has not been activated.
 
 ### Test Plan
 
