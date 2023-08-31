@@ -3,15 +3,17 @@ title: converting-machine-api-to-cluster-api
 authors:
   - "@JoelSpeed"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
+  - "@damdo" # Cluster API and Machine API maintainer
+  - "@nrb" # Cluster API and Machine API maintainer
+  - "@mdbooth" # OpenStack Cluster API and Machine API maintainer
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
-  - TBD
+  - "@JoelSpeed" # Cluster API and Machine API lead for OpenShift (TODO: find an approver who isn't an author)
 api-approvers:
   - "@deads2k"
 creation-date: 2023-08-30
-last-updated: 2023-08-30
-tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - TBD
+last-updated: 2023-08-31
+tracking-link: 
+  - https://issues.redhat.com/browse/OCPCLOUD-1578
 see-also: []
 replaces: []
 superseded-by: []
