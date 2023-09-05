@@ -11,10 +11,11 @@ approvers:
   - "@knobunc"
   - "@shawn-hurley"
 creation-date: 2019-11-04
-last-updated: 2020-03-10
+last-updated: 2023-09-05
 status: implementable
 see-also:
 replaces:
+  - /enhancements/storage/csi-ebs-operator.md
 superseded-by:
 ---
 

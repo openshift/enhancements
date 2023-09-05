@@ -9,11 +9,12 @@ reviewers:
 approvers:
   - "@..."
 creation-date: 2020-03-09
-last-updated: 2020-03-13
-status: implementable
+last-updated: 2023-09-05
+status: replaced
 see-also:
 replaces:
 superseded-by:
+-  /enhancements/storage/csi-driver-install.md
 ---
 
 # CSI Operator for AWS EBS
