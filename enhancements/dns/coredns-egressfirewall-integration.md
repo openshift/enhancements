@@ -482,7 +482,7 @@ update_dns_resolver_failure(objName, dnsName, response):
 	obj = get_dns_name_resolver(objName)
 	for each resolvedName in obj.status.resolvedNames:
 		if resolvedName.dnsName == dnsName:
-			if resolvedName.resolutionFailures == 5 && has_ttl_expired(resolvedName.resolvedAddresses) == true:
+			if resolvedName.resolutionFailures >= 5 && has_ttl_expired(resolvedName.resolvedAddresses) == true:
 				remove(obj.status.resolvedNames, resolvedName)
 			else
 				for each dns_info in resolvedName.info:
