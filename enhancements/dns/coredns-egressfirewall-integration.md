@@ -14,7 +14,7 @@ approvers:
 api-approvers:
   - '@JoelSpeed'
 creation-date: 2023-01-31
-last-updated: 2023-08-03
+last-updated: 2023-09-06
 tracking-link:
   - https://issues.redhat.com/browse/CFE-748
 see-also:
@@ -111,7 +111,8 @@ be pruned as described in the [DNS lookup failure](#dns-lookup-failure) subsecti
 The following `DNSNameResolver` CRD will be added to the `network.openshift.io` api-group.
 
 ````go
-// DNSNameResolver stores the DNS name resolution information of a DNS name. It is TechPreviewNoUpgrade only.
+// DNSNameResolver stores the DNS name resolution information of a DNS name. It can be enabled by the TechPreviewNoUpgrade feature set.
+// It can also be enabled by the feature gate DNSNameResolver when using CustomNoUpgrade feature set.
 type DNSNameResolver struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -137,7 +138,7 @@ type DNSNameResolverSpec struct {
 	// '*' can be used at the beginning of the wildcard DNS name. For example, '*.example.com.'
 	// will match 'sub1.example.com.' but won't match 'sub2.sub1.example.com.'
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.$
+	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.)*[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.$
 	// +kubebuilder:validation:MaxLength=254
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.name is immutable"
 	Name string `json:"name"`
@@ -146,7 +147,7 @@ type DNSNameResolverSpec struct {
 // DNSNameResolverStatus defines the observed status of DNSNameResolver.
 type DNSNameResolverStatus struct {
 	// resolvedNames contains a list of matching DNS names and their corresponding IP addresses
-	// along with TTL and last DNS lookup time.
+	// along with their TTL and last DNS lookup times.
 	// +listType=map
 	// +listMapKey=dnsName
 	// +patchMergeKey=dnsName
@@ -154,10 +155,6 @@ type DNSNameResolverStatus struct {
 	// +optional
 	ResolvedNames []DNSNameResolverStatusItem `json:"resolvedNames,omitempty" patchStrategy:"merge" patchMergeKey:"dnsName"`
 }
-
-// +kubebuilder:validation:Pattern=`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$|^s*((([0-9A-Fa-f]{1,4}:){7}(:|([0-9A-Fa-f]{1,4})))|(([0-9A-Fa-f]{1,4}:){6}:([0-9A-Fa-f]{1,4})?)|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){0,1}):([0-9A-Fa-f]{1,4})?))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){0,2}):([0-9A-Fa-f]{1,4})?))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){0,3}):([0-9A-Fa-f]{1,4})?))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){0,4}):([0-9A-Fa-f]{1,4})?))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){0,5}):([0-9A-Fa-f]{1,4})?))|(:(:|((:[0-9A-Fa-f]{1,4}){1,7}))))(%.+)?s*$`
-// IPAddressStr is used for validation of an IP address.
-type IPAddressStr string
 
 // DNSNameResolverStatusItem describes the details of a resolved DNS name.
 type DNSNameResolverStatusItem struct {
@@ -170,12 +167,12 @@ type DNSNameResolverStatusItem struct {
 	// dnsName is the resolved DNS name matching the name field of DNSNameResolverSpec. This field can
 	// store both regular and wildcard DNS names which match the spec.name field. When the spec.name
 	// field contains a regular DNS name, this field will store the same regular DNS name after it is
-	// successfully resolved. When the spec.name field contains a wildcard DNS name, this field will
-	// store the regular DNS names which match the wildcard DNS name and have been successfully resolved.
+	// successfully resolved. When the spec.name field contains a wildcard DNS name, each resolvedName.dnsName
+	// will store the regular DNS names which match the wildcard DNS name and have been successfully resolved.
 	// If the wildcard DNS name can also be successfully resolved, then this field will store the wildcard
 	// DNS name as well.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.$
+	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.)*[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.$
 	// +kubebuilder:validation:MaxLength=254
 	DNSName string `json:"dnsName"`
 	// resolvedAddresses gives the list of associated IP addresses and their corresponding TTLs and last
@@ -196,13 +193,19 @@ type DNSNameResolverInfo struct {
 	// ip is an IP address associated with the dnsName. The validity of the IP address expires after
 	// lastLookupTime + ttlSeconds. To refresh the information a DNS lookup will be performed on the
 	// expiration of the IP address's validity. If the information is not refreshed then it will be
-	// removed after a grace period of 1 second after the expiration of the IP address's validity.
+	// removed with a grace period after the expiration of the IP address's validity.
 	// +kubebuilder:validation:Required
-	IP IPAddressStr `json:"ip"`
-	// ttlSeconds is the time-to-live value of the IP address.
+	IP string `json:"ip"`
+	// ttlSeconds is the time-to-live value of the IP address. The validity of the IP address expires after
+	// lastLookupTime + ttlSeconds. On a successful DNS lookup the value of this field will be updated with
+	// the current time-to-live value. If the information is not refreshed then it will be removed with a
+	// grace period after the expiration of the IP address's validity.
 	// +kubebuilder:validation:Required
 	TTLSeconds int32 `json:"ttlSeconds"`
-	// lastLookupTime is the timestamp when the last DNS lookup was completed.
+	// lastLookupTime is the timestamp when the last DNS lookup was completed successfully. The validity of
+	// the IP address expires after lastLookupTime + ttlSeconds. The value of this field will be updated to
+	// the current time on a successful DNS lookup. If the information is not refreshed then it will be
+	// removed with a grace period after the expiration of the IP address's validity.
 	// +kubebuilder:validation:Required
 	LastLookupTime *metav1.Time `json:"lastLookupTime"`
 }
@@ -536,7 +539,8 @@ rule(s) containing the DNS name(s).  The OVN-K master(s) will also delete the co
 
 The validation of [`DNSName`](https://github.com/ovn-org/ovn-kubernetes/blob/master/go-controller/pkg/crd/egressfirewall/v1/types.go#L74-L76) field in
 `EgressFirewallDestination` will be updated to accept wildcard DNS names as well. It will be updated from `^([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$` which
-accepts only regular DNS names to `^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$`.
+accepts only regular DNS names to `^(\*\.)?([A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.)*[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.?$`. This updated regex
+also validates that a label in a DNS name does not start or end with a `-`.
 
 ````go
 // EgressFirewallDestination is the endpoint that traffic is either allowed or denied to
@@ -547,7 +551,7 @@ type EgressFirewallDestination struct {
 	// For a wildcard DNS name, the '*' will match only one label. Additionally, only a single '*' can be
 	// used at the beginning of the wildcard DNS name. For example, '*.example.com' will match 'sub1.example.com'
 	// but won't match 'sub2.sub1.example.com'
-	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$
+	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.)*[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.?$
 	DNSName string `json:"dnsName,omitempty"`
 	// ..
 }
