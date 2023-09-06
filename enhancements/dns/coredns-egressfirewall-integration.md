@@ -303,7 +303,8 @@ else if match(event.type, "delete"):
 CRs upon expiration of the validity of the corresponding IP addresses associated to the resolved names. As the CoreDNS pods are configured using the upstream
 nameservers present in the node host's `/etc/resolv.conf` file, the upstream nameservers for different CoreDNS pods may serve different IP addresses (possibly
 with different TTLs) for the same DNS name. Thus, while refreshing the information of a DNS name, the DNS lookup requests are sent to a maximum of 5 randomly
-chosen CoreDNS pods to get as many different associated IP addresses for the DNS name as possible.
+chosen CoreDNS pods to get as many different associated IP addresses for the DNS name as possible. However, if the DNS name is associated with only one IP
+address or if the DNS name is being looked up for the first time, then it will be sent to only one randomly chosen CoreDNS pod.
 * The `DNSNameResolver` controller will watch for the events related to `DNSNameResolver` CRs.
 * After it receives the create/update events, it will perform DNS lookup for each of the DNS names corresponding to the `DNSNameResolver` CRs,
 if the details of the DNS names are not already added.
@@ -320,10 +321,10 @@ with the TTL and the last time to lookup for each IP address. Using the TTL and 
 time for the DNS name is also stored. Based on the next lookup time, the controller will follow the same method as that of the regular DNS names to get the
 latest IP addresses and TTL information.
 * The controller will also check if any IP address is needed to be removed from the `.status` field. The validity of any IP address expires after the
-corresponding next lookup time (TTL + last lookup time). However, the IP address may still be in use. Thus, a grace period of 1 second is provided for
+corresponding next lookup time (TTL + last lookup time). However, the IP address may still be in use. Thus, a grace period of 5 seconds is provided for
 each IP address and on expiration of the grace period the IP address will be removed. If any IP address satisfies this condition then it is removed from
 the `.status` of the `DNSNameResolver` CR and the object is updated.
-* If the validity (TTL + last lookup time) of any of the IP addresses have expired, but the grace period of 1 second is still not over, then the same event
+* If the validity (TTL + last lookup time) of any of the IP addresses have expired, but the grace period of 5 seconds is still not over, then the same event
 will be reconciled after the grace period has expired. This is done so that during the next reconcile the IP addresses can be removed from the `.status` of the
 `DNSNameResolver` CR.
 * On receiving the delete event, the `DNSNameResolver` controller will remove the details stored regarding the `DNSNameResolver` CRs.
@@ -481,7 +482,7 @@ update_dns_resolver_failure(objName, dnsName, response):
 	obj = get_dns_name_resolver(objName)
 	for each resolvedName in obj.status.resolvedNames:
 		if resolvedName.dnsName == dnsName:
-			if resolvedName.resolutionFailures == 5:
+			if resolvedName.resolutionFailures == 5 && has_ttl_expired(resolvedName.resolvedAddresses) == true:
 				remove(obj.status.resolvedNames, resolvedName)
 			else
 				for each dns_info in resolvedName.info:
@@ -496,7 +497,8 @@ update_dns_resolver_failure(objName, dnsName, response):
 ```
 
 * If a DNS name (regular or wildcard) matches a `DNSNameResolver` CR, then the corresponding resolved name field in the `.status` will be updated.
-* If the corresponding `resolutionFailures` field has reached a threshold value of 5, then the details of the DNS name will be removed from the
+* If the corresponding `resolutionFailures` field has reached a threshold value of 5 and TTL of all associated IP addresses have expired, then the
+details of the DNS name will be removed from the
 `.status` of the `DNSNameResolver` CR.
 * Otherwise, the `ttlSeconds` field will be set to the minimum TTL value of 5 seconds and the `lastLookupTime` time will be set to the current time
 for each IP address whose next lookup time matches the current time. The `resolutionFailures` will be incremented by one. Additionally, the `Degraded`
@@ -559,7 +561,7 @@ type EgressFirewallDestination struct {
 The details of the `DNSNameResolver` CRD can be found in the [Proposal](#proposal) section.
 
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 The implementation changes needed for the proposed enhancement are documented in this section for each of the components.
 
@@ -578,7 +580,7 @@ For wildcard DNS names, the controller will query for the DNS names that get add
 including the wildcard DNS name, even if it doesn't get added to the `.status`.
 
 The controller will also remove the IP addresses whose validity has expired from the `.status` field. However, the removal will happen after a
-grace period of 1 second post the validity expiration.
+grace period of 5 seconds post the validity expiration.
 
 #### CoreDNS
 
