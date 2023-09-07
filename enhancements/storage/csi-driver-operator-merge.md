@@ -178,70 +178,6 @@ Right now, ART pipeline builds a separate image for each CSI driver operator:
 
 *) ART name is the name of metadata file in https://github.com/openshift-eng/ocp-build-data/tree/openshift-4.14/images
 
-##### Option 1: Build separate images and switch them using a feature gate
-
-During development of an OCP release, we want ART to build both old and new operator image, as the new one is used only
-when a feature gate (name TBD) is enabled. This will give us opportunity to test the new operator image in CI and by
-QE. Before OCP feature freeze, we must decide which operator image will be shipped in the release. The other one will be
-removed from the release, i.e. from CI, from ART pipeline and from payload.
-
-Example (using BREW package names + AWS EBS CSI driver operator + 4.15):
-
-* In OCP 4.14, ART builds
-  only [`ose-aws-ebs-csi-driver-operator-container`](https://brewweb.engineering.redhat.com/brew/packageinfo?packageID=74505)
-  from https://github.com/openshift/aws-ebs-csi-driver-operator repository.
-
-* During OCP 4.15 development, we want ART to build both `ose-aws-ebs-csi-driver-operator-container` (as today)
-  and say `ose-aws-ebs-csi-driver-operator-v2-container` from https://github.com/openshift/csi-operator.
-  TODO: better name for the new images?
-
-  We will file these tickets / PRs ([source](https://art-dash.engineering.redhat.com/self-service/new-content)):
-  * Comet:
-    * New _build repository_ for `ose-aws-ebs-csi-driver-operator-v2-container`.
-    * New _delivery repository_ for `ose-aws-ebs-csi-driver-operator-v2-container`.
-    * Shall we follow the same brew / dist-git / image names as the old one, just add `-v2-`? Or shall we fix the inconsistencies (e.g. `azure-file-...` vs `ose-azure-disk-...`)?
-  * openshift/release:
-    * build the image in CI + promote to 4.15.
-  * ART:
-    * Follow https://art-dash.engineering.redhat.com/self-service/new-content, using almost the same data as in the existing image (e.g. multiarch support)
-      * Exception: we will not perform threat model assessment - we're merging code from existing repos.
-
-* Before OCP 4.15 feature freeze we will decide if the `-v2-` image is good enough and file tickets to
-  disable builds of either the old or `-v2-` image. Similarly, we will update `cluster-storage-operator` and its feature gate
-  to use only one of these images.
-  We will file these tickets + PRs ([source](https://docs.ci.openshift.org/docs/how-tos/onboarding-a-new-component/#removing-a-component-from-the-openshift-release-payload)):
-  * PR to update `cluster-storage-operator` and its related-images, so only the "good" image is used.
-    * This can be merged before anything below.
-  * Jira for ART to stop building the "bad" image, https://issues.redhat.com/browse/ART-1443
-    * They will create a PR to update ocp-build-data.
-  * When removing the old image: PR to openshift/release to stop building + promoting the image in CI.
-  * On slack, coordinate with ART merging of all these PRs
-
-* At 4.15 GA (and in the whole 4.15.z stream), ART will build and ship only the "good" image.
-
-* In 4.16, if the "good" image is the old one, we re-submit all tickets to enable building + shipping of the `-v2-` image
-  again and continue testing.
-    * Drawback: we will have to stop its development + testing until OCP 4.16 is branched, so we can keep 4.15 with only
-      a single image until GA.
-
-Drawbacks:
-
-* New images need to be built, i.e. lot of Comet requests.
-* More tickets.
-* It's harder to track which image is used in which OCP release. For example we may end up with:
-  * AWS EBS, Azure Disk, Azure File: -container repo for < 4.15 builds and -v2-container repo for >= 4.15 builds.
-  * Say GCP PD, GCP Filestore: -container repo for < 4.16 builds and -v2-container repo for >= 4.16 builds.
-  * Say OpenStack Cinder, Manila: -container repo for < 4.17 builds and -v2-container repo for >= 4.17 builds.
-  * Etc.
-
-  OCP release numbers are purely illustrative!
-
-Advantages:
-
-* Can be tested easily in CI and by QE.
-
-##### Option 2: Build & test images manually and do a hard switch
-
 During development of an OCP release, we will merge an CSI driver operator to github.com/openshift/csi-operator
 without any testing in CI. We will keep as close to the original operator as possible, and we will test the new image
 manually (or with some tricks in CI if possible, see below).
@@ -262,7 +198,7 @@ Example:
   except for directory names. This way, we can ensure the code will be 99% the same as the old operator.
   * We can test the new image pre-merge manually using:
     `oc adm release new --from=<the latest 4.15 nightly> aws-ebs-csi-driver-operator=quay.io/jsafrane/my-ebs-operator:1 --to=quay.io/jsafrane/test-release:1` and install / upgrade from `test-release:1`.
-  * _We could convince CI to build `aws-ebs-csi-driver-operator` image from the new repo and use it in presubmit
+  * _We could trick CI to build `aws-ebs-csi-driver-operator` image from the new repo and use it in presubmit
     tests there. But we can't promote it anywhere, as it would overwrite the old image from
     github.com/openshift/aws-ebs-csi-driver-operator. Some experiments are needed here._
 
@@ -271,7 +207,14 @@ Example:
   github.com/openshift/csi-operator / `Dockerfile.aws-ebs` in a semi-atomic way.
   * With a quick pre-merge test in CI, if possible.
   * Goal: nightlies should be green all the time.
-  * TBD: exact procedure & tickets to file.
+  * TBD: exact procedure & tickets to file. It looks like:
+    1. PR against openshift/release to stop promoting the CI operator image
+       from `openshift/aws-ebs-csi-driver-operator` jobs and start promoting it from `openshift/csi-operator`.
+    2. PR against openshift/ocp-build-data to switch the source github repo + Dockerfile
+       for `ose-aws-ebs-csi-driver-operator-container` image.
+    3. Somehow coordinated merge of these two.
+      * _Can we merge 1. before 2. to see if / how it breaks CI builds? We could be able to revert back to the working
+        config without any extra approvals._
 
 * After the switch, we start actually refactoring and merging the operator code to shared packages and so on. At this
   time, we will have CI in place for all our PRs in the repo. We will not need to coordinate with ART about AWS EBS
@@ -287,7 +230,7 @@ Advantages:
 * Harder (but not impossible) to test before the switch. In ideal case, we're switching just the source repository
   of the same image, the actual operator code should be the same.
 
-### Gradual merge
+#### Gradual merge
 
 We will merge the operators one by one, starting with AWS EBS. Second will be Azure Disk and Azure File, as we need to
 support HyperShift for them and we want to share code with AWS EBS. The rest will follow as time allows, possibly over
@@ -382,13 +325,75 @@ History`.
 
 ## Alternatives
 
-### Merge operators in a single binary
+### Merge operators in a single binary + image
 
 We can easily build all CSI driver operators into a single binary in a single image. This would simplify the build,
 but it would make it more difficult to switch between the old and new CSI driver operator images during development
 and testing.
 
 The resulting image would be quite large, as it would contain all the dependencies of all CSI driver operators.
+
+### Build separate images and switch them using a feature gate
+
+During development of an OCP release, we want ART to build both old and new operator image, as the new one is used only
+when a feature gate (name TBD) is enabled. This will give us opportunity to test the new operator image in CI and by
+QE. Before OCP feature freeze, we must decide which operator image will be shipped in the release. The other one will be
+removed from the release, i.e. from CI, from ART pipeline and from payload.
+
+Example (using BREW package names + AWS EBS CSI driver operator + 4.15):
+
+* In OCP 4.14, ART builds
+  only [`ose-aws-ebs-csi-driver-operator-container`](https://brewweb.engineering.redhat.com/brew/packageinfo?packageID=74505)
+  from https://github.com/openshift/aws-ebs-csi-driver-operator repository.
+
+* During OCP 4.15 development, we want ART to build both `ose-aws-ebs-csi-driver-operator-container` (as today)
+  and say `ose-aws-ebs-csi-driver-operator-v2-container` from https://github.com/openshift/csi-operator.
+  TODO: better name for the new images?
+
+  We will file these tickets / PRs ([source](https://art-dash.engineering.redhat.com/self-service/new-content)):
+  * Comet:
+    * New _build repository_ for `ose-aws-ebs-csi-driver-operator-v2-container`.
+    * New _delivery repository_ for `ose-aws-ebs-csi-driver-operator-v2-container`.
+    * Shall we follow the same brew / dist-git / image names as the old one, just add `-v2-`? Or shall we fix the inconsistencies (e.g. `azure-file-...` vs `ose-azure-disk-...`)?
+  * openshift/release:
+    * build the image in CI + promote to 4.15.
+  * ART:
+    * Follow https://art-dash.engineering.redhat.com/self-service/new-content, using almost the same data as in the existing image (e.g. multiarch support)
+      * Exception: we will not perform threat model assessment - we're merging code from existing repos.
+
+* Before OCP 4.15 feature freeze we will decide if the `-v2-` image is good enough and file tickets to
+  disable builds of either the old or `-v2-` image. Similarly, we will update `cluster-storage-operator` and its feature gate
+  to use only one of these images.
+  We will file these tickets + PRs ([source](https://docs.ci.openshift.org/docs/how-tos/onboarding-a-new-component/#removing-a-component-from-the-openshift-release-payload)):
+  * PR to update `cluster-storage-operator` and its related-images, so only the "good" image is used.
+    * This can be merged before anything below.
+  * Jira for ART to stop building the "bad" image, https://issues.redhat.com/browse/ART-1443
+    * They will create a PR to update ocp-build-data.
+  * When removing the old image: PR to openshift/release to stop building + promoting the image in CI.
+  * On slack, coordinate with ART merging of all these PRs
+
+* At 4.15 GA (and in the whole 4.15.z stream), ART will build and ship only the "good" image.
+
+* In 4.16, if the "good" image is the old one, we re-submit all tickets to enable building + shipping of the `-v2-` image
+  again and continue testing.
+  * Drawback: we will have to stop its development + testing until OCP 4.16 is branched, so we can keep 4.15 with only
+    a single image until GA.
+
+Drawbacks:
+
+* New images need to be built, i.e. lot of Comet requests.
+* More tickets.
+* It's harder to track which image is used in which OCP release. For example we may end up with:
+  * AWS EBS, Azure Disk, Azure File: -container repo for < 4.15 builds and -v2-container repo for >= 4.15 builds.
+  * Say GCP PD, GCP Filestore: -container repo for < 4.16 builds and -v2-container repo for >= 4.16 builds.
+  * Say OpenStack Cinder, Manila: -container repo for < 4.17 builds and -v2-container repo for >= 4.17 builds.
+  * Etc.
+
+  OCP release numbers are purely illustrative!
+
+Advantages:
+
+* Can be tested easily in CI and by QE.
 
 ## Infrastructure Needed [optional]
 
