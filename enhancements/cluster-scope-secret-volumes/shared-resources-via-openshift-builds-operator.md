@@ -41,7 +41,9 @@ Packaging this driver with the forthcoming OpenShift Builds operator provides se
 - Provides an extension to OpenShift Builds, which is based on the upstream [Shipwright](https://shipwright.io) project.
 - Allows release outside of OpenShift's cadence.
 - Potential to fully support customers on older versions of OCP.
-- Pathway to adoption on hosted control plane clusters.
+- Pathway to adoption on hosted control plane clusters. The original GA of this component was
+  blocked due to cumbersome work-arounds needed for the CSI driver's associated webhooks.
+- Improve general composability of OpenShift (see [OCPSTRAT-841](https://issues.redhat.com/browse/OCPSTRAT-841)).
 
 
 ### User Stories
@@ -85,11 +87,11 @@ lifecycle management of Shipwright, whose logic is implemented in the upstream
 ### Workflow Description
 
 1. Cluster admin installs the OpenShift Builds operator via OLM, using one of the following:
-   1. OperatorHub web console in OpenShift
+   1. OperatorHub web console in OpenShift.
    2. Creating an appropriate OLM `Subscription` object via `oc apply`, OpenShift GitOps, and so
       forth.
 2. Once the operator is deployed, it creates an `OpenShiftBuild` custom resource instance on the
-   cluster:
+   cluster with the following specification:
 
    ```yaml
    apiVersion: operator.build.openshift.io/v1alpha1
@@ -99,27 +101,77 @@ lifecycle management of Shipwright, whose logic is implemented in the upstream
    spec:
      shipwright:
        build:
-         enabled: false
+         managementState: Enabled
      sharedResources:
-       enabled: false
+       managementState: Enabled
    ```
 
+3. Each component has a `managementState` field that indicates if it should be disabled, enabled,
+   or removed. These states implement the following state machine:
+   1. `Disabled` components can only transition to the `Enabled` state.
+   2. `Enabled` components can only transition to the `Removed` state.
+   3. `Removed` components can only transition to the `Enabled` state.
 3. The OpenShift Builds Operator reconciles the `OpenShiftBuild` instance (singleton), and reports
-   an appropriate status. If `spec.sharedResources.enabled` is `true`, the operator deploys the
+   an appropriate status. If `spec.sharedResources.managementState` is `Enabled`, the operator deploys the
    Shared Resource CSI driver, custom resource definitions, and webhook.
 4. The operator will likewise deploy and manage Shipwright components using the `spec.shipwright.*`
-   fields.
-5. The operator will not enable any operand by default.
+   fields, respecting the `managementState: Enabled|Disabled|Removed` value for each.
+   Reconciliation will reuse upstream Shipwright operator CRDs and controllers.
+5. **The operator will enable Shipwright Builds and the Shared Resources CSI driver by default.**
 
 
 ### Variations
 
-- If OpenShift Pipelines is not installed and `spec.shipwright.build.enabled` is set to `true`,
-  the operator does not install Shipwright Builds and reports that OpenShift Pipelines should be
-  installed in its status.
-- If the operator is deployed on a cluster with the `CSIDriverSharedResource` feature gate enabled,
-  changing `spec.sharedResources.enabled` will not be respected, and an appropriate status
-  condition will report why the operator has not deployed the Shared Resource CSI driver.
+#### Shipwright Builds
+
+- To disable Shipwright Builds by default, set the `SHIPWRIGHT_BUILD_DEFAULT_DISABLED` envionrment
+  variable to `true` in the operator `Subscription` object:
+
+  ```yaml
+  kind: Subscription
+  apiVersion: operators.coreos.com/v1alpha1
+  metadata:
+    name: openshift-build
+    namespace: openshift-operators
+  spec:
+    ...
+    config:
+      env:
+        - name: SHIPWRIGHT_BUILD_DEFAULT_DISABLED
+          value: "true"
+  ```
+
+- If OpenShift Pipelines is not installed and `spec.shipwright.build.managementState` is set to
+  `Enabled`, the operator does not install Shipwright Builds and reports that OpenShift Pipelines
+  should be installed in its status.
+- If Shipwright Builds is enabled and then later disabled, the following should occur:
+  - Shipwright build controllers should be deleted.
+  - CRDs and associated admission webhooks should remain in place.
+
+
+#### Shared Resource CSI Driver
+
+- To disable the Shared Resource CSI Driver by default, set the `SHARED_RESOURCES_DEFAULT_DISABLED`
+  environment variable to `true` in the operator `Subscription` object:
+
+  ```yaml
+  kind: Subscription
+  apiVersion: operators.coreos.com/v1alpha1
+  metadata:
+    name: openshift-build
+    namespace: openshift-operators
+  spec:
+    ...
+    config:
+      env:
+        - name: SHARED_RESOURCES_DEFAULT_DISABLED
+          value: "true"
+  ```
+
+- If the CSI driver is disabled after it has been enabled, the following should occur:
+  - The `CSIDriver` object for the driver should be deleted.
+  - The `DaemonSet` for the CSI driver should be deleted.
+  - CRDs and associated admission webhooks should remain in place.
 
 
 ### API Extensions
@@ -135,28 +187,30 @@ components. The operator will also deploy (directly or indirectly) the following
 
 ### Implementation Details/Notes/Constraints [optional]
 
-As noted above, the operator will not deploy the Shared Resource CSI Driver if the cluster has
-the respective OCP feature gate enabled. This generally applies to tech preview clusters or
-clusters with custom fature gate tunings.
+#### Update domain name for Shared Resource CSI Driver
 
-With the start of OCP 4.16, the Shared Resource CSI driver operator will be removed from the
-[Cluster Storage Operator](https://github.com/openshift/cluster-storage-operator). The feature
-will likewise be removed from OpenShift's feature sets - any code that needs the most up to date
-set of feature sets will need to be updated (ex - openshift/library-go).
-The Shared Resource CSI driver itself will need to be removed from the OpenShift payload. Its
-components will need to be re-productized as an OLM operand.
+The root domain/api group used for the Shared Resource CSI driver components will be changed from
+`sharedresource.openshift.io` to `sharedresource.dev`, impacting the registered name of the CSI
+driver and resource CRDs. To keep the existing feature in OCP, the Shared Resource CSI driver code
+may need to be forked to a new GitHub repo/organization.
+
+
+#### Dependency Resolution with OpenShift Pipelines
 
 Notably, the design of this operator does **_not_** intend to use OLM API dependency resolution
 to automate the deployment and management of OpenShift Pipelines. Cluster admins will need to
-separately (and manually) install OpenShift Pipelines.
+separately (and manually) install OpenShift Pipelines. This ensures that OpenShift Pipelines is not
+installed if a cluster admin does not want Shipwright Builds.
 
 
 ### Risks and Mitigations
 
 #### Duplicate CSI Drivers
 
-On a tech preview cluster, the Same CSI driver could be deployed twice on tech preview clusters. The operator will check if the `CSIDriverSharedResource` feature is enabled before
-deploying the Shared Resource CSI driver itself.
+On a tech preview cluster, the same CSI driver could be deployed twice on tech preview clusters.
+Changing the root domain of the driver and CRDs avoids this problem - the driver and CRDs have
+different names/APIGroups, and this are distinct entities in OpenShift. The driver DaemonSet should
+likewise not collide, since it will be deployed in a different namespace.
 
 
 #### Unwanted components/CRDs
@@ -168,12 +222,16 @@ installation and deployment of OpenShift Pipelines. The operator will instead re
 status message if `spec.shipwright.build.enabled` is set to `true` and it detects that OpenShift
 Pipelines has not been installed.
 
+The operator will also allow admins to opt out of enabling Shipwright Builds and/or the Shared
+Resource CSI Driver through environment variable declarations in the `Subscription` object. Doing
+so blocks the default creation of the CRDs for the Shared Resource CSI driver and Shipwright.
+
 
 ### Drawbacks
 
-- Shared resources no longer a part of OpenShift.
+- Shared resources no longer a part of OpenShift, impacting groups that had hypothetical use cases.
 - Customers who need entitlements in builds will need to install a new operator, or resort to
-  current cumbersome work-arounds.
+  current cumbersome work-arounds. OCP will not support this feature "out of the box."
 - Potential impact on Red Hat components that need shared resources and/or RHEL entitlements.
 - Manual installation of OpenShift Pipelines is required to deploy Shipwright Builds. Shipwright's
   upstream operator currently installs Tekton via [OLM API dependency resolution](https://olm.operatorframework.io/docs/concepts/olm-architecture/dependency-resolution/).
@@ -186,10 +244,14 @@ Pipelines has not been installed.
 
 ### Test Plan
 
-- Shared resource logic in the OCP Builds tech preview suite will need to be migrated to the
-  OpenShift Builds operator test suites
-- OpenShift Builds operator will need a techpreview variant to ensure the shared resource CSI
-  driver is not managed by the operator on OCP 4.15 and earlier (tech preview).
+- Shared resource logic in the OCP Builds [tech preview suite](https://github.com/openshift/origin/blob/master/test/extended/builds/volumes.go#L134)
+  will need to be migrated to the OpenShift Builds operator test suites.
+- OpenShift Builds operator tests will need an OCP techpreview variant to ensure the Shared Resource
+  CSI drivers (plural) can coexist. This variant can be removed once OCP 4.15 reaches end of life.
+- Tests for [inline CSI volumes](https://github.com/openshift/origin/blob/master/test/extended/storage/inline.go)
+  will need to updated to either:
+  - Utilize a different driver that supports CSI inline (ephemeral) volumes.
+  - Install the OpenShift Builds operator prior to test execution.
 
 
 ### Graduation Criteria
@@ -275,7 +337,9 @@ would still want to deploy and manage this driver, since this is part of our str
 of entitlements in builds simpler. This would likely add a lot of unnecessary complexity:
 
 - An additional operator CRD to reconcile (ex: `SharedResourceConfig`)
-- Version skews when OLM does its API resolution, OR
+- Inability to manage which version of the Shared Resource CSI Driver is installed. Operators have
+  limited ability to declare the exact version of a dependant operator (especially when APIs are
+  used for dependency resoution).
 - Separate deployment/management of the CSI driver, with added "Day 2" actions required by cluster
   admins.
 
@@ -286,6 +350,8 @@ management in OLM would significantly expand the potential support matrix.
 
 ## Infrastructure Needed [optional]
 
-None expected - the new operator can take advantage of existing resources used in OpenShift CI.
-Alternatively, the new OpenShift Builds operator may decide to "dogfood" Tekton in its tests, using
-an operating OpenShift Builds/Pipelines cluster.
+- New GitHub repository (and organization?) for the Shared Resource CSI driver.
+- New GitHub repository for the OpenShift Builds operator (likely to live in the `redhat-developer`
+  org).
+- CI infrastructure - either reuse the existing OpenShift CI, "dogfood" with its own CI cluster, or
+  something in between (ex: share with OpenShift Pipelines dogfooding CI).
