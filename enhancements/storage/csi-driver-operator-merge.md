@@ -64,18 +64,18 @@ so their code is quite small and mostly just configure the shared library.
 
 * Recently we have started adding HyperShift support to these operators (AWS EBS first). This means that we need to add
   a new functionality to all these operators, and it's easier to do it in a single repository.
-  
+
 ### User Stories
 
 * As an OpenShift engineer, I want to fix a CVE in a vendored package in all CSI driver operators at once, so that I
   don't have to fix it in their individual git repositories separately.
-  
+
 * As an OpenShift cluster admin, I don't see any difference in my cluster. All CSI drivers + their operators work as
   before and use the same API.
-  
+
 * Explicitly, as OpenShift cluster admin, I am still able to install and uninstall AWS EBS and GCP filestore CSI drivers
   from OLM as before.
-  
+
 ### Goals
 
 * Simplify maintenance of CSI driver operators that are part of OCP and built + shipped by ART.
@@ -151,13 +151,16 @@ monolithic operator for all CSI driver for OCP 3.11. AFAIK, it was never part of
 openshift/release (e.g. to run unit tests), but no image is built there. We will completely remove existing code from
 the repository and start from scratch.
 
+`openshift4/csi-operator` is already listed in Comet as Operator image and Deprecated, but AFAIK Comet tracks images and
+distgit repos, not github repos. We do not plan to re-use `csi-operator` _image_ nor distgit.
+
 #### Building and shipping the operators
 
 Right now, ART pipeline builds a separate image for each CSI driver operator:
 
 | Source repository                                                                                                      | ART name*                                    |
 |------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
-| [openshift/alibaba-disk-csi-driver-operator](https://github.com/openshift/alibaba-disk-csi-driver-operator/)           | ose-alibaba-disk-csi-driver-operator.yml     | 
+| [openshift/alibaba-disk-csi-driver-operator](https://github.com/openshift/alibaba-disk-csi-driver-operator/)           | ose-alibaba-disk-csi-driver-operator.yml     |
 | [openshift/aws-ebs-csi-driver-operator](https://github.com/openshift/aws-ebs-csi-driver-operator/)                     | ose-aws-ebs-csi-driver-operator.yml          |
 | [openshift/aws-efs-csi-driver-operator](https://github.com/openshift/aws-efs-csi-driver-operator/)                     | ose-aws-efs-csi-driver-operator.yml          |
 | [openshift/azure-disk-csi-driver-operator](https://github.com/openshift/azure-disk-csi-driver-operator/)               | ose-azure-disk-csi-driver-operator.yml       |
@@ -196,13 +199,13 @@ Example (using BREW package names + AWS EBS CSI driver operator + 4.15):
   * Comet:
     * New _build repository_ for `ose-aws-ebs-csi-driver-operator-v2-container`.
     * New _delivery repository_ for `ose-aws-ebs-csi-driver-operator-v2-container`.
-    * Shall we follow the same brew / dist-git / image names as the old one, just add `-v2-`? Or shall we fix the inconsistencies (e.g. `azure-file-...` vs `ose-azure-disk-...`)? 
+    * Shall we follow the same brew / dist-git / image names as the old one, just add `-v2-`? Or shall we fix the inconsistencies (e.g. `azure-file-...` vs `ose-azure-disk-...`)?
   * openshift/release:
     * build the image in CI + promote to 4.15.
   * ART:
     * Follow https://art-dash.engineering.redhat.com/self-service/new-content, using almost the same data as in the existing image (e.g. multiarch support)
       * Exception: we will not perform threat model assessment - we're merging code from existing repos.
-    
+
 * Before OCP 4.15 feature freeze we will decide if the `-v2-` image is good enough and file tickets to
   disable builds of either the old or `-v2-` image. Similarly, we will update `cluster-storage-operator` and its feature gate
   to use only one of these images.
@@ -213,7 +216,7 @@ Example (using BREW package names + AWS EBS CSI driver operator + 4.15):
     * They will create a PR to update ocp-build-data.
   * When removing the old image: PR to openshift/release to stop building + promoting the image in CI.
   * On slack, coordinate with ART merging of all these PRs
-  
+
 * At 4.15 GA (and in the whole 4.15.z stream), ART will build and ship only the "good" image.
 
 * In 4.16, if the "good" image is the old one, we re-submit all tickets to enable building + shipping of the `-v2-` image
@@ -223,8 +226,15 @@ Example (using BREW package names + AWS EBS CSI driver operator + 4.15):
 
 Drawbacks:
 
-* New images need to be built, i.e. lot of Comet requuests.
+* New images need to be built, i.e. lot of Comet requests.
 * More tickets.
+* It's harder to track which image is used in which OCP release. For example we may end up with:
+  * AWS EBS, Azure Disk, Azure File: -container repo for < 4.15 builds and -v2-container repo for >= 4.15 builds.
+  * Say GCP PD, GCP Filestore: -container repo for < 4.16 builds and -v2-container repo for >= 4.16 builds.
+  * Say OpenStack Cinder, Manila: -container repo for < 4.17 builds and -v2-container repo for >= 4.17 builds.
+  * Etc.
+
+  OCP release numbers are purely illustrative!
 
 Advantages:
 
@@ -233,8 +243,8 @@ Advantages:
 ##### Option 2: Build & test images manually and do a hard switch
 
 During development of an OCP release, we will merge an CSI driver operator to github.com/openshift/csi-operator
-without any testing in CI. We will keep as close to the original operator as possible and we will test the new image
-manually.
+without any testing in CI. We will keep as close to the original operator as possible, and we will test the new image
+manually (or with some tricks in CI if possible, see below).
 
 Once we're happy with the results, we will follow ART's guidelines and flip building of an existing image from the old
 repo to github.com/openshift/csi-operator. The resulting image name will be the same. This will require a tight
@@ -247,19 +257,23 @@ Example:
 * In OCP 4.14, ART builds
   only [`ose-aws-ebs-csi-driver-operator-container`](https://brewweb.engineering.redhat.com/brew/packageinfo?packageID=74505)
   from https://github.com/openshift/aws-ebs-csi-driver-operator repository.
-  
-* In 4.15, we merge the operator into github.com/openshift/csi-operator and not change any code of it,
+
+* In 4.15, we merge the operator into github.com/openshift/csi-operator and do not change any code of it,
   except for directory names. This way, we can ensure the code will be 99% the same as the old operator.
   * We can test the new image pre-merge manually using:
-    `oc adm release new --from=<the latest 4.15 nightly> aws-ebs-csi-driver-operator=quay.io/jsafrane/my-ebs-operator:1 --to=<xxx>`.
-    
+    `oc adm release new --from=<the latest 4.15 nightly> aws-ebs-csi-driver-operator=quay.io/jsafrane/my-ebs-operator:1 --to=quay.io/jsafrane/test-release:1` and install / upgrade from `test-release:1`.
+  * _We could convince CI to build `aws-ebs-csi-driver-operator` image from the new repo and use it in presubmit
+    tests there. But we can't promote it anywhere, as it would overwrite the old image from
+    github.com/openshift/aws-ebs-csi-driver-operator. Some experiments are needed here._
+
 * We coordinate with ART to switch building of `ose-aws-ebs-csi-driver-operator-container` image from
-  github.com/openshift/aws-ebs-csi-driver-operator / `Dockerfile.rhel7` to github.com/openshift/csi-operator / `Dockerfile.aws-ebs` in a semi-atomic way.
+  github.com/openshift/aws-ebs-csi-driver-operator / `Dockerfile.rhel7` to
+  github.com/openshift/csi-operator / `Dockerfile.aws-ebs` in a semi-atomic way.
   * With a quick pre-merge test in CI, if possible.
   * Goal: nightlies should be green all the time.
   * TBD: exact procedure & tickets to file.
-    
-* After the switch, we start actually refactoring and merging the operator code to shared packages and so on. At this 
+
+* After the switch, we start actually refactoring and merging the operator code to shared packages and so on. At this
   time, we will have CI in place for all our PRs in the repo. We will not need to coordinate with ART about AWS EBS
   CSI driver.
 
@@ -271,8 +285,8 @@ Advantages:
 
 * Keeping image names, i.e. no new Comet repos (distgits, brew packages, etc.)
 * Harder (but not impossible) to test before the switch. In ideal case, we're switching just the source repository
-  of the same image, the actual operator code should be the same. 
-  
+  of the same image, the actual operator code should be the same.
+
 ### Gradual merge
 
 We will merge the operators one by one, starting with AWS EBS. Second will be Azure Disk and Azure File, as we need to
@@ -286,15 +300,17 @@ Very provisional and optimistic plan:
 
 ### Risks and Mitigations
 
-* Churn around adding / removing images in ART pipeline and in Comet may be too much.
-* Since each CSI driver operator is different:
+* Churn around adding / removing images in ART pipeline and in Comet may be too much, it's easy to make a mistake there
+  that either requires subsequent tickets to fix them or are set to stone forever.
+* Since each CSI driver operator is different, it may be hard to merge all their code. Some differences are:
   * Shared Resource (and maybe others) deploy an extra validating webhook.
   * Cinder (and maybe others) syncs Secrets to a different format.
   * Manila installs the CSI driver only optionally.
   * AWS sync CA-bundle from a different namespace.
   * vSphere interacts with vSphere API a lot.
+  * AWS EFS and GCP Filestore are OLM operators.
   * And many others.
-  
+
   All the operators use shared code from library-go already, so merging them to a single repository will not make them
   worse. Still, it may be more difficult to share even more code e.g. for HyperShift.
 
@@ -302,14 +318,14 @@ Very provisional and optimistic plan:
 
 * We will need to support old images + github repos in all supported z-streams for quite some time, so the real benefit
   will be visible only after few years. Until then, we will have to maintain repositories with the old CSI driver
-  operators _and_ the new merged repository. 
+  operators _and_ the new merged repository.
 
 * While each CSI driver operator will be a separate binary and a separate image, all their dependencies will be in a
   single repository. `vendor/` dir of this repository will be large, as it will contain many (all?) SDKs of clouds that
   we support.
   * There is a risk that the operators will require different versions of a vendored package. So far, we kept library-go
     and k8s packages at the same version in all CSI driver operators without issues, but we did not monitor _all_ the
-    packages. 
+    packages.
 
 ## Design Details
 
