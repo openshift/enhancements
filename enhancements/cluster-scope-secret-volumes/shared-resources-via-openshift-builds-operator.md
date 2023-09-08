@@ -124,7 +124,7 @@ lifecycle management of Shipwright, whose logic is implemented in the upstream
 
 #### Shipwright Builds
 
-- To disable Shipwright Builds by default, set the `SHIPWRIGHT_BUILD_DEFAULT_DISABLED` envionrment
+- To disable Shipwright Builds by default, set the `SHIPWRIGHT_BUILD_DEFAULT_DISABLED` environment
   variable to `true` in the operator `Subscription` object:
 
   ```yaml
@@ -144,7 +144,7 @@ lifecycle management of Shipwright, whose logic is implemented in the upstream
 - If OpenShift Pipelines is not installed and `spec.shipwright.build.managementState` is set to
   `Enabled`, the operator does not install Shipwright Builds and reports that OpenShift Pipelines
   should be installed in its status.
-- If Shipwright Builds is enabled and then later disabled, the following should occur:
+- If Shipwright Builds is enabled and then later set to `Removed`, the following should occur:
   - Shipwright build controllers should be deleted.
   - CRDs and associated admission webhooks should remain in place.
 
@@ -168,7 +168,7 @@ lifecycle management of Shipwright, whose logic is implemented in the upstream
           value: "true"
   ```
 
-- If the CSI driver is disabled after it has been enabled, the following should occur:
+- If the CSI driver is `Removed` after it has been enabled, the following should occur:
   - The `CSIDriver` object for the driver should be deleted.
   - The `DaemonSet` for the CSI driver should be deleted.
   - CRDs and associated admission webhooks should remain in place.
@@ -176,7 +176,7 @@ lifecycle management of Shipwright, whose logic is implemented in the upstream
 
 ### API Extensions
 
-The OpenShift Builds will introduce a new configuration CRD, `OpenShiftBuild`. It will contain 
+The OpenShift Builds operator will introduce a new configuration CRD, `OpenShiftBuild`. It will contain 
 `spec` fields that configure the Shared Resource CSI driver in addition to Shipwright-related
 components. The operator will also deploy (directly or indirectly) the following:
 
@@ -219,7 +219,7 @@ Admins or users may want to use the Shared Resource CSI Driver without Shipwrigh
 example, developers or teams that heavily rely on the `BuildConfig` APIs today. To address this
 concern, the OpenShift Builds operator will not rely on OLM API resolution to automate the
 installation and deployment of OpenShift Pipelines. The operator will instead report an appropriate
-status message if `spec.shipwright.build.enabled` is set to `true` and it detects that OpenShift
+status message if `spec.shipwright.build.managementState` is set to `Enabled` and it detects that OpenShift
 Pipelines has not been installed.
 
 The operator will also allow admins to opt out of enabling Shipwright Builds and/or the Shared
