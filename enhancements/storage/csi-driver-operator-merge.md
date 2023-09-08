@@ -86,18 +86,16 @@ so their code is quite small and mostly just configure the shared library.
 
 ## Proposal
 
-1. Merge all CSI driver operators listed above into a single repository, github.com/openshift/csi-operator, together
-   with the shared CSI driver operator library (i.e. move it from library-go to this repository). This will be a gradual
-   process over several OCP releases - we will move few operators at a time.
-1. Until all CSI driver operators are merged into the common repository, update them in their existing repos to vendor
-   the shared library from github.com/openshift/csi-operator instead of library-go, so we can fix bugs only on a single
-   place. Remove all CSI controllers from library-go, if possible.
+1. Merge all CSI driver operators listed above into a single repository, github.com/openshift/csi-operator. This will be
+   a gradual process over several OCP releases - we will move few operators at a time.
+1. After all operators are merged into csi-operator, move CSI controllers from library-go to the csi-operator. _We may
+   do it earlier, if we need a bigger refactoring of the controllers, but we don't plan it right now._
 1. When merging the operators, share even more code between them. For example, the AWS EBS and GCP PD operators are
    almost identical, so they can share the same code. Individual operators will still have enough flexibility to
    run extra library-go style controllers, e.g. to install a separate Deployment for a webhook, sync Secret from a
    different namespace or change the Secret format to be usable by a CSI driver.
-1. We do not want to disrupt CI / nightlies. There are two options listed in "Building and shipping the operators"
-   section how to switch from old to new images. In both cases, we will need to coordinate with ART a lot.
+1. We do not want to disrupt CI / nightlies. See "Building and shipping the operators" section how, otgether with ART
+   team, we plan to switch building of the images from the old repository to openshift/csi-operator.
 
 We want to keep existing behavior of the CSI driver operators as much as possible:
 
@@ -238,13 +236,54 @@ Example:
   only [`ose-aws-ebs-csi-driver-operator-container`](https://brewweb.engineering.redhat.com/brew/packageinfo?packageID=74505)
   from https://github.com/openshift/aws-ebs-csi-driver-operator repository.
 
-* In 4.15, we merge the operator into github.com/openshift/csi-operator and do not change any code of it,
-  except for directory names. This way, we can ensure the code will be 99% the same as the old operator.
+* In 4.15, we merge the operator into github.com/openshift/csi-operator into `/legacy` directory, including
+  its own `go.mod` and `vendor/`, and do not change any code of it. This way, we can ensure the code will be 100% the
+  same as the
+  old operator
   * We can test the new image pre-merge manually using:
     `oc adm release new --from=<the latest 4.15 nightly> aws-ebs-csi-driver-operator=quay.io/jsafrane/my-ebs-operator:1 --to=quay.io/jsafrane/test-release:1` and install / upgrade from `test-release:1`.
   * _We could trick CI to build `aws-ebs-csi-driver-operator` image from the new repo and use it in presubmit
     tests there. But we can't promote it anywhere, as it would overwrite the old image from
     github.com/openshift/aws-ebs-csi-driver-operator. Some experiments are needed here._
+
+  The openshift/csi-operator repository should look like this at this point:
+  ```
+  ├── assets          # Common assets for all CSI drivers (empty now)
+  ├── cmd             # All commands for all CSI driver operators (empty now)
+  ├── pkg             # All common code for all CSI driver operators (empty now)
+  ├── test            # All tests for all CSI driver operators (empty now)
+  ├── vendor          # Global vendor dir (empty now)
+  ├── legacy          # "Old" CSI driver operators that just merged here.
+  │   └── aws-ebs-csi-driver-operator
+  │       ├── assets
+  │       │   ├── assets.go
+  │       │   ├── cabundle_cm.yaml
+  │       │   └── ... # all other assets
+  │       ├── cmd
+  │       │   └── aws-ebs-csi-driver-operator
+  │       │       └── main.go
+  │       ├── pkg
+  │       │   ├── dependencymagnet
+  │       │   │   └── dependencymagnet.go
+  │       │   ├── operator
+  │       │   │   ├── starter.go
+  │       │   │   ├── starter_test.go
+  │       │   │   ├── storageclasshook.go
+  │       │   │   └── storageclasshook_test.go
+  │       │   └── version
+  │       │       └── version.go
+  │       ├── test
+  │       │   └── e2e
+  │       │       └── manifest.yaml
+  │       ├── vendor
+  │       │   └── ... # all packages vendored by the old operator
+  │       ├── go.mod  # go.mod + go.sum from the old operator
+  │       └── go.sum
+  ├── Dockerfile.aws-ebs
+  └── Dockerfile.aws-ebs.test
+  ```
+  `Dockerfile.aws-ebs` + `Dockerfile.aws-ebs.test` will be in the root directory, so we can re-use it in the next step.
+  They will build the operator + its test image from the `legacy/` directory at this point.
 
 * We coordinate with ART to switch building of `ose-aws-ebs-csi-driver-operator-container` image from
   github.com/openshift/aws-ebs-csi-driver-operator / `Dockerfile.rhel7` to
@@ -261,12 +300,51 @@ Example:
         config without any extra approvals._
 
 * After the switch, we start actually refactoring and merging the operator code to shared packages and so on. At this
-  time, we will have CI in place for all our PRs in the repo. We will not need to coordinate with ART about AWS EBS
-  CSI driver.
+  time, we will have CI in place for all our PRs in the repo. We will re-use `Dockerfile.aws-ebs`
+  and `Dockerfile.aws-ebs.test` to build the image, so we don't need to change anything in ART build data.
+
+  After the refactoring, the repo should look like this:
+  ```
+  ├── assets
+  │   ├── assets.go
+  │   └── generated   # We want to generate the assets, see below.
+  │       └── aws-ebs
+  │           ├── cabundle_cm.yaml
+  │           └── ... # other AWS EBS driver assets
+  ├── cmd
+  │   └── aws-ebs-csi-driver-operator
+  │       └── main.go
+  ├── pkg
+  │   ├── aws-ebs
+  │   │   └── # AWS EBS specific-code
+  │   └── common
+  │       └── starter.go # and any other code shared by all CSI drivers
+  ├── test
+  │   └── e2e
+  │       └── aws-ebs
+  │           └── manifest.yaml
+  ├── vendor
+  ├── Dockerfile.aws-ebs
+  ├── Dockerfile.aws-ebs-test
+  ├── go.mod
+  └── go.sum
+  ```
+
+There will be two major points when things can break:
+
+1. When we switch building of `ose-aws-ebs-csi-driver-operator-container` from openshift/aws-ebs-csi-driver-operator to
+   openshift/csi-operator. Since the code will be 100% the same, we think it's safe to do. Any revert must be
+   coordinated with ART in ocp-build-data and openshift/release repositories.
+2. After our refactoring, we will switch building of `Dockerfile.aws-ebs` from `legacy/aws-ebs-csi-driver-operator/cmd/`
+   to `cmd/`. At this time we will have CI that should catch any breakage. Any revert must be done in
+   openshift/csi-operator repo, which is under our control.
+
+All CSI driver operators will be merged in a similar way, i.e. in `legacy/` directory first.
 
 Drawbacks:
 
-* When anything goes wrong, it's ART who will need to roll back things, we cannot do it ourselves.
+* When anything goes wrong in switching the source repositories, it's ART who will need to roll back things, we cannot
+  do it ourselves.
 
 Advantages:
 
@@ -285,10 +363,14 @@ Very provisional and optimistic plan:
 * AWS EBS, Azure Disk and Azure File in 4.15.
 * The rest in 4.16 or later.
 
+#### Generated YAML files
+
+All CSI driver YAML files look very similar today. We plan to generate them from a single set of templates, so that we
+don't need to maintain them separately. Exact details about the generator are TBD. We want something like kustomize,
+but better integrated with the operator code.
+
 ### Risks and Mitigations
 
-* Churn around adding / removing images in ART pipeline and in Comet may be too much, it's easy to make a mistake there
-  that either requires subsequent tickets to fix them or are set to stone forever.
 * Since each CSI driver operator is different, it may be hard to merge all their code. Some differences are:
   * Shared Resource (and maybe others) deploy an extra validating webhook.
   * Cinder (and maybe others) syncs Secrets to a different format.
@@ -300,6 +382,10 @@ Very provisional and optimistic plan:
 
   All the operators use shared code from library-go already, so merging them to a single repository will not make them
   worse. Still, it may be more difficult to share even more code e.g. for HyperShift.
+
+* Since we plan to generate also YAML files for the CSI drivers, there is a risk that an exotic CSI driver will
+  require a different YAML file than the others. We will keep possibility for a CSI driver to provide its own YAML file,
+  not using the generator.
 
 ### Drawbacks
 
