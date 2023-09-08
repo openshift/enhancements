@@ -154,6 +154,50 @@ the repository and start from scratch.
 `openshift4/csi-operator` is already listed in Comet as Operator image and Deprecated, but AFAIK Comet tracks images and
 distgit repos, not github repos. We do not plan to re-use `csi-operator` _image_ nor distgit.
 
+#### CSI operator maintenance
+
+Right now, different CSI driver operators are co-maintained by different teams:
+
+Shift on Stack (i.e. OpenStack):
+
+* OpenStack Cinder
+* OpenStack Manila
+
+IBM:
+
+* IBM PowerVS
+* IBM VPC
+
+oVirt:
+
+* oVirt Disk (to be removed soon)
+
+Alibaba:
+
+* Alibaba Disk (to be removed?)
+
+Build team:
+
+* Shared Resource
+
+OCP storage:
+
+* All the rest.
+
+Co-maintenance means that OCP storage team knows best how to run an operator in OCP (e.g. how to set replicas, their
+topology, tolerations etc), how to report the operator status to upper layers (CSO, CVO or OLM) and how to integrate it
+with other OCP components. The platform-specific teams know best how to run a CSI driver - what cmdline arguments and
+env. variable it needs, what Secret or other configuration it needs etc.
+
+We want to keep this co-maintenance model, however, we want to refactor the operators more aggressively to a common
+code. For example, the `assets/` directory of each operator is mostly copy-paste from an earlier operator and fixing
+anything there leads to too many PRs. Similarly, `starter.go` is often very similar to the other operators.
+
+The other teams will still be responsible for their platform-specific code, e.g. adding extra controllers
+to sync / modify driver's Secrets, running extra Deployment with a webhook, or even adding extra sidecars to the CSI
+driver like IBM vpc-node-label-updater. We want to reduce copy-paste of the common code, which is easier if the operator
+code is in a single repository.
+
 #### Building and shipping the operators
 
 Right now, ART pipeline builds a separate image for each CSI driver operator:
