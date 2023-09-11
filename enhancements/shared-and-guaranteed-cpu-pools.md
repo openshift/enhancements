@@ -227,12 +227,20 @@ started before the new admission hook is running.
 
 ### Implementation Details/Notes/Constraints
 
+#### Cluster Wide Feature Scope
+
 One constraint of this approach is that the feature scope is cluster wide. When the feature gate is
 enabled, the new admission hook will mutate all incoming pods, adding requests/limits for the new
 extended resources. This means that all nodes in the cluster must have a Performance Profile that
 includes shared CPUs - without that, no pods would be scheduled on that node. Note that the isolated
 CPUs partition would be optional and would only be required on nodes that were going to run
 pods that had containers with whole CPU requests/limits.
+
+#### cgroup v1 vs v2 considerations
+
+This feature is cgroup version agnostic - it does not require any changes to cgroup configuration for
+pods or containers. The feature will work with either cgroup v1 or v2, without modification to the
+code introduced by this feature.
 
 ### Risks and Mitigations
 
