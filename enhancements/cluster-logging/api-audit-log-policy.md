@@ -11,7 +11,8 @@ api-approvers:
   - "@jewzaam"
 creation-date: 2023-03-28
 tracking-link:
-  - https://issues.redhat.com/browse/OBSDA-339
+  - https://issues.redhat.com/browse/OBSDA-344
+  - https://issues.redhat.com/browse/LOG-3982
 see-also:
   - /enhancements/cluster-logging/hypershift-audit-logs.md
 ---
@@ -26,7 +27,8 @@ It is not feasible to forward the unfiltered data to most external log storage s
 Audit events may exceed record size limits, and the total volume may be too expensive to store.
 
 Kubernetes defines an [audit policy configuration][k8s-auditing] to filter audit events,
-Service Delivery uses  this configuration internally for managed clusters.
+Red Hat Service Delivery filters API audit logs using  https://gitlab.cee.redhat.com/service/splunk-audit-exporter
+which implements the k8s audit policy. This exporter is not available to customers.
 
 The goals of this proposal are:
 - Make the Kubernetes audit policy available for customer log forwarding.
@@ -89,57 +91,40 @@ See [Kubernetes Documentation][k8s-auditing] for an example.
 
 #### Extensions to `ClusterLogForwarder.logging.openshift.io`
 
-Extended the `ClusterLogForwarder` input selector to include an `audit` section with a policy.
+Add a new `filters` section to the `ClusterLogForwarder` resource.
+A filter can contain an audit policy. Activate the filter by referring to it from a pipeline.
+The same filter can be attached to multiple pipelines.
+
 For example:
 
 ``` yaml
-  inputs:
-    - name: myAuditLogs
-      audit:
-        api:
-          myAuditPolicy # Name of a Policy.audit.k8s.io object in same namespace.
-  outputs:
-    - name: myAuditLogSore
-      type: any supported log output ...
+  filters:
+    - name: my-policy
+      type: apiAudit # Other types of filter will be added in future.
+      apiAudit:
+	    # Audit policy as defined by https://kubernetes.io/docs/tasks/debug/debug-cluster/audit
+        omitStages:
+          - "RequestReceived"
+        rules:
+          - level: RequestResponse
+            resources:
+            - group: ""
+              resources: ["pods"]
   pipelines:
-    - inputRefs: [myAuditLogs]
-      outputRefs: [myAuditLogStore]
+    - inputRefs: [application, infrastructure, audit]
+      filterRefs: [my-policy]
+      outputRefs: [default]
 ```
-
-FIXME UPDATE FROM DESIGN
 
 ### Implementation Details
 
-There is already a go executable that does everything we need: 
-https://gitlab.cee.redhat.com/service/splunk-audit-exporter
-The "splunk" part is a misnomer, this is a filter from file/stdin/web-hook to stdout.
-
-This proposal only uses the audit log filtering features of the exporter.
-The exporter also has rate-limiting and other features that may be incorporated in future.
-
-For an input with an `apiServerPolicyRef`, the collector will
-- mount or copy the policy to the local file-system.
-- configure vector with an Exec source that runs the filter program as a separate process using the policy file.
-- vector reads stdout of the filter from the Exec source.
-- from there we route the events as normal
-
-Note: all of the above should support multiple distinct policies, so unique names for policy files etc.
+The policy is compiled into a VRL (Vector Remap Language) transformation as part of the vector log forwarding configuration.
+The transformation drops or edits API audit events according to the policy.
+Logs which are not API audit events are passed on unmodified.
 
 ### Risks and Mitigations
 
-#### Separation of OSD and Customer logging operators
-In classic ROSA, if OSD adopts the CLO for their logging needs, there may be a version problem:
-- customer does not want to upgrade CLO
-- OSD needs a more recent version of CLO.
-
-This problem is not addressed by this proposal, but needs to be addressed.
-
-Some avenues to explore:
-- Create separate operators using different API groups to distinguish the API types. \
-  Similar approach was used for the observability opertor:
-  - [MON-2792 OBO support for monitoring.coreos.com group](https://issues.redhat.com/browse/MON-2792)
-  - [HOSTEDCP-624 Support monitoring.rhobs Resources](https://issues.redhat.com/browse/HOSTEDCP-624)
-- OLM 1.x has multi-operator-version features
+None.
 
 #### Data security
 
@@ -158,7 +143,6 @@ The customer creates their own filtering configuration, it needs to be clear tha
 #### Roll-out
 
 Existing customers using the CLO add-on will be unaffected.
-The customer `cl/instance` and `clf/instance` resources will not be modified.
 The new features will be activated only when the customer modifies their configuration as described above.
 
 The existing SRE Splunk exporter SHOULD be replaced by separate CL/CLF resources in a separate namespace as soon as possible.
@@ -171,29 +155,34 @@ Both can scrape from the same audit log files simultaneously, and perform separa
 
 ### Drawbacks
 
-- Increased scope for user error.
-- Additional CPU cost, latency (to be measured)
-- New dependency to be maintained for the log collector.
+- Increased scope for user error in policies.
+- Possible additional CPU cost.
 
 ## Design Details
 
+None.
+
 ### Open Questions
 
-#### Form of audit policy
-
-The [Kubernetes Audit Policy File](https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/) is expressed as a k8s "object" but not as a typical k8s "resource (no spec/status).
-
-Should we
-- Use it as a resource unmodified
-- Wrap it in a more typical spec/status resource
+None.
 
 ### Test Plan
 
+- unit tests for each type of rule.
+- port tests from the splunk-audit-exporter repository.
+- compatibility test to ensure it produces the same result as splunk-audit-exporter.
+
 ### Graduation Criteria
+
+None.
 
 #### Dev Preview -> Tech Preview
 
+None.
+
 #### Tech Preview -> GA
+
+None.
 
 #### Removing a deprecated feature
 
@@ -209,15 +198,11 @@ Nothing new.
 
 ### Operational Aspects of API Extensions
 
-SRE and customer CLF instances are separate and independent.
-CLO will deploy separate instances of the collector, so failures or resets of one will not affect the other.
-Version skew may be an issue, see above.
+Nothing new.
 
 #### Failure Modes
 
 - Invalid Policy: indicate in `ClusterLogForwarder.status`
-- Invalid policy reference or policy: Indicate in `ClusterLogForwarder.status`
-- Crashed filter process: restart by vector, `streaming.respawn_on_exit`
 
 #### Support Procedures
 
@@ -241,8 +226,8 @@ None.
   - it breaks down when logs need to be forwarded elsewhere (e.g. Cloudwatch)
   - it scatters and duplicates features in the logging operator rather than improving those features in one place
 
-
-Note there is an existing [APIServer.config.openshift.io resource][openshift-config] resource that configures policy based on authenticated groups. This is insufficient for some customers:
+Note: there is an existing [APIServer.config.openshift.io resource][openshift-config] resource that configures policy based on authenticated groups. 
+This is insufficient for some customers:
 - lacks control by _verb_ - the most important filter of all is to remove "read only" events.
 - lacks control for of chatty k8s/openshift services that don't belong to distinct groups.
 
