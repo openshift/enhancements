@@ -4,14 +4,13 @@ authors:
   - jsafrane
 reviewers:
   - "@storage-team"
-  # TODO: someone from ART
-  # TODO: staff engineer for new image names
+  - "joepvd" # ART
 approvers:
   - TBD
 api-approvers:
   - None
 creation-date: 2023-09-05
-last-updated: 2023-09-05
+last-updated: 2023-09-12
 tracking-link:
   - https://issues.redhat.com/browse/STOR-1437
 see-also:
@@ -94,9 +93,9 @@ so their code is quite small and mostly just configure the shared library.
    almost identical, so they can share the same code. Individual operators will still have enough flexibility to
    run extra library-go style controllers, e.g. to install a separate Deployment for a webhook, sync Secret from a
    different namespace or change the Secret format to be usable by a CSI driver.
-1. We do not want to disrupt CI / nightlies. See "Building and shipping the operators" section how, otgether with ART
+1. We do not want to disrupt CI / nightlies. See "Building and shipping the operators" section how, together with ART
    team, we plan to switch building of the images from the old repository to openshift/csi-operator.
-
+   
 We want to keep existing behavior of the CSI driver operators as much as possible:
 
 * All operators will use the same leader election locks as before.
@@ -290,7 +289,7 @@ Example:
   github.com/openshift/csi-operator / `Dockerfile.aws-ebs` in a semi-atomic way.
   * With a quick pre-merge test in CI, if possible.
   * Goal: nightlies should be green all the time.
-  * TBD: exact procedure & tickets to file. It looks like:
+  * TBD: exact procedure & tickets to file. Current high level idea:
     1. PR against openshift/release to stop promoting the CI operator image
        from `openshift/aws-ebs-csi-driver-operator` jobs and start promoting it from `openshift/csi-operator`.
     2. PR against openshift/ocp-build-data to switch the source github repo + Dockerfile
@@ -392,6 +391,25 @@ but better integrated with the operator code.
 * We will need to support old images + github repos in all supported z-streams for quite some time, so the real benefit
   will be visible only after few years. Until then, we will have to maintain repositories with the old CSI driver
   operators _and_ the new merged repository.
+  Listing nr. of merge commits (i.e. nr. of PRs) in each release branch:
+
+  |                                       | 4.10 | 4.11 | 4.12 | 4.13 |
+  |---------------------------------------|------|------|------|------|
+  | alibaba-disk-csi-driver-operator      | 2    | 0    | 1    | 1    |
+  | aws-ebs-csi-driver-operator           | 1    | 0    | 7    | 4    |
+  | aws-efs-csi-driver-operator           | 4    | 1    | 1    | 1    |
+  | azure-disk-csi-driver-operator        | 3    | 2    | 3    | 1    |
+  | azure-file-csi-driver-operator        | 0    | 1    | 1    | 1    |
+  | csi-driver-manila-operator            | 3    | 3    | 4    | 3    |
+  | csi-driver-shared-resource-operator   | 0    | 0    | 2    | 1    |
+  | gcp-filestore-csi-driver-operator     |      |      | 2    | 1    |
+  | gcp-pd-csi-driver-operator            | 1    | 0    | 1    | 1    |
+  | ibm-powervs-block-csi-driver-operator |      |      | 1    | 3    |
+  | ibm-vpc-block-csi-driver-operator     | 4    | 0    | 1    | 1    |
+  | openstack-cinder-csi-driver-operator  | 2    | 1    | 2    | 2    |
+  | vmware-vsphere-csi-driver-operator    | 9    | 6    | 5    | 5    |
+
+  Most of the PRs are CVEs and high severity bugs already. 
 
 * While each CSI driver operator will be a separate binary and a separate image, all their dependencies will be in a
   single repository. `vendor/` dir of this repository will be large, as it will contain many (all?) SDKs of clouds that
@@ -399,6 +417,8 @@ but better integrated with the operator code.
   * There is a risk that the operators will require different versions of a vendored package. So far, we kept library-go
     and k8s packages at the same version in all CSI driver operators without issues, but we did not monitor _all_ the
     packages.
+    * Most cloud SDKs were part of github.com/kubernetes/kubernetes at some point, so we know it was possible (with a
+      lot of effort, I guess).
 
 ## Design Details
 
@@ -407,7 +427,8 @@ but better integrated with the operator code.
 ### Test Plan
 
 We have a solid CI to test that CVO runs CSO and CSO runs corresponding CSI driver operator.
-We will add CI jobs that enables the feature gate (name TBD) and runs the new CSI driver operator image.
+We will add CI jobs for csi-operator repository for all platforms, possibly with careful rules to trigger only the jobs
+that a PR affects. With a possibility to run everything manually using `/test all`. 
 
 ### Graduation Criteria
 
