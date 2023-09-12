@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2023-03-29
-last-updated: 2023-03-29
+last-updated: 2023-09-12
 tracking-link:
   - https://issues.redhat.com/browse/OCPBU-465
 ---
@@ -132,20 +132,97 @@ No action required.
 
 #### Cluster upgrades
 
-[When upgrading cluster versions, in-tree driver Volumes will automatically be updated to use the appropriate CSI node
-drivers by the cluster](https://docs.openshift.com/container-platform/4.12/storage/container_storage_interface/persistent-storage-csi-migration.html).
-In order to properly make use of this, and ensure a clean transition with minimal workload interruption, the CSI node
-drivers must be running on the Windows node before the upgrade commences. This will be up to the cluster administrator
-to do. If this has not been done, and if in-tree storage volumes are being used by Windows workloads, WMCO will block
-upgrades via its [OperatorCondition](https://olm.operatorframework.io/docs/concepts/crds/operatorcondition/).
-WMCO is able to detect that the CSI drivers have been sucessfully deployed by checking that all Windows nodes have a
-CSINode object associated with them.
+##### Supported upgrades
+WMCO will only support upgrading in-tree storage workloads to CSI driver storage workloads for Azure and vSphere.
+New cluster installs on other platforms must be created with a minumum version of OCP 4.12, so they can immediately
+use CSI driver storage, as there will not be a way to safely migrate in-tree volumes for those platforms. This is due
+to a lack of Windows in-tree storage support leading up to 4.12 for those platforms.
 
-This feature is targeted for WMCO 9.0.0, but will be backported to WMCO v8 and v7. This enables a smooth transition
-of volumes when upgrading from OCP 4.12 and 4.13. This specifically effects Azure, which loses in-tree storage
-functionality in 4.13, and vSphere which loses it in 4.14. New clusters on other platforms should be created with a
-minumum version of OCP 4.12, so they can immediately use CSI driver storage, as there will not be a way to migrate
-in-tree volumes for those platforms.
+##### Node upgrades
+Cluster upgrades will have an impact on this feature when upgrading from a cluster version which uses in-tree
+storage, to one which uses CSI drivers. [When upgrading the cluster, Volumes using in-tree drivers will automatically
+be updated to use the appropriate CSI node drivers by the cluster](https://docs.openshift.com/container-platform/4.12/storage/container_storage_interface/persistent-storage-csi-migration.html).
+Volumes attached to Windows Nodes using the deprecated in-tree storage drivers will remain usable until the Node's
+kubelet is upgraded to the version matching the new cluster version. This overlap period will allow for a smooth
+transition for each Node.
+
+In order to properly make use of the overlap period, and ensure a clean transition with minimal workload interruption,
+both the csi-proxy service, and the CSI node driver pod must be running on the Windows node before the upgrade
+commences. It will be up to the cluster administrator to install the CSI drivers on the cluster. They should check that
+all deployed pods go into running, and a CSINode is created for each Windows node. The CSINode should list the CSI
+driver as enabled.
+
+The csi-proxy requirement must be fufilled by WMCO. As this feature is targeted for WMCO 9.0.0, csi-proxy must be
+backported to WMCO v8 and v7, to enable a smooth transition of volumes when upgrading from OCP 4.13 and 4.12,
+respectively. This specifically effects vSphere, which loses in-tree storage functionality in 4.14, and Azure which
+loses it in 4.13.
+
+What this means for the user, is that when they are upgrading a cluster from a version that uses in-tree to one that
+uses CSI storage drivers, they must first upgrade WMCO to a version which runs csi-proxy as a service on Windows Nodes.
+Only then should they upgrade the cluster.
+
+In order to help ensure a smooth transition, WMCO v8 and v9 will block each individual Node upgrade if both these
+conditions are met:
+* A Node is being upgraded from in-tree storage to CSI driver storage
+* A volume is attached to the Node
+
+The cluster administrator will need to apply the label `windowsmachineconfig.openshift.io/allow-upgrade=true` to each
+blocked Node, in order to allow the upgrade. This way, they can unblock an upgrade, and ensure that the workload is
+able to go back into running, using the migrated storage volume. If the workload does not go back into running, the
+cluster administrator must triage any issues with the CSI drivers, correcting them before allowing upgrades on any
+other Nodes. This process is meant to minimize any workload interruption on upgrade.
+
+##### Possible upgrade path scenarios
+
+###### v7 -> v8
+
+Scenario A:
+
+v7 with csi-proxy running on Windows Nodes -> v8 with csi-proxy running on Windows Nodes
+
+csi-proxy will be running on each Node. WMCO v8 will be installed on the cluster, and the individual Node upgrades will
+be blocked by WMCO v8 on Azure, in cases where in-tree storage volumes must be migrated. The user will be able to deploy
+the CSI drivers and confirm they go into running. The user will be able to follow the ideal upgrade procedure.
+
+Scenario B:
+
+v7 without csi-proxy running on Windows Nodes -> v8 with csi-proxy running on Windows Nodes
+
+csi-proxy will not be running on each Node. WMCO 8 will be installed on the cluster, and the individual Node upgrades
+will be blocked by WMCO v8 on Azure, in cases where in-tree storage volumes must be migrated. The user will be able to
+deploy the CSI drivers, but will not be able to confirm the CSI Windows daemonset pods go into running until a Node has
+been upgraded. The user should upgrade a Node, confirm the csi-driver Windows daemonset pod for the node goes into
+running, and then confirm that the workload goes into running.
+
+Scenario C:
+
+v7 with csi-proxy running on Windows Nodes -> v8 without csi-proxy running on Windows Nodes
+
+csi-proxy will initally be running on each Node. WMCO 8 will be installed on the cluster, and the individual Node
+upgrades will not be blocked, each Node will be upgraded to v8, and csi-proxy will stop running on each Node.
+For vSphere clusters, there is no impact as in-tree storage will still be used.
+For Azure and all other platforms, neither in-tree volumes nor CSI volumes will be usable. Storage workloads will be
+disrupted until WMCO and all Windows Nodes are upgraded to a version of v8 with the csi-proxy backport.
+
+Scenario C needs to be avoided. For this reason WMCO v8 with csi-proxy backport should be released before WMCO v7
+with csi-proxy backport. The new WMCO v8 version should have a skipRange present in its CSV which prevents the
+installation of v8 versions without csi-proxy backported.
+
+###### v8 -> v9
+
+Scenario D:
+
+v8 with csi-proxy running on Windows Nodes -> v9
+
+Same as Scenario A, but with WMCO v9 blocking upgrades for vSphere Nodes, instead of Azure.
+
+Scenario E:
+
+v8 without csi-proxy running on Windows Nodes -> v9
+
+Same as Scenario B, but with WMCO v9 blocking upgrades for vSphere Nodes, instead of Azure.
+
+##### CSI driver upgrades
 
 If users are making use of the Linux CSI node drivers on the cluster, and not deploying all parts of storage
 themselves, users will have to ensure the following:
@@ -153,12 +230,15 @@ Before upgrading, users should check the OCP release notes to determine how the 
 if they need to use a new Windows CSI node driver image. If so, the Windows DaemonSet should be updated once the
 cluster upgrade is complete. More on this can be found in the [version skew](#version-skew-strategy) section.
 
-WMCO does not support downgrades.
 
 #### csi-proxy upgrades
 
 The csi-proxy binary will be updated [the same as all other Windows services configured by WMCO/WICD](health-management.md#upgrade--downgrade-strategy).
 The service will be stopped, if necessary a newer binary will be copied over, and the service will be started again, with configuration defined in the windows-services ConfigMap.
+
+#### Downgrades
+
+WMCO does not support downgrades.
 
 ### Version Skew Strategy
 
