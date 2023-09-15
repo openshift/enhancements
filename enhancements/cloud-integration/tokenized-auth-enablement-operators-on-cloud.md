@@ -224,7 +224,7 @@ enabled cluster. New guidelines would include the following to use CCO has detec
 - When OLM starts the operator with `ROLEARN` env. variable, handle the cloud credentials *almost* as if CCO is in Mint
   mode:
   - Create CredentialsRequest, now with `spec.cloudTokenPath` and `spec.providerSpec.stsIAMRoleARN` filed.
-  - Wait for Secrets referenced in the CredentialsRequest to be created by CCO.
+  - Wait for the Secret referenced in the CredentialsRequest to be created by CCO.
     - Expect the Secrets take some time to create, do not crash and report error when it takes too long.
 
 ### Workflow Description
