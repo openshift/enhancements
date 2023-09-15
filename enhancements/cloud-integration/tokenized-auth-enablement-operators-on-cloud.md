@@ -225,7 +225,7 @@ enabled cluster. New guidelines would include the following to use CCO has detec
   mode:
   - Create CredentialsRequest, now with `spec.cloudTokenPath` and `spec.providerSpec.stsIAMRoleARN` filed.
   - Wait for the Secret referenced in the CredentialsRequest to be created by CCO.
-    - Expect the Secrets take some time to create, do not crash and report error when it takes too long.
+    - Expect the Secret to take some time to create, do not crash and report an error when it takes too long.
 
 ### Workflow Description
 
