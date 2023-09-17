@@ -734,9 +734,10 @@ We don't allow setting the `strict-transport-security` header on either an Ingre
 another [option](https://docs.openshift.com/container-platform/4.12/networking/ingress-operator.html#nw-using-ingress-forwarded_configuring-ingress))
 but have actual use-cases (which aren't covered by the existing option). Therefore, they will be allowed, with the following note in the product documentation:
 
-Note: If in the IngressController, action `Set` is set using API(`spec.httpHeaders.actions`) and if action `Replace` is set using the API mentioned above i.e spec.httpHeaders.forwardedHeaderPolicy then the value will be set
-using this API(spec.httpHeaders.actions).
-In short, the value set by `spec.httpHeaders.actions` will override the value set by `spec.httpHeaders.actions`.
+Note: In the IngressController, if both the action `Set` is configured using `spec.httpHeaders.actions` and the 
+action `Replace` is configured using `spec.httpHeaders.forwardedHeaderPolicy`, then the resulting configured value
+is from `spec.httpHeaders.actions`.  
+In short, the value set by `spec.httpHeaders.actions` will override the value set by `spec.httpHeaders.forwardedHeaderPolicy`.
 
 In the case of HTTP request headers, the actions specified in `spec.httpHeaders.actions` on the Route will be executed after
 the actions specified in the IngressController's `spec.httpHeaders.actions` field.
@@ -747,6 +748,14 @@ value which was present in the backend section.
 
 This enhancement provides a method for a user to  delete the `x-forwarded-for` header, which the Ingress Controller `spec.httpHeaders.forwardedHeaderPolicy` does not provide.
 
+The `x-forwarded-for` header can be changed in three different places in the IngressControllerSpec and Route annotation: `spec.httpHeaders.actions`, `spec.httpHeaders.forwardedHeaderPolicy`, route annotation `haproxy.router.openshift.io/set-forwarded-headers`
+
+The following chart describes what values will be over-ridden when either `spec.httpHeaders.forwardedHeaderPolicy`, route annotation `haproxy.router.openshift.io/set-forwarded-headers` 
+or both are set along with `spec.httpHeaders.action`.
+The rows describe which API field or route annotation were set.
+The columns describe the API field or annotation which will get over-ridden by `spec.httpHeaders.action`.
+The value `yes` means the field present in the column header will get over-ridden by `spec.httpHeaders.action` when the fields in the corresponding row
+are set.
 
 | values overriden by spec.httpHeaders.action &rarr;<br/>values set along with spec.httpHeaders.action &darr;                                                                      | haproxy.router.openshift.io/set-forwarded-headers | spec.httpHeaders.forwardedHeaderPolicy |
 |-----------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------|----------------------------------------|
@@ -1174,7 +1183,7 @@ The HAProxy documentation refers to this as _strong quoting_.  Using strong quot
 By design, HAProxy's frontend receives the request and dispatches it to the backend, and then the frontend
 gets the response from the backend.
 
-So, the override behavior happens the way mentioned in the question `Why does a custom header value defined in RouteSpec override IngressControllerSpec value ?`
+So, the override behavior happens the way mentioned in the question `How do Route headers interact with IngressController headers of the same value?`
 under section `Open Questions` where HTTP request headers defined in the IngressController are overridden by headers
 defined in the Route.  HTTP response headers defined in the Ingress Controller are **not** overridden by response headers defined in the Route.
 
@@ -1186,10 +1195,10 @@ For Example: Suppose an ingress controller called custom-header handles 100 rout
 If it sets HTTP response `X-Frame-Options DENY` via `spec.httpHeader.actions`,
 then for each of those 100 routes the command `http-response set-header X-Frame-Options DENY` will be set, resulting in 100 additional stanzas as it will be one stanza per backend related to a route.
 
-There might be a case, where admin wants to set a response header for all connections to the IngressController as per company policy which he won't be able to do so
-using this approach.
-For Example: A cluster admin wants to set the  `X-Frame-Options` header with the value `DENY` for all routes the ingress controller is handling, overwriting 
-any existing `X-Frame-Options` header that may have been set by the application or Route configuration.
+There might be a case, where company policy requires the admin to set a response header for all connections to the IngressController.  
+For example, a cluster admin wants to set the  `X-Frame-Options` header with the value `DENY` for all routes the ingress controller is handling, overwriting
+any existing `X-Frame-Options` header that may have been set by the application or Route configuration.  This wouldn't be possible with this alternative solution.
+However, it can be done by the current proposal as described in the section `Workflow Description`.
 
 The upsides of injecting all the header configuration on the backends is that
 it would give OpenShift router full control over the ordering of header actions and present a more consistent learning environment for the admin.
