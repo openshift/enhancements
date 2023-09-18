@@ -156,21 +156,7 @@ to a different network and if none found, clear EIP node status and let cluster 
 - EIP was assigned to ovn-managed network but CM assigned it to another network on the node
 
 ### API Extensions
-Add `Network` field to `EgressIP` `.status`:
-
-```golang
-// The per node status, for those egress IPs who have been assigned.
-type EgressIPStatusItem struct {
-// Assigned node name
-Node string `json:"node"`
-// Assigned egress IP
-EgressIP string `json:"egressIP"`
-// Assigned network
-Network string `json:"network"`
-}
-```
-
-This will aid debugging of egress IP assignments. Nothing must depend on this network value otherwise upgrades may fail.
+N/A
 
 ### Risks and Mitigations
 - OVN kube node must recalculate all the matched pods for a given egress IP. This will require refactoring this logic
