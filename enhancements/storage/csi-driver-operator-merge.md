@@ -6,7 +6,7 @@ reviewers:
   - "@storage-team"
   - "joepvd" # ART
 approvers:
-  - TBD
+  - hekumar
 api-approvers:
   - None
 creation-date: 2023-09-05
