@@ -246,7 +246,7 @@ Example:
     github.com/openshift/aws-ebs-csi-driver-operator. Some experiments are needed here._
 
   The openshift/csi-operator repository should look like this at this point:
-  ```
+  ```text
   ├── assets          # Common assets for all CSI drivers (empty now)
   ├── cmd             # All commands for all CSI driver operators (empty now)
   ├── pkg             # All common code for all CSI driver operators (empty now)
@@ -295,15 +295,15 @@ Example:
     2. PR against openshift/ocp-build-data to switch the source github repo + Dockerfile
        for `ose-aws-ebs-csi-driver-operator-container` image.
     3. Somehow coordinated merge of these two.
-      * _Can we merge 1. before 2. to see if / how it breaks CI builds? We could be able to revert back to the working
-        config without any extra approvals._
+       _Can we merge 1. before 2. to see if / how it breaks CI builds? We could be able to revert back to the working
+       config without any extra approvals._
 
 * After the switch, we start actually refactoring and merging the operator code to shared packages and so on. At this
   time, we will have CI in place for all our PRs in the repo. We will re-use `Dockerfile.aws-ebs`
   and `Dockerfile.aws-ebs.test` to build the image, so we don't need to change anything in ART build data.
 
   After the refactoring, the repo should look like this:
-  ```
+  ```text
   ├── assets
   │   ├── assets.go
   │   └── generated   # We want to generate the assets, see below.
