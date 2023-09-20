@@ -28,8 +28,8 @@ files to kube-apiserver pods in an unsupported mode that matches the testing use
 
 ## Motivation
 
-Simplify testing features that might require additional files to be installed into
-kube-apiserver pods.
+Simplify testing features that might require additional files to be present inside of the
+kube-apiserver pod.
 
 ### User Stories
 
