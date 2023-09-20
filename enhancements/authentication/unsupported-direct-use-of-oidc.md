@@ -19,6 +19,7 @@ tracking-link: []
 see-also:
   - [oc Authorization Grant login](./improved-login-workflow.md)
   - [Configuring OIDC directly - study](./direct-oidc-study/study-oidc-in-openshift.md)
+  - [Unsupported file synchronization into kube-apiserver static pods](https://github.com/openshift/enhancements/blob/master/enhancements/kube-apiserver/unsupported-file-sync.md)
 replaces: []
 superseded-by: []
 ---
@@ -149,22 +150,9 @@ into a file.
 The OIDC configuration is very likely to require configuring additional files to be
 mounted to the kube-apiserver static pods. A typical example is the `oidc-ca-file`.
 
-This requires synchronizing additional `configMaps`/`secrets` into static pods.
-The kube-apiserver-operator should support two subfields to the `unsupportedConfigOverrides`:
-- `unsupportedConfigMaps`
-- `unsupportedSecrets`
-
-These each follow the same API:
-```
-- name: <openshift-config ref>
-  path: <cannot contain any path traversal>
-  defaultMode: <file permissions>
-```
-where:
-- `name` points to the name of the resource in the `openshift-config` namespace
-- `path` specifies a subpath of the `/etc/kubernetes/unsupported` directory where
-  the `configMap`/`secret` should be mounted
-- `defaultMode` matches the common `volume`'s `defaultMode` semantics
+To do that, the process described in
+[GitHub Pull Request: kube-apiserver: allow unsupported files sync](https://github.com/openshift/enhancements/pull/1480)
+shall be used.
 
 **OAuth metadata**<br>
 `oc login`, the web console and the `oauth-proxy` are all using the kube-apiserver's
