@@ -7,6 +7,8 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+source "$(dirname "${BASH_SOURCE}")/ignore_lib.sh"
+
 SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 TEMPLATE=${SCRIPTDIR}/../guidelines/enhancement_template.md
@@ -15,6 +17,7 @@ TEMPLATE=${SCRIPTDIR}/../guidelines/enhancement_template.md
 # avoid problems when the template is changed in a way that is
 # incompatible with existing documents.
 NEW_FILES=$(${SCRIPTDIR}/find_new.sh)
+NEW_FILES=$(filter_ignored_paths $NEW_FILES)
 
 if [ -z "$NEW_FILES" ]; then
     echo "OK, no new enhancement files found"
