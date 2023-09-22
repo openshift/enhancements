@@ -6,6 +6,7 @@ authors:
   - "@fenggw-fnst"
 reviewers:
   - "@dtantsur"
+  - "@zaneb"
 approvers:
   - "@dtantsur"
 api-approvers:
@@ -13,7 +14,7 @@ api-approvers:
 tracking-link:
   - "https://issues.redhat.com/browse/RFE-3505"
 creation-date: 2023-04-13
-last-updated: 2023-07-06
+last-updated: 2023-09-22
 ---
 
 # BMC CA Certificate Support
@@ -75,34 +76,27 @@ environments where such risks are unacceptable.
 
 ## Proposal
 
-- Modify [OpenStack Ironic][OpenStack Ironic] to accept CA path in its
-  configuration (Implementation details will be discussed in the ironic community).
-- Modify [ironic-image][Metal3 Ironic Container] to specify the CA certificates
-  in a pre-defined path to Ironic. The pre-defined path can be, e.g.
-  `/certs/ca/bmc`, which is the mount point for the CA certificates in
-  ironic-image. When starting the container, check if `/certs/ca/bmc` exists,
-  if it does, then:
-  - Write the CA certificates mounted in `/certs/ca/bmc` to a file, e.g.
-    `/tmp/bmc-tls.pem`.
-  - Launch a process to monitor changes to `/certs/ca/bmc`, if changes are
-    detected, then update `/tmp/bmc-tls.pem` accordingly.
-  - Set the `default_verify_ca_path` in `ironic.conf` using `/tmp/bmc-tls.pem`
-    as the value.
-
 - Modify [installer][OpenShift Installer] for control plane installation:
   - Add a new optional field `platform.baremetal.bmcCACert` in
     `install-config.yaml` to allow users to enter the contents of the CA
     certificates.
   - Perform a pre-validation of the SSL connection with the BMCs using the
     provided CA certificates before the installation begins. If the validation
-    fails, an error message will be outputed to indicate which baremetal
+    fails, a warning message will be outputed to indicate which baremetal
     failed. This helps to identify issues early on, especially for the
     time-consuming IPI installation.
   - Modify `startironic.sh.template`:
-    - Create the CA certificate files in of the bootstrap VM
+    - Create the CA certificate file in of the bootstrap VM
       according to `platform.baremetal.bmcCACert`.
-    - Mount the CA certificate files when starting the Ironic container.
-    - Create the contents of CA certificate files as a ConfigMap.
+    - Mount the CA certificate file when starting the Ironic container.
+    - Create the contents of CA certificate file as a ConfigMap.
+
+- Modify [ironic-image][Metal3 Ironic Container] to detect whether the CA certificate file
+  is successfully mounted into the container. If this file exists, set the path of this
+  file to the value of `default_verify_ca_path` in `ironic.conf`.
+
+- Modify [OpenStack Ironic][OpenStack Ironic] to accept CA path in its
+  configuration (Implementation details will be discussed in the ironic community).
 
 - Modify [cluster-baremetal-operator][OpenShift Cluster Baremetal Operator]
   to ensure mounting the `bmc-verify-ca` ConfigMap into Ironic container
@@ -137,12 +131,9 @@ environments where such risks are unacceptable.
 
 ### API Extensions
 
-Add an optional map field `bmcCACert` under `platform.baremetal` in
-`install-config.yaml`. Users can configure multiple sets of CA certificates
-with the names they desire, and within each set, multiple certificates can
-also be configured. For example, setting a generic CA certificate (which
-includes multiple certificates) for the cluster and assigning dedicated CA
-certificates to certain baremetal nodes.
+Add an optional string field `bmcCACert` under `platform.baremetal` in
+`install-config.yaml`. Administrators can add the CA certificates used in
+cluster deployment to this field.
 
 ```diff
  # install-config.yaml
@@ -152,7 +143,6 @@ certificates to certain baremetal nodes.
      ingressVIP: xxx.xxx.xxx.xxx
      provisioningNetworkCIDR: xxx.xxx.xxx.xxx/xx
 +    bmcCACert:
-+      "generic.crt": |
 +      -----BEGIN CERTIFICATE-----
 +      ......
 +      ......
@@ -163,7 +153,6 @@ certificates to certain baremetal nodes.
 +      ......
 +      ......
 +      -----END CERTIFICATE-----
-+      "master-0.crt": |
 +      -----BEGIN CERTIFICATE-----
 +      ......
 +      ......
@@ -178,12 +167,6 @@ certificates to certain baremetal nodes.
          ......
      ......
 ```
-
-Please note that these CA certificates will be merged into a single file within
-the Ironic container, rather than organized in the form defined by the API.
-Using a map for this field, as opposed to a string, improves maintainability.
-For instance, when updating CA certificates for certain nodes, users can
-distinguish them by the names they have set, reducing the risk of human errors.
 
 ### Risks and Mitigations
 
