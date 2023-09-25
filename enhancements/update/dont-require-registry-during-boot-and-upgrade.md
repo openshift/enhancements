@@ -3,11 +3,11 @@ title: dont-require-registry-during-boot-and-upgrade
 authors:
 - "@jhernand"
 reviewers:
-- "@avishayt"
-- "@danielerez"
-- "@mrunalp"
-- "@nmagnezi"
-- "@oourfali"
+- "@avishayt"   # To ensure that this will be usable with the appliance.
+- "@danielerez" # To ensure that this will be usable with the appliance.
+- "@mrunalp"    # To ensure that this can be implemented with CRI-O and MCO.
+- "@nmagnezi"   # To ensure that this will be usable with the appliance.
+- "@oourfali"   # To ensure that this will be usable with the appliance.
 approvers:
 - "@sdodson"
 - "@zaneb"
