@@ -99,9 +99,6 @@ and that verifies that boots and upgrades can be performed without a registry
 server. One way to ensure this is to run in CI an admission hook that
 rejects/warns about any spec that uses the `Always` pull policy.
 
-It would also be useful to have another test that scans for use of this
-`Always` pull policy in the source code.
-
 #### Don't try to contact the image registry server explicitly
 
 Some OCP components explicitly try to contact the registry server without a
@@ -135,12 +132,6 @@ We should have a set of CI tests that verify that boots and upgrades can be
 performed in a fully disconnected environment without a registry server, both
 for a single node cluster and a cluster with multiple nodes. These tests should
 gate the OCP release.
-
-It is desirable to have another set of test that scans the OCP components
-looking for use of the `Always` pull policy. This should probably run for each
-pull request of each OCP component, and prevent merging if it detects that the
-offending pull policy is used. We should consider adding admission in CI for
-this.
 
 ### Graduation Criteria
 
