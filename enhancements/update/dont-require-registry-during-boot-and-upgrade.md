@@ -128,7 +128,9 @@ None.
 
 ### Open Questions
 
-None.
+Access to a registry server is also needed by the image stream controller to
+import tags. Those imports will fail if there is no registry available. Does
+that block upgrades?
 
 ### Test Plan
 
