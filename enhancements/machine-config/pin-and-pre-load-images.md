@@ -69,7 +69,10 @@ container images.
 
 ### Non-Goals
 
-None.
+We wish to use the mechanism described in this enhancement to orchestrate
+upgrades without a registry server. But that orchestration is not a goal
+of this enhancement; it will be part of a separate enhancement based on
+parts of https://github.com/openshift/enhancements/pull/1432.
 
 ## Proposal
 
