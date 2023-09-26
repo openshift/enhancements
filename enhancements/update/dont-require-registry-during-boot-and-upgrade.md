@@ -64,9 +64,13 @@ all the required images have already been pulled.
 
 ### Non-Goals
 
-It is not the goal of this enhancement to add a mechanism to ensure that
+It is not a goal of this enhancement to add a mechanism to ensure that
 required images are available. That is the subject of the [pin and pre-load
 images](https://github.com/openshift/enhancements/pull/1481) enhancement.
+
+It is not a goal of this enhancement to elimitate the requirement of a registry
+server for other operators. We are just eliminating the requirement that it be
+available during boots and upgrades.
 
 ## Proposal
 
