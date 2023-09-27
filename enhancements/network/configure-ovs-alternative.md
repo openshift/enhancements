@@ -6,12 +6,13 @@ authors:
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - @jcaamano
   - @trozet
+  - TODO: Someone from MCO
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
   - TBD
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - TBD
+  - None
 creation-date: 2023-06-29
-last-updated: 2023-08-03
+last-updated: 2023-09-27
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/OPNET-265
 see-also:
@@ -79,6 +80,12 @@ In that case manual configuration of br-ex would be an unnecessary extra
 burden on the user and the logic to handle it automatically would be fairly
 simple so using configure-ovs is far less likely to cause problems.
 
+However, it should be noted that this initial implementation does not preclude
+future work to replace configure-ovs in all cases. The nmpolicy feature of
+NMState may be able to provide a sufficiently generic configuration that no
+user input would be required. This can be investigated as a followup once
+we have a solution for the more complex use cases.
+
 ## Proposal
 
 This mechanism will be similar to the day-1 network configuration described
@@ -92,7 +99,8 @@ NMState YAML, which will be provided to each node via Ignition. Around the
 same point in the boot process that configure-ovs would run, we will run
 NMState to apply the provided configuration. This will only be done on first
 boot because subsequent changes will be made using the Kubernetes-NMState
-operator.
+operator. When this mechanism is used to create br-ex, the configure-ovs
+script will be skipped to avoid conflicts.
 
 ### Important differences from baremetal day-1
 
@@ -107,7 +115,7 @@ baremetal-operator, which means non-baremetal platforms cannot use it.
 
 However, this is not a replacement for the baremetal feature (and any other
 platform-specific deploy-time network configuration tools). This is because
-minimal networking is required in order to pull Ignition, and since this
+minimal networking is required in order to pull Ignition, and since this new
 configuration will be provided through Ignition it will still be necessary
 to have platform-specific methods of injecting network config before Ignition
 runs. However, the platform-specific part can be much simpler because it
@@ -117,111 +125,119 @@ won't even be needed.
 
 ### Workflow Description
 
-When the user is populating install-config they will provide the necessary
-configuration in the networking section (TODO: Is this the right place?).
-It will look something like this:
+During initial deployment, the user will provide the installer with a
+machine-config manifest containing base64-encoded NMState YAML for each node
+in the cluster. This manifest may look something like:
 
-networking:
-  networkType: OVNKubernetes
-  machineNetwork:
-  - cidr: 192.0.2.0/24
-  [...]
-  hostConfig:
-  - name: master-0
-    networkConfig:
-      interfaces:
-      - name: enp2s0
-        type: ethernet
-        state: up
-        ipv4:
-          enabled: false
-        ipv6:
-          enabled: false
-      - name: br-ex
-        type: ovs-bridge
-        state: up
-        copy-mac-from: enp2s0
-        ipv4:
-          enabled: false
-          dhcp: false
-        ipv6:
-          enabled: false
-          dhcp: false
-        bridge:
-          port:
-          - name: enp2s0
-          - name: br-ex
-      - name: br-ex
-        type: ovs-interface
-        state: up
-        ipv4:
-          enabled: true
-          dhcp: true
-        ipv6:
-          enabled: false
-          dhcp: false
+```
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineConfig
+metadata:
+  labels:
+    machineconfiguration.openshift.io/role: worker
+  name: 10-br-ex-worker
+spec:
+  config:
+    ignition:
+      version: 3.2.0
+    storage:
+      files:
+      - contents:
+          source: data:text/plain;charset=utf-8;base64,aW50ZXJmYWNlczoKLSBuYW1lOiBlbnAyczAKICB0eXBlOiBldGhlcm5ldAogIHN0YXRlOiB1cAogIGlwdjQ6CiAgICBlbmFibGVkOiBmYWxzZQogIGlwdjY6CiAgICBlbmFibGVkOiBmYWxzZQotIG5hbWU6IGJyLWV4CiAgdHlwZTogb3ZzLWJyaWRnZQogIHN0YXRlOiB1cAogIGNvcHktbWFjLWZyb206IGVucDJzMAogIGlwdjQ6CiAgICBlbmFibGVkOiBmYWxzZQogICAgZGhjcDogZmFsc2UKICBpcHY2OgogICAgZW5hYmxlZDogZmFsc2UKICAgIGRoY3A6IGZhbHNlCiAgYnJpZGdlOgogICAgcG9ydDoKICAgIC0gbmFtZTogZW5wMnMwCiAgICAtIG5hbWU6IGJyLWV4Ci0gbmFtZTogYnItZXgKICB0eXBlOiBvdnMtaW50ZXJmYWNlCiAgc3RhdGU6IHVwCiAgaXB2NDoKICAgIGVuYWJsZWQ6IHRydWUKICAgIGFkZHJlc3M6CiAgICAtIGlwOiAiMTkyLjE2OC4xMTEuMTEzIgogICAgICBwcmVmaXgtbGVuZ3RoOiAyNAogIGlwdjY6CiAgICBlbmFibGVkOiBmYWxzZQogICAgZGhjcDogZmFsc2UKZG5zLXJlc29sdmVyOgogIGNvbmZpZzoKICAgIHNlcnZlcjoKICAgIC0gMTkyLjE2OC4xMTEuMQpyb3V0ZXM6CiAgY29uZmlnOgogIC0gZGVzdGluYXRpb246IDAuMC4wLjAvMAogICAgbmV4dC1ob3AtYWRkcmVzczogMTkyLjE2OC4xMTEuMQogICAgbmV4dC1ob3AtaW50ZXJmYWNlOiBici1leA==
+        mode: 0644
+        overwrite: true
+        path: /etc/nmstate/worker-0.yaml
+      - contents:
+          source: data:text/plain;charset=utf-8;base64,aW50ZXJmYWNlczoKLSBuYW1lOiBlbnAyczAKICB0eXBlOiBldGhlcm5ldAogIHN0YXRlOiB1cAogIGlwdjQ6CiAgICBlbmFibGVkOiBmYWxzZQogIGlwdjY6CiAgICBlbmFibGVkOiBmYWxzZQotIG5hbWU6IGJyLWV4CiAgdHlwZTogb3ZzLWJyaWRnZQogIHN0YXRlOiB1cAogIGNvcHktbWFjLWZyb206IGVucDJzMAogIGlwdjQ6CiAgICBlbmFibGVkOiBmYWxzZQogICAgZGhjcDogZmFsc2UKICBpcHY2OgogICAgZW5hYmxlZDogZmFsc2UKICAgIGRoY3A6IGZhbHNlCiAgYnJpZGdlOgogICAgcG9ydDoKICAgIC0gbmFtZTogZW5wMnMwCiAgICAtIG5hbWU6IGJyLWV4Ci0gbmFtZTogYnItZXgKICB0eXBlOiBvdnMtaW50ZXJmYWNlCiAgc3RhdGU6IHVwCiAgaXB2NDoKICAgIGVuYWJsZWQ6IHRydWUKICAgIGFkZHJlc3M6CiAgICAtIGlwOiAiMTkyLjE2OC4xMTEuMTE0IgogICAgICBwcmVmaXgtbGVuZ3RoOiAyNAogIGlwdjY6CiAgICBlbmFibGVkOiBmYWxzZQogICAgZGhjcDogZmFsc2UKZG5zLXJlc29sdmVyOgogIGNvbmZpZzoKICAgIHNlcnZlcjoKICAgIC0gMTkyLjE2OC4xMTEuMQpyb3V0ZXM6CiAgY29uZmlnOgogIC0gZGVzdGluYXRpb246IDAuMC4wLjAvMAogICAgbmV4dC1ob3AtYWRkcmVzczogMTkyLjE2OC4xMTEuMQogICAgbmV4dC1ob3AtaW50ZXJmYWNlOiBici1leA==
+        mode: 0644
+        overwrite: true
+        path: /etc/nmstate/worker-1.yaml
+```
 
-The name field will need to be something that uniquely identifies a given host.
-I'm unsure if name is necessarily the best way to do that, but it is one valid
-option. I reused the networkConfig name from the baremetal feature for
-consistency. Perhaps something different would be preferable to avoid confusion
-though?
+The filenames must correspond to the hostname of each node as that will be
+used to map the configuration to the node. A separate manifest will need
+to be provided for masters and workers, which is typical when working with
+machine-configs.
 
-Note that although the configuration can be provided on a per-host basis, it is
-not mandatory to do so. YAML anchors can be used to duplicate a single
-configuration across multiple nodes. For example:
+Alternatively, there will be a mechanism to deploy a single cluster-wide
+configuration. That might look like:
 
-networking:
-  networkType: OVNKubernetes
-  machineNetwork:
-  - cidr: 192.0.2.0/24
-  [...]
-  hostConfig:
-  - name: master-0
-    networkConfig: &BOND
-      interfaces:
-      - name: br-ex
-        ...etc...
-  - name: master-1
-    networkConfig: *BOND
-  - name: master-2
-    networkConfig: *BOND
+```
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineConfig
+metadata:
+  labels:
+    machineconfiguration.openshift.io/role: master
+  name: 10-br-ex-master
+spec:
+  config:
+    ignition:
+      version: 3.2.0
+    storage:
+      files:
+      - contents:
+          source: data:text/plain;charset=utf-8;base64,aW50ZXJmYWNlczoKLSBuYW1lOiBlbnAyczAKICB0eXBlOiBldGhlcm5ldAogIHN0YXRlOiB1cAogIGlwdjQ6CiAgICBlbmFibGVkOiBmYWxzZQogIGlwdjY6CiAgICBlbmFibGVkOiBmYWxzZQotIG5hbWU6IGJyLWV4CiAgdHlwZTogb3ZzLWJyaWRnZQogIHN0YXRlOiB1cAogIGNvcHktbWFjLWZyb206IGVucDJzMAogIGlwdjQ6CiAgICBlbmFibGVkOiBmYWxzZQogICAgZGhjcDogZmFsc2UKICBpcHY2OgogICAgZW5hYmxlZDogZmFsc2UKICAgIGRoY3A6IGZhbHNlCiAgYnJpZGdlOgogICAgcG9ydDoKICAgIC0gbmFtZTogZW5wMnMwCiAgICAtIG5hbWU6IGJyLWV4Ci0gbmFtZTogYnItZXgKICB0eXBlOiBvdnMtaW50ZXJmYWNlCiAgc3RhdGU6IHVwCiAgaXB2NDoKICAgIGVuYWJsZWQ6IHRydWUKICAgIGRoY3A6IHRydWUKICBpcHY2OgogICAgZW5hYmxlZDogZmFsc2UKICAgIGRoY3A6IGZhbHNl
+        mode: 0644
+        overwrite: true
+        path: /etc/nmstate/cluster.yaml
+```
 
-This reduces duplication in install-config and the chance of errors due to
-unintended differences in node config.
+The only difference is there will be a single file applied to each node of the
+specified role. The name of the file must be `cluster.yaml`.
+If there are both node-specific and cluster-wide configuration
+files present, the node-specific one will take precedence. Again, separate
+manifests will be needed for each role because of how MCO works.
 
 When this mechanism is in use, a flag will be set to indicate to configure-ovs
 that it should not attempt to configure br-ex.
 
 If changes to the bridge configuration are desired on day 2 (e.g. adding a VLAN
 or changing MTU), the user will need to install Kubernetes-NMState and use it
-to apply those changes directly to br-ex.
+to apply those changes directly to br-ex. The configuration applied initially
+should be copied into an NNCP and used as the basis for the update config.
+Modifying the machine-config for an already-deployed node will have no effect.
+
+#### Scaleout
+
+When scaling out new nodes on day 2, it will be necessary to update the
+appropriate machine-configs with NMState YAML for the new node(s). If a
+cluster-wide configuration is in use, no changes will be necessary. This
+must happen before the scaleout occurs.
+
+Since we don't want to trigger a reboot of the entire cluster before each
+scaleout operation, we will add the NMState configuration directory to the
+list of paths for which the machine-config-operator will not trigger a reboot.
+Files in this path will only be applied on initial deployment anyway so it
+will never be necessary to reboot a node when updates are made. Note that,
+as mentioned above, if changes are desired on day 2 they should be made
+with Kubernetes-NMState, not by updating the machine-configs used here.
 
 #### Variation [optional]
 
-This could be implemented almost entirely with machine-configs, with only a simple
-service on the host to apply the provided NMState files. This is the approach
-the [prototype implementation](https://docs.google.com/document/d/1Zp1J2HbVvu-v4mHc9M594JLqt6UwdKoix8xkeSzVL98/edit#heading=h.fba4j9nvp0nl)
-used since per-host configuration was not available any other way. However,
-this feels messy as it requires every node to have the configuration for every
-other node in the cluster and select the correct one for itself. It does have
-the benefit of requiring significantly less work to implement. If users are
-writing their NMState configs in machine-configs instead of via a top-level
-OpenShift API perhaps this also side-steps the concerns about API style
-compatibility between OpenShift and NMState?
+We have two paths forward for applying the configuration. One is to write a
+custom service that will select only the host-specific NMState file and
+apply it. This is what my [current prototype](https://docs.google.com/document/d/1Zp1J2HbVvu-v4mHc9M594JLqt6UwdKoix8xkeSzVL98/edit#heading=h.fba4j9nvp0nl) does.
 
-One concern with this is that changes to machine-configs require a reboot of
-all affected nodes. We could eliminate that by making the machine-configs for
-this feature part of the [rebootless updates](https://github.com/openshift/machine-config-operator/blob/94fc0354f154e2daa923dd96defdf86448b2b327/docs/MachineConfigDaemon.md?plain=1#L147)
-list in MCO. That way if you wanted to, for example, scale out a new machine
-you would just add its config to the existing machine-config, roll that out,
-then deploy the new node. These configs will only be applied at deploy time
-anyway since Kubernetes-NMState will be used for day 2 changes, so it shouldn't
-ever be necessary to reboot a node for changes to these configs.
+The other is to use the NMState service already included in the OS image to
+apply the configurations. One issue with this is that it will apply everything
+in the /etc/nmstate directory rather than just the host-specific file.
+To get around that, we could still implement a custom service, but instead of
+applying the configurations, it would only be responsible for copying the
+correct file to /etc/nmstate so the regular service can apply it. This has
+the benefit of not reinventing the NMState service and still gives us full
+control over what gets applied to the host, and also leaves us a way to signal
+to ovs-configuration that we've already handled the bridge setup.
 
-I believe we would need to add logic for these new config to
-[this code](https://github.com/openshift/machine-config-operator/blob/a41f5af837d95e0fc4f59e4497447a26acaf5bc2/pkg/daemon/update.go#L328)
-in MCO to make changes without rebooting.
+I'm currently leaning toward the second option just so we avoid having two
+NMState services that may conflict with each other.
+
+### API Extensions
+
+This will not directly modify the API of OpenShift. The API for this feature is
+implemented in Kubernetes-NMState, and this does not require any specific
+modifications in that project at this time.
+
+### Implementation Details/Notes/Constraints [optional]
 
 Scaleout in this implementation (using static IPs on baremetal to demonstrate
 as many parts of the process as possible) would look something like this:
@@ -249,17 +265,8 @@ The node will initially boot with the network configuration specified in
 `preprovisioningNetworkDataName` and then have the configuration in the
 machine-config applied.
 
-### API Extensions
-
-This will not directly modify the API of OpenShift. The API for this feature is
-implemented in Kubernetes-NMState, and this does not require any specific
-modifications in that project at this time.
-
-### Implementation Details/Notes/Constraints [optional]
-
-What are the caveats to the implementation? What are some important details that
-didn't come across above. Go in to as much detail as necessary here. This might
-be a good place to talk about core concepts and how they relate.
+Only the first step of the process is new for this feature. The rest is
+standard baremetal scaleout when using static IPs.
 
 ### Risks and Mitigations
 
@@ -284,7 +291,10 @@ Using a machine-config to do initial deployment and a
 NodeNetworkConfigurationPolicy to make day 2 changes will require a manual sync
 of the NMState configuration. Unfortunately this is unavoidable because the
 Kubernetes-NMState operator is not part of the core payload so it (and its
-CRDs) cannot be used for initial deployment.
+CRDs) cannot be used for initial deployment. A possible future improvement
+in this area would be to have Kubernetes-NMState "adopt" the configuration
+applied by this process and generate an NNCP automatically when it is
+installed.
 
 
 ## Design Details
@@ -302,11 +312,6 @@ CRDs) cannot be used for initial deployment.
   Some initial work to address this concern:
   https://github.com/nmstate/nmstate/pull/2338
 
-* Which operator is going to be responsible for deploying the NMState configuration?
-  MCO will need to be involved since it needs to be included in Ignition, but
-  do we want to use machine-configs? The variation discussion above covers this
-  option in more detail.
-
 * If changes are made to the bridge configuration on day 2, will OVNKubernetes
   handle those correctly without a reboot? If not, how do we orchestrate a
   reboot?
@@ -320,9 +325,10 @@ CRDs) cannot be used for initial deployment.
 * Do all platforms have a concept of individual hosts? I know baremetal does and
   I believe VSphere as well, but I'm not sure about cloud platforms.
 
-* Depending on the answer to the previous question, can we make this only for
-  on-prem platforms?
-
+* Depending on the answer to the previous question, can we require such platforms
+  to use only the cluster-wide configuration? I think this should be fine since
+  those platforms tend not to use things like static IPs that may require per-host
+  configuration.
 
 **** End of current document. Everything below here is unedited template sections ****
 
