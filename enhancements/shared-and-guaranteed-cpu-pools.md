@@ -190,9 +190,8 @@ for each container and will not require any modifications.
 **cluster creator** is a human user responsible for deploying a cluster.
 
 1. The cluster creator creates a Performance Profile for the NTO and specifies a shared CPU partition.
-2. The cluster creator enables the new admission hook (TODO: how???). Note: This needs to be done
-at the cluster level (not the node level) so can't be done by NTO. One option might be to apply a CR to update
-the apiserver configuration, but that is still TBD.
+2. The cluster creator enables the new admission hook in the API server configuration. Note: This needs to be
+done at the cluster level (not the node level) so can't be done by NTO.
 3. The cluster creator then creates the cluster.
 4. The NTO creates a machine config manifest to write a configuration file for kubelet to specify
 the shared and isolated CPUs.
@@ -240,7 +239,19 @@ pods that had containers with whole CPU requests/limits.
 
 This feature is cgroup version agnostic - it does not require any changes to cgroup configuration for
 pods or containers. The feature will work with either cgroup v1 or v2, without modification to the
-code introduced by this feature.
+code introduced by this feature. For containers requesting guaranteed CPUs, instead of allocating CPUs
+from the defaultCpuSet, it will allocate CPUs from a subset of the defaultCpuSet. The runtime will just
+be given a set of CPUs to be assigned to the container and this would not impact how load balancing is
+being disabled.
+
+#### Interactions with Vertical Pod Autoscaler
+
+[VPA](https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler) could still be used
+to auto-scale pods on a cluster with this feature enabled. If a pod using shared CPUs is scaled to use
+more CPUs, it can remain on the same node if there are available CPUs in the shared CPU pool - otherwise
+the pod would be recreated on another node (as is the case when the total number of available CPUs is
+exhausted on a node when this feature is not configured). The same constraint applies to pods using
+guaranteed CPUs.
 
 ### Risks and Mitigations
 
@@ -465,12 +476,6 @@ scheduler, pod autoscaling and more.
 Given that this change is being done for a very specific usecase, there is no chance the
 upstream community would accept a change of this magnitude.
 
-A variation of this alternative would be to add a new extended resource for the guaranteed CPUs 
-(e.g. `openshift.io/guaranteed-cpus`) but continue to use the existing `cpu` resource for shared 
-CPUs. This actually makes things worse as it would require just as many changes as would be
-required to add the new first class resource, but most of the changes would have to be made
-downstream and carried in patches indefinitely.
-
 ### Extend Workload Partitioning
 
 The existing [Management Workload Partitioning](https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md) 
@@ -478,47 +483,19 @@ could be extended to add support for a new `shared` partition. To place a pod in
 partition, the user would annotate the namespace with `workload.openshift.io/allowed: shared` and 
 then annotate each pod with `target.workload.openshift.io/management: {"effect": "PreferredDuringScheduling"}`. 
 
-Here is the workflow:
-1. The cluster creator creates a Performance Profile for the NTO and specifies a shared CPU partition.
-2. The cluster creator then creates the cluster.
-3. The NTO creates a machine config manifest to configure CRI-O to partition shared workloads.
-4. The NTO creates a machine config manifest to write a configuration file for kubelet to specify
-the shared CPUs.
-5. The kubelet starts up, finds the configuration file and removes the shared CPUs from the `defaultCpuSet`,
-adding them to the `reservedSystemCPUs` instead. 
-6. The kubelet advertises `shared.workload.openshift.io/cores` extended resources on the node based on the 
-number of shared CPUs from the config file.
-7. Something schedules a pod with the `target.workload.openshift.io/shared` annotation in a namespace 
-with the `workload.openshift.io/allowed: shared` annotation. 
-   * The admission hook modifies the containers in the pod:
-     * replacing the `cpu` requests with `shared.workload.openshift.io/cores` requests/limits
-     * adding the `resources.workload.openshift.io/{container-name}: {"cpushares": <shares>, "cpulimits": <limits>}`
-   annotation for CRI-O.
-   * The scheduler sees the new pod and finds available `shared.workload.openshift.io/cores` resources on the node. 
-   The scheduler places the pod on the node.
-   * Kubelet does not do the cgroup configuration for the containers since it is a shared pod (based on the annotation).
-   * CRI-O does the cgroup configuration for the containers in the pod based on the shares/limits annotated 
-   against each container. Note: this is the same workflow currently used for guaranteed containers.
-8. Something schedules a pod without the new `shared` annotations.
-   * The pod is scheduled as usual based on the `cpu` requests.
-   * Kubelet processes the pod as usual, allocating CPUs from the `defaultCpuSet`.
-9. Repeat steps 7-8 until all pods are running.
-
 This approach has several drawbacks:
-* It requires all non-guaranteed QoS application pods to be annotated, which is going to be painful for users, 
-especially when running third party components (e.g. operators).
+* It requires all non-guaranteed QoS application pods to be annotated, which is going to be painful for users
+when running their own workloads or when running third party components (e.g. operators).
 * It requires the shared CPUs to be “hidden” in Kubelet's reserved CPU set (`reservedSystemCPUs`) to ensure kubelet 
 doesn’t use these CPUs for guaranteed containers. This is an abuse of the intended use of the reserved CPU set
 and could lead to future conflicts with Kubelet changes in this area.
 * Some shared pods will have the Guaranteed QoS (because all `cpu` limits/requests match), but the containers in
 the pod do not use whole CPUs. These containers would have their `cpu` resource removed, so the existing 
 [QoS calculations](https://github.com/openshift/kubernetes/blob/master/pkg/apis/core/helper/qos/qos.go) would 
-no longer work, which causes issues for various kubernetes components (e.g. evictions). One option would be 
-to keep a very small (i.e. 2mc) `cpu` request/limit for these containers (done with the admission hook) - this 
-would satisfy the QoS calculation, but is extremely hacky and likely to break other things.
+no longer work, which causes issues for various kubernetes components (e.g. evictions).
 
-This approach also has larger code impacts than the chosen solution - impacting the existing Workload Partioning code
-and requiring CRI-O changes.
+This approach also has significantly larger code impacts than the chosen solution - impacting the existing
+Workload Partioning code and requiring CRI-O changes.
 
 ### Detached CPU pool
 
@@ -530,8 +507,8 @@ these pools and requested by containers that want to allocate CPUs from these po
 solution implemented by the [Nokia CPU Pooler for Kubernetes](https://github.com/nokia/CPU-Pooler).
 
 This approach has several drawbacks:
-* It requires all containers using the new CPU pool(s) to be annotated, which is going to be painful for users, 
-especially when running third party components (e.g. operators).
+* It requires all containers using the new CPU pool(s) to be annotated, which is going to be painful for users
+when running their own workloads or when running third party components (e.g. operators).
 * Containers using the new CPU pool(s) will no longer have `cpu` requests, which breaks the existing QoS 
 calculations (see above for implications).
 * Since the new CPU pools are no longer managed by kubelet and CPU Manager, we lose existing features like
@@ -594,10 +571,6 @@ CPUs available) and that would allow the TAS to only schedule pods to workers wh
 guaranteed CPUs available on the same NUMA node (when the single-numa-node policy is being used). However,
 that doesn't solve the problem of ensuring shared CPUs are not oversubscribed on a worker and doesn't
 provide the end user with visibility into the number of shared CPUs available at any point in time.
-
-Another concern with any solution that relies on TAS/NFD/RTE is that TAS/NFD/RTE can’t be deployed on
-some SNO configurations (e.g. vRAN DU) due to resource constraints. We need a solution that can be used
-in those configurations as well as larger configurations.
 
 ## Infrastructure Needed [optional]
 
