@@ -41,7 +41,10 @@ operations that require pulling images. For example, an upgrade may require
 pulling more than one hundred images. Failures to pull those images cause
 retries that interfere with the upgrade process and may eventually make it
 fail. One way to improve that is to pull the images in advance, before they are
-actually needed, and ensure that they aren't removed.
+actually needed, and ensure that they aren't removed. Doing that provides a
+more consistent upgrade time in those environments. That is important when
+scheduling upgrades into maintenance windows, even if the upgrade might not
+otherwise fail.
 
 ### User Stories
 
