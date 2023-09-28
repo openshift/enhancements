@@ -9,9 +9,8 @@ reviewers:
 - "@nmagnezi"   # To ensure that this will be usable with the appliance.
 - "@oourfali"   # To ensure that this will be usable with the appliance.
 approvers:
-- "@sdodson"
-- "@zaneb"
-- "@LalatenduMohanty"
+- "@sinnykumari"
+- "@mrunalp"
 api-approvers:
 - "@sdodson"
 - "@zaneb"
