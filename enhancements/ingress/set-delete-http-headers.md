@@ -742,26 +742,40 @@ In short, the value set by `spec.httpHeaders.actions` will override the value se
 In the case of HTTP request headers, the actions specified in `spec.httpHeaders.actions` on the Route will be executed after
 the actions specified in the IngressController's `spec.httpHeaders.actions` field.
 
-So, the custom HTTP request value of `x-forwarded-for` header set using `spec.httpHeaders.actions[*].request` of the Route will take over the value defined in annotation `haproxy.router.openshift.io/set-forwarded-headers` of Route, `spec.httpHeaders.forwardedHeaderPolicy` of Ingress Controller
-or `spec.httpHeaders.actions[*].request` of Ingress Controller as in case of HTTP request headers, HAProxy overrides the value of the frontend of same header name set by IngressController with the
-value which was present in the backend section.
-
 This enhancement provides a method for a user to  delete the `x-forwarded-for` header, which the Ingress Controller `spec.httpHeaders.forwardedHeaderPolicy` does not provide.
 
 The `x-forwarded-for` header can be changed in three different places in the IngressControllerSpec and Route annotation: `spec.httpHeaders.actions`, `spec.httpHeaders.forwardedHeaderPolicy`, route annotation `haproxy.router.openshift.io/set-forwarded-headers`
 
 The following chart describes what values will be over-ridden when either `spec.httpHeaders.forwardedHeaderPolicy`, route annotation `haproxy.router.openshift.io/set-forwarded-headers` 
-or both are set along with `spec.httpHeaders.action`.
-The rows describe which API field or route annotation were set.
-The columns describe the API field or annotation which will get over-ridden by `spec.httpHeaders.action`.
-The value `yes` means the field present in the column header will get over-ridden by `spec.httpHeaders.action` when the fields in the corresponding row
-are set.
+or both are set along with `spec.httpHeaders.actions`.
 
-| values overriden by spec.httpHeaders.action &rarr;<br/>values set along with spec.httpHeaders.action &darr;                                                                      | haproxy.router.openshift.io/set-forwarded-headers | spec.httpHeaders.forwardedHeaderPolicy |
-|-----------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------|----------------------------------------|
-|haproxy.router.openshift.io/set-forwarded-headers,<br/>spec.httpHeaders.forwardedHeaderPolicy | yes                                               | yes                                    |                          
-| haproxy.router.openshift.io/set-forwarded-headers                                             | yes                                               |                                        | 
-| spec.httpHeaders.forwardedHeaderPolicy                                                        |                                                   | yes                                    | 
+A=haproxy.router.openshift.io/set-forwarded-headers
+
+B=spec.httpHeaders.forwardedHeaderPolicy
+
+C=spec.httpHeaders.actions in IngressController
+
+D=spec.httpHeaders.actions in Route
+
+| Simplified combination | When this comb. is present                                                                                                                                                  | This value is used                                                                                                               |
+|------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| ABCD                   | haproxy.router.openshift.io/set-forwarded-headers, spec.httpHeaders.forwardedHeaderPolicy, spec.httpHeaders.actions in IngressController, spec.httpHeaders.actions in Route | spec.httpHeaders.actions in Route.                                                                                               |
+| ABC                    | haproxy.router.openshift.io/set-forwarded-headers, spec.httpHeaders.forwardedHeaderPolicy, spec.httpHeaders.actions in IngressController                                    | spec.httpHeaders.actions                                                                                                         |
+| ABD	                   | haproxy.router.openshift.io/set-forwarded-headers, spec.httpHeaders.forwardedHeaderPolicy, spec.httpHeaders.actions in Route                                                | spec.httpHeaders.actions                                                                                                         |
+| ACD                    | haproxy.router.openshift.io/set-forwarded-headers,spec.httpHeaders.actions in IngressController,spec.httpHeaders.actions in Route                                           | spec.httpHeaders.actions in Route.                                                                                               |
+| BCD                    | 	spec.httpHeaders.forwardedHeaderPolicy, spec.httpHeaders.actions in IngressController, spec.httpHeaders.actions in Route                                                   | spec.httpHeaders.actions in Route.                                                                                               |
+| AB                     | haproxy.router.openshift.io/set-forwarded-headers, spec.httpHeaders.forwardedHeaderPolicy                                                                                   | haproxy.router.openshift.io/set-forwarded-headers will set the policy for handling X-Forwarded-For headers.                      |
+| AC                     | haproxy.router.openshift.io/set-forwarded-headers, spec.httpHeaders.actions in IngressController                                                                            | spec.httpHeaders.actions will set X-Forwarded-For.                                                                               |
+| AD                     | haproxy.router.openshift.io/set-forwarded-headers, spec.httpHeaders.actions in Route                                                                                        | spec.httpHeaders.actions will set X-Forwarded-For                                                                                |
+| BC                     | spec.httpHeaders.forwardedHeaderPolicy, spec.httpHeaders.actions in IngressController                                                                                       | append policy: spec.httpHeaders.actions will set X-Forwarded-For and one more X-Forwarded-For header will be set with client IP. |
+|                        |                                                                                                                                                                             | replace policy: value in spec.httpHeaders.actions will be replaced by client IP.                                                 |
+|                        |                                                                                                                                                                             | never policy:  spec.httpHeaders.actions will set the X-Forwarded-For header.                                                     |
+|                        |                                                                                                                                                                             | if-none policy:spec.httpHeaders.actions will set X-Forwarded-For header.                                                         |
+| BD	                    | spec.httpHeaders.forwardedHeaderPolicy, spec.httpHeaders.actions in Route                                                                                                   | append policy: spec.httpHeaders.actions will set X-Forwarded-For and one more X-Forwarded-For header will be set with client IP. |
+|                        |                                                                                                                                                                             | replace policy: spec.httpHeaders.actions will set X-Forwaders-For header.                                                        |
+|                        |                                                                                                                                                                             | never policy: spec.httpHeaders.actions will set the X-Forwarded-For header.                                                      |
+|                        |                                                                                                                                                                             | if-none policy:spec.httpHeaders.actions will set X-Forwarded-For header.                                                         |
+| CD                      | spec.httpHeaders.actions in IngressController, spec.httpHeaders.actions in Route                                                                                            | spec.httpHeaders.actions in Route.                                                                                               |
 
 
 #### X-SSL
