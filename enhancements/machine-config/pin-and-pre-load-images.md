@@ -116,6 +116,13 @@ request for details). That capability will be used to pin all the images
 required for the upgrade, so that they aren't garbage collected by kubelet and
 CRI-O.
 
+In addition when the CRI-O service is upgraded and restarted it removes all the
+images. This used to be done by the `crio-wipe` service, but is now done
+internally by CRI-O. It can be avoided setting the `version_file_persist`
+configuration parameter to "", but that would affect all images, not just the
+pinned ones. This behavior needs to be changed so that pinned images aren't
+removed, regardless of the value of `version_file_persist`.
+
 The changes to pin the images will be done in a `/etc/crio/crio.conf.d/pin.conf`
 file, something like this:
 
