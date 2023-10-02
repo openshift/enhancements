@@ -147,7 +147,7 @@ spec:
 
 Then the complete path will be this:
 
-```
+```txt
 /etc/crio/crio.conf.d/my-pinned-images-550a1d88-2976-4447-9fc7-b65e457a7f42.conf
 ```
 
