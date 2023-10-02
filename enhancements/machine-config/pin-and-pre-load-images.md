@@ -80,32 +80,34 @@ parts of https://github.com/openshift/enhancements/pull/1432.
 
 ### Workflow Description
 
-1. The administrator of a cluster uses the `ContainerRuntimeConfig` object to
+1. The administrator of a cluster uses the new `PinnedImageSet` object to
 request that a set of container images are pinned and pre-loaded:
 
     ```yaml
-    apiVersion: machineconfiguration.openshift.io/v1
-    kind: ContainerRuntimeConfig
+    apiVersion: machineconfiguration.openshift.io/v1alpha1
+    kind: PinnedImageSet
     metadata:
-      name: ...
+      name: my-pinned-images
     spec:
-      containerRuntimeConfig:
-        pinnedImages:
-        - quay.io/openshift-release-dev/ocp-release@sha256:...
-        - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
-        - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
-        ...
+      nodeSelector:
+        matchLabels:
+          node-role.kubernetes.io/control-plane: ""
+      pinnedImages:
+      - quay.io/openshift-release-dev/ocp-release@sha256:...
+      - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
+      - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
+      ...
     ```
 
 1. The machine config operators ensures that all the images are pinned and
-pulled in all the nodes of the cluster.
+pulled in all the nodes that match the node selector.
 
 ### API Extensions
 
-There are no new object kinds introduced by this enhancement, but new fields
-will be added to existing `ContainerRuntimeConfig` objects.
+A new `PinnedImageSet` object will be added to the
+`machineconfiguration.openshift.io` API group.
 
-The new fields for the `ContainerRuntimeConfig` object are defined in detail in
+The new object is defined in detail in
 https://github.com/openshift/machine-config-operator/pull/3839.
 
 ### Implementation Details/Notes/Constraints
@@ -123,8 +125,34 @@ configuration parameter to "", but that would affect all images, not just the
 pinned ones. This behavior needs to be changed so that pinned images aren't
 removed, regardless of the value of `version_file_persist`.
 
-The changes to pin the images will be done in a `/etc/crio/crio.conf.d/pin.conf`
-file, something like this:
+The changes to pin the images will be done in a file inside the
+`/etc/crio/crio.conf.d` directory. To avoid potential conflicts with files
+manually created by the administrator the name of this file will be the name of
+the `PinnedImageSet` object concatenated with the UUID assiged by the API
+server. For example, if the object is this:
+
+```yaml
+apiVersion: machineconfiguration.openshift.io/v1alpha1
+kind: PinnedImageSet
+metadata:
+  name: my-pinned-images
+  uuid: 550a1d88-2976-4447-9fc7-b65e457a7f42
+spec:
+  pinnedImages:
+  - quay.io/openshift-release-dev/ocp-release@sha256:...
+  - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
+  - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
+  ...
+```
+
+Then the complete path will be this:
+
+```
+/etc/crio/crio.conf.d/my-pinned-images-550a1d88-2976-4447-9fc7-b65e457a7f42.conf
+```
+
+The content of the file will the `pinned_images` parameter containing the list
+of images:
 
 ```toml
 pinned_images=[
@@ -135,42 +163,83 @@ pinned_images=[
 ]
 ```
 
-The images need to be pre-loaded and the CRI-O service needs to be reloaded
-when this configuration changes. To support that a new field will be added to
-the `ContainerRuntimeConfig` object:
+In addition to the list of images to be pinned, the `PinnedImageSet` object
+will also contain a node selector. This is intended to support different sets
+of images for different kinds of nodes. For example, to pin different images
+for control plane and worker nodes the user could create two `PinnedImageSet`
+objects:
 
 ```yaml
-apiVersion: machineconfiguration.openshift.io/v1
-kind: ContainerRuntimeConfig
+# For control plane nodes:
+apiVersion: machineconfiguration.openshift.io/v1alpha1
+kind: PinnedImageSet
 metadata:
-  name: ...
+  name: my-control-plane-pinned-images
 spec:
-  containerRuntimeConfig:
-    pinnedImages:
-    - quay.io/openshift-release-dev/ocp-release@sha256:...
-    - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
-    - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
-    ...
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/control-plane: ""
+  pinnedImages:
+  ...
+
+---
+
+# For worker nodes:
+apiVersion: machineconfiguration.openshift.io/v1alpha1
+kind: PinnedImageSet
+metadata:
+  name: my-control-plane-pinned-images
+spec:
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/worker: ""
+  pinnedImages:
+  ...
 ```
 
-When the new `pinnedImages` field is added or changed the machine config
-operator will need to pull those images (with the equivalent of `crictl pull`),
-create or update the corresponding `/etc/crio/crio.conf.d/pin.conf` file and ask
-CRI-O reload its configuration (with the equivalent of `systemctl reload
-crio.service`).
+This is specially convenient for pinning images for upgrades: there are many
+images that are needed only by the control plane nodes and there is no need to
+have them consuming disk space in worker nodes.
 
-The machine config operator will then will use the gRPC API of CRI-O to run the
-equivalent of `crictl pull` for each of the images. When that is completed the
-machine config operator will update the new `status.pinnedImages` field of the
-rendered machine config:
+When no node selector is specified the images will be pinned in all the nodes
+of the cluster.
+
+When a `PinnedImageSet` object is added, modified or deleted the machine config
+operator will create, modify or delete the configuration file, reload the CRI-O
+configuration (with the equivalent of `systemctl reload crio`) and then it will
+use the CRI-O gRPC API to run the equivalent of `crictl pull` for each of the
+images.
+
+Note that this will happen in all the nodes of the cluster that match the node
+selector.
+
+When all the images have been succesfully pinned and pulled in all the matching
+nodes the `Ready` condition will be set to `True`:
+
+```yaml
+status:
+  conditions:
+  - type: Ready
+    status: "True"
+  - type: Failed
+    status: "False"
+```
+
+If something fails the `Failed` condition will be set to `True`, and the
+details of the error will be in the message. For example if `node12` fails to
+pull an image:
 
 ```yaml
 status:
   pinnedImages:
   - quay.io/openshift-release-dev/ocp-release@sha256:...
   - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
-  - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
-  ...
+  conditions:
+  - type: Ready
+    status: "False"
+  - type: Failed
+    status: "True"
+    message: Node 'node12' failed to pull image `quay.io/...` because ...
 ```
 
 ### Risks and Mitigations
@@ -178,16 +247,16 @@ status:
 Pre-loading disk images can consume a large amount of disk space. For example,
 pre-loading all the images required for an upgrade can consume more 32 GiB.
 This is a risk because disk exhaustion can affect other workloads and the
-control plane. There is already mechanisms to mitigate that: the kubelet
+control plane. There is already a mechanism to mitigate that: the kubelet
 garbage collection. To ensure disk space issues are reported and that garbage
 collection doesn't interfere we will introduced new mechanisms:
 
 1. If disk exhaustion happens while trying to pre-load images the issues will
-be reported explicitly via the status of the `ContainerRuntimeConfig`
-status. Note typically these issues are reported as failures to pull images in
-the status of pods, but in this case there are no pods pulling the images. CRI-O
-will still report these issues in the log (if there is space for that), like
-for any other image pull.
+be reported explicitly via the status of the `PinnedImageSet` status. Note
+typically these issues are reported as failures to pull images in the status of
+pods, but in this case there are no pods pulling the images. CRI-O will still
+report these issues in the log (if there is space for that), like for any other
+image pull.
 
 1. If disk exhaustion happens after the images have been pulled, then we will
 ensure that the kubelet garbage collector doesn't select these images. That
@@ -233,7 +302,13 @@ Not applicable, no feature will be removed.
 
 ### Upgrade / Downgrade Strategy
 
-Not applicable.
+Upgrades from versions that don't support the `PinnedImageSet` object don't
+require any special handling because the object is optional: there will be no
+such objects in the upgraded cluster.
+
+Downgrades to versions that don't support the `PinnedImageSet` object don't
+require any changes. The existing pinned images will be ignored in the
+downgraded cluster, and will eventually be garbage collected.
 
 ### Version Skew Strategy
 
@@ -241,11 +316,15 @@ Not applicable.
 
 ### Operational Aspects of API Extensions
 
-Not applicable, there are no API extensions.
-
 #### Failure Modes
 
+Image pulling may fail due to lack of disk space or other reasons. This will be
+reported via the conditions in the `PinnedImageSet` objects. See the risks and
+mitigations section for details.
+
 #### Support Procedures
+
+Nothing.
 
 ## Implementation History
 
