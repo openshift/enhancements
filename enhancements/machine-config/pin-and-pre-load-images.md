@@ -175,7 +175,27 @@ status:
 
 ### Risks and Mitigations
 
-None.
+Pre-loading disk images can consume a large amount of disk space. For example,
+pre-loading all the images required for an upgrade can consume more 32 GiB.
+This is a risk because disk exhaustion can affect other workloads and the
+control plane. There is already mechanisms to mitigate that: the kubelet
+garbage collection. To ensure disk space issues are reported and that garbage
+collection doesn't interfere we will introduced new mechanisms:
+
+1. If disk exhaustion happens while trying to pre-load images the issues will
+be reported explicitly via the status of the `ContainerRuntimeConfig`
+status. Note typically these issues are reported as failures to pull images in
+the status of pods, but in this case there are no pods pulling the images. CRI-O
+will still report these issues in the log (if there is space for that), like
+for any other image pull.
+
+1. If disk exhaustion happens after the images have been pulled, then we will
+ensure that the kubelet garbage collector doesn't select these images. That
+will be handled by the image pinning support in CRI-O: even if kubelet asks
+CRI-O to delete a pinned image CRI-O will not delete it.
+
+1. The recovery steps in the documentation will be amended to ensure that these
+images aren't deleted to recover disk space.
 
 ### Drawbacks
 
