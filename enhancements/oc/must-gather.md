@@ -9,7 +9,7 @@ reviewers:
 approvers:
 - "@derekwaynecarr"
 creation-date: 2019-09-09
-last-updated: 2019-09-09
+last-updated: 2023-10-03
 status: implemented
 see-also:
 replaces:
@@ -73,7 +73,17 @@ ship a second one.
    (not the developers) that describes what to gather. It is tightly coupled to the OpenShift payload
    and only contains logic to gather information from that payload. We have e2e tests that make sure this functions.
 3. `oc adm must-gather --image` which is a client-side tool that runs any must-gather compatible image by creating a pod,
-   running the `/usr/bin/gather` binary, and then rsyncing the `/must-gather` and includes the logs of the pod.
+   running the `/usr/bin/gather` binary, and then rsyncing the `/must-gather` and includes the logs of the pod. To 
+   avoid overwhelming the cluster by passing numerous `--image` flags or an `--all-images` flag (covered in next point),
+   we are capping this to spin up four concurrent pods. If required, it could be exposed via a flag in future.
+4. `oc adm must-gather --all-images` allows the user to perform the same task as `oc adm must-gather --image`, but 
+   instead of specifying multiple must-gather compatible images using multiple `--image` flags, it finds such images 
+   from the cluster and runs `/usr/bin/gather`. The way it finds such images is by looking up the Operators 
+   (ClusterServiceVersions/CSVs) and [ClusterOperators]
+   (https://github.com/openshift/enhancements/blob/master/dev-guide/operators.md#what-is-an-openshift-clusteroperator)
+   with the annotation `operators.openshift.io/must-gather-image` on the cluster where it's running. Among the 
+   various flags provided by `oc adm must-gather`, only `--dest-dir`, `--node-selector` and `--timeout` can be used 
+   in conjunction with the `--all-images` flag.
 
 ### `inspect`
 
@@ -113,6 +123,10 @@ ecosystem.
 How will security be reviewed and by whom? How will UX be reviewed and by whom?
 
 Consider including folks that also work outside your immediate sub-project.
+
+When using either multiple `--images` flag or the `--all-images` flag, only four concurrent pods are started to 
+prevent overwhelming the cluster. Also, when using the `--all-images` flag, one can't pass arguments other than 
+`--dest-dir`, `--node-selector` and `--timeout`.
 
 ## Design Details
 
