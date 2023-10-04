@@ -111,7 +111,7 @@ This role allows collection of application logs and requires the namespace admin
       name: audit-collector
       namespace: openshift-kube-apiserver
     spec:
-      serviceAccount: audit-collector-sa
+      serviceAccountName: audit-collector-sa
       pipelines:
        - inputRefs:
          - audit
