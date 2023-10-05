@@ -89,6 +89,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9105  | ovn-kubernetes node kube-rbac-proxy-ovn-metrics ||| sdn | 4.10 | metrics |
 | 9106  | sdn controller kube-rbac-proxy || yes | sdn | 4.10 | sdn only |
 | 9107  | ovn-kubernetes node ||| sdn | 4.12 | egressip-node-healthcheck-port, sdn interface only, ovn-kubernetes only |
+| 9108 | ovn-kubernetes kube-rbac-proxy || yes | sdn | 4.14 | ovnkube-control-plane |
 | 9120  | metallb ||| sdn | 4.9 | metrics|
 | 9121  | metallb ||| sdn | 4.9 | metrics|
 | 9122  | metallb ||| sdn | 4.9 | leader election protocol |
@@ -160,11 +161,12 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 11443 | kube-scheduler ||| workloads || recovery-controller |
 | 29100 | openshift-sdn ||| sdn |4.10| metrics |
 | 29101 | openshift-sdn ||| sdn || metrics |
-| 29150 | metallb ||| sdn | 4.9 | metrics |
-| 29151 | metallb ||| sdn | 4.9 | metrics |
-| 29105 | ovn-kubernetes ||| sdn |4.10| metrics, ovn-kubernetes only|
 | 29102 | ovn-kubernetes ||| sdn || metrics, ovn-kubernetes only |
 | 29103 | ovn-kubernetes ||| sdn || metrics, ovn-kubernetes only |
+| 29105 | ovn-kubernetes ||| sdn |4.10| metrics, ovn-kubernetes only|
+| 29108 | ovn-kubernetes || yes | sdn |4.14| metrics, ovn-kubernetes only |
+| 29150 | metallb ||| sdn | 4.9 | metrics |
+| 29151 | metallb ||| sdn | 4.9 | metrics |
 | 29445 | haproxy ||| sdn | 4.7 | on-prem internal loadbalancer, stats port |
 | 39300 | manager ||| sdn | 4.12 | metrics, ingress node firewall |
 | 39301 | daemon ||| sdn | 4.12 | metrics, ingress node firewall |
