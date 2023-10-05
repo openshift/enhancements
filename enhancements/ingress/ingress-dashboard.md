@@ -1,5 +1,5 @@
 ---
-title: NETOBSERV-1052: Deployment of a monitoring dashboard based on ingress operator metrics
+title: ingress-dashboard
 authors:
   - "@jotak"
   - "@OlivierCazade"
