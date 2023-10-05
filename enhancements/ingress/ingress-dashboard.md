@@ -2,10 +2,10 @@
 title: NETOBSERV-1052: Deployment of a monitoring dashboard based on ingress operator metrics
 authors:
   - "@jotak"
+  - "@OlivierCazade"
 reviewers:
   - "@Miciah"
   - "@candita"
-  - "@OlivierCazade"
 approvers:
   - "@Miciah"
   - "@candita"
@@ -40,15 +40,16 @@ Ingress components, such as HAProxy, already provide some metrics that are expos
 
 ## Motivation
 
-While ingress related metrics already exist and are accessible in the OpenShift Console (via the menu “Observe” > Metrics”), there is no consolidated view presenting a summary of them. There are existing dashboards in other areas (such as etcd, compute resources, etc.), but networking today is less represented there, despite its importance for monitoring and troubleshooting.
+While ingress related metrics already exist and are accessible in the OpenShift Console (via the menu “Observe” > Metrics”), there is no consolidated view presenting a summary of them. There are existing dashboards in other areas (such as etcd, compute resources, etc.), but networking today is less represented there, despite its importance for monitoring and troubleshooting. Metrics such as HAProxy error rates, or latencies, can be made more visible by promoting them in a dashboard.
 
 In addition, product management has shown interest in providing and making more visible some cluster-wide statistics such as the number of routes and shards in use.
 
+More details on the new dashboard content is provided below.
+
 ### Goals
 
-1. Review and select a subset of the available metrics that should be included in the new dashboard. This should ideally be done with the help of the NetEdge team expertise and/or SREs.
-2. Design and implement a new dashboard with these metrics.
-3. Update the Ingress Operator to deploy this dashboard configmap, making it accessible for Cluster Monitoring stack.
+1. Design and implement a new dashboard using a selection of metrics listed below.
+2. Update the Ingress Operator to deploy this dashboard configmap, making it accessible for the Cluster Monitoring stack.
 
 ### Non-Goals
 
@@ -65,20 +66,37 @@ In addition, product management has shown interest in providing and making more 
 To make a new dashboard discoverable by Cluster Monitoring, a `ConfigMap` needs to be created in the namespace `openshift-config-managed`, containing a static dashboard definition in Grafana format (JSON). The dashboard datasource has to be Cluster Monitoring's Prometheus.
 
 The Ingress Operator is responsible for creating and reconciling this `ConfigMap`. We assume all metrics used in the dashboard are present unconditionally, which allows us to create a static dashboard unconditionally as well. The Ingress Operator would embed a static and full json dashboard. If the operator detect any change between the deployed dashboard and the embedded one, the deployed dashboard would be replaced totally by the embedded one.
-In the event where conditional display should be introduced later (e.g. an alternative to HAProxy being implemented, resulting is different metrics to display), different approaches can be discussed: the dashboard could be dynamically amended via JSON manipulation; or several dashboards could be embedded and selectively installed.
 
-The content of the dashboard will be further discussed and refined, including during review and verification.
-As a starting point, we can focus on metrics mentioned in [NE-1059](https://issues.redhat.com/browse/NE-1059):
+### Dashboard content
 
-- Number of external connections to each HAproxy instance/pod that could be grouped by client's source IP
-- Number/IP/names of backends per route
-- Balancing option/algorithm used by a route
-- Traffic volume (Mbps) on each ingress instance
-- Refresh rate of HAproxy
-- Route's backend failure count
+At the top, a summary row presenting global cluster statistics as text panels:
 
-And also global statistics such as:
-- Number of routes / shards / routes per shard
+- Total current byte rate in (aggregated across all routes/shards):
+	- _sum(rate(haproxy_server_bytes_in_total[1m]))_
+- Total current byte rate out (aggregated across all routes/shards):
+	- _sum(rate(haproxy_server_bytes_out_total[1m]))_
+- Total current number of routes:
+	- _count(count(haproxy_server_up == 1) by (route))_
+- Total current number of ingress controllers:
+	- _count(count(haproxy_server_up == 1) by (pod))_
+
+Below this top summary, more detailed time-series panels. Each of these panel come in two flavours: aggregated per route, and aggregated per controller instance.
+
+- Byte rate in, per route or per controller instance
+	- _sum(rate(haproxy_server_bytes_in_total[1m])) by (route)_
+	- _sum(rate(haproxy_server_bytes_in_total[1m])) by (pod)_
+
+- Byte rate out, per route or per controller instance
+	- _sum(rate(haproxy_server_bytes_out_total[1m])) by (route)_
+	- _sum(rate(haproxy_server_bytes_out_total[1m])) by (pod)_
+
+- Response error rate, per route or per controller instance
+	- _sum(irate(haproxy_server_response_errors_total[180s])) by (route)_
+	- _sum(irate(haproxy_server_response_errors_total[180s])) by (pod)_
+
+- Average response latency, per route or per controller instance
+	- _avg(haproxy_server_http_average_response_latency_milliseconds != 0) by (route)_
+	- _avg(haproxy_server_http_average_response_latency_milliseconds != 0) by (pod)_
 
 ### Workflow Description
 
@@ -141,7 +159,11 @@ func buildDashboard() *corev1.ConfigMap {
 }
 ```
 
-The controller should then deploy this configmap in the `openshift-config-managed`. Any configmap deployed in this namespace with the `console.openshift.io/dashboard` label will be automatically picked by the monitoring operator and deployed in the OpenShift Console.
+This is achieved by a new controller added to the operator, in charge of reconciling the dashboard. This controller watches the Infrastructure object which it is bound to, and the generated configmap.
+
+The controller should deploy this configmap in the `openshift-config-managed`. Any configmap deployed in this namespace with the `console.openshift.io/dashboard` label will be automatically picked by the monitoring operator and deployed in the OpenShift Console. The monitoring stack is responsible for querying the metrics as defined in the dashboard.
+
+When the Ingress operator is upgraded to a new version, if this upgrade brings changes to the dashboard, the existing ConfigMap will be overwritten through reconciliation.
 
 ### Risks and Mitigations
 
@@ -153,7 +175,7 @@ The controller should then deploy this configmap in the `openshift-config-manage
 
 Unit test
 
-- Verify that the embedded JSON is parseable and contains expected elements for a dashboard (rows, panels, etc.)
+- Verify that the embedded JSON is parseable (to avoid unintentional errors while manually editing the JSON).
 
 E2E Tests
 
@@ -188,6 +210,8 @@ N/A
 ### Upgrade / Downgrade Strategy
 
 Upgrading from a previous release must install the new dashboard without requiring any intervention.
+
+On next upgrades, if the dashboard already exists and if the new version brings changes to the dashboard, the existing one will be overwritten with the new one.
 
 ### Version Skew Strategy
 
