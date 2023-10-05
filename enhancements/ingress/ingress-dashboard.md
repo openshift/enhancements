@@ -40,7 +40,8 @@ Ingress components, such as HAProxy, already provide some metrics that are expos
 
 ## Motivation
 
-While ingress related metrics already exist and are accessible in the OpenShift Console (via the menu “Observe” > Metrics”), there is no consolidated view presenting a summary of them. There are existing dashboards in other areas (such as etcd, compute resources, etc.), but networking today is less represented there, despite its importance for monitoring and troubleshooting. Metrics such as HAProxy error rates, or latencies, can be made more visible by promoting them in a dashboard.
+While ingress related metrics already exist and are accessible in the OpenShift Console (via the menu “Observe” > Metrics”), there is no consolidated view presenting a summary of them. There are existing dashboards in other areas (such as etcd, compute resources, etc.), but networking today is less represented there, despite its importance for monitoring and troubleshooting.
+Metrics such as HAProxy error rates, or latencies, can be made more visible by promoting them in a dashboard.
 
 In addition, product management has shown interest in providing and making more visible some cluster-wide statistics such as the number of routes and shards in use.
 
@@ -65,38 +66,28 @@ More details on the new dashboard content is provided below.
 
 To make a new dashboard discoverable by Cluster Monitoring, a `ConfigMap` needs to be created in the namespace `openshift-config-managed`, containing a static dashboard definition in Grafana format (JSON). The dashboard datasource has to be Cluster Monitoring's Prometheus.
 
-The Ingress Operator is responsible for creating and reconciling this `ConfigMap`. We assume all metrics used in the dashboard are present unconditionally, which allows us to create a static dashboard unconditionally as well. The Ingress Operator would embed a static and full json dashboard. If the operator detect any change between the deployed dashboard and the embedded one, the deployed dashboard would be replaced totally by the embedded one.
+The Ingress Operator is responsible for creating and reconciling this `ConfigMap`. We assume all metrics used in the dashboard are present unconditionally, which allows us to create a static dashboard unconditionally as well.
+The Ingress Operator would embed a static and full json dashboard.
+If the operator detect any change between the deployed dashboard and the embedded one, the deployed dashboard would be replaced totally by the embedded one.
 
 ### Dashboard content
 
 At the top, a summary row presenting global cluster statistics as text panels:
 
-- Total current byte rate in (aggregated across all routes/shards):
-	- _sum(rate(haproxy_server_bytes_in_total[1m]))_
-- Total current byte rate out (aggregated across all routes/shards):
-	- _sum(rate(haproxy_server_bytes_out_total[1m]))_
-- Total current number of routes:
-	- _count(count(haproxy_server_up == 1) by (route))_
-- Total current number of ingress controllers:
-	- _count(count(haproxy_server_up == 1) by (pod))_
+- Total current byte rate in (aggregated across all routes/shards): _sum(rate(haproxy_server_bytes_in_total[1m]))_
+- Total current byte rate out (aggregated across all routes/shards): _sum(rate(haproxy_server_bytes_out_total[1m]))_
+- Total current number of routes: _count(count(haproxy_server_up == 1) by (route))_
+- Total current number of ingress controllers: _count(count(haproxy_server_up == 1) by (pod))_
 
 Below this top summary, more detailed time-series panels. Each of these panel come in two flavours: aggregated per route, and aggregated per controller instance.
 
-- Byte rate in, per route or per controller instance
-	- _sum(rate(haproxy_server_bytes_in_total[1m])) by (route)_
-	- _sum(rate(haproxy_server_bytes_in_total[1m])) by (pod)_
+- Byte rate in, per route or per controller instance: _sum(rate(haproxy_server_bytes_in_total[1m])) by (route)_ or _sum(rate(haproxy_server_bytes_in_total[1m])) by (pod)_
 
-- Byte rate out, per route or per controller instance
-	- _sum(rate(haproxy_server_bytes_out_total[1m])) by (route)_
-	- _sum(rate(haproxy_server_bytes_out_total[1m])) by (pod)_
+- Byte rate out, per route or per controller instance: _sum(rate(haproxy_server_bytes_out_total[1m])) by (route)_ or _sum(rate(haproxy_server_bytes_out_total[1m])) by (pod)_
 
-- Response error rate, per route or per controller instance
-	- _sum(irate(haproxy_server_response_errors_total[180s])) by (route)_
-	- _sum(irate(haproxy_server_response_errors_total[180s])) by (pod)_
+- Response error rate, per route or per controller instance: _sum(irate(haproxy_server_response_errors_total[180s])) by (route)_ or _sum(irate(haproxy_server_response_errors_total[180s])) by (pod)_
 
-- Average response latency, per route or per controller instance
-	- _avg(haproxy_server_http_average_response_latency_milliseconds != 0) by (route)_
-	- _avg(haproxy_server_http_average_response_latency_milliseconds != 0) by (pod)_
+- Average response latency, per route or per controller instance: _avg(haproxy_server_http_average_response_latency_milliseconds != 0) by (route)_ or _avg(haproxy_server_http_average_response_latency_milliseconds != 0) by (pod)_
 
 ### Workflow Description
 
