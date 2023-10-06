@@ -22,7 +22,7 @@ tracking-link:
 - https://issues.redhat.com/browse/RFE-4482
 see-also:
 - https://github.com/openshift/enhancements/pull/1432
-- https://github.com/openshift/machine-config-operator/pull/3839
+- https://github.com/openshift/api/pull/1609
 replaces: []
 superseded-by: []
 ---
@@ -108,7 +108,7 @@ A new `PinnedImageSet` object will be added to the
 `machineconfiguration.openshift.io` API group.
 
 The new object is defined in detail in
-https://github.com/openshift/machine-config-operator/pull/3839.
+https://github.com/openshift/api/pull/1609.
 
 ### Implementation Details/Notes/Constraints
 
