@@ -242,6 +242,9 @@ status:
     message: Node 'node12' failed to pull image `quay.io/...` because ...
 ```
 
+This logic to handle the pinned image sets and generate the configuration files
+will be part of a new sub-controller in MCC.
+
 ### Risks and Mitigations
 
 Pre-loading disk images can consume a large amount of disk space. For example,
