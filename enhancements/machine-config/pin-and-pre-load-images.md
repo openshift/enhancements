@@ -80,8 +80,8 @@ parts of https://github.com/openshift/enhancements/pull/1432.
 
 ### Workflow Description
 
-1. The administrator of a cluster uses the new `PinnedImageSet` object to
-request that a set of container images are pinned and pre-loaded:
+1. The administrator of a cluster uses the new `PinnedImageSet` custom resource
+to request that a set of container images are pinned and pre-loaded:
 
     ```yaml
     apiVersion: machineconfiguration.openshift.io/v1alpha1
@@ -104,10 +104,10 @@ pulled in all the nodes that match the node selector.
 
 ### API Extensions
 
-A new `PinnedImageSet` object will be added to the
+A new `PinnedImageSet` custom resource definition will be added to the
 `machineconfiguration.openshift.io` API group.
 
-The new object is defined in detail in
+The new custom resource definition is described in detail in
 https://github.com/openshift/api/pull/1609.
 
 ### Implementation Details/Notes/Constraints
@@ -128,8 +128,8 @@ aren't removed, regardless of the value of `version_file_persist`.
 The changes to pin the images will be done in a file inside the
 `/etc/crio/crio.conf.d` directory. To avoid potential conflicts with files
 manually created by the administrator the name of this file will be the name of
-the `PinnedImageSet` object concatenated with the UUID assiged by the API
-server. For example, if the object is this:
+the `PinnedImageSet` custom resource concatenated with the UUID assiged by the
+API server. For example, if the custom resource is this:
 
 ```yaml
 apiVersion: machineconfiguration.openshift.io/v1alpha1
@@ -163,11 +163,11 @@ pinned_images=[
 ]
 ```
 
-In addition to the list of images to be pinned, the `PinnedImageSet` object
-will also contain a node selector. This is intended to support different sets
-of images for different kinds of nodes. For example, to pin different images
-for control plane and worker nodes the user could create two `PinnedImageSet`
-objects:
+In addition to the list of images to be pinned, the `PinnedImageSet` custom
+resource will also contain a node selector. This is intended to support
+different sets of images for different kinds of nodes. For example, to pin
+different images for control plane and worker nodes the user could create two
+`PinnedImageSet` custom resources:
 
 ```yaml
 # For control plane nodes:
@@ -204,11 +204,11 @@ have them consuming disk space in worker nodes.
 When no node selector is specified the images will be pinned in all the nodes
 of the cluster.
 
-When a `PinnedImageSet` object is added, modified or deleted the machine config
-operator will create, modify or delete the configuration file, reload the CRI-O
-configuration (with the equivalent of `systemctl reload crio`) and then it will
-use the CRI-O gRPC API to run the equivalent of `crictl pull` for each of the
-images.
+When a `PinnedImageSet` custom resource is added, modified or deleted the
+machine config operator will create, modify or delete the configuration file,
+reload the CRI-O configuration (with the equivalent of `systemctl reload crio`)
+and then it will use the CRI-O gRPC API to run the equivalent of `crictl pull`
+for each of the images.
 
 Note that this will happen in all the nodes of the cluster that match the node
 selector.
@@ -305,12 +305,12 @@ Not applicable, no feature will be removed.
 
 ### Upgrade / Downgrade Strategy
 
-Upgrades from versions that don't support the `PinnedImageSet` object don't
-require any special handling because the object is optional: there will be no
-such objects in the upgraded cluster.
+Upgrades from versions that don't support the `PinnedImageSet` custom resource
+don't require any special handling because the custom resource is optional:
+there will be no such custom resource in the upgraded cluster.
 
-Downgrades to versions that don't support the `PinnedImageSet` object don't
-require any changes. The existing pinned images will be ignored in the
+Downgrades to versions that don't support the `PinnedImageSet` custom resource
+don't require any changes. The existing pinned images will be ignored in the
 downgraded cluster, and will eventually be garbage collected.
 
 ### Version Skew Strategy
@@ -322,8 +322,8 @@ Not applicable.
 #### Failure Modes
 
 Image pulling may fail due to lack of disk space or other reasons. This will be
-reported via the conditions in the `PinnedImageSet` objects. See the risks and
-mitigations section for details.
+reported via the conditions in the `PinnedImageSet` custom resource. See the
+risks and mitigations section for details.
 
 #### Support Procedures
 
