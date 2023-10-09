@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "None"
 creation-date: 2023-09-06
-last-updated: 2023-09-28
+last-updated: 2023-10-12
 tracking-link:
   - https://issues.redhat.com/browse/NE-1299
   - https://issues.redhat.com/browse/OCPSTRAT-730
@@ -63,6 +63,7 @@ ExternalDNS Operator users to share Route 53 hosted zones, they can reduce cost 
   a different role.
 * Support specifying of [ExternalID](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html).
 * Provide support for the automatic creation of DNS hosted zones by utilizing the assume role ARN.
+* Add AWS Security Token Service (STS) support for the ExternalDNS Operator
 
 ## Proposal
 
@@ -175,6 +176,14 @@ more appropriate solution as outlined in the alternative [Bumping the API](#bump
 In terms of security concerns, the IAM role is not considered sensitive because AWS incorporates security measures to
 limit the usage of a role ARN to a particular AWS account.
 
+#### Lack of STS Support
+
+Another drawback for this feature is that the ExternalDNS Operator currently lacks support for the AWS Security Token
+Service (STS). Given that STS is not supported, and the majority of ROSA (Red Hat OpenShift Service on AWS) customers
+rely on STS, this shared VPC feature is not usable for most managed OpenShift users. The addition of STS support for
+ExternalDNS Operator is currently under evaluation. However, until that is completed, the decision has been made to move
+forward with the implementation of shared VPC support.
+
 ### Drawbacks
 
 A minor drawback is the added complexity in supporting cross-account DNS hosted zones. This complexity involves handling
@@ -202,8 +211,11 @@ This update is an extension of the existing v1beta1 ExternalDNS Operator API and
 criteria for the v1beta1 API.
 
 The ExternalDNS Operator updates to support Shared VPC are out of payload and are therefore not aligned with
-OpenShift releases. However, we are targeting to release this enhancement of ExternalDNS as alongside of OCP 4.14.
-Consequently, there is no requirement for backporting this feature, as outlined in [AWS Shared VPC with Cross-account DNS Zones](/enhancements/installer/aws-cross-account-dns-zone.md).
+OpenShift releases. Initially, the plan was to release this enhancement alongside of OCP 4.14. However, because
+ExternalDNS Operator lacks STS support (see [Lack of STS Support](#lack-of-sts-support)), the decision was made to
+complete implementation of this feature, but postpone the release until STS support is available.
+
+There is no requirement for backporting this feature, as outlined in [AWS Shared VPC with Cross-account DNS Zones](/enhancements/installer/aws-cross-account-dns-zone.md).
 
 #### Dev Preview -> Tech Preview
 
