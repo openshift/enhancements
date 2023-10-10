@@ -84,12 +84,23 @@ kubelet and the network daemon.
 
 ### User Stories
 
-- As an user, I want to lower the amount of resources consumed by Prometheus in
-  a supported way, so I can configure the clusters metrics collection profiles
-  to `minimal`.
+- As a user, I want to lower the amount of resources consumed by Prometheus in a
+  supported way, so I can configure the clusters metrics collection profiles to
+  `minimal`.
 - As a developer, I want a supported way to collect a subset of the metrics
   exported by my operator and operands, while still collecting necessary metrics
   for alerts, visualization of key indicators and Telemetry.
+- As a component owner (that does not yet implement a profile), I want to
+  extract metrics needed to implement said profile, based on the assets I
+  provide, or the ones gathered from the cluster based on a group of target
+  selectors, and a plug-in relabel configuration to apply within the monitor.
+- As a component owner (that does not, or only partially implements a profile),
+  I want to get information about any monitors that are not yet implemented for
+  any of the supported profiles that are offered.
+- As a component owner (that implements a profile), I want to verify if all the
+  profile metrics are present in the cluster, and which of the profile monitors
+  are affected if not. Also, I want additional information to narrow down where
+  these metrics are exactly being used.
 
 ### Goals
 
@@ -249,6 +260,28 @@ Finally, a team that adopts the metrics collection profile feature should also
 add themselves and their component to the list under 
 [Infrastruture needed](#infrastructure-needed-optional)
 
+#### CLI Utility
+
+Incorporating the CLI utility into the workflow in order to better leverage this
+feature offers the following functionalities (based on the various options
+offered):
+* Metric extraction: Metrics can be extracted from the rule file, as well as the
+  cluster based on the target selectors provided, while allow-listing a set of
+  metrics, if need be, that will always be included within the metrics regex of
+  the [generated relabel
+  configuration](https://github.com/rexagod/cpv/blob/40acb00abedd25bcd9cebfbc19c897766470cb96/internal/profiles/minimal_extractor.go#L231).
+* Cardinality statistics: Output the cardinality of every single metric that was
+  included in the aforementioned relabel configuration, i.e., every single
+  metric that was extracted using any of the three methods.
+* Profile validation: Verify if the set of metrics used within the range of
+  monitors that were used to collectively implement a profile (for different
+  components) are all available at the given endpoint, and output the queries,
+  rules, groups, and profile monitors that the absence of these metrics affects.
+* Implementation status: Get the profile implementation status in terms of which
+  monitors need to be created in order to completely implement that profile, for
+  every single default profile monitor to eventually have a corresponding custom
+  monitor that implements said profile.
+
 #### Variation [optional]
 
 NA
@@ -276,8 +309,8 @@ providing the different monitors. This work is not trivial. Dependencies between
 operators and their metrics exist. This makes it difficult for developers to
 determine whether a given metric can be excluded from the `minimal` profile or
 not. To aid teams with this effort the monitoring team will provide:
-- a CLI tool that consumes a ServiceMonitor and a list of metrics and
-  generates the `minimal` ServiceMonitor for that operator.
+- a CLI tool that offers a suite of operation to make it easier for developers
+  to utilize all aspects of this feature into their component's workflow.
 - an origin/CI test that validates for all Alerts and PrometheusRules that the
   metrics used by them are present in the `keep` expression of the
   monitor for the `minimal` profile
@@ -305,6 +338,7 @@ not. To aid teams with this effort the monitoring team will provide:
       - How would we ensure teams that adopted metrics collection profiles
         implement the new profile?
       - How would we aid developers implementing the new profile?
+
 ### Drawbacks
 
 - Extra CI cycles
