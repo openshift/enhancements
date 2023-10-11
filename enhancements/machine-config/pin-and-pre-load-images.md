@@ -210,6 +210,9 @@ reload the CRI-O configuration (with the equivalent of `systemctl reload crio`)
 and then it will use the CRI-O gRPC API to run the equivalent of `crictl pull`
 for each of the images.
 
+Note that currently CRI-O doesn't reset pinned images on reload, support for
+that will need to be added.
+
 Note that this will happen in all the nodes of the cluster that match the node
 selector.
 
