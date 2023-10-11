@@ -13,7 +13,7 @@ api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggreg
 creation-date: 2023-10-10
 last-updated: yyyy-mm-dd
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - TBD
+  - "https://issues.redhat.com/browse/HOSTEDCP-1240"
 see-also:
   - "/enhancements/authentication/direct-oidc-study/study-oidc-in-openshift.md"
   - "https://github.com/kubernetes/enhancements/commits/master/keps/sig-auth/3331-structured-authentication-configuration"
