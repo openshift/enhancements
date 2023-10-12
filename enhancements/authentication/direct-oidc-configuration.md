@@ -5,6 +5,7 @@ authors:
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - deads2k
   - sjenning
+  - enxebre
   - tkashem
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
   - deads2k
@@ -16,7 +17,7 @@ tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic 
   - "https://issues.redhat.com/browse/HOSTEDCP-1240"
 see-also:
   - "/enhancements/authentication/direct-oidc-study/study-oidc-in-openshift.md"
-  - "https://github.com/kubernetes/enhancements/commits/master/keps/sig-auth/3331-structured-authentication-configuration"
+  - "https://github.com/kubernetes/enhancements/tree/master/keps/sig-auth/3331-structured-authentication-configuration"
 replaces:
   - "/enhancements/authentication/unsupported-direct-use-of-oidc.md"
 superseded-by: []
@@ -49,7 +50,8 @@ for users to be able to use their OIDC providers' features to their full extent.
 ### Goals
 
 - Provide an API that exposes kube-apiserver OIDC configuration with possible
-  expansions to accommodate recent "Structured Authentication Configuration"
+  expansions to accommodate a recent ["Structured Authentication Configuration"](
+  https://github.com/kubernetes/enhancements/tree/master/keps/sig-auth/3331-structured-authentication-configuration)
   Kubernetes enhancement.
 
 ### Non-Goals
@@ -92,7 +94,7 @@ A new value for the `Type` field is introduced - `OIDC`. Setting this value
 allows the user to configure a new field: "OIDCProviders".
 
 ```go
-type Authentication struct {
+type AuthenticationSpec struct {
     ...
     // OIDCProviders are OIDC identity providers that can issue tokens
     // for this cluster
@@ -232,6 +234,10 @@ authentication configuration](https://github.com/kubernetes/enhancements/tree/ma
 the values from the API get transformed into this new structure.
 
 #### Hypershift
+
+The `Authentication` API that's being modified in this enhancement is already
+vendored into Hypershift's `ClusterConfiguration` type, the API changes therefore
+carry over to Hypershift cleanly.
 
 Hypershift is not prepared today for Tech Preview features and does not appear
 to have a way to mark cluster support to be limited as such. However, this feature
