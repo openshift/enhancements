@@ -81,15 +81,15 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9001  | machine-config-daemon oauth proxy ||| node || metrics |
 | 9099  | cluster-version operator | HTTPS | yes | updates || metrics |
 | 9100  | node-exporter || no | monitoring || metrics |
-| 9101  | openshift-sdn kube-rbac-proxy ||| sdn || metrics, openshift-sdn only |
+| 9101  | openshift-sdn kube-rbac-proxy | HTTPS || sdn || metrics, openshift-sdn only |
 | 9101  | kube-proxy ||| sdn || metrics, third-party network plugins only, deprecated |
-| 9102  | ovn-kubernetes master kube-rbac-proxy || yes | sdn || metrics, ovn-kubernetes only |
+| 9102  | ovn-kubernetes master kube-rbac-proxy | HTTPS | yes | sdn || metrics, ovn-kubernetes only |
 | 9102  | kube-proxy ||| sdn | 4.7 | metrics, third-party network plugins only |
-| 9103  | ovn-kubernetes node kube-rbac-proxy ||| sdn || metrics |
-| 9105  | ovn-kubernetes node kube-rbac-proxy-ovn-metrics ||| sdn | 4.10 | metrics |
-| 9106  | sdn controller kube-rbac-proxy || yes | sdn | 4.10 | sdn only |
+| 9103  | ovn-kubernetes node kube-rbac-proxy | HTTPS | no | sdn || metrics |
+| 9105  | ovn-kubernetes node kube-rbac-proxy-ovn-metrics | HTTPS | no | sdn | 4.10 | metrics |
+| 9106  | sdn controller kube-rbac-proxy | HTTPS | yes | sdn | 4.10 | sdn only |
 | 9107  | ovn-kubernetes node ||| sdn | 4.12 | egressip-node-healthcheck-port, sdn interface only, ovn-kubernetes only |
-| 9108 | ovn-kubernetes kube-rbac-proxy || yes | sdn | 4.14 | ovnkube-control-plane |
+| 9108 | ovn-kubernetes kube-rbac-proxy | HTTPS | yes | sdn | 4.14 | ovnkube-control-plane |
 | 9120  | metallb ||| sdn | 4.9 | metrics|
 | 9121  | metallb ||| sdn | 4.9 | metrics|
 | 9122  | metallb ||| sdn | 4.9 | leader election protocol |
@@ -159,12 +159,12 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 10302 | various CSI drivers ||| storage | 4.7 | healthz |
 | 10303 | various CSI drivers ||| storage | 4.9 | healthz |
 | 11443 | kube-scheduler ||| workloads || recovery-controller |
-| 29100 | openshift-sdn ||| sdn |4.10| metrics |
-| 29101 | openshift-sdn ||| sdn || metrics |
-| 29102 | ovn-kubernetes ||| sdn || metrics, ovn-kubernetes only |
-| 29103 | ovn-kubernetes ||| sdn || metrics, ovn-kubernetes only |
-| 29105 | ovn-kubernetes ||| sdn |4.10| metrics, ovn-kubernetes only|
-| 29108 | ovn-kubernetes || yes | sdn |4.14| metrics, ovn-kubernetes only |
+| 29100 | openshift-sdn | HTTP | yes | sdn |4.10| metrics |
+| 29101 | openshift-sdn | HTTP | no | sdn || metrics |
+| 29102 | ovn-kubernetes | HTTP | yes | sdn || metrics, ovn-kubernetes only |
+| 29103 | ovn-kubernetes | HTTP | no | sdn || metrics, ovn-kubernetes only |
+| 29105 | ovn-kubernetes | HTTP | no | sdn |4.10| metrics, ovn-kubernetes only|
+| 29108 | ovn-kubernetes | HTTP | yes | sdn |4.14| metrics, ovn-kubernetes only |
 | 29150 | metallb ||| sdn | 4.9 | metrics |
 | 29151 | metallb ||| sdn | 4.9 | metrics |
 | 29445 | haproxy ||| sdn | 4.7 | on-prem internal loadbalancer, stats port |
