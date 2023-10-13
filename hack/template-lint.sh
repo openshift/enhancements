@@ -17,7 +17,7 @@ TEMPLATE=${SCRIPTDIR}/../guidelines/enhancement_template.md
 # avoid problems when the template is changed in a way that is
 # incompatible with existing documents.
 NEW_FILES=$(${SCRIPTDIR}/find_new.sh)
-NEW_FILES=$(filter_ignored_paths $NEW_FILES)
+NEW_FILES=$(filter_ignored_paths "$NEW_FILES")
 
 if [ -z "$NEW_FILES" ]; then
     echo "OK, no new enhancement files found"
