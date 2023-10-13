@@ -1,5 +1,5 @@
 ---
-title: dont-require-registry-during-boot-and-upgrade
+title: dont-require-registry-during-reboot-and-upgrade
 authors:
 - "@jhernand"
 reviewers:
@@ -29,26 +29,26 @@ replaces: []
 superseded-by: []
 ---
 
-# Don't require registry during boot and upgrade
+# Don't require registry during reboot and upgrade
 
 ## Summary
 
-Ensure that clusters don't require a registry server to boot or upgrade when
-all the required images have already been pulled.
+Ensure that clusters don't require a registry server to reboot existing nodes or
+upgrade when all the required images have already been pulled.
 
 ## Motivation
 
-Currently during reboots and upgrades clusters may need to contact the image
-registry servers, even if the images have already been pulled. This complicates
-things for clusters that are completely disconnected or that have an slow or
-unreliable connection to the image registry servers.
+Currently during reboots of existing nodes and upgrades clusters may need to
+contact the image registry servers, even if the images have already been pulled.
+This complicates things for clusters that are completely disconnected or that
+have an slow or unreliable connection to the image registry servers.
 
 ### User Stories
 
-#### Boot without registry
+#### Reboot without registry
 
 As the administrator of a cluster that has all the required images already
-pulled in all the nodes, I want to be able to reboot it without requiring
+pulled in all the nodes, I want to be able to reboot nodes it without requiring
 access to a registry server.
 
 ### Upgrade without registry
@@ -59,8 +59,8 @@ access to a registry server.
 
 ### Goals
 
-Ensure that clusters don't require a registry server to boot or upgrade when
-all the required images have already been pulled.
+Ensure that clusters don't require a registry server to reboot nodes or upgrade
+when all the required images have already been pulled.
 
 ### Non-Goals
 
@@ -70,13 +70,13 @@ images](https://github.com/openshift/enhancements/pull/1481) enhancement.
 
 It is not a goal of this enhancement to eliminate the requirement of a registry
 server for other workloads. We are just eliminating the requirement that it be
-available during boots and upgrades.
+available during reboots of existing nodes and upgrades.
 
 ## Proposal
 
 ### Workflow Description
 
-1. The administrator of a cluster boots a node or performs an upgrade.
+1. The administrator of a cluster reboots a node or performs an upgrade.
 
 1. All the components of the cluster ensure that if the required images have
 been already pulled they will not try to contact the registry server.
@@ -95,12 +95,12 @@ server, even if the image is already available in the local storage of the
 cluster. This blocks upgrades and should be avoided.
 
 Most of these OCP components have been changed in the past to avoid this use of
-the `Always` pull policy. Recently the OVN pre-puller has also been changed
-(see this [bug](https://issues.redhat.com/browse/OCPBUGS-13219) for details).
-To prevent bugs like this happening in the future and make the boots and
-upgrades less fragile we should have a test that gates the OpenShift release
-and that verifies that boots and upgrades can be performed without a registry
-server. One way to ensure this is to run in CI an admission hook that
+the `Always` pull policy. Recently the OVN pre-puller has also been changed (see
+this [bug](https://issues.redhat.com/browse/OCPBUGS-13219) for details).  To
+prevent bugs like this happening in the future and make the reboots of nodes and
+upgrades less fragile we should have a test that gates the OpenShift release and
+that verifies that reboots of nodes and upgrades can be performed without a
+registry server. One way to ensure this is to run in CI an admission hook that
 rejects/warns about any spec that uses the `Always` pull policy.
 
 #### Don't try to contact the image registry server explicitly
@@ -134,10 +134,10 @@ that block upgrades?
 
 ### Test Plan
 
-We should have a set of CI tests that verify that boots and upgrades can be
-performed in a fully disconnected environment without a registry server, both
-for a single node cluster and a cluster with multiple nodes. These tests should
-gate the OCP release.
+We should have a set of CI tests that verify that reboots of nodes and upgrades
+can be performed in a fully disconnected environment without a registry server,
+both for a single node cluster and a cluster with multiple nodes. These tests
+should gate the OCP release.
 
 ### Graduation Criteria
 
@@ -146,14 +146,14 @@ moved to `Tech Preview` in 4.X+1 and declared `GA` in 4.X+2.
 
 #### Dev Preview -> Tech Preview
 
-- Ability to boot clusters in disconnected environments without a registry
+- Ability to reboot nodes in disconnected environments without a registry
 server.
 
 - Ability to upgrade clusters in disconnected environments without a registry
 server.
 
-- Availability of the tests that verify the boot and upgrade without a registry
-server.
+- Availability of the tests that verify the reboots of nodes and upgrade without
+a registry server.
 
 - Availability of the tests that verify that no OCP component uses the `Always`
 pull policy.
