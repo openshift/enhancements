@@ -188,7 +188,7 @@ spec:
 apiVersion: machineconfiguration.openshift.io/v1alpha1
 kind: PinnedImageSet
 metadata:
-  name: my-control-plane-pinned-images
+  name: my-worker-pinned-images
 spec:
   nodeSelector:
     matchLabels:
