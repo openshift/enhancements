@@ -97,7 +97,7 @@ kubelet and the network daemon.
 - As a developer of a component (that does not, or only partially implements a profile),
   I want to get information about any monitors that are not yet implemented for
   any of the supported profiles that are offered.
-- As a component owner (that implements a profile), I want to verify if all the
+- As a developer of a component (that implements a profile), I want to verify if all the
   profile metrics are present in the cluster, and which of the profile monitors
   are affected if not. Also, I want additional information to narrow down where
   these metrics are exactly being used.
