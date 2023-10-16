@@ -94,7 +94,7 @@ kubelet and the network daemon.
   extract metrics needed to implement said profile, based on the assets I
   provide, or the ones gathered from the cluster based on a group of target
   selectors, and a plug-in relabel configuration to apply within the monitor.
-- As a component owner (that does not, or only partially implements a profile),
+- As a developer of a component (that does not, or only partially implements a profile),
   I want to get information about any monitors that are not yet implemented for
   any of the supported profiles that are offered.
 - As a component owner (that implements a profile), I want to verify if all the
