@@ -90,7 +90,7 @@ kubelet and the network daemon.
 - As a developer, I want a supported way to collect a subset of the metrics
   exported by my operator and operands, while still collecting necessary metrics
   for alerts, visualization of key indicators and Telemetry.
-- As a component owner (that does not yet implement a profile), I want to
+- As a developer of a component (that does not yet implement a profile), I want to
   extract metrics needed to implement said profile, based on the assets I
   provide, or the ones gathered from the cluster based on a group of target
   selectors, and a plug-in relabel configuration to apply within the monitor.
