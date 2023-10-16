@@ -33,8 +33,9 @@ various components.
 
 ### User Stories
 
-* As an operator author, I want to easily discover the cluster publishing
-status, so that I can bootstrap my component as public or private accordingly.
+* As the author of the image registry operator, I want to easily discover the
+cluster publishing status, so that I can configure access the cloud storage objects
+accordingly.
 
 ### Goals
 
