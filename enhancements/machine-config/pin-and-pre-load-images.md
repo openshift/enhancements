@@ -204,20 +204,35 @@ have them consuming disk space in worker nodes.
 When no node selector is specified the images will be pinned in all the nodes
 of the cluster.
 
-When a `PinnedImageSet` custom resource is added, modified or deleted the
-machine config operator will create, modify or delete the configuration file,
-reload the CRI-O configuration (with the equivalent of `systemctl reload crio`)
-and then it will use the CRI-O gRPC API to run the equivalent of `crictl pull`
-for each of the images.
+The _machine-config-controller_ will grow a new `PinnedImageSetController` sub
+controller that will watch the `PinnedImageSet` custom resources. When one of
+those is created, updated or deleted the controller will start a daemon set that
+will do the following in each node of the cluster:
 
-Note that currently CRI-O doesn't reset pinned images on reload, support for
-that will need to be added.
+1. Create, modify or delete the CRI-O pinning configuration file.
 
-Note that this will happen in all the nodes of the cluster that match the node
-selector.
+1. Reload the CRI-O configuration, with the equivalent of `systemctl reload crio`.
+
+    Note that currently CRI-O doesn't recalculate the set of pinned images on
+    reload, support for that will need to be added.
+
+1. Use the CRI-O gRPC API to run the equivalent of `crictl pull` for each of the
+images.
+
+This needs to be a daemon set running in each node of the cluster because it
+needs to create configuration files on the node, and use the CRI-O gRPC API,
+which is only accessible via `localhost`.
+
+This logic could be part of a new daemon set, specific for this, or else part of
+the _machine-config-daemon_.
+
+The steps above will happen in all the nodes of the cluster. The daemon set will
+be provided with enough information to ensure that each pod applies only the
+changes required for the node where it runs, according to the node selectors in
+the `PinnedImageSet` custom resources.
 
 When all the images have been succesfully pinned and pulled in all the matching
-nodes the `Ready` condition will be set to `True`:
+nodes the `PinnedImageSetController` will set the `Ready` condition to `True`:
 
 ```yaml
 status:
@@ -245,8 +260,28 @@ status:
     message: Node 'node12' failed to pull image `quay.io/...` because ...
 ```
 
-This logic to handle the pinned image sets and generate the configuration files
-will be part of a new sub-controller in MCC.
+Additional information may be needed inside the `status` field of the
+`PinnedImageSet` custom resources in order to implement the mechanisms described
+above. For example, it may be necessary to have conditions per node, something
+like this:
+
+```yaml
+status:
+  node0:
+  - type: Ready
+    status: "False"
+  - type: Failed
+    status: "True"
+  node1:
+  - type: Ready
+    status: "True"
+  - type: Failed
+    status: "True"
+  ...
+```
+
+Those details are explicitly left out of this document, because they are mostly
+implementation details, and't not relevant for the user of the API.
 
 ### Risks and Mitigations
 
