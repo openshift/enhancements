@@ -24,6 +24,13 @@ install-config.yaml using the `Publish` parameter. There is no current standard
 defined for how components should access this parameter to bootstrap themselves
 as public (External) or private (Internal).
 
+At the moment of writing, provisioning a private cluster means the cluster
+will be configured with a private DNS zone, internal (non internet facing)
+ingress, and internal API server.
+
+Exposing the cluster's publishing status empowers other components to bootstrap
+themselves as public or private according to the user request at install time.
+
 ## Motivation
 
 A component should be able to know how to bootstrap itself according to user
@@ -57,7 +64,7 @@ The Infrastructure API is extended, adding the `Publish` field to the
 type InfrastructureStatus struct {
 	// ...
 
-	// publish indicates whether the cluster was installed as public or private.
+	// publish indicates the publishing status of the cluster at install time.
 	// The default is 'External', which means the cluster will be publicly
     // available on the internet.
 	// The 'Internal' mode indicates a private cluster, and operators should
