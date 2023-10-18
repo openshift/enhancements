@@ -128,7 +128,7 @@ aren't removed, regardless of the value of `version_file_persist`.
 The changes to pin the images will be done in a file inside the
 `/etc/crio/crio.conf.d` directory. To avoid potential conflicts with files
 manually created by the administrator the name of this file will be the name of
-the `PinnedImageSet` custom resource concatenated with the UUID assiged by the
+the `PinnedImageSet` custom resource concatenated with the UUID assigned by the
 API server. For example, if the custom resource is this:
 
 ```yaml
@@ -209,6 +209,9 @@ controller that will watch the `PinnedImageSet` custom resources. When one of
 those is created, updated or deleted the controller will start a daemon set that
 will do the following in each node of the cluster:
 
+1. Verify that there is enough disk space available in the machine to pull the
+   images.
+
 1. Create, modify or delete the CRI-O pinning configuration file.
 
 1. Reload the CRI-O configuration, with the equivalent of `systemctl reload crio`.
@@ -226,12 +229,46 @@ which is only accessible via `localhost`.
 This logic could be part of a new daemon set, specific for this, or else part of
 the _machine-config-daemon_.
 
+In order to verify that there is enough disk space we will first check which of
+the images in the `PinnedImageSet` have not yet been downloaded, using CRI-O
+gRPC API. For those that haven't been download we will then fetch from the
+registry server the size of the blobs of the layers (only the size, not the
+actual data).
+
+Calculating the exact total size of the layers once uncompressed and written to
+disk is difficult without deep knowledge of the underplaying containers storage
+library. Instead of that we will assume that the disk space required is twice
+the size of the blobs of the layers. That is an heuristic that works well for
+complete OpenShift releases: blobs take 16 GiB and when they are written to disk
+they take 32 GiB.
+
+If the calculate disk space exceeds the available disk space then the
+`PinnedImageSet` will be marked as failed and the process will not move forward.
+For example:
+
+```yaml
+status:
+  conditions:
+  - type: Ready
+    status: "False"
+  - type: Failed
+    status: "True"
+    message: |
+      Pulling the images in `node12` requires at least 16 GiB of disk
+      space, but there are only 10 GiB available
+```
+
+Note that even with this check it will still be possible (but less likely) to
+have failures to pull images due to disk space: the heuristic could be wrong,
+and there may be other components pulling images or consuming disk space in some
+other way. Those failures will be detected and reported in the status of the `PinnedImageSet` when CRI-O fails to pull the image.
+
 The steps above will happen in all the nodes of the cluster. The daemon set will
 be provided with enough information to ensure that each pod applies only the
 changes required for the node where it runs, according to the node selectors in
 the `PinnedImageSet` custom resources.
 
-When all the images have been succesfully pinned and pulled in all the matching
+When all the images have been successfully pinned and pulled in all the matching
 nodes the `PinnedImageSetController` will set the `Ready` condition to `True`:
 
 ```yaml
@@ -281,7 +318,7 @@ status:
 ```
 
 Those details are explicitly left out of this document, because they are mostly
-implementation details, and't not relevant for the user of the API.
+implementation details, and not relevant for the user of the API.
 
 ### Risks and Mitigations
 
@@ -292,12 +329,15 @@ control plane. There is already a mechanism to mitigate that: the kubelet
 garbage collection. To ensure disk space issues are reported and that garbage
 collection doesn't interfere we will introduced new mechanisms:
 
-1. If disk exhaustion happens while trying to pre-load images the issues will
-be reported explicitly via the status of the `PinnedImageSet` status. Note
-typically these issues are reported as failures to pull images in the status of
-pods, but in this case there are no pods pulling the images. CRI-O will still
-report these issues in the log (if there is space for that), like for any other
-image pull.
+1. Disk space will be checked before trying to pre-load images, and if there are
+issues they will be reported explicitly via the status of the `PinnedImageSet`
+status.
+
+1. If disk space is exhausted while pulling the images, then the issue will be
+reported via the status of the `PinnedImageSet` as well. Typically these issues
+are reported as failures to pull images in the status of pods, but in this case
+there are no pods pulling the images. CRI-O will still report these issues in
+the log (if there is space for that), like for any other image pull.
 
 1. If disk exhaustion happens after the images have been pulled, then we will
 ensure that the kubelet garbage collector doesn't select these images. That
