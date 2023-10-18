@@ -11,30 +11,30 @@ reviewers:
 approvers:
   - "@yuqi-zhang"
 api-approvers: 
-  - "@joelspeed" 
-  - "@murnal" 
-creation-date: 2023-10-05
-last-updated: 2022-10-05
+  - None
+creation-date: 2023-10-16
+last-updated: 2022-10-17
 tracking-link:
   - https://issues.redhat.com/browse/MCO-589
 see-also:
-replaces:
-superseded-by: https://github.com/openshift/enhancements/pull/201, https://github.com/openshift/enhancements/pull/368
+replaces: 
+  - https://github.com/openshift/enhancements/pull/368
+superseded-by: 
+  - https://github.com/openshift/enhancements/pull/201
 ---
 
 # Managing boot images via the MCO
 
 ## Summary
 
-This is a proposal to manage bootimages via the `Machine Config Operator`(MCO), leveraging some of the [pre-work](https://github.com/openshift/installer/pull/4760) done as a result of the discussion in [#201](https://github.com/openshift/enhancements/pull/201). 
+This is a proposal to manage bootimages via the `Machine Config Operator`(MCO), leveraging some of the [pre-work](https://github.com/openshift/installer/pull/4760) done as a result of the discussion in [#201](https://github.com/openshift/enhancements/pull/201). This feature will only target standalone OCP installs. It will also be user opt-in and is planned to be released behind a feature gate.
 
-For Install Provisioned Infrastructure(IPI) clusters, the end goal is to create a mechanism that can:
+For Installer Provisioned Infrastructure(IPI) clusters, the end goal is to create a mechanism that can:
 - update the boot images references in `MachineSets` to the latest in the payload image
 - ensure stub ignition referenced in each `Machinesets` is in spec 3 format
 
-This mechanism is user opt-in and will also be released behind a feature gate.
-
 For User Provisioned Infrastructure(UPI) clusters, this end goal is to create a document(KB or otherwise) that a cluster admin would follow to update their boot images.
+
 
 ## Motivation
 
@@ -62,29 +62,37 @@ The MCO will take over management of the boot image references and the stub igni
 - The new subcontroller does not provide a solution for UPI as it does not use `MachineSets`. We plan to support a UPI solution via documentation that is based on this workflow.
 - This is meant to be a user opt-in feature, and if the user wishes to keep their boot images static it will let them do so.
 - This does not intend to solve [booting into custom pools](https://issues.redhat.com/browse/MCO-773). 
+- This does not target Hypershift, as [it does not use machinesets](https://github.com/openshift/hypershift/blob/32309b12ae6c5d4952357f4ad17519cf2424805a/hypershift-operator/controllers/nodepool/nodepool_controller.go#L2168).
 
 ## Proposal
 
-This automated flow is fairly straightforward, but will require a bit of special casing for each platform. 
+__Overview__
 
 - The `machine-config-controller`(MCC) pod will gain a new sub-controller `machine_set_controller`(MSC) that monitors `MachineSet` changes and the `coreos-bootimages` [ConfigMap](https://github.com/openshift/installer/pull/4760).
-- Based on platform and arch type, the MSC will check if the images referenced in the `MachineSet(s)` is the same as the one in the ConfigMap. Each platform(gcp, aws...and so on) does this differently, so this is a good opportunity to split the work up between platforms and see if the implementation is effective. The ConfigMap is considered to be the golden set of bootimage values, i.e. they will never go out of date.
+- Before processing a MachineSet, the MSC will check for the existence of `io.openshift.mco-managed=true` annotation. If it is not present, the MSC will exit the reconciliation loop. This is how `MachineSets` are opted-in to this mechanism.
+- Based on platform and arch type, the MSC will check if the boot images referenced in the `providerSpec` field of the `MachineSet` is the same as the one in the ConfigMap. Each platform(gcp, aws...and so on) does this differently, so this is a good opportunity to split the work up between platforms and see if the implementation is effective. The ConfigMap is considered to be the golden set of bootimage values, i.e. they will never go out of date.
 - Next, it will check if the stub secret referenced is spec 3. If it is spec 2, the MSC will try create a new version of this secret by trying to translate it to spec 3. This step is platform/arch agnostic. Failure to up translate will cause a degrade and the sub-controller will exit without patching the `MachineSet`.
 - Finally, if the MSC will attempt to patch the `MachineSet` if required. Failure to do so will cause a degrade. 
 - Any other failures in the above steps will report an error; but degrades will only be in the specific cases mentioned above. Certain failures may also be as a result of an unsupported architecture or an unsupported platform. This is necessary because support for platforms will be phased in(and some platforms may not even desire this support)
 
 __Rolling back__
 
-The very first time bootimages are patched via this mechanism, the MSC will also backup the existing bootimage and secret references. This will be used to roll back the `MachineSets` which can be done by opting out of the feature. This is also an important mitigation in case things go wrong(invalid bootimage references, incorrect patching... etc).
+The very first time a `MachineSet` is patched, the MSC will also backup the following via annotation to the `MachineSet`:
+- `io.openshift.mco-pre-managed-image=` storing the original provider image reference
+- `io.openshift.mco-pre-managed-secret=` storing the original stub secret
+
+A roll back can be done by opting out the `MachineSet`, this will trigger the MSC to restore the MachineSet to "factory" values by using the annotations mentioned above.
+This is an important mitigation in case things go wrong(invalid bootimage references, incorrect patching... etc).
 
 __UPI__
 
 For UPI, the proposal is to create platform specific documentation based on our implementation of the the above work. If this feature is
-switched "on" in UPI, it is necessary to warn(degrade or some other way) the cluster admin to indicate that this functionally is essentially a no-op in the absence of machinesets.
+opted in on a UPI install, it is necessary to warn(degrade or some other way) the cluster admin to indicate that this functionally is essentially a no-op in the absence of machinesets.
 
 ### Workflow Description
 
-From the user workflow standpoint, this enhancement will be more or less invisible once turned ON. The opt-in mechanism is still up for debate and is one of the open questions below.
+- To enroll a `MachineSet` for boot image updates, the cluster admin should add an annotation `io.openshift.mco-managed=true` to the `MachineSet`.
+- To un-enroll(and effectively rollback) the `MachineSet` from boot image updates, the cluster admin should remove the `io.openshift.mco-managed=true` annotation from the `MachineSet`.
 
 #### Variation and form factor considerations [optional]
 
@@ -128,9 +136,10 @@ TBD, based on the open questions below.
 
 ### Open Questions
 
-- What should the user opt-in mechanism be? This could be simple as an configmap in the MCO namespace, or a new field in an [MCO CRD](https://github.com/openshift/api/blob/master/operator/v1/0000_80_machine-config-operator_01_config.crd.yaml). While feature gating is an "opt-in", this proposal only works when the cluster gets an upgrade and a newer boot image is available. As I understand it, upgrades do not happen under the TechPreviewNoUpgrade featureset and this feature will be a no-op - so we can't use feature gate as the only on/off toggle. 
-- This proposal relies on the golden configmap having a target value for every platform/arch combination that we use today. I've [noticed](https://issues.redhat.com/browse/MCO-793) some cases like vsphere don't have a a reference as it stands today. Why is that? Are there scenarios not requiring boot image updates?
-- Heterogenous platform(nodes span across infra providers) concerns. Do such clusters exist? If they do, do they use `MachineSets`? The current proposal assumes the same platform across all nodes and uses the infra object to determine the cluster platform. The current proposal will run into an error if there is a platform mismatch and will exit non-fatally.
+- Should we have a like a global switch that opt-in all `MachineSets` for this mechanism?
+- Somewhat related to above, would we also want to allow opting out without rolling back? This is for a situation for the customer would not want to update the boot images any longer, but would like to keep the current image instead of the "factory" after rolling back. Not sure if anyone would use this, but though it was worth considering.
+- This proposal relies on the golden configmap having a target value for every platform/arch combination that we use today. I've [noticed](https://issues.redhat.com/browse/MCO-793) some cases like vsphere don't have a reference as it stands today. Why is that? Are there scenarios not requiring boot image updates?
+- Heterogenous platform(nodes span across infra providers) concerns. Do such clusters exist? If they do, do they use `MachineSets`? The current proposal assumes the same platform across all nodes and uses the infra object to determine the cluster platform. It reports anror if there is a platform mismatch and will exit non-fatally.
 - Hetergenous architecture concerns. I think these exist, but do they use `MachineSets`? The current proposal maps a `MachineSet` to an architecture, so this should not be a concern, but curious overall
 - The user could have possibly modified the stub ignition used in first boot with sensitive information. While this sub controller could uptranslate them, this is manipulating user data in a certain way which the customer may not be comfortable with. Are we ok with this?
 - What platforms do we want to support in GA? GCP was used in the PoC so I've added that, but is there an interest for certain platforms over others for the first release?
