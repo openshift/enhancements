@@ -99,7 +99,8 @@ to request that a set of container images are pinned and pre-loaded:
       ...
     ```
 
-1. The machine config operators ensures that all the images are pinned and
+1. A new `PinnedImageSetController` sub-controller of the
+_machine-config-controller_ ensures that all the images are pinned and
 pulled in all the nodes that match the node selector.
 
 ### API Extensions
