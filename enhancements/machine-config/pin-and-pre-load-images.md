@@ -299,6 +299,10 @@ status:
     message: Node 'node12' failed to pull image `quay.io/...` because ...
 ```
 
+We will consider using the new _machine-config-operator_ state reporting
+mechanism introduced [https://github.com/openshift/api/pull/1596](here) to
+report additional details about the progress or issues of each node.
+
 Additional information may be needed inside the `status` field of the
 `PinnedImageSet` custom resources in order to implement the mechanisms described
 above. For example, it may be necessary to have conditions per node, something
