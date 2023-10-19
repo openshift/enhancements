@@ -260,13 +260,14 @@ status:
 
 Note that even with this check it will still be possible (but less likely) to
 have failures to pull images due to disk space: the heuristic could be wrong,
-and there may be other components pulling images or consuming disk space in some
-other way. Those failures will be detected and reported in the status of the `PinnedImageSet` when CRI-O fails to pull the image.
+and there may be other components pulling images or consuming disk space in
+some other way. Those failures will be detected and reported in the status of
+the `PinnedImageSet` when CRI-O fails to pull the image.
 
-The steps above will happen in all the nodes of the cluster. The daemon set will
-be provided with enough information to ensure that each pod applies only the
-changes required for the node where it runs, according to the node selectors in
-the `PinnedImageSet` custom resources.
+The steps above will happen in all the nodes of the cluster. The daemon set
+will be provided with enough information to ensure that each pod applies only
+the changes required for the node where it runs, according to the node
+selectors in the `PinnedImageSet` custom resources.
 
 When all the images have been successfully pinned and pulled in all the matching
 nodes the `PinnedImageSetController` will set the `Ready` condition to `True`:
