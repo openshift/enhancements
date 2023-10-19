@@ -86,23 +86,76 @@ pod the VM runs on - the following requirements must be met:
 - the NAD holding the configuration for the secondary network must allow for
 persistent IPs - `{..., "allowPersistentIPs": true, ...}`
 
+If the KubeVirt feature gate is enabled, KubeVirt will create the `IPAMClaims`
+for each multus non-default network, thus declaring intent of having persistent
+IP allocations for those interfaces.
+
+The IPAM CNI plugin will then react accordingly and if the NAD configuration
+allows it, allocate IPs from its pool - which will be persisted in the
+`IPAMClaim` status. Finally, the CNI will configure the interface with these
+IP addresses.
+
+Please refer to the diagram below to better understand the proposed workflow
+for VM creation:
+1. the user provisions a VM object
+2. the KubeVirt controller creates an IPAMClaim for each multus non-default
+  network in the corresponding VMI spec
+3. OVN-K reacts to the creation of the `IPAMClaim`s. It will generate IP address
+  from the required IP pools, and update the corresponding `IPAMClaim` with the
+  generate IPs.
+4. this step occurs in parallel to step 3; KubeVirt templates the KubeVirt
+  launcher pod, featuring in each network selection element the name of the
+  claim where the CNI will find the IP address.
+5. the CNI plugin will see this network has persistent IPs enabled; it will
+  then look in the pod's network selection elements for the claim name where
+  the persistent IP address will be located. If it doesn't find it there, the
+  plugin will retry later, using exponential backoff. Once the `IPAMClaim`
+  features the IPs in the status, the OVN-Kubernetes CNI will configure the
+  pod's OVN annotations with this IP, which will in turn trickle down to the
+  pod interface.
+
 ```mermaid
 sequenceDiagram
-actor user
-user ->> KubeVirt: createVM(name=vmA)
+  actor user
+  participant KubeVirt
+  participant apiserver
+  participant CNI
+  participant IPAM CNI
 
-KubeVirt ->> Kubernetes: createPod(name=<generated name>, owner=vmA)
+  user->>KubeVirt: createVM(name=vm-a)
+  KubeVirt-->>user: OK
 
-note over OVN-K: notices a new pod was added
-OVN-K ->> OVN-K: ip := generateIP()
+  note over KubeVirt: we only iterate Multus non-default networks
+  loop for network := range vm.spec.networks
+    note over KubeVirt, apiserver: claimName := <vmName>.<network.Name>
+    KubeVirt->>apiserver: createIPAMClaim(claimName)
+    apiserver-->>KubeVirt: OK
+  end
 
-alt if cniConf.AllowPersistentIPs()
-  OVN-K ->> Kubernetes: persistentIPAllocation(ip, owner=vmA)
-  Kubernetes -->> OVN-K: OK
-end
-Kubernetes -->> KubeVirt: OK
+  apiserver->>IPAM CNI: reconcileIPAMClaims()
+  activate IPAM CNI
 
-KubeVirt -->> user: OK
+  note over KubeVirt, apiserver: new attribute in network-selection-elements
+  KubeVirt->>apiserver: createPOD(ipamClaims=...)
+  apiserver-->>KubeVirt: OK
+
+  apiserver->>CNI: podCreatedEvent(ipamClaims=...)
+  activate CNI
+
+  note over CNI: wait until IPAMClaims associated
+
+  loop for ipamClaim := range ipamClaims
+  IPAM CNI->>IPAM CNI: subnet = GetNAD(ipamClaim).Subnet
+  IPAM CNI->> IPAM CNI: ips = AllocateNextIPs(subnet)
+  IPAM CNI->>apiserver: IPAMClaim.UpdateStatus(status.ips = ips)
+  apiserver-->>IPAM CNI: OK
+  end
+
+  deactivate CNI
+  apiserver->>CNI: reconcileIPAMClaims()
+  loop for ipamClaim := range pod.ipamClaims
+  CNI->>CNI: configureIPs(pod, ipamClaim.ips)
+  end
 ```
 
 **NOTES**:
@@ -125,29 +178,46 @@ note over OVN-K: notices a pod was deleted
 OVN-K ->> OVN-K: ips = teardownOVNEntities()
 ```
 
-The main difference from a traditional IPAM CNI response to a pod delete is the
-`IPAMClaim` allocation will not be deleted if the CNI DEL arguments
-feature any owner indication. Thus, on the VM scenario, the `IPAMClaim`s
-will **not** be deleted.
+OVN-Kubernetes will **not** delete the `IPAMClaim` CRs for the deleted VM pod.
+The IP addresses allocated to the VM will **not** be released to the IP pool
+when there's a corresponding `IPAMClaim` for the attachment being deleted.
 
 #### Starting a (previously stopped) Virtual Machine
+This flow is - from a CNI perspective - quite similar to the
+[Creating a VM flow](#creating-a-virtual-machine):
+1. the workload controller (KubeVirt) templates the pod, featuring the required
+   `IPAMClaim` references in each network selection element.
+2. OVN-Kubernetes will read the network selection element; if it sees an
+   `IPAMClaim` reference, it will attempt to read it from the datastore.
+3. if the read `IPAMClaim` features IP addresses in its status, OVN-Kubernetes
+   will configure the interface with those IPs. If the status doesn't feature
+   IP addresses, the CNI plugin will retry later, with exponential backoff.
+
 ```mermaid
 sequenceDiagram
 
-actor user
+  actor user
+  participant KubeVirt
+  participant Kubernetes
+  participant CNI
 
-user ->> KubeVirt: startVM(vm=vmA)
+  user->>KubeVirt: startVM(vmName)
 
-KubeVirt ->> Kubernetes: createPod(name=<generated name>, owner=vmA)
+  note over KubeVirt: podName := "launcher-<vm name>"
+  KubeVirt->>Kubernetes: createPod(name=podName, ipam-claims=[claimName])
 
-note over OVN-K: notices a new pod was added having an owner
-OVN-K ->> Kubernetes: getPersistentIPs(owner=vmA)
-Kubernetes -->> OVN-K: persistentIPs
-OVN-K ->> Kubernetes: result(..., ips = persistentIPs)
+  Kubernetes->>CNI: CNI ADD
+  note over CNI: this CNIs has an IPAMClaims informer
 
-Kubernetes -->> KubeVirt: OK
+  CNI->>CNI: ipamClaim := readIPAMClaim(claimName)
+  CNI->>CNI: configIface(ipamClaim.Status.IPs)
 
-KubeVirt -->> user: OK
+  CNI-->>Kubernetes: OK
+
+  Kubernetes-->>KubeVirt: OK
+
+
+  KubeVirt-->>user: OK
 ```
 
 When creating the pod, the OVN-Kubernetes IPAM module finds existing
@@ -156,31 +226,41 @@ allocations, instead of generating brand new allocations for the pod where the
 encapsulating object will run. The migration scenario is similar.
 
 #### Removing a Virtual Machine
+This flow is - from a CNI perspective - quite similar to the
+[Stopping a VM flow](#stopping-a-virtual-machine). The main difference is after
+the VM is deleted, Kubernetes Garbage Collection will kick in, and remove the
+orphaned `IPAMClaim`s. OVN-Kubernetes will need to react to the `IPAMClaim`
+delete event, to return those IP addresses to the respective IP pools.
+
 ```mermaid
 sequenceDiagram
 
-actor user
+  actor user
+  participant KubeVirt
+  participant Kubernetes
+  participant CNI
+  participant IPAM CNI
 
-user ->> KubeVirt: stopVM(vm=vmA)
+  user->>KubeVirt: deleteVM(vmName)
 
-KubeVirt ->> Kubernetes: deletePod(owner=vmA)
+  KubeVirt->>Kubernetes: deletePod(launcher-vmName)
 
-note over OVN-K: notices a pod was deleted
-OVN-K ->> OVN-K: ips = teardownOVNEntities()
+  Kubernetes->>CNI: CNI DEL
+  CNI-->>Kubernetes: OK
 
-Kubernetes -->> KubeVirt: OK
+  Kubernetes-->>KubeVirt: OK
 
-KubeVirt -->> user: OK
+  KubeVirt-->>user: OK
 
-loop persistentIPs with owner=vmA:
-    Kubernetes ->> Kubernetes: garbageCollect(allocation)
-end
+  loop for every orphaned IPAMClaim
+    Kubernetes->>Kubernetes: deleteIPAMClaim()
+  end
+
+  note over IPAM CNI: this CNI has an IPAMClaim informer
+
+Kubernetes->>IPAM CNI: removeEvent(ipamClaim)
+IPAM CNI->>IPAM CNI: returnToPool(ipamClaim.Status.IPs)
 ```
-
-This scenario, from the OVN-Kubernetes IPAM module perspective is exactly like
-deleting a pod: since the `IPAMClaim` is owned by a Kubernetes entity we
-give up on manipulating the datastore for it, and delegate to Kubernetes to
-garbage collect them once the Virtual Machine is removed.
 
 ### API Extensions
 
@@ -983,8 +1063,9 @@ sequenceDiagram
     user->>KubeVirt: createVM(name=...)
     KubeVirt-->>user: OK
 
-    loop for iface := range vm.spec.ifaces
-        note over KubeVirt, apiserver: claimName := <vmName>.<iface.Name>
+    note over KubeVirt: we only iterate Multus non-default networks
+    loop for network := range vm.spec.networks
+        note over KubeVirt, apiserver: claimName := <vmName>.<network.Name>
         KubeVirt->>apiserver: createIPAMClaim(claimName)
         apiserver-->>KubeVirt: OK
     end
