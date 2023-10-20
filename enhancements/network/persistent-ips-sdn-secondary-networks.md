@@ -717,6 +717,62 @@ TODO
 
 ## Alternatives
 
+### Have OVN-Kubernetes create the `IPAMClaim`
+This alternative does **not** require the `IPAMClaim` CRD to have a status
+sub-resource.
+
+The main difference is KubeVirt instructs the CNI plugin via CNI-Args (over the
+network-selection-elements) the pod being created is requesting an IP on behalf
+of another entity - i.e. the VM. The network selection element would look like:
+```json
+{
+  "name": "tenantred",
+  "namespace": "default",
+  "interface": "pod16367aacb67",
+  "cni-args": {
+    "ipamclaim.cni.cncf.io/ownerID": "a0790345-4e84-4257-837a-e3d762d191ab",
+    "ipamclaim.cni.cncf.io/ownerName": "vm-a",
+    "ipamclaim.cni.cncf.io/ownerType": "VirtualMachine",
+    "ipamclaim.cni.cncf.io/ownerVersion": "kubevirt.io/v1"
+  }
+}
+```
+
+When the CNI plugin notices this information in the network selection element,
+it allocates an IP address from the pool, and then creates the CR with the IPs
+directly in the spec - keep in mind there's no reason for this alternative to
+feature the status sub-resource.
+
+The CNI plugin will also create the `IPAMClaim` with the owner reference
+information, which was passed via CNI-Args. The CR would look like:
+```yaml
+apiVersion: "ipamclaims.k8s.cni.cncf.io/v1alpha1"
+kind: IPAMClaim
+metadata:
+  name: vm-a.tenantred.pod16367aacb67
+  namespace: ns1
+  ownerReferences:
+  - apiVersion: kubevirt.io/v1
+    kind: VirtualMachine
+    name: vm-a
+    uid: a0790345-4e84-4257-837a-e3d762d191ab
+spec:
+  network: tenantred
+  interface: pod16367aacb67
+  ips:
+  - 10.128.20.8/24
+  - fd10:128:20::8/64
+```
+
+This alternative cannot handle the scenario where foreground deletion is asked,
+since OVN-Kubernetes (the component setting the finalizer) does not know when
+to remove the finalizer (i.e. it doesn't know the VMI lifecycle).
+
+Also, please notice the `metadata.name` attribute: it refers to the name of the
+interface in the pod. Some KubeVirt scenarios will lead to the name of the pod
+interface changing across reboots or migration. This will cause OVN-Kubernetes
+to not find the `IPAMClaim` on the new pod.
+
 ### Delegate the IPAM functionality to a CNI IPAM plugin
 
 Below you can find a Network Attachment Definition requesting delegated IPAM
