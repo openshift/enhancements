@@ -81,9 +81,12 @@ type InfrastructureStatus struct {
     // available on the internet.
 	// The 'Internal' mode indicates a private cluster, and operators should
     // configure operands accordingly.
-    // +kubebuilder:default=External
-    // +kubebuilder:validation:Enum=Internal;External
-	Publish PublishMode `json:"publish"`
+    // The empty value means the publishing status of the cluster at install
+    // time is unknown.
+    // +kubebuilder:validation:Enum="";Internal;External;
+    // +kubebuilder:default=""
+	// +optional
+	Publish PublishMode `json:"publish,omitempty"`
 }
 ```
 
