@@ -1,9 +1,9 @@
 ---
 title: metrics-collection-profiles
 authors:
-  - @JoaoBraveCoding
+  - JoaoBraveCoding
 reviewers:
-  - @openshift/openshift-team-monitoring
+  - openshift/openshift-team-monitoring
 approvers:
   - TBD
 api-approvers: "None"
@@ -417,8 +417,11 @@ Initial proofs-of-concept:
 
 - Make CMO injecting metric relabelling for all service monitors based on the
   rules being deployed, but this is not a good idea because: 
-  - CMO acting behind the back of other operators isn't probably a very good
-    idea (less explicit, more brittle);
+  - CMO acting behind the back of other operators isn't a good principle (less
+    explicit, more brittle), it would require CMO to watch the components
+    monitors and generates new resources that would be reconciled by
+    prometheus-operator instead of the original ones, this would also translate
+    into a nightmare from a maintainability point of view;
   - it's likely to be less efficient because the relabeling configs would be
     very complex and expensive in terms of processing.
   - Hypershift implements a [similar
@@ -451,6 +454,10 @@ Initial proofs-of-concept:
   set of metrics that are only consumed when the minimal profile is enabled.
   However, customers are also able to extend this minimal profile with regexes to
   include metrics which might be interesting to them.
+- Leverage [installer capabilities](https://docs.google.com/document/d/1I-YT7LKKDHSBLB6Hmg0tZ54DWjrAxlVdXxlViShMu-0/edit#heading=h.848jsje80fru)
+  - After some consideration we decided to abandon this idea since it would only
+    work for resources controlled by CVO which is not the case for the majority
+    of ServiceMonitors.
 
 ## Infrastructure Needed [optional]
 
