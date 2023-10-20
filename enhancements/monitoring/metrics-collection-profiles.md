@@ -48,7 +48,7 @@ Nevertheless, users have repeatedly asked for the ability to reduce the amount
 of memory consumed by Prometheus either by lowering the Prometheus scrape
 intervals or by modifying monitors.
 
-Users currently can not control the aformentioned monitors scraped by Prometheus
+Users currently can not control the aforementioned monitors scraped by Prometheus
 since some of the metrics collected are essential for other parts of the system
 to function properly: recording rules, alerting rules, console dashboards, and
 Red Hat Telemetry. Users also are not allowed to tune the interval at which
@@ -150,7 +150,7 @@ metadata:
 data:
   config.yaml: |
     prometheusK8s:
-      collectionProfile: full 
+      collectionProfile: full
 ```
 
 The different profile names would be pre-defined by the OpenShift monitoring
@@ -250,7 +250,7 @@ spec:
  ```
 
 Note: 
-- the `metricRelabeling`s section keeps only two metrics, while the rest is
+- the `metricRelabelings` section keeps only two metrics, while the rest is
 dropped.
 - the metrics in the `keep` section were obtained with the help of a script that
   parsed all Alerts, PrometheusRules and Console dashboards to determine what
@@ -258,7 +258,7 @@ dropped.
 
 Finally, a team that adopts the metrics collection profile feature should also 
 add themselves and their component to the list under 
-[Infrastruture needed](#infrastructure-needed-optional)
+[Infrastructure needed](#infrastructure-needed-optional)
 
 #### CLI Utility
 
@@ -320,7 +320,7 @@ not. To aid teams with this effort the monitoring team will provide:
 
 - How are monitors supposed to be kept up to date? In 4.12 a metric that wasn't
   being used in an alert is now required, how does the monitor responsible for
-  that metric gets updated?
+  that metric get updated?
   - The origin/CI test mentioned in the previous section will fail if there is a
     resource (Alerts/PrometheusRules/Dashboards) using a metric which is not
     present in the monitor in question;
@@ -331,7 +331,7 @@ not. To aid teams with this effort the monitoring team will provide:
 
 - Should we add future profiles? How would we validate such profiles?
   - Our current validation strategy with only two profiles is quite linear,
-    however, things start becoming more complex and hard to mainain as we
+    however, things start becoming more complex and hard to maintain as we
     introduce new profiles to the mix. 
   - Some of the things to consider if new profiles are introduce are:
       - How would we validate such profile?
@@ -352,7 +352,7 @@ not. To aid teams with this effort the monitoring team will provide:
 - Unit tests in CMO to validate that the correct monitors are being selected
 - E2E tests in CMO to validate that everything works correctly 
 - For the `minimal` profile, origin/CI test to validate that every metric used
-in a resource (Alerts/PrometheusRules/Dashboards) exist in the `keep` expression
+in a resource (Alerts/PrometheusRules/Dashboards) exists in the `keep` expression
 of a minimal monitors.
 
 ### Graduation Criteria
@@ -372,7 +372,7 @@ TechPreview gate. PTAL at the section below for more details.
 - [CLI tool to facilitate implementation of metrics collection profiles for OCP components](https://issues.redhat.com/browse/MON-2694)
 - [Drop TechPreview gate on collection profiles](https://issues.redhat.com/browse/MON-3215)
 - [origin/CI tool to validate collection profiles](https://issues.redhat.com/browse/MON-3105)
-- [User facing documentation created in openshift-docs](https://issues.redhat.com/browse/OBSDOCS-330)
+- [User facing documentation created in OpenShift-docs](https://issues.redhat.com/browse/OBSDOCS-330)
 
 #### Removing a deprecated feature
 
@@ -437,7 +437,7 @@ Initial proofs-of-concept:
     mind;
   - Scrapes can fail, but the user might not be mindful of this and set a high
     scrape interval;
-- Add a seperate container to prometheus-operator (p-o) that would be used by
+- Add a separate container to prometheus-operator (p-o) that would be used by
   p-o to modify the prometheus config according to a metrics collection profile.
   - This container would perform an analysis on what metrics were being used.
     Then it would provide prometheus operator with this list.
@@ -449,14 +449,14 @@ Initial proofs-of-concept:
   -  https://github.com/Azure/prometheus-collector
   - In their approach they also have [hardcoded](https://github.com/Azure/prometheus-collector/blob/66ed1a5a27781d7e7e3bb1771b11f1da25ffa79c/otelcollector/configmapparser/tomlparser-default-targets-metrics-keep-list.rb#L28)
   set of metrics that are only consumed when the minimal profile is enabled.
-  However, customer are also able to extend this minimal profile with regexes to
+  However, customers are also able to extend this minimal profile with regexes to
   include metrics which might be interesting to them.
 
 ## Infrastructure Needed [optional]
 
 ### Adopted metrics collection profiles
 
-Add the team and the component that will to adopt metrics collection profiles
+Add the team and the component that will adopt metrics collection profiles
 and implementation status. Possible implementation status: 
 - considering
 - implementation in progress
