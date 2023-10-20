@@ -313,10 +313,6 @@ From OVN-Kubernetes perspective, it **must**:
   described via the `metadata.ownerReferences` attribute. I.e. if we're
   deleting a pod where a KubeVirt VM will run, do not remove the `IPAMClaim`
   allocation when processing the CNI delete.
-- retrieve any `IPAMClaim`s previously allocated for a Virtual Machine
-  when processing Virtual Machine's pod creations.
-  I.e. when starting a previously stopped VM, OVN-Kubernetes should check if
-  there are existing `IPAMClaim`s for it, and re-use them if found.
 - the IPAM side of OVN-Kubernetes needs to react to the `IPAMClaim` creation,
   generate an IP for it, and update the `IPAMClaim` status with those IPs.
 - when persistent IPs are requested by the network admin (via the network
@@ -332,51 +328,6 @@ garbage collected by Kubernetes when the `VirtualMachine` named `vm-a` with UID
 
 ### Implementation Details/Notes/Constraints
 
-#### Instructing the IPAM CNI the ADD/DEL requests are on behalf of an owner
-
-We require different behaviors from the IPAM CNI when processing **ADD** events:
-- when an owner is specified, the IPAM CNI plugin **will** try to recover
-  previous allocations for this particular owner. If found, they are re-used.
-  Generated otherwise.
-- when the setup command features an owner, we must persist the IP allocation
-  in the datastore for every IP allocation we generate.
-
-The behavior is also different when processing CNI deletes: the `IPAMClaim`
-CRs will not be deleted by the CNI plugin: Kubernetes will garbage collect
-these once the encapsulating object is removed.
-
-The question now becomes how does the client instruct the IPAM CNI plugin this
-particular operation is for a pod owned by another entity ?
-
-#### Specifying persistent IPs for a NAD
-
-The network administrator has a say when specifying the NAD if the persistent
-IPs feature can be used for their network.
-
-To achieve that, a new flag is added (only `layer2` and `localnet` topologies),
-named `allowPersistentIPs`.
-
-```yaml
----
-apiVersion: "k8s.cni.cncf.io/v1"
-kind: NetworkAttachmentDefinition
-metadata:
-  name: tenantred
-  namespace: default
-spec:
-  config: '{
-      "cniVersion": "0.3.1",
-      "name": "l2-network",
-      "type": "ovn-k8s-cni-overlay",
-      "topology": "layer2",
-      "mtu": 1300,
-      "netAttachDefName": "default/tenantred",
-      "subnet": "10.128.20.0/24,fd10:128:20::0/64",
-      "excludeSubnets": "10.128.200.1/32,fd10:128:20::1/128",
-      "allowPersistentIPs": true
-    }'
-```
-
 ### Risks and Mitigations
 
 When building the OVN-Kubernetes IPAM module IP pools, it will be needed to
@@ -389,17 +340,14 @@ we will not actively synchronously call the Kubernetes API for reading.
 
 ### Drawbacks
 
-Using the proposed solution would lead to an issue with VirtualMachine
-foreground deletion. It is described in-depth in the
-[Garbage Collection section](#kubernetes-garbage-collection-extended-info).
-
 ## Design Details
 
 ### KubeVirt related changes
 
 KubeVirt would need to template the pod accordingly - i.e. the
-`NetworkSelectionElements` must feature the owner information required by
-the OVN-Kubernetes CNI to use in the owner references via CNI args.
+`NetworkSelectionElements` must feature the `ipam-claim-reference` attribute to
+indicate to the IPAM CNI / CNI which `IPAMClaim` they should use to persist the
+IP allocation across reboots / migrations.
 
 Check the following network selection elements annotation from a KubeVirt
 launcher pod to see an example:
@@ -411,24 +359,16 @@ kubectl get pods <launcher pod name> -ojsonpath="{ @.metadata.annotations.k8s\.v
     "name": "tenantred",
     "namespace": "default",
     "interface": "pod16367aacb67",
-    "cni-args": {
-      "ipamclaim.cni.cncf.io/ownerID": "a0790345-4e84-4257-837a-e3d762d191ab",
-      "ipamclaim.cni.cncf.io/ownerName": "vm-a",
-      "ipamclaim.cni.cncf.io/ownerType": "VirtualMachine",
-      "ipamclaim.cni.cncf.io/ownerVersion": "kubevirt.io/v1"
-    }
+    "ipam-claim-reference": "vm-a.tenantred-attachment"
   }
 ]
 ```
 
 #### KubeVirt feature gate
 We recommend to protect this feature behind a feature gate, at least in the
-beginning, since the current proposal will not work safely for VM foreground
-deletes - i.e. the feature comes with a cost: only background delete
-propagation is accepted.
-
-More details about this in
-[Kubernetes GC extended info](#kubernetes-garbage-collection-extended-info).
+beginning. When enabled, KubeVirt will **always** declare its intent of having
+persistent IP allocations for all its VM secondary networks (i.e. multus non
+default networks).
 
 #### KubeVirt API changes
 
@@ -454,40 +394,13 @@ type NetworkInterfaceStatus {
 }
 ```
 
-**NOTE:** this change is not required per-se. It does provide helpful
-information to the VM user.
+**NOTE:** this change is **not** required. It does provide helpful information
+to the VM user.
 
 ### OVN-Kubernetes related changes
 When the OVN-Kubernetes `ovnkube-control-plane` pod realizes the network
-selection element features those CNI arguments, it will generate an IP address
-allocation for it, using the existing allocator, plus create an `IPAMClaim` CR
-to represent it in the Kubernetes data-store. OVN-Kubernetes will use the
-CNI-args information to fill out the `ownerReferences` metadata on the
-`IPAMClaim` CR, which would look like:
-
-```yaml
-apiVersion: "ipamclaims.k8s.cni.cncf.io/v1alpha1"
-kind: IPAMClaim
-metadata:
-  name: vm-a.tenantred.pod16367aacb67
-  namespace: ns1
-  ownerReferences:
-  - apiVersion: kubevirt.io/v1
-    kind: VirtualMachine
-    name: vm-a
-    uid: a0790345-4e84-4257-837a-e3d762d191ab
-spec:
-  network: tenantred
-  interface: pod16367aacb67
-  ips:
-  - 10.128.20.8/24
-  - fd10:128:20::8/64
-```
-
-**NOTE**: it is important to refer the name of the CR would be computed from
-`<CNI args owner name>.<net-attach-def name>.<iface name>`. Interface name is
-available in the network selection elements, and thus available to
-ovnkube-control-plane.
+selection element features `ipam-claim-references`, it will allocate IP
+addresses from the pools, plus update the existing `IPAMClaim` CR with them.
 
 The next sections feature specific information on how to integrate this new CRD
 in the existing OVN-Kubernetes IP pool.
@@ -495,12 +408,12 @@ in the existing OVN-Kubernetes IP pool.
 #### Integrate the `IPAMClaim` CRD with OVN-Kubernetes ip pool
 
 We plan on integrating the proposed `IPAMClaim`s CRD with the existing
-OVN-Kubernetes IP pool allocation mechanism by reacting to two different
-events: ovnkube-control-plane start, and `IPAMClaim` CR delete.
+OVN-Kubernetes IP pool allocation mechanism by reacting to different events:
+- ovnkube-control-plane start
+- `IPAMClaim` CR add.
+- `IPAMClaim` CR delete.
 
-The updates to the `IPAMClaim` CR will not be supported, and since they will
-be provisioned as part of the regular pod triggered CNI ADD operation, it is
-not necessary to react to provisioned `IPAMClaim`s.
+The updates to the `IPAMClaim` CR will not be supported.
 
 #### Integrate the CRD with the OVN-K IP pool on ovnkube-control-plane start
 
@@ -519,7 +432,7 @@ sequenceDiagram
 
   k8s->>ipamClaimAllocator:Sync(ipamClaims)
   loop all IPAMClaims
-    ipamClaimAllocator->>ipAllocator:AllocateIPs(ipamClaim.IPs)
+    ipamClaimAllocator->>ipAllocator:AllocateIPs(ipamClaim.Status.IPs)
     ipAllocator->>ipamClaimAllocator:Result
     Note right of ipamClaimAllocator: IsErrAllocated is ignored
   end
@@ -555,11 +468,11 @@ sequenceDiagram
     k8s-->>user: OK
     k8s->>networkClusterController: AddResource(pod)
     networkClusterController->>podAllocator:Reconcile(pod)
-    podAllocator->>k8s:GetIPAMClaim(vm owner)
-    k8s-->>podAllocator:NotFound
+    podAllocator->>k8s:GetIPAMClaim(pod.network-selection-element.ipam-claim-reference)
+    k8s-->>podAllocator:ipamClaim
     podAllocator->>ipAllocator:AllocateNextIPs
     ipAllocator-->>podAllocator:IPs
-    podAllocator->>k8s:CreateIPAMClaim(vm, network, interface, IPs)
+    podAllocator->>k8s:UpdateIPAMClaim(vm, network, interface, IPs)
     k8s-->>podAllocator:Result
     podAllocator->>podAllocator:annotatedPod(IPs)
 ```
@@ -600,7 +513,7 @@ sequenceDiagram
     k8s->>networkClusterController: AddResource(pod)
     networkClusterController->>podAllocator:Reconcile(pod)
     podAllocator->>k8s:GetIPAMClaim(vm owner)
-    k8s-->>podAllocator:IPAMClaim(IPs)
+    k8s-->>podAllocator:IPAMClaim(claim.Status.IPs)
     note over podAllocator: Similar to static IP
     podAllocator->>ipAllocator:AllocateIPs
     ipAllocator-->>podAllocator:Result
@@ -608,6 +521,10 @@ sequenceDiagram
 ```
 
 ##### Delete VM - IP pool flow
+When a persistentIP allocation is removed from the datastore (via Kubernetes GC
+), we must return said IP address to the pool, by invoking `ReleaseIPs` for
+every IP in it.
+
 ```mermaid
 sequenceDiagram
   actor user
@@ -625,12 +542,6 @@ sequenceDiagram
   ipAllocator-->>ipamClaimAllocator:Result
   ipamClaimAllocator-->user:Result
 ```
-
-#### How to integrate the new CRD with the OVN-K IP pool on IPAMClaim delete
-
-When a persistentIP allocation is removed from the datastore (via Kubernetes GC
-), we must return said IP address to the pool, by invoking `ReleaseIPs` for
-every IP in it.
 
 ### Kubernetes Garbage Collection extended info
 
