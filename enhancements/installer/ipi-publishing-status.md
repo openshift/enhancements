@@ -8,7 +8,7 @@ reviewers: # Include a comment about what domain expertise a reviewer is expecte
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
   - TBD
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - "@bparees"
+  - "@JoelSpeed"
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
@@ -43,6 +43,18 @@ various components.
 * As the author of the image registry operator, I want to easily discover the
 cluster publishing status, so that I can configure access the cloud storage objects
 accordingly.
+
+
+In the specific case of OpenShift's internal image registry, when a cluster is
+provisioned as internal, the registry operator will provision the required cloud
+storage assets without consideration for the cluster publishing status. In Azure
+specifically, customers find this problematic as their cloud console will show
+them a security warning about the exposed storage account.
+
+To circumvent this problem, the registry operator needs to know when to provision
+the storage account behind a private endpoint. Currently there is no supported
+way for components to know whether they should configure themselves as internal
+or not.
 
 ### Goals
 
@@ -101,10 +113,6 @@ const (
 ### API Extensions
 
 ### Implementation Details/Notes/Constraints [optional]
-
-What are the caveats to the implementation? What are some important details that
-didn't come across above. Go in to as much detail as necessary here. This might
-be a good place to talk about core concepts and how they relate.
 
 The `Publish` field in the infrastructure status will only reflect the initial
 status of the cluster. Individual components (like ingress) may be changed on
@@ -168,7 +176,11 @@ N/A
 
 ### Upgrade / Downgrade Strategy
 
-N/A
+Upgrading a cluster will not affect the publishing status of the cluster.
+The `Publish` field is set by the installer in the Infrastructure object at
+cluster install time - no value will be set during upgrades or downgrades.
+
+Components consuming this value should be prepared for the case when it is unset.
 
 ### Version Skew Strategy
 
