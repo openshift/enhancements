@@ -89,6 +89,10 @@ persistent IPs - `{..., "allowPersistentIPs": true, ...}`
 If the KubeVirt feature gate is enabled, KubeVirt will create the `IPAMClaims`
 for each multus non-default network, thus declaring intent of having persistent
 IP allocations for those interfaces.
+This could be further improved by having KubeVirt only create those for multus
+non-default network having the `allowPersistentIPs` knob enabled - KubeVirt
+already reads `NetworkAttachmentDefinition`s. Refactoring it to read those via
+informers would be good, to alleviate the API load.
 
 The IPAM CNI plugin will then react accordingly and if the NAD configuration
 allows it, allocate IPs from its pool - which will be persisted in the
