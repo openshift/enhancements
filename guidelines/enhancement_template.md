@@ -461,6 +461,19 @@ Describe how to
   - Namespaces deletion will not delete all objects in etcd, leading to zombie
     objects when another namespace with the same name is created.
 
+#### Operating at scale
+
+It is of special relevance the declarative nature of APIs when operating
+features on multiple clusters. If applicable, reason about any peculiarity to
+the API that does not follow this principle and thus may require specific
+considerations when operated at scale.
+
+For example, the workflow to operate the feature may comprise of several steps
+of different nature instead of a single declarative express of intention. A
+service reliability engineer would prefer for this not to be the case but if it
+must be, he might require additional knowledge to enable the automation of those
+steps.
+
 ## Implementation History
 
 Major milestones in the life cycle of a proposal should be tracked in `Implementation
