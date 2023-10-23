@@ -93,7 +93,7 @@ type InfrastructureStatus struct {
 To reflect the install-config publishing options, `PublishMode` will only
 support to valid options.
 
-```
+```go
 // PublishMode defines the publish mode of the cluster at install time.
 type PublishMode string
 
