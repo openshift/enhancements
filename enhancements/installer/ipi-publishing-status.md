@@ -12,7 +12,7 @@ api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggreg
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - [IR-302](https://issues.redhat.com/browse/IR-302)
+  - https://issues.redhat.com/browse/IR-302
 ---
 
 # Expose Cluster Publishing Status
