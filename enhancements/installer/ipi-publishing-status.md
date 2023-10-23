@@ -15,14 +15,14 @@ tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic 
   - https://issues.redhat.com/browse/IR-302
 ---
 
-# Expose Cluster Publishing Status
+# Expose Cluster Initial Publishing Status
 
 ## Summary
 
 IPI clusters can be configured to be public or private. This is done in the
-install-config.yaml using the `Publish` parameter. There is no current standard
+install-config.yaml using the `publish` parameter. There is no current standard
 defined for how components should access this parameter to bootstrap themselves
-as public (External) or private (Internal).
+as public (`publish: External`) or private (`publish: Internal`).
 
 At the moment of writing, provisioning a private cluster means the cluster
 will be configured with a private DNS zone, internal (non internet facing)
@@ -58,20 +58,20 @@ or not.
 
 ### Goals
 
-Expose the cluster publishing status used at install time in the Infrastructure
-object.
+Expose the cluster initial publishing status used at install time in the
+Infrastructure object.
 
 ### Non-Goals
 
-This enhancement does not cover support for updating the cluster publishing
-status on running clusters. This property is meant to reflect the `publish`
-parameter as it was set in the install-config.yaml.
+* support for updating the cluster publishing status on running clusters
+* support for `publish` values other than the current (External/Internal)
+
+
 
 ## Proposal
 
-The Infrastructure API is extended, adding the `Publish` field to the
-platform status for each specific cloud provider type, for those which support
-"Internal" IPI.
+The Infrastructure API is extended, adding the `InitialPublishingStatus` field to the
+platform status for each specific cloud provider type with support for `publish: Internal`.
 
 Below is an example of the change applied to the `AzurePlatformStatus` type.
 
@@ -79,7 +79,7 @@ Below is an example of the change applied to the `AzurePlatformStatus` type.
 type AzurePlatformStatus struct {
 	// ...
 
-	// publish indicates the publishing status of the cluster at install time.
+	// initialPublishingStatus indicates the publishing status of the cluster at install time.
 	// The default is 'External', which means the cluster will be publicly
     // available on the internet.
 	// The 'Internal' mode indicates a private cluster, and operators should
@@ -87,10 +87,10 @@ type AzurePlatformStatus struct {
     // The empty value means the publishing status of the cluster at install
     // time is unknown.
     // +kubebuilder:validation:Enum="";Internal;External;
-    // +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="publish is immutable once set"
+    // +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="initialPublishingStatus is immutable once set"
     // +kubebuilder:default=""
 	// +optional
-	Publish PublishMode `json:"publish,omitempty"`
+	InitialPublishingStatus PublishMode `json:"initialPublishingStatus,omitempty"`
 }
 ```
 
@@ -111,7 +111,7 @@ const (
 )
 ```
 
-Below are all the platform status types which will need to have the `Publish`
+Below are all the platform status types which will need to have the `InitialPublishingStatus`
 field added to them when implementing this EP:
 
 * `AWSPlatformStatus`
@@ -124,17 +124,18 @@ field added to them when implementing this EP:
 ### Workflow Description
 
 1. The cluster creator install a cluster via IPI, setting `publish: Internal` in installer-config.yaml
-2. The installer bootstraps the cluster, and sets `Publish: Internal` in the Infrastructure status
+2. The installer bootstraps the cluster, and sets `InitialPublishingStatus: Internal` in the Infrastructure status
 3. Operators use this value to configure operands accordingly.
 
 ### API Extensions
 
 ### Implementation Details/Notes/Constraints [optional]
 
-The `Publish` field in the infrastructure status will only reflect the initial
-status of the cluster. [Individual components (like ingress) may be changed on
-day-2 to for example turn a public cluster private](https://docs.openshift.com/container-platform/4.13/post_installation_configuration/configuring-private-cluster.html), and the `Publish` field in
-the Infrastructure status will remain untouched.
+The `InitialPublishingStatus` field in the infrastructure status will only reflect the initial
+status of the cluster.
+It is [currently supported](https://docs.openshift.com/container-platform/4.13/post_installation_configuration/configuring-private-cluster.html)
+to make certain components private as a day-2 operation. In these cases, the
+`InitialPublishingStatus` field will remain unchanged.
 
 #### Hypershift [optional]
 
@@ -160,7 +161,7 @@ The suggested approach to Hypershift is to translate the modes as follows:
 
 ### Risks and Mitigations
 
-Users may interpret the `Publish` field in the Infrastructure status as a way
+Users may interpret the `InitialPublishingStatus` field in the Infrastructure status as a way
 to change the publishing status of their clusters at run time, which is not
 its intention.
 
@@ -194,14 +195,14 @@ N/A
 ### Upgrade / Downgrade Strategy
 
 Upgrading a cluster will not affect the publishing status of the cluster.
-The `Publish` field is set by the installer in the Infrastructure object at
+The `InitialPublishingStatus` field is set by the installer in the Infrastructure object at
 cluster install time - no value will be set during upgrades or downgrades.
 
 Components consuming this value should be prepared for the case when it is unset.
 
 ### Version Skew Strategy
 
-The `Publish` field in the Infrastructure status should only be used by
+The `InitialPublishingStatus` field in the Infrastructure status should only be used by
 operators at bootstrap time. It does not affect upgrades or version skew.
 
 ### Operational Aspects of API Extensions
