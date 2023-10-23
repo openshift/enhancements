@@ -28,7 +28,8 @@ To get started with this template:
    Motivation sections. These should be easy and explain why the community
    should desire this enhancement.
 1. **Create a PR.** Assign it to folks with expertise in that domain to help
-   sponsor the process.
+   sponsor the process. Include parties that will operate the feature, 
+   like members of relevant QA or service delivery teams.
 1. **Merge after reaching consensus.** Merge when there is consensus
    that the design is complete and all reviewer questions have been
    answered so that work can begin.  Come back and update the document
@@ -460,6 +461,19 @@ Describe how to
     labels that were not applied during admission webhook downtime.
   - Namespaces deletion will not delete all objects in etcd, leading to zombie
     objects when another namespace with the same name is created.
+
+#### Operating at scale
+
+It is of special relevance the declarative nature of APIs when operating
+features on multiple clusters. If applicable, reason about any peculiarity to
+the API that does not follow this principle and thus may require specific
+considerations when operated at scale.
+
+For example, the workflow to operate the feature may comprise of several steps
+of different nature instead of a single declarative express of intention. A
+service reliability engineer would prefer for this not to be the case but if it
+must be, he might require additional knowledge to enable the automation of those
+steps.
 
 ## Implementation History
 
