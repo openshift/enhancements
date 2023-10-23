@@ -87,6 +87,7 @@ type AzurePlatformStatus struct {
     // The empty value means the publishing status of the cluster at install
     // time is unknown.
     // +kubebuilder:validation:Enum="";Internal;External;
+    // +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="publish is immutable once set"
     // +kubebuilder:default=""
 	// +optional
 	Publish PublishMode `json:"publish,omitempty"`
@@ -131,8 +132,8 @@ field added to them when implementing this EP:
 ### Implementation Details/Notes/Constraints [optional]
 
 The `Publish` field in the infrastructure status will only reflect the initial
-status of the cluster. Individual components (like ingress) may be changed on
-day-2 to for example turn a public cluster private, and the `Publish` field in
+status of the cluster. [Individual components (like ingress) may be changed on
+day-2 to for example turn a public cluster private](https://docs.openshift.com/container-platform/4.13/post_installation_configuration/configuring-private-cluster.html), and the `Publish` field in
 the Infrastructure status will remain untouched.
 
 #### Hypershift [optional]
