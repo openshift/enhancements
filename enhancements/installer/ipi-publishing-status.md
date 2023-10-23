@@ -70,10 +70,13 @@ parameter as it was set in the install-config.yaml.
 ## Proposal
 
 The Infrastructure API is extended, adding the `Publish` field to the
-`InfrastructureStatus`.
+platform status for each specific cloud provider type, for those which support
+"Internal" IPI.
+
+Below is an example of the change applied to the `AzurePlatformStatus` type.
 
 ```go
-type InfrastructureStatus struct {
+type AzurePlatformStatus struct {
 	// ...
 
 	// publish indicates the publishing status of the cluster at install time.
@@ -91,7 +94,7 @@ type InfrastructureStatus struct {
 ```
 
 To reflect the install-config publishing options, `PublishMode` will only
-support to valid options.
+support two valid options.
 
 ```go
 // PublishMode defines the publish mode of the cluster at install time.
@@ -106,6 +109,16 @@ const (
 	ExternalPublishMode PublishMode = "External"
 )
 ```
+
+Below are all the platform status types which will need to have the `Publish`
+field added to them when implementing this EP:
+
+* `AWSPlatformStatus`
+* `AzurePlatformStatus`
+* `GCPPlatformStatus`
+* `IBMCloudPlatformStatus`
+* `PowerVSPlatformStatus`
+* `AlibabaCloudPlatformStatus`
 
 ### Workflow Description
 
