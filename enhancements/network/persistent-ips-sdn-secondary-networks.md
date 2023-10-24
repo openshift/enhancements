@@ -647,6 +647,17 @@ the `IPAMClaim` object.
 This approach is favored by the KubeVirt team, since it follows the same
 pattern as PVCs.
 
+If this approach is followed, OVN-Kubernetes cannot create the `IPAMClaim`,
+since it would be responsible by clearing the finalizer once the VM is removed.
+Since it does not understand the VM lifecycle (all it knows are pods) it would
+not know when to remove the finalizer (unless we read the KubeVirt label, and
+ensure there are no other pods for that VM. While we already do that for
+HyperShift scenarios, I would prefer not to abuse this notion).
+
+Thus, to allow for foreground deletion of VMs, KubeVirt must create the
+`IPAMClaim` objects, and clear the finalizer once the associated VMI object
+(or at least the pod) are removed from the datastore.
+
 ### Open Questions
 
 1. should we delegate IP allocation to a separate IPAM plugin ?
