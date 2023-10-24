@@ -266,6 +266,58 @@ Kubernetes->>IPAM CNI: removeEvent(ipamClaim)
 IPAM CNI->>IPAM CNI: returnToPool(ipamClaim.Status.IPs)
 ```
 
+#### Hot-plug a VM interface
+This flow is exactly the same as
+[starting a VM](#starting-a-previously-stopped-virtual-machine).
+
+#### Hot-unplug a VM interface
+Hot-unplugging an interface from a KubeVirt VM is a two step process, requiring
+a migration:
+1. the user mutates the VM.Spec.Template of the running VMI setting the
+   interface(s) as absent
+2. the user migrates the VM
+3. the interfaces marked as absent will not be templated on the destination pod
+   (i.e. the migration destination pod will not have those interfaces)
+4. KubeVirt dettaches the interface from the live VM
+
+To ensure the IPs allocated to hot-unplugged interfaces are returned to the
+pool, KubeVirt needs to delete the `IPAMClaim`, otherwise, they will only be
+garbage collected when the VM is deleted.
+
+Finally, OVN-Kubernetes must react to the deletion of the IPAMClaim, and return
+this IP address to its in-memory pool.
+
+```mermaid
+sequenceDiagram
+
+  actor user
+  participant KubeVirt
+  participant Kubernetes
+  participant CNI
+  participant IPAM CNI
+
+  user->>KubeVirt: unplugInterface(vmName, networkName)
+  KubeVirt-->>user: OK
+
+  user->>KubeVirt: migrateVM(vmName)
+  KubeVirt-->>user: OK
+
+  KubeVirt->>Kubernetes: createPod(name=podName, ipam-claims=[])
+  Kubernetes->>CNI: CNI ADD
+  CNI->>CNI: configIface(ipamClaim.Status.IPs)
+
+  CNI-->>Kubernetes: OK
+  Kubernetes-->>KubeVirt: OK
+
+  KubeVirt->>Kubernetes: removeFinalizer(ipamClaim)
+  Kubernetes-->>KubeVirt: OK
+  KubeVirt->>Kubernetes: deleteIPAMClaim(ipamClaim)
+  Kubernetes-->>KubeVirt: OK
+
+  Kubernetes->>IPAM CNI: removeEvent(ipamClaim)
+  IPAM CNI->>IPAM CNI: returnToPool(ipamClaim.Status.IPs)
+```
+
 ### API Extensions
 
 We plan on adding a new CRD that would be hosted in the k8snetworkplumbingwg,
@@ -329,6 +381,10 @@ performed by Kubernetes (garbage collection) once the Virtual Machine
 (i.e. owner) is removed. In the example above, that `IPAMClaim` will be
 garbage collected by Kubernetes when the `VirtualMachine` named `vm-a` with UID
 `a0790345-4e84-4257-837a-e3d762d191ab` is deleted.
+
+To support hot-unplug scenarios (from Virtual Machines) the KubeVirt controller
+will need to remove the associated `IPAMClaim` objects. This should only happen
+if the NetworkAttachmentDefinition has the persistent IPs knob enabled.
 
 ### Implementation Details/Notes/Constraints
 
