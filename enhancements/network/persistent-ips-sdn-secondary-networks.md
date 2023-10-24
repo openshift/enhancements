@@ -348,6 +348,8 @@ we will not actively synchronously call the Kubernetes API for reading.
 
 ### KubeVirt related changes
 
+#### Pod templating
+
 KubeVirt would need to template the pod accordingly - i.e. the
 `NetworkSelectionElements` must feature the `ipam-claim-reference` attribute to
 indicate to the IPAM CNI / CNI which `IPAMClaim` they should use to persist the
@@ -715,7 +717,7 @@ All the API reads will happen via informers, thus the API impact will be minimal
 
 #### Failure Modes
 
-The feature is compartimentalized in order to protect the default cluster
+The feature is compartmentalized in order to protect the default cluster
 network. It will not impact it in any way.
 
 Performance impacts will impact IP address assignment in the network's scope,
@@ -764,7 +766,7 @@ information, which was passed via CNI-Args. The CR would look like:
 apiVersion: "ipamclaims.k8s.cni.cncf.io/v1alpha1"
 kind: IPAMClaim
 metadata:
-  name: vm-a.tenantred.pod16367aacb67
+  name: vm-a.tenantred-attachment
   namespace: ns1
   ownerReferences:
   - apiVersion: kubevirt.io/v1
@@ -783,10 +785,9 @@ This alternative cannot handle the scenario where foreground deletion is asked,
 since OVN-Kubernetes (the component setting the finalizer) does not know when
 to remove the finalizer (i.e. it doesn't know the VMI lifecycle).
 
-Also, please notice the `metadata.name` attribute: it refers to the name of the
-interface in the pod. Some KubeVirt scenarios will lead to the name of the pod
-interface changing across reboots or migration. This will cause OVN-Kubernetes
-to not find the `IPAMClaim` on the new pod.
+This alternative also requires KubeVirt to template the pod indicating the name
+of the `IPAMClaim`, as described in the [pod templating](#pod-templating)
+section.
 
 ### Delegate the IPAM functionality to a CNI IPAM plugin
 
