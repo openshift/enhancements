@@ -8,7 +8,7 @@ reviewers:
   - "@ffromani"
   - "@jmencak"
   - "@mrunalp"
-  - "@dhellmann"
+  - "@haircommander"
 approvers: 
   - "@mrunalp"
   - "@rphillips"
@@ -30,10 +30,10 @@ tracking-link:
 
 Resources management (particularly CPUs) in Kubernetes/OpenShift is limited and not flexible enough to cover all of
 our customer use cases.
-This enhancement introduces a new node-plugin that operates at runtime-level
+This enhancement introduces a runtime-level approach 
 for extending CPU resources management on top of Kubernetes and OpenShift platforms.
 With the existing CPU management design, a container can either request exclusive CPUs or shared CPUs,
-while with this new node plugin, it would be possible for container workload to request for both.
+while with this feature, it would be possible for container workload to request for both.
 
 ## Motivation
 
@@ -76,26 +76,27 @@ to request and subsequently be allocated both exclusive and shared CPUs.
 
 ## Proposal
 
+#### node-plugin implementation stages
+
+To minimize the moving part and keep this feature as stable as possible
+as an initial stage, the node-plugin would be implemented in CRI-O as a CRI-O hook
+(similar to the existing performance hooks).
+
+As a second stage, the plugin should be exported into a separate component, decoupled from CRI-O,
+and be running as a separate
+[NRI-plugin](https://github.com/containerd/nri).
+
+#### plugin workflow
+
 Container processes are restricted
 to given [cpuset](https://man7.org/linux/man-pages/man7/cpuset.7.html) by their corresponding cgroup definition.
-Essentially, the kernel enforces the processes of container to run only at the CPU (core) ids specified under its
+The kernel restricts the processes of a container to run at the CPU (core) ids specified under its
 cgroup.
 
-The mixed-cpu-node-plugin is a runtime-agnostic, hybrid (composed of both [NRI-plugin](https://github.com/containerd/nri) and
-[device-plugin](https://kubernetes.io/docs/concepts/extend-kubernetes/compute-storage-net/device-plugins/)), 
-[mixed-cpu-node-plugin](https://github.com/openshift-kni/mixed-cpu-node-plugin) 
-that communicates with the container-runtime
-at various lifecycle stages of container e.g. CreateContainer, UpdateContainer, etc.,
-and modifies the container's cgroup to include a set of shared CPUs.
-
-First, the plugin appends the shared cpus into the container's OCI spec.
-Then, it modifies the cgroup
-by injecting a [CreateRuntime](https://github.com/opencontainers/runtime-spec/blob/main/config.md#createruntime-hooks)
-OCI hook into the container oci spec.
-The OCI hook changes the following settings:
+The plugin appends the shared cpus under the cgroup's `cpuset.cpus`.
+Next, it modifies the following cgroup settings:
 1. It increases the container's `cpu.cfs_quota_us` as a multiplication of shared cpus number and `cfs_period_us`.
-2. It repeats step 2 for the container's parent cgroup `cpu.cfs_quota_us`. (essentially the pod level cgroup quota)
-   The node plugin only injects the OCI hook, while the actual execution of the hook done by the low-level runtime (`crun`, `runc`)
+2. It repeats step 1 for the container's parent (pod) cgroup `cpu.cfs_quota_us`.
 
 Let's have a look at numeric example:
 `cpu.shared` = `3,4`
@@ -105,36 +106,33 @@ Container has 2 exclusive cpus id: `5,6`
 
 The plugin expands the [CPUs](https://github.com/containerd/nri/blob/main/pkg/api/api.pb.go#L2105)
 to include the shared CPUs so the final CPU set looks like: `3,4,5,6`.
-It also injects OCI hook,
-that increases the container's `cpu.cfs_quota_us` from `200,000` to `400,000` according to the following formula:
+It also increases the container's `cpu.cfs_quota_us` from `200,000` to `400,000` according to the following formula:
 `cpu.cfs_quota_us` = number_of(`cpu.shared`) * `cfs_period_us` + `cpu.cfs_quota_us`
 
-The hook modifies the cgroup `kubepods.slice/kubepods-pod<pod-id>/crio-<container-id>.scope/cpu.cfs_quota_us` value
-It also modifies the cgroup`kubepods.slice/kubepods-pod<pod-id>/cpu.cfs_quota_us` value
-using the same formula.
+It modifies the cgroup `kubepods.slice/kubepods-pod<pod-id>/crio-<container-id>.scope/cpu.cfs_quota_us` value
+and `kubepods.slice/kubepods-pod<pod-id>/cpu.cfs_quota_us` value using the same formula.
 
 For cgroup v2 the same changes apply but with the respective to the API changes in v2, For example,
 cgroup v1 cpu.cfs_quota_us path:
 `/sys/fs/cgroup/cpu,cpuacct/kubepods.slice/kubepods-pod<pod-id>/crio-<container-id>.scope/cpu.cfs_quota_us`
 changes to:
 `/sys/fs/cgroup/kubepods.slice/kubepods-pod<pod-id>/crio-<container-id>.scope/cpu.max`
+The cpuset changes stays the same. 
 
-However, the cpuset changes are done by changing directly the OCI spec.
-The interaction with cgroup is done by the low-level runtime,
-hence it's transparent to the plugin and does not require separate flow for cgroup v2. 
-
-Shared CPUs append to Kubelet [reservedSystemCpus](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#explicitly-reserved-cpu-list).
-This means that when the feature enabled, Kubelet's `reservedSystemCpus` composed of PerformanceProfile's 
+#### Shared CPUs 
+The Shared CPUs are configured via a [performance profile](https://github.com/openshift/cluster-node-tuning-operator/blob/master/docs/performanceprofile/performance_controller.md#performanceprofile) 
+and are added to Kubelet [reservedSystemCpus](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#explicitly-reserved-cpu-list).
+With this addition, Kubelet's `reservedSystemCpus` will be composed of PerformanceProfile's 
 `spec.cpu.reserved` + `spec.cpu.shared`.
-The reason we utilize Kubelet `reservedSystemCpus` is because of CPU manager, which is not aware of the CPUs
+We utilize Kubelet `reservedSystemCpus` because of CPU manager, which is not aware of the CPUs
 lying in this pool, so it doesn't undo or changes the allocation logic performed by the plugin.
-Therefore, the plugin assigns the shared CPUs to containers without racing/conflict
+Therefore, the plugin assigns the shared CPUs to containers without racing/conflict with
 the CPU manager behavior. 
 More about this decision at the [Alternative](mixed-cpu-node-plugin.md#alternatives) section
 
-When management and workload partitioning is enabled,
-the `reservedSystemCpus` were exclusive to management components (Kubelet/CRI-O) or pods that were labeled as management. 
-With this proposal system reserved no longer maps to Kubelet's view of a system reserved.
+When [management and workload partitioning](https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md) is enabled,
+the `reservedSystemCpus` are exclusive to management components (Kubelet/CRI-O) or pods that are labeled as management. 
+With this proposal system reserved is no longer mapped to Kubelet's view of a system reserved.
 Instead, there is an internal partition of `resrvedSystemCpus` in which the `reserved` cpus are dedicated
 and exclusive to a management component ([same as today](https://github.com/openshift/cluster-node-tuning-operator/blob/master/pkg/performanceprofile/controller/performanceprofile/components/machineconfig/machineconfig.go#L592)).
 While the `shared` cpus are dedicated for workloads which are asking for shared cpus.
@@ -152,75 +150,93 @@ When shared-partition lands, Kubelet's cpu pool layout should look roughly like:
 
 When shared-partition feature enabled, 
 mixed-cpu-node-plugin allocates the shared cpus from the `sharedCpus` pool and not
-from the reservedSystemCpus anymore.
+from the `reservedSystemCpus` anymore.
 
-The following section summarizes the shared-cpus source in each flow:
-* mixed-cpu enabled -> `cpu.shared` appends to Kubelet's `reservedSystemCPUs`
-* shared-partition enabled -> Kubelet's `sharedCpus` = All cpus - `reserved` - `isolated`
-* Both enabled -> sharedCpus = All cpus - `reserved` - `isolated`
+The following table shows the shared-cpus origin in each flow:
 
-The node-plugin populates a special device named `openshift.io/shared-cpus` to provide way for pods to request
-for this special type of CPUs.
-There's no meaning to the value/number of `openshift.io/shared-cpus` devices that the pod requests.
+| mixed-cpu | shared-partition | shared cpus origin                 |
+|-----------|------------------|------------------------------------|
+| Enable    | Disable          | Kubelet's `reservedSystemCPUs`     | 
+| Disable   | Enable           | All cpus - `reserved` - `isolated` | 
+| Enable    | Enable           | All cpus - `reserved` - `isolated` | 
+
+#### Workload configuration
+A workload that wants to access the shared cpu should request for `openshift.io/enabled-shared-cpus` under its spec.
+The `openshift.io/enabled-shared-cpus` should be treated as a boolean value.
+In other words, the resource request only uses as a hint that shared-cpus required for the container and
+does not indicate any actual value.
+
 For example:
 ```yaml
 requests:
-   openshift.io/shared-cpus: 1
+   openshift.io/enabled-shared-cpus: 1
 ```
-Or
+Fine.
+
 ```yaml
 requests:
-   openshift.io/shared-cpus: 2
+   openshift.io/enabled-shared-cpus: 2
 ```
-Are the same in that context, the container has access to the same number of shared-cpus in both cases.
-In other words, the device request only uses as a hint to tell the plugin that shared-cpus required for the container and
-does not indicate any actual value.
+Wrong. An error will be returned to the user explaining how to fix the pod spec.
 
-The reason for specifying a device, and not, for example, an annotation,
-is because when application pod requests for a device, the scheduler makes the pod pending till device up and running.
-This gives the node plugin room for setup and not being depended on pod admission order.
-So only when the node plugin finishes the registration process with NRI and device plugin, the scheduler
-admits the application pod.
+The reason for specifying a resource request, and not an annotation,
+is to allow control on the number of workloads that can request for shared cpus.
+By populating shared cpu resources as the number of maximum workloads.
+If the number of shared cpu requests got exhausted, any new workload that requests for shared cpus request will move
+to pending state by the scheduler.
 
-Once a container under the pod requests and gets access to shared cpus, new environment variable named
-`OPENSHIFT_SHARED_CPUS=<CPU-IDs>` will be present under the container's environment variables.
+Once workload request completed successfully it gets access to shared cpus, and two new environment variables
+will be present under the container's environment variables:
+`OPENSHIFT_SHARED_CPUS=<CPU-IDs>` = specifies the core ids of the shared cpus
+`OPENSHIFT_ISOLATED_CPUS=<CPU-IDs>` = specifies the core ids of the isolated cpus
+Those environment variables help the application's user to pin its processes/threads to the desired CPU set. 
 
-The mixed-cpu-node-plugin itself is essentially a pod that runs as a DaemonSet on the worker nodes.
-cluster-node-tuning-operator (NTO) will be modified to support the deployment of the DaemonSet and additional
-resources (ServiceAccount, RBAC resources, SecurityContextConstraint, etc.)
-NTO will also be responsible to watch, monitor and report the node-plugin's DaemonSet status.
-Additionally, since the plugin is part of OCP infrastructure pods, NTO annotates the pods with:
-```yaml
-target.workload.openshift.io/management: {
-  "effect":"PreferredDuringScheduling"
+#### Kubelet
+Kubelet needs to be updated to advertise the `openshift.io/enabled-shared-cpus` resources 
+as [Extended Resources](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#extended-resources).
+Kubelet will look for a configuration file `/etc/kubernetes/openshift-shared-cpus`, to enable the resource advertisement.
+The configuration file should be look like this (the number of resources might be varied)
+``` json
+{
+  "shared-cpus": {
+     "containersLimit": "15"
+  }
 }
 ```
-See https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md for details.
+`containersLimit` limit the number of containers that can access the shared cpus in parallel.
+At first, this number will be static, and based on user feedback, we can make it configurable.
 
-Since both the components are related,
-mixed-cpu-node-plugin [source code](https://github.com/openshift-kni/mixed-cpu-node-plugin) would be vendored under NTO.
-By having different main.go + container entrypoint, NTO image can be also used as the
-mixed-cpu-node-plugin image. 
-This way saves the overhead of having a separate container image with all the maintenance cost that comes with it.
+#### API Server Admission Hook
+A new admission hook for [OpenShift Kubernetes API Server](https://github.com/openshift/kubernetes/tree/master/openshift-kube-apiserver/admission)
+will be added for handling the following:
+1. In case a user specifies more than a single `openshift.io/enabled-shared-cpus` resource, it rejects the pod request with an error explaining the user how to fix its pod spec.
+2. It adds an annotation `cpu-shared.crio.io` that will be used to tell the runtime that a shared cpus were requested.
+For every container requested for shared cpus, it adds and annotation with the following scheme:
+`cpu-shared.crio.io/<container name>`
+In addition, the `cpu-shared.crio.io` annotation needs 
+to be added under the performance-runtime [allowed_annotation](https://github.com/openshift/cluster-node-tuning-operator/blob/master/assets/performanceprofile/configs/99-runtimes.conf#L20)   
 
-In order to activate NRI in container-runtime, NTO creates MachineConfig to enable NRI in 
+#### CRI-O
+CRI-O should update with a new performance hook to support the shared-cpu logic.
+CRI-O should update with the configuration of the shared cpus.
+```toml
+[crio.runtime]
+shared_cpuset = "0-1,50,51"
+```
+
+#### Cluster-Node-Tuning-Operator 
+cluster-node-tuning-operator (NTO) will be modified to add new configuration settings to Kubelet and CRI-O and
+update Kubelet's `resevedSystemCPUs`.
+
+To activate NRI in container-runtime, NTO creates MachineConfig to enable NRI in 
 the container-runtime configuration:
 ```yaml
 [crio.nri]
 enable_nri = true
 ```
-The plugin enablement is optional and is off by default.
-
-No changes are needed in the container-runtime, because NRI hooks already supported by the runtime
-and mixed-cpu-node-plugin implementing the NRI interface.
-This minimizes risks and helps avoid regression on
-a container-runtime component (CRI-O in OpenShift case).
-
-_"A picture is worth a thousand words"_
-![mixed-cpu-node-plugin](mixed-cpu-node-plugin.jpg)
+NOTE: NRI enablement is not needed for the [first stage](mixed-cpu-node-plugin.md#node-plugin-implementation-stages)
 
 ### API
-
 Extend PerformanceProfile with new `workloadHints` named `mixedCpus` in order to enable
 the feature.
 
@@ -245,11 +261,14 @@ The CPU set must not overlap with `spec.cpu.reserved` or `spec.cpu.isolated` and
 should return an error in case it does.
 
 The reason for having a separate flag for enabling the feature, 
-is because there is a coming feature named shared-partition
+is because there is a coming feature named [shared-partition](https://github.com/openshift/enhancements/pull/1421)
 that uses the `cpu.shared` value as well.
 The features must be enabled independently, hence the `workloadHints` flag.
 
-Both workloadHints and `cpu.shared` have to be specified in order to activate the feature.
+Both workloadHints and `cpu.shared` have to be specified to activate the feature.
+
+The feature is optional and off by default.
+The feature can be activated/deactivated on a running system.
 
 PerformanceProfile example:
 ```yaml
@@ -276,7 +295,7 @@ spec:
     node-role.kubernetes.io/performance: "test"
 ```
 
-Specify the `cpu.shared` and `mixedCpus: true` in `workloadHints` activates the feature,
+Specify the `cpu.shared` and `mixedCpus: true` under `workloadHints` activates the feature,
 signals NTO to update the `reservedSystemCpus` in Kubelet config,
 reboots the nodes that are associated with the updated PerformanceProfile,
 and deploys the mixed-cpu-node-plugin.
@@ -285,55 +304,48 @@ The logic of updating reserved-cpus pool is NTO's responsibility and would be im
 Remove the `cpu.shared` value,
 or `mixedCpus: true` from `workloadHints` reverts the changes from Kubelet `reservedSystemCpus`,
 reboots the nodes that are associated with the updated PerformanceProfile,
-and deletes the mixed-cpu-node-plugin from the cluster.
-
-The feature can be activated/deactivated on a running system.
+and removes the configuration files from Kubelet and CRI-O.
 
 ### Workflow Description
 
 The premise is that OCP cluster is running, and there's an active performance-profile that already tuned the system.
 
 1. The cluster administrator wants to support both exclusive and shared cpus for workloads running on the cluster.
-2. The cluster administrator specifies the shared CPU ids in the PerformanceProfile `spec.cpu.shared`.
+2. The cluster administrator specifies the shared CPU ids in the PerformanceProfile `spec.cpu.shared` and toggels `mixedCpus: true` under the `WorkloadHints`.
 3. The cluster administrator waits for MCO to kick in, update and reboot the nodes.
 4. The cluster administrator waits for the node to come back from reboot.
 5. The application administrator wants to deploy their DPDK application as a Guaranteed pod with shared CPUs.
-6. The application administrator specifies a request for `openshift.io/shared-cpus: 1` under the pod's `spec.containers[].resources.requests`.
+6. The application administrator specifies a request for `openshift.io/enabled-shared-cpus: 1` under the pod's `spec.containers[].resources.requests`.
 7. The application administrator is waiting for the DPDK pod to be `Running`.
 8. The DPDK's app user/developer wants to run a light-weight task (threads) on shared cpus.
 9. The DPDK's app user/developer should pin the light-weight threads to CPUs that have shown in the `OPENSHIFT_SHARED_CPUS` environment variable of the container's process.
+10. The DPDK's app user/developer should pin the heavy-weight threads to CPUs that have shown in the `OPENSHIFT_ISOLATED_CPUS` environment variable of the container's process.
 
 ### API Extensions
-N/A
+A new admission hook in the Kubernetes API Server within OpenShift will 
+mutate pod spec if more than a single `openshift.io/enabled-shared-cpus` was requested 
+and annotate the pod with `cpu-shared.crio.io` annotation as describe at API Server Admission Hook [section](#api-server-admission-hook)
 
 ### Risks and Mitigations
-
+#### Processes Boundaries 
 * With this solution, the platform's housekeeping processes also runs on the shared CPUs.
 but the intent is to allocate those cpus to workload’s light-weight tasks,
 so having some latency is bearable.
 A way of mitigating that is to use workload partitioning
 to ensure the platform housekeeping processes don't run on the shared cpus.
 
-* There is no risk that workload’s tasks run on dedicated OCP’s housekeeping reserved cpus,
+* There is no risk that workload’s tasks will run on dedicated OCP’s housekeeping reserved cpus,
 because only the shared cpus exposed via cgroups to the workload’s process.
 In other words, platform's housekeeping processes can run on shared cpus dedicated to workload’s light-weight tasks,
 but not the other way around.
 
-* mixed-cpus-node-plugin is NRI-based plugin.
-Bugs in the plugin or NRI framework might affect the containers at various lifecycle stages, e.g.,
-CreateContainer, UpdateContainer, etc.
-For mitigating such cases, it is possible to deactivate the node-plugin, and in severe cases it is possible to disable
-NRI completely at runtime-level.
-
-* From a performance perspective, the runtime communicates with the node-plugin via gRPC calls.
-Therefore, for every container creation, there's another gRPC call between the runtime and the node-plugin.
-We can't avoid this call even for containers that don't ask for shared CPUs, since runtime doesn't have any filtering
-mechanism, it sends all the containers through the NRI framework to node-plugin, and the filtering is done at the
-plugin side.
+#### cgroup v1 vs v2 considerations
+This feature supports changes to cgroup configuration for pods or containers, at both v1 and v2.
+In containers that are annotated with cpu load-balancing disabling and are asking for shared cpus, only the isolated cpus (guaranteed)
+would have cpu load-balancing disabled.
 
 ### Drawbacks
-
-The way of how user should ask for shared CPUs in the pod spec is through device plugin.
+The way of how user should ask for shared CPUs in the pod spec is through device request.
 While this approach fits in the model of how the workload requires resources,
 better integration would require more invasive changes which are out of scope now.
     
@@ -341,34 +353,32 @@ better integration would require more invasive changes which are out of scope no
 N/A
 
 ### Enabling Feature
-
 A new feature gate will be defined for this feature (e.g. `MixedCPUAllocation`).
 
-There is one component affected by this feature:
-* cluster-node-tuning-operator: The operator is resposible for deploying the node-plugin only when the feature gate is enabled and performance
-profile configured with mixed-cpus settings. 
+Multiple components affected by this feature:
+* Cluster-Node-Tuning-Operator
+* Kubelet
+* Openshift Admission Webhook
+* CRI-O
 
 All code changes won't take effect when a feature gate is not enabled or the feature has not been activated.
 
 ### Test Plan
 The node-plugin testing will be split into two phases:
 1. Functionally - Tests that focus on the plugin's business logic.
-Validation of cgroups settings, robustness (Kubelet restart/node reboot), scalability (In-place Resource Resize).
+Validation of cgroups settings, robustness (Kubelet restart/node reboot), scalability (In-place Resource Resizes).
 Validate new API for workloads.
 
 2. Deployment - Tests that focus on plugin deployment via NTO.
-Verifying new API for PerformanceProfile, operator `Status` reported correctly,
+Verifying new API for PerformanceProfile, configuration files applied successfully,
 Feature Gate enablement, run tests from the previous section while deployment done via NTO.
 
 #### Unit testing
-We will have unit-testing for the mixed-cpu-node-plugin to guarantee the basic functionality.
+We will add unit-testing for the different components (especially CRI-O) to guarantee the basic functionality.
 
-#### E2E testing on mixed-cpu-node-plugin
-The behavior of the mixed-cpu-node-plugin will be validated in isolation (without NTO) by E2E tests
-
-#### E2E testing on NTO
+#### E2E testing
 Validating a deployment process on NTO, verifying PerformanceProfile configuration and checking 
-the functionality of mixed-cpu-node-plugin (running the e2e tests from mixed-cpu-node-plugin) 
+the functionality of the feature (running the e2e tests from mixed-cpu-node-plugin) 
 
 ### Graduation Criteria
 N/A
@@ -401,25 +411,12 @@ N/A
 N/A
 
 ## Alternatives
-* Implement directly in CRI-O.
-The user specifies an annotation for shared-cpus and runs with high-performance runtime class under its workload.
-Instead of calling NRI hook, CRI-O executes all the logic needed for the shared CPUs injection.
-
-Pros:
-1. Simplifies the solution by avoiding the need of running with DaemonSet 
-2. No need to handle image artifacts/delivery
-3. CRI-O always starts before all the pods, so no racing issue on startup.
-
-Cons:
-1. Vendor lock-in solution. cannot be used with other runtimes.
-2. Makes CRI-O susceptible to regression due to new workflow added to CRI-O
-
 * Taint the nodes with `NoSchedule`, `NoExecute` in order to keep the node from scheduling/run on nodes when
 the plugin is not ready (critical for reboot scenarios). 
-This replaces the `openshift.io/shared-cpu` request and eliminate the need in device plugin API.
+This replaces the `openshift.io/enabled-shared-cpu` request and eliminate the need in device plugin API.
 
 Pros:
-1. Using an annotation for shared-cpus request which is more descriptive than the `openshift.io/shared-cpu` request
+1. Using an annotation for shared-cpus request which is more descriptive than the `openshift.io/enabled-shared-cpu` request
 which is fitter for counted resources while here it's a static request.
 2. simplifies the node-plugin by removing the device plugin implementation part.
 
