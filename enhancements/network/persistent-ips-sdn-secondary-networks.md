@@ -287,37 +287,6 @@ garbage collected when the VM is deleted.
 Finally, OVN-Kubernetes must react to the deletion of the IPAMClaim, and return
 this IP address to its in-memory pool.
 
-```mermaid
-sequenceDiagram
-
-  actor user
-  participant KubeVirt
-  participant Kubernetes
-  participant CNI
-  participant IPAM CNI
-
-  user->>KubeVirt: unplugInterface(vmName, networkName)
-  KubeVirt-->>user: OK
-
-  user->>KubeVirt: migrateVM(vmName)
-  KubeVirt-->>user: OK
-
-  KubeVirt->>Kubernetes: createPod(name=podName, ipam-claims=[])
-  Kubernetes->>CNI: CNI ADD
-  CNI->>CNI: configIface(ipamClaim.Status.IPs)
-
-  CNI-->>Kubernetes: OK
-  Kubernetes-->>KubeVirt: OK
-
-  KubeVirt->>Kubernetes: removeFinalizer(ipamClaim)
-  Kubernetes-->>KubeVirt: OK
-  KubeVirt->>Kubernetes: deleteIPAMClaim(ipamClaim)
-  Kubernetes-->>KubeVirt: OK
-
-  Kubernetes->>IPAM CNI: removeEvent(ipamClaim)
-  IPAM CNI->>IPAM CNI: returnToPool(ipamClaim.Status.IPs)
-```
-
 ### API Extensions
 
 We plan on adding a new CRD that would be hosted in the k8snetworkplumbingwg,
