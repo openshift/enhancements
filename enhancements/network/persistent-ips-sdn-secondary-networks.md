@@ -427,10 +427,13 @@ kubectl get pods <launcher pod name> -ojsonpath="{ @.metadata.annotations.k8s\.v
 ```
 
 #### KubeVirt feature gate
-We recommend to protect this feature behind a feature gate, at least in the
-beginning. When enabled, KubeVirt will **always** declare its intent of having
-persistent IP allocations for all its VM secondary networks (i.e. multus non
-default networks).
+If a feature gate is introduced, KubeVirt will **always** declare its intent of
+having persistent IP allocations for all its VM secondary networks (i.e. multus
+non default networks).
+
+A more efficient alternative would be to only create the `IPAMClaim` objects if
+the `network-attachment-definition` they point to have the `allowPersistentIPs`
+knob enabled.
 
 #### KubeVirt API changes
 
@@ -712,7 +715,7 @@ not know when to remove the finalizer (unless we read the KubeVirt label, and
 ensure there are no other pods for that VM. While we already do that for
 HyperShift scenarios, I would prefer not to abuse this notion).
 
-Thus, to allow for foreground deletion of VMs, KubeVirt must create the
+Thus, to allow for foreground deletion of VMs, KubeVirt **must** create the
 `IPAMClaim` objects, and clear the finalizer once the associated VMI object
 (or at least the pod) are removed from the datastore.
 
@@ -757,15 +760,15 @@ The tests should be available in the upstream project of the IPAM CNI plugin.
 
 #### Removing a deprecated feature
 
-TODO
+Does not apply.
 
 ### Upgrade / Downgrade Strategy
 
-TODO
+Does not apply.
 
 ### Version Skew Strategy
 
-TODO
+Does not apply.
 
 ### Operational Aspects of API Extensions
 
@@ -783,6 +786,9 @@ thus other networks are also not impacted.
 
 If the IPAM plugin fails to generate an `IPAMClaim` for the VM, an event will
 be thrown, and the error logged.
+
+We can also create some `condition`s to highlight some specific errors in the
+`IPAMClaim` - e.g. IP pool is full, etc.
 
 ## Implementation History
 
