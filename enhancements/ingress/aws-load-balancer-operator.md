@@ -10,9 +10,10 @@ approvers:
 api-approvers:
   - N/A
 creation-date: 2022-01-27
-last-updated: 2022-01-27
+last-updated: 2023-10-27
 tracking-link:
   - https://issues.redhat.com/browse/CFEPLAN-39
+  - https://issues.redhat.com/browse/NE-1307
 see-also:
   - "/enhancements/ingress/transition-ingress-from-beta-to-stable.md"
 replaces:
@@ -318,16 +319,16 @@ false. When an addon which was previously enabled is disabled the controller
 does not remove the existing addon attachment from the provisioned load
 balancers.
 
-The operator will also create a [CredentialRequest](https://docs.openshift.com/container-platform/4.10/rest_api/security_apis/credentialsrequest-cloudcredential-openshift-io-v1.html#credentialsrequest-cloudcredential-openshift-io-v1)
-on behalf of the lb-controller and mount the minted credentials in the
+The operator will also create a [CredentialRequest](https://docs.openshift.com/container-platform/latest/rest_api/security_apis/credentialsrequest-cloudcredential-openshift-io-v1.html#credentialsrequest-cloudcredential-openshift-io-v1)
+on behalf of the lb-controller and mount the credentials in the
 _Deployment_ of the controller. This means that the operator will only work on
 OCP/OKD but this is sufficient for the initial release. There is a variation in
-this flow when it comes to OCP/OKD clusters running in STS or Manual Mode. Since
-the `cloud-credentials-operator` will be running in `manual mode`, the credentials
-for the lb-controller won't be provisioned automatically, and will require manual
+this flow when it comes to OCP/OKD clusters running in STS mode.
+The `cloud-credentials-operator` in `manual mode` on an STS cluster expects a role ARN
+which won't be provisioned automatically, and will require a manual
 intervention to do so. The required manual steps will be documented within the
 operator docs. Additional documentation for STS mode/manual mode can be found in 
-[the OCP documentation for using manual mode with STS](https://docs.openshift.com/container-platform/4.10/authentication/managing_cloud_provider_credentials/cco-mode-sts.html)
+[the OCP documentation for using manual mode with STS](https://docs.openshift.com/container-platform/latest/authentication/managing_cloud_provider_credentials/cco-mode-sts.html)
 
 The lb-controller requires a validating and mutating webhook for correct operation.
 The operator creates the webhook configuration along with the controller deployment. 
