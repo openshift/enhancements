@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "None"
 creation-date: 2023-09-06
-last-updated: 2023-10-12
+last-updated: 2023-10-30
 tracking-link:
   - https://issues.redhat.com/browse/NE-1299
   - https://issues.redhat.com/browse/OCPSTRAT-730
@@ -62,14 +62,14 @@ ExternalDNS Operator users to share Route 53 hosted zones, they can reduce cost 
   [kiam](https://github.com/uswitch/kiam), or [kube2iam](https://github.com/jtblin/kube2iam) as mechanisms for assuming
   a different role.
 * Support specifying of [ExternalID](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html).
-* Provide support for the automatic creation of DNS hosted zones by utilizing the assume role ARN.
-* Add AWS Security Token Service (STS) support for the ExternalDNS Operator
+* Provide support for the automatic creation of DNS hosted zones by utilizing the assumed role ARN.
+* Add AWS Security Token Service (STS) support for the ExternalDNS Operator.
 
 ## Proposal
 
 Conveniently, ExternalDNS already supports the [`--aws-assume-role`](https://github.com/openshift/external-dns/blob/fe00b4b83c2263282a9068655e8e3fbbc167b653/docs/faq.md#can-external-dns-manageaddremove-records-in-a-hosted-zone-which-is-setup-in-different-aws-account)
 argument, which uses the specified AWS role ARN when creating new DNS records. Therefore, to support cross-account DNS hosted
-zones with the ExternalDNS Operator, update the [API](#api-extensions) to expose the `--aws-assume-role` argument for
+zones with the ExternalDNS Operator, this enhancement updates the [API](#api-extensions) to expose the `--aws-assume-role` argument for
 the ExternalDNS binary.
 
 ### Workflow Description
@@ -82,11 +82,12 @@ the ExternalDNS binary.
 2. **shared vpc admin** creates a DNS hosted zone in Account A and associates it with the shared VPC.
 3. **shared vpc admin** creates an IAM policy in Account A granting route53 and tagging permissions to the hosted zone
    (see [IAM Policies and Roles](/enhancements/installer/aws-cross-account-dns-zone.md#iam-policies-and-roles)).
-4. **shared vpc admin** creates an IAM role in Account A with a Trust Policy granting Account B IAM User to assume it,
-   and attach the custom IAM policy created in step 3.
-5. **cluster admin** installs the cluster in Account B.
-6. **cluster admin** installs ExternalDNS Operator in the new cluster.
-7. **cluster admin** specifies the role from step 4 in a new ExternalDNS CR object.
+4. **shared vpc admin** creates an IAM role in Account A with a [Trust Policy](/enhancements/installer/aws-cross-account-dns-zone.md#iam-policies-and-roles)
+   granting Account B IAM User permission to assume it.
+5. **shared vpc admin** attaches the IAM policy created in step 3 to the IAM role created in step 4.
+6. **cluster admin** installs the cluster in Account B.
+7. **cluster admin** installs ExternalDNS Operator in the new cluster.
+8. **cluster admin** specifies the role from step 4 in a new ExternalDNS CR object.
 
 ### API Extensions
 
@@ -154,17 +155,17 @@ the need to manually specify `Credentials`. This wasn't yet exposed as an issue 
 of the webhook is accurate; the issue lies with this required field in the `ExternalDNS` CRD.
 
 However, there exists a simple workaround: we can apply a default value of an empty string `""` to the
-`spec.aws.provider.credentials.name` field using the `+kubebuilder:default:={"name":""}` specifier on the `Credentials`
-field. When `spec.aws.provider` is created, but `spec.aws.provider.credentials` is not specified, it will default
-`spec.aws.provider.credentials.name` to `""`.
+`spec.provider.aws.credentials.name` field using the `+kubebuilder:default:={"name":""}` specifier on the `Credentials`
+field. When `spec.provider.aws` is specified, but `spec.provider.aws.credentials` is not specified, the API server will default
+`spec.provider.aws.credentials.name` to `""`.
 
 For OpenShift clusters, this default satisfies the `+required` field for `Credentials` while the ExternalDNS Operator
 logic [ignores](https://github.com/openshift/external-dns-operator/blob/bac092e98fe5f9065b75bd0fa21d5aeff9d00853/pkg/operator/controller/credentials-secret/controller.go#L259-L267)
 the empty string and uses the `CredentialsRequest`.
 
 Non-OpenShift clusters (who do not have the option to use a `CredentialsRequest`) will encounter a validation webhook
-failure when the `Credentials` default of `""` is used due to the [validateProviderCredentials](https://github.com/openshift/external-dns-operator/blob/4cb22f19c5e6edcc6a37b73e17f25d996dbef9cd/api/v1beta1/externaldns_webhook.go#L132-L160).
-This failure is desirable because non-OpenShift users are required to specify valid `Credentials`.
+failure when the `Credentials` default of `""` is used due to the [validateProviderCredentials](https://github.com/openshift/external-dns-operator/blob/4cb22f19c5e6edcc6a37b73e17f25d996dbef9cd/api/v1beta1/externaldns_webhook.go#L132-L160)
+logic. This failure is appropriate in this case because non-OpenShift users are required to specify valid `Credentials`.
 
 In a future version of ExternalDNS Operator's API, we will resolve the requirement for the `Credentials` field through a
 more appropriate solution as outlined in the alternative [Bumping the API](#bumping-the-api).
@@ -181,13 +182,14 @@ limit the usage of a role ARN to a particular AWS account.
 Another drawback for this feature is that the ExternalDNS Operator currently lacks support for the AWS Security Token
 Service (STS). Given that STS is not supported, and the majority of ROSA (Red Hat OpenShift Service on AWS) customers
 rely on STS, this shared VPC feature is not usable for most managed OpenShift users. The addition of STS support for
-ExternalDNS Operator is currently under evaluation. However, until that is completed, the decision has been made to move
+ExternalDNS Operator is currently under evaluation. However, in the meantime, the decision has been made to move
 forward with the implementation of shared VPC support.
 
 ### Drawbacks
 
-A minor drawback is the added complexity in supporting cross-account DNS hosted zones. This complexity involves handling
-AWS resource sharing, managing IAM policies and roles, and understanding shared VPC architecture.
+A minor drawback is the added complexity in supporting cross-account DNS hosted zones for the ExternalDNS Operator. This
+complexity involves handling AWS resource sharing, managing IAM policies and roles, and understanding shared VPC
+architecture.
 
 ## Design Details
 
@@ -213,9 +215,11 @@ criteria for the v1beta1 API.
 The ExternalDNS Operator updates to support Shared VPC are out of payload and are therefore not aligned with
 OpenShift releases. Initially, the plan was to release this enhancement alongside of OCP 4.14. However, because
 ExternalDNS Operator lacks STS support (see [Lack of STS Support](#lack-of-sts-support)), the decision was made to
-complete implementation of this feature, but postpone the release until STS support is available.
+complete the implementation, but deprioritize the release of this feature until there is a need for a new ExternalDNS
+Operator release due to other important updates.
 
-There is no requirement for backporting this feature, as outlined in [AWS Shared VPC with Cross-account DNS Zones](/enhancements/installer/aws-cross-account-dns-zone.md).
+There is no requirement for backporting this feature because users have the option to run a newer version of
+ExternalDNS Operator, which includes this feature, in an older OpenShift cluster.
 
 #### Dev Preview -> Tech Preview
 
@@ -238,11 +242,19 @@ N/A
 
 ### Version Skew Strategy
 
+#### ExternalDNS Operator and OpenShift Container Platform Version Skew
+
 The updates to the ExternalDNS Operator are decoupled from the standard release schedule of OpenShift Container
 Platform. Consequently, in a shared VPC cluster using cross-account DNS record creation with the Ingress Operator, there
 is a possibility of installing a version of the ExternalDNS Operator that lacks support for this same feature. However,
 it is important to note that the ExternalDNS Operator and the installer or Ingress Operator do not rely on each other's 
 logic. Hence, this mismatch does not pose a concern.
+
+#### ExternalDNS Operator and ExternalDNS Version Skew
+
+This feature adds an API field consumed by the ExternalDNS Operator that sets the `--aws-assume-role` flag in
+ExternalDNS. Version discrepancies between the ExternalDNS Operator and ExternalDNS shouldn't be a concern, as the
+`--aws-assume-role` flag already is supported in the existing ExternalDNS image we distribute.
 
 ### Operational Aspects of API Extensions
 
@@ -250,16 +262,75 @@ N/A
 
 #### Failure Modes
 
-- If the role ARN is not configured with the appropriate permissions, ExternalDNS will error and be unable to generate
-  DNS records.
+##### Role ARN Permissions Issues
+
+If the role ARN is not configured with the appropriate permissions, ExternalDNS will error and be unable to generate
+DNS records. Here is an example of a situation where a user forgot to apply all the needed permissions for their role
+ARN:
+
+1. The user applies the following `ExternalDNS` object with the bad role ARN:
+```yaml
+apiVersion: externaldns.olm.openshift.io/v1beta1
+kind: ExternalDNS
+metadata:
+  name: example-fail
+spec:
+  provider:
+    type: AWS
+    aws:
+      assumeRole:
+        arn: arn:aws:iam::123456789012:role/user-rol1 # This Role lacks adequate permission
+  source:
+    hostnameAnnotation: Allow
+    type: Service
+```
+
+2. The user annotates the `router-default` service to instruct ExternalDNS to create a DNS record for it:
+```bash
+oc annotate service -n openshift-ingress router-default external-dns.alpha.kubernetes.io/hostname=externaldns.$(oc get ingresses.config/cluster -o jsonpath={.spec.domain})
+```
+
+3. The user inspects the logs of the `example-fail` ExternalDNS controller and finds error messages related to the lack
+   of permission:
+```bash
+oc logs -n external-dns-operator external-dns-example-fail-6c45fd8bfc-sjdj9
+[...]
+time="2023-10-30T18:00:41Z" level=info msg="Assuming role: arn:aws:iam::123456789012:role/user-rol1"
+time="2023-10-30T18:00:41Z" level=debug msg="Refreshing zones list cache"
+time="2023-10-30T18:00:42Z" level=error msg="records retrieval failed: failed to list hosted zones: AccessDenied: User: arn:aws:sts::123456789012:assumed-role/user-rol1/1698688841876440549 is not authorized to perform: route53:ListHostedZones because no identity-based policy allows the route53:ListHostedZones action\n\tstatus code: 403, request id: 73f968e4-8b8d-4aa0-929f-988da0c3e3d1"
+```
+
+In this particular case, the role `arn:aws:iam::123456789012:role/user-rol1` is lacking the `route53:ListHostedZones`
+permission.
 
 #### Support Procedures
 
-TODO
+As illustrated in [Failure Mode](#failure-modes), the failures associated with this feature can be identified by
+examining the logs of the ExternalDNS controller instance located in the `external-dns-operator` namespace:
+```bash
+oc logs -n external-dns-operator external-dns-<instance_name>-<id>
+```
+
+The logs should be reviewed for permission errors linked to the role ARN specified in `spec.provider.aws.assumeRole.arn`
+of the `ExternalDNS` object.
 
 ## Implementation History
 
-Major milestones in the life cycle of a proposal should be tracked in `Implementation History`.
+* PR [openshift/external-dns-operator#195](https://github.com/openshift/external-dns-operator/pull/195) was merged on
+  September 18, 2023. This PR contained the initial implementation without E2E tests.
+* PR [openshift/release#42894](https://github.com/openshift/release/pull/42894) was merged on September 18, 2023. This
+  PR contained the initial CI job implementation.
+* PR [openshift/release#43517](https://github.com/openshift/release/pull/43517) was merged on September 20, 2023. This
+  PR provided a fix for the `aws-provision-route53-private-hosted-zone` step, addressing a bug in the creation of a
+  private hosted zone.
+* PR [openshift/external-dns-operator#199](https://github.com/openshift/external-dns-operator/pull/199) was merged on
+  October 26, 2023. This PR added a default value to the `spec.provider.aws.credentials.name` field (see
+  [API Extensions](#api-extensions)).
+* PR [openshift/external-dns-operator#198](https://github.com/openshift/external-dns-operator/pull/198) was merged on
+  October 26, 2023. This PR added E2E tests for this feature.
+* PR [openshift/release#44311](https://github.com/openshift/release/pull/44311) was merged on October 27, 2023. This PR
+  modified the CI job to explicitly execute the shared VPC subset of E2E tests, which were seperated during the code
+  review of the E2E tests.
 
 ## Alternatives
 
@@ -292,9 +363,8 @@ We considered supporting configuration of an [external ID](https://docs.aws.amaz
 for the ExternalDNS Operator when using an assumed role. ExternalDNS provides support for an external ID via the [`--aws-assume-role-external-id`](https://github.com/kubernetes-sigs/external-dns/blob/22da9f231dbc6faa3a668b507a4a06823a129609/pkg/apis/externaldns/types.go#L460)
 command line argument. AWS suggests the use of an external ID in specific scenarios to mitigate privilege escalation
 such as the [confused deputy problem](https://en.wikipedia.org/wiki/Confused_deputy_problem). However, for this effort,
-we opted not to include this functionality at the moment. TThe reason behind this decision is that it would become
-necessary to incorporate support for external ID throughout all the components that enable shared VPC (including API,
-Install, and Ingress Operator), and there hasn't been a specific customer need for it thus far.
+we opted not to include this functionality at the moment. The reason behind this decision is that there hasn't been a
+specific customer need for it thus far, but we should revisit this at a later time.
 
 ## Infrastructure Needed
 
