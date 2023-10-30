@@ -65,7 +65,10 @@ Deploying third-party Observability UI solutions like Grafana or Kibana.
 
 Supporting UIs coming from other observability projects such as Jaeger UI, Prometheus/Thanos UI, or AlertManager UI.
 
-Replacing or superseding the monitoring plugin deployed by the Cluster Monitoring Operator.
+Replacing or superseding plugins that have a clear 1:1 relationship with an existing operator such as:
+
+- the monitoring plugin deployed by the Cluster Monitoring Operator. This plugin is responsible for displaying and managing alerts coming from the cluster monitoring stack.
+- the network observability plugin deployed by the Network Observability Operator
 
 ## Proposal
 
@@ -85,7 +88,7 @@ The Observability UI Operator will be available in the Red Hat catalog.
 
 It will manage the deployment of several components which will be added incrementally based on priority, as shown in the table below:
 
-| Component                          | Component Type         | Current features                                                                                                                                                                                                                                                   | Planned features                                                                                                                               |
+| Component                          | Component Type         | Current functionality                                                                                                                                                                                                                                              | Planned functionality                                                                                                                          |
 | ---------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | Dashboards console plugin          | Console Dynamic Plugin | Allows the current dashboards to fetch data from other Prometheus services in the cluster, different from the cluster monitoring                                                                                                                                   | Integrate Perses UI for dashboards <br> Allow new dashboards to consume data from several data sources <br> Allow new dashboards customization |
 | Logging view plugin                | Console Dynamic Plugin | Displays logs under the observe section for the admin perspective <br> Displays logs in the pod detail view <br> Displays logs as a tab in the observe menu for the dev perspective <br> Merges log-based alerts with monitoring alerts in the observe alerts view | Allow dev console users to see logs from several namespaces at the same time <br> Display log metrics                                          |
@@ -121,7 +124,9 @@ The workflow for the Observability UI Operator focuses on enhancing the user exp
 **OpenShift user** is the end-user interfacing with the OpenShift console and making use of the observability signals presented by the dynamic console plugins.
 
 1. The cluster administrator installs the ObservabilityUI operator from the RedHat Catalog.
-2. If there is an existing observability UI plugin deployed by another operator, the cluster administrator disables it.
+2. If there is an existing observability UI plugin deployed by another operator:
+   - If the new plugin defines console feature flag to disable the existing plugin extensions, only the new plugin extensions will be enabled.
+   - If the new plugin does not define console feature flag to disable the existing plugin extensions, the cluster administrator disables the existing plugin.
 3. The cluster administrator configures the operator adding a custom resources (CR) to deploy the desired plugins and link them with the corresponding signal operators.
 4. The operator will reconcile the necessary deployments for each enabled plugin, then it will reconcile the required [CRs for the console operator](https://github.com/openshift/enhancements/blob/master/enhancements/console/dynamic-plugins.md#delivering-plugins) so they become be available in the OpenShift console.
 5. The user accesses the OpenShift console and interacts with the observability signals through the plugins deployed by the operator.
@@ -196,7 +201,7 @@ Review Processes:
 
 ### Open Questions
 
-- How does the operator enables the plugins from the Observability UI Operator without having to patch the console operator? Answer fom the console team: Plugins signed by Red Hat can be enabled by default.
+- How does the operator enables the plugins from the Observability UI Operator without having to patch the console operator? On going discussion with the console team: Plugins signed by Red Hat could be enabled by default.
 
 ### Test Plan
 
