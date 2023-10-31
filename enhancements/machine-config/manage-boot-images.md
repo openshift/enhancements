@@ -38,13 +38,14 @@ For User Provisioned Infrastructure(UPI) clusters, this end goal is to create a 
 
 ## Motivation
 
-Currently, bootimage references are [stored](https://github.com/openshift/installer/blob/1ca0848f0f8b2ca9758493afa26bf43ebcd70410/pkg/asset/machines/gcp/machines.go#L204C1-L204C1) in a `MachineSet` by the openshift installer during cluster bringup and is thereafter unmanaged. These boot image references are not updated on an upgrade, so any node scaled up using it will boot up with the original “install” bootimage. This has caused a myriad of issues during scale-up due to this version skew, when the nodes attempt the final pivot to the release payload image. Issues linked below:
+Currently, bootimage references are [stored](https://github.com/openshift/installer/blob/1ca0848f0f8b2ca9758493afa26bf43ebcd70410/pkg/asset/machines/gcp/machines.go#L204C1-L204C1) in a `MachineSet` by the openshift installer during cluster bringup and is thereafter not managed. These boot image references are not updated on an upgrade, so any node scaled up using it will boot up with the original “install” bootimage. This has caused a myriad of issues during scale-up due to this version skew, when the nodes attempt the final pivot to the release payload image. Issues linked below:
 - Afterburn [[1](https://issues.redhat.com/browse/OCPBUGS-7559)],[[2](https://issues.redhat.com/browse/OCPBUGS-4769)]
 - podman [[1](https://issues.redhat.com/browse/OCPBUGS-9969)]
 - skopeo [[1](https://issues.redhat.com/browse/OCPBUGS-3621)]
 
-Additionally, the stub secret [referenced](https://github.com/openshift/installer/blob/1ca0848f0f8b2ca9758493afa26bf43ebcd70410/pkg/asset/machines/gcp/machines.go#L197) in the `MachineSet` is also unmanaged. This stub is used by the ignition binary in firstboot to auth and consume content from the `machine-config-server`(MCS). The content served includes the actual ignition configuration and the final pivot OS image. The ignition binary now does first boot provisioning based on this, then hands off to the `machine-config-daemon`(MCD) first boot service to do the final pivot. As 4.6 and up clusters only understood spec 3 ignition, and as the unmanaged ignition stub is only spec 2, this was now an incompatibility. This would prevent new nodes from joining a cluster that had been upgraded past 4.5, but was originally a 4.5 or lower at install time. Issue linked below:
-- SAN [[1](https://issues.redhat.com/browse/OCPBUGS-1817)]
+Additionally, the stub secret [referenced](https://github.com/openshift/installer/blob/1ca0848f0f8b2ca9758493afa26bf43ebcd70410/pkg/asset/machines/gcp/machines.go#L197) in the `MachineSet` is also not managed. This stub is used by the ignition binary in firstboot to auth and consume content from the `machine-config-server`(MCS). The content served includes the actual ignition configuration and the target OCI format RHCOS image. The ignition binary now does first boot provisioning based on this, then hands off to the `machine-config-daemon`(MCD) first boot service to do the reboot into the target OCI format RHCOS image. As 4.6 and up clusters only understood spec 3 ignition, and as the unmanaged ignition stub is only spec 2, this was now an incompatibility. This would prevent new nodes from joining a cluster that had been upgraded past 4.5, but was originally a 4.5 or lower at install time. 
+
+To peel another layer from the Ignition onion (sorry), there are some scenarios in which the MCS TLS cert contained within the above ignition stub may be out of date or incompatible. In such cases, just up-translating the ignition stub will not be enough. Example issue [here](https://issues.redhat.com/browse/OCPBUGS-1817). Solving this is not a direct goal of this enhancement(this work is targeted and scoped by [MCO-642](https://issues.redhat.com/browse/MCO-642)), but it is important to keep track of as this is a new failure mode that will be exposed by solving the above two issues. 
 
 
 ### User Stories
@@ -57,10 +58,11 @@ Additionally, the stub secret [referenced](https://github.com/openshift/installe
 
 The MCO will take over management of the boot image references and the stub ignition. The installer is still responsible for creating the `MachineSet` at cluster bring-up of course, but once cluster installation is complete the MCO will ensure that boot images are in sync with the latest payload. From the user standpoint, this should cause less compatibility issues as nodes will no longer need to pivot to a different version of rhcos during node scaleup.
 
+This should not interfere with existing workflows such as Hive and ArgoCD. As this is an opt-in mechanism, the cluster admin will be protected against such scenarios of accidental "reconciliation". 
+
 ### Non-Goals
 
-- The new subcontroller does not provide a solution for UPI as it does not use `MachineSets`. We plan to support a UPI solution via documentation that is based on this workflow.
-- This is meant to be a user opt-in feature, and if the user wishes to keep their boot images static it will let them do so.
+- The new subcontroller is only intended to support clusters that use MachineSet backed node scaling. This is meant to be a user opt-in feature, and if the user wishes to keep their boot images static it will let them do so.
 - This does not intend to solve [booting into custom pools](https://issues.redhat.com/browse/MCO-773). 
 - This does not target Hypershift, as [it does not use machinesets](https://github.com/openshift/hypershift/blob/32309b12ae6c5d4952357f4ad17519cf2424805a/hypershift-operator/controllers/nodepool/nodepool_controller.go#L2168).
 
@@ -83,11 +85,6 @@ The very first time a `MachineSet` is patched, the MSC will also backup the foll
 
 A roll back can be done by opting out the `MachineSet`, this will trigger the MSC to restore the MachineSet to "factory" values by using the annotations mentioned above.
 This is an important mitigation in case things go wrong(invalid bootimage references, incorrect patching... etc).
-
-__UPI__
-
-For UPI, the proposal is to create platform specific documentation based on our implementation of the the above work. If this feature is
-opted in on a UPI install, it is necessary to warn(degrade or some other way) the cluster admin to indicate that this functionally is essentially a no-op in the absence of machinesets.
 
 ### Workflow Description
 
@@ -115,7 +112,7 @@ The implementation has a GCP specific POC here:
 - https://github.com/openshift/machine-config-operator/pull/3980
 
 Possible constraints:
-- Ignition spec 2 to spec 3 is not deterministic. Some translations are unsupported and as a result not all stub secrets can be managed. In these cases, failure will be reported, and it will cause a cluster degrade.
+- Ignition spec 2 to spec 3 is not deterministic. Some translations are unsupported and as a result not all stub secrets can be managed. In these cases, failure will be reported via an operator degrade. As the MSC is a sub controller within the MCC, this will bubble up from the MSC -> MCC -> MCO, and a "MSC failed to translate stub ignition to spec 3 due to ...." message will be visible as the degrade reason.
 - See Open questions below for some more possible constraints.
 
 ### Risks and Mitigations
@@ -136,13 +133,10 @@ TBD, based on the open questions below.
 
 ### Open Questions
 
-- Should we have a like a global switch that opt-in all `MachineSets` for this mechanism?
+- Should we have a global switch that opt-ins all `MachineSets` for this mechanism?
 - Somewhat related to above, would we also want to allow opting out without rolling back? This is for a situation for the customer would not want to update the boot images any longer, but would like to keep the current image instead of the "factory" after rolling back. Not sure if anyone would use this, but though it was worth considering.
-- This proposal relies on the golden configmap having a target value for every platform/arch combination that we use today. I've [noticed](https://issues.redhat.com/browse/MCO-793) some cases like vsphere don't have a reference as it stands today. Why is that? Are there scenarios not requiring boot image updates?
-- Heterogenous platform(nodes span across infra providers) concerns. Do such clusters exist? If they do, do they use `MachineSets`? The current proposal assumes the same platform across all nodes and uses the infra object to determine the cluster platform. It reports anror if there is a platform mismatch and will exit non-fatally.
-- Hetergenous architecture concerns. I think these exist, but do they use `MachineSets`? The current proposal maps a `MachineSet` to an architecture, so this should not be a concern, but curious overall
-- The user could have possibly modified the stub ignition used in first boot with sensitive information. While this sub controller could uptranslate them, this is manipulating user data in a certain way which the customer may not be comfortable with. Are we ok with this?
-- What platforms do we want to support in GA? GCP was used in the PoC so I've added that, but is there an interest for certain platforms over others for the first release?
+- Heterogenous architecture concerns. I think these exist, but do they use `MachineSets`? The current proposal maps a `MachineSet` to an architecture, so this should not be a concern, but curious overall
+- The user could have possibly modified the stub ignition used in first boot with sensitive information. While this sub controller could up translate them, this is manipulating user data in a certain way which the customer may not be comfortable with. Are we ok with this?
 
 ### Test Plan
 
@@ -155,16 +149,29 @@ In addition to unit tests, the enhancement will also ship with e2e tests, outlin
 - Support for GCP
 - Unit & E2E tests
 - Feedback from openshift teams
+- UPI documentation based on IPI workflow for select platforms
 - [Good CI signal from autoscaling nodes](https://github.com/cgwalters/enhancements/blob/5505d7db7d69ffa1ee838be972c70b572d882891/enhancements/bootimages.md#test-plan) 
 
 
 #### Tech Preview -> GA
 
 - Feedback from interested customers
-- UPI documentation based on IPI workflow for select platforms(vpshere + any others TBD)
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-In future releases, we can phase in support for remaining platforms as we gain confidence in the functionality. Priorty list for this is still TBD.
+Additionaly, a phased approach such as the following is the proposed:
+
+Phase 0
+- Support for GCP
+- vsphere UPI documentation
+- Opt-in mechanism
+- Backup functionality
+- Ignition stub management
+
+Phase 1
+- Support for Azure and AWS
+- MCS TLS cert management
+
+In future releases, we can phase in support for remaining platforms as we gain confidence in the functionality and demands of those platforms. An exhaustive list can be found in [MCO-793](https://issues.redhat.com/browse/MCO-793).
 
 #### Removing a deprecated feature
 
