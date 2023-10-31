@@ -117,27 +117,36 @@ automatically scale the control plane by modifying the control plane machinset.
 
 ### Implementation Details/Notes/Constraints [optional]
 
-The implementation for this feature, requires a data source to gather current
-CPU and memory usage for nodes, as well as available resources on the nodes.
+The implementation for this feature, requires a data source to gather required
+data that is used to make scaling decisions.
 
-To gather available resource information the default
+As every OpenShift cluster comes with the [metrics
+API](https://kubernetes.io/docs/tasks/debug/debug-cluster/resource-metrics-pipeline/)
+as well as
+[prometheus](https://docs.openshift.com/container-platform/4.13/monitoring/monitoring-overview.html)
+installed, both should be available as possible data sources.
+
+#### Using metrics API
+
+Current CPU and memory usage for nodes, as well as available resources on the
+nodes are gathered using the metrics API.
+
+To gather available resource information in this case, the default
 [Node](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#node-v1-core)
 API endpoint can be used.
 
 Using the [horizontal pod
 autoscaler](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
-as a reference, they are using the [metrics
-API](https://kubernetes.io/docs/tasks/debug/debug-cluster/resource-metrics-pipeline/)
-to gather performance statistics for nodes. 
+as a reference, they are using the to gather performance statistics for nodes.
 
 Using the metrics API has the least requirements as it does not expect a running
-Prometheus monitoring stack. Using Prometheus generated data could make the
-implementation easier with respect to data aggregation.
+Prometheus monitoring stack. 
 
-Data aggregation will be required using the metrics API, as decisions about
-scaling nodes up and down, must not be performed based on performance usage at a
-single point in time. Instead the operator will have to gather and store usage
-data for a certain period of time, to decide if scaling is required.
+On the other hand, data aggregation will be required using the metrics API, as
+decisions about scaling nodes up and down, must not be performed based on
+performance usage at a single point in time. Instead the operator will have to
+gather and store usage data for a certain period of time, to decide if scaling
+is required.
 
 As an example with a configured `timeWindow` (see
 [configuration](#control-plane-machineset-operator-configuration)) of 30 minutes
@@ -148,6 +157,11 @@ last 30 minutes.
 If the metrics API returns it's own window of ~60 second aggregations, the
 operators will have to retrieve 30 values (one per minute), before any scaling
 decision should be made.
+
+#### Using Prometheus
+
+Using Prometheus generated data will make the implementation easier with respect
+to data aggregation, as data should already have been aggregated by prometheus.
 
 #### Hypershift
 
@@ -237,23 +251,44 @@ The **optional** configurations will include the following properties:
   - `stabilizationWindow`: duration to wait after a scale up before another
     scaling operation can occur.
   - `selectPolicy`: `next` to select the next bigger instance size.
-  - `timeWindow`: the time CPU and memory usage have to be above the
-    thresholds, before triggering a scale up event.
-  - `thresholds`: sets up the thresholds, which will trigger a scale down if
-    load is higher:
-    - `cpuLoadAverage`: a percentage of averge CPU load.
-    - `memoryUsage`: a percentage of average memory usage.
+  - `triggerPolicy`: `all` or `any`. Determines if scaling occurs if one or
+    all triggers have to be true.
+  - `triggers`: sets up the list of triggers, which will trigger a scale up. The
+    configuration is based on [custom metrics autoscaling
+    configuration](https://docs.openshift.com/container-platform/4.13/nodes/cma/nodes-cma-autoscaling-custom-trigger.html)
+    and should be kept compatbile to make usage easier for users accustomed to
+    CMA. Specifying multiple triggers, the `triggerPolicy` will determine when a
+    scaleup is performed.
+    An empty list of triggers disables scale up.
+    - `type`: `prometheus`, `cpu` or `memory`.
+    - `Prometheus`:
+      - `serverAddress`: https://thanos-querier.openshift-monitoring.svc.cluster.local:9092 
+      - `metricName`: Specifies the name to identify the metric in the
+        `external.metrics.k8s.io` API.
+      - `threshold`: Specifies the value that triggers scaling. 
+      - `query`: Specifies the Prometheus query to use.
+      - `authModes`: Specifies the authentication method to use. Should support
+        at least *basic*, *bearer* and *tls* authentication.
+      - `ignoreNullValues`: false 
+      - `unsafeSsl`: Specifies whether the certificate check should be skipped.
+    - `cpu`:
+      - `value`: Load average value that determines if scaling has to occur.
+      - `timeWindow`: Duration over which the load average must be higher to
+        trigger a scale up.
+    - `memory`:
+      - `value`: Load average value that determines if scaling has to occur.
+      - `timeWindow`: Duration over which the load average must be higher to
+        trigger a scale up.
 - `scaleDown`: defines configuration for scaling up. This includes the following
   sub elements:
   - `stabilizationWindow`: duration to wait after a scale down before another
     scaling operation can occur.
   - `selectPolicy`: `next` to select the next smaller instance size.
-  - `timeWindow`: the time CPU and memory usage have to be above the
-    thresholds, before triggering a scale up event.
-  - `thresholds`: sets up the thresholds, which will trigger a scale down if
-    load is lower:
-    - `cpuLoadAverage`: a percentage of averge CPU load.
-    - `memoryUsage`: a percentage of average memory usage.
+  - `triggerPolicy`: `all` or `any`. Determines if scaling occurs if one or
+    all triggers have to be true.
+  - `triggers`: sets up the list of triggers, which will trigger a scale down.
+    For details see the `scaleUp` configuration.
+    An empty list of triggers disables scale down.
 
 A complete custom resources instance in YAML format could then look like this:
 
@@ -271,31 +306,47 @@ controlplaneautoscaling:
           instanceSize: r4.xlarge
   syncPeriod: [duration as specified in golang: e.g. 5s, 15s]
   scaleUp:
-    stabilizationWindow: [duration as specified in golang: e.g. 5s, 15s]
     selectPolicy: "next"
-    timeWindow: [duration as specified in golang: e.g. 5m, 15m]
-    thresholds:
-      cpuLoadAverage: [0-100 as percentage]
-      memoryUsage: [0-100 as percentage]
+    stabilizationWindow: [duration as specified in golang: e.g. 5s, 15s]
+    triggerPolicy: "any"
+    triggers:
+      - type: "cpu"
+        value: "80"
+        timeWindow: "30m"
   scaleDown:
-    stabilizationWindow: [duration as specified in golang: e.g. 5s, 15s]
     selectPolicy: "next"
-    timeWindow: [duration as specified in golang: e.g. 5m, 15m]
-    thresholds:
-      cpuLoadAverage: [0-100 as percentage]
-      memoryUsage: [0-100 as percentage]
+    stabilizationWindow: [duration as specified in golang: e.g. 5s, 15s]
+    triggerPolicy: "all"
+    triggers:
+      - type: "cpu"
+        value: "80"
+        timeWindow: "30m"
+      - type: "memory"
+        value: "90"
+        timeWindow: "30m"
 ```
+
+In case the user decides to use `prometheus`, authentication will be specified
+in an additional custom resource
+`ControlPlaneMachineSetAutoscalingTriggerAuthentication` that is based on
+[CMA](https://docs.openshift.com/container-platform/4.13/nodes/cma/nodes-cma-autoscaling-custom-trigger.html#nodes-cma-autoscaling-custom-prometheus-config_nodes-cma-autoscaling-custom-trigger
+) as well and specifies the following values:
+
+- `secretTargetRef`:
+  - `parameter`: type of the secret referenced: should be `bearer` for bearer
+    authentication.
+  - `name`: name of the secret too use.
+  - `key`: key in the secret that contains the token.
 
 ### Data gathering
 
-As specified the operator should not require access to data from operators that
-might not be installed in the cluster (e.g. `prometheus`).
+As specified the operator should be able to use two different data sources:
+metrics API and prometheus.
 
-Instead the operator should gather the required data via the [metrics
-API](https://kubernetes.io/docs/tasks/debug/debug-cluster/resource-metrics-pipeline/)
-that is also used for the horizontal and vertical pod autoscalers.
+#### Metrics API
 
-Data available from the metrics API includes:
+The operator can gather the following data via the [metrics
+API](https://kubernetes.io/docs/tasks/debug/debug-cluster/resource-metrics-pipeline/):
 
 - CPU usage in `cores`.
 - Memory usage in a SI units.
@@ -310,16 +361,27 @@ As the window returned by metrics API is likely shorter than required window for
 scaling decisions, the operator should gather its own average to allow making
 the scaling decision based on the metrics data.
 
+#### Prometheus
+
+Prometheus queries should be configured to use the correct window already.
+
+The operator has to handle a metric's data missing or authentication failure.
+
+Both cases should use a conservative approach of not performing any actions, and
+not interrupting cluster operation.
+
 ### Workflow for automatic scaling
 
-Automatic scaling should be triggered the same as [horizontal pod
-autoscaling](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/) -
-that runs periodically to check if scaling the control-plane machines is
-required.
+Automatic scaling should be triggered, when either of the triggers specified
+matches it's conditions.
 
-In addition the implementation has to ensure that scaling decision are not based
-on single point-in-time values to prevent scaling up or down based on usage
-spikes.
+Checking for the conditions should use the same approach as [horizontal pod
+autoscaling](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/):
+HPA runs periodic checks, to see if scaling is required.
+
+In addition the implementation has to ensure that scaling decision made based on
+the metrics API are not based on single point-in-time values to prevent scaling
+up or down based on usage spikes.
 
 Instead a running average (or similar) should be used to decide about scaling.
 
@@ -336,10 +398,8 @@ The operator will require access to the following resources to gather the data:
 
 ### Open Questions
 
-1. Data gathering via metrics API requires calculating its own average again,
-   while a TSDB like Prometheus could provide this information directly. Should
-   the operator allow different data gathering strategies, so Prometheus could
-   be used instead of the metrics API.
+1. CMA even allow scaling to be triggered via Kafka - should this be supported
+   as well?
 
 ### Test Plan
 
