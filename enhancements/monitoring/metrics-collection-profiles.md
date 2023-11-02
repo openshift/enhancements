@@ -18,11 +18,14 @@ tracking-link:
 
 ## Terms
 
-monitors - refers to the CRDs ServiceMonitor, PodMonitor and Probe from Prometheus Operator;
+monitors - refers to the CRDs ServiceMonitor, PodMonitor and Probe from
+Prometheus Operator;
 
-users - refers to end-users of OpenShift who manage an OpenShift installation i.e cluster-admins;
+users - refers to end-users of OpenShift who manage an OpenShift installation
+i.e cluster-admins;
 
-developers - refers to OpenShift developers that build the platform i.e. RedHat associates and OpenSource contributors;
+developers - refers to OpenShift developers that build the platform i.e. RedHat
+associates and OpenSource contributors;
 
 
 ## Summary
@@ -48,14 +51,14 @@ Nevertheless, users have repeatedly asked for the ability to reduce the amount
 of memory consumed by Prometheus either by lowering the Prometheus scrape
 intervals or by modifying monitors.
 
-Users currently can not control the aforementioned monitors scraped by Prometheus
-since some of the metrics collected are essential for other parts of the system
-to function properly: recording rules, alerting rules, console dashboards, and
-Red Hat Telemetry. Users also are not allowed to tune the interval at which
-Prometheus scrapes targets as this again can have unforeseen results that can
-hinder the platform: a low scrape interval value may overwhelm the platform
-Prometheus instance while a high interval value may render some of the default
-alerts ineffective.
+Users currently can not control the aforementioned monitors scraped by
+Prometheus since some of the metrics collected are essential for other parts of
+the system to function properly: recording rules, alerting rules, console
+dashboards, and Red Hat Telemetry. Users also are not allowed to tune the
+interval at which Prometheus scrapes targets as this again can have unforeseen
+results that can hinder the platform: a low scrape interval value may overwhelm
+the platform Prometheus instance while a high interval value may render some of
+the default alerts ineffective.
 
 The goal of this proposal is to allow users to pick their desired level of
 scraping while limiting the impact this might have on the platform, via
@@ -90,17 +93,17 @@ kubelet and the network daemon.
 - As a developer, I want a supported way to collect a subset of the metrics
   exported by my operator and operands, while still collecting necessary metrics
   for alerts, visualization of key indicators and Telemetry.
-- As a developer of a component (that does not yet implement a profile), I want to
-  extract metrics needed to implement said profile, based on the assets I
+- As a developer of a component (that does not yet implement a profile), I want
+  to extract metrics needed to implement said profile, based on the assets I
   provide, or the ones gathered from the cluster based on a group of target
   selectors, and a plug-in relabel configuration to apply within the monitor.
-- As a developer of a component (that does not, or only partially implements a profile),
-  I want to get information about any monitors that are not yet implemented for
-  any of the supported profiles that are offered.
-- As a developer of a component (that implements a profile), I want to verify if all the
-  profile metrics are present in the cluster, and which of the profile monitors
-  are affected if not. Also, I want additional information to narrow down where
-  these metrics are exactly being used.
+- As a developer of a component (that does not, or only partially implements a
+  profile), I want to get information about any monitors that are not yet
+  implemented for any of the supported profiles that are offered.
+- As a developer of a component (that implements a profile), I want to verify if
+  all the profile metrics are present in the cluster, and which of the profile
+  monitors are affected if not. Also, I want additional information to narrow
+  down where these metrics are exactly being used.
 
 ### Goals
 
@@ -325,7 +328,8 @@ not. To aid teams with this effort the monitoring team will provide:
     resource (Alerts/PrometheusRules/Dashboards) using a metric which is not
     present in the monitor in question;
 
-- What happens if a user provides an invalid value for a metrics collection profile?
+- What happens if a user provides an invalid value for a metrics collection
+  profile?
   - CMO will reconcile and validate that the value supplied is invalid and it
     will report Degraded=False and fail reconciliation.
 
@@ -352,8 +356,8 @@ not. To aid teams with this effort the monitoring team will provide:
 - Unit tests in CMO to validate that the correct monitors are being selected
 - E2E tests in CMO to validate that everything works correctly 
 - For the `minimal` profile, origin/CI test to validate that every metric used
-in a resource (Alerts/PrometheusRules/Dashboards) exists in the `keep` expression
-of a minimal monitors.
+in a resource (Alerts/PrometheusRules/Dashboards) exists in the `keep`
+expression of a minimal monitors.
 
 ### Graduation Criteria
 
@@ -450,10 +454,11 @@ Initial proofs-of-concept:
   - [Azure
     Docs](https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/prometheus-metrics-scrape-configuration-minimal)
   -  https://github.com/Azure/prometheus-collector
-  - In their approach they also have [hardcoded](https://github.com/Azure/prometheus-collector/blob/66ed1a5a27781d7e7e3bb1771b11f1da25ffa79c/otelcollector/configmapparser/tomlparser-default-targets-metrics-keep-list.rb#L28)
+  - In their approach they also have
+  [hardcoded](https://github.com/Azure/prometheus-collector/blob/66ed1a5a27781d7e7e3bb1771b11f1da25ffa79c/otelcollector/configmapparser/tomlparser-default-targets-metrics-keep-list.rb#L28)
   set of metrics that are only consumed when the minimal profile is enabled.
-  However, customers are also able to extend this minimal profile with regexes to
-  include metrics which might be interesting to them.
+  However, customers are also able to extend this minimal profile with regexes
+  to include metrics which might be interesting to them.
 - Leverage [installer capabilities](https://docs.google.com/document/d/1I-YT7LKKDHSBLB6Hmg0tZ54DWjrAxlVdXxlViShMu-0/edit#heading=h.848jsje80fru)
   - After some consideration we decided to abandon this idea since it would only
     work for resources controlled by CVO which is not the case for the majority
