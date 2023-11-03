@@ -14,7 +14,7 @@ above.
 Upstream [defines](https://kubernetes.io/blog/2020/08/21/moving-forward-from-beta/) 3 tiers of maturity:
 * alpha - off by default, can change freely, no commitment to help migrate a user to new versions
 * beta - on by default, still may change freely, but higher expectation that a GA version will arrive and users *may* be aided in a migration to a GA version
-* GA/Stable  
+* GA/Stable
 
 When bringing an alpha or beta api/feature downstream, we need to carefully consider the implications and support expectations.
 
@@ -25,10 +25,10 @@ There are significant risks associated with exposing customers to Alpha-level up
 * The api/feature may change in a way that we cannot migrate customer workloads/configuration/resources
 * The api/feature may be removed entirely in a future k8s version leaving us having to carry patches or manually help customers to move forward which may even require an entirely new cluster installation
 
-Given these risks, alpha features **MUST NOT** be turned on downstream unless behind a feature gate that can only be enabled via the TechPreviewNoUpgrade 
-or CustomNoUpgrade featuresets.  If you/your team intend to enable (without a TechPreview gate) an upstream alpha feature, downstream, you must bring the request to 
-the staff engineering group for discussion.  This can be done by adding it to the agenda of an appropriate themed architecture calls (this may not get you approval 
-but it is a good place to start the conversation about what you want to do and why), or tagging `@aos-staff-engineers` on `#forum-arch`.  Approval won't be granted 
+Given these risks, alpha features **MUST NOT** be turned on downstream unless behind a feature gate that can only be enabled via the TechPreviewNoUpgrade
+or CustomNoUpgrade featuresets.  If you/your team intend to enable (without a TechPreview gate) an upstream alpha feature, downstream, you must bring the request to
+the staff engineering group for discussion.  This can be done by adding it to the agenda of an appropriate themed architecture calls (this may not get you approval
+but it is a good place to start the conversation about what you want to do and why), or tagging `@aos-staff-engineers` on `#forum-arch`.  Approval won't be granted
 without a set of people who clearly own working on the feature upstream and ensuring it will be driven to beta/GA state.
 
 Enabling an upstream alpha feature by putting it behind a TechPreviewNoUpgrade feature gate is acceptable as long as the team that is enabling it understands
@@ -36,9 +36,15 @@ they are going to be responsible for helping debug issues associated with it.
 
 ## Enabling Upstream Beta features
 
-TBD - we'd like to disable these by default(and then have a relatively lower bar for enabling them), but right no there's no good way to disable the associated 
+TBD - we'd like to disable these by default (and then have a relatively lower bar for enabling them), but right no there's no good way to disable the associated
 upstream tests, so if we disabled them we'd break those tests w/o additional work to explicitly disable the associated tests.
 
+All of the upstream beta features (enabled by default) automatically fall under Tier 2 support as described in [our documentation](https://docs.openshift.com/container-platform/latest/rest_api/understanding-api-support-tiers.html#mapping-support-tiers-to-kubernetes-api-groups_understanding-api-tiers).
+This allows us to align their lifecycle with the [Kubernetes Deprecation Policy](https://kubernetes.io/docs/reference/using-api/deprecation-policy/).
+
+The above rule applies equally to features not providing any API resources as well as those that extend stable APIs (ie. `v1`).
+Features relying on beta APIs, are disabled by default and are [guaranteed to not be required for conformance tests](https://github.com/kubernetes/enhancements/tree/master/keps/sig-architecture/1333-conformance-without-beta), thus the guidance here is that such features will require a TechPreviewNoUpgrade
+feature gate usage.
 
 ## What does it mean to be Tech Preview
 
