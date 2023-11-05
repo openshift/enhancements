@@ -90,16 +90,21 @@ and be running as a separate
 
 Container processes are restricted
 to given [cpuset](https://man7.org/linux/man-pages/man7/cpuset.7.html) by their corresponding cgroup definition.
-The kernel restricts the processes of a container to run at the CPU (core) ids specified under its
-cgroup.
+The kernel restricts the processes of a container to run at the CPU (core) ids specified under its cgroup.
+For that, the plugin appends the shared cpus under the cgroup's `cpuset.cpus`.
 
-The plugin appends the shared cpus under the cgroup's `cpuset.cpus`.
-Next, it modifies the following cgroup settings:
+But expending the CPU set is not enough, because the kernel also limits the process by its quota.
+If threads that are pinned to shared cpus overstep their boundaries, or threads that are pinned
+to isolated cpus, consume the maximal quota (pretty common in dpdk/latency sensitive applications),
+it might throttle the process.
+Since we can't determine the cpu quota for the shared cpus, and we can't bare throttling the process,
+the cpu quota will be set to the maximum.
+For that, the plugin modifies the following cgroup's files:
 1. It increases the container's `cpu.cfs_quota_us` as a multiplication of shared cpus number and `cfs_period_us`.
 2. It repeats step 1 for the container's parent (pod) cgroup `cpu.cfs_quota_us`.
 
 Let's have a look at numeric example:
-`cpu.shared` = `3,4`
+Shared CPUs are: `3,4`
 Container has 2 exclusive cpus id: `5,6`
 `cfs_period_us` = `100,000`
 `cpu.cfs_quota_us` = `200,000` (number of exclusive cpus * `cfs_period_us`)
@@ -116,8 +121,8 @@ For cgroup v2 the same changes apply but with the respective to the API changes 
 cgroup v1 cpu.cfs_quota_us path:
 `/sys/fs/cgroup/cpu,cpuacct/kubepods.slice/kubepods-pod<pod-id>/crio-<container-id>.scope/cpu.cfs_quota_us`
 changes to:
-`/sys/fs/cgroup/kubepods.slice/kubepods-pod<pod-id>/crio-<container-id>.scope/cpu.max`
-The cpuset changes stays the same. 
+`/sys/fs/cgroup/kubepods.slice/kubepods-pod<pod-id>/crio-<container-id>.scope/cpu.max` 
+The cpuset changes stay the same. 
 
 #### Shared CPUs 
 The Shared CPUs are configured via a [performance profile](https://github.com/openshift/cluster-node-tuning-operator/blob/master/docs/performanceprofile/performance_controller.md#performanceprofile) 
@@ -126,7 +131,7 @@ With this addition, Kubelet's `reservedSystemCpus` will be composed of Performan
 `spec.cpu.reserved` + `spec.cpu.shared`.
 We utilize Kubelet `reservedSystemCpus` because of CPU manager, which is not aware of the CPUs
 lying in this pool, so it doesn't undo or changes the allocation logic performed by the plugin.
-Therefore, the plugin assigns the shared CPUs to containers without racing/conflict with
+Therefore, the plugin assigns the shared CPUs to containers without racing or conflicting with
 the CPU manager behavior. 
 More about this decision at the [Alternative](mixed-cpu-node-plugin.md#alternatives) section
 
@@ -210,14 +215,14 @@ At first, this number will be static, and based on user feedback, we can make it
 A new admission hook for [OpenShift Kubernetes API Server](https://github.com/openshift/kubernetes/tree/master/openshift-kube-apiserver/admission)
 will be added for handling the following:
 1. In case a user specifies more than a single `openshift.io/enabled-shared-cpus` resource, it rejects the pod request with an error explaining the user how to fix its pod spec.
-2. It adds an annotation `cpu-shared.crio.io` that will be used to tell the runtime that a shared cpus were requested.
-For every container requested for shared cpus, it adds and annotation with the following scheme:
+2. It adds an annotation `cpu-shared.crio.io` that will be used to tell the runtime that shared cpus were requested.
+For every container requested for shared cpus, it adds an annotation with the following scheme:
 `cpu-shared.crio.io/<container name>`
 In addition, the `cpu-shared.crio.io` annotation needs 
 to be added under the performance-runtime [allowed_annotation](https://github.com/openshift/cluster-node-tuning-operator/blob/master/assets/performanceprofile/configs/99-runtimes.conf#L20)   
 
 #### CRI-O
-CRI-O should update with a new performance hook to support the shared-cpu logic.
+CRI-O will be updated to add a new performance hook to support the shared-cpu logic.
 CRI-O should update with the configuration of the shared cpus.
 ```toml
 [crio.runtime]
@@ -340,7 +345,7 @@ In other words, platform's housekeeping processes can run on shared cpus dedicat
 but not the other way around.
 
 #### cgroup v1 vs v2 considerations
-This feature supports changes to cgroup configuration for pods or containers, at both v1 and v2.
+This feature supports changes to cgroup configuration for pods or containers, for both v1 and v2.
 In containers that are annotated with cpu load-balancing disabling and are asking for shared cpus, only the isolated cpus (guaranteed)
 would have cpu load-balancing disabled.
 
