@@ -156,6 +156,8 @@ The controller should deploy this configmap in the `openshift-config-managed`. A
 
 When the Ingress operator is upgraded to a new version, if this upgrade brings changes to the dashboard, the existing ConfigMap will be overwritten through reconciliation.
 
+Note that, despite this work taking place in the Ingress Operator codebase, the implementation and initial maintenance are done by the NetObserv team.
+
 ### Risks and Mitigations
 
 ### Drawbacks
