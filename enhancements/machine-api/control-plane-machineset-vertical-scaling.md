@@ -7,7 +7,7 @@ reviewers:
 approvers:
   - "@JoelSpeed"
 api-approvers: 
-  - None
+  - "@JoelSpeed"
 creation-date: 2023-10-30
 last-updated: 2023-10-30
 tracking-link:
@@ -22,8 +22,9 @@ superseded-by: []
 ## Summary
 
 To allow control plane nodes to remain at an adequate size for its cluster, this
-proposal introduces new configuration for the control plane machineset operator
-to allow it to make automated scaling decisions for control plane node sizing.
+proposal introduces new operator that monitors resource usage in the cluster.
+Based on configured thresholds it will use the control plane machineset to make
+apply automated scaling decisions for control plane node sizing.
 
 ## Motivation
 
@@ -106,7 +107,7 @@ possible automatic scaling.
 ### Workflow Description
 
 1. The OpenShift adminstrator creates a valid
-   `control-plane-machine-set-autoscaling` `CR` in the `openshift-machine-api`
+   `control-plane-machine-set-autoscaler` `CR` in the `openshift-machine-api`
    namespace (or the respective namespace `control-plane-machineset-operator` is
    running in), to configure the automatic vertical scaling.
 
@@ -125,6 +126,10 @@ API](https://kubernetes.io/docs/tasks/debug/debug-cluster/resource-metrics-pipel
 as well as
 [prometheus](https://docs.openshift.com/container-platform/4.13/monitoring/monitoring-overview.html)
 installed, both should be available as possible data sources.
+
+Both should be usable simultaneously or in isolation - should prometheus not be
+available and not configured this should not pose a problem and the metrics
+based datasource should continue functioning and vice versa.
 
 #### Using metrics API
 
@@ -199,6 +204,11 @@ reliability and availability, if performed too often.
 As such the additional logic must ensure that there is a grace period between
 changes to the machine size, during which no more scaling will be performed.
 
+Initially this value should be rather conservative like 60 minutes or even more,
+to give plenty of time for all operators to settle on the new nodes. The
+operator can log information if the configured value seems too low, but should
+still continue running.
+
 ### Drawbacks
 
 Some users might not want this feature and rather opt to scale control planes
@@ -206,14 +216,16 @@ manually.
 
 ## Design Details
 
-### Control Plane MachinSet operator configuration
+### Control Plane MachineSet Scaling operator configuration
 
 As automatic scaling will require adjustments to certain aspects of its logic,
 the implementation should implement a way for administrators of an OpenShift
 cluster to configure the specifics of how and when scaling will occur.
 
 This configuration will be performed using a new custom resource
-`ControlPlaneMachineSetAutoscaling`.
+`ControlPlaneMachineSetAutoscaler`. This resource should be a singleton, as it
+should not be possible to run multiple instances of this operator at the same
+time to prevent race conditions during resizing.
 
 The **required** configurations will include the following properties:
 - `machineConfiguration`: this YAML object copies the [
@@ -248,8 +260,8 @@ The **optional** configurations will include the following properties:
   should be performed.
 - `scaleUp`: defines configuration for scaling up. This includes the following
   sub elements:
-  - `stabilizationWindow`: duration to wait after a scale up before another
-    scaling operation can occur.
+  - `scaleUpDelay`: duration to wait after a scale up before another scaling
+    operation can occur.
   - `selectPolicy`: `next` to select the next bigger instance size.
   - `triggerPolicy`: `all` or `any`. Determines if scaling occurs if one or
     all triggers have to be true.
@@ -263,13 +275,15 @@ The **optional** configurations will include the following properties:
     - `type`: `prometheus`, `cpu` or `memory`.
     - `Prometheus`:
       - `serverAddress`: https://thanos-querier.openshift-monitoring.svc.cluster.local:9092 
-      - `metricName`: Specifies the name to identify the metric in the
-        `external.metrics.k8s.io` API.
-      - `threshold`: Specifies the value that triggers scaling. 
       - `query`: Specifies the Prometheus query to use.
+      - `threshold`: Specifies the value that triggers scaling. 
       - `authModes`: Specifies the authentication method to use. Should support
         at least *basic*, *bearer* and *tls* authentication.
-      - `ignoreNullValues`: false 
+      - `ignoreNullValues`: Specifies how the trigger should proceed if the Prometheus target is lost.
+        - If true, the trigger continues to operate if the Prometheus target is
+          lost. This is the default behavior.
+        - If false, the trigger returns an error if the Prometheus target is
+          lost - this will degrade the operator.
       - `unsafeSsl`: Specifies whether the certificate check should be skipped.
     - `cpu`:
       - `value`: Load average value that determines if scaling has to occur.
@@ -279,10 +293,14 @@ The **optional** configurations will include the following properties:
       - `value`: Load average value that determines if scaling has to occur.
       - `timeWindow`: Duration over which the load average must be higher to
         trigger a scale up.
+    - `authenticationRef`:
+      - `name`: Name of the
+        `ControlPlaneMachineSetAutoscalingTriggerAuthentication` in the same
+        namespace.
 - `scaleDown`: defines configuration for scaling up. This includes the following
   sub elements:
-  - `stabilizationWindow`: duration to wait after a scale down before another
-    scaling operation can occur.
+  - `scaleDownDelay`: duration to wait after a scale down before another scaling
+    operation can occur.
   - `selectPolicy`: `next` to select the next smaller instance size.
   - `triggerPolicy`: `all` or `any`. Determines if scaling occurs if one or
     all triggers have to be true.
@@ -311,19 +329,22 @@ controlplaneautoscaling:
     triggerPolicy: "any"
     triggers:
       - type: "cpu"
-        value: "80"
-        timeWindow: "30m"
+        cpu:
+          value: "80"
+          timeWindow: "30m"
   scaleDown:
     selectPolicy: "next"
     stabilizationWindow: [duration as specified in golang: e.g. 5s, 15s]
     triggerPolicy: "all"
     triggers:
       - type: "cpu"
-        value: "80"
-        timeWindow: "30m"
+        cpu:
+          value: "80"
+          timeWindow: "30m"
       - type: "memory"
-        value: "90"
-        timeWindow: "30m"
+        memory:
+          value: "90"
+          timeWindow: "30m"
 ```
 
 In case the user decides to use `prometheus`, authentication will be specified
@@ -368,7 +389,8 @@ Prometheus queries should be configured to use the correct window already.
 The operator has to handle a metric's data missing or authentication failure.
 
 Both cases should use a conservative approach of not performing any actions, and
-not interrupting cluster operation.
+not interrupting cluster operation. However the operator must be marked as
+degraded in case of authentication failure and disappearing of a metric.
 
 ### Workflow for automatic scaling
 
@@ -392,6 +414,7 @@ available and only the autoscaling should be disabled / non-functional.
 
 The operator will require access to the following resources to gather the data:
 
+- Write access to the `ControlPlaneMachineSet` CR.
 - Read access for `/apis/metrics.k8s.io/v1beta1/nodes`.
 - Read access for `/api/v1/nodes` (this is already in place for OSD OpenShift
   clusters, but has to be verified for a OCP OpenShift installations).
