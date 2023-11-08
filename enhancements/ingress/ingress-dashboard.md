@@ -152,7 +152,7 @@ func buildDashboard() *corev1.ConfigMap {
 
 This is achieved by a new controller added to the operator, in charge of reconciling the dashboard. This controller watches the Infrastructure object which it is bound to, and the generated configmap.
 
-The controller should deploy this configmap in the `openshift-config-managed`. Any configmap deployed in this namespace with the `console.openshift.io/dashboard` label will be automatically picked by the monitoring operator and deployed in the OpenShift Console. The monitoring stack is responsible for querying the metrics as defined in the dashboard.
+The controller should deploy this configmap in the `openshift-config-managed` namespace. Any configmap deployed in this namespace with the `console.openshift.io/dashboard` label will be automatically picked by the monitoring operator and deployed in the OpenShift Console. The monitoring stack is responsible for querying the metrics as defined in the dashboard.
 
 When the Ingress operator is upgraded to a new version, if this upgrade brings changes to the dashboard, the existing ConfigMap will be overwritten through reconciliation.
 
@@ -172,7 +172,7 @@ Unit test
 
 E2E Tests
 
-There are two scenarios depending of the cluster network topology
+There are two scenarios depending on the cluster network topology
 
 1. Verify that the cluster network topology is not external
 2. Verify that the new ConfigMap dashboard was created.
