@@ -70,26 +70,62 @@ This should not interfere with existing workflows such as Hive and ArgoCD. As th
 
 __Overview__
 
-- The `machine-config-controller`(MCC) pod will gain a new sub-controller `machine_set_controller`(MSC) that monitors `MachineSet` changes and the `coreos-bootimages` [ConfigMap](https://github.com/openshift/installer/pull/4760).
-- Before processing a MachineSet, the MSC will check for the existence of `io.openshift.mco-managed=true` annotation. If it is not present, the MSC will exit the reconciliation loop. This is how `MachineSets` are opted-in to this mechanism.
+- The `machine-config-controller`(MCC) pod will gain a new sub-controller `machine_set_controller`(MSC) that monitors `MachineSet` changes and the `coreos-bootimages` [ConfigMap](https://github.com/openshift/installer/pull/4760) changes.
+- Before processing a MachineSet, the MSC will check if the following conditions are satisfied:
+  - `ManagedBootImages` feature gate is active
+  - The cluster and/or the machineset is opted-in to boot image updates. This mechanism is still TBD, see Workflow Description for more details.
+  - The golden configmap is verified to be in sync with the current version of the MCO. The MCO will "stamp"(annotate) the golden configmap with the new version of the MCO after atleast 1 node has succesfully completed an update to the new OCP image. This helps prevent `machinesets` being updated too soon at the end of a cluster upgrade, before the MCO itself has updated and has had a chance to roll out the new OCP image to the cluster. 
+
+  If any of the above checks fail, the MSC will exit out of the sync.
 - Based on platform and arch type, the MSC will check if the boot images referenced in the `providerSpec` field of the `MachineSet` is the same as the one in the ConfigMap. Each platform(gcp, aws...and so on) does this differently, so this is a good opportunity to split the work up between platforms and see if the implementation is effective. The ConfigMap is considered to be the golden set of bootimage values, i.e. they will never go out of date.
 - Next, it will check if the stub secret referenced is spec 3. If it is spec 2, the MSC will try create a new version of this secret by trying to translate it to spec 3. This step is platform/arch agnostic. Failure to up translate will cause a degrade and the sub-controller will exit without patching the `MachineSet`.
 - Finally, if the MSC will attempt to patch the `MachineSet` if required. Failure to do so will cause a degrade. 
 - Any other failures in the above steps will report an error; but degrades will only be in the specific cases mentioned above. Certain failures may also be as a result of an unsupported architecture or an unsupported platform. This is necessary because support for platforms will be phased in(and some platforms may not even desire this support)
 
-__Rolling back__
+#### Degrade Mechanism
 
-The very first time a `MachineSet` is patched, the MSC will also backup the following via annotation to the `MachineSet`:
-- `io.openshift.mco-pre-managed-image=` storing the original provider image reference
-- `io.openshift.mco-pre-managed-secret=` storing the original stub secret
+One possible strategy would be for the MSC to degrade the worker `MachineConfigPool` via a new [MachineConfigPoolConditionType](https://github.com/openshift/api/blob/master/machineconfiguration/v1/types.go#L492). This would be an API change, but a fairly simple one is it only adding a new type. The node controller(another sub controller within the MCC) would then [check for this condition](https://github.com/openshift/machine-config-operator/blob/master/pkg/controller/node/status.go#L142C34-L142C34) and degrade the worker pool, effectively degrading the operator.
 
-A roll back can be done by opting out the `MachineSet`, this will trigger the MSC to restore the MachineSet to "factory" values by using the annotations mentioned above.
-This is an important mitigation in case things go wrong(invalid bootimage references, incorrect patching... etc).
+Every degrade will be associated with a machineset. As a result, the MSC will have to maintain a list(configmap or something else) of currently "degraded" machinesets, and remove/add to this list during a sync as necessary. Based on the list, the MSC can then intiate, update or clear a degrade condition on the operator.
+
+#### Reverting to original bootimage
+
+Couple of strategies here, one with annotations directly on the machineset, and another via a configmap in the MCO.
+
+##### via Annotations
+
+The MSC will maintain a backup of the the following via annotation to the `MachineSet`:
+- `io.openshift.mco-managed-factory-image=` storing the original provider image reference prior to the feature was turned on
+- `io.openshift.mco-managed-factory-secret=` storing the original stub secret name
+- `io.openshift.mco-managed-last-image=` storing the last provider image reference before an update
+- `io.openshift.mco-managed-last-secret=` storing the last stub secret name before an update
+
+##### via ConfigMap
+
+The MSC will maintain a backup of the following per machinset, with these keys:
+- `$(machine_set_name)-factory-image` storing the original provider image reference prior to the feature was turned on
+- `$(machine_set_name)-factory-secret` storing the original stub secret name prior to the feature was turned on
+- `$(machine_set_name)-last-image` storing the last provider image reference before an update
+- `$(machine_set_name)-last-secret` storing the last stub secret name before an update
+
+A revert can be done by opting out the `MachineSet`, this will trigger the MSC to restore the MachineSet to values before the last update by using the annotations/configmap values mentioned above. This is an important mitigation in case things go wrong(invalid bootimage references, incorrect patching... etc).
+
+The reason for keeping a factory version is in case the admin wishes to restore to factory values manually(they will have to opt-out of the feature first). It may also may aid in debugging.
 
 ### Workflow Description
 
+It is important to note that there would be two "opt-in" knobs while this feature is under TechPreview. The admin would first have to turn on the feature gate, and then the opt-in mechanism. The secondary knob is necessary as some customers may want to keep their boot images static when this feature leaves TechPreview.
+Couple of strategies as before:
+
+##### via Annotations
+
 - To enroll a `MachineSet` for boot image updates, the cluster admin should add an annotation `io.openshift.mco-managed=true` to the `MachineSet`.
-- To un-enroll(and effectively rollback) the `MachineSet` from boot image updates, the cluster admin should remove the `io.openshift.mco-managed=true` annotation from the `MachineSet`.
+- To un-enroll(and effectively revert) the `MachineSet` from boot image updates, the cluster admin should remove the `io.openshift.mco-managed=true` annotation from the `MachineSet`.
+
+##### via an Operator type 
+
+This would be be a global switch at the operator level and an API change. Here is a rough [PoC PR](https://github.com/openshift/api/compare/master...djoshy:api:manage-boot-image-toggle). Instead of checking per machineset, this would effectively opt-in all machinesets and be checked on every sync loop.
+
 
 #### Variation and form factor considerations [optional]
 
@@ -117,7 +153,7 @@ Possible constraints:
 
 ### Risks and Mitigations
 
-The biggest risk in this enhancement would be delivering a bad boot image. To mitigate this, we have outlined a rollback option.
+The biggest risk in this enhancement would be delivering a bad boot image. To mitigate this, we have outlined a revert option.
 
 How will security be reviewed and by whom? TBD
 This is a solution aimed at reducing usage of outdated artifacts and should not introduce any security concerns that do not currently exist. 
