@@ -34,16 +34,16 @@ superseded-by:
 ## Summary
 
 The goal is to add a new dashboard in the OpenShift Console (in menu “Observe” > “Dashboards”), dedicated to metrics related to Ingress.
-Such dashboard are deployed through a configmap, a new controller will be added to the ingress operator to manage this configmap.
+Such dashboards are deployed through configmaps, so a new controller will be added to the ingress operator to manage this configmap.
 
-Ingress components, such as HAProxy, already provide some metrics that are exposed and collected by Prometheus / Cluster Monitoring. Administrators should be able to get a consolidated view, using a subset of these metrics, to get a quick overview of the cluster state. This enhancement proposal is part of a wider initiative to improve the observability of networking components (cf https://issues.redhat.com/browse/OCPSTRAT-139).
+Ingress components, such as HAProxy, already provide some metrics that are exposed and collected by Prometheus / Cluster Monitoring. Administrators should be able to get a consolidated view, using a subset of these metrics, to get a quick overview of the cluster state. This enhancement proposal is part of a wider initiative to improve the observability of networking components (see https://issues.redhat.com/browse/OCPSTRAT-139).
 
 ## Motivation
 
-While ingress related metrics already exist and are accessible in the OpenShift Console (via the menu “Observe” > Metrics”), there is no consolidated view presenting a summary of them. There are existing dashboards in other areas (such as etcd, compute resources, etc.), but networking today is less represented there, despite its importance for monitoring and troubleshooting.
-Metrics such as HAProxy error rates, or latencies, can be made more visible by promoting them in a dashboard.
+While ingress related metrics already exist and are accessible in the OpenShift Console (via the menu “Observe” > “Metrics”), there is no consolidated view presenting a summary of them. There are existing dashboards in other areas (such as etcd, compute resources, etc.), but networking today is less represented there, despite its importance for monitoring and troubleshooting.
+Metrics such as HAProxy error rates or latency can be made more visible by promoting them in a dashboard.
 
-In addition, product management has shown interest in providing and making more visible some cluster-wide statistics such as the number of routes and shards in use.
+In addition, product management has shown interest in providing and making more visible some cluster-wide statistics, such as the number of routes and shards in use.
 
 More details on the new dashboard content is provided below.
 
@@ -60,6 +60,7 @@ More details on the new dashboard content is provided below.
 ### User Stories
 
 > As a cluster administrator, I want to get a quick overview of general cluster statistics, such as the number of routes or shards in use.
+
 > As a cluster administrator, I want to get a quick insight in incoming traffic statistics, such as on latency and HTTP errors.
 
 ## Proposal
@@ -67,8 +68,8 @@ More details on the new dashboard content is provided below.
 To make a new dashboard discoverable by Cluster Monitoring, a `ConfigMap` needs to be created in the namespace `openshift-config-managed`, containing a static dashboard definition in Grafana format (JSON). The dashboard datasource has to be Cluster Monitoring's Prometheus.
 
 The Ingress Operator is responsible for creating and reconciling this `ConfigMap`. We assume all metrics used in the dashboard are present unconditionally, which allows us to create a static dashboard unconditionally as well.
-The Ingress Operator would embed a static and full json dashboard.
-If the operator detect any change between the deployed dashboard and the embedded one, the deployed dashboard would be replaced totally by the embedded one.
+The Ingress Operator embeds a static json manifest for the full dashboard.
+If the operator detects any change between the deployed dashboard and the embedded one, the operator replaces the deployed dashboard with the embedded one.
 
 ### Dashboard content
 
@@ -105,8 +106,8 @@ The new ingress dashboard will be listed there, as:
 
 This "Networking" category can potentially be used for other Network-related dashboards, such as for OVN, NetObserv, etc.
 
-Clicking on this dashboard will open it, showing time-series charts such as cluster ingress stats and HAProxy metrics.
-On each chart, an "Inspect" link allows to view that metrics from the _Metrics_ page, which allows to customize the query (e.g: modifying the label filters, the grouping, etc.) and view the result directly.
+Clicking on this dashboard will open it, showing time-series charts, such as cluster ingress stats and HAProxy metrics.
+On each chart, an "Inspect" link allows the user to view that metric from the _Metrics_ page, which allows the user to customize the query (for example, to modify the label filters, the grouping, etc.) and view the result directly.
 Note that editing a query from the _Metrics_ page does not affect dashboards displayed in the _Dashboards_ page.
 These behaviours are already implemented in the Console and do not necessitate any change.
 
@@ -116,7 +117,7 @@ No planned change on the API.
 
 ### Implementation Details / Notes / Constraints
 
-The new `ConfigMap` installed in `openshift-config-managed` should be named `grafana-dashboard-ingress` (The `grafana-dashboard-` prefix is common for all such dashboards).
+The new `ConfigMap` installed in `openshift-config-managed` should be named `grafana-dashboard-ingress` (the `grafana-dashboard-` prefix is common for all such dashboards).
 
 It needs to be labelled with `console.openshift.io/dashboard: "true"`.
 
@@ -124,7 +125,7 @@ Dashboards have a `title` field as part of their Grafana JSON model, which is di
 Here `title` should be `Networking / Ingress`.
 
 Dashboards should also have a tag that identifies their supplier in the OpenShift Console; existing tags are: `kubernetes-mixin`, `node-exporter-mixin`, `prometheus-mixin`, `etcd-mixin`.
-A new tag named `networking-mixin` should be used for this new dashboard. This tag aims to group all dashboards related to networking, such as also OVN dashboards and NetObserv.
+A new tag named `networking-mixin` should be used for this new dashboard. This tag aims to group all dashboards related to networking, such as OVN dashboards and NetObserv dashboards that may be added in the future.
 This tag is directly set in the static JSON definition of the dashboard. No more action is required for tag creation.
 
 A typical procedure to design and create the dashboard is to use Grafana for designing purpose, then export the dashboard as JSON and save it as an asset in the target repository. Then, it can be embedded in the built artifact using `go:embed`, and injected into a `ConfigMap`. Example:
