@@ -13,7 +13,7 @@ approvers:
 api-approvers: 
   - None
 creation-date: 2023-10-16
-last-updated: 2022-10-17
+last-updated: 2022-11-17
 tracking-link:
   - https://issues.redhat.com/browse/MCO-589
 see-also:
@@ -65,6 +65,7 @@ This should not interfere with existing workflows such as Hive and ArgoCD. As th
 - The new subcontroller is only intended to support clusters that use MachineSet backed node scaling. This is meant to be a user opt-in feature, and if the user wishes to keep their boot images static it will let them do so.
 - This does not intend to solve [booting into custom pools](https://issues.redhat.com/browse/MCO-773). 
 - This does not target Hypershift, as [it does not use machinesets](https://github.com/openshift/hypershift/blob/32309b12ae6c5d4952357f4ad17519cf2424805a/hypershift-operator/controllers/nodepool/nodepool_controller.go#L2168).
+- This proposal only targets MAPI backed machinesets. It does not intend to support CAPI backed machinesets, but we hope to do so in a future release, perhaps with a seperate enhancement. 
 
 ## Proposal
 
@@ -86,16 +87,20 @@ __Overview__
 
 One possible strategy would be for the MSC to degrade the worker `MachineConfigPool` via a new [MachineConfigPoolConditionType](https://github.com/openshift/api/blob/master/machineconfiguration/v1/types.go#L492). This would be an API change, but a fairly simple one is it only adding a new type. The node controller(another sub controller within the MCC) would then [check for this condition](https://github.com/openshift/machine-config-operator/blob/master/pkg/controller/node/status.go#L142C34-L142C34) and degrade the worker pool, effectively degrading the operator.
 
-Every degrade will be associated with a machineset. As a result, the MSC will have to maintain a list(configmap or something else) of currently "degraded" machinesets, and remove/add to this list during a sync as necessary. Based on the list, the MSC can then intiate, update or clear a degrade condition on the operator.
+As mentioned in the above section, degrading will only happen in two scenarios:
+- Translating the ignition stub to spec 3 fails. This is likely more fatal and won't get fixed without the editing the ignition stub manually.
+- Patching of the MachineSet fails. This is likely due to a temporary API server outage and will resolve itself without user intervention.
+
+Every degrade will be associated with a machineset. As a result, the MSC will have to maintain a local list of currently "degraded" machinesets, and remove/add to this list during a sync loop as necessary. Based on the changes to this list, the MSC can then intiate, update or clear a degrade condition on the operator.
 
 #### Reverting to original bootimage
 
-Couple of strategies here, one with annotations directly on the machineset, and another via a configmap in the MCO.
+Few strategies here:
 
 ##### via Annotations
 
 The MSC will maintain a backup of the the following via annotation to the `MachineSet`:
-- `io.openshift.mco-managed-factory-image=` storing the original provider image reference prior to the feature was turned on
+- `io.openshift.mco-managed-factory-image=` storing the original provider image reference prior to when the feature was turned on
 - `io.openshift.mco-managed-factory-secret=` storing the original stub secret name
 - `io.openshift.mco-managed-last-image=` storing the last provider image reference before an update
 - `io.openshift.mco-managed-last-secret=` storing the last stub secret name before an update
@@ -103,12 +108,18 @@ The MSC will maintain a backup of the the following via annotation to the `Machi
 ##### via ConfigMap
 
 The MSC will maintain a backup of the following per machinset, with these keys:
-- `$(machine_set_name)-factory-image` storing the original provider image reference prior to the feature was turned on
+- `$(machine_set_name)-factory-image` storing the original provider image reference prior to when the feature was turned on
 - `$(machine_set_name)-factory-secret` storing the original stub secret name prior to the feature was turned on
 - `$(machine_set_name)-last-image` storing the last provider image reference before an update
 - `$(machine_set_name)-last-secret` storing the last stub secret name before an update
 
-A revert can be done by opting out the `MachineSet`, this will trigger the MSC to restore the MachineSet to values before the last update by using the annotations/configmap values mentioned above. This is an important mitigation in case things go wrong(invalid bootimage references, incorrect patching... etc).
+##### Via new MachineSet fields
+
+Another proposed strategy is to add the required fields into the `.Status` section of a `MachineSet` object. This would be an API change.
+
+##### Mechanism
+
+A revert can be done by opting out the `MachineSet`, this will trigger the MSC to restore the MachineSet to last known good values stored from the backups. This is an important mitigation in case things go wrong(invalid bootimage references, incorrect patching... etc).
 
 The reason for keeping a factory version is in case the admin wishes to restore to factory values manually(they will have to opt-out of the feature first). It may also may aid in debugging.
 
@@ -124,7 +135,11 @@ Couple of strategies as before:
 
 ##### via an Operator type 
 
-This would be be a global switch at the operator level and an API change. Here is a rough [PoC PR](https://github.com/openshift/api/compare/master...djoshy:api:manage-boot-image-toggle). Instead of checking per machineset, this would effectively opt-in all machinesets and be checked on every sync loop.
+This is an API change to and would involve adding two new fields in the [operator types](https://github.com/openshift/api/blob/master/operator/v1/types_machineconfiguration.go) for the MCO:
+- `BootImageUpdateMode` This is an enum which can have three values: `Enabled`, `Selected` or `Disabled`
+- `BootImageUpdateEnrolledMachineSets` This is a list of enrolleds machinesets. When the above type is in the `Selected` mode, all machinesets in the list would be considered enrolled for updates.
+
+Here is a [rough PR](https://github.com/openshift/api/pull/1672) of what these API changes would look like.
 
 
 #### Variation and form factor considerations [optional]
@@ -169,9 +184,6 @@ TBD, based on the open questions below.
 
 ### Open Questions
 
-- Should we have a global switch that opt-ins all `MachineSets` for this mechanism?
-- Somewhat related to above, would we also want to allow opting out without rolling back? This is for a situation for the customer would not want to update the boot images any longer, but would like to keep the current image instead of the "factory" after rolling back. Not sure if anyone would use this, but though it was worth considering.
-- Heterogenous architecture concerns. I think these exist, but do they use `MachineSets`? The current proposal maps a `MachineSet` to an architecture, so this should not be a concern, but curious overall
 - The user could have possibly modified the stub ignition used in first boot with sensitive information. While this sub controller could up translate them, this is manipulating user data in a certain way which the customer may not be comfortable with. Are we ok with this?
 
 ### Test Plan
@@ -183,10 +195,11 @@ In addition to unit tests, the enhancement will also ship with e2e tests, outlin
 #### Dev Preview -> Tech Preview
 
 - Support for GCP
-- Unit & E2E tests
+- Opt-in and Degrade mechanism
+- GCP specific E2E tests
 - Feedback from openshift teams
 - UPI documentation based on IPI workflow for select platforms
-- [Good CI signal from autoscaling nodes](https://github.com/cgwalters/enhancements/blob/5505d7db7d69ffa1ee838be972c70b572d882891/enhancements/bootimages.md#test-plan) 
+- [Good CI signal from autoscaling nodes](https://github.com/cgwalters/enhancements/blob/5505d7db7d69ffa1ee838be972c70b572d882891/enhancements/bootimages.md#test-plan)
 
 
 #### Tech Preview -> GA
@@ -200,14 +213,16 @@ Phase 0
 - Support for GCP
 - vsphere UPI documentation
 - Opt-in mechanism
-- Backup functionality
-- Ignition stub management
+- Degrade mechanism
+- E2E tests
 
 Phase 1
 - Support for Azure and AWS
+- Backup functionality
+- Ignition stub management
 - MCS TLS cert management
 
-In future releases, we can phase in support for remaining platforms as we gain confidence in the functionality and demands of those platforms. An exhaustive list can be found in [MCO-793](https://issues.redhat.com/browse/MCO-793).
+In future phases/releases, we can add in support for remaining platforms as we gain confidence in the functionality and demands of those platforms. An exhaustive list can be found in [MCO-793](https://issues.redhat.com/browse/MCO-793).
 
 #### Removing a deprecated feature
 
