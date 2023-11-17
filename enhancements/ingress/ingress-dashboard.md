@@ -25,10 +25,10 @@ superseded-by:
 
 ## Release Signoff Checklist
 
-- [ ] Enhancement is `implementable`.
-- [ ] Design details are appropriately documented from clear requirements.
-- [ ] Test plan is defined.
-- [ ] graduation criteria for dev preview, tech preview, GA
+- [x] Enhancement is `implementable`.
+- [x] Design details are appropriately documented from clear requirements.
+- [x] Test plan is defined.
+- [ ] graduation criteria for dev preview, tech preview, GA: N/A
 - [ ] User-Facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/).
 
 ## Summary
@@ -218,6 +218,20 @@ N/A
 N/A
 
 #### Support Procedures
+
+- If the dashboard doesn't show up in menu "Observe" > "Dashboards"
+
+Make sure a `ConfigMap` named `grafana-dashboard-ingress` was created in namespace `openshift-config-managed`.
+If not, check the ingress operator pod logs for any error that could be related to dashboard creation.
+
+- If the dashboard shows unexpected empty charts
+
+Click the "Inspect" link to see the Prometheus query from the "Observe" > "Metrics" view. You can verify if the metric exists by typing just the metric name: for instance, if the query is `avg(haproxy_server_http_average_response_latency_milliseconds != 0) by (route)`, try just looking at `haproxy_server_http_average_response_latency_milliseconds` and see if there is any data point.
+
+If there is not, check if other HAProxy metrics exist, such as `haproxy_server_up`. If not, something might be wrong in the HAProxy pods as they don't seem to be generating any metric.
+
+Another possibility is that some of the HAProxy metrics definitions changed (metrics names, or labels). In that case it requires to update the dashboards: please open an issue.
+
 
 ## Implementation History
 
