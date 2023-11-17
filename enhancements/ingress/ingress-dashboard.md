@@ -207,6 +207,12 @@ Upgrading from a previous release must install the new dashboard without requiri
 
 On next upgrades, if the dashboard already exists and if the new version brings changes to the dashboard, the existing one will be overwritten with the new one.
 
+In case of a downgrade to a version not having this dashboard, the related `ConfigMap` would remain in the cluster, hence the dashboard would still be visible. This should not cause any trouble since the related HAProxy metrics did already exist in prior versions. If for some reason this is still perceived as an issue, the `ConfigMap` can be manually deleted to remove the dashboard:
+
+```
+oc delete configmap grafana-dashboard-ingress -n openshift-config-managed
+```
+
 ### Version Skew Strategy
 
 N/A
