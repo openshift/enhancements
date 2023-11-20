@@ -1,5 +1,5 @@
 ---
-title: simplify-and-unify-day2-add-node
+title: day2-add-nodes
 authors:
   - "@andfasano"
 approvers: 
@@ -10,6 +10,8 @@ reviewers:
   - "@soltysh"
   - "@rwsu"
   - "@pawanpinjarkar"
+api-approvers:
+  - None  
 creation-date: 2023-11-10
 last-updated: 2023-11-10
 tracking-link: 
