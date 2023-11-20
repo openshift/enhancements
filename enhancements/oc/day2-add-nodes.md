@@ -2,12 +2,12 @@
 title: simplify-and-unify-day2-add-node
 authors:
   - "@andfasano"
-  - "@zaneb"
 approvers: 
+  - "@zaneb"
+reviewers: 
   - "@patrickdillon"
   - "@oourfali"
   - "@soltysh"
-reviewers: 
   - "@rwsu"
   - "@pawanpinjarkar"
 creation-date: 2023-11-10
