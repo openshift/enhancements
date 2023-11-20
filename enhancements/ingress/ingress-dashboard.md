@@ -242,3 +242,7 @@ Another possibility is that some of the HAProxy metrics definitions changed (met
 ## Implementation History
 
 ## Alternatives
+
+A first alternative would be to expose the metric so a customer can create another dashboard outside of the console.
+
+Another alternative would be to let the customer create his own grafana dashboard and then create the configmap with the exported JSON. This requires some knowledge about the different metrics and about prometheus query language. This alternative is already possible for the customer.
