@@ -9,7 +9,7 @@ reviewers:
 approvers:
   - "@russelb"
 creation-date: 2020-08-26
-last-updated: 2022-10-26
+last-updated: 2023-11-23
 status: informational
 ---
 
@@ -98,6 +98,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9193  | cluster-machine-approver-capi ||| cluster infra | 4.11 | metrics |
 | 9194  | cluster-machine-approver-capi ||| cluster infra | 4.11 | metrics |
 | 9200-9219  | various CSI drivers ||| storage | 4.8 | metrics |
+| 9257  | cluster-cloud-controller-manager-operator ||| cluster infra | 4.15 | metrics, control plane only |
 | 9258  | cluster-cloud-controller-manager-operator ||| cluster infra | 4.9 | metrics, control plane only |
 | 9300  | kube-proxy ||| sdn | 4.12 | metrics, ingress node firewall |
 | 9301  | kube-proxy ||| sdn | 4.12 | metrics, ingress node firewall |
