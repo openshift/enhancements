@@ -113,8 +113,298 @@ possible automatic scaling.
 
 ### API Extensions
 
-This proposal requires a new custom resource to configure when and how
+This proposal requires a new custom resource to configure when and how to
 automatically scale the control plane by modifying the control plane machinset.
+
+As multiple configurations could potentially interrupt each other's work, this
+API should act like a *Configuration API* (see: [API
+conventions](https://github.com/openshift/enhancements/blob/master/dev-guide/api-conventions.md#discriminated-unions)),
+but the concrete API CR instances should be scoped to the namespace the new
+operator will run in.
+
+```go
+package cpmsscaling
+
+// ControlPlaneMachineSetAutoScaler enables the user to define rules, when to
+// automatically scale control plane nodes vertically in size - up or down.
+type ControlPlaneMachineSetAutoScaler struct {
+	// MachineConfiguration defines the possible flavors of virtual machines
+	// that the scaling algorithm has available to scale either up or down.
+	// +kubebuilder:validation:Required
+	MachineConfiguration MachineConfiguration
+	// SyncPeriod allows the user to define how often the controller will check
+	// the configured triggers to see if scaling up or down is required.
+	//
+	// When omitted, this means the user has no opinion and the value is left to
+	// the platform to choose a good default, which is subject to change over
+	// time. The current default is 30m.
+	SyncPeriod Duration
+	// ScaleUp allows the user to define specifics around scale up decisions.
+	// For example it allows the to specify possible triggers like CPU or memory
+	// utilization.
+	//
+	// When omitted, the value will default to disabling scaling up.
+	//
+	// +kubebuilder:validation:Optional
+	ScaleUp ScaleDefinition
+	// ScaleDown allows the user to define specifics around scale down
+	// decisions.
+	// For example it allows the to specify possible triggers like CPU or memory
+	// utilization.
+	//
+	// When omitted, the value will default to disabling scaling down.
+	//
+	// +kubebuilder:validation:Optional
+	ScaleDown ScalingDefinition
+}
+
+// MachineConfiguration defines the changes to be made to the
+// controlplanemachineset in case of scaling up or down. It lets the customer
+// specify platform specific options to increase or decrease CPU or memory.
+type MachineConfiguration struct {
+	// MachineType is the union discriminator.
+	// Users are expected to set this value to the name of the platform.
+	// Currently the only valid value is 'machines_v1beta1_machine_openshift_io'
+	// +unionDiscriminator
+	// +kubebuilder:validation:Enum:="machines_v1beta1_machine_openshift_io"
+	// +kubebuilder:validation:Required
+	MachineType string
+	// OpenShiftMachineV1Beta1Machine defines the template for creating Machines
+	// from the v1beta1.machine.openshift.io API group.
+	OpenShiftMachinesV1Beta1Machine MachineConfigurationMAPI
+}
+
+type MachineConfigurationMAPI struct {
+	// Platform identifies the platform for which the FailureDomain represents.
+	// Currently supported values are AWS, Azure, and GCP.
+	// +unionDiscriminator
+	// +kubebuilder:validation:Enum:="AWS","Azure","GCP","Nutanix","Openstack","Vsphere"
+	// +kubebuilder:validation:Required
+	Platform string
+	// AWS configures machine information for the AWS platform.
+	// +kubebuilder:validation:Optional
+	Aws AWSMachineConfiguration
+	// Azure configures machine information for the Azure platform.
+	// +kubebuilder:validation:Optional
+	Azure AzureMachineConfiguration
+	// Gcp configures machine information for the Gcp platform.
+	// +kubebuilder:validation:Optional
+	Gcp GCPMachineConfiguration
+	// Nutanix configures machine information for the Nutanix platform.
+	// +kubebuilder:validation:Optional
+	Nutanix NutanixMachineConfiguration
+	// Openstack configures machine information for the Openstack platform.
+	// +kubebuilder:validation:Optional
+	Openstack OpenstackMachineConfiguration
+	// Vsphere configures machine information for the Vsphere platform.
+	// +kubebuilder:validation:Optional
+	Vsphere VsphereMachineConfiguration
+}
+
+type AWSMachineConfiguration struct {
+	// Weight specifies the priority ordering for using this configuration. This
+	// is selected in increasing order for scaling up, or decreasing order for
+	// scaling down.
+	// +kubebuilder:validation:Required
+	Weight uint
+	// InstanceSize specifies the AWS instance size to use for this size of
+	// machine.
+	// +kubebuilder:validation:Required
+	InstanceSize string
+}
+
+type AzureMachineConfiguration struct {
+	// Weight specifies the priority ordering for using this configuration. This
+	// is selected in increasing order for scaling up, or decreasing order for
+	// scaling down.
+	// +kubebuilder:validation:Required
+	Weight uint
+	// VmSize specifies the Azure instance size to use for this size of
+	// machine.
+	// +kubebuilder:validation:Required
+	VmSize string
+}
+
+type GCPMachineConfiguration struct {
+	// Weight specifies the priority ordering for using this configuration. This
+	// is selected in increasing order for scaling up, or decreasing order for
+	// scaling down.
+	// +kubebuilder:validation:Required
+	Weight uint
+	// MachineType specifies the GCP instance size to use for this size of
+	// machine.
+	// +kubebuilder:validation:Required
+	MachineType size
+}
+
+type VsphereMachineConfiguration struct {
+	// Weight specifies the priority ordering for using this configuration. This
+	// is selected in increasing order for scaling up, or decreasing order for
+	// scaling down.
+	// +kubebuilder:validation:Required
+	Weight uint
+	// NumCPUs specifies the amount of CPUs to use for this instance size.
+	// +kubebuilder:validation:Required
+	NumCPUs uint
+	// MemoryMiB specifies the amount of memory to use for this instance size.
+	// +kubebuilder:validation:Required
+	MemoryMiB uint
+}
+
+type OpenstackMachineConfiguration struct {
+	// Weight specifies the priority ordering for using this configuration. This
+	// is selected in increasing order for scaling up, or decreasing order for
+	// scaling down.
+	// +kubebuilder:validation:Required
+	Weight uint
+	// Flavor specifies the flavor to use for this instance size.
+	// +kubebuilder:validation:Required
+	Flavor size
+}
+
+type NutanixMachineConfiguration struct {
+	// Weight specifies the priority ordering for using this configuration. This
+	// is selected in increasing order for scaling up, or decreasing order for
+	// scaling down.
+	// +kubebuilder:validation:Required
+	Weight uint
+	// MemorySize specifies the amount of memory to use for this instance size.
+	// +kubebuilder:validation:Required
+	MemorySize string
+	// VcpuSockets specifies the amount of CPU sockets to use for this instance
+	// size.
+	// +kubebuilder:validation:Required
+	VcpuSockets uint
+	// VcpusPerSockets specifies the amount of virtual CPU per socket to use for
+	// this instance size.
+	// +kubebuilder:validation:Required
+	VcpusPerSocket uint
+}
+
+type ScalingDefinition struct {
+	// ScaleUpDelay let's the user define the amount of time that must pass
+	// between a previous scale event and a potential new scale event. This
+	// allows the user to specify a custom amount of time to allow operators to
+	// settle before scaling again.
+	//
+	// When omitted, this means the user has no opinion and the value is left to
+	// the platform to choose a good default, which is subject to change over
+	// time. The current default is 120m.
+	//
+	// +kubebuilder:validation:Required
+	ScaleUpDelay  Duration
+	// SelectPolicy let's the user define the selection strategy when choosing
+	// the next machine to scale up to. Right now the only supported value is
+	// 'next', which will choose the next highest weight available.
+	// 
+	// +kubebuilder:validation:Optional
+	SelectPolicy  string
+	// TriggerPolicy let's the user define how many triggers must be above or
+	// below their threshold, before a scale up or scale down will be triggered.
+	//
+	// Possible values are 'all' or 'any'.
+	// 
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:Enum:="all","any"
+	TriggerPolicy string
+	// Triggers contains the definition for triggers that will be checked to
+	// decide if scaling is required or not.
+	// 
+	// If the triggers are empty, the type of scaling is disabled.
+	// 
+	// +kubebuilder:validation:Optional
+	Triggers      []Trigger
+}
+
+type Trigger struct {
+	// TriggerType is the union discriminator. Users are expected to set this
+	// value to the type of trigger they want to use. Supported values are
+	// 'cpu', 'memory', 'prometheus'.
+	//
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum:="cpu","memory","prometheus"
+	TriggerType       string
+	// Prometheus allows the user to specify the required fields to check a
+	// metric using prometheus.
+	// 
+	// +kubebuilder:validation:Optional
+	Prometheus        PrometheusTrigger
+	// Cpu allows the user to specify the required fields to check a
+	// cpu-usage based metric using the metrics API.
+	// 
+	// +kubebuilder:validation:Optional
+	Cpu               MetricsTrigger
+	// Memory allows the user to specify the required fields to check a
+	// memory-usage based metric using the metrics API.
+	// 
+	// +kubebuilder:validation:Optional
+	Memory            MetricsTrigger
+	// AuthenticationRef allows the user to specify a secret that contains
+	// authentication information to connect to prometheus.
+	// In case of CPU and Memory triggers this value is ignored.
+	//
+	// +kubebuilder:validation:Optional 
+	AuthenticationRef string
+}
+
+type PrometheusTrigger struct {
+	// ServerAddress allows the user to specify the address of Prometheus
+	// server.
+	//
+	// kubebuilder:validation:Required
+	ServerAddress    string
+	// Query allows the user to specify the query for the Prometheus metric to
+	// use.
+	//
+	// kubebuilder:validation:Required
+	Query            string
+	// Threshold allows the user to specify the threshold for the Prometheus
+	// metric to use.
+	// 
+	// In case of scale up, this is the lower bound - so if current usage is
+	// higher it will trigger scaling.
+	// 
+	// In case of scale down, this is the upper bound - so if current usage is
+	// lower it will trigger scaling.
+	//
+	// kubebuilder:validation:Required
+	Threshold        float
+	// AuthMode allows the user to specify what authentication mode to use to
+	// connect to the Prometheus server.
+	//
+	// Supported values are "Basic", "Bearer" and "Tls".
+	// 
+	// kubebuilder:validation:Required
+	// kubebuilder:validation:Enum:"Basic","Bearer","Tls"
+	AuthMode         string
+	// UnsafeSsl allows the user to specify skipping the certificate check.
+	//
+	// The default value is "false".
+	// 
+	// kubebuilder:validation:Optional
+	UnsafeSsl        bool
+}
+
+type MetricsTrigger struct {
+	// Value allows the user to specify the usage % of the metrics API based
+	// metric that is used to make a scaling decision.
+	//
+	// In case of scale up, this is the lower bound - so if current usage is
+	// higher it will trigger scaling.
+	// 
+	// In case of scale down, this is the upper bound - so if current usage is
+	// lower it will trigger scaling.
+	//
+	// kubebuilder:validation:Required
+	Value      string
+	// TimeWindow alles the user to specify the amount of time to take into
+	// account, when calculating the usage-average that will be compared to the
+	// specified Value.
+	// 
+	// kubebuilder:validation:Required
+	TimeWindow Duration
+}
+```
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -311,7 +601,7 @@ The **optional** configurations will include the following properties:
 A complete custom resources instance in YAML format could then look like this:
 
 ```yaml
-controlplaneautoscaling:
+controlplaneautoscaler:
   machineConfiguration:
     machineType: machines_v1beta1_machine_openshift_io
     machines_v1beta1_machine_openshift_io:
