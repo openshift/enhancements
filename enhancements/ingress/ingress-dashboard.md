@@ -33,7 +33,7 @@ superseded-by:
 
 ## Summary
 
-The goal is to add a new dashboard in the OpenShift Console (in menu “Observe” > “Dashboards”), dedicated to metrics related to Ingress.
+The goal is to add a new dashboard in the OpenShift Console (in menu “Observe” > “Dashboards” of the Administrator view), dedicated to metrics related to Ingress.
 Such dashboards are deployed through configmaps, so a new controller will be added to the ingress operator to manage this configmap.
 
 Ingress components, such as HAProxy, already provide some metrics that are exposed and collected by Prometheus / Cluster Monitoring. Administrators should be able to get a consolidated view, using a subset of these metrics, to get a quick overview of the cluster state. This enhancement proposal is part of a wider initiative to improve the observability of networking components (see https://issues.redhat.com/browse/OCPSTRAT-139).
@@ -56,6 +56,7 @@ More details on the new dashboard content is provided below.
 
 - This work is not intended to provide a comprehensive set of metrics all at once. Instead, the intent is to "start small", setting in place all the mechanisms in code, and iterate later based on feedback to add or amend elements in the dashboard without any changes outside of the dashboard json definition file.
 - This enhancement does not include any new metric creation or exposition: only already available metrics are considered. If discussions lead to consider the creation of new metrics, this could be the purpose of a follow-up enhancement.
+- This work does not cover the Developer Console.
 
 ### User Stories
 
@@ -75,20 +76,17 @@ If the operator detects any change between the deployed dashboard and the embedd
 
 At the top, a summary row presenting global cluster statistics as text panels:
 
-- Total current byte rate in (aggregated across all routes/shards): _sum(rate(haproxy_server_bytes_in_total[1m]))_
-- Total current byte rate out (aggregated across all routes/shards): _sum(rate(haproxy_server_bytes_out_total[1m]))_
-- Total current number of routes: _count(count(haproxy_server_up == 1) by (route))_
-- Total current number of ingress controllers: _count(count(haproxy_server_up == 1) by (pod))_
+- Total current byte rate in (aggregated across all routes/shards)
+- Total current byte rate out (aggregated across all routes/shards)
+- Total current HTTP error rate
+- Total current HTTP server average response latency
 
-Below this top summary, more detailed time-series panels. Each of these panel come in two flavours: aggregated per route, and aggregated per controller instance.
+Below this top summary, more detailed time-series panels. Each of these panel come in two flavours: aggregated per route, application namespace and ingress shard.
 
-- Byte rate in, per route or per controller instance: _sum(rate(haproxy_server_bytes_in_total[1m])) by (route)_ or _sum(rate(haproxy_server_bytes_in_total[1m])) by (pod)_
-
-- Byte rate out, per route or per controller instance: _sum(rate(haproxy_server_bytes_out_total[1m])) by (route)_ or _sum(rate(haproxy_server_bytes_out_total[1m])) by (pod)_
-
-- Response error rate, per route or per controller instance: _sum(irate(haproxy_server_response_errors_total[180s])) by (route)_ or _sum(irate(haproxy_server_response_errors_total[180s])) by (pod)_
-
-- Average response latency, per route or per controller instance: _avg(haproxy_server_http_average_response_latency_milliseconds != 0) by (route)_ or _avg(haproxy_server_http_average_response_latency_milliseconds != 0) by (pod)_
+- Current byte rate in per route, application namespace or shard
+- Current byte rate out per route, application namespace or shard
+- Current HTTP error rate per route, application namespace or shard
+- Current HTTP server average response latency per route, application namespace or shard
 
 ### Workflow Description
 
@@ -153,7 +151,7 @@ func buildDashboard() *corev1.ConfigMap {
 
 This is achieved by a new controller added to the operator, in charge of reconciling the dashboard. This controller watches the Infrastructure object which it is bound to, and the generated configmap.
 
-The controller should deploy this configmap in the `openshift-config-managed` namespace. Any configmap deployed in this namespace with the `console.openshift.io/dashboard` label will be automatically picked by the monitoring operator and deployed in the OpenShift Console. The monitoring stack is responsible for querying the metrics as defined in the dashboard.
+The controller should deploy this configmap in the `openshift-config-managed` namespace. Any configmap deployed in this namespace with the `console.openshift.io/dashboard` label will be automatically picked by the monitoring operator and deployed in the OpenShift Console. The console is responsible for querying the monitoring stack according to the dashboard definition.
 
 When the Ingress operator is upgraded to a new version, if this upgrade brings changes to the dashboard, the existing ConfigMap will be overwritten through reconciliation.
 
@@ -163,13 +161,13 @@ Note that, despite this work taking place in the Ingress Operator codebase, the 
 
 ### Drawbacks
 
+A dashboard creates a dependency on the HAProxy metrics. Changing metrics (such as between two HAProxy versions) may cause defects in the dashboard, which would then need to be patched. Such defects are certainly not critical, as this isn't affecting any other component than the dashboard itself, and the actual metrics are still available in the "Metrics" page of the Console.
+
+Another potential risk is to misinterpret metrics as they can sometimes be ambiguous. For example, the metric named `haproxy_server_response_errors_total` could be seen as a counter of HTTP response errors (4xx / 5xx) whereas it actually counts internal HAProxy errors. To mitigate this risk, the dashboard is duely reviewed and tested to make sure it doesn't carry any ambiguity.
+
 ## Design Details
 
 ### Test Plan
-
-Unit test
-
-- Verify that the embedded JSON is parseable (to avoid unintentional errors while manually editing the JSON).
 
 E2E Tests
 
