@@ -147,8 +147,8 @@ spec:
    - resource: configmaps
 
    # Describes the default log forwarding outputs for each log type applied to all managed clusters.
-   - group: logging.openshift.io/v1
-     resource: ClusterLogForwarder
+   - group: logging.openshift.io
+     resource: clusterlogforwarders
      # The default config is the main stanza of a ClusterLogForwarder resource
      # that describes where logs should be forwarded for all managed cluster.
      defaultConfig:
@@ -157,7 +157,7 @@ spec:
 
    # Describe the default trace forwarding locations for each OTEL exporter applied to all managed clusters.
    - group: opentelemetry.io/v1alpha1
-     resource: OpentelemetryCollector
+     resource: opentelemetrycollectors
      # The default config is the main stanza of an OpenTelemetryCollector resource
      # that describes local receivers, remote exporters and generic usable extensions.
      defaultConfig:
@@ -175,9 +175,9 @@ metadata:
   namespace: open-cluster-management
 spec:
   customizedVariables:
-    - name: cluster-logging-channel
+    - name: clusterLoggingChannel
       value: stable-5.8
-    - name: otel-channel
+    - name: otelChannel
       value: stable
 ```
 
@@ -229,53 +229,53 @@ apiVersion: addon.open-cluster-management.io/v1alpha1
 kind: ManagedClusterAddOn
 metadata:
   name: multi-cluster-observability-addon
-  namespace: managed-ocp-cluster-1
+  namespace: spoke
 spec:
   installNamespace: open-cluster-management-agent-addon
   configs:
   # Secret with mTLS client certificate for application-logs output
   - resource: secrets
-    name: managed-ocp-cluster-1-application-logs
-    namespace: managed-ocp-cluster-1
+    name: spoke-application-logs
+    namespace: spoke
   # ConfigMap with CloudWatch configuration for cluster-logs output
   - resource: configmaps
-    name: managed-ocp-cluster-1-cluster-logs
-    namespace: managed-ocp-cluster-1
+    name: spoke-cluster-logs
+    namespace: spoke
 ```
 
-For the `application-logs` log forwarding output the MCOA provides a Secret `managed-ocp-cluster-1-application-logs` with all required authentication information, e.g. TLS client Certificate:
+For the `application-logs` log forwarding output the MCOA provides a Secret `spoke-application-logs` with all required authentication information, e.g. TLS client Certificate:
 
 ```yaml
 apiVersion: v1
 kind: Secret
 metadata:
-  annotation:
+  annotations:
     logging.openshift.io/target-output-name: "application-logs"
-  name: managed-ocp-cluster-1-application-logs
-  namespace: managed-ocp-cluster-1
-data:
+  name: spoke-application-logs
+  namespace: spoke
+stringData:
   url: "https://loki-outside-this-cluster.com:3100"
-  'tls.crt': "Base64 encoded TLS client certificate"
-  'tls.key': "Base64 endoded TLS key"
-  'ca-bundle.crt': "Base64 encoded Certificate Authority certificate"
+  'tls.crt': "TLS client certificate"
+  'tls.key': "TLS key"
+  'ca-bundle.crt': "Certificate Authority certificate"
 ```
 
-For `cluster-logs` log forwarding output the MCOA needs to provide a ConfigMap `managed-ocp-cluster-1-cluster-logs` with all output configuration, e.g. AWS Cloudwatch:
+For `cluster-logs` log forwarding output the MCOA needs to provide a ConfigMap `spoke-cluster-logs` with all output configuration, e.g. AWS Cloudwatch:
 
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  annotation:
+  annotations:
     logging.openshift.io/target-output-name: "cluster-logs"
-  name: managed-ocp-cluster-1-cluster-logs
-  namespace: managed-ocp-cluster-1
+  name: spoke-cluster-logs
+  namespace: spoke
 data:
   region: us-east-1
   groupPrefix: a-prefix
 ```
 
-In turn the addon will compile a `ManifestWork` for the managed cluster `managed-ocp-cluster-1` as follows and pass it over it's WorkAgentController:
+In turn the addon will compile a `ManifestWork` for the managed cluster `spoke` as follows and pass it over it's WorkAgentController:
 
 ```yaml
 kind: ManifestWork
@@ -300,9 +300,9 @@ spec:
     - apiVersion: v1
       kind: Secret
       metadata:
-        annotation:
+        annotations:
           logging.openshift.io/target-output-name: "application-logs"
-        name: managed-ocp-cluster-1-application-logs
+        name: spoke-application-logs
         namespace: openshift-logging
       data:
         'tls.crt': "Base64 encoded TLS client certificate"
@@ -325,13 +325,13 @@ spec:
           type: loki
           url: "https://loki-outside-this-cluster.com:3100" # Pulled from the referenced secret
           secret:
-            name: managed-ocp-cluster-1-application-logs
+            name: spoke-application-logs
         - name: cluster-logs
           type: cloudwatch
           cloudwatch:
             groupBy: logType
-            region: us-east-1 # Pulled from the `managed-ocp-cluster-1-cluster-logs` configmap
-            groupPrefix: a-prefix # Pulled from the `managed-ocp-cluster-1-cluster-logs` configmap
+            region: us-east-1 # Pulled from the `spoke-cluster-logs` configmap
+            groupPrefix: a-prefix # Pulled from the `spoke-cluster-logs` configmap
         pipelines:
         - inputRefs:
           - application
