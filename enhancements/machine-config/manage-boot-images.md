@@ -43,16 +43,15 @@ Currently, bootimage references are [stored](https://github.com/openshift/instal
 - podman [[1](https://issues.redhat.com/browse/OCPBUGS-9969)]
 - skopeo [[1](https://issues.redhat.com/browse/OCPBUGS-3621)]
 
-Additionally, the stub secret [referenced](https://github.com/openshift/installer/blob/1ca0848f0f8b2ca9758493afa26bf43ebcd70410/pkg/asset/machines/gcp/machines.go#L197) in the `MachineSet` is also not managed. This stub is used by the ignition binary in firstboot to auth and consume content from the `machine-config-server`(MCS). The content served includes the actual ignition configuration and the target OCI format RHCOS image. The ignition binary now does first boot provisioning based on this, then hands off to the `machine-config-daemon`(MCD) first boot service to do the reboot into the target OCI format RHCOS image. As 4.6 and up clusters only understood spec 3 ignition, and as the unmanaged ignition stub is only spec 2, this was now an incompatibility. This would prevent new nodes from joining a cluster that had been upgraded past 4.5, but was originally a 4.5 or lower at install time. 
+Additionally, the stub secret [referenced](https://github.com/openshift/installer/blob/1ca0848f0f8b2ca9758493afa26bf43ebcd70410/pkg/asset/machines/gcp/machines.go#L197) in the `MachineSet` is also not managed. This stub is used by the ignition binary in firstboot to auth and consume content from the `machine-config-server`(MCS). The content served includes the actual ignition configuration and the target OCI format RHCOS image. The ignition binary now does first boot provisioning based on this, then hands off to the `machine-config-daemon`(MCD) first boot service to do the reboot into the target OCI format RHCOS image. In certain long lived clusters, the MCS TLS cert contained within the above ignition configuration may be out of date.
 
-To peel another layer from the Ignition onion (sorry), there are some scenarios in which the MCS TLS cert contained within the above ignition stub may be out of date or incompatible. In such cases, just up-translating the ignition stub will not be enough. Example issue [here](https://issues.redhat.com/browse/OCPBUGS-1817). Solving this is not a direct goal of this enhancement(this work is targeted and scoped by [MCO-642](https://issues.redhat.com/browse/MCO-642)), but it is important to keep track of as this is a new failure mode that will be exposed by solving the above two issues. 
-
+Example issue [here](https://issues.redhat.com/browse/OCPBUGS-1817). While this has been partly solved [MCO-642](https://issues.redhat.com/browse/MCO-642) (which allows the user to manually rotate the cert) it would be very beneficial for the MCO to actively manage this TLS cert and take this concern away from the user.
 
 ### User Stories
 
 * As an Openshift engineer, having nodes boot up on an unsupported OCP version is a security liability. By having nodes directly boot on the release payload image, it helps me avoid tracking incompatibilities across OCP release versions and shore up technical debt(see issues linked above). 
 
-* As a cluster administrator, having to keep track of a "boot" vs "live" image for a given cluster is not intuitive or user friendly. In the worst case scenario, I will have to reset a cluster(or do a lot of manual steps with rh-support in recovering the node) simply to be able to scale up nodes after an upgrade. If I'm managing an IPI cluster, once opted in, this feature will be a "switch on and forget" mechanism for me. If I'm managing a UPI cluster, this would provide me with documentation that I could follow after an upgrade to ensure my cluster has the latest bootimages.
+* As a cluster administrator, having to keep track of a "boot" vs "live" image for a given cluster is not intuitive or user friendly. In the worst case scenario, I will have to reset a cluster(or do a lot of manual steps with rh-support in recovering the node) simply to be able to scale up nodes after an upgrade. If I'm managing a `MachineSet` managed cluster, once opted in, this feature will be a "switch on and forget" mechanism for me. If I'm managing a non `Machineset` managed cluster, this would provide me with documentation that I could follow after an upgrade to ensure my cluster has the latest bootimages.
 
 ### Goals
 
@@ -70,22 +69,22 @@ This should not interfere with existing workflows such as Hive and ArgoCD. As th
 
 __Overview__
 
-- The `machine-config-controller`(MCC) pod will gain a new sub-controller `machine_set_controller`(MSC) that monitors `MachineSet` changes and the `coreos-bootimages` [ConfigMap](https://github.com/openshift/installer/pull/4760) changes.
-- Before processing a MachineSet, the MSC will check if the following conditions are satisfied:
+- The `machine-config-controller`(MCC) pod will gain a new sub-controller `machine_set_boot_image_controller`(MSBIC) that monitors `MachineSet` changes and the `coreos-bootimages` [ConfigMap](https://github.com/openshift/installer/pull/4760) changes.
+- Before processing a MachineSet, the MSBIC will check if the following conditions are satisfied:
   - `ManagedBootImages` feature gate is active
   - The cluster and/or the machineset is opted-in to boot image updates.
   - The golden configmap is verified to be in sync with the current version of the MCO. The MCO will "stamp"(annotate) the golden configmap with the new version of the MCO after atleast 1 node has succesfully completed an update to the new OCP image. This helps prevent `machinesets` being updated too soon at the end of a cluster upgrade, before the MCO itself has updated and has had a chance to roll out the new OCP image to the cluster. 
 
-  If any of the above checks fail, the MSC will exit out of the sync.
-- Based on platform and architecture type, the MSC will check if the boot images referenced in the `providerSpec` field of the `MachineSet` is the same as the one in the ConfigMap. Each platform(gcp, aws...and so on) does this differently, so this part of the implementation will have to be special cased. The ConfigMap is considered to be the golden set of bootimage values, i.e. they will never go out of date. If it is not a match, the `providerSpec` field is cloned and updated with the new boot image reference.
-- Next, it will check if the stub secret referenced is spec 3. If it is spec 2, the MSC will try create a new version of this secret by trying to translate it to spec 3. The new secret will be named `$(secret_name)-spec-3-managed`. It is necessary to preserve the old secret as `MachineSets` that are not opted-in to boot image updates will still reference the older secret and use them.
+  If any of the above checks fail, the MSBIC will exit out of the sync.
+- Based on platform and architecture type, the MSBIC will check if the boot images referenced in the `providerSpec` field of the `MachineSet` is the same as the one in the ConfigMap. Each platform(gcp, aws...and so on) does this differently, so this part of the implementation will have to be special cased. The ConfigMap is considered to be the golden set of bootimage values, i.e. they will never go out of date. If it is not a match, the `providerSpec` field is cloned and updated with the new boot image reference.
+- Next, it will check if the stub secret referenced is spec 3. If it is spec 2, the MSBIC will try create a new version of this secret by trying to translate it to spec 3. The new secret will be named `$(secret_name)-spec-3-managed`. It is necessary to preserve the old secret as `MachineSets` that are not opted-in to boot image updates will still reference the older secret and use them.
 
 The above step is platform/arch agnostic. Failure to up translate will cause a degrade and the sub-controller will exit without patching the `MachineSet`.
-- Finally, if the MSC will attempt to patch the `MachineSet` if required. Failure to do so will cause a degrade. 
+- Finally, the MSBIC will attempt to patch the `MachineSet` if required. Failure to do so will cause a degrade. 
 
 #### Degrade Mechanism
 
-The MSC will degrade the worker `MachineConfigPool` via a new [MachineConfigPoolConditionType](https://github.com/openshift/api/blob/master/machineconfiguration/v1/types.go#L492). This would be an API change, but a fairly simple one is it only adding a new condition type. The node controller(another sub controller within the MCC) would then [check for this condition](https://github.com/openshift/machine-config-operator/blob/master/pkg/controller/node/status.go#L142C34-L142C34) and degrade the worker pool, effectively degrading the operator.
+The MSBIC will degrade the worker `MachineConfigPool` via a new [MachineConfigPoolConditionType](https://github.com/openshift/api/blob/master/machineconfiguration/v1/types.go#L492). This would be an API change, but a fairly simple one is it only adding a new condition type. The node controller(another sub controller within the MCC) would then [check for this condition](https://github.com/openshift/machine-config-operator/blob/master/pkg/controller/node/status.go#L142C34-L142C34) and degrade the worker pool, effectively degrading the operator.
 
 As mentioned in the above section, degrading will only happen in two scenarios:
 - Translating the ignition stub to spec 3 fails. This is likely more fatal and won't get fixed without the editing the ignition stub manually.
@@ -109,6 +108,25 @@ Any form factor using the MCO and `MachineSets` will be impacted by this proposa
 - Standalone OpenShift: Yes, this is the main target form factor.
 - microshift: No, as it does [not](https://github.com/openshift/microshift/blob/main/docs/contributor/enabled_apis.md) use `MachineSets`.
 - Hypershift: No, Hypershift does not have this issue.
+
+##### Supported platforms
+
+The initial release(phase 0) will support GCP. In future releases, we will add in support for remaining platforms as we gain confidence in the functionality and understand the specific needs of those platforms. For platforms that cannot be supported, we aim to atleast provide documentation to perform the boot image updates manually. Here is an exhaustive list of all the platforms:
+
+- gcp
+- aws
+- azure
+- alibabacloud
+- nutanix
+- powervs
+- openstack
+- vsphere
+- baremetal
+- libvirt
+- ovirt
+- ibmcloud
+
+This work will be tracked in [MCO-793](https://issues.redhat.com/browse/MCO-793).
 
 ##### Cluster API backed machinesets
 
@@ -171,13 +189,12 @@ As can be seen, the bootimage becomes part of an `InfrastructureMachineTemplate`
 It is important to note that InfrastructureMachineTemplate is different per platform and is immutable. This will prevent an update in place style approach and would mean that the template would need to be cloned, updated during the clone, and then the MachineSet updated. This is somewhat similar to the approach used in the current MAPI PoC of cloning the `providerSpec` object, updating it and then patching the `MachineSet`. The `bootstrap` object is platform agnostic, making it somewhat simpler to update. 
 
 Based on the observation above, here is a rough outline of what CAPI support would require:
-- CAPI backed MachineSet detection, so the MSC knows when to invoke the CAPI path
-- Update the bootimage reference in `InfrastructureMachineTemplate` to matches the `core-bootimages` configMap value if required
-- Update the ignition stub in `bootstrap` to spec 3 if required
+- CAPI backed MachineSet detection, so the MSBIC knows when to invoke the CAPI path
+- If a boot image update is required, create a new `InfrastructureMachineTemplate` by cloning the existing and updating the boot image reference within. The name of the new `InfrastructureMachineTemplate` object will be generated by hashing the template content. This is consistent with the current CAPI approach to naming new objects.
+- If a stub translation is required, update the ignition stub in `bootstrap.dataSecretName` to reference the new spec 3.
 - CAPI backed MachineSet patching
 
-Much of the existing architecture regarding architecture & platform detection, opt-in, degradation and storing boot image history can remain the same. 
-
+Much of the existing design regarding architecture & platform detection, opt-in, degradation and storing boot image history can remain the same. 
 
 ### API Extensions
 
@@ -185,11 +202,11 @@ Much of the existing architecture regarding architecture & platform detection, o
 
 This proposal will introduce a discriminated union in [operator types](https://github.com/openshift/api/blob/master/operator/v1/types_machineconfiguration.go) for the MCO, `ManagedBootImageConfig` which has two fields:
 
-- `Mode` This is an enum which can have three values:
+- `Mode` This is a string enum which can have three values:
   - `Enabled` - All `Machinesets` will be enrolled for boot image updates.
-  - `MatchSelector` - `Machinesets` matched with the label selector will be enrolled for boot image updates.
+  - `CustomConfig` - `Machinesets` matched with the label selector will be enrolled for boot image updates.
   - `Disabled` - No `Machinesets` will be enrolled for boot image updates.
-- `MatchSelector` This is a label selector that will be used by machineset objects to opt-in. 
+- `CustomConfig` This is struct which encloses a label selector that will be used by machineset objects to opt-in. 
 
 Here are some YAML examples that describes operators in each of these modes:
 ##### Enabled
@@ -223,10 +240,11 @@ metadata:
   labels:
 spec:
   managedBootImageConfig:
-    mode: MatchSelector
-    matchSelector:
-      matchLabels:
-        machineconfiguration.openshift.io/mco-managed-machineset: ""        
+    mode: CustomConfig
+    CustomConfig:
+      machineSetSelector:
+        matchLabels:
+          machineconfiguration.openshift.io/mco-managed-machineset: ""        
 ```
 Note: While in this mode, the label added to the selector will have to be added to the `machineset` object.
 
@@ -267,7 +285,7 @@ spec:
 ```
 #### Tracking boot image history
 
-This proposal will also introduce a new CR, `MachineSetBootImageHistory` for tracking boot image history in the MCO namespace. As a starting point, here is a stub type definition for this:
+This proposal will also introduce a new CR, `MachineSetBootImageHistory` for tracking boot image history. As a starting point, here is a stub type definition for this:
 
 ```
 type MachineSetBootImageHistory struct {
@@ -303,7 +321,9 @@ type MachineSetBootImageHistoryList struct {
 	Items           []MachineSetBootImageHistory `json:"items"`
 }
 ```
-There will be one instance of this per machineset and it will be updated by the MSC as `Machinesets` are created/updated. This CRD will also need to support MAPI and CAPI backed `MachineSets`. The goal of this is to provide information about the "lineage" of a `MachineSet` to the user. The user can then manually restore their `MachineSet` to an earlier state if they wish to do so by following documentation. The MCO will not directly consume from this CR. This is not planned to be part of the initial release, but more of a nice to have.
+There will be one instance of this per `Machineset`. It will be updated by the MSBIC as `Machinesets` are created/updated and will exist in the same namespace as the `MachineSet`. This CRD will also need to support MAPI and CAPI backed `MachineSets`. The goal of this is to provide information about the "lineage" of a `MachineSet` to the user. The user can then manually restore their `MachineSet` to an earlier state if they wish to do so by following documentation. 
+
+The MCO will not directly consume from this CR. This is not planned to be part of the initial release, but more of a nice to have.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -375,8 +395,6 @@ Additionaly, a phased approach such as the following is the proposed:
 #### Phase 2
 - Tracking boot image history
 - User facing documentation for manual restoration
-
-In future phases/releases, we can add in support for remaining platforms as we gain confidence in the functionality and demands of those platforms. An exhaustive list can be found in [MCO-793](https://issues.redhat.com/browse/MCO-793).
 
 #### Removing a deprecated feature
 
