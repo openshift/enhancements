@@ -2,6 +2,7 @@
 title: static-ip-addresses-vsphere
 authors:
   - rvanderp3
+  - vr4manta
 reviewers: 
   - JoelSpeed - machine API
   - elmiko - machine API
@@ -130,6 +131,137 @@ platform:
         nameservers:
         - 192.168.101.2
 ~~~
+
+The install will be consuming the above config and will be creating custom resources following the CAPI static ip address process.  We will be generating a IPAddress and IPAddressClaim for each master and worker (bootstrap is not included but will have static IP directly applied to the VM based on the config).  These files will be a part of the openshift directory that is generated from `openshift-install create manifests`.  A sample of what is generated based on above config:
+
+```shell
+[ngirard@fedora openshift]$ ls
+99_cloud-creds-secret.yaml
+99_feature-gate.yaml
+99_kubeadmin-password-secret.yaml
+99_openshift-cluster-api_master-machines-0.yaml
+99_openshift-cluster-api_master-machines-1.yaml
+99_openshift-cluster-api_master-machines-2.yaml
+99_openshift-cluster-api_master-user-data-secret.yaml
+99_openshift-cluster-api_worker-machines-0.yaml
+99_openshift-cluster-api_worker-machines-1.yaml
+99_openshift-cluster-api_worker-machines-2.yaml
+99_openshift-cluster-api_worker-machineset-0.yaml
+99_openshift-cluster-api_worker-machineset-1.yaml
+99_openshift-cluster-api_worker-machineset-2.yaml
+99_openshift-cluster-api_worker-machineset-3.yaml
+99_openshift-cluster-api_worker-user-data-secret.yaml
+99_openshift-machine-api_address-ngirard-dev-lbfxg-master-0-claim-0-0.yaml
+99_openshift-machine-api_address-ngirard-dev-lbfxg-master-1-claim-0-0.yaml
+99_openshift-machine-api_address-ngirard-dev-lbfxg-master-2-claim-0-0.yaml
+99_openshift-machine-api_address-ngirard-dev-lbfxg-worker-0-claim-0-0.yaml
+99_openshift-machine-api_address-ngirard-dev-lbfxg-worker-1-claim-0-0.yaml
+99_openshift-machine-api_address-ngirard-dev-lbfxg-worker-2-claim-0-0.yaml
+99_openshift-machine-api_claim-ngirard-dev-lbfxg-master-0-claim-0-0.yaml
+99_openshift-machine-api_claim-ngirard-dev-lbfxg-master-1-claim-0-0.yaml
+99_openshift-machine-api_claim-ngirard-dev-lbfxg-master-2-claim-0-0.yaml
+99_openshift-machine-api_claim-ngirard-dev-lbfxg-worker-0-claim-0-0.yaml
+99_openshift-machine-api_claim-ngirard-dev-lbfxg-worker-1-claim-0-0.yaml
+99_openshift-machine-api_claim-ngirard-dev-lbfxg-worker-2-claim-0-0.yaml
+99_openshift-machine-api_master-control-plane-machine-set.yaml
+99_openshift-machineconfig_99-master-ssh.yaml
+99_openshift-machineconfig_99-worker-ssh.yaml
+99_role-cloud-creds-secret-reader.yaml
+openshift-install-manifests.yaml
+```
+
+Using master-0 as the target example, we can see how the machine, IPAddressClaim and IPAddress are configured as follows:
+
+Machine:
+```yaml
+apiVersion: machine.openshift.io/v1beta1
+kind: Machine
+metadata:
+  creationTimestamp: null
+  labels:
+    machine.openshift.io/cluster-api-cluster: ngirard-dev-fhshn
+    machine.openshift.io/cluster-api-machine-role: master
+    machine.openshift.io/cluster-api-machine-type: master
+  name: ngirard-dev-fhshn-master-0
+  namespace: openshift-machine-api
+spec:
+  lifecycleHooks: {}
+  metadata: {}
+  providerSpec:
+    value:
+      apiVersion: machine.openshift.io/v1beta1
+      credentialsSecret:
+        name: vsphere-cloud-credentials
+      diskGiB: 100
+      kind: VSphereMachineProviderSpec
+      memoryMiB: 16384
+      metadata:
+        creationTimestamp: null
+      network:
+        devices:
+          - addressesFromPools:
+              - group: installer.openshift.io
+                name: default-0
+                resource: IPPool
+            nameservers:
+              - 8.8.8.8
+            networkName: ocp-ci-seg-13
+      numCPUs: 4
+      numCoresPerSocket: 2
+      snapshot: ""
+      template: ngirard-dev-fhshn-rhcos-us-east-us-east-1a
+      userDataSecret:
+        name: master-user-data
+      workspace:
+        datacenter: IBMCloud
+        datastore: /IBMCloud/datastore/mdcnc-ds-1
+        folder: /IBMCloud/vm/ngirard-dev-fhshn
+        resourcePool: /IBMCloud/host/vcs-mdcnc-workload-1//Resources
+        server: ibmvcenter.vmc-ci.devcluster.openshift.com
+status: {}
+```
+
+IPAddressClaim:
+```yaml
+apiVersion: ipam.cluster.x-k8s.io/v1alpha1
+kind: IPAddressClaim
+metadata:
+  creationTimestamp: null
+  finalizers:
+    - machine.openshift.io/ip-claim-protection
+  name: ngirard-dev-fhshn-master-0-claim-0-0
+  namespace: openshift-machine-api
+spec:
+  poolRef:
+    apiGroup: installer.openshift.io
+    kind: IPPool
+    name: default-0
+status:
+  addressRef:
+    name: ngirard-dev-fhshn-master-0-claim-0-0
+```
+
+IPAddress:
+```yaml
+apiVersion: ipam.cluster.x-k8s.io/v1alpha1
+kind: IPAddress
+metadata:
+  creationTimestamp: null
+  name: ngirard-dev-fhshn-master-0-claim-0-0
+  namespace: openshift-machine-api
+spec:
+  address: 192.168.13.241
+  claimRef:
+    name: ngirard-dev-fhshn-master-0-claim-0-0
+  gateway: 192.168.13.1
+  poolRef:
+    apiGroup: installer.openshift.io
+    kind: IPPool
+    name: default-0
+  prefix: 23
+```
+
+If the cluster admin wishes to change anything about the ipaddress or ipaddress claim information, they may do so at this time.  Once all changes are made, it is now find to continue the rest of the cluster create process.
 
 ### Scaling in Additional Machines
 
