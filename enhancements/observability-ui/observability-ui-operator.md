@@ -45,8 +45,6 @@ The current state of observability signals in the OpenShift console has each ope
 
 - As an OpenShift administrator, I want a centralized operator for observability UI components so that I can streamline console requirements and integrate diverse signals effectively.
 
-- As an OpenShift user, I want to customize observability dashboards with various signals so that I can quickly identify and resolve issues.
-
 ### Goals
 
 Provide a centralized operator to manage dynamic UI plugins for observability signals within the OpenShift console.
@@ -64,6 +62,8 @@ Ensure that the Observability UI operator remains independent of the OpenShift C
 Deploying third-party Observability UI solutions like Grafana or Kibana.
 
 Supporting UIs coming from other observability projects such as Jaeger UI, Prometheus/Thanos UI, or AlertManager UI.
+
+Define how customizable dashboards should be created or managed using Perses, this will be part of another enhancement proposal.
 
 Replacing or superseding plugins that have a clear 1:1 relationship with an existing operator such as:
 
@@ -104,7 +104,7 @@ Migration plans will be crucial. Current plugins deployed by other signal operat
 
 ### Console plugin configuration
 
-The Observability UI Operator will be configured through a series of custom resource (CR) that will allow the user to enable or disable the console plugins and link them with the corresponding backend from signal operators.
+The Observability UI Operator will be configured through a series of custom resource (CR) that will allow administrators to enable or disable console plugins and link them with the corresponding backend from signal operators. To ease the process for administrators, the operator will provide a UI so plugins can be enabled or disabled from the console, this will also display plugins that can be enabled based on the OCP version and the signal operator version.
 
 ### Objective:
 
@@ -120,49 +120,38 @@ By centralizing the observability UI components under one operator, we hope to m
 
 The workflow for the Observability UI Operator focuses on enhancing the user experience when interfacing with the OpenShift console. This proposal targets a more unified and enhanced observability experience through a new Kubernetes operator.
 
-**OpenShift cluster administrator** is responsible for installing, enabling, configuring, and managing the plugins and operators within the OpenShift environment.
+**OpenShift cluster administrator** is responsible for enabling plugins.
 **OpenShift user** is the end-user interfacing with the OpenShift console and making use of the observability signals presented by the dynamic console plugins.
 
 1. The cluster administrator installs the ObservabilityUI operator from the RedHat Catalog.
-2. If there is an existing observability UI plugin deployed by another operator:
+2. The operator enables the ObservabilityUI Hub in the OpenShift console, adding a list of available plugins to the console based on the OCP version and the discovered signal operator version.
+3. Using the Observability UI Hub, the cluster administrator enables the desired plugins, a CR is created for each plugin connecting it with the corresponding signal operator backend.
+4. If there is an existing observability UI plugin deployed by another operator:
    - If the new plugin defines console feature flag to disable the existing plugin extensions, only the new plugin extensions will be enabled.
    - If the new plugin does not define console feature flag to disable the existing plugin extensions, the cluster administrator disables the existing plugin.
-3. The cluster administrator configures the operator adding a custom resources (CR) to deploy the desired plugins and link them with the corresponding signal operators.
-4. The operator will reconcile the necessary deployments for each enabled plugin, then it will reconcile the required [CRs for the console operator](https://github.com/openshift/enhancements/blob/master/enhancements/console/dynamic-plugins.md#delivering-plugins) so they become be available in the OpenShift console.
-5. The user accesses the OpenShift console and interacts with the observability signals through the plugins deployed by the operator.
+5. The operator will reconcile the necessary deployments and services for each enabled plugin, then it will reconcile the required [CRs for the console operator](https://github.com/openshift/enhancements/blob/master/enhancements/console/dynamic-plugins.md#delivering-plugins) so they become be available in the OpenShift console.
+6. The user accesses the OpenShift console and interacts with the observability signals through the plugins deployed by the operator.
 
 ### API Extensions
 
-This enhancement introduces a new CRD to represent observability UI console plugins. The `ObservabilityUIConsolePlugin` CR for a plugin will be defined as follows:
+This enhancement introduces a new CRD to represent observability UI console plugins. The `ObservabilityUIPlugin` CR for a plugin will be defined as follows:
 
 ```yaml
 apiVersion: observability-ui.openshift.io/v1alpha1
-kind: ObservabilityUIConsolePlugin
+kind: ObservabilityUIPlugin
 metadata:
   name: logging-view-plugin
   namespace: openshift-observability-ui
 spec:
   displayName: "Logging View Plugin"
-  deployment:
-    containers:
-      - name: logging-view-plugin
-        image: "quay.io/gbernal/logging-view-plugin:latest"
-        ports:
-          - containerPort: 9443
-            protocol: TCP
-  backend:
-    type: logs
-    sources:
-      - alias: logs-backend
-        caCertificate: '-----BEGIN CERTIFICATE-----\nMIID....'
-        authorize: true
-        endpoint:
-          type: Service
-          service:
-            name: lokistack-dev
-            namespace: openshift-logging
-            port: 8080
-  settings:
+  version: "dev"
+  type: logs
+  services:
+    - alias: backend
+      name: lokistack-dev
+      namespace: openshift-logging
+      port: 8080
+  config:
     timeout: 30s
     logsLimit: 300
 ```
@@ -198,6 +187,15 @@ Review Processes:
 - There is an inherent dependence of the UI plugins with the signal operators. However, users will have the flexibility to choose which plugins they want to install and use.
 
 ## Design Details
+
+### Observability UI Hub design proposal
+
+![Observability UI Hub ](./observability-ui-hub-demo.png)
+
+#### TBD:
+
+- Catalog menu item location
+- Details of versions and compatibility
 
 ### Open Questions
 
