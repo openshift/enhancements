@@ -282,6 +282,14 @@ type NutanixMachineConfiguration struct {
 }
 
 type ScalingDefinition struct {
+	// Enabled is a shortcut to enable or disable this scaling definition. When
+	// a scaling configuration is set to enabled, but has no defined Triggers it
+	// will still perform no scaling actions and perform like being disabled.
+	//
+	// When omitted, the value will default to true.
+	//
+	// +kubebuilder:validation:Required
+	Enabled bool
 	// ScaleUpDelay let's the user define the amount of time that must pass
 	// between a previous scale event and a potential new scale event. This
 	// allows the user to specify a custom amount of time to allow operators to
@@ -377,12 +385,24 @@ type PrometheusTrigger struct {
 	// kubebuilder:validation:Required
 	// kubebuilder:validation:Enum:"Basic","Bearer","Tls"
 	AuthMode         string
-	// UnsafeSsl allows the user to specify skipping the certificate check.
+	// HandleLostTarget lets the user specify how the trigger should proceed if the
+	// Prometheus target is lost.
+	// Support two different values:
+	// - 'Ignore': If this is set, the trigger continues to operate if the
+	// Prometheus target is lost essentially ignoring this trigger.
+	// - 'Error': If this is set, the trigger returns an error if the Prometheus
+	// target is lost - this will degrade the operator. This is the default
+	// behavior.
+	//
+	// +kubebuilder:validation:Enum:="Ignore","Error"
+	// +kubebuilder:validation:Optional
+	HandleLostTarget string
+	// InsecureSkipTLSVerify allows the user to specify skipping the certificate check.
 	//
 	// The default value is "false".
 	// 
 	// kubebuilder:validation:Optional
-	UnsafeSsl        bool
+	InsecureSkipTLSVerify        bool
 }
 
 type MetricsTrigger struct {
@@ -550,6 +570,9 @@ The **optional** configurations will include the following properties:
   should be performed.
 - `scaleUp`: defines configuration for scaling up. This includes the following
   sub elements:
+  - `enabled`: decides if scaling up should be enabled or disabled. If this is
+    set to true, but there are no triggers configured, the scale up is still
+    disabled.
   - `scaleUpDelay`: duration to wait after a scale up before another scaling
     operation can occur.
   - `selectPolicy`: `next` to select the next bigger instance size.
@@ -569,12 +592,15 @@ The **optional** configurations will include the following properties:
       - `threshold`: Specifies the value that triggers scaling. 
       - `authModes`: Specifies the authentication method to use. Should support
         at least *basic*, *bearer* and *tls* authentication.
-      - `ignoreNullValues`: Specifies how the trigger should proceed if the Prometheus target is lost.
-        - If true, the trigger continues to operate if the Prometheus target is
-          lost. This is the default behavior.
-        - If false, the trigger returns an error if the Prometheus target is
-          lost - this will degrade the operator.
-      - `unsafeSsl`: Specifies whether the certificate check should be skipped.
+      - `handleLostTarget`: Specifies how the trigger should proceed if the
+        Prometheus target is lost.
+        - `Ignore`: If this is set, the trigger continues to operate if the
+          Prometheus target is lost essentially ignoring this trigger.
+        - `Error`: If this is set, the trigger returns an error if the
+          Prometheus target is lost - this will degrade the operator. This is
+          the default behavior.
+      - `insecureSkipTLSVerify`: Specifies whether certificate errors should be
+        ignored.
     - `cpu`:
       - `value`: Load average value that determines if scaling has to occur.
       - `timeWindow`: Duration over which the load average must be higher to
@@ -589,6 +615,9 @@ The **optional** configurations will include the following properties:
         namespace.
 - `scaleDown`: defines configuration for scaling up. This includes the following
   sub elements:
+  - `enabled`: decides if scaling down should be enabled or disabled. If this is
+    set to true, but there are no triggers configured, the scale dow is still
+    disabled.
   - `scaleDownDelay`: duration to wait after a scale down before another scaling
     operation can occur.
   - `selectPolicy`: `next` to select the next smaller instance size.
