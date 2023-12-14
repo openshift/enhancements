@@ -56,7 +56,8 @@ automations that are expensive to maintain.
 - As a cluster administrator, I want to be able to monitor the process of adding new nodes
 
 ### Goals
-- Allow the user to easily add one or more worker nodes to an existing (disconnected) non-IPI cluster, with the minimum amount of configuration requested
+- Allow the user to easily add one or more worker nodes to an existing (disconnected) cluster where MachineSet scaleout is not available or feasible, 
+  with the minimum amount of configuration requested
 - Provide a simpler interface by reusing existing command line tools for cluster administration
 - When adding multiple nodes, a failure in adding a node should not impact the other nodes currently involved in the process
 - Cover at least Baremetal, vSphere, Nutanix and None platform (regardless of the installation method used)
@@ -80,7 +81,7 @@ There are several reasons for choosing `oc` as a primary user interfaces for the
 - It’s the official cluster administration tool, so it is expected to be already available in the target cluster environment
 - It already supports the kubeconfig file for interacting with the target cluster (it’s relevant since it contains several pieces of 
   information required for adding the nodes, as explained in the design section)
-- It already offers a couple of commands to manually approve/deny certificate signing requests (CRSs) when adding new nodes
+- It already offers a couple of commands to manually approve/deny certificate signing requests (CSRs) when adding new nodes
 
 The usage of `oc` will also help in reducing the amount of information that the user will need to provide, resulting thus in a simplified
 input configuration file.
@@ -115,7 +116,7 @@ hosts:
    - macAddress: 00:00:00:00:00:00
      name: eth0
    - macAddress: 00:00:00:00:00:01
-     name: eth0
+     name: eth1
   networkConfig:
    interfaces:
      - name: eth0
@@ -132,7 +133,7 @@ hosts:
   rootDeviceHints:
    deviceName: /dev/sda
   interfaces:
-   - macAddress: 00:00:00:00:00:01
+   - macAddress: 00:00:00:00:00:02
      name: eth0
   networkConfig:
    interfaces:
@@ -161,7 +162,7 @@ Where:
 The command will try to connect to each specified node to retrieve initially the results of the pre-flight validations, and then 
 the progress of the activity. In case of validation failures, the command will report them to the console to allow the user to 
 take the requested actions and troubleshoot the issues. In the future this command could be enhanced to automatically approve the node CSRs
-(iudentifying the correct CSR requires the Node IP address, which this command already has as an input).
+(identifying the correct CSR requires the Node IP address, which this command already has as an input).
 
 ### Workflow Description
 The working environment must satisfy the initial following conditions:
@@ -184,7 +185,7 @@ The implementation will largely reuse the same approach / code present in the op
 for the installation, with a number of exceptions that will be detailed in the subsequent paragraphs.
 
 #### Proposed architecture
-Every node booted with the generated ISO will will be independent for adding itself to the cluster - without any need to specify a single rendezvous IP, 
+Every node booted with the generated ISO will be independent for adding itself to the cluster - without any need to specify a single rendezvous IP, 
 as it happens for the installation scenario. In this way if a node is failing for some reason (for example, the pre-flight validations block the process), 
 the other nodes may continue the joining process undisturbed.
 The following hilights better the proposed architecture:
@@ -209,10 +210,7 @@ To achieve this kind of loosely coupled level of integration with `oc`, a specif
 repo code and distributed into an image of the release payload as an additional artifact.
 
 ### Risks and Mitigations
-Most of the existing code for agent-based installer approach is currently stored into the openshift/installer repo (with additional vendoring of the api/client 
-parts of openshift/assisted-service), and it wasn’t explicitly designed for being re-vendored. Vendoring the required parts in the openshift/oc repo will require
-a significant amount of refactoring in the openshift/install repo. Also, `oc` is not tied to a particular version, while the agent-based installer code is. 
-
+-
 ### Drawbacks
 -
 ## Design Details
@@ -259,6 +257,10 @@ N/A
   possible to add on to existing sub-commands (ie, to `oc adm`)
 - Implement a cluster specific controller to generate the image. This approach seems anyhow to have several drawbacks: the controller would be always active, and 
   that is not ideal for a one-shot operation seldomly applied. In particular for SNO, it would consume additional resources unnecessarily.
+- Most of the existing code for agent-based installer approach is currently stored into the openshift/installer repo (with additional vendoring of the api/client 
+  parts of openshift/assisted-service), and it wasn’t explicitly designed for being re-vendored. Vendoring the required parts in the openshift/oc repo will require
+  a significant amount of refactoring in the openshift/install repo. Also, `oc` is not tied to a particular version, while the agent-based installer code is. 
+
 
 
 
