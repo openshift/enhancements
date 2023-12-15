@@ -66,6 +66,7 @@ This should not interfere with existing workflows such as Hive and ArgoCD. As th
 - The new subcontroller is only intended to support clusters that use MachineSet backed node scaling. This is meant to be a user opt-in feature, and if the user wishes to keep their boot images static it will let them do so.
 - This does not intend to solve [booting into custom pools](https://issues.redhat.com/browse/MCO-773). 
 - This does not target Hypershift, as [it does not use machinesets](https://github.com/openshift/hypershift/blob/32309b12ae6c5d4952357f4ad17519cf2424805a/hypershift-operator/controllers/nodepool/nodepool_controller.go#L2168).
+- This does not target [ControlPlaneMachineSets](https://docs.openshift.com/container-platform/4.14/machine_management/control_plane_machine_management/cpmso-about.html).
 
 ## Proposal
 
@@ -91,7 +92,7 @@ As mentioned in the above section, degrading will only happen when the patching 
 
 #### Reverting to original bootimage
 
-The proposal will introduce a CR, `MachineSetBootImageHistory` to store the boot image history associated with a given machineset. By providing this CR and accompanying documentation, the user will be able to restore their machinesets to an earlier state if they wish to do so. 
+The proposal will introduce a CR, `BootImageHistory` to store the boot image history associated with a given machineset. By providing this CR and accompanying documentation, the user will be able to restore their machinesets to an earlier state if they wish to do so. 
 
 ### Workflow Description
 
@@ -193,6 +194,8 @@ Based on the observation above, here is a rough outline of what CAPI support wou
 
 Much of the existing design regarding architecture & platform detection, opt-in, degradation and storing boot image history can remain the same. 
 
+When [MachineDeployments](https://cluster-api.sigs.k8s.io/developer/architecture/controllers/machine-deployment#machinedeployment) are introduced into CAPI, this mechanism will need to be reworked to update those rather than the MachineSet itself.
+
 ### API Extensions
 
 #### Opt-in Mechanism
@@ -282,44 +285,108 @@ spec:
 ```
 #### Tracking boot image history
 
-This proposal will also introduce a new CR, `MachineSetBootImageHistory` for tracking boot image history. As a starting point, here is a stub type definition for this:
+This proposal will also introduce a new CR, `BootImageHistory` for tracking boot image history. As a starting point, here is a stub type definition for this:
 
 ```
-type MachineSetBootImageHistory struct {
+type BootImageHistory struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   MachineSetBootImageHistorySpec   `json:"spec,omitempty"`
-	Status MachineSetBootImageHistoryStatus `json:"status,omitempty"`
+	Spec   BootImageHistorySpec   `json:"spec,omitempty"`
+	Status BootImageHistoryStatus `json:"status,omitempty"`
 }
 
-// MachineSetBootImageHistorySpec defines the desired state of MachineSetBootImageHistory
-type MachineSetBootImageHistorySpec struct {
-	MachineSetName string                   `json:"machineSetName"`
-	Details        []BootImageHistoryDetail `json:"details"`
+// BootImageHistorySpec defines the desired state of BootImageHistory
+type BootImageHistorySpec struct {
 }
 
-// MachineSetBootImageHistoryStatus defines the observed state of MachineSetBootImageHistory
-type MachineSetBootImageHistoryStatus struct {
+// BootImageHistoryStatus defines the observed state of BootImageHistory
+type BootImageHistoryStatus struct {
+	// machineResourceReference contains identifying information of the machine management resource being tracked.
+	// +kubebuilder:validation:Required
+	// +required
+	MachineResourceReference MachineResourceReference `json:"machineResourceReference"`
+	// details is a list of boot image history entries of the machine resource.
+	// +optional
+	Details []BootImageHistoryDetail `json:"details,omitempty"`
+}
+
+type MachineResourceReference struct {
+	// name is the machine management resource's name
+	// +kubebuilder:validation:Required
+	// +required
+	Name string `json:"name"`
+	// kind is the machine management resource's kind
+	// +kubebuilder:validation:Required
+	// +required
+	Kind string `json:"kind"`
+	// apiGroup is name of the APIGroup that the machine management resource belongs to. This is for disambiguating
+	// between Cluster API and Machine API backed resources.
+	// +kubebuilder:validation:Required
+	// +required
+	APIGroup string `json:"apiGroup"`
 }
 
 // BootImageHistoryDetail is the struct for each element in the Details array
 type BootImageHistoryDetail struct {
-	Index          int         `json:"index"`
-	UpdatedTime    metav1.Time `json:"updatedTime"`
-	BootImageRef   string      `json:"bootImageRef"`
+	// updateTime records the timestamp at which the update took place.
+	// +required
+	UpdateTime metav1.Time `json:"updatedTime"`
+	// bootImageRef records the new boot image reference to which the update took place.
+	// +required
+	BootImageRef string `json:"bootImageRef"`
 }
 
-// MachineSetBootImageHistoryList contains a list of MachineSetBootImageHistory
-type MachineSetBootImageHistoryList struct {
+// BootImageHistoryList contains a list of BootImageHistory
+type BootImageHistoryList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []MachineSetBootImageHistory `json:"items"`
+	Items           []BootImageHistory `json:"items"`
 }
-```
-There will be one instance of this per `Machineset`. It will be updated by the MSBIC as `Machinesets` are created/updated and will exist in the same namespace as the `MachineSet`. This CRD will also need to support MAPI and CAPI backed `MachineSets`. The goal of this is to provide information about the "lineage" of a `MachineSet` to the user. The user can then manually restore their `MachineSet` to an earlier state if they wish to do so by following documentation. 
 
-The MCO will not directly consume from this CR. This is not planned to be part of the initial release, but more of a nice to have.
+```
+There will be one instance of this per machine management resource(which can be a MachineSet[MAPI or CAPI], MachineDeployment...etc). It will be named the same as the resource being tracked. The MSBIC is responsible for creating and updating this CR when a boot image update takes place. This CR will exist in the same namespace as the resource.
+
+YAML Example for a MAPI backed machineset scenario:
+```
+apiVersion: machineconfiguration.openshift.io/v1alpha1
+kind: BootImageHistory
+metadata:
+  name: djoshy10-2tcqv-worker-a
+spec: {}
+status:
+  machineResourceReference:
+    name: djoshy10-2tcqv-worker-a
+    kind: MachineSet
+    apiGroup: cluster.x-k8s.io/v1alpha3
+  details:
+    - updateTime: "2023-12-14T12:00:00Z"
+      bootImageRef: "projects/rhcos-cloud/global/images/rhcos-414-92-202308032115-0-gcp-x86-64"
+    - updateTime: "2023-12-14T14:30:00Z"
+      bootImageRef: "projects/rhcos-cloud/global/images/rhcos-415-92-202311241643-0-gcp-x86-64"
+
+```
+
+YAML Example for a CAPI backed machineset scenario:
+```
+apiVersion: machineconfiguration.openshift.io/v1alpha1
+kind: BootImageHistory
+metadata:
+  name: djoshy10-2tcqv-worker-a
+spec: {}
+status:
+  machineResourceReference:
+    name: djoshy10-2tcqv-worker-a
+    kind: MachineSet
+    apiGroup: machine.openshift.io/v1beta1
+  details:
+    - updateTime: "2023-12-14T12:00:00Z"
+      bootImageRef: "projects/rhcos-cloud/global/images/rhcos-414-92-202308032115-0-gcp-x86-64"
+    - updateTime: "2023-12-14T14:30:00Z"
+      bootImageRef: "projects/rhcos-cloud/global/images/rhcos-415-92-202311241643-0-gcp-x86-64"
+
+```
+The goal of this is to provide information about the "lineage" of a machine management resource to the user. The user can then manually restore their machine management resource to an earlier state if they wish to do so by following documentation. The MCO will not directly consume from this CR. This is not planned to be part of the initial release, but more of a nice to have.
 
 ### Implementation Details/Notes/Constraints [optional]
 
