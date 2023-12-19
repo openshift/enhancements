@@ -26,6 +26,8 @@ tracking-link:
   - https://issues.redhat.com/browse/OBSDA-356
   - https://issues.redhat.com/browse/OBSDA-393
   - https://issues.redhat.com/browse/LOG-4539
+  - https://issues.redhat.com/browse/TRACING-3540
+  - https://issues.redhat.com/browse/OBSDA-489
 see-also:
   - None
 replaces:
@@ -84,7 +86,7 @@ The workflow implemented in this proposal enables fleet-wide log/tracing collect
 1. The fleet administrator registers MCOA on RHACM using a dedicated `ClusterManagementAddOn` resource on the hub cluster.
 2. The fleet administrator deploys MCOA on the hub cluster using a Red Hat provided Helm chart.
 2. The fleet administrator creates a default `ClusterLogForwarder` stanza in the `open-cluster-management` namespace that describes the list of log forwarding outputs. This stanza will then be used as a template by MCOA when generating the `ClusterLogForwarder` instance per managed cluster.
-3. The fleet administrator creates a default `OpenTelemetryCollector` resource in the `open-cluster-management` namespace that describes the list of trace exporters. This stanza will then be used as a template by MCOA when generating the `OpenTelemetryCollector` instance per managed cluster.
+3. The fleet administrator creates a default `OpenTelemetryCollector` resource in the `open-cluster-management` namespace that describes the list of trace receivers, processors, connectors and exporters. This stanza will then be used as a template by MCOA when generating the `OpenTelemetryCollector` instance per managed cluster.
 4. The fleet administrator creates a default `AddOnDeploymentConfig` resource in the `open-cluster-management` namespace that describes general addon parameters, i.e. operator subscription channel names that should be used on all managed clusters.
 5. For each managed cluster the MCOA or the fleet administrator provides on the managed cluster namespace additional configuration resources:
    1. Per Log Output / Trace Exporter `Secret`: For each output a resource holding the authentication settings (See [ClusterLogForwarder Type: OutputSecretSpec](ocp-clusterlogforwarder-outputsecretspec), [OpenTelemetry Collector Authentication](opentelemetry-collector-auth))
@@ -100,7 +102,7 @@ TBD
 
 ### API Extensions
 
-None as the MCOA is not providing any new custom reource definitions or changing any existing ones.
+None as the MCOA is not providing any new custom resource definitions or changing any existing ones.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -347,8 +349,177 @@ spec:
 ```
 
 #### Multi Cluster Trace Collection and Forwarding
+For all managed clusters the fleet administrator is required to provide a single `OpenTelemetryCollector` resource stanza that describes the trace forwarding configuration for the entire fleet in the default namespace `open-cluster-management`.
 
-TBD
+The following example resource describes a configuration for forwarding application traces from one OpenTelemetry Collector (deployed in the spoke cluster) to another one in a different
+cluster exposing the OTLP endpoint via OpenShift Route:
+
+```yaml
+apiVersion: opentelemetry.io/v1alpha1
+kind: OpenTelemetryCollector
+metadata:
+  name: otel
+spec:
+  mode: deployment
+  serviceAccount: otel-collector-deployment
+  config: |
+    receivers:
+      jaeger:
+        protocols:
+          grpc:
+          thrift_binary:
+          thrift_compact:
+          thrift_http:
+      opencensus:
+      otlp:
+        protocols:
+          grpc:
+          http:
+      zipkin:
+    processors:
+      batch:
+      k8sattributes:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 50
+        spike_limit_percentage: 30
+      resourcedetection:
+        detectors: [openshift]
+    exporters:
+      otlp:
+        endpoint: "otel-colector.example.com"
+        tls:
+          insecure: false
+          ca_file: /etc/pki/ca-trust/source/service-ca/service-ca.crt
+          cert_file: client.crt
+          key_file: client.key
+    service:
+      pipelines:
+        traces:
+          receivers: [jaeger, opencensus, otlp, zipkin]
+          processors: [memory_limiter, k8sattributes, resourcedetection, batch]
+          exporters: [otlp]
+```
+
+For each managed cluster the addon configuration that enables being considered by MCOA looks as follows. It references managed specific configuration resources, i.e. Secrets/ConfigMaps per `OpenTelemetry Collector Exporter` output:
+
+```yaml
+apiVersion: addon.open-cluster-management.io/v1alpha1
+kind: ManagedClusterAddOn
+metadata:
+  name: multi-cluster-observability-addon
+  namespace: spoke
+spec:
+  installNamespace: open-cluster-management-agent-addon
+  configs:
+  # Secret with mTLS client certificate for  output
+  - resource: secrets
+    name: spoke-exporter-traces
+    namespace: spoke
+```
+
+For the `OTLP` traces exporter the MCOA provides a Secret `spoke-exporter-traces` with all required authentication information, e.g. TLS client Certificate:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: spoke-exporter-traces
+  namespace: spoke
+stringData:
+  'tls.crt': "TLS client certificate"
+  'tls.key': "TLS key"
+  'ca-bundle.crt': "Certificate Authority certificate"
+```
+
+In turn the addon will compile a `ManifestWork` for the managed cluster `spoke` as follows and pass it over it's WorkAgentController:
+
+```yaml
+kind: ManifestWork
+metadata:
+  name: addon-otel-ocm-addon-deploy-0
+  namespace: managed-cluster-1
+spec:
+  workload:
+    manifests:
+    - apiVersion: project.openshift.io/v1
+      kind: Project
+      metadata:
+        name: openshift-opentelemetry-operator
+    - apiVersion: operators.coreos.com/v1
+      kind: OperatorGroup
+      metadata:
+        name: openshift-opentelemetry-operator-ghl6v
+        namespace: openshift-opentelemetry-operator
+      spec:
+        upgradeStrategy: Default
+    - apiVersion: operators.coreos.com/v1alpha1
+      kind: Subscription
+      metadata:
+        name: opentelemetry-product
+        namespace: openshift-opentelemetry-operator
+      spec:
+        channel: stable
+        installPlanApproval: Automatic
+        name: opentelemetry-product
+        source: redhat-operators
+        sourceNamespace: openshift-marketplace
+        startingCSV: opentelemetry-operator.v0.81.1-5
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: spoke-exporter-traces
+        namespace: spoke
+      stringData:
+        'tls.crt': "TLS client certificate"
+        'tls.key': "TLS key"
+        'ca-bundle.crt': "Certificate Authority certificate"
+    - apiVersion: opentelemetry.io/v1alpha1
+      kind: OpenTelemetryCollector
+      metadata:
+        name: otel
+      spec:
+        mode: deployment
+        serviceAccount: otel-collector-deployment
+        config: |
+          receivers:
+            jaeger:
+              protocols:
+                grpc:
+                thrift_binary:
+                thrift_compact:
+                thrift_http:
+            opencensus:
+            otlp:
+              protocols:
+                grpc:
+                http:
+            zipkin:
+          processors:
+            batch:
+            k8sattributes:
+            memory_limiter:
+              check_interval: 1s
+              limit_percentage: 50
+              spike_limit_percentage: 30
+            resourcedetection:
+              detectors: [openshift]
+          exporters:
+            otlp:
+              endpoint: "otel-colector.example.com"
+              tls:
+                insecure: false
+                ca_file: /etc/pki/ca-trust/source/service-ca/service-ca.crt
+                cert_file: client.crt
+                key_file: client.key
+          service:
+            pipelines:
+              traces:
+                receivers: [jaeger, opencensus, otlp, zipkin]
+                processors: [memory_limiter, k8sattributes, resourcedetection, batch]
+                exporters: [otlp]
+```
+
 
 #### Hypershift [optional]
 
