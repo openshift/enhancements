@@ -351,8 +351,35 @@ spec:
 #### Multi Cluster Trace Collection and Forwarding
 For all managed clusters the fleet administrator is required to provide a single `OpenTelemetryCollector` resource stanza that describes the trace forwarding configuration for the entire fleet in the default namespace `open-cluster-management`.
 
-The following example resource describes a configuration for forwarding application traces from one OpenTelemetry Collector (deployed in the spoke cluster) to another one in a different
-cluster exposing the OTLP endpoint via OpenShift Route:
+One `OpenTelemetryCollector` instance is deployed per spoke cluster. It reports its traces to a Hub OTEL Cluster (note that this cluster can be different from the RHACM Hub cluster). The Hub OTEL Cluster exports the received telemetry to a traces storage (like Grafana Tempo or a third-party service).
+
+```mermaid
+flowchart TD
+    subgraph Spoke cluster
+    A[OTEL Collector] 
+    end
+    subgraph Spoke cluster
+    B[OTEL Collector] 
+    end
+    subgraph Spoke cluster
+    C[OTEL Collector] 
+    end
+    subgraph Hub OTEL Cluster
+    D[OTEL Collector] 
+    E[Grafana Tempo]
+    end
+    A --> |Traces|D
+    B --> |Traces|D
+    C --> |Traces|D
+    D --> E
+    subgraph Third party services
+    D --> F[Dynatrace]
+    D --> G[Datadog]
+    end
+```
+
+
+The following example resource describes a configuration for forwarding application traces from one OpenTelemetry Collector (deployed in the spoke cluster) to the OpenTelemetry Hub instance:
 
 ```yaml
 apiVersion: opentelemetry.io/v1alpha1
