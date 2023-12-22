@@ -26,7 +26,6 @@ tracking-link:
   - https://issues.redhat.com/browse/OBSDA-356
   - https://issues.redhat.com/browse/OBSDA-393
   - https://issues.redhat.com/browse/LOG-4539
-  - https://issues.redhat.com/browse/TRACING-3540
   - https://issues.redhat.com/browse/OBSDA-489
 see-also:
   - None
@@ -50,7 +49,7 @@ superseded-by:
 
 Multi-Cluster Observability has been an integrated concept in Red Hat Advanced Cluster Management (RHACM) since its inception but only incorporates one of the core signals, namely metrics, to manage fleets of OpenShift Container Platform (OCP) based clusters (See [RHACM Multi-Cluster-Observability-Operator (MCO)](rhacm-multi-cluster-observability)). The underlying architecture of RHACM observability consists of a set of observability components to collect a dedicated set of OCP metrics, visualizing them and alerting on fleet-relevant events. It is an optional but closed circuit system applied to RHACM managed fleets without any points of extensibility.
 
-This enhancement proposal seeks to bring a unified approach to collect and forward logs and traces from a fleet of OCP clusters based on the RHACM addon facility (See Open Cluster Management (OCM) [addon framework](ocm-addon-framework)) by enabling these signals events to land on third-party managed and centralized storage solutions (e.g. AWS Cloudwatch, Google Cloud Logging). The multi-cluster observability addon is an optional RHACM addon. It is a day two companion for MCO and does not necessarily share any resources/configuration with the latter. It provides a unified installation approach of required dependencies (e.g. operator subscriptions) and resources (custom resources, certificates, CA Bundles, configuration) on the managed clusters to collect and forward logs and traces. The addon's name is Multi Cluster Observability Addon (MCOA).
+This enhancement proposal seeks to bring a unified approach to collect and forward logs and OTLP data from a fleet of OCP clusters based on the RHACM addon facility (See Open Cluster Management (OCM) [addon framework](ocm-addon-framework)) by enabling these signals events to land on third-party managed and centralized storage solutions (e.g. AWS Cloudwatch, Google Cloud Logging). The multi-cluster observability addon is an optional RHACM addon. It is a day two companion for MCO and does not necessarily share any resources/configuration with the latter. It provides a unified installation approach of required dependencies (e.g. operator subscriptions) and resources (custom resources, certificates, CA Bundles, configuration) on the managed clusters to collect and forward logs and traces. The addon's name is Multi Cluster Observability Addon (MCOA).
 
 ## Motivation
 
@@ -60,7 +59,7 @@ resources (i.e. `Clusterlogging`, `ClusterLogForwarder`, `OpenTelemetryCollector
 ### User Stories
 
 * As a fleet administrator I want to install a homogeneous log collection and forwarding on any set of RHACM managed OCP clusters.
-* As a fleet administrator I want to install a homogeneous trace collection and forwarding on any set of RHACM managed OCP clusters.
+* As a fleet administrator I want to install a homogeneous OTLP data collection and forwarding on any set of RHACM managed OCP clusters.
 * As a fleet administrator I want to centrally control authentication credentials for the target log forwarding outputs.
 * As a fleet administrator I want to centrally control authentication credentials for the target trace exporters.
 
@@ -106,7 +105,7 @@ None as the MCOA is not providing any new custom resource definitions or changin
 
 ### Implementation Details/Notes/Constraints [optional]
 
-The MCOA implementation sources three different set of manifests acompanying the addon registration and deployment on a RHACM hub cluster:
+The MCOA implementation sources three different set of manifests accompanying the addon registration and deployment on a RHACM hub cluster:
 1. General configuration and fleet-wide stanzas: A `ClusterManagementAddon`, an `AddOnDeploymentConfig` and a `ClusterLogForwarder` (for logs) and/or `OpenTelemetryCollector` (for traces).
 2. For multi-cluster logs collection and forwarding: Per log output `Secret` and/or `ConfigMap` resources.
 3. For multi-cluster traces collection and forwarding: Per trace exporter `Secret` and/or `ConfigMap` resources.
@@ -348,10 +347,10 @@ spec:
           - cluster-logs
 ```
 
-#### Multi Cluster Trace Collection and Forwarding
-For all managed clusters the fleet administrator is required to provide a single `OpenTelemetryCollector` resource stanza that describes the trace forwarding configuration for the entire fleet in the default namespace `open-cluster-management`.
+#### Multi Cluster OTLP Collection and Forwarding
+For all managed clusters the fleet administrator is required to provide a single `OpenTelemetryCollector` resource stanza that describes the OpenTelemetry forwarding configuration for the entire fleet in the default namespace `open-cluster-management`.
 
-One `OpenTelemetryCollector` instance is deployed per spoke cluster. It reports its traces to a Hub OTEL Cluster (note that this cluster can be different from the RHACM Hub cluster). The Hub OTEL Cluster exports the received telemetry to a traces storage (like Grafana Tempo or a third-party service).
+One `OpenTelemetryCollector` instance is deployed per spoke cluster. It reports its OpenTelemetry data to a Hub OTEL Cluster (note that this cluster can be different from the RHACM Hub cluster). The Hub OTEL Cluster exports the received telemetry to an storage (like Grafana Tempo or a third-party service).
 
 ```mermaid
 flowchart TD
@@ -368,9 +367,9 @@ flowchart TD
     D[OTEL Collector] 
     E[Grafana Tempo]
     end
-    A --> |Traces|D
-    B --> |Traces|D
-    C --> |Traces|D
+    A --> |otlp|D
+    B --> |otlp|D
+    C --> |otlp|D
     D --> E
     subgraph Third party services
     D --> F[Dynatrace]
@@ -379,7 +378,7 @@ flowchart TD
 ```
 
 
-The following example resource describes a configuration for forwarding application traces from one OpenTelemetry Collector (deployed in the spoke cluster) to the OpenTelemetry Hub instance:
+The following example resource describes a configuration for forwarding application otlp data from one OpenTelemetry Collector (deployed in the spoke cluster) to the OpenTelemetry Hub instance:
 
 ```yaml
 apiVersion: opentelemetry.io/v1alpha1
@@ -441,17 +440,17 @@ spec:
   configs:
   # Secret with mTLS client certificate for  output
   - resource: secrets
-    name: spoke-exporter-traces
+    name: spoke-exporter-otlp
     namespace: spoke
 ```
 
-For the `OTLP` traces exporter the MCOA provides a Secret `spoke-exporter-traces` with all required authentication information, e.g. TLS client Certificate:
+For the `OTLP` exporter the MCOA provides a Secret `spoke-exporter-otlp` with all required authentication information, e.g. TLS client Certificate:
 
 ```yaml
 apiVersion: v1
 kind: Secret
 metadata:
-  name: spoke-exporter-traces
+  name: spoke-exporter-otlp
   namespace: spoke
 stringData:
   'tls.crt': "TLS client certificate"
@@ -495,7 +494,7 @@ spec:
     - apiVersion: v1
       kind: Secret
       metadata:
-        name: spoke-exporter-traces
+        name: spoke-exporter-otlp
         namespace: spoke
       stringData:
         'tls.crt': "TLS client certificate"
@@ -619,5 +618,5 @@ None
 [ocp-clusterlogforwarder-outputsecretspec]:https://github.com/openshift/cluster-logging-operator/blob/627b0c7f8c993f89250756d9601d1a632b024c94/apis/logging/v1/cluster_log_forwarder_types.go#L226-L265
 [ocp-clusterlogforward-outputtypespec]:https://github.com/openshift/cluster-logging-operator/blob/627b0c7f8c993f89250756d9601d1a632b024c94/apis/logging/v1/output_types.go#L21-L40
 [opentelemetry-collector-auth]:https://opentelemetry.io/docs/collector/configuration/#authentication
-[opentelemetry-operator]:https://console-openshift-console.apps.ptsirakiaws2311285.devcluster.openshift.com/github.com/open-telemetry/opentelemetry-operator
+[opentelemetry-operator]:https://github.com/open-telemetry/opentelemetry-operator
 [rhacm-multi-cluster-observability]:https://github.com/stolostron/multicluster-observability-operator/
