@@ -415,7 +415,12 @@ N/A
 N/A
 
 ## Implementation History
-N/A
+
+* Kubelet changes: https://github.com/openshift/kubernetes/pull/1795
+* Admission plugin changes:  https://github.com/openshift/kubernetes/pull/1799
+* NTO changes: https://github.com/openshift/cluster-node-tuning-operator/pull/853
+* CRI-O changes: https://github.com/cri-o/cri-o/pull/7502
+* CI job added to NTO: https://github.com/openshift/release/pull/46767
 
 ## Alternatives
 * Taint the nodes with `NoSchedule`, `NoExecute` in order to keep the node from scheduling/run on nodes when
