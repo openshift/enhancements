@@ -72,19 +72,6 @@ var annualSummaryCmd = &cobra.Command{
 			},
 		}
 
-		// Define a few buckets for pull requests related to work
-		// prioritized for the current or next release.
-		prioritizedMerged := stats.Bucket{
-			Rule: func(prd *stats.PullRequestDetails) bool {
-				return prd.Prioritized && prd.State == "merged" && prd.Pull.ClosedAt.After(earliestDate)
-			},
-		}
-		prioritizedOpen := stats.Bucket{
-			Rule: func(prd *stats.PullRequestDetails) bool {
-				return prd.Prioritized && prd.State != "merged" && prd.State != "closed" && prd.Pull.CreatedAt.After(earliestDate)
-			},
-		}
-
 		// Define basic groups for all of the non-prioritized pull
 		// requests.
 		otherMerged := stats.Bucket{
@@ -108,13 +95,8 @@ var annualSummaryCmd = &cobra.Command{
 		reportBuckets := []*stats.Bucket{
 			&all,
 			&ignore,
-
-			&prioritizedMerged,
-			&prioritizedOpen,
-
 			&otherMerged,
 			&otherOpen,
-
 			&remainder,
 		}
 
@@ -145,24 +127,13 @@ var annualSummaryCmd = &cobra.Command{
 
 		fmt.Printf("# The Year in Enhancements - %d\n", earliestDate.Year())
 
-		// Only print the priority section if there are prioritized pull requests
-		if anyRequests(prioritizedMerged, prioritizedOpen) {
-			fmt.Printf("\n## Enhancements for Release Priorities\n")
-
-			report.SortByID(prioritizedMerged.Requests)
-			report.ShowPRs(summarizer, "Prioritized Merged", prioritizedMerged.Requests, false, false)
-
-			report.SortByID(prioritizedOpen.Requests)
-			report.ShowPRs(summarizer, "Prioritized Open", prioritizedOpen.Requests, false, false)
-		}
-
-		fmt.Printf("\n## Other Enhancements\n")
+		fmt.Printf("\n## Enhancements\n")
 
 		report.SortByID(otherMerged.Requests)
-		report.ShowPRs(summarizer, "Other Merged", otherMerged.Requests, false, false)
+		report.ShowPRs(summarizer, "Merged", otherMerged.Requests, false, false)
 
 		report.SortByID(otherOpen.Requests)
-		report.ShowPRs(summarizer, "Other Open", otherOpen.Requests, false, false)
+		report.ShowPRs(summarizer, "Open", otherOpen.Requests, false, false)
 
 		return nil
 	},
