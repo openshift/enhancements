@@ -8,16 +8,16 @@ reviewers:
   - elmiko - machine API
   - patrickdillon - installer
   - jcpowermac - vSphere
-  - cybertron - networking
   - zaneb - networking
+  - 2uasimojo - hive
 approvers:
   - JoelSpeed
   - patrickdillon
-  - cybertron
+  - 2uasimojo
 api-approvers: 
   - JoelSpeed
 creation-date: 2022-10-21
-last-updated: 2023-05-01
+last-updated: 2024-01-02
 tracking-link: 
 - https://issues.redhat.com/browse/OCPPLAN-9654
 see-also:
