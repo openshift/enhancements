@@ -47,12 +47,12 @@ being used.
 
 ## Motivation
 
-1. OpenShift Alignment with CAPI: CAPI offers numerous potential benefits;
+- OpenShift Alignment with CAPI: CAPI offers numerous potential benefits;
 such as: day-2 infrastructure management, an API for users to edit cluster
 infrastructure, and upstream collaboration. Installer support for CAPI would
 be foundational for adopting these benefits.
 
-2. Terraform BSL License Change: due to the restrictive license change of
+- Terraform BSL License Change: due to the restrictive license change of
 Terraform, `openshift-install` needs a framework to replace the primary
 tool it used to provision cluster infrastructure. In addition to the benefits
 listed above, CAPI provides solutions for the biggest gaps left by Terraform:
@@ -62,7 +62,7 @@ reduce the surface area for security vulnerabilities. Terraform and its provider
 constitutes over half a million lines of code in the Installer repo and is directly
 attributable for all (13) CVEs that have been fixed in the Installer repo.
 
-3. Streamline Installer development: a common pattern for Installer development
+-Streamline Installer development: a common pattern for Installer development
 has been to reimplement control-plane features in Terraform that have already been
 delivered upstream. By utilizing CAPI providers for Day-0 provisioning, our development
 practices will remove this duplication and become more efficient.
@@ -98,7 +98,7 @@ practices will remove this duplication and become more efficient.
 The Installer will create CAPI infrastructure manifests based on user
 input from the install config; then, in order to provision cluster infrastructure,
 apply the manifests to CAPI controllers running on a local Kubernetes control-plane
-setup by [envtest](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest). 
+setup by [envtest](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest).
 
 ### Workflow Description
 
@@ -107,17 +107,43 @@ cluster. Note that the workflow does not change for this user.
 
 **openshift-install** is the Installer binary.
 
-1. The cluster creator provides an install-config and credentials
-2. (optional) The cluster creator runs `openshift-install create manifests`
-3. (optional) The cluster creator edits the newly created CAPI manifests.
-4. The cluster creator runs `openshift-install create cluster`
-5. `openshift-install` extracts binaries for kube-apiserver, etcd, CAPI infrastructure provider & cloud CAPI provider to the install dir
-6. `openshift-install` using `envtest` initializes a control plane locally on the Installer host
-7. `openshift-install` execs the CAPI infrastructure and cloud provider as subprocesses, pointing them to the local control plane
-8. `openshift-install` applies the CAPI manifests to the control plane
-9. The CAPI controllers provision cluster infrastructure based on the manifests
-10. `openshift-install` monitors the status of the CAPI resources as they are applied
-11. If the statuses are as expected, infrastrucutre has been provisioned and installation continues with the normal flow.
+
+```mermaid
+sequenceDiagram
+  actor Operator
+  participant Installer
+  participant Local Control Plane
+
+  Operator->>Installer: provides `install-config` and credentials
+
+  opt customization
+    Operator->>+Installer: runs `openshift-install create manifests`
+    Installer-->>-Operator: generates manifests in the current folder
+    Operator-->>Operator: edits manifests
+  end
+
+  Operator->>+Installer: runs `openshift-install create cluster`
+  Installer->>Installer: extracts binaries for  to the install dir:<br/>kube-apiserver, etcd, <br/>CAPI infrastructure provider & cloud CAPI provider
+  Installer->>Local Control Plane: execs the CAPI infrastructure<br/> and cloud provider as subprocesses
+  Installer->>Local Control Plane: applies the CAPI manifests to the control plane
+
+  loop informer watch
+  Infra Controller-->Local Control Plane: Reconcile resources
+  end
+
+  Infra Controller->>+Cloud: provision cluster infrastrcuture
+  Cloud-->>Infra Controller: creation completed
+  Infra Controller->>Cloud: provision machines
+  Cloud-->>-Infra Controller: machines created
+
+  loop exponential backoff
+  Installer-->Local Control Plane: Wait for OpenShift Control Plane Availability
+  Infra Controller-->Cloud: checks bootstrap machine available
+  Installer-->OpenShift Cluster: waits until control plane is available and operators are healthy
+  end
+
+  Installer-->>-Operator: FIN
+```
 
 In the case of an error in the final step, the Installer will bubble up resources with non-expected statuses.
 
@@ -126,7 +152,7 @@ In the case of an error in the final step, the Installer will bubble up resource
 
 ### API Extensions
 
-As a result of this enhancement, API Extensions will only be used locally by the 
+As a result of this enhancement, API Extensions will only be used locally by the
 local Installer control plane--they will not, until future work, be pivoted to the cluster.
 The following are CRD references for Installer-supported platforms:
 
@@ -189,9 +215,9 @@ The Installer will produce the CAPI manifests as part of the `manifests` target,
 
 ```shell=
 $ ./openshift-install create manifests --dir install-dir
-INFO Credentials loaded from the "default" profile in file "~/.aws/credentials" 
-INFO Consuming Install Config from target directory 
-INFO Manifests created in: install-dir/cluster-api, install-dir/manifests and install-dir/openshift 
+INFO Credentials loaded from the "default" profile in file "~/.aws/credentials"
+INFO Consuming Install Config from target directory
+INFO Manifests created in: install-dir/cluster-api, install-dir/manifests and install-dir/openshift
 $ tree install-dir/cluster-api/
 install-dir/cluster-api/
 ├── 00_capi-namespace.yaml
@@ -356,8 +382,8 @@ to ensure they are aware of the changes and are able to review.
 ### Drawbacks
 
 By depending on CAPI providers whose codebases live in a repository external to the Installer,
-the process for developing features and delivering fixes is more complex than in a monolothic repo. 
-While the same could be true for the Installer Terraform dependency; the CAPI providers will 
+the process for developing features and delivering fixes is more complex than in a monolothic repo.
+While the same could be true for the Installer Terraform dependency; the CAPI providers will
 be more actively developed than their Terraform counterparts. Furthermore, it will be necessary
 to ensure that the CAPI providers used by the Installer match the version of those in the payload.
 
@@ -378,7 +404,7 @@ into the development process.
 
 2. Whether to use downstream OpenShift-specific `kube-apiserver` and `etcd` dependencies and how to source them?
 
-3. When should the Installer declare infrastructure provisioning failed? 
+3. When should the Installer declare infrastructure provisioning failed?
 
 ### Test Plan
 
@@ -423,7 +449,7 @@ N/A
 
 During a failed install, the controller logs will contain useful information. The status of the CAPI manifests
 may also contain useful information,in which case it would be important to display that to users and collect
-for bugs and support cases. There is an open question about the best way to handle this UX, and we expect the answer to become more clear during development. 
+for bugs and support cases. There is an open question about the best way to handle this UX, and we expect the answer to become more clear during development.
 
 As the infrastructure will be reconciled by a controller, it will be possible to resolve issues during an ongoing
 installation, although this would not necessarily be a feature we would call attention to for documented use cases.
@@ -439,7 +465,7 @@ regarding the open question for the log bundle).
 
 As the providers will be running in a control loop, it would be possible to resolve certain issues
 (e.g. fix missing permissions or delete resources taking up quota) during an installation, but this would
-not be a documented procedure. Furthermore, it would be possible to make the installs re-entrant, but 
+not be a documented procedure. Furthermore, it would be possible to make the installs re-entrant, but
 it would not be a goal for simplicity's sake.
 
 ## Implementation History
