@@ -211,19 +211,20 @@ Over time, `envtest` matured in a way that now can be used to run controllers in
 reducing or eliminating the need for a full Kubernetes cluster to run controllers.
 
 At a high level, the local control plane is responsible for:
-- Setting up certificates for the apiserver and etcd.
+- Setting up temporary certificates for the local api-server and etcd.
 - Running (and cleaning up, on shutdown) the local control plane components.
 - Installing any required component, like Custom Resource Definitions (CRDs)
     - For Cluster API core the CRDs are stored in `data/data/cluster-api/core-components.yaml`.
     - Infrastructure providers are expected to store their components in `data/data/cluster-api/<name>-infrastructure-components.yaml`
-- Upon install, the local control plane takes care of modifying any webhook (conversion, admission, validation) to point to the `host:post` combination assigned.
+- Upon install, the local control plane takes care of modifying any webhook (conversion, admission, validation) to point to a `host:post` (usually host is `localhost`) combination assigned.
     - Each controller manager will have its own `host:port` combination assigned.
     - Certificates are generated and injected in the server, and the client certs in the api-server webhook configuration.
-- For each process that the local control plane manages, a health check (ping to `/healthz`) is required to pass similarly how, when running in a Deployment, a health probe is configured.
+- For each process that the local control plane manages, a health check (ping to `/healthz`) is required to pass; similarly how, when running in a Deployment, a health probe is configured.
+  - The health check is only ran once, once OK, the process can continue.
 
 #### Manifests
 
-The Installer will produce the CAPI manifests as part of the `manifests` target, writing them to a new
+The Installer produces the CAPI manifests as part of the `manifests` target, writing them to a
 `cluster-api` directory alongside the existing `manifests` and `openshift` directories:
 
 ```shell=
@@ -249,12 +250,10 @@ install-dir/cluster-api/
 1 directory, 12 files
 ```
 
-The manifests within this `cluster-api` directory will not be written to the cluster or included in bootstrap ignition.
-In future work, we expect these manifests to be pivoted to the cluster to enable the target cluster to take over managing
-its own infrastructure.
+The manifests within the `cluster-api` directory won't be written to the resulting OpenShift cluster, or included in bootstrap ignition.
+In future work, we expect these manifests to be pivoted to the cluster to enable the target cluster to take over managing its own infrastructure.
 
-The Cluster API manifests will be generated with `.spec` fields in the [manifest asset target][asset] with `.status`
-updated after cluster creation.
+The Cluster API manifests will be generated with `.spec` fields in the [manifest asset target][asset] with `.status` updated after cluster creation, which can be useful for debugging purposes.
 
 #### Infrastructure Provisioning
 
@@ -334,16 +333,16 @@ status:
   ready: false
 ```
 
-This manifest describes the network, load balancers, security group rules, etc. that will be used or provisioned for
-the target cluster. Control plane machines are provisioned by [AWSMachines][AWSMachines] & [CAPI Machines][CAPIMachines]
-manifests.
+This manifest describes the network, load balancers, security group rules, etc. that will be used or provisioned for the target cluster.
+Control plane machines are provisioned by [AWSMachines][AWSMachines] & [CAPI Machines][CAPIMachines] manifests.
 
 ##### Additional Infrastructure
 
-The Installer will generate any additional infrastructure that is needed but not handled by the CAPI provider, either
-because it is out of scope (e.g. IAM, DNS) or not adopted upstream (e.g. split-horizon load balancers). The Installer
-will provide hooks into the provisioning lifecycle that can be used to provision resources using direct SDK calls
-or other tooling.
+The Installer generates any additional infrastructure that is needed but not handled by the CAPI provider, either because it is out of scope (e.g. IAM, DNS), or not adopted upstream (e.g. split-horizon load balancers).
+The Installer codebase provides hooks into the provisioning lifecycle that can be used to provision resources using direct SDK calls or other tooling.
+
+In most cases, teams are encouraged in discussing and building issues in the respective upstream repositories first, e.g. `cluster-api` or `cluster-api-provider-aws` and only
+use the following hook as a fallback path.
 
 The AWS proof-of-concept implementation utilizes hooks defined in this interface:
 
@@ -364,9 +363,8 @@ type PreProvisionInput struct{ clusterID string }
 type ControlPlaneAvailableInput struct{ *clusterv1.Cluster }
 ```
 
-For AWS, IAM roles needed by the CAPA provider are created with `PreProvision` and DNS Records
-are created upon `ControlPlaneAvailable`. This interface would be implemented by each cloud provider
-and can be expanded as needed.
+For AWS, IAM roles needed by the CAPA provider are created with `PreProvision` and DNS Records are created upon `ControlPlaneAvailable`.
+This interface would be implemented by each cloud provider and can be expanded as needed.
 
 ##### Bootstrap Resources
 
@@ -461,15 +459,14 @@ N/A
 #### Failure Modes
 
 During a failed install, the controller logs will contain useful information. The status of the CAPI manifests
-may also contain useful information,in which case it would be important to display that to users and collect
+may also contain useful information, in which case it would be important to display that to users and collect
 for bugs and support cases. There is an open question about the best way to handle this UX, and we expect the answer to become more clear during development.
 
 As the infrastructure will be reconciled by a controller, it will be possible to resolve issues during an ongoing
 installation, although this would not necessarily be a feature we would call attention to for documented use cases.
 
 Finally, the Installer will need to be able to identify when infrastructure provisioning has failed during an installation.
-Initially this will be achieved through a timeout. There is an open question about whether this can be done in a more
-sophisticated manner.
+Initially this will be achieved through a timeout. There is an open question about whether this can be done in a more sophisticated manner.
 
 #### Support Procedures
 
