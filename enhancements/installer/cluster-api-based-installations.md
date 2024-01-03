@@ -83,8 +83,10 @@ practices will remove this duplication and become more efficient.
 
 - To provide a common experience across platforms for users and `openshift-install` developers
 - To be backwards compatible and fully satisfy the requirements of install-config type APIs.
+  - To document for end users differences in infrastructure created for each cloud provider.
+    Example: on AWS we are expecting there to be additional security groups used, rather than 1 per worker and 1 per master, each machine will be a member of multiple security groups which add permissions based on their roles (node, master, load balancer, most machines will be in 2 of these).
 - To keep the user experience for day-zero operations unchanged or improved.
-- To not require any new runtime dependencies.
+- To not require any new runtime dependencies (e.g. containers).
 - To maintain compatibility for hive, particularly regarding `destroy` functionality
 
 ### Non-Goals / Future work
@@ -150,7 +152,13 @@ sequenceDiagram
   Installer-->>-Operator: FIN
 ```
 
-In the case of an error in the final step, the Installer will bubble up resources with non-expected statuses.
+##### Error handling
+
+In the case of an error in the final step, the Installer will bubble up resources with non-expected statuses. The installer binary will collect and save all logs from all controllers used during the day zero operations, including Cluster API and its infrastructure providers.
+
+##### Credentials management
+
+The local control plane and Cluster API controllers share similar requirements regarding credentials when compared to Terraform. The installer validates and inject the required credentials from the user environments, cloud infrastructure providers can opt to pass credentials from the environment or install config in well-known Secret objects, or use the inherited environment available.
 
 #### Variation and form factor considerations [optional]
 
