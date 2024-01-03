@@ -35,6 +35,11 @@ superseded-by:
 
 # Enabling Cluster-API-based Installations via openshift-install
 
+> NOTE: At the time of writing (Jan '24), Cluster API
+> is only used as an implementation detail to replace Terraform.
+> The OpenShift clusters created through these mechanics do not pivot Cluster API resources
+> but instead hand off operations to Machine API.
+
 ## Summary
 
 This enhancement discusses how `openshift-install` can use
