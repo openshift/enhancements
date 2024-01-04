@@ -392,6 +392,8 @@ to ensure they are aware of the changes and are able to review.
 
 ### Drawbacks
 
+#### External/Upstream dependencies
+
 By depending on CAPI providers whose codebases live in a repository external to the Installer,
 the process for developing features and delivering fixes is more complex than in a monolothic repo.
 While the same could be true for the Installer Terraform dependency; the CAPI providers will
@@ -404,6 +406,25 @@ before being vendored into a component). To minimize the devex friction, we will
 on documenting a workflow for developing providers while working with the Installer.
 
 Additionally, we will explore designs to solve or mitigate these issues.
+
+#### Disk space and memory
+
+> NOTE: All tests are performed on a MacOS system at the time of writing.
+
+With the introduction of the Local Control Plane, new required components are being run during cluster creation.
+
+- `api-server` uses ~280MB and `etcd` ~52MB
+- Cluster API
+  - Core controller uses ~28MB
+  - Infrastructure controller (AWS, in testing) uses ~35MB
+
+When compared to Terraform, the runtime memory footprint is well-within the current usare or limitations (TODO: provide Terraform benchmark); the disk footprint increases by what's required of `etcd` which is around 128MB while creating an OpenShift cluster on AWS.
+
+#### Binary size
+
+> NOTE: All tests are performed on a MacOS system at the time of writing.
+
+The `openshift-install` resulting binary size, with Cluster API bundled binaries reaches ~515MB, of which, the bundled binaries account 228MB.
 
 ## Design Details
 
