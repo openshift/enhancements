@@ -426,6 +426,21 @@ When compared to Terraform, the runtime memory footprint is well-within the curr
 
 The `openshift-install` resulting binary size, with Cluster API bundled binaries reaches ~515MB, of which, the bundled binaries account 228MB.
 
+The binaries are stored in `zip` format within the installer, and unpacked at runtime; from the `zip` output, the space savings are quite substantial:
+
+```
+updating: cluster-api (deflated 68%)
+updating: cluster-api-provider-aws (deflated 73%)
+updating: cluster-api-provider-azure (deflated 70%)
+updating: cluster-api-provider-azureaso (deflated 74%)
+updating: cluster-api-provider-gcp (deflated 73%)
+updating: cluster-api-provider-ibmcloud (deflated 72%)
+updating: cluster-api-provider-nutanix (deflated 69%)
+updating: cluster-api-provider-vsphere (deflated 72%)
+updating: etcd (deflated 64%)
+updating: kube-apiserver (deflated 72%)
+```
+
 ## Design Details
 
 ### Open Questions [optional]
