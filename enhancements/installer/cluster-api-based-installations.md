@@ -424,7 +424,7 @@ When compared to Terraform, the runtime memory footprint is well-within the curr
 
 > NOTE: All tests are performed on a MacOS system at the time of writing.
 
-The `openshift-install` resulting binary size, with Cluster API bundled binaries reaches ~515MB, of which, the bundled binaries account 228MB.
+The `openshift-install` resulting binary size, with Cluster API bundled binaries reaches ~515MB, of which, the bundled binaries account 228MB. By comparison, the binary available for download on `console.redhat.com` for MacOS, once upacked, is 732MB.
 
 The binaries are stored in `zip` format within the installer, and unpacked at runtime; from the `zip` output, the space savings are quite substantial:
 
