@@ -50,6 +50,8 @@ upstream tests, so if we disabled them we'd break those tests w/o additional wor
 Any upstream beta features that are are enabled by default in OpenShift fall under Tier 2 support, as described in [our documentation](https://docs.openshift.com/container-platform/latest/rest_api/understanding-api-support-tiers.html#mapping-support-tiers-to-kubernetes-api-groups_understanding-api-tiers).
 This allows us to align their lifecycle with the [Kubernetes Deprecation Policy](https://kubernetes.io/docs/reference/using-api/deprecation-policy/).
 
+Every team is responsible for documenting the Tier 2 support for a beta feature, and including that information in the release notes.
+
 The above rule applies equally to features not providing any API resources as well as those that extend stable APIs (ie. `v1`).
 Features relying on beta APIs, are disabled by default and are [guaranteed to not be required for conformance tests](https://github.com/kubernetes/enhancements/tree/master/keps/sig-architecture/1333-conformance-without-beta), thus the guidance here is that such features will require a TechPreviewNoUpgrade
 feature gate.
