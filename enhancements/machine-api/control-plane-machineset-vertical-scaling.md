@@ -24,22 +24,22 @@ superseded-by: []
 To allow control plane nodes to remain at an adequate size for its cluster, this
 proposal introduces new operator that monitors resource usage in the cluster.
 Based on configured thresholds it will use the control plane machineset to make
-apply automated scaling decisions for control plane node sizing.
+automated scaling decisions for control plane node sizing.
 
 ## Motivation
 
 During normal operation of an OpenShift cluster, as worker node count and
-workloads increase, it becomes necessary to increase resources available to the
+workload increases, it becomes necessary to increase resources available to the
 control plane nodes.
 
 During SRE operations of the managed OpenShift product, there was already a
 trigger indentified, when these increases are required: right now these triggers
-are based on cluster load over the last 8 hours (details care available in [this
+are based on cluster load over the last 8 hours (details are available in [this
 PrometheusAlert](https://github.com/openshift/managed-cluster-config/blob/master/deploy/sre-prometheus/100-control-plane-resizing.PrometheusRule.yaml#L93C1-L93C1)
 that is used in OSD clusters). In addition to the average load our [recommended
 control plane
 practices](https://docs.openshift.com/container-platform/4.13/scalability_and_performance/recommended-performance-scale-practices/recommended-control-plane-practices.html)
-specify control plane sizes based on worker nodes.
+specify control plane sizes based on number worker nodes in the cluster.
 
 Instead of requiring the adjustments to be performed by hand, the operator
 should be able to automatically determine if a control plane node size change is
@@ -57,21 +57,21 @@ users in a cloud environment is only has high as needed.
 ### User Stories
 
 * As an OpenShift administrator, I want to know that the platform will always
-  have enough resources available to it's control plane nodes without manual
+  have enough resources available for it's control plane nodes without manual
   intervention.
 * As an OpenShift administrator, I want to know that the platform can reduce
   spending on control plane nodes if they are oversized for the current cluster
   load.
 * As an OpenShift administrator, I want to be able to control when sizing up and
   down occurs, to adjust it to workloads on my cluster that might be burstable
-  to prevent the automatic scaling from occurring to often.
+  to prevent the automatic scaling from occurring too often.
 
 ### Goals
 
 * Allow automatic vertical scaling of control plane nodes.
 * Allow users to configure the sizes that can be chosen for automatic scaling.
 * Allow users to configure the thresholds when scaling will occur for CPU and
-  memory usage.
+  memory usage or custom metrics (if using prometheus).
 * Allow users to configure how often checks for automatic scaling should be run.
 * Allow users to configure how long after a scale up or scale down, no more
   scaling should be performed.
@@ -94,10 +94,10 @@ horizontally automatically this is out of scope for this enhancement.
 
 ## Proposal
 
-New configuration and a reconcile loop for the
-`control-plane-machine-set-operator` will be introduced that will monitor
-resource usage of the control plane nodes and automatically modify the
-`ControlPlaneMachineSet` if scaling the nodes is determined to be required.
+A new operator with its own configuration and a reconcile loop for the
+`ControlPlaneMachineSet` customer resource will be introduced that will
+monitor resource usage of the control plane nodes and automatically modify the
+`ControlPlaneMachineSet` if scaling the nodes is required.
 
 The new configuration will specify if scaling up and down is enabled and allow
 configuring when to trigger scaling. It will also allow configuring which
@@ -106,10 +106,13 @@ possible automatic scaling.
 
 ### Workflow Description
 
-1. The OpenShift adminstrator creates a valid
+1. The OpenShift administrator installs the new
+   `control-plane-machineset-scaling-operator`.
+2. The OpenShift administrator creates a valid
    `control-plane-machine-set-autoscaler` `CR` in the `openshift-machine-api`
-   namespace (or the respective namespace `control-plane-machineset-operator` is
-   running in), to configure the automatic vertical scaling.
+   namespace (or the respective namespace the new
+   `control-plane-machineset-scaling-operator` is running in), to configure the
+   automatic vertical scaling.
 
 ### API Extensions
 
@@ -428,8 +431,8 @@ type MetricsTrigger struct {
 
 ### Implementation Details/Notes/Constraints [optional]
 
-The implementation for this feature, requires a data source to gather required
-data that is used to make scaling decisions.
+The implementation for this feature requires a data source to gather data that
+is used to make the scaling decisions.
 
 As every OpenShift cluster comes with the [metrics
 API](https://kubernetes.io/docs/tasks/debug/debug-cluster/resource-metrics-pipeline/)
@@ -452,20 +455,24 @@ API endpoint can be used.
 
 Using the [horizontal pod
 autoscaler](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
-as a reference, they are using the to gather performance statistics for nodes.
+as a reference, they are using the resource metrics API to gather performance
+statistics for nodes.
 
 Using the metrics API has the least requirements as it does not expect a running
 Prometheus monitoring stack. 
 
 On the other hand, data aggregation will be required using the metrics API, as
-decisions about scaling nodes up and down, must not be performed based on
+decisions about scaling nodes up and down must not be performed based on
 performance usage at a single point in time. Instead the operator will have to
 gather and store usage data for a certain period of time, to decide if scaling
 is required.
 
+The concrete implementation how to store this will be refined during
+implementation.
+
 As an example with a configured `timeWindow` (see
 [configuration](#control-plane-machineset-operator-configuration)) of 30 minutes
-for scaling up, the operator has to keep querying the metrics API and averaging
+for scaling up, the operator may keep querying the metrics API and averaging
 values until enough data has been aggregated to know the load average for the
 last 30 minutes.
 
@@ -476,7 +483,8 @@ decision should be made.
 #### Using Prometheus
 
 Using Prometheus generated data will make the implementation easier with respect
-to data aggregation, as data should already have been aggregated by prometheus.
+to data aggregation, as data should already have been aggregated by prometheus
+and can be used directly by consuming exposed metrics.
 
 #### Hypershift
 
@@ -511,8 +519,9 @@ require an explicit opt-in by the cluster administrator.
 Automatically scaling up and down control planes could impact cluster
 reliability and availability, if performed too often.
 
-As such the additional logic must ensure that there is a grace period between
-changes to the machine size, during which no more scaling will be performed.
+To mitigate this additional logic must ensure that there is a grace period
+between changes to the machine size, during which no more scaling will be
+performed.
 
 Initially this value should be rather conservative like 60 minutes or even more,
 to give plenty of time for all operators to settle on the new nodes. The
@@ -689,7 +698,7 @@ The operator can gather the following data via the [metrics
 API](https://kubernetes.io/docs/tasks/debug/debug-cluster/resource-metrics-pipeline/):
 
 - CPU usage in `cores`.
-- Memory usage in a SI units.
+- Memory usage in SI units.
 - The time window used to aggregate the above mentioned data.
 
 To gather data about the available CPU cores and memory available to control
@@ -697,19 +706,19 @@ plane nodes, the operator should use the kubernetes
 [Node](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#node-v1-core)
 API.
 
-As the window returned by metrics API is likely shorter than required window for
-scaling decisions, the operator should gather its own average to allow making
-the scaling decision based on the metrics data.
+As the window returned by metrics API is likely shorter than the required window
+for scaling decisions, the operator should maintain its own average to allow
+making the scaling decision based on the metrics data.
 
 #### Prometheus
 
 Prometheus queries should be configured to use the correct window already.
 
-The operator has to handle a metric's data missing or authentication failure.
+The operator has to handle metric data missing or authentication failure.
 
 Both cases should use a conservative approach of not performing any actions, and
 not interrupting cluster operation. However the operator must be marked as
-degraded in case of authentication failure and disappearing of a metric.
+degraded in case of authentication failure or disappearance of a used metric.
 
 ### Workflow for automatic scaling
 
@@ -740,7 +749,7 @@ The operator will require access to the following resources to gather the data:
 
 ### Open Questions
 
-1. CMA even allow scaling to be triggered via Kafka - should this be supported
+1. CMA even allows scaling to be triggered via Kafka - should this be supported
    as well?
 
 ### Test Plan
