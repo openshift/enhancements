@@ -738,6 +738,14 @@ Instead a running average (or similar) should be used to decide about scaling.
 If for any reason metrics can not be gathered, the operator must remain
 available and only the autoscaling should be disabled / non-functional.
 
+During scaling the observed workload on the nodes might be subject to
+[Hysteris](https://en.wikipedia.org/wiki/Hysteresis), where observed load lags
+behind actual load. To not impact scaling decisions with this during-scale
+workload the `scaleUp` and `scaleDown` delays must be taken into account when
+collecting data to make these decisions. The user must set these with sensible
+values and guidance will be provided in the form of observed times that scale up
+and scale down can take on the different supported cloud providers.
+
 ### Additional RBAC permissions
 
 The operator will require access to the following resources to gather the data:
