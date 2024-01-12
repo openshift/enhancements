@@ -52,7 +52,7 @@ automations that are expensive to maintain.
 
 ### User Stories
 - As a cluster administrator, I want to add (or replace) one or more nodes to an existing cluster (potentially deployed in a disconnected environment) 
-  using the same simplified agent-based workflow already adopted for the installation
+  by generating an ISO and use it to boot the required nodes
 - As a cluster administrator, I want to provide the initial static network configuration required for each different host that will be added to the cluster
 - As a cluster administrator, I want to validate the nodes to be added before initiating the procedure and be informed of any validation failures
 - As a cluster administrator, I want to be able to monitor the process of adding new nodes
@@ -187,7 +187,7 @@ The implementation will largely reuse the same approach / code present in the op
 for the installation, with a number of exceptions that will be detailed in the subsequent paragraphs.
 
 #### Proposed architecture
-Every node booted with the generated ISO will be independent for adding itself to the cluster - without any need to specify a single rendezvous IP, 
+Every node booted with the generated ISO will be independent for adding itself to the cluster - without any need to specify a single rendezvous IP
 as it happens for the installation scenario. In this way if a node is failing for some reason (for example, the pre-flight validations block the process), 
 the other nodes may continue the joining process undisturbed.
 The following hilights better the proposed architecture:
