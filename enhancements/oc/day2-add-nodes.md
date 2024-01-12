@@ -92,12 +92,12 @@ input configuration file.
 The format of the command will be the following:
 
 ```
-oc -–kubeconfig=’’ adm add-nodes-image [-o=’agent-nodes.iso’] <nodes-config.yaml> 
+oc --kubeconfig='' adm add-nodes-image [-o='agent-nodes.iso'] <nodes-config.yaml> 
 ```
 
 Where:
--`-o=’agent-nodes.iso`. The name of the ISO image to be generated.
--`–kubeconfig=’’`. Path to the kubeconfig file (or `KUBECONFIG` if available)
+- `-o='agent-nodes.iso'`. The name of the ISO image to be generated.
+- `--kubeconfig=''`. Path to the kubeconfig file (or `KUBECONFIG` if available)
 
 `nodes-config.yaml` is a configuration file, similar to `agent-config.yaml`, used to specify the list of the hosts to be added as worker 
 nodes. For each host, it will be possible to specify a number of attributes, including a piece of nmstate configuration for the initial 
@@ -155,11 +155,11 @@ hosts:
 
 The format of the command will be the following:
 
-`oc -–kubeconfig=’’ adm monitor-add-nodes <IPs list>`
+`oc --kubeconfig='' adm monitor-add-nodes <IPs list>`
 
 Where:
-- `–kubeconfig=’’``. Path to the kubeconfig file (or KUBECONFIG if available)
-- `IPs list`` is a list of the nodes IP to be monitored
+- `--kubeconfig=''`. Path to the kubeconfig file (or KUBECONFIG if available)
+- `<IPs list>` is a list of the nodes IP to be monitored
 
 The command will try to connect to each specified node to retrieve initially the results of the pre-flight validations, and then 
 the progress of the activity. In case of validation failures, the command will report them to the console to allow the user to 
