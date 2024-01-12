@@ -126,7 +126,7 @@ Consider including folks that also work outside your immediate sub-project.
 
 When using either multiple `--images` flag or the `--all-images` flag, only four concurrent pods are started to 
 prevent overwhelming the cluster. Also, when using the `--all-images` flag, one can't pass arguments other than 
-`--dest-dir`, `--node-selector` and `--timeout`.
+`--dest-dir`, `--node-selector`, `--source-dir` and `--timeout`.
 
 ## Design Details
 
