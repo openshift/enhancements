@@ -394,7 +394,7 @@ kubectl get pods <launcher pod name> -ojsonpath="{ @.metadata.annotations.k8s\.v
     "name": "tenantred",
     "namespace": "default",
     "interface": "pod16367aacb67",
-    "ipam-claim-reference": "vm-a.tenantred-attachment"
+    "ipam-claim-reference": "vm-a.tenantred"
   }
 ]
 ```
@@ -801,7 +801,7 @@ information, which was passed via CNI-Args. The CR would look like:
 apiVersion: "ipamclaims.k8s.cni.cncf.io/v1alpha1"
 kind: IPAMClaim
 metadata:
-  name: vm-a.tenantred-attachment
+  name: vm-a.tenantred
   namespace: ns1
   ownerReferences:
   - apiVersion: kubevirt.io/v1
