@@ -57,8 +57,9 @@ There are a few problems with configure-ovs.sh:
 * As an OpenShift developer, I want a mechanism for bridge configuration that
   is well-tested and less likely to break than a Bash script.
 
-* As an OpenShift developer, I want to simplify the configure-ovs.sh script
-  by providing a better way to do advanced bridge configuration.
+* As an OpenShift developer, I want to avoid further complications in the
+  configure-ovs.sh script by providing a better way to do advanced bridge
+  configuration.
 
 ### Goals
 
