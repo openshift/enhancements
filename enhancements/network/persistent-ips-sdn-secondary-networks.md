@@ -293,7 +293,9 @@ We plan on adding a new CRD that would be hosted in the k8snetworkplumbingwg,
 and hopefully accepted as part of the
 [Kubernetes multi-networking de-facto standard](https://github.com/k8snetworkplumbingwg/multi-net-spec).
 Meaning we envision other plugins with IPAM functionality to use this CRD to
-provide persistent IPs for their workloads.
+provide persistent IPs for their workloads. This proposal is captured in the
+following
+[de-facto standard update proposal](https://docs.google.com/document/d/1HjPZCfl_3zsXr905T620mF7OFt2QnwxLZomPbeDj0vc).
 
 - Adds a new `IPAMClaim` CRD. OVN-Kubernetes will provision these to
   "block" the IP allocation during the VM object lifecycle.
@@ -330,7 +332,9 @@ We also propose a new attribute to be added to the network selection elements,
 allowing the workload controller (KubeVirt, which templates the pod) to
 indicate to the CNI plugin which `IPAMClaim` it should use. Remember that IPAM
 CNI will store the generated IP there, while the CNI plugin will consume and
-honor it.
+honor it. This proposal is found in
+[this update proposal](https://docs.google.com/document/d/1HjPZCfl_3zsXr905T620mF7OFt2QnwxLZomPbeDj0vc)
+to the NPWG de-facto standard.
 
 From OVN-Kubernetes perspective, it **must**:
 - **not** delete `IPAMClaim`s for encapsulating entities once their pods
