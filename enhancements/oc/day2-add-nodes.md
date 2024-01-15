@@ -79,6 +79,8 @@ the proposal consists into enhancing the `oc` cli with two new commands:
 - `oc adm add-nodes-image` to generate the ISO for adding the nodes to the cluster
 - `oc adm monitor-add-nodes` to monitor the nodes currently being added to the cluster
 
+(More specific details about the proposed integration with `oc` could be find later in the [integration notes](#oc-integration-notes) paragraph)
+
 There are several reasons for choosing `oc` as a primary user interfaces for these tasks:
 - It’s the official cluster administration tool, so it is expected to be already available in the target cluster environment
 - It already supports the kubeconfig file for interacting with the target cluster (it’s relevant since it contains several pieces of 
