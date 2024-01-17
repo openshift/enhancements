@@ -160,7 +160,7 @@ Additional specification of **audit** and **infrastructure** logs is allowed by 
         audit:
           sources: []              #enum: auditd,kubeAPI,openshiftAPI,ovn
         receiver:  
-      transforms:
+      filters:
       - name:
         type:              #kubeapiaudit, detectmultiline, parse, labels
         kubeAPIAudit:
@@ -168,7 +168,7 @@ Additional specification of **audit** and **infrastructure** logs is allowed by 
       pipelines:
        - inputRefs: []
          outputRefs: []
-         transformRefs: []
+         filterRefs: []
       outputs:
       - name: 
         type:                    #enum
@@ -297,7 +297,7 @@ Sample:
       namespace_name:
       namespace_labels:  #map[string]string
       container_name:
-      lables:  #map[string]string, underscore, dedoted, deslashed
+      labels:  #map[string]string, underscore, dedoted, deslashed
     message:
     structured:  #map[string]
     openshift:
@@ -338,104 +338,61 @@ continue to confuse comsumers of logging and will require documentation and expl
 
 ### Test Plan
 
-Exectue all existing tests for log collection, forwarding and storage with the exeception of tests specifically intended to test deprecated features (e.g. Elasticsearch).  Functionally, other other tests are still applicable
+* Exectue all existing tests for log collection, forwarding and storage with the exeception of tests specifically intended to test deprecated features (e.g. Elasticsearch).  Functionally, other other tests are still applicable
+
+* Execute a test to verify the flow defined for collecting, storing, and visualizing logs from an on-cluster, Red Hat operator managed Loki Stack
 
 ### Graduation Criteria
 
-**Note:** *Section not required until targeted at a release.*
+#### Dev Preview Release
 
-Define graduation milestones.
+This release:
 
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
+* Intends to support the use-cases described within this proposal
+* Intends to distibute v2alpha1 of the APIs described within this proposal
+* May introduce v2 of the VIAQ data model
+* Allows v2alpha1 APIs to exist along side v1 APIs (i.e. **ClusterLogging**, **ClusterLogForwarder**)
 
-Consider the following in developing the graduation criteria for this
-enhancement:
+#### GA Release
 
-- Maturity levels
-  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
-- [Deprecation policy][deprecation-policy]
+This release:
 
-Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
-or by redefining what graduation means.
-
-In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
-
-[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
-[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
-
-**If this is a user facing change requiring new or updated documentation in [openshift-docs](https://github.com/openshift/openshift-docs/),
-please be sure to include in the graduation criteria.**
-
-**Examples**: These are generalized examples to consider, in addition
-to the aforementioned [maturity levels][maturity-levels].
+* Intends to support the use-cases described within this proposal
+* Intends to distibute v2 of the APIs described within this proposal
+* May support multiple data models (e.g OpenTelementry, VIAQ v2)
+* Drop support of v1 APIs (i.e. **ClusterLogging**, **ClusterLogForwarder**)
 
 #### Dev Preview -> Tech Preview
 
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-- Enumerate service level indicators (SLIs), expose SLIs as metrics
-- Write symptoms-based alerts for the component(s)
+TBD
 
 #### Tech Preview -> GA
 
-- More testing (upgrade, downgrade, scale)
+- Ability to utilize the enhancement end to end
+- Sufficient test coverage
 - Sufficient time for feedback
+- Gather feedback from users rather than just developers
 - Available by default
-- Backhaul SLI telemetry
-- Document SLOs for the component
-- Conduct load testing
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
 
 #### Removing a deprecated feature
 
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
+Upon GA release of this enhancement:
+
+- The internally managed Elastic (e.g. Elasticsearch, Kibana) offering will no longer be available.
+- The Fluentd collector implementation will no longer be available
 
 ### Upgrade / Downgrade Strategy
 
-There is no automated upgrade path between v1 and v2 of the APIs.  Administrators will need to manually migrate between the two versions.  This primary affects users of log forwarding as
+There is no automated upgrade path between v1 and v2 of the APIs.  Administrators will migrate between the two versions.  This primary affects users of log forwarding as
 
 * **LokiStack** is unaffected by this proposal and not managed by the **cluster-logging-operator**
-* There is a migration path for log visualization which will ony require interatction if the **observability-operator** offers a custom resource
+* There is a migration path for log visualization which will ony require interaction if the **observability-operator** offers a custom resource
 
 ### Version Skew Strategy
 
 ### Operational Aspects of API Extensions
-
-Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
-admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
-especially how they impact the OCP system architecture and operational aspects.
-
-- For conversion/admission webhooks and aggregated apiservers: what are the SLIs (Service Level
-  Indicators) an administrator or support can use to determine the health of the API extensions
-
-  Examples (metrics, alerts, operator conditions)
-  - authentication-operator condition `APIServerDegraded=False`
-  - authentication-operator condition `APIServerAvailable=True`
-  - openshift-authentication/oauth-apiserver deployment and pods health
-
-- What impact do these API extensions have on existing SLIs (e.g. scalability, API throughput,
-  API availability)
-
-  Examples:
-  - Adds 1s to every pod update in the system, slowing down pod scheduling by 5s on average.
-  - Fails creation of ConfigMap in the system when the webhook is not available.
-  - Adds a dependency on the SDN service network for all resources, risking API availability in case
-    of SDN issues.
-  - Expected use-cases require less than 1000 instances of the CRD, not impacting
-    general API throughput.
-
-- How is the impact on existing SLIs to be measured and when (e.g. every release by QE, or
-  automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
-  this enhancement)
 
 #### Failure Modes
 
