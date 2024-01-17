@@ -104,9 +104,11 @@ The cluster administrator does the following:
 1. Deploys the Red Hat **cluster-logging-operator**
 1. Creates a **ClusterLogForwarder** custom resource for the **LokiStack**
 
-The **loki-operator**:
-
+The **observability-operator**:
 1. Deploys the logging-view-plugin for reading logs in the OpenShift console
+
+The **loki-operator**:
+1. Deploys the **LokiStack** for storing logs on-cluster
 
 The **cluster-logging-operator**:
 
@@ -114,7 +116,17 @@ The **cluster-logging-operator**:
 
 ### API Extensions
 
-CustomResourceDefinition:
+This API defines the following opinionated input sources which is a continuation of prior versions:
+
+* **application**: Logs of container workloads running in all namespaces except **default**, **openshift***, and **kube*** 
+* **infrastructure**: journald logs from OpenShift nodes and container workloads running only in namespaces **default**, **openshift***, and **kube***
+* **audit**: The logs from OpenShift nodes written to the node filesystem by: Kubernetes API server, OpenShift API server, Auditd, and OpenShift Virtual Network (OVN).
+
+These are **well-known** input sources that can be referenced by a pipeline without an explicit input specification.
+
+Additional specification of **audit** and **infrastructure** logs is allowed by creating a named input of that type and specifiying at least one of the allowed sources.
+
+#### CustomResourceDefinition:
 ```yaml
     apiVersion: "logging.openshift.io/v2"
     kind: ClusterLogForwarder
@@ -124,22 +136,29 @@ CustomResourceDefinition:
       serviceAccount:
         name: 
         namespace:       #namespace of deployment and resources
+      collector:
+        resources:       #corev1.ResourceRequirements
+          limits:        #cpu, memory
+          requests:
+        nodeSelector:    #map[string]string
+        tolerations:     #corev1.Toleration
       inputs:
       - name:
-        type:
+        type:                      #enum: application,infrastructure,audit
         application:
-          selector:  #labelselector
+          selector:                #labelselector
           namespaces:
-            include: []
-            exclude: []
+            include: []            #glob
+            exclude: []            #glob
           containers:
-            include: []
-            exclude: []
-            maxRecordsPerSecond: # map[containername] int 
+            include: []            #glob
+            exclude: []            #glob
+            limits:
+              maxRecordsPerSecond: # map[containername] int 
         infrastructure:
-          sources: []
+          sources: []              #enum: node,container
         audit:
-          sources: []
+          sources: []              #enum: auditd,kubeAPI,openshiftAPI,ovn
         receiver:  
       transforms:
       - name:
@@ -152,7 +171,7 @@ CustomResourceDefinition:
          transformRefs: []
       outputs:
       - name: 
-        type: 
+        type:                    #enum
         url:
         tls:
         secret:
@@ -208,12 +227,17 @@ Example:
     metadata:
       name: log-collector
     spec:
+      inputs:
+      - name: infra-container
+        type: infrastructure
+        infrastructure:
+          sources: [container]
       serviceAccount:
         name: audit-collector-sa
         namespace: acme-logging
       pipelines:
        - inputRefs:
-         - infrastructure
+         - infra-container
          - audit
          outputRefs:
          - rh-loki
@@ -228,6 +252,7 @@ This example:
 * Expects the administrator to have created a service account named 'audit' in that namespace
 * Expects the administrator to have bound the roles 'collect-audit-logs', 'collect-infrastructure-logs to the service account
 * Expects the administrator created a **LokiStack** CR named 'rh-loki' in the 'openshift-logging' namespace
+* Collects all audit log sources and only infrastructure container logs and writes them to the Red Hat managed lokiStack
 
 ### Implementation Details/Notes/Constraints [optional]
 
