@@ -186,22 +186,22 @@ type MachineConfigurationMAPI struct {
 	Platform string
 	// AWS configures machine information for the AWS platform.
 	// +kubebuilder:validation:Optional
-	Aws AWSMachineConfiguration
+	Aws []AWSMachineConfiguration
 	// Azure configures machine information for the Azure platform.
 	// +kubebuilder:validation:Optional
-	Azure AzureMachineConfiguration
+	Azure []AzureMachineConfiguration
 	// Gcp configures machine information for the Gcp platform.
 	// +kubebuilder:validation:Optional
-	Gcp GCPMachineConfiguration
+	Gcp []GCPMachineConfiguration
 	// Nutanix configures machine information for the Nutanix platform.
 	// +kubebuilder:validation:Optional
-	Nutanix NutanixMachineConfiguration
+	Nutanix []NutanixMachineConfiguration
 	// Openstack configures machine information for the Openstack platform.
 	// +kubebuilder:validation:Optional
-	Openstack OpenstackMachineConfiguration
+	Openstack []OpenstackMachineConfiguration
 	// Vsphere configures machine information for the Vsphere platform.
 	// +kubebuilder:validation:Optional
-	Vsphere VsphereMachineConfiguration
+	Vsphere []VsphereMachineConfiguration
 }
 
 type AWSMachineConfiguration struct {
