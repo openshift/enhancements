@@ -42,7 +42,7 @@ The next version of the APIs should continue to support the primary objectives o
 * Provide a Red Hat managed storage solution
 * Provide an interface to allow users to review logs from a Red Hat managed storage solution
 
-The following user stories describe deployment scenarios to support these objections:
+The following user stories describe deployment scenarios to support these objectives:
 
 * As an administrator, I want to deploy a complete operator managed logging solution that includes collection, storage, and visualization so I can evaluate log records while on the cluster
 * As an administrator, I want to deploy an operator managed log collector only so that I can forward logs to an existing storage solution
@@ -153,8 +153,10 @@ Additional specification of **audit** and **infrastructure** logs is allowed by 
           containers:
             include: []            #glob
             exclude: []            #glob
-            limits:
-              maxRecordsPerSecond: # map[containername] int 
+          tuning:
+            ratelimitDefault:      # for containers not mentioned in rateLimitByContainer
+              recordsPerSecond:    # int 
+            ratelimitByContainer:  # map[string]RateLimit (e.g ngnix: {recordsPerSecond: 20}) 
         infrastructure:
           sources: []              #enum: node,container
         audit:
@@ -175,9 +177,9 @@ Additional specification of **audit** and **infrastructure** logs is allowed by 
         url:
         tls:
         secret:
-        limitsPerForwarder:
-          maxRecordsPerSecond:
-        tuning:    # map[keyname] value. Should allow freeform buffer tuning?
+        tuning:
+          rateLimit:
+            recordsPerSecond:  #int - document per-forwarder/per-node multiplier
         cloudwatch:
           region:
           groupBy:         # enum.  should support templating?
