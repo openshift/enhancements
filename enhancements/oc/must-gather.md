@@ -9,7 +9,7 @@ reviewers:
 approvers:
 - "@derekwaynecarr"
 creation-date: 2019-09-09
-last-updated: 2023-10-03
+last-updated: 2024-01-10
 status: implemented
 see-also:
 replaces:
@@ -84,6 +84,8 @@ ship a second one.
    with the annotation `operators.openshift.io/must-gather-image` on the cluster where it's running. Among the 
    various flags provided by `oc adm must-gather`, only `--dest-dir`, `--node-selector` and `--timeout` can be used 
    in conjunction with the `--all-images` flag.
+5. `oc adm must-gather` allows users to limit the collected logs via `--since` and `--since-time` flags. `--since`
+    accepts a duration (eg. 2h) and `--since-time` accepts an RFC3339 compatible date time
 
 ### `inspect`
 
@@ -97,6 +99,8 @@ To provide your own must-gather image, it must....
 2. Must produce data to be copied back at `/must-gather`. The data must not contain any sensitive data. We don't string PII information, only secret information.
 3. Must produce a text `/must-gather/version` that indicates the product (first line) and the version (second line, `major.minor.micro-qualifier`),
    so that programmatic analysis can be developed.
+4. Should honor the user-provided values for `--since` and `--since-time`, which are passed to plugins via
+   environment variables named `MUST_GATHER_SINCE` and `MUST_GATHER_SINCE_TIME`, respectively.
 
 ### local fall-back
 
@@ -110,9 +114,15 @@ If the `oc adm must-gather` tool's pod cannot be scheduled or run on the cluster
 
 ### Implementation Details/Notes/Constraints
 
-What are the caveats to the implementation? What are some important details that
-didn't come across above? Go in to as much detail as necessary here. This might
-be a good place to talk about core concepts and how they releate.
+During the implementation of `--since` and `--since-time`, `--until` and
+`--until-time` were also considered.
+Supporting `until` flags considerably increase the complexity of the task, so more
+research is required before pursuing it.
+The `--rotated-pod-logs` in `oc adm inspect` did not initially support `--since`
+and `--since-time`. This was changed to take into considerations the time
+constraint provided by the new flags by comparing them against the date in the
+log file name. See https://github.com/openshift/oc/pull/1653 for implementation
+details.
 
 ### Risks and Mitigations
 
