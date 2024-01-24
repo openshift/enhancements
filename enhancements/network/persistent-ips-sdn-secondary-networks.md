@@ -68,9 +68,10 @@ provided by OVN-Kubernetes.
 
 ### Non-Goals
 
-- IPv6 support is not required.
-- This enhancement's scope is limited to secondary networks - i.e. the default
-  cluster network's IP allocation should still follow the pod lifecycle.
+- This enhancement's scope is limited to secondary networks of `layer2` or
+  `localnet` topologies; meaning any type of routed topology (e.g. the default
+  cluster network **or** routed topology secondary networks) IP allocation
+  should still follow the pod lifecycle.
 
 ## Proposal
 
