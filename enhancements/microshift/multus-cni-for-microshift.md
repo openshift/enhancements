@@ -276,6 +276,15 @@ assumption that MicroShift will always run as a single-node should be made and p
 should be kept in mind. We will not build the solution to support multi-node, but want to avoid
 making decisions that make it harder to do so in the future.
 
+Another potential risk was investigated but judged as not a problem: could a race condition between
+Multus being ready and application's Pods starting impact the application, by for example not having
+relevant parts of network set up.
+This should not be an issue because Pods that do not use `hostNetwork` will have networking setup
+after the CNI is ready. Both ovn-kubernetes and Multus use `hostNetwork` so they start before other
+Pods. If CRI-O is configured to use the Multus regardless of files in /etc/cni/net.d, CRI-O will wait
+for the Multus. We can also use the Multus' config option of `--readiness-indicator-file` to make
+sure the Multus waits for the ovn-kubernetes.
+
 ### Drawbacks
 
 This section includes limitations of the Multus itself, not its integration with MicroShift.
