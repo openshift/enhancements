@@ -259,6 +259,8 @@ No, enhancement is MicroShift specific.
 
 ### Risks and Mitigations
 
+There may be a race condition between Multus on MicroShift and other services on the host that also
+configure the host's networking
 Taking `bridge` CNI as an example: when the bridge interface does not exist, it will be created
 when a Pod requiring that interface is created.
 If user expects something else will create the interface, they will need to configure system to start
