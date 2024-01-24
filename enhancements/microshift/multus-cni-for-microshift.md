@@ -1,17 +1,17 @@
 ---
 title: multus-cni-for-microshift
 authors:
-  - @pmtk
+  - pmtk
 reviewers:
-  - @s1061123, Multus expert
-  - @pliurh, Networking expert
-  - @dhellmann, MicroShift architect
-  - @jerpeter1, Edge Enablement Staff Engineer
-  - @pacevedom, MicroShift team lead
+  - s1061123, Multus expert
+  - pliurh, Networking expert
+  - dhellmann, MicroShift architect
+  - jerpeter1, Edge Enablement Staff Engineer
+  - pacevedom, MicroShift team lead
 approvers:
-  - @dhellmann
+  - dhellmann
 api-approvers:
-  - TBD
+  - None
 creation-date: 2024-01-16
 last-updated: 2024-01-23
 tracking-link:
@@ -31,26 +31,27 @@ tracking-link:
 Currently MicroShift ships [ovn-kubernetes](https://github.com/openshift/ovn-kubernetes) (ovn-k)
 CNI responsible for connectivity within and outside the cluster.
 There are users that have needs beyond what ovn-k offers like adding more interfaces to the Pods.
-Some example requirements are connecting Pod to host's bridge interface or setting up complex networking based on VLAN.
+Some example requirements are connecting Pods to the host's bridge interface or setting up complex networking based on VLAN.
 This functionality is Multus' trademark - adding additional interfaces to Pods.
 
-Following enhancement explores providing Multus CNI as an optional component to MicroShift.
+This enhancement explores providing Multus CNI as an optional component to MicroShift.
 
 ## Motivation
 
 Providing Multus CNI for MicroShift will help users:
 - wanting to integrate MicroShift into existing environments
 - wanting to slowly, step by step, migrate to MicroShift without being required to refactor everything at once
-- wanting to add additional interfaces because of newly discovered requirement
+- wanting to add additional interfaces because of newly discovered requirements
 
 ### User Stories
 
-* As an MicroShift admin, I want to add additional interface to certain Pods so that I can
-  make them accessible over network that should not be available to rest of the cluster.
-* As an MicroShift admin, I want to add additional interface to certain Pods so that I can
-  access them directly without using Kubernetes' networking such as NodePorts, Load Balancers, Ingresses, etc.
-* As an MicroShift admin, I want to add additional interface to certain Pods so that I can
-  start slowly migrating existing solution to MicroShift.
+* As a MicroShift admin, I want to add additional interfaces to certain Pods so that I can
+  make them accessible over networks that should not be available to rest of the cluster.
+* As a MicroShift admin, I want to add additional interfaces to certain Pods so that I can
+  access them directly (from outside the cluster) without using Kubernetes' networking such as
+  NodePorts, Load Balancers, Ingresses, etc.
+* As a MicroShift admin, I want to add additional interfaces to certain Pods so that I can
+  start slowly migrating an existing solution to MicroShift.
 
 ### Goals
 
@@ -59,12 +60,19 @@ Providing Multus CNI for MicroShift will help users:
 ### Non-Goals
 
 - Automatically removing Multus from the cluster upon RPM uninstall
+- Support Multus for multi-node deployments of MicroShift
 
 ## Proposal
 
 Deliver Multus for MicroShift as an optional RPM containing required manifests that will be applied
-during MicroShift's start. There should be little to none changes to MicroShift itself as we want
+during MicroShift's start. There should be little to no changes to MicroShift itself as we want
 Multus CNI for MicroShift to fit optional components pattern.
+
+Manifests for deploying Multus on MicroShift will be based on existing manifests for OpenShift,
+but they will differ because OpenShift uses thick architecture Multus whereas MicroShift will use
+thin architecture Multus.
+
+How should cleanup of the Multus artifacts look like is an open question (see Open Questions section).
 
 ### Workflow Description
 
@@ -84,12 +92,16 @@ Multus CNI for MicroShift to fit optional components pattern.
 1. MicroShift starts
 1. MicroShift applies Multus' manifests
 1. MicroShift applies Application's manifests that include NetworkAttachmentDefinitions
-   **TODO: Make sure that App starts after Multus, otherwise it might got by-passed** - maybe crio override to use multus
 1. Application's Pod are created, Multus inspects Pod's annotations and sets up 
    additional interfaces based on matching NetworkAttachmentDefinitions
 1. Application's containers are running, they can utilize additional interfaces
 
 ### API Extensions
+
+Multus is an established project with already existing API extensions.
+Following paragraphs does not present brand new CRDs or APIs, it only aims to summarize how adding
+Multus will affect MicroShift's API. For more information see
+[Multus CNI repository](https://github.com/openshift/multus-cni/).
 
 Multus is configured in following ways:
 - CNI configuration created when Multus' DaemonSet starts, it includes the primary CNI (ovn-kubernetes for MicroShift)
@@ -200,15 +212,15 @@ It is primarily used with SR-IOV and as such out of scope for this enhancement m
 
 ### Implementation Details/Notes/Constraints [optional]
 
-First, it must be noted that Multus CNI itself is a meta-CNI. From high level perspective, its
+First, it must be noted that Multus CNI itself is a meta-CNI. From a high level perspective, its
 purpose is to call other CNIs according to the CNI configs supplied by the user in form of
 NetworkAttachmentDefinitions and Pod annotations.
-Any specific actions are related to the delegate CNIs itself. For example: creating veth pair,
+Any specific actions are related to the delegate CNIs. For example: creating veth pair,
 attaching one end of veth to the bridge and making the other end available within the Pod is
 responsibility of `bridge` CNI is this example.
 MicroShift team will create tests for CNIs that will be declared as supported. However these tests
-will not explore the breadth and depth of possible network setups, so ultimately responsible for
-correctness of the configuration is the user.
+will not explore the breadth and depth of possible network setups, so ultimately the responsibility
+for correctness of the configuration is up to the user.
 
 #### Manifests
 
@@ -222,16 +234,18 @@ Updating necessary image references will be part of existing rebase procedure.
 
 #### RPM package
 
-RPM spec to build `microshift-networking-multus` RPM will be part of existing `microshift.spec` file.
-RPM will include:
+RPM spec to build `microshift-multus` and `microshift-multus-release-info` RPMs will be part of
+existing `microshift.spec` file.
+The RPM will include:
 - manifests required to deploy Multus on MicroShift
-- CRI-O drop-in config to use Multus instead of ovn-kubernetes
+- CRI-O drop-in config to use Multus instead of ovn-kubernetes (which will require reorganization
+  of currently existing MicroShift's CRI-O configs)
 - greenboot healthcheck script
 - cleanup script plugin
 
 #### Container images: Multus and network plugins
 
-Because Multus image used by OpenShift has size that is not acceptable for edge devices, new image
+Because the Multus image used by OpenShift has a large size that is not acceptable for edge devices, new image
 will be prepared and will only include relevant artifacts such as entrypoint script/binary and
 Multus CNI binary (which is copied to host's `/opt/cni/bin`).
 
@@ -259,22 +273,24 @@ access to the cluster after logging into the host can be compared to getting acc
 Currently MicroShift runs as a single-node cluster but in future releases there might be an effort
 to allow for multi-node clusters. For this reason, during implementation of this enhancement, no
 assumption that MicroShift will always run as a single-node should be made and potential multi-node
-should be kept in mind.
+should be kept in mind. We will not build the solution to support multi-node, but want to avoid
+making decisions that make it harder to do so in the future.
 
 ### Drawbacks
 
+This section includes limitations of the Multus itself, not its integration with MicroShift.
+However, these drawbacks should be documented nonetheless.
+
 Multus does not actively watch NetworkAttachmentDefinitions or annotations therefore to make changes
-to these resources effective Pod must be re-created. This behavior is reasonable because it does not
-disrupt Pod's networking and should not be a problem in production environments where we expect to
+to these resources effective the Pod must be re-created. This behavior is reasonable because it does not
+disrupt the Pod's networking and should not be a problem in production environments where we expect to
 have stable configurations.
 
-Multus also does not observe the underlying bridge interfaces, therefore if one is rebuilt, Pod's
+Multus also does not observe the underlying bridge interfaces, therefore if one is rebuilt, the Pod's
 interface might stop working (see [BZ #2066351](https://bugzilla.redhat.com/show_bug.cgi?id=2066351)).
 If these limitations are ever addressed (see [NP-606](https://issues.redhat.com/browse/NP-606) and 
 [NP-608](https://issues.redhat.com/browse/NP-608)), they would, most likely, be part of the thick
 Multus plugin.
-
-Even though these are limitation of the Multus itself, they should be documented.
 
 ## Design Details
 
@@ -302,17 +318,29 @@ Tests for other networking plugins will be designed and implemented when plugins
 
 Multus CNI for MicroShift is targeted to be GA next release.
 
+#### Dev Preview -> Tech Preview
+
+N/A
+
+#### Tech Preview -> GA
+
+N/A
+
+#### Removing a deprecated feature
+
+N/A
+
 ### Upgrade / Downgrade Strategy
 
-Because both Multus and MicroShift RPMs will be build from the same spec file, they will share version
-and it is expected that they are updated together following MicroShift upgrade rules depending on
-type of operating system (ostree-based or regular RPM).
+Because both Multus and MicroShift RPMs will be built from the same spec file, they will share the
+same version and it is expected that they are updated together following MicroShift upgrade rules
+depending on type of operating system (ostree-based or regular RPM).
 
 Considering only the manifests, we know that on each start MicroShift will apply manifests forcefully
 overwriting any differences. However, MicroShift does not have any uninstall capabilities.
 If manifests ever change, for example some ConfigMap is renamed, then these old parts will
-keep existing in the etcd. This could have undesirable consequences of having two Multus DaemonSets
-if name or namespace of original DaemonSet changes. To make potential the transition to thick Multus
+keep existing in the database. This could have undesirable consequences of having two Multus DaemonSets
+if the name or the namespace of original DaemonSet changes. To make the transition to thick Multus
 smooth, we should not deviate from already existing resource names present in OpenShift's Multus
 manifests. This problem is not Multus specific - it is how MicroShift works and it is not part of this
 enhancement addressing this shortcoming.
@@ -323,13 +351,15 @@ When Multus CNI binary is executed by kubelet/CRI-O it will setup Pod's network 
 configs and Annotations (not a database with "expected states"), therefore updating Multus does not
 require migration strategies.
 
-If schema of NetworkAttachmentDefinitions CRD changes, instead of deploying a mutating webhook,
-we can just suggest users to update their CRs.
+If the schema of NetworkAttachmentDefinitions CRD changes, instead of deploying a mutating webhook
+(which would use resources idling but actually perform actions on first start), we can just suggest
+users to update their CRs.
 
 ### Version Skew Strategy
 
 Building Multus and MicroShift RPMs from the same spec file means Multus should be updated together
 with MicroShift which means there should not be any version skew between MicroShift and Multus.
+This might change with introduction of multi-node deployments of MicroShift.
 
 ### Operational Aspects of API Extensions
 
@@ -337,8 +367,8 @@ N/A
 
 #### Failure Modes
 
-If Multus (or any delegate CNIs it executes) fails, Pod will be stuck in "ContainerCreating" status
-and none of the Pod's container will start. This can happen if the CNI configuration provided in
+If Multus (or any delegate CNIs it executes) fails, a new Pod will be stuck in "ContainerCreating" status
+and none of the Pod's containers will start. This can happen if the CNI configuration provided in
 NetworkAttachmentDefinition is incorrect or when Pod's Annotation contains NAD that does not exist.
 In such cases, user needs to verify its manifests.
 
@@ -347,8 +377,8 @@ have increased CNI failure rate.
 
 #### Support Procedures
 
-If Multus cannot configure Pod's networking according to the annotations (any of the CNIs fail),
-Pod will not start and its events should contain error from the Multus. For example:
+If Multus cannot configure a Pod's networking according to the annotations (any of the CNIs fail),
+the Pod will not start and its events should contain error from the Multus. For example:
 ```
 Warning  NoNetworkFound          0s                 multus             cannot find a network-attachment-definition (asdasd) in namespace (default): network-attachment-definitions.k8s.cni.cncf.io "asdasd" not found
 ```
@@ -366,21 +396,21 @@ History`. -->
 
 ### Thick plugin architecture
 
-In 2022 Multus was rewritten in manner called "thick plugin" and changes mode of operation significantly.
+In 2022 Multus was rewritten in manner called "thick plugin" which changed its mode of operation significantly.
 Major difference is that DaemonSet is no longer dummy (i.e. Thin: creates kubeconfig, config, copies Multus
 CNI binary to the host, and finally sleeps or watches files to update the kubeconfig and/or config).
 Instead it is the brain of the operation: CNI binary on the host is only a shim that forwards the request
 to the DaemonSet which executes all of the delegates. It also exports a metric, but it was not
 deemed useful.
 
-Decision to use thin instead of thick architecture is mostly driven by resource consumption:
+The decision to use thin instead of thick architecture is mostly driven by resource consumption:
 Multus CNI binary in thin mode only uses resources when it runs and DaemonSet idles (or is close to it),
 whereas thick Multus' DaemonSet is an application that uses resources even if there are no new Pods.
 
-If we would decide to use thick plugin, we still would need to create new image as the one used in OCP
-is not suitable for edge deployments (1.2GB). Another pro for thick plugin is that is has better
+If we would decide to use the thick plugin, we still would need to create a new image as the one used in OCP
+is not suitable for edge deployments (1.2GB). Another pro for using the thick plugin is that is has better
 test coverage as it is used in OpenShift. Also, if there will be a new CNI spec that includes UPDATE
-command it thick has better chance of supporting that.
+command the thick plugin has better chance of supporting that.
 
 Even though thin plugin suits MicroShift needs better, we should strive toward making as little
 breaking changes as possible compared to OpenShift's thick multus when preparing manifests for
@@ -394,7 +424,9 @@ RHEL ships network plugins RPM that includes delegate CNIs we aim to support lik
 Originally that RPM was meant for Podman networking, but Podman shipped with RHEL9 does not use them anymore.
 This means they can exist only for compatibility and are not actively maintained.
 On the other hand, OpenShift networking team (with whom we have ongoing cooperation) are actively
-maintaining these binaries and quickly addressing any CVEs or bugs.
+maintaining these binaries and quickly addressing any CVEs or bugs. These binaries are packaged in
+a container image as part of the OpenShift payload which will ensure that we do not have version
+skew with MicroShift or Multus and they will match binaries shipped with OpenShift.
 
 ## Infrastructure Needed [optional]
 
