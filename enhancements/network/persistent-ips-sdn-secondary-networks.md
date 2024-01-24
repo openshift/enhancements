@@ -105,9 +105,10 @@ for VM creation:
 1. the user provisions a VM object
 2. the KubeVirt controller creates an IPAMClaim for each multus non-default
   network in the corresponding VMI spec
-3. OVN-K reacts to the creation of the `IPAMClaim`s. It will generate IP address
-  from the required IP pools, and update the corresponding `IPAMClaim` with the
-  generate IPs.
+3. OVN-K reacts to the creation of the `IPAMClaim`s. It will allocate IP
+  addresses from the required IP pools, and **only afterward** update the
+  corresponding `IPAMClaim` with the generated IPs. Users can only rely / use
+  the `IPAMClaim` status for informational purposes.
 4. this step occurs in parallel to step 3; KubeVirt templates the KubeVirt
   launcher pod, featuring in each network selection element the name of the
   claim where the CNI will find the IP address.
@@ -166,6 +167,8 @@ sequenceDiagram
 **NOTES**:
 - When the feature gate is not enabled, KubeVirt will **not** request
   persistent IP allocations from the CNI.
+- OVN-Kubernetes will **not** check for consistency errors related to the
+  `IPAMClaim`s used in two different pods simultaneously.
 
 #### Stopping a Virtual Machine
 ```mermaid
