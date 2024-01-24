@@ -865,15 +865,7 @@ Thus, we would have the following three behaviors:
 subnet **and** the IPAM key at the same time.
 
 #### Why this alternative was not considered further
-
-Implementing the sticky IPs feature in separate IPAM plugins will prevent this
-solution from being used on the default cluster network for the HyperShift
-use cases, in which point to point routing is used to ensure the IPs persist
-during the migration of KubeVirt nodes. In fact, it will also not be usable for
-`layer3` topologies (secondary networks) since those topologies feature a
-subnet per node.
-
-Furthermore, performance wise, implementing the "sticky IPs" feature in the
+Performance wise, implementing the "sticky IPs" feature in the
 IPAM plugin - e.g. whereabouts - might not be a good option since we would need
 to invoke the IPAM plugin via CNI exec based API - i.e. invoke the CNI IPAM
 binary on disk, get the result (the IP), and then use said IP in the entire
@@ -888,6 +880,14 @@ allocations, it is probable the time it takes to provision a pod to grow.
 
 Implementing a new CNI IPAM plugin - or refactoring whereabouts to address its
 shortcomings - would be a major effort.
+
+While it is not a strong argument (the default cluster network / secondary
+routed topologies are non-goals), implementing the sticky IPs feature in
+separate IPAM plugins will prevent this solution from being used on the default
+cluster network for the HyperShift use cases, in which point to point routing
+is used to ensure the IPs persist during the migration of KubeVirt nodes. In
+fact, it will also not be usable for `layer3` topologies (secondary networks)
+since those topologies feature a subnet per node.
 
 ### Separate IPAMClaims controller
 
