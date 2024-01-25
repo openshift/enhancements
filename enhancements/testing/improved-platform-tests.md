@@ -211,7 +211,7 @@ N/A
 To achieve the first step of the proposal, we need to:
 1. Provide a library for building `<binary>-tests` which exposes two commands:
    - `list` - responsible for listing tests in JSON format;
-   - `run` - run a single test, returning results in ginkgo compatible format;
+   - `run-test` - run a single test, returning results in ginkgo compatible format;
 2. Provide a mechanism for labeling tests, similarly how we currently indicate
    that a test is part of a special group. See [origin/rules.go](https://github.com/openshift/origin/blob/cc42164781a728b804d0bb07f09cf878ec8f7807/test/extended/util/annotate/rules.go)
    or [kubernetes/rules.go](https://github.com/openshift/kubernetes/blob/8bd5514be14de7fb3105962c8fc206ef5e921a0b/openshift-hack/e2e/annotate/rules.go),
