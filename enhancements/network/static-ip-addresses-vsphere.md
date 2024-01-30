@@ -8,16 +8,16 @@ reviewers:
   - elmiko - machine API
   - patrickdillon - installer
   - jcpowermac - vSphere
-  - cybertron - networking
   - zaneb - networking
+  - 2uasimojo - hive
 approvers:
   - JoelSpeed
   - patrickdillon
-  - cybertron
+  - 2uasimojo
 api-approvers: 
   - JoelSpeed
 creation-date: 2022-10-21
-last-updated: 2023-05-01
+last-updated: 2024-01-02
 tracking-link: 
 - https://issues.redhat.com/browse/OCPPLAN-9654
 see-also:
@@ -71,7 +71,7 @@ As an OpenShift administrator, I want to scale nodes with static IPs so that I c
 To faciliate the configuration of static IP address, network device configuration definitions are created for each node in the install-config.yaml. A `hosts` slice will be introduced to the installer platform specification to allow network device configurations to be specified for a nodes. 
 If a `hosts` slice is defined, enough `hosts` must be defined to cover the bootstrap, control plane, and compute nodes to be provisioned during the installation process.
 
-The bootstrap and control plane nodes will have their static IP addresses provisioned by terraform.  Compute nodes will rely on the machine API to provision their IP addresses.
+The bootstrap and control plane nodes will have their static IP addresses provisioned by CAPV.  Compute nodes will rely on the machine API to provision their IP addresses.
 
 Example of platform specification with IP addresses defined for bootstrap, control plane, and compute nodes:
 ~~~yaml
@@ -447,7 +447,7 @@ type NetworkDeviceSpec struct {
 
 2. Add validation for the modified/added fields in the platform specification.
 3. For compute nodes, produce machine manifests with associated network device configuration.  
-4. For bootstrap and control plane nodes, modify vSphere terraform to convert network device configuration to a VM guestinfo parameter for each VM to be created.
+4. For bootstrap and control plane nodes, provide network device configuration to a VM guestinfo parameter in the capv machine spec for each VM to be created.
 
 As the assets are generated for the control plane and compute nodes, the slice of `host`s for each node role will be used to populate network device configuration.  The number of `host`s must match the number of replicas defined in the associated machine pool.
 
