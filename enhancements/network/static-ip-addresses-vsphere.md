@@ -33,7 +33,7 @@ superseded-by:
 Static IP addresses are emerging as a common requirement in environments where
 the usage of DHCP violates corporate security guidelines.  Additionally, many 
 users which require static IPs also require the use of the IPI installer. 
-The proposal described in this enhacement discusses the implementation of
+The proposal described in this enhancement discusses the implementation of
 of assiging static IPs at both day 0 and day 2.
 
 ## Motivation
@@ -82,7 +82,7 @@ platform:
       networkDevice:
         ipAddrs:
         - 192.168.101.240/24
-        gateway4: 192.168.101.1
+        gateway: 192.168.101.1
         nameservers:
         - 192.168.101.2
     - role: control-plane
@@ -90,7 +90,7 @@ platform:
       networkDevice:
         ipAddrs:
         - 192.168.101.241/24
-        gateway4: 192.168.101.1
+        gateway: 192.168.101.1
         nameservers:
         - 192.168.101.2
     - role: control-plane
@@ -98,7 +98,7 @@ platform:
       networkDevice:
         ipAddrs:
         - 192.168.101.242/24
-        gateway4: 192.168.101.1
+        gateway: 192.168.101.1
         nameservers:
         - 192.168.101.2
     - role: control-plane
@@ -106,33 +106,33 @@ platform:
       networkDevice:
         ipAddrs:
         - 192.168.101.243/24
-        gateway4: 192.168.101.1
+        gateway: 192.168.101.1
         nameservers:
         - 192.168.101.2
     - role: compute
       networkDevice:
         ipAddrs:
         - 192.168.101.244/24
-        gateway4: 192.168.101.1
+        gateway: 192.168.101.1
         nameservers:
         - 192.168.101.2
     - role: compute
       networkDevice:
         ipAddrs:
         - 192.168.101.245/24
-        gateway4: 192.168.101.1
+        gateway: 192.168.101.1
         nameservers:
         - 192.168.101.2
     - role: compute
       networkDevice:
         ipAddrs:
         - 192.168.101.246/24
-        gateway4: 192.168.101.1
+        gateway: 192.168.101.1
         nameservers:
         - 192.168.101.2
 ~~~
 
-The install will be consuming the above config and will be creating custom resources following the CAPI static ip address process.  We will be generating a IPAddress and IPAddressClaim for each master and worker (bootstrap is not included but will have static IP directly applied to the VM based on the config).  These files will be a part of the openshift directory that is generated from `openshift-install create manifests`.  A sample of what is generated based on above config:
+The install will be consuming the above config and will be creating custom resources following the CAPI static ip address process.  We will be generating an IPAddress and IPAddressClaim for each master and worker (bootstrap is not included but will have static IP directly applied to the VM based on the config).  These files will be a part of the openshift directory that is generated from `openshift-install create manifests`.  A sample of what is generated based on above config:
 
 ```shell
 [ngirard@fedora openshift]$ ls
@@ -223,7 +223,7 @@ status: {}
 
 IPAddressClaim:
 ```yaml
-apiVersion: ipam.cluster.x-k8s.io/v1alpha1
+apiVersion: ipam.cluster.x-k8s.io/v1beta1
 kind: IPAddressClaim
 metadata:
   creationTimestamp: null
@@ -243,7 +243,7 @@ status:
 
 IPAddress:
 ```yaml
-apiVersion: ipam.cluster.x-k8s.io/v1alpha1
+apiVersion: ipam.cluster.x-k8s.io/v1beta1
 kind: IPAddress
 metadata:
   creationTimestamp: null
@@ -324,6 +324,74 @@ spec:
 
 The IP address pool specifies the CRD which defines the address pool configuration. This CRD will vary based on the external controller used to provision IP addresses.  The machine controller will create an `IPAddressClaim` which the external controller will fulfill with an `IPAddress`.
 
+#### Control Plane Machine Sets
+
+Control Plane Machinesets (CPMS) works similar to the way compute machinesets work.  When the installer generates the CPMS for the cluster, it will inject the AddessFromPools information to be used for future node scaling.  One difference is that the networkName will not be populated.  This is due to how each FailureDomain can define a different networkName.  This information will be populated when the machine object gets created dynamically after evaluating which failure domain the machine will be placed into.
+
+Example:
+~~~
+apiVersion: machine.openshift.io/v1
+kind: ControlPlaneMachineSet
+metadata:
+  creationTimestamp: null
+  labels:
+    machine.openshift.io/cluster-api-cluster: ngirard-dev-bwnz9
+  name: cluster
+  namespace: openshift-machine-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      machine.openshift.io/cluster-api-cluster: ngirard-dev-bwnz9
+      machine.openshift.io/cluster-api-machine-role: master
+      machine.openshift.io/cluster-api-machine-type: master
+  state: Active
+  strategy: {}
+  template:
+    machineType: machines_v1beta1_machine_openshift_io
+    machines_v1beta1_machine_openshift_io:
+      failureDomains:
+        platform: VSphere
+        vsphere:
+        - name: fd-2
+        - name: fd-3
+        - name: fd-4
+      metadata:
+        labels:
+          machine.openshift.io/cluster-api-cluster: ngirard-dev-bwnz9
+          machine.openshift.io/cluster-api-machine-role: master
+          machine.openshift.io/cluster-api-machine-type: master
+      spec:
+        lifecycleHooks: {}
+        metadata: {}
+        providerSpec:
+          value:
+            apiVersion: machine.openshift.io/v1beta1
+            credentialsSecret:
+              name: vsphere-cloud-credentials
+            diskGiB: 100
+            kind: VSphereMachineProviderSpec
+            memoryMiB: 16384
+            metadata:
+              creationTimestamp: null
+            network:
+              devices:
+              - addressesFromPools:
+                - group: installer.openshift.io
+                  name: default-0
+                  resource: IPPool
+                nameservers:
+                - 8.8.8.8
+            numCPUs: 4
+            numCoresPerSocket: 2
+            snapshot: ""
+            template: ""
+            userDataSecret:
+              name: master-user-data
+            workspace: {}
+status: {}
+~~~
+
 #### Changes Required
 
 ##### Installer
@@ -333,67 +401,46 @@ The IP address pool specifies the CRD which defines the address pool configurati
 // Hosts defines `Host` configurations to be applied to nodes deployed by the installer
 type Hosts []Host
 
-// AddressesFromPool is an IPAddressPool that will be used to create
-// IPAddressClaims for fulfillment by an external controller.
-type AddressesFromPool struct {
-	// APIGroup is the group for the resource
-	// being referenced. If APIGroup is not
-	// specified, the specified Kind must be in
-	// the core API group. For any other
-	// third-party types, APIGroup is required.
-	ApiGroup string `json:"apiGroup"`
-
-	// Kind is the type of resource being referenced
-	Kind string `json:"kind"`
-
-	// Name is the name of resource being referenced
-	Name string `json:"name"`
-}
-
-// Host defines the network device configuration to be applied for a node deployed by the installer
-type Host struct {  
+// Host defines host VMs to generate as part of the installation.
+type Host struct {
   // FailureDomain refers to the name of a FailureDomain as described in https://github.com/openshift/enhancements/blob/master/enhancements/installer/vsphere-ipi-zonal.md
   // +optional
-  FailureDomain string `json: "failureDomain"`
-
-  // Slice of NetworkDeviceSpecs to be applied
+  FailureDomain string `json:"failureDomain"`
+  
+  // NetworkDeviceSpec to be applied to the host
   // +kubebuilder:validation:Required
-  NetworkDevice []NetworkDeviceSpec `json: "networkDevice"` 
-
+  NetworkDevice *NetworkDeviceSpec `json:"networkDevice"`
+  
   // Role defines the role of the node
   // +kubebuilder:validation:Enum="";bootstrap;control-plane;compute
   // +kubebuilder:validation:Required
-  Role string `json: "role"`
+  Role string `json:"role"`
 }
 
 type NetworkDeviceSpec struct {
-	// gateway4 is the IPv4 gateway used by this device.
-	// Required when DHCP4 is false.
-	// +optional
-	// +kubebuilder:validation:Format=ipv4
-	Gateway4 string `json:"gateway4,omitempty"`
-
-	// gateway4 is the IPv4 gateway used by this device.
-	// Required when DHCP6 is false.
-	// +kubebuilder:validation:Format=ipv6
-	// +optional
-	Gateway6 string `json:"gateway6,omitempty"`
-
-	// ipaddrs is a list of one or more IPv4 and/or IPv6 addresses to assign
-	// to this device.
-	// Required when DHCP4 and DHCP6 are both Disabled.
-	// + Validation is applied via a patch, we validate the format as either ipv4 or ipv6
-	// +optional
-	IPAddrs []string `json:"ipAddrs,omitempty"`
-
-	// nameservers is a list of IPv4 and/or IPv6 addresses used as DNS
-	// nameservers.
-	// Please note that Linux allows only three nameservers (https://linux.die.net/man/5/resolv.conf).
-	// +optional
-	Nameservers []string `json:"nameservers,omitempty"`
+  // gateway is an IPv4 or IPv6 address which represents the subnet gateway,
+  // for example, 192.168.1.1.
+  // +kubebuilder:validation:Format=ipv4
+  // +kubebuilder:validation:Format=ipv6
+  Gateway string `json:"gateway,omitempty"`
   
-  // addressesFromPools is a list of address pools which will fulfill requests for static IPs
-  AddressesFromPools []AddressesFromPool `json:"addressesFromPool,omitempty"`
+  // ipAddrs is a list of one or more IPv4 and/or IPv6 addresses and CIDR to assign to
+  // this device, for example, 192.168.1.100/24. IP addresses provided via ipAddrs are
+  // intended to allow explicit assignment of a machine's IP address.
+  // +kubebuilder:validation:Format=ipv4
+  // +kubebuilder:validation:Format=ipv6
+  // +kubebuilder:example=192.168.1.100/24
+  // +kubebuilder:example=2001:DB8:0000:0000:244:17FF:FEB6:D37D/64
+  // +kubebuilder:validation:Required
+  IPAddrs []string `json:"ipAddrs"`
+  
+  // nameservers is a list of IPv4 and/or IPv6 addresses used as DNS nameservers, for example,
+  // 8.8.8.8. a nameserver is not provided by a fulfilled IPAddressClaim. If DHCP is not the
+  // source of IP addresses for this network device, nameservers should include a valid nameserver.
+  // +kubebuilder:validation:Format=ipv4
+  // +kubebuilder:validation:Format=ipv6
+  // +kubebuilder:example=8.8.8.8
+  Nameservers []string `json:"nameservers,omitempty"`
 }
 
 ~~~
@@ -478,10 +525,12 @@ A sample project [machine-ipam-controller](https://github.com/rvanderp3/machine-
 
 ### API Extensions
 
-2 additional CRDs will be introduced which to `machine.openshift.io`.
+2 new CRDs will be included in the Machine API Operator.
 
-- `ipaddressclaim.machine.openshift.io` - IP address claim request which is created by the machine reconciler and fulfilled by an external controller
-- `ipaddress.machine.openshift.io` - IP address fulfilled by an external controller
+- `ipaddressclaims.ipam.cluster.x-k8s.io` - IP address claim request which is created by the machine reconciler and fulfilled by an external controller
+- `ipaddresses.ipam.cluster.x-k8s.io` - IP address fulfilled by an external controller
+
+These two CRDs are part of CAPI and will be imported into this operator from the Cluster CAPI Operator.
 
 The CRDs `machines.machine.openshift.io` and `machinesets.machine.openshift.io` will be modified to allow the definition of `addressesFromPool` in the provider specification.
 
@@ -491,7 +540,7 @@ See https://github.com/openshift/api/pull/1338 for details and discussion relate
 
 #### Eventual Migration to CAPI/CAPV
 
-The definition of the CRDs above is intended to follow a similar pattern followed by [CAPV](https://github.com/kubernetes-sigs/cluster-api-provider-vsphere/pull/1210/files).  Migration would consist of migrating the `ipaddressclaim.machine.openshift.io` and `ipaddress.machine.openshift.io` CRDs to the analogous CAPI CRDs.
+The inclusion of the CRDs above is intended to follow a similar pattern followed by [CAPV](https://github.com/kubernetes-sigs/cluster-api-provider-vsphere/pull/1210/files).  Migration would not require any migration due to the `ipaddressclaim.ipam.cluster.x-k8s.io` and `ipaddress.ipam.cluster.x-k8s.io` CRDs already being a part of CAPI/CAPV.
 
 ### Risks and Mitigations
 
@@ -537,7 +586,7 @@ A: In the November 10, 2022 cluster lifecycle arch call, it was decided to move 
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 **For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
+end-to-end tests.**
 
 #### Removing a deprecated feature
 
