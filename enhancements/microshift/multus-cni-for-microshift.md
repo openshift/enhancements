@@ -61,6 +61,7 @@ Providing Multus CNI for MicroShift will help users:
 
 - Automatically removing Multus from the cluster upon RPM uninstall
 - Support Multus for multi-node deployments of MicroShift
+- Providing network policies or admission webhook for Multus
 
 ## Proposal
 
