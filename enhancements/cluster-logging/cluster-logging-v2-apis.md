@@ -133,9 +133,8 @@ Additional specification of **audit** and **infrastructure** logs is allowed by 
     metadata:
       name: 
     spec:
-      serviceAccount:
-        name: 
-        namespace:       #namespace of deployment and resources
+      serviceAccountName:
+      namespace:         #namespace of deployment and resources
       collector:
         resources:       #corev1.ResourceRequirements
           limits:        #cpu, memory
@@ -178,8 +177,13 @@ Additional specification of **audit** and **infrastructure** logs is allowed by 
         tls:
         secret:
         tuning:
-          rateLimit:
+          rateLimitDefault:
             recordsPerSecond:  #int - document per-forwarder/per-node multiplier
+          delivery:         #AtMostOnce, AtLeastOnce
+          maxWrite:         # quantity (e.g. 500k)
+          compression:      # enum of supported algos specific to the output
+          minRetryDuration:
+          maxRetryDuration:
         cloudwatch:
           region:
           groupBy:         # enum.  should support templating?
@@ -218,6 +222,12 @@ Additional specification of **audit** and **infrastructure** logs is allowed by 
           appName:  #templating?
           procID:  #templating?
           msgID:  #templating?
+    status:
+      conditions:    # []metav1.conditions
+      inputs:        # map[string] metav1.conditions
+      outputs:       # map[string] metav1.conditions
+      filters:       # map[string] metav1.conditions
+      pipelins:      # map[string] metav1.conditions      
 ```
 
 
