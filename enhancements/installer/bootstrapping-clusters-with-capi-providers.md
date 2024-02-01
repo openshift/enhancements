@@ -1,5 +1,5 @@
 ---
-title: cluster-api-based-installations
+title: bootstrapping-clusters-with-capi-providers
 authors:
   - "@patrickdillon"
   - "@vincepri"
@@ -25,15 +25,9 @@ creation-date: 2023-12-12
 last-updated: 2023-12-12
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/CORS-2840
-see-also:
-  - "/enhancements/this-other-neat-thing.md"
-replaces:
-  - "/enhancements/that-less-than-great-idea.md"
-superseded-by:
-  - "/enhancements/our-past-effort.md"
 ---
 
-# Enabling Cluster-API-based Installations via openshift-install
+# Bootstraping Clusters with CAPI Infrastructure Providers
 
 > NOTE: At the time of writing (Jan '24), Cluster API
 > is only used as an implementation detail to replace Terraform.
@@ -88,12 +82,14 @@ practices will remove this duplication and become more efficient.
 - To keep the user experience for day-zero operations unchanged or improved.
 - To not require any new runtime dependencies (e.g. containers).
 - To maintain compatibility for hive, particularly regarding `destroy` functionality
+- To continue delivering `openshift-install` for supported os/architectures: linux/x86, linux/arm, linux/powerpc, linux/s390x, darwin/x86, darwin/arm
 
 ### Non-Goals / Future work
 
 - Non-goal: To maintain a consistent infrastructure footprint as clusters previously created with Terraform
 - Non-goal: Support openshift cluster creation by using any tools other than `openshift-install`, such as `clusterctl`
-- Future work: To optimize build processes or binary size (this will be prioritized ASAP in a separate design doc)
+- Non-goal: To create a re-entrant installation process
+- Non-goal: To change the machine bootstrapping process, e.g. implementing a CAPI bootstap provider
 - Future work: To use an existing management cluster to install OpenShift
 - Future work: To pivot the CAPI manifests to the newly-installed cluster to enable day-2 infrastructure management within the cluster.
 - Future work: Replace Machine API (MAPI) with CAPI for day-2 machine management. This enhancement assumes we are still using MAPI Day 2.
@@ -208,7 +204,8 @@ Envtest was born due to a necessity to run integration tests for controllers aga
 (conversion, admission, validation), and managing the lifecycle of Custom Resource Definitions.
 
 Over time, `envtest` matured in a way that now can be used to run controllers in a local environment,
-reducing or eliminating the need for a full Kubernetes cluster to run controllers.
+reducing or eliminating the need for a full Kubernetes cluster to run controllers. `envtest` is part of the
+[controller-runtime project][controller-runtime].
 
 At a high level, the local control plane is responsible for:
 - Setting up temporary certificates for the local api-server and etcd.
@@ -221,6 +218,9 @@ At a high level, the local control plane is responsible for:
     - Certificates are generated and injected in the server, and the client certs in the api-server webhook configuration.
 - For each process that the local control plane manages, a health check (ping to `/healthz`) is required to pass; similarly how, when running in a Deployment, a health probe is configured.
   - The health check is only ran once, once OK, the process can continue.
+
+The [envtest APIs][envtestAPI] are a thin layer on top of running binaries and setting up flags or variables.
+The logic could be eventually moved into the installer, if warranted.
 
 #### Manifests
 
@@ -250,10 +250,16 @@ install-dir/cluster-api/
 1 directory, 12 files
 ```
 
+The cluster-api manifests are generated in parallel with all other manifests, particularly the machine-api manifests, which means that
+any changes to the control-plane machines within the manifests will also need to be made in the cluster-api manifests. Although, the
+machines are provisioned based off of the cluster-api manifests, post-install the control plane will be managed by the machine-api operator.
+
 The manifests within the `cluster-api` directory won't be written to the resulting OpenShift cluster, or included in bootstrap ignition.
 In future work, we expect these manifests to be pivoted to the cluster to enable the target cluster to take over managing its own infrastructure.
 
-The Cluster API manifests will be generated with `.spec` fields in the [manifest asset target][asset] with `.status` updated after cluster creation, which can be useful for debugging purposes.
+The Cluster API manifests will be generated with `.spec` fields in the [manifest asset target][asset] with `.status` updated after cluster creation.
+These manifests can be used by post-install commands such as `openshift-install gather bootstrap` in order to determine the IP addresses of the
+control-plane machines. The manifests would also be useful for general debugging tasks.
 
 #### Infrastructure Provisioning
 
@@ -344,30 +350,20 @@ The Installer codebase provides hooks into the provisioning lifecycle that can b
 In most cases, teams are encouraged in discussing and building issues in the respective upstream repositories first, e.g. `cluster-api` or `cluster-api-provider-aws` and only
 use the following hook as a fallback path.
 
-The AWS proof-of-concept implementation utilizes hooks defined in this interface:
+Provisioning of resources with CAPI is divided into two stages: _infrastructure_ (all non-machine related manifests) and _control plane_,
+with hooks before, in between, and after:
 
-```go
-type CAPIInfraHelper interface {
-	// PreProvision is called before provisioning using CAPI controllers has begun.
-	// and should be used to create dependencies needed for CAPI provisioning,
-	// such as IAM roles or policies.
-	PreProvision(in PreProvisionInput) error
-
-	// ControlPlaneAvailable is called once cluster.Spec.ControlPlaneEndpoint.IsValid()
-	// returns true, typically after load balancers have been provisioned. It can be used
-	// to create DNS records.
-	ControlPlaneAvailable(in ControlPlaneAvailableInput) error
-}
-
-type PreProvisionInput struct{ clusterID string }
-type ControlPlaneAvailableInput struct{ *clusterv1.Cluster }
-```
-
-For AWS, IAM roles needed by the CAPA provider are created with `PreProvision` and DNS Records are created upon `ControlPlaneAvailable`.
-This interface would be implemented by each cloud provider and can be expanded as needed.
+* PreProvision Hook - handle prequisites: e.g. IAM role creation, OS Disk upload
+* Provision Infrastructure - create `cluster` manifest on local control plane
+* InfraReady Hook - handle requirements in between cluster infrastructure and machine provisioning
+* Ignition Hook - similar to InfraReady but specifically for generating (bootstrap) ignition
+* Provision Machines - create bootstrap ignition and control-plane machines
+* PostProvision Hook - post-provision requirements, such as DNS record creation
 
 ##### Bootstrap Resources
 
+OpenShift will continue to use the same bootstrapping process, as described in the Installer
+[Cluster Installation Process][install-overview].
 The Bootstrap Machine is created like the other control plane nodes, by defining a CAPI Machine resource.
 Accordingly, the bootstrap machine can be deleted by simply deleting the object. This works for all platforms:
 
@@ -392,20 +388,45 @@ to ensure they are aware of the changes and are able to review.
 
 ### Drawbacks
 
+Users will be required to edit additional files if they are manually editing control-plane machine manifests.
+Changes would need to be made to both the machine-api and cluster-api manifests.
+
 #### External/Upstream dependencies
 
-By depending on CAPI providers whose codebases live in a repository external to the Installer,
-the process for developing features and delivering fixes is more complex than in a monolothic repo.
-While the same could be true for the Installer Terraform dependency; the CAPI providers will
-be more actively developed than their Terraform counterparts. Furthermore, it will be necessary
-to ensure that the CAPI providers used by the Installer match the version of those in the payload.
+As explained above, the Installer will embed binaries for each supported CAPI provider, as well
+as `etcd` and `kube-apiserver` binaries. Initially, CAPI providers will be vendored and built in
+the Installer repo. `etcd` and `kube-apiserver` will be copied from the release image.
 
-While this external dependency is a significant drawback, it is not unique to this design
-and is common throughout OpenShift (e.g. any time the API or library-go must be updated
-before being vendored into a component). To minimize the devex friction, we will focus
-on documenting a workflow for developing providers while working with the Installer.
+##### In-tree Dependency Vendoring
 
-Additionally, we will explore designs to solve or mitigate these issues.
+For the initial implementation, CAPI providers will be vendored and built within the Installer repo:
+
+```bash
+$ tree cluster-api/providers -L 2
+cluster-api/providers
+├── aws
+│   ├── go.mod
+│   ├── go.sum
+│   ├── tools.go
+│   └── vendor
+├── azure
+│   ├── go.mod
+│   ├── go.sum
+│   ├── tools.go
+│   └── vendor
+...
+```
+
+This follows a similar pattern to the current Terraform provider implementation and build. This
+pattern will be used initially due to its simplicity and existing support. This pattern has
+drawbacks because changes to providers need to be merged upstream first and then vendored 
+to the Installer. This aspect will be particularly problematic once CAPI providers are GA
+and we need to keep the Installer in-sync with other providers. Builds are also inefficient 
+in that providers are always rebuilt, even when unchanged.
+
+##### Copying Dependencies from Container Images
+
+[TODO]
 
 #### Disk space and memory
 
@@ -511,8 +532,7 @@ regarding the open question for the log bundle).
 
 As the providers will be running in a control loop, it would be possible to resolve certain issues
 (e.g. fix missing permissions or delete resources taking up quota) during an installation, but this would
-not be a documented procedure. Furthermore, it would be possible to make the installs re-entrant, but
-it would not be a goal for simplicity's sake.
+not be a documented procedure.
 
 ## Implementation History
 
@@ -533,6 +553,11 @@ It would also be possible to implement the installation using direct SDK calls f
 to the reasons stated above, using individual SDK implementations would not present a common framework across various
 cloud platforms.
 
+To mitigate the drawback of requiring additional editing of cluster-api manifests after changing machine-api manifests
+it would be possible to create the cluster-api manifests based on the machine-api manifests, rather than generating
+them in parallel based on the same inputs. Considering that we want to replace MAPI with CAPI in the long-term, it
+seems more future proof not to create a dependency between CAPI & MAPI manifests. Furthermore, it would be more
+user-friendly to keep all manifests within the same target (`manifests`).
 
 ## Infrastructure Needed [optional]
 
@@ -555,3 +580,6 @@ started right away.
 [asset]: https://github.com/openshift/installer/blob/master/docs/design/assetgeneration.md
 [AWSMachines]: https://github.com/openshift/installer/blob/ba66fc691e67b9bfe04204c3ece98e1386f66057/pkg/asset/machines/aws/awsmachines.go#L57-L85
 [CAPIMachines]: https://github.com/openshift/installer/blob/master/pkg/asset/machines/aws/awsmachines.go#L100-L118
+[controller-runtime]: https://github.com/kubernetes-sigs/controller-runtime
+[envtestAPI]: [https://github.com/kubernetes-sigs/controller-runtime/tree/main/pkg/internal/testing/controlplane
+[install-overview]: https://github.com/openshift/installer/blob/master/docs/user/overview.md#cluster-installation-process
