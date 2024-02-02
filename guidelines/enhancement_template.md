@@ -172,13 +172,6 @@ deploying an application in a cluster.
    applications, and gives the application administrator their
    credentials.
 
-#### Variation and form factor considerations [optional]
-
-How does this proposal intersect with Standalone OCP, Microshift and Hypershift?
-
-If the cluster creator uses a standing desk, in step 1 above they can
-stand instead of sitting down.
-
 See
 https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md#high-level-end-to-end-workflow
 and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples.
@@ -201,17 +194,38 @@ and finalizers, i.e. those mechanisms that change the OCP API surface and behavi
 Fill in the operational impact of these API Extensions in the "Operational Aspects
 of API Extensions" section.
 
-### Implementation Details/Notes/Constraints [optional]
+### Topology Considerations
 
-What are the caveats to the implementation? What are some important details that
-didn't come across above. Go in to as much detail as necessary here. This might
-be a good place to talk about core concepts and how they relate.
+#### Hypershift / Hosted Control Planes
 
-#### Hypershift [optional]
+Are there any unique considerations for making this change work with
+Hypershift?
 
-Does the design and implementation require specific details to account for the Hypershift use case?
 See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282
 
+How does it affect any of the components running in the
+management cluster? How does it affect any components running split
+between the management cluster and guest cluster?
+
+#### Standalone Clusters
+
+Is the change relevant for standalone clusters?
+
+#### Single-node Deployments or MicroShift
+
+How does this proposal affect the resource consumption of a
+single-node OpenShift deployment (SNO), CPU and memory?
+
+How does this proposal affect MicroShift? For example, if the proposal
+adds configuration options through API resources, should any of those
+behaviors also be exposed to MicroShift admins through the
+configuration file for MicroShift?
+
+### Implementation Details/Notes/Constraints
+
+What are some important details that didn't come across above in the
+**Proposal**? Go in to as much detail as necessary here. This might be
+a good place to talk about core concepts and how they relate.
 
 ### Risks and Mitigations
 
