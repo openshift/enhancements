@@ -58,13 +58,13 @@ around the enhancement process.
 
 ## Summary
 
-The `Summary` section is incredibly important for producing high quality
+The `Summary` section is important for producing high quality
 user-focused documentation such as release notes or a development roadmap. It
 should be possible to collect this information before implementation begins in
 order to avoid requiring implementors to split their attention between writing
 release notes and implementing the feature itself.
 
-A good summary is no more than one paragraph in length. More detail
+Your summary should be one paragraph long. More detail
 should go into the following sections.
 
 ## Motivation
@@ -90,12 +90,15 @@ implementation details.
 
 Here are some example user stories to show what they might look like:
 
-* As an OpenShift engineer, I want to write an enhancement, so that I can get feedback on my design and 
-build consensus about the approach to take before starting the implementation.
-* As a product manager, I want to review this enhancement proposal, so that I can make sure the customer 
-requirements are met by the design.
-* As an administrator, I want a one-click OpenShift installer, so that I can easily set up a new cluster
-without having to follow a long set of operations.
+* As an OpenShift engineer, I want to write an enhancement, so that I
+  can get feedback on my design and build consensus about the approach
+  to take before starting the implementation.
+* As a product manager, I want to review this enhancement proposal, so
+  that I can make sure the customer requirements are met by the
+  design.
+* As an administrator, I want a one-click OpenShift installer, so that
+  I can easily set up a new cluster without having to follow a long
+  set of operations.
 
 In each example, the persona's goal is clear, and the goal is clearly provided
 by the capability being described.
@@ -108,7 +111,7 @@ reducing the install to a single click simplifies that process.
 
 Here are some real examples from previous enhancements:
 * [As a member of OpenShift concerned with the release process (TRT, dev, staff engineer, maybe even PM),
-I want to opt in to pre-release features so that I can run periodic testing in CI and obtain a signal of 
+I want to opt in to pre-release features so that I can run periodic testing in CI and obtain a signal of
 feature quality.](https://github.com/openshift/enhancements/blob/master/enhancements/installer/feature-sets.md#user-stories)
 * [As a cloud-provider affiliated engineer / platform integrator / RH partner
 I want to have a mechanism to signal OpenShift's built-in operators about additional
@@ -137,13 +140,17 @@ enhancement.
 
 ## Proposal
 
-This is where we get down to the nitty gritty of what the proposal
-actually is. Describe clearly what will be changed, including all of
-the components that need to be modified and how they will be
+This section should explain what the proposal actually is. Enumerate
+*all* of the proposed changes at a *high level*, including all of the
+components that need to be modified and how they will be
 different. Include the reason for each choice in the design and
-implementation that is proposed here, and expand on reasons for not
-choosing alternatives in the Alternatives section at the end of the
-document.
+implementation that is proposed here.
+
+To keep this section succinct, document the details like API field
+changes, new images, and other implementation details in the
+**Implementation Details** section and record the reasons for not
+choosing alternatives in the **Alternatives** section at the end of
+the document.
 
 ### Workflow Description
 
@@ -242,11 +249,11 @@ Consider including folks that also work outside your immediate sub-project.
 ### Drawbacks
 
 The idea is to find the best form of an argument why this enhancement should
-_not_ be implemented.  
+_not_ be implemented.
 
-What trade-offs (technical/efficiency cost, user experience, flexibility, 
+What trade-offs (technical/efficiency cost, user experience, flexibility,
 supportability, etc) must be made in order to implement this? What are the reasons
-we might not want to undertake this proposal, and how do we overcome them?  
+we might not want to undertake this proposal, and how do we overcome them?
 
 Does this proposal implement a behavior that's new/unique/novel? Is it poorly
 aligned with existing user expectations?  Will it be a significant maintenance
@@ -474,14 +481,12 @@ Describe how to
 
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement.
+Similar to the `Drawbacks` section the `Alternatives` section is used
+to highlight and record other possible approaches to delivering the
+value proposed by an enhancement, including especially information
+about why the alternative was not selected.
 
 ## Infrastructure Needed [optional]
 
 Use this section if you need things from the project. Examples include a new
 subproject, repos requested, github details, and/or testing infrastructure.
-
-Listing these here allows the community to get the process for these resources
-started right away.
