@@ -93,6 +93,10 @@ Here are some example user stories to show what they might look like:
 * As an OpenShift engineer, I want to write an enhancement, so that I
   can get feedback on my design and build consensus about the approach
   to take before starting the implementation.
+* As an OpenShift engineer, I want to understand the rationale behind
+  a particular feature's design and alternatives considered, so I can
+  work on a new enhancement in that problem space knowing the history
+  of the current design better.
 * As a product manager, I want to review this enhancement proposal, so
   that I can make sure the customer requirements are met by the
   design.
