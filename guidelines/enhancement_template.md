@@ -252,17 +252,14 @@ Does this proposal implement a behavior that's new/unique/novel? Is it poorly
 aligned with existing user expectations?  Will it be a significant maintenance
 burden?  Is it likely to be superceded by something else in the near future?
 
-
-## Design Details
-
-### Open Questions [optional]
+## Open Questions [optional]
 
 This is where to call out areas of the design that require closure before deciding
 to implement the design.  For instance,
  > 1. This requires exposing previously private resources which contain sensitive
   information.  Can we do this?
 
-### Test Plan
+## Test Plan
 
 **Note:** *Section not required until targeted at a release.*
 
@@ -278,7 +275,7 @@ challenging to test should be called out.
 All code is expected to have adequate tests (eventually with coverage
 expectations).
 
-### Graduation Criteria
+## Graduation Criteria
 
 **Note:** *Section not required until targeted at a release.*
 
@@ -310,7 +307,7 @@ please be sure to include in the graduation criteria.**
 **Examples**: These are generalized examples to consider, in addition
 to the aforementioned [maturity levels][maturity-levels].
 
-#### Dev Preview -> Tech Preview
+### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
@@ -319,7 +316,7 @@ to the aforementioned [maturity levels][maturity-levels].
 - Enumerate service level indicators (SLIs), expose SLIs as metrics
 - Write symptoms-based alerts for the component(s)
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -332,12 +329,12 @@ to the aforementioned [maturity levels][maturity-levels].
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
 - Deprecate the feature
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
 If applicable, how will the component be upgraded and downgraded? Make sure this
 is in the test plan.
@@ -378,7 +375,7 @@ Downgrade expectations:
     CVO does not currently delete resources that no longer exist in
     the target version.
 
-### Version Skew Strategy
+## Version Skew Strategy
 
 How will the component handle version skew with other components?
 What are the guarantees? Make sure this is in the test plan.
@@ -392,7 +389,7 @@ enhancement:
 - Will any other components on the node change? For example, changes to CSI, CRI
   or CNI may require updating that component before the kubelet.
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 
 Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
 admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
@@ -421,8 +418,6 @@ especially how they impact the OCP system architecture and operational aspects.
   automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
   this enhancement)
 
-#### Failure Modes
-
 - Describe the possible failure modes of the API extensions.
 - Describe how a failure or behaviour of the extension will impact the overall cluster health
   (e.g. which kube-controller-manager functionality will stop working), especially regarding
@@ -430,7 +425,7 @@ especially how they impact the OCP system architecture and operational aspects.
 - Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
   and add them as reviewers to this enhancement.
 
-#### Support Procedures
+## Support Procedures
 
 Describe how to
 - detect the failure modes in a support situation, describe possible symptoms (events, metrics,
