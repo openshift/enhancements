@@ -477,11 +477,6 @@ Describe how to
   - Namespaces deletion will not delete all objects in etcd, leading to zombie
     objects when another namespace with the same name is created.
 
-## Implementation History
-
-Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`.
-
 ## Alternatives
 
 Similar to the `Drawbacks` section the `Alternatives` section is used to
