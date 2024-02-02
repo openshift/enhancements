@@ -74,8 +74,6 @@ practices will remove this duplication and become more efficient.
 - As an existing user of the installer, I want to continue to use the installer binary (e.g. `create cluster`) in the same environments and with existing automation.
 - As an advanced user or cluster administrator, I want to be able to edit the CAPI infrastructure manifests so that I can customize control-plane infrastructure.
 
-
-
 ### Goals
 
 - To provide a common experience across platforms for users and `openshift-install` developers
@@ -95,6 +93,7 @@ practices will remove this duplication and become more efficient.
 - Non-goal: To change the machine bootstrapping process, e.g. implementing a CAPI bootstap provider
 - Future work: To use an existing management cluster to install OpenShift
 - Future work: To pivot the CAPI manifests to the newly-installed cluster to enable day-2 infrastructure management within the cluster.
+  - Collaborate with Assisted Installer and HIVE for any related changes required.
 - Future work: Replace Machine API (MAPI) with CAPI for day-2 machine management. This enhancement assumes we are still using MAPI Day 2.
 - Future work: To provide an extensible framework to plug-in new infrastructure cloud providers.
 
@@ -193,7 +192,6 @@ configuration files and invokes Terraform using the `tf-exec` library.
 
 ![alt terraform diagram](terraform_embedded.jpg)
 
-
 We can follow a similar pattern to run CAPI controllers locally on the Installer host. In addition
 to the CAPI controller binaries, `kube-apiserver` and `etcd` are embedded in order to run a local
 control plane, orchestrated with `envtest`.
@@ -221,6 +219,7 @@ At a high level, the local control plane is responsible for:
     - Certificates are generated and injected in the server, and the client certs in the api-server webhook configuration.
 - For each process that the local control plane manages, a health check (ping to `/healthz`) is required to pass; similarly how, when running in a Deployment, a health probe is configured.
   - The health check is only ran once, once OK, the process can continue.
+
 
 The [envtest APIs][envtestAPI] are a thin layer on top of running binaries and setting up flags or variables.
 The logic could be eventually moved into the installer, if warranted.
@@ -383,11 +382,23 @@ Further work needs to be done to determine how to delete additional bootstrap re
 and the bootstrap ignition S3 bucket. These could be deleted either through updating the relevant manifests or created &
 deleted out-of-band using hooks.
 
+##### Backward compatibility
+
+As covered in [OpenShift API compatibility](https://docs.openshift.com/container-platform/4.14/rest_api/understanding-compatibility-guidelines.html):
+
+> No assurances are made at this time that a new installation of a product minor release will have the same functional defaults as a version of the product that was installed with a prior minor release and upgraded to the equivalent version. For example, future versions of the product may provision cloud infrastructure with different defaults than prior minor versions. In addition, different default security choices may be made in future versions of the product than those made in past versions of the product. Past versions of the product will forward upgrade, but preserve legacy choices where appropriate specifically to maintain backwards compatibility.
+
+The changes proposed in this enhancement allow the OpenShift Installer to change the underlying mechanics on how an OpenShift cluster is created from an InstallConfig. The change of technology carries structural differences in how the infrastructure is provisioned, defaults, or the topology of the cluster.
+
+Given an InstallConfig to both systems the enhancement guarantees a functionally equivalent OpenShift cluster.
+
+In the best case scenario, OpenShift users rely on tags or labels attached to cloud resources when automating specific parts of their infrastructure. While this can be true in most cases, a goal of this proposal is to document in details the underlying structural differences.
+
 ### Risks and Mitigations
 
-While we do not expect these changes to introduce a significant security risk, we are working with product security teams
-to ensure they are aware of the changes and are able to review.
+While we do not expect these changes to introduce a significant security risk, we are working with product security teams to ensure they are aware of the changes and are able to review.
 
+Each Cluster API provider's created infrastructure should be reviewed by product security and subject area experts to ensure the new infrastructure topologies considered are on par with today's standards.
 
 ### Drawbacks
 
@@ -422,9 +433,9 @@ cluster-api/providers
 
 This follows a similar pattern to the current Terraform provider implementation and build. This
 pattern will be used initially due to its simplicity and existing support. This pattern has
-drawbacks because changes to providers need to be merged upstream first and then vendored 
+drawbacks because changes to providers need to be merged upstream first and then vendored
 to the Installer. This aspect will be particularly problematic once CAPI providers are GA
-and we need to keep the Installer in-sync with other providers. Builds are also inefficient 
+and we need to keep the Installer in-sync with other providers. Builds are also inefficient
 in that providers are always rebuilt, even when unchanged.
 
 ##### Copying Dependencies from Container Images
@@ -469,22 +480,25 @@ updating: kube-apiserver (deflated 72%)
 
 ### Open Questions [optional]
 
-1. UX design during install process as well as during failure (log collection). The Installer will dump
+- UX design during install process as well as during failure (log collection). The Installer will dump
 (potentially prettified) controller logs. We expect that this question will become easier to answer further
 into the development process.
 
-2. Whether to use downstream OpenShift-specific `kube-apiserver` and `etcd` dependencies and how to source them?
+- Whether to use downstream OpenShift-specific `kube-apiserver` and `etcd` dependencies and how to source them?
 
-3. When should the Installer declare infrastructure provisioning failed?
+- When should the Installer declare infrastructure provisioning failed?
+  - Today we have different timeouts at different stages of the installation process; during the first phase of this enhancement
+    we'll keep the same values in place. Long term, we could allow upper bound customization of these values.
 
 ### Test Plan
 
-The functionality described in this enhancement is gated by `FeatureGateClusterAPIInstall`.
+The functionality described in this enhancement is gated by a new Feature Gate called `ClusterAPIInstall`.
+
 In 4.15, the `installer-altinfra` image was introduced to serve as a Terraform-free variant of the
 `installer` image until Terraform is removed from the `installer` image, at which point
 `installer-altinfra` will be removed from the release image.
 
-CI testing will initially begin in the `installer-altinfra`image to avoid
+CI testing will initially begin in the `installer-altinfra` image to avoid
 build time issues associated with Terraform and to allow rapid introduction
 of CI testing while working on the solution of opying Dependencies from Container Images
 
@@ -494,21 +508,31 @@ of CI testing while working on the solution of opying Dependencies from Containe
 
 #### Dev Preview -> Tech Preview
 
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
+Users can opt-in to use a Cluster API based installation by including in the InstallConfig a custom feature set:
+
+```
+[...]
+featureSet: CustomNoUpgrade
+featureGates:
+- ClusterAPIInstall=true
+```
+
+- Ability to utilize the enhancement end to end.
+- End user documentation, relative API stability.
 
 #### Tech Preview -> GA
 
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
+- More testing (upgrade, downgrade, scale).
+- Sufficient time for feedback.
+- Available by default.
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-
+  - Document detailed deltas in cluster infrastructure created by Terraform and Cluster API.
+- Infrastructure topology security posture review for each provider.
 
 #### Removing a deprecated feature
 
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
+- Announce deprecation and support policy of the existing feature.
+- Deprecate the feature gate.
 
 ### Upgrade / Downgrade Strategy
 
@@ -551,17 +575,28 @@ History`.
 
 ## Alternatives
 
+
+#### MicroShift
+
+While we've considered using MicroShift for a local control plane, which can run in different platforms using tools like Podman Desktop or on RHEL directly, the requirement of having access to a RHEL Virtual Machine is a high bar to reach given the goal of not introducing any dependency on runtimes and being able to run in a variety of platforms, including CI systems.
+
+#### Infrastructure-as-code Tools
+
 Using other infrastructure-as-code alternatives such as Pulumi, Ansible, or OpenTofu
 all have their own individual drawbacks. We prefer the CAPI solution over
 these alternatives because it:
 
-* streamlines Installer development (we do not need to re-implement features for the control plane)
-* lays the foundation for OpenShift to implement future CAPI features
-* requires less development effort, as CAPI providers are already setup to provision infrastructure for a cluster
+* Streamlines Installer development (we do not need to re-implement features for the control plane)
+* Lays the foundation for OpenShift to implement future CAPI features
+* Requires less development effort, as CAPI providers are already setup to provision infrastructure for a cluster
+
+#### Direct SDK calls
 
 It would also be possible to implement the installation using direct SDK calls for the cloud provider. In addition
 to the reasons stated above, using individual SDK implementations would not present a common framework across various
 cloud platforms.
+
+#### Separate manifest creation targets for Cluster/Machine APIs (implementation detail)
 
 To mitigate the drawback of requiring additional editing of cluster-api manifests after changing machine-api manifests
 it would be possible to create the cluster-api manifests based on the machine-api manifests, rather than generating
