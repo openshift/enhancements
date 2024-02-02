@@ -42,7 +42,10 @@ without requiring access to an external management cluster or a local container 
 By running a Kubernetes control plane and CAPI-provider controllers as
 subprocesses on the installer host, `openshift-install` can use CAPI and its
 providers in a similar manner to how Terraform and its providers are currently
-being used.
+being used. The outcome would be a removal of Terraform dependencies in
+installer-provisioned installs as well as added the ability to produce
+cluster-api manifests to `openshift-install`, which lay the foundation
+for future OpenShift features.
 
 ## Motivation
 
@@ -476,8 +479,15 @@ into the development process.
 
 ### Test Plan
 
-As this is replacing existing functionality in the Installer, we can rely on existing
-testing infrastructure.
+The functionality described in this enhancement is gated by `FeatureGateClusterAPIInstall`.
+In 4.15, the `installer-altinfra` image was introduced to serve as a Terraform-free variant of the
+`installer` image until Terraform is removed from the `installer` image, at which point
+`installer-altinfra` will be removed from the release image.
+
+CI testing will initially begin in the `installer-altinfra`image to avoid
+build time issues associated with Terraform and to allow rapid introduction
+of CI testing while working on the solution of opying Dependencies from Container Images
+
 
 ### Graduation Criteria
 
