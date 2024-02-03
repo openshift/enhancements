@@ -493,14 +493,23 @@ into the development process.
 ### Test Plan
 
 The functionality described in this enhancement is gated by a new Feature Gate called `ClusterAPIInstall`.
+A major goal of this enhancement is feature parity, which means we can leverage existing test job definitions
+and infrastructure for testing. The initial round of testing will be running the standard `e2e-<platform>-ovn`
+tests with the feature gate enabled; and adding additional tests is as simple as copying an existing config and
+adding the gate.
 
-In 4.15, the `installer-altinfra` image was introduced to serve as a Terraform-free variant of the
-`installer` image until Terraform is removed from the `installer` image, at which point
-`installer-altinfra` will be removed from the release image.
+In 4.15, the `installer-altinfra` image was introduced to serve as a Terraform-free alternative to the
+`installer` image. CI testing will initially begin in this image (using a [variant](variant)) to enjoy the
+benefits of a Terraform-free build and to avoid introducing temporary changes to the `installer` image Dockerfile,
+which would be necessary while working on the solution for
+[copying dependencies from container images](#dependencies-from-container-images). The `OPENSHIFT_CLUSTER_API` flag
+will be used during the installer build to obtain the `kube-apiserver` and `etcd` binary dependencies from the internet;
+the flag is enabled through Dockerfile args in the `installer-altinfra` image.  Once the work of copying dependencies
+from images is ready, we will be able to test that build functionality by running the CAPI-feature-gated installs 
+without the `OPENSHIFT_CLUSTER_API` envvar in the `installer` image.
 
-CI testing will initially begin in the `installer-altinfra` image to avoid
-build time issues associated with Terraform and to allow rapid introduction
-of CI testing while working on the solution of opying Dependencies from Container Images
+While we are using the `OPENSHIFT_CLUSTER_API` envvar, we are able to test in CI but the Installer
+cannot be tested in nightlies or release candidates, due to egress lockdown in the OpenShift Build System.
 
 
 ### Graduation Criteria
@@ -519,6 +528,7 @@ featureGates:
 
 - Ability to utilize the enhancement end to end.
 - End user documentation, relative API stability.
+- Build using `OPENSHIFT_CLUSTER_API` envvar
 
 #### Tech Preview -> GA
 
@@ -528,6 +538,11 @@ featureGates:
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
   - Document detailed deltas in cluster infrastructure created by Terraform and Cluster API.
 - Infrastructure topology security posture review for each provider.
+- Installer image is built by copying `kube-apiserver` & `etcd` binaries from release images
+
+#### Future Work
+- Follow `kube-apiserver` & `etcd` pattern, and copy CAPI controller binaries from release images
+
 
 #### Removing a deprecated feature
 
@@ -628,3 +643,4 @@ started right away.
 [controller-runtime]: https://github.com/kubernetes-sigs/controller-runtime
 [envtestAPI]: [https://github.com/kubernetes-sigs/controller-runtime/tree/main/pkg/internal/testing/controlplane
 [install-overview]: https://github.com/openshift/installer/blob/master/docs/user/overview.md#cluster-installation-process
+[variant]: https://docs.ci.openshift.org/docs/how-tos/contributing-openshift-release/#variants
