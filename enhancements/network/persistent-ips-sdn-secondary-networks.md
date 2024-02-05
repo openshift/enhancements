@@ -105,10 +105,11 @@ for VM creation:
 1. the user provisions a VM object
 2. the KubeVirt controller creates an IPAMClaim for each multus non-default
   network in the corresponding VMI spec
-3. OVN-K reacts to the creation of the `IPAMClaim`s. It will allocate IP
-  addresses from the required IP pools, and **only afterward** update the
-  corresponding `IPAMClaim` with the generated IPs. Users can only rely / use
-  the `IPAMClaim` status for informational purposes.
+3. OVN-K allocates an IP address for pod requests featuring an
+  `ip-claim-reference` pointing to an `IPAMClaim` for one of the networks it
+  currently manages. **Only afterwards** will it update the corresponding
+  `IPAMClaim` with the generated IPs. Users can only rely / use the `IPAMClaim`
+  status for informational purposes.
 4. this step occurs in parallel to step 3; KubeVirt templates the KubeVirt
   launcher pod, featuring in each network selection element the name of the
   claim where the CNI will find the IP address.
