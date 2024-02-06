@@ -162,13 +162,13 @@ apiVersion: "k8s.cni.cncf.io/v1"
 kind: NetworkAttachmentDefinition
 metadata:
   name: bridge-conf
-spec:         
-  config: '{                                
+spec:
+  config: '{
       "cniVersion": "0.3.0",
       "type": "bridge",
       "bridge": "test-bridge",
-      "mode": "bridge",                                                   
-      "ipam": {  
+      "mode": "bridge",
+      "ipam": {
         "type": "host-local",
         "subnet": "192.168.20.0/24",
         "rangeStart": "192.168.20.200",
@@ -186,10 +186,10 @@ Main one is `k8s.v1.cni.cncf.io/networks` which specifies which NAD should be ad
 Multiple NADs can be specified by separating them with comma. NADs can be even reused.
 Examples from Multus docs:
 ```yaml
-apiVersion: v1                  
-kind: Pod                        
+apiVersion: v1
+kind: Pod
 metadata:
-  name: samplepod  
+  name: samplepod
   annotations:
     k8s.v1.cni.cncf.io/networks: bridge-conf
 ---
