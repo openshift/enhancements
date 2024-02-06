@@ -448,7 +448,7 @@ History`. -->
 
 ### Thick plugin architecture
 
-In 2022 Multus was rewritten in manner called "thick plugin" which changed its mode of operation significantly.
+In 2022 Multus was recreated in a different way called "thick plugin" which changed its mode of operation significantly.
 Major difference is that DaemonSet is no longer dummy (i.e. Thin: creates kubeconfig, config, copies Multus
 CNI binary to the host, and finally sleeps or watches files to update the kubeconfig and/or config).
 Instead it is the brain of the operation: CNI binary on the host is only a shim that forwards the request
