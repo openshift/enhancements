@@ -448,12 +448,15 @@ in that providers are always rebuilt, even when unchanged.
 
 With the introduction of the Local Control Plane, new required components are being run during cluster creation.
 
+Memory runtime:
 - `api-server` uses ~280MB and `etcd` ~52MB
 - Cluster API
   - Core controller uses ~28MB
   - Infrastructure controller (AWS, in testing) uses ~35MB
 
-When compared to Terraform, the runtime memory footprint is well-within the current usare or limitations (TODO: provide Terraform benchmark); the disk footprint increases by what's required of `etcd` which is around 128MB while creating an OpenShift cluster on AWS.
+When compared to Terraform, the runtime memory footprint is well-within the current usage or limitations (TODO: provide Terraform benchmark).
+
+The disk footprint increases by what's required for `etcd` which is around 128MB while creating an OpenShift cluster on AWS.
 
 #### Binary size
 
