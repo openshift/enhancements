@@ -236,7 +236,9 @@ configuration file for MicroShift?
 
 What are some important details that didn't come across above in the
 **Proposal**? Go in to as much detail as necessary here. This might be
-a good place to talk about core concepts and how they relate.
+a good place to talk about core concepts and how they relate. While it is useful
+to go into the details of the code changes required, it is not necessary to show
+how the code will be rewritten in the enhancement.
 
 ### Risks and Mitigations
 
