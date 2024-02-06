@@ -358,6 +358,10 @@ time for Pods using CNI network as more preconditions are added (waiting for two
    to MicroShift's core cleanup script? This architecture could be based on existing
    [kubectl plugin](https://kubernetes.io/docs/tasks/extend-kubectl/kubectl-plugins/) architecture
    where plugins start with `kubectl-`, so we could use `microshift-cleanup-plugin-` prefix.
+1. Should we enable namespace isolation? This requires NetworkAttachmentDefinition and Pod to be in the same
+   namespace.
+   - There is an additional option `--global-namespaces` where we can define a namespace so that NAD residing
+     in the namespace can be referenced in Pod from any other namespace.
 
 ### Test Plan
 
