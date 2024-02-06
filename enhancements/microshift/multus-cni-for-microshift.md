@@ -56,6 +56,12 @@ Providing Multus CNI for MicroShift will help users:
 ### Goals
 
 - Provide optional Multus CNI for MicroShift clusters that can be added to existing clusters
+- Provide container network plugins that are planned to be supported with MicroShift and Multus,
+  meaning:
+  - IPAMs: host-local, dhcp, static
+  - CNIs:
+    - bridge - must have
+    - macvlan, ipvlan - stretch goal
 
 ### Non-Goals
 
