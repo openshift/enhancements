@@ -344,6 +344,10 @@ If these limitations are ever addressed (see [NP-606](https://issues.redhat.com/
 [NP-608](https://issues.redhat.com/browse/NP-608)), they would, most likely, be part of the thick
 Multus plugin.
 
+When installing Multus CNI, CRI-O will be configured to use Multus CNI meaning that CRI-O will
+wait for Multus and Multus will wait for ovn-kubernetes. This can result in slight increase of startup
+time for Pods using CNI network as more preconditions are added (waiting for two CNIs in sequence).
+
 ## Design Details
 
 ### Open Questions [optional]
