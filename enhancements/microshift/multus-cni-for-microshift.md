@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2024-01-16
-last-updated: 2024-01-23
+last-updated: 2024-02-06
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-473
 # see-also:
@@ -443,6 +443,32 @@ Warning  NoNetworkFound          0s                 multus             cannot fi
 To address such issues, user can:
 - verify values in both NetworkAttachmentDefinitions and Annotations,
 - remove Annotation to verify if the Pod is created successfully with just the default network.
+
+Other support procedure, more intended for administrators of the device, is inspecting logs
+of `crio.service` or `microshift.service` (especially those coming from `kubelet` component).
+
+For example, following error from kubelet informs that there the primary CNI is not running.
+It can be because the Pods are not starting or because CRI-O misconfiguration (wrong
+`cni_default_network` setting).
+
+```
+Feb 06 13:47:31 dev microshift[1494]: kubelet E0206 13:47:31.163290    1494 pod_workers.go:1298] "Error syncing pod, skipping" err="network is not ready: container runtime network not ready: NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: No CNI configuration file in /etc/cni/net.d/. Has your network provider started?" pod="default/samplepod" podUID="fe0f7f7a-8c47-4488-952b-8abc0d8e2602"
+```
+
+Below is an example log when Pod cannot be created because the annotations reference
+NetworkAttachmentDefinition that doesn't exist.
+
+> Relevant log:
+>
+> cannot find a network-attachment-definition (bad-conf) in namespace (default): network-attachment-definitions.k8s.cni.cncf.io \"bad-conf\" not found" pod="default/samplepod"`
+
+```
+Feb 06 13:51:11 dev microshift[1476]: kubelet I0206 13:51:11.604745    1476 util.go:30] "No sandbox for pod can be found. Need to start a new one" pod="default/samplepod"
+Feb 06 13:51:11 dev microshift[1476]: kubelet E0206 13:51:11.696487    1476 remote_runtime.go:193] "RunPodSandbox from runtime service failed" err="rpc error: code = Unknown desc = failed to create pod network sandbox k8s_samplepod_default_5fa13105-1bfb-4c6b-aee7-3437cfb50e25_0(7517818bd8e85f07b551f749c7529be88b4e7daef0dd572d049aa636950c76c6): error adding pod default_samplepod to CNI network \"multus-cni-network\": plugin type=\"multus\" name=\"multus-cni-network\" failed (add): Multus: [default/samplepod/5fa13105-1bfb-4c6b-aee7-3437cfb50e25]: error loading k8s delegates k8s args: TryLoadPodDelegates: error in getting k8s network for pod: GetNetworkDelegates: failed getting the delegate: getKubernetesDelegate: cannot find a network-attachment-definition (bad-conf) in namespace (default): network-attachment-definitions.k8s.cni.cncf.io \"bad-conf\" not found"
+Feb 06 13:51:11 dev microshift[1476]: kubelet E0206 13:51:11.696543    1476 kuberuntime_sandbox.go:72] "Failed to create sandbox for pod" err="rpc error: code = Unknown desc = failed to create pod network sandbox k8s_samplepod_default_5fa13105-1bfb-4c6b-aee7-3437cfb50e25_0(7517818bd8e85f07b551f749c7529be88b4e7daef0dd572d049aa636950c76c6): error adding pod default_samplepod to CNI network \"multus-cni-network\": plugin type=\"multus\" name=\"multus-cni-network\" failed (add): Multus: [default/samplepod/5fa13105-1bfb-4c6b-aee7-3437cfb50e25]: error loading k8s delegates k8s args: TryLoadPodDelegates: error in getting k8s network for pod: GetNetworkDelegates: failed getting the delegate: getKubernetesDelegate: cannot find a network-attachment-definition (bad-conf) in namespace (default): network-attachment-definitions.k8s.cni.cncf.io \"bad-conf\" not found" pod="default/samplepod"
+Feb 06 13:51:11 dev microshift[1476]: kubelet E0206 13:51:11.696565    1476 kuberuntime_manager.go:1172] "CreatePodSandbox for pod failed" err="rpc error: code = Unknown desc = failed to create pod network sandbox k8s_samplepod_default_5fa13105-1bfb-4c6b-aee7-3437cfb50e25_0(7517818bd8e85f07b551f749c7529be88b4e7daef0dd572d049aa636950c76c6): error adding pod default_samplepod to CNI network \"multus-cni-network\": plugin type=\"multus\" name=\"multus-cni-network\" failed (add): Multus: [default/samplepod/5fa13105-1bfb-4c6b-aee7-3437cfb50e25]: error loading k8s delegates k8s args: TryLoadPodDelegates: error in getting k8s network for pod: GetNetworkDelegates: failed getting the delegate: getKubernetesDelegate: cannot find a network-attachment-definition (bad-conf) in namespace (default): network-attachment-definitions.k8s.cni.cncf.io \"bad-conf\" not found" pod="default/samplepod"
+Feb 06 13:51:11 dev microshift[1476]: kubelet E0206 13:51:11.696625    1476 pod_workers.go:1298] "Error syncing pod, skipping" err="failed to \"CreatePodSandbox\" for \"samplepod_default(5fa13105-1bfb-4c6b-aee7-3437cfb50e25)\" with CreatePodSandboxError: \"Failed to create sandbox for pod \\\"samplepod_default(5fa13105-1bfb-4c6b-aee7-3437cfb50e25)\\\": rpc error: code = Unknown desc = failed to create pod network sandbox k8s_samplepod_default_5fa13105-1bfb-4c6b-aee7-3437cfb50e25_0(7517818bd8e85f07b551f749c7529be88b4e7daef0dd572d049aa636950c76c6): error adding pod default_samplepod to CNI network \\\"multus-cni-network\\\": plugin type=\\\"multus\\\" name=\\\"multus-cni-network\\\" failed (add): Multus: [default/samplepod/5fa13105-1bfb-4c6b-aee7-3437cfb50e25]: error loading k8s delegates k8s args: TryLoadPodDelegates: error in getting k8s network for pod: GetNetworkDelegates: failed getting the delegate: getKubernetesDelegate: cannot find a network-attachment-definition (bad-conf) in namespace (default): network-attachment-definitions.k8s.cni.cncf.io \\\"bad-conf\\\" not found\"" pod="default/samplepod" podUID="5fa13105-1bfb-4c6b-aee7-3437cfb50e25"
+```
 
 ## Implementation History
 
