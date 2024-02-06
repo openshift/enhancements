@@ -105,6 +105,10 @@ the specifics.
 
 1. The existing resource metrics API implementation, prometheus-adapter, is deployed on the guest cluster's data plane by CMO which is itself deployed by the Cluster Version operator. The same will be true for the Metrics server because it requires kubelet scraping. Consequently, we don't anticipate any effects on Hypershift as part of this enhancement.
 
+#### Impact for Windows nodes
+
+1. We took help from the OCP Windows team to verify that no impact on windows nodes in the cluster and metrics for windows nodes are reported correctly. Both `oc adm top pods` and `oc adm top nodes` commands work as expected, even for the win-webserver pods. More details in [MON-3514](https://issues.redhat.com/browse/MON-3514).
+
 #### Configuration/Enablement
 
 Initially the Metrics Server must be explicitly enabled by the user by configuring the `TechPreviewNoUpgrade` feature set. 
