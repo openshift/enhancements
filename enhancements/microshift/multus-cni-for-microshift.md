@@ -86,13 +86,19 @@ How should cleanup of the Multus artifacts look like is an open question (see Op
 **User** is a human user responsible for setting up and managing Edge Devices.
 **Application** is user's workload that intends to use additional interfaces.
 
+#### Installation and usage on RHEL For Edge (ostree)
+
+> In this workflow, it doesn't matter if the device is already running R4E with existing MicroShift cluster.
+> Deployment of new commit requires reboot which will force recreation of the Pod networking after adding Multus.
+
 1. User gathers all information about the networking environment of the edge device.
 1. User prepares NetworkAttachmentDefinition (NAD) CRs that will allow Application to be part of the specified network.
 1. User prepares ostree commit that contains:
    - (optional) Init procedures to configure OS for usage of the additional network
    - MicroShift RPMs
    - Multus for MicroShift RPM
-   - Application with the NetworkAttachmentDefinition CRs.
+   - NetworkAttachmentDefinition CRs
+   - Application using mentioned NetworkAttachmentDefinition CRs
 1. User deploys the ostree commit onto the edge device.
 1. Edge device boots:
 1. (optional) Init procedures are configuring OS and networks
@@ -101,6 +107,32 @@ How should cleanup of the Multus artifacts look like is an open question (see Op
 1. MicroShift applies Application's manifests that include NetworkAttachmentDefinitions
 1. Application's Pod are created, Multus inspects Pod's annotations and sets up 
    additional interfaces based on matching NetworkAttachmentDefinitions
+1. Application's containers are running, they can utilize additional interfaces
+
+#### Installation and usage on RHEL (rpm)
+
+##### Adding to existing MicroShift cluster
+
+1. MicroShift already runs on the device.
+1. User installs `microshift-multus` RPM
+1. User reboots the host
+1. Host boots, MicroShift starts and deploys Multus from the manifests.d.
+1. User creates NetworkAttachmentDefinition CRs
+1. User deploys application that uses NetworkAttachmentDefinitions
+1. When network for Pods is created, Multus calls additional CNIs according to annotations
+   and NetworkAttachmentDefinitions
+1. Application's containers are running, they can utilize additional interfaces
+
+##### Adding to MicroShift cluster before first start
+
+1. MicroShift is not installed. MicroShift's database (`/var/lib/microshift`) does not exist.
+1. User installs `microshift` and `microshift-multus` RPMs.
+1. User enables and starts `microshift.service`
+1. MicroShift starts and deploys Multus from the manifests.d.
+1. User creates NetworkAttachmentDefinition CRs
+1. User deploys application that uses NetworkAttachmentDefinitions
+1. When network for Pods is created, Multus calls additional CNIs according to annotations
+   and NetworkAttachmentDefinitions
 1. Application's containers are running, they can utilize additional interfaces
 
 ### API Extensions
