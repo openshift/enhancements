@@ -288,9 +288,11 @@ Because the Multus image used by OpenShift has a large size that is not acceptab
 will be prepared and will only include relevant artifacts such as entrypoint script/binary and
 Multus CNI binary (which is copied to host's `/opt/cni/bin`).
 
-To supply network plugins (CNIs) such as bridge, vlan, macvlan, and so on a new image will be prepared
+To supply network plugins (CNIs) such as `bridge`, `ipvlan`, and `macvlan` a new image will be prepared
 so MicroShift uses the same binaries as OpenShift (alternative is using RHEL's networkplugins RPM - see alternatives).
 This image will also contain IPAM binaries such as `static`, `dynamic (DHCP)`, and `host-local`.
+
+Both of these images will be part of the OpenShift payload which MicroShift references during rebase procedure.
 
 #### Hypershift [optional]
 
