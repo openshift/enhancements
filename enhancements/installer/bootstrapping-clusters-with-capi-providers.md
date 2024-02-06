@@ -462,7 +462,7 @@ The disk footprint increases by what's required for `etcd` which is around 128MB
 
 > NOTE: All tests are performed on a MacOS system at the time of writing.
 
-The `openshift-install` resulting binary size, with Cluster API bundled binaries reaches ~515MB, of which, the bundled binaries account 228MB. By comparison, the binary available for download on `console.redhat.com` for MacOS, once upacked, is 732MB.
+The `openshift-install` resulting binary size, with Cluster API bundled binaries (excluding alicloud, libvirt) reaches ~515MB, of which, the bundled binaries account 228MB. By comparison, the binary available for download on `console.redhat.com` for MacOS, once upacked, is 732MB.
 
 The binaries are stored in `zip` format within the installer, and unpacked at runtime; from the `zip` output, the space savings are quite substantial:
 
@@ -508,7 +508,7 @@ which would be necessary while working on the solution for
 [copying dependencies from container images](#dependencies-from-container-images). The `OPENSHIFT_CLUSTER_API` flag
 will be used during the installer build to obtain the `kube-apiserver` and `etcd` binary dependencies from the internet;
 the flag is enabled through Dockerfile args in the `installer-altinfra` image.  Once the work of copying dependencies
-from images is ready, we will be able to test that build functionality by running the CAPI-feature-gated installs 
+from images is ready, we will be able to test that build functionality by running the CAPI-feature-gated installs
 without the `OPENSHIFT_CLUSTER_API` envvar in the `installer` image.
 
 While we are using the `OPENSHIFT_CLUSTER_API` envvar, we are able to test in CI but the Installer
