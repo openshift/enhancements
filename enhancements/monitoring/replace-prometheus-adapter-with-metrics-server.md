@@ -107,7 +107,7 @@ the specifics.
 
 #### Impact for Windows nodes
 
-1. We took help from the OCP Windows team to verify that no impact on windows nodes in the cluster and metrics for windows nodes are reported correctly. Both `oc adm top pods` and `oc adm top nodes` commands work as expected, even for the win-webserver pods. More details in [MON-3514](https://issues.redhat.com/browse/MON-3514).
+1. We took help from the OCP Windows team to verify that no impact on Windows nodes in the cluster and metrics for Windows nodes are reported correctly. Both `oc adm top pods` and `oc adm top nodes` commands work as expected, even for the win-webserver pods. More details in [MON-3514](https://issues.redhat.com/browse/MON-3514).
 
 #### Configuration/Enablement
 
