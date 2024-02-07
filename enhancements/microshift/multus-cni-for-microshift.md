@@ -202,10 +202,6 @@ metadata:
     k8s.v1.cni.cncf.io/networks: bridge-conf,bridge-conf
 ```
 
-Other Pod annotation is `v1.multus-cni.io/default-network` which overrides default CNI from Multus'
-configuration file (created on DaemonSet start). This annotation is optional and its absence means
-Pod's default network will be ovn-kubernetes.
-
 Information about the Pod's interfaces are reported back by Multus also as an annotation `k8s.v1.cni.cncf.io/network-status`.
 Example below shows annotations of a Pod with two `bridge` CNI interfaces:
 ```yaml
