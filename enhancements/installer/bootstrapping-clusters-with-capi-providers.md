@@ -487,8 +487,6 @@ updating: kube-apiserver (deflated 72%)
 (potentially prettified) controller logs. We expect that this question will become easier to answer further
 into the development process.
 
-- Whether to use downstream OpenShift-specific `kube-apiserver` and `etcd` dependencies and how to source them?
-
 - When should the Installer declare infrastructure provisioning failed?
   - Today we have different timeouts at different stages of the installation process; during the first phase of this enhancement
     we'll keep the same values in place. Long term, we could allow upper bound customization of these values.
