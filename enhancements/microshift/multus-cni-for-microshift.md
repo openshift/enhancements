@@ -266,6 +266,9 @@ Because of the differences with OpenShift (which uses thick Multus plugin), exis
 manifests will require changes to make them suitable for MicroShift. These manifests will reside
 in MicroShift repository.
 
+Because one of the required IPAMs is the `dhcp` (dynamic), manifests will also include
+a DHCP server DaemonSet.
+
 Updating necessary image references will be part of existing rebase procedure.
 
 #### RPM package
