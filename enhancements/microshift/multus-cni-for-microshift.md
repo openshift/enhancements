@@ -517,6 +517,21 @@ maintaining these binaries and quickly addressing any CVEs or bugs. These binari
 a container image as part of the OpenShift payload which will ensure that we do not have version
 skew with MicroShift or Multus and they will match binaries shipped with OpenShift.
 
+### Building an operator based on Cluster Network Operator
+
+In OpenShift Multus manifests can be templated according to the needs. This includes working with
+SDN or OVN-K CNI, deploying optional DHCP server, or deploying opetional whereabouts reconciler.
+Rendering Multus manifests is responsibility of Cluster Network Operator (CNO).
+
+During review of this enhancement a question was asked: should we create an operator with subset of
+CNO's functionality?
+Since CNO mostly renders manifests, there is no real need to add additional runtime component
+that would do only that. If we ever find that we don't want to deploy DHCP server or we need
+whereabouts reconciler, we can think of another way to compose Multus and accompanying addons,
+for example providing several RPMs such as `microshift-multus`, `microshift-multus-dhcp`,
+`microshift-multus-whereabouts`, or think of other way, e.g. something resembling helm's
+`values.yaml` that could be user supplied to configure behavior of RPM supplied by MicroShift team.
+
 ## Infrastructure Needed [optional]
 
 N/A
