@@ -372,6 +372,9 @@ a Pod that should have additional interface attached. After verifying that the i
 test will try to access Pod's application using the bridge interface on the host to make sure there
 is a connectivity.
 
+Adding Multus to existing cluster will be tested by adding this scenario to existing upgrade test
+on rpm-based RHEL.
+
 Tests for other networking plugins will be designed and implemented when plugins are planned for support.
 
 ### Graduation Criteria
