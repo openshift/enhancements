@@ -308,7 +308,8 @@ If user expects something else will create the interface, they will need to conf
 MicroShift after other services.
 
 Multus using thin plugin architecture creates a kubeconfig when the DaemonSet starts and copies it
-out of Pod to `/opt/cni/bin` on the host filesystem so the Multus CNI binary can use it to get
+out of Pod to `/etc/cni/net.d/multus.d/multus.kubeconfig` on the host filesystem so the Multus CNI
+binary can use it to get
 NetworkAttachmentDefinitions and Pod annotations. The file is owned and readable only by root, so
 the risk of someone gaining access to the cluster after logging into the host can be compared to
 getting access to `/var/lib/microshift/resources/kubeadmin/kubeconfig`.
