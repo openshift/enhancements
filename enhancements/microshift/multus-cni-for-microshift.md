@@ -77,8 +77,8 @@ during MicroShift's start. There should be little to no changes to MicroShift it
 Multus CNI for MicroShift to fit optional components pattern.
 
 Manifests for deploying Multus on MicroShift will be based on existing manifests for OpenShift,
-but they will differ because OpenShift uses thick architecture Multus whereas MicroShift will use
-thin architecture Multus.
+but they will differ because OpenShift uses thick architecture Multus since 4.14 whereas MicroShift
+will use thin architecture Multus.
 
 How should cleanup of the Multus artifacts look like is an open question (see Open Questions section).
 
