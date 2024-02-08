@@ -43,9 +43,8 @@ By running a Kubernetes control plane and CAPI-provider controllers as
 subprocesses on the installer host, `openshift-install` can use CAPI and its
 providers in a similar manner to how Terraform and its providers are currently
 being used. The outcome would be a removal of Terraform dependencies in
-installer-provisioned installs as well as added the ability to produce
-cluster-api manifests to `openshift-install`, which lay the foundation
-for future OpenShift features.
+installer-provisioned installs as well as the added ability to produce
+cluster-api manifests, which lay the foundation for future OpenShift features.
 
 ## Motivation
 
@@ -64,10 +63,9 @@ reduce the surface area for security vulnerabilities. Terraform and its provider
 constitutes over half a million lines of code in the Installer repo and is directly
 attributable for all (13) CVEs that have been fixed in the Installer repo.
 
--Streamline Installer development: a common pattern for Installer development
+- Streamline Installer development: a common pattern for Installer development
 has been to reimplement control-plane features in Terraform that have already been
-delivered upstream. By utilizing CAPI providers for Day-0 provisioning, our development
-practices will remove this duplication and become more efficient.
+delivered upstream. By utilizing CAPI providers for Day-0 provisioning, our development practices will remove this duplication and become more efficient.
 
 ### User Stories
 
@@ -89,7 +87,7 @@ practices will remove this duplication and become more efficient.
 
 - Non-goal: To maintain a consistent infrastructure footprint as clusters previously created with Terraform
 - Non-goal: Support openshift cluster creation by using any tools other than `openshift-install`, such as `clusterctl`
-- Non-goal: To create a re-entrant installation process
+- Non-goal: To add new functionality of having a reentrant installation
 - Non-goal: To change the machine bootstrapping process, e.g. implementing a CAPI bootstap provider
 - Future work: To use an existing management cluster to install OpenShift
 - Future work: To pivot the CAPI manifests to the newly-installed cluster to enable day-2 infrastructure management within the cluster.
@@ -259,9 +257,9 @@ machines are provisioned based off of the cluster-api manifests, post-install th
 The manifests within the `cluster-api` directory won't be written to the resulting OpenShift cluster, or included in bootstrap ignition.
 In future work, we expect these manifests to be pivoted to the cluster to enable the target cluster to take over managing its own infrastructure.
 
-The Cluster API manifests will be generated with `.spec` fields in the [manifest asset target][asset] with `.status` updated after cluster creation.
+After installation, updated Cluster API manifests will be written to disk.
 These manifests can be used by post-install commands such as `openshift-install gather bootstrap` in order to determine the IP addresses of the
-control-plane machines. The manifests would also be useful for general debugging tasks.
+control-plane machines. The manifests would also be useful for debugging.
 
 #### Infrastructure Provisioning
 
@@ -346,7 +344,9 @@ Control plane machines are provisioned by [AWSMachines][AWSMachines] & [CAPI Mac
 
 ##### Additional Infrastructure
 
-The Installer generates any additional infrastructure that is needed but not handled by the CAPI provider, either because it is out of scope (e.g. IAM, DNS), or not adopted upstream (e.g. split-horizon load balancers).
+The Installer generates any additional infrastructure that is needed but not handled by the CAPI provider, either because it is out of scope (e.g. IAM, DNS), or not adopted upstream (e.g. split-horizon load balancers). In the case of
+Ignition support, the `Bootstrap` field of the CAPI Machine Spec allows
+bootstrapping via the machine user-data.
 The Installer codebase provides hooks into the provisioning lifecycle that can be used to provision resources using direct SDK calls or other tooling.
 
 In most cases, teams are encouraged in discussing and building issues in the respective upstream repositories first, e.g. `cluster-api` or `cluster-api-provider-aws` and only
@@ -440,7 +440,12 @@ in that providers are always rebuilt, even when unchanged.
 
 ##### Copying Dependencies from Container Images
 
-[TODO]
+When building, the `kube-apiserver` and `etcd` dependencies will be copied from container images in the Installer Dockerfile.  For FIPS supported architectures
+the dependencies will be copied from the release image, while others will
+be copied from intermediary build images. During development, the dependencies
+can be obtained from the internet via a script.
+
+The method would eventually be used for CAPI controllers.
 
 #### Disk space and memory
 
@@ -491,6 +496,8 @@ into the development process.
   - Today we have different timeouts at different stages of the installation process; during the first phase of this enhancement
     we'll keep the same values in place. Long term, we could allow upper bound customization of these values.
 
+- What is the best way to destroy bootstrap resources?
+
 ### Test Plan
 
 The functionality described in this enhancement is gated by a new Feature Gate called `ClusterAPIInstall`.
@@ -515,6 +522,7 @@ cannot be tested in nightlies or release candidates, due to egress lockdown in t
 
 ### Graduation Criteria
 
+Graduation can happen per individual cloud platform.
 
 #### Dev Preview -> Tech Preview
 
