@@ -82,6 +82,9 @@ each certification file will be validated (see validation rules).
 
 Those certificate will extend the default  API server [external](https://github.com/openshift/microshift/blob/main/pkg/controllers/kube-apiserver.go#L194) certificate configuration.
 
+the generated `kubeconfig` for the custom certificates will omit the certificate-authority-data section,
+those custom certificates will be validated against configured CAs in the RHEL trust store. 
+
 
 ### Workflow Description
 
@@ -90,6 +93,7 @@ Those certificate will extend the default  API server [external](https://github.
 
 #### when custom namedCertificates configured
 1. Device Administrator copies the certificated to MicroShift host
+1. Device Administrator configures additonal CAs in the RHEL trust store.
 1. Device Administrator configures `namedCertificates` in the Microshift configuration yaml file (/etc/microshift/config.yaml).
 1. Device Administrator start/restarts MicroShift
 1. During startup the certifates paths will be checked and validated. in case of an error service will produce clear error log and exit.
