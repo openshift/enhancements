@@ -105,6 +105,24 @@ We expect this to require minimal work in MicroShift because
 
 N/A
 
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+N/A
+
+#### Standalone Clusters
+
+N/A
+
+#### Single-node Deployments or MicroShift
+
+This enhancement only applies to MicroShift.
+
+### Implementation Details/Notes/Constraints
+
+The details are covered in the rest of this document.
+
 ### Risks and Mitigations
 
 There is a risk that some underlying data format will change between
@@ -158,18 +176,13 @@ The main drawback to implementing this enhancement is the increased
 test matrix for upgrades. We can automate those tests to minimize the
 impact.
 
-## Design Details
-
-### Test Plan
+## Test Plan
 
 We will add an automated test to CI to deploy 4.Y-2 and update to 4.Y
 using the latest published packages of 4.Y-2 and testing the "source"
 version (HEAD of the branch or the pull request content) of 4.Y. This
 ensures that every package we build can be continuously upgraded to
 the latest version of the source.
-
-The QE team will need to perform similar tests using the 4.Y-2 and 4.Y
-packages built by the release team.
 
 MicroShift's OS support policy is to allow combining each version of
 MicroShift with 1 EUS version of RHEL and the next non-EUS version of
@@ -179,13 +192,51 @@ of testing the OS support during upgrades are orthogonal to the work
 for this enhancement, however, and should not require additional
 expansion of the test matrix, either in CI or by QE.
 
-### Graduation Criteria
+The QE team will need to perform similar tests using the 4.Y-2 and 4.Y
+packages built by the release team. Their test plan includes:
 
-#### Dev Preview -> Tech Preview
+1. The scope of QE testing will be confined to upgrades of RHEL and
+   rpm-ostree hosts deployed with RPMs built by ART (nightly, EC, RC
+   and after release z-streams).
+1. Both x86_64 and aarch64 architecture will be covered.
+   1. Not every combination listed below will be tested on both
+      architectures.
+   1. A mix of Intel and ARM hosts will be used
+1. Rpm-ostree based hosts
+   1. Initial cluster bring-up will be a mix of deployments from ISO
+      installer and rpm-ostree upgrades from a bare RHEL host
+   1. The following upgrade paths will be covered:
+      1. RHEL 9.2 / 4.14.latest → RHEL 9.4 / 4.16.Z
+      1. RHEL 9.3 / 4.14.latest → RHEL 9.4 / 4.16.Z
+      1. RHEL 9.2 / 4.15.latest → RHEL 9.4 / 4.16.Z
+      1. RHEL 9.3 / 4.15.latest → RHEL 9.4 / 4.16.Z
+   1. Z-stream upgrade testing for 4.16 will also include Z-1
+      1. RHEL 9.4 / 4.16.Z-1 → RHEL 9.4 / 4.16.Z
+   1. Rollback of each upgrade listed above will be performed
+   1. Z-stream upgrade testing for 4.14 and 4.15 will remain at Y-1 and Z-1
+1. RPM upgrades on RHEL hosts
+   1. Given the support statement says MicroShift will support only
+      "2 RHEL versions: the most recent EUS at the time of development
+      and the next RHEL release after that EUS release", upgrade
+      testing of MicroShift versions 4.14 or 4.15 to 4.16 will also
+      require an OS upgrade from 9.2 or 9.3 to 9.4.
+      1. MicroShift will need to be stopped and upgraded at the same time
+         1. MicroShift 4.14 or 4.15 are not supported on RHEL 9.4
+         1. MicroShift 4.16 is not supported on RHEL 9.2 or 9.3
+   1. The upgrade paths described above will also be covered for RPM
+      installed on RHEL
+   1. RHEL states that it is unsafe to downgrade to an earlier minor
+      release or an earlier EUS repository. Therefore, downgrades of
+      MicroShift deployed with RPMs on RHEL is not supported and will
+      not be tested
+
+## Graduation Criteria
+
+### Dev Preview -> Tech Preview
 
 N/A
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 
 - Ability to utilize the enhancement end to end
 - End user documentation
@@ -193,28 +244,28 @@ N/A
 - Available by default
 - Conduct load testing
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
 N/A
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
 The mechanics of upgrade and rollback for MicroShift do not change as
 part of this work.
 
-### Version Skew Strategy
+## Version Skew Strategy
 
 N/A
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 
 N/A
 
-#### Failure Modes
+## Support Procedures
 
 N/A
 
-#### Support Procedures
+## Failure Modes
 
 N/A
 
