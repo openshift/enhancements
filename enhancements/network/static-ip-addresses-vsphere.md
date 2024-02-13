@@ -317,8 +317,8 @@ spec:
         devices:
         - networkName: port-group-vlan-101          
           addressesFromPools:                   
-          - apiGroup: machine.openshift.io
-            kind: IPPool
+          - group: machine.openshift.io
+            resource: IPPool
             name: example-pool
 ~~~
 
