@@ -13,7 +13,7 @@ approvers:
 api-approvers: 
   - "@joelspeed"
 creation-date: 2023-10-16
-last-updated: 2024-01-23
+last-updated: 2024-02-13
 tracking-link:
   - https://issues.redhat.com/browse/MCO-589
 see-also:
@@ -66,7 +66,7 @@ This should not interfere with existing workflows such as Hive and ArgoCD. As th
 - The new subcontroller is only intended to support clusters that use MachineSet backed node scaling. This is meant to be a user opt-in feature, and if the user wishes to keep their boot images static it will let them do so.
 - This does not intend to solve [booting into custom pools](https://issues.redhat.com/browse/MCO-773). 
 - This does not target Hypershift, as [it does not use machinesets](https://github.com/openshift/hypershift/blob/32309b12ae6c5d4952357f4ad17519cf2424805a/hypershift-operator/controllers/nodepool/nodepool_controller.go#L2168).
-- This does not target [ControlPlaneMachineSets](https://docs.openshift.com/container-platform/4.14/machine_management/control_plane_machine_management/cpmso-about.html). This is considered future work and will be tracked by [MCO-773](https://issues.redhat.com/browse/MCO-1007). 
+- This does not target [ControlPlaneMachineSets](https://docs.openshift.com/container-platform/4.14/machine_management/control_plane_machine_management/cpmso-about.html). This is considered future work and will be tracked by [MCO-1007](https://issues.redhat.com/browse/MCO-1007). 
 
 ## Proposal
 
@@ -77,7 +77,7 @@ __Overview__
   - `ManagedBootImages` feature gate is active
   - The cluster and/or the machineset is opted-in to boot image updates.
   - The machineset does not have a valid owner reference. (eg. Hive, Cluster API and other managed machineset workflows)
-  - The golden configmap is verified to be in sync with the current version of the MCO. The MCO will "stamp"(annotate) the golden configmap with the new version of the MCO after atleast 1 node has succesfully completed an update to the new OCP image. This helps prevent `machinesets` being updated too soon at the end of a cluster upgrade, before the MCO itself has updated and has had a chance to roll out the new OCP image to the cluster. 
+  - The golden configmap is verified to be in sync with the current version of the MCO. The MCO will "stamp"(annotate) the golden configmap with the new version of the MCO after atleast 1 master node has succesfully completed an update to the new OCP image. This helps prevent `machinesets` being updated too soon at the end of a cluster upgrade, before the MCO itself has updated and has had a chance to roll out the new OCP image to the cluster. 
 
   If any of the above checks fail, the MSBIC will exit out of the sync.
 - Based on platform and architecture type, the MSBIC will check if the boot images referenced in the `providerSpec` field of the `MachineSet` is the same as the one in the ConfigMap. Each platform(gcp, aws...and so on) does this differently, so this part of the implementation will have to be special cased. The ConfigMap is considered to be the golden set of bootimage values, i.e. they will never go out of date. If it is not a match, the `providerSpec` field is cloned and updated with the new boot image reference.
@@ -200,21 +200,15 @@ Much of the existing design regarding architecture & platform detection, opt-in,
 ### API Extensions
 
 #### Opt-in Mechanism
-This proposal introduces a new CR in the MCO operator API, `ManagedBootImages` which encloses an array of `MachineManager` objects. A `MachineManager` object contains the resource type of the machine management object that is being opted-in, the API group of that object and a union discriminant object of the type `MachineManagerSelector`. This object `MachineManagerSelector` encloses:
+This proposal introduces a new field in the MCO operator API, `ManagedBootImages` which encloses an array of `MachineManager` objects. A `MachineManager` object contains the resource type of the machine management object that is being opted-in, the API group of that object and a union discriminant object of the type `MachineManagerSelector`. This object `MachineManagerSelector` contains:
 
-- The union discriminator, `Mode`, can be set to three values : All, Partial and None.
+- The union discriminator, `Mode`, can be set to two values : All and Partial.
 - Partial: This is a label selector that will be used by users to opt-in a custom selection of machine resources. When the Mode is set to Partial mode, all machinesets in the selector list would be considered enrolled for updates. For all other values of Mode, this selector does not exist.
 
 ```
 type ManagedBootImages struct {
-	// machineManagers is an array of machineManager objects.
-	// The MCO will watch for changes to this list and register/de-register machine management resources from boot image updates.
-	// An entry in this list consists of the resource type, the API group that the resource belongs to and a selection filter
-	// on the resources.
-	//
-	// Warning: Only one entry is permitted per unique pair of resource/API group. The label selector provided within MachineManager
-	// can be used for further customization if required.
-	//
+	// machineManagers can be used to register machine management resources for boot image updates. The Machine Config Operator
+	// will watch for changes to this list. Only one entry is permitted per type of machine management resource.
 	// +optional
 	// +listType=map
 	// +listMapKey=resource
@@ -222,25 +216,22 @@ type ManagedBootImages struct {
 	MachineManagers []MachineManager `json:"machineManagers"`
 }
 
-// MachineManager contains identifying information of a machine management resource(eg. a machineset) that will be
-// registered for boot image updates. This is likely to evolve as support for more machine management resources are added.
+// MachineManager describes a target machine resource that is registered for boot image updates. It stores identifying information
+// such as the resource type and the API Group of the resource. It also provides granular control via the selection field.
 type MachineManager struct {
 	// resource is the machine management resource's type.
-	//
-	// The following values are accepted:
-	// - MachineSets: The machine manager will only register resources of the type MachineSet, which may belong to MachineAPI or ClusterAPI.
-	//
+	// The only current valid value is machinesets.
+	// machinesets means that the machine manager will only register resources of the kind MachineSet.
 	// +kubebuilder:validation:Required
 	Resource MachineManagerMachineSetsResourceType `json:"resource"`
+
 	// apiGroup is name of the APIGroup that the machine management resource belongs to.
-	//
-	// The following values are accepted:
-	// - MachineAPI: The machine manager will only register resources that belong to MachineAPI APIGroup.
-	//
+	// The only current valid value is machine.openshift.io.
+	// machine.openshift.io means that the machine manager will only register resources that belong to OpenShift machine API group.
 	// +kubebuilder:validation:Required
 	APIGroup MachineManagerMachineSetsAPIGroupType `json:"apiGroup"`
+
 	// selection allows granular control of the machine management resources that will be registered for boot image updates.
-	//
 	// +kubebuilder:validation:Required
 	Selection MachineManagerSelector `json:"selection"`
 }
@@ -248,10 +239,10 @@ type MachineManager struct {
 // +kubebuilder:validation:XValidation:rule="has(self.mode) && self.mode == 'Partial' ?  has(self.partial) : !has(self.partial)",message="Partial is required when type is partial, and forbidden otherwise"
 // +union
 type MachineManagerSelector struct {
-	// mode is a union discriminator for MachineManagerSelector and can have three possible values.
-	// - All: All resources specified by the parent MachineManager are registered for boot image updates.
-	// - None: No resources specified by the parent MachineManager are registered for boot image updates.
-	// - Partial: resources specified by the parent MachineManager are registered for boot image updates only if they match with the label selector.
+	// mode determines how machine managers will be selected for updates.
+	// Valid values are All and Partial.
+	// All means that every resource matched by the machine manager will be updated.
+	// Partial requires a specified selector and allows customisation of which resources matched by the machine manager will be updated.
 	// +unionDiscriminator
 	// +kubebuilder:validation:Required
 	Mode MachineManagerSelectorMode `json:"mode"`
@@ -263,16 +254,12 @@ type MachineManagerSelector struct {
 }
 
 // MachineManagerSelectorMode is a string enum used in the MachineManagerSelector union discriminator.
-// +kubebuilder:validation:Enum:="All";"None";"Partial"
+// +kubebuilder:validation:Enum:="All";"Partial"
 type MachineManagerSelectorMode string
 
 const (
 	// All represents a configuration mode that registers all resources specified by the parent MachineManager for boot image updates.
 	All MachineManagerSelectorMode = "All"
-
-	// None represents a configuration mode that will not register any resource specified by the parent MachineManager MachineManager
-	// for boot image updates.
-	None MachineManagerSelectorMode = "None"
 
 	// Partial represents a configuration mode that will register resources specified by the parent MachineManager only
 	// if they match with the label selector.
@@ -285,8 +272,7 @@ const (
 type MachineManagerMachineSetsResourceType string
 
 const (
-	// machinesets represent the MachineSet resource type, which manage a group of machines.
-	// Although this could belong to a MachineAPI or a ClusterAPI, only MAPI is currently supported.
+	// MachineSets represent the MachineSet resource type, which manage a group of machines and belong to the Openshift machine API group.
 	MachineSets MachineManagerMachineSetsResourceType = "machinesets"
 )
 
@@ -316,7 +302,10 @@ managedBootImages:
     selection:
        mode: All
 ```
-The above example partially selects CAPI MachineSets and all MAPI Machinesets. Please note that for every unique pair of resource/APIGroup, only 1 entry is allowed in machineManagers. This is to avoid providing conflicting instructions for the same type of machine resourcess. The user can then use the partial label selector if further customization is required.
+The above example partially selects CAPI MachineSets and all MAPI Machinesets. Please note that for every unique pair of resource/APIGroup, only 1 entry is allowed in machineManagers. This is to avoid providing conflicting instructions for the same type of machine resource. The user can then use the partial label selector if further customization is required.
+
+It is also important to note that if a user opts out of the feature after having some machine resources updated, the opted out resources will retain the boot images that
+they were last updated to by this feature. There is no rollback to cluster install values, i.e. the original boot images that the resources started on before they were enrolled for updates. Opting out a machine resource simply means that the machine resources will no longer have updated boot images values
 
 A [ValidatingAdmissionPolicy](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/) will be implemented via an MCO manifest that will restrict updating the `ManagedBootImages` object to only supported platforms(initially, just GCP). This will be updated as we phase in support for other platforms. Here is a sample policy that would do this:
 
@@ -471,8 +460,8 @@ The goal of this is to provide information about the "lineage" of a machine mana
 
 ![MachineSet Reconciliation Flow](manage_boot_images_reconcile_loop.jpg)
 
-The implementation has a GCP specific POC here:
-- https://github.com/openshift/machine-config-operator/pull/3980
+The implementation has a GCP specific MVP here:
+- https://github.com/openshift/machine-config-operator/pull/4083
 
 ### Risks and Mitigations
 
