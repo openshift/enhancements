@@ -569,7 +569,7 @@ When a core operator exposes Prometheus metrics, it should comply with the follo
    should be configured with TLS client certificate only (the certificate path to
    use is `/etc/prometheus/secrets/metrics-client-certs/tls.crt` and the key
    path is `/etc/prometheus/secrets/metrics-client-certs/tls.key`).
-3. It should support local authorization and always allow the well-know metrics
+3. It should support local authorization and always allow the well-known metrics
    scraping identity
    (`system:serviceaccount:openshift-monitoring:prometheus-k8s`) to access the
    /metrics endpoint. It may support delegated authorization check.
