@@ -24,6 +24,8 @@ To get started with this template:
 1. **Pick a domain.** Find the appropriate domain to discuss your enhancement.
 1. **Make a copy of this template.** Copy this template into the directory for
    the domain.
+1. **Fill out the metadata at the top.** The embedded YAML document is
+   checked by the linter.
 1. **Fill out the "overview" sections.** This includes the Summary and
    Motivation sections. These should be easy and explain why the community
    should desire this enhancement.
@@ -56,13 +58,13 @@ around the enhancement process.
 
 ## Summary
 
-The `Summary` section is incredibly important for producing high quality
+The `Summary` section is important for producing high quality
 user-focused documentation such as release notes or a development roadmap. It
 should be possible to collect this information before implementation begins in
 order to avoid requiring implementors to split their attention between writing
 release notes and implementing the feature itself.
 
-A good summary is no more than one paragraph in length. More detail
+Your summary should be one paragraph long. More detail
 should go into the following sections.
 
 ## Motivation
@@ -88,12 +90,19 @@ implementation details.
 
 Here are some example user stories to show what they might look like:
 
-* As an OpenShift engineer, I want to write an enhancement, so that I can get feedback on my design and 
-build consensus about the approach to take before starting the implementation.
-* As a product manager, I want to review this enhancement proposal, so that I can make sure the customer 
-requirements are met by the design.
-* As an administrator, I want a one-click OpenShift installer, so that I can easily set up a new cluster
-without having to follow a long set of operations.
+* As an OpenShift engineer, I want to write an enhancement, so that I
+  can get feedback on my design and build consensus about the approach
+  to take before starting the implementation.
+* As an OpenShift engineer, I want to understand the rationale behind
+  a particular feature's design and alternatives considered, so I can
+  work on a new enhancement in that problem space knowing the history
+  of the current design better.
+* As a product manager, I want to review this enhancement proposal, so
+  that I can make sure the customer requirements are met by the
+  design.
+* As an administrator, I want a one-click OpenShift installer, so that
+  I can easily set up a new cluster without having to follow a long
+  set of operations.
 
 In each example, the persona's goal is clear, and the goal is clearly provided
 by the capability being described.
@@ -106,7 +115,7 @@ reducing the install to a single click simplifies that process.
 
 Here are some real examples from previous enhancements:
 * [As a member of OpenShift concerned with the release process (TRT, dev, staff engineer, maybe even PM),
-I want to opt in to pre-release features so that I can run periodic testing in CI and obtain a signal of 
+I want to opt in to pre-release features so that I can run periodic testing in CI and obtain a signal of
 feature quality.](https://github.com/openshift/enhancements/blob/master/enhancements/installer/feature-sets.md#user-stories)
 * [As a cloud-provider affiliated engineer / platform integrator / RH partner
 I want to have a mechanism to signal OpenShift's built-in operators about additional
@@ -135,13 +144,17 @@ enhancement.
 
 ## Proposal
 
-This is where we get down to the nitty gritty of what the proposal
-actually is. Describe clearly what will be changed, including all of
-the components that need to be modified and how they will be
+This section should explain what the proposal actually is. Enumerate
+*all* of the proposed changes at a *high level*, including all of the
+components that need to be modified and how they will be
 different. Include the reason for each choice in the design and
-implementation that is proposed here, and expand on reasons for not
-choosing alternatives in the Alternatives section at the end of the
-document.
+implementation that is proposed here.
+
+To keep this section succinct, document the details like API field
+changes, new images, and other implementation details in the
+**Implementation Details** section and record the reasons for not
+choosing alternatives in the **Alternatives** section at the end of
+the document.
 
 ### Workflow Description
 
@@ -170,13 +183,6 @@ deploying an application in a cluster.
    applications, and gives the application administrator their
    credentials.
 
-#### Variation and form factor considerations [optional]
-
-How does this proposal intersect with Standalone OCP, Microshift and Hypershift?
-
-If the cluster creator uses a standing desk, in step 1 above they can
-stand instead of sitting down.
-
 See
 https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md#high-level-end-to-end-workflow
 and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples.
@@ -199,17 +205,40 @@ and finalizers, i.e. those mechanisms that change the OCP API surface and behavi
 Fill in the operational impact of these API Extensions in the "Operational Aspects
 of API Extensions" section.
 
-### Implementation Details/Notes/Constraints [optional]
+### Topology Considerations
 
-What are the caveats to the implementation? What are some important details that
-didn't come across above. Go in to as much detail as necessary here. This might
-be a good place to talk about core concepts and how they relate.
+#### Hypershift / Hosted Control Planes
 
-#### Hypershift [optional]
+Are there any unique considerations for making this change work with
+Hypershift?
 
-Does the design and implementation require specific details to account for the Hypershift use case?
 See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282
 
+How does it affect any of the components running in the
+management cluster? How does it affect any components running split
+between the management cluster and guest cluster?
+
+#### Standalone Clusters
+
+Is the change relevant for standalone clusters?
+
+#### Single-node Deployments or MicroShift
+
+How does this proposal affect the resource consumption of a
+single-node OpenShift deployment (SNO), CPU and memory?
+
+How does this proposal affect MicroShift? For example, if the proposal
+adds configuration options through API resources, should any of those
+behaviors also be exposed to MicroShift admins through the
+configuration file for MicroShift?
+
+### Implementation Details/Notes/Constraints
+
+What are some important details that didn't come across above in the
+**Proposal**? Go in to as much detail as necessary here. This might be
+a good place to talk about core concepts and how they relate. While it is useful
+to go into the details of the code changes required, it is not necessary to show
+how the code will be rewritten in the enhancement.
 
 ### Risks and Mitigations
 
@@ -226,27 +255,24 @@ Consider including folks that also work outside your immediate sub-project.
 ### Drawbacks
 
 The idea is to find the best form of an argument why this enhancement should
-_not_ be implemented.  
+_not_ be implemented.
 
-What trade-offs (technical/efficiency cost, user experience, flexibility, 
+What trade-offs (technical/efficiency cost, user experience, flexibility,
 supportability, etc) must be made in order to implement this? What are the reasons
-we might not want to undertake this proposal, and how do we overcome them?  
+we might not want to undertake this proposal, and how do we overcome them?
 
 Does this proposal implement a behavior that's new/unique/novel? Is it poorly
 aligned with existing user expectations?  Will it be a significant maintenance
 burden?  Is it likely to be superceded by something else in the near future?
 
-
-## Design Details
-
-### Open Questions [optional]
+## Open Questions [optional]
 
 This is where to call out areas of the design that require closure before deciding
 to implement the design.  For instance,
  > 1. This requires exposing previously private resources which contain sensitive
   information.  Can we do this?
 
-### Test Plan
+## Test Plan
 
 **Note:** *Section not required until targeted at a release.*
 
@@ -262,7 +288,7 @@ challenging to test should be called out.
 All code is expected to have adequate tests (eventually with coverage
 expectations).
 
-### Graduation Criteria
+## Graduation Criteria
 
 **Note:** *Section not required until targeted at a release.*
 
@@ -294,7 +320,7 @@ please be sure to include in the graduation criteria.**
 **Examples**: These are generalized examples to consider, in addition
 to the aforementioned [maturity levels][maturity-levels].
 
-#### Dev Preview -> Tech Preview
+### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
@@ -303,7 +329,7 @@ to the aforementioned [maturity levels][maturity-levels].
 - Enumerate service level indicators (SLIs), expose SLIs as metrics
 - Write symptoms-based alerts for the component(s)
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -316,12 +342,12 @@ to the aforementioned [maturity levels][maturity-levels].
 **For non-optional features moving to GA, the graduation criteria must include
 end to end tests.**
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
 - Deprecate the feature
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
 If applicable, how will the component be upgraded and downgraded? Make sure this
 is in the test plan.
@@ -362,7 +388,7 @@ Downgrade expectations:
     CVO does not currently delete resources that no longer exist in
     the target version.
 
-### Version Skew Strategy
+## Version Skew Strategy
 
 How will the component handle version skew with other components?
 What are the guarantees? Make sure this is in the test plan.
@@ -376,7 +402,7 @@ enhancement:
 - Will any other components on the node change? For example, changes to CSI, CRI
   or CNI may require updating that component before the kubelet.
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 
 Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
 admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
@@ -405,8 +431,6 @@ especially how they impact the OCP system architecture and operational aspects.
   automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
   this enhancement)
 
-#### Failure Modes
-
 - Describe the possible failure modes of the API extensions.
 - Describe how a failure or behaviour of the extension will impact the overall cluster health
   (e.g. which kube-controller-manager functionality will stop working), especially regarding
@@ -414,7 +438,7 @@ especially how they impact the OCP system architecture and operational aspects.
 - Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
   and add them as reviewers to this enhancement.
 
-#### Support Procedures
+## Support Procedures
 
 Describe how to
 - detect the failure modes in a support situation, describe possible symptoms (events, metrics,
@@ -461,21 +485,14 @@ Describe how to
   - Namespaces deletion will not delete all objects in etcd, leading to zombie
     objects when another namespace with the same name is created.
 
-## Implementation History
-
-Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`.
-
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement.
+Similar to the `Drawbacks` section the `Alternatives` section is used
+to highlight and record other possible approaches to delivering the
+value proposed by an enhancement, including especially information
+about why the alternative was not selected.
 
 ## Infrastructure Needed [optional]
 
 Use this section if you need things from the project. Examples include a new
 subproject, repos requested, github details, and/or testing infrastructure.
-
-Listing these here allows the community to get the process for these resources
-started right away.
