@@ -360,6 +360,7 @@ time for Pods using CNI network as more preconditions are added (waiting for two
    namespace.
    - There is an additional option `--global-namespaces` where we can define a namespace so that NAD residing
      in the namespace can be referenced in Pod from any other namespace.
+1. Should we enable logging to file on the host using `--multus-log-file`?
 
 ### Test Plan
 
