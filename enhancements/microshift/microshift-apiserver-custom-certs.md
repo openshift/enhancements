@@ -80,11 +80,16 @@ For each provided certificate, the following configuration is proposed:
 Certificate files will be read from their configured location by the Microshift service,
 each certification file will be validated (see validation rules).
 
+because we dont want to disrupt the internal API communication and make sure the internal certificate will be automaticly renewed,
 Those certificate will extend the default  API server [external](https://github.com/openshift/microshift/blob/main/pkg/controllers/kube-apiserver.go#L194) certificate configuration.
 
-the generated `kubeconfig` for the custom certificates will omit the certificate-authority-data section,
-those custom certificates will be validated against configured CAs in the RHEL trust store. 
+The generated `kubeconfig` for the custom certificates will omit the certificate-authority-data section,
+therefore custom certificates will have to be validated against CAs in the RHEL trust store. 
 
+For every certificate that contain `names` the first non-wildcard `name`  will be used,
+and placed inside the `server` section of the generated `kubeconfig`.
+
+because certain values that configured in `names` field can cause  internal API communication issues  ie:127.0.0.1,localhost we must not allow them.
 
 ### Workflow Description
 
@@ -96,7 +101,7 @@ those custom certificates will be validated against configured CAs in the RHEL t
 1. Device Administrator configures additonal CAs in the RHEL trust store.
 1. Device Administrator configures `namedCertificates` in the Microshift configuration yaml file (/etc/microshift/config.yaml).
 1. Device Administrator start/restarts MicroShift
-1. During startup the certifates paths will be checked and validated. in case of an error service will produce clear error log and exit.
+1. During startup the certifates paths will be checked and validated. in case of an error service will produce clear error log and if the file is missing it will exit.
 1. Certificates will be passed to the tls-sni-cert-key command line flag preceding all the other certificates.
 1. kube-apiserver picks up the certificates and start serving them on the configured SNI.
 
@@ -112,7 +117,7 @@ when same SNI appear in the CN part of the provided certs,this certificate will 
 N/A
 
 ### Risks and Mitigations
-* User provide incorrect/expired certificate.
+* User provide certificate and it expired after some time.
   kube-api server will continue serving with an expired cert - similiar approach is taken by OpenShift.
   > users can mitigate this by using --insecure-skip-tls-verify client mode
 
@@ -185,13 +190,10 @@ Connecting to API server using external SNI yields external certificate.
 N/A
 
 ## Alternatives
-- Use cert-manager for managing Microshift external custom certs
-  - Benefits
-    1. Will allow MicroShift administrators to rotate certificates automatically (e.g. via ACME)
-
-  - Drawbacks
-    1. cert-manager is for managing certs inside k8s clusters. (its not designed for kube-api certs which is based on files.)
-    1. cert-managed will introduce additional load (CPU/Memory) into Microshift Node.
+- Use [cert-manager](https://cert-manager.io/docs/) for managing Microshift external custom certs
+ which allow MicroShift administrators to rotate certificates automatically (e.g. via ACME)
+    1. cert-manager is not supported on Microshift because it requires alot of internal API changes.
+    1. automatic certificate rotation and integration with 3rd party cert issuing services are non-goals.
 
 ## Infrastructure Needed [optional]
 N/A
