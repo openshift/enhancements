@@ -44,7 +44,7 @@ they cannot disable these capabilities once enabled.
 
 This feature will allow cluster administrators to disable the `builder` service
 account while keeping other components of the BuildConfig system available.
-When disabled, cluster administrators will be responsible for configuing a
+When disabled, cluster administrators will be responsible for configuring a
 service account that can perform actions that typically occur during builds.
 Most notably, these service accounts will need permission to push to the
 OpenShift internal registry if that feature is enabled. The builder service
