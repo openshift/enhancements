@@ -165,19 +165,23 @@ metadata:
   name: bridge-conf
 spec:
   config: '{
-      "cniVersion": "0.3.0",
+      "cniVersion": "0.4.0",
       "type": "bridge",
       "bridge": "test-bridge",
       "mode": "bridge",
       "ipam": {
         "type": "host-local",
-        "subnet": "192.168.20.0/24",
-        "rangeStart": "192.168.20.200",
-        "rangeEnd": "192.168.20.216",
-        "routes": [
-          { "dst": "0.0.0.0/0" }
+        "ranges": [
+          [
+            {
+              "subnet": "10.10.0.0/16",
+              "rangeStart": "10.10.1.20",
+              "rangeEnd": "10.10.3.50",
+              "gateway": "10.10.0.254"
+            }
+          ]
         ],
-        "gateway": "192.168.20.1"
+        "dataDir": "/var/lib/cni/test-bridge"
       }
     }'
 ```
@@ -205,38 +209,32 @@ metadata:
 Information about the Pod's interfaces are reported back by Multus also as an annotation `k8s.v1.cni.cncf.io/network-status`.
 Example below shows annotations of a Pod with two `bridge` CNI interfaces:
 ```yaml
-Annotations:      k8s.v1.cni.cncf.io/network-status:
+k8s.v1.cni.cncf.io/network-status:
                     [{
                         "name": "ovn-kubernetes",
                         "interface": "eth0",
                         "ips": [
-                            "10.42.0.14"
+                            "10.42.0.18"
                         ],
-                        "mac": "0a:58:0a:2a:00:0e",
+                        "mac": "0a:58:0a:2a:00:12",
                         "default": true,
                         "dns": {}
                     },{
                         "name": "default/bridge-conf",
                         "interface": "net1",
                         "ips": [
-                            "192.168.20.202"
+                            "10.10.1.20"
                         ],
-                        "mac": "b2:6a:5c:ba:34:9a",
-                        "dns": {},
-                        "gateway": [
-                            "\u003cnil\u003e"
-                        ]
+                        "mac": "6e:4a:f5:49:fb:6d",
+                        "dns": {}
                     },{
                         "name": "default/bridge-conf",
                         "interface": "net2",
                         "ips": [
-                            "192.168.20.203"
+                            "10.10.1.21"
                         ],
-                        "mac": "7a:ca:cf:19:64:e8",
-                        "dns": {},
-                        "gateway": [
-                            "\u003cnil\u003e"
-                        ]
+                        "mac": "02:4b:86:bf:80:1f",
+                        "dns": {}
                     }]
                   k8s.v1.cni.cncf.io/networks: bridge-conf,bridge-conf
 ```
