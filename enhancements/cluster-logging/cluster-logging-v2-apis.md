@@ -210,7 +210,6 @@ Additional specification of **audit** and **infrastructure** logs is allowed by 
           tenantID:  #templating?
           labelKeys: 
         splunk:
-          fields:
           index:  #templating?
         syslog:    #only supports RFC5424
           severity:
