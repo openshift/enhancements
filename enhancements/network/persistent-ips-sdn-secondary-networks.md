@@ -300,7 +300,10 @@ and hopefully accepted as part of the
 Meaning we envision other plugins with IPAM functionality to use this CRD to
 provide persistent IPs for their workloads. This proposal is captured in the
 following
-[de-facto standard update proposal](https://docs.google.com/document/d/1HjPZCfl_3zsXr905T620mF7OFt2QnwxLZomPbeDj0vc).
+[de-facto standard update proposal](https://docs.google.com/document/d/1HjPZCfl_3zsXr905T620mF7OFt2QnwxLZomPbeDj0vc),
+and was accepted by the community Feb 8, as reflected in the community
+meeting's
+[notes](https://docs.google.com/document/d/1oE93V3SgOGWJ4O1zeD1UmpeToa0ZiiO6LqRAmZBPFWM/edit#heading=h.3hj4tertx9nj).
 
 - Adds a new `IPAMClaim` CRD. OVN-Kubernetes will provision these to
   "block" the IP allocation during the VM object lifecycle.
@@ -339,7 +342,9 @@ indicate to the CNI plugin which `IPAMClaim` it should use. Remember that IPAM
 CNI will store the generated IP there, while the CNI plugin will consume and
 honor it. This proposal is found in
 [this update proposal](https://docs.google.com/document/d/1HjPZCfl_3zsXr905T620mF7OFt2QnwxLZomPbeDj0vc)
-to the NPWG de-facto standard.
+to the NPWG de-facto standard, and was accepted Feb 8th, as indicated in the
+community meeting's
+[notes](https://docs.google.com/document/d/1oE93V3SgOGWJ4O1zeD1UmpeToa0ZiiO6LqRAmZBPFWM/edit#heading=h.3hj4tertx9nj).
 
 From OVN-Kubernetes perspective, it **must**:
 - **not** delete `IPAMClaim`s for encapsulating entities once their pods
