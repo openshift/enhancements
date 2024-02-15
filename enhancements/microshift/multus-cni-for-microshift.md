@@ -243,6 +243,19 @@ There is an annotation for NetworkAttachmentDefinition - `k8s.v1.cni.cncf.io/res
 It is used when some CNI requires information about specific device that is prepared by device plugin.
 It is primarily used with SR-IOV and as such out of scope for this enhancement mentioned only for completeness.
 
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+Not applicable
+
+#### Standalone Clusters
+
+Not applicable
+
+#### Single-node Deployments or MicroShift
+
+Enhancement is solely intended for MicroShift.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -291,10 +304,6 @@ so MicroShift uses the same binaries as OpenShift (alternative is using RHEL's n
 This image will also contain IPAM binaries such as `static`, `dynamic (DHCP)`, and `host-local`.
 
 Both of these images will be part of the OpenShift payload which MicroShift references during rebase procedure.
-
-#### Hypershift [optional]
-
-No, enhancement is MicroShift specific.
 
 ### Risks and Mitigations
 
@@ -347,9 +356,8 @@ When installing Multus CNI, CRI-O will be configured to use Multus CNI meaning t
 wait for Multus and Multus will wait for ovn-kubernetes. This can result in slight increase of startup
 time for Pods using CNI network as more preconditions are added (waiting for two CNIs in sequence).
 
-## Design Details
 
-### Open Questions [optional]
+## Open Questions [optional]
 
 1. Clean up of Multus artifacts on disk during system rollback or when `microshift-cleanup-data` is executed:
    Should we invest in creating a lightweight plugin architecture to avoid adding cleanup of Multus
@@ -362,7 +370,7 @@ time for Pods using CNI network as more preconditions are added (waiting for two
      in the namespace can be referenced in Pod from any other namespace.
 1. Should we enable logging to file on the host using `--multus-log-file`?
 
-### Test Plan
+## Test Plan
 
 Multus CNI for MicroShift will be tested using existing test harness. New test suite will be created
 with simple test for each CNI we want to declare as supported.
@@ -377,23 +385,23 @@ on rpm-based RHEL.
 
 Tests for other networking plugins will be designed and implemented when plugins are planned for support.
 
-### Graduation Criteria
+## Graduation Criteria
 
 Multus CNI for MicroShift is targeted to be GA next release.
 
-#### Dev Preview -> Tech Preview
+### Dev Preview -> Tech Preview
 
 N/A
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 
 N/A
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
 N/A
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
 Because both Multus and MicroShift RPMs will be built from the same spec file, they will share the
 same version and it is expected that they are updated together following MicroShift upgrade rules
@@ -418,17 +426,13 @@ If the schema of NetworkAttachmentDefinitions CRD changes, instead of deploying 
 (which would use resources idling but actually perform actions on first start), we can just suggest
 users to update their CRs.
 
-### Version Skew Strategy
+## Version Skew Strategy
 
 Building Multus and MicroShift RPMs from the same spec file means Multus should be updated together
 with MicroShift which means there should not be any version skew between MicroShift and Multus.
 This might change with introduction of multi-node deployments of MicroShift.
 
-### Operational Aspects of API Extensions
-
-N/A
-
-#### Failure Modes
+## Operational Aspects of API Extensions
 
 If Multus (or any delegate CNIs it executes) fails, a new Pod will be stuck in "ContainerCreating" status
 and none of the Pod's containers will start. This can happen if the CNI configuration provided in
@@ -438,7 +442,7 @@ In such cases, user needs to verify its manifests.
 Pods without Multus' Annotation will be set up with the default CNI (ovn-kubernetes) and should not
 have increased CNI failure rate.
 
-#### Support Procedures
+## Support Procedures
 
 If Multus cannot configure a Pod's networking according to the annotations (any of the CNIs fail),
 the Pod will not start and its events should contain error from the Multus. For example:
@@ -475,11 +479,6 @@ Feb 06 13:51:11 dev microshift[1476]: kubelet E0206 13:51:11.696543    1476 kube
 Feb 06 13:51:11 dev microshift[1476]: kubelet E0206 13:51:11.696565    1476 kuberuntime_manager.go:1172] "CreatePodSandbox for pod failed" err="rpc error: code = Unknown desc = failed to create pod network sandbox k8s_samplepod_default_5fa13105-1bfb-4c6b-aee7-3437cfb50e25_0(7517818bd8e85f07b551f749c7529be88b4e7daef0dd572d049aa636950c76c6): error adding pod default_samplepod to CNI network \"multus-cni-network\": plugin type=\"multus\" name=\"multus-cni-network\" failed (add): Multus: [default/samplepod/5fa13105-1bfb-4c6b-aee7-3437cfb50e25]: error loading k8s delegates k8s args: TryLoadPodDelegates: error in getting k8s network for pod: GetNetworkDelegates: failed getting the delegate: getKubernetesDelegate: cannot find a network-attachment-definition (bad-conf) in namespace (default): network-attachment-definitions.k8s.cni.cncf.io \"bad-conf\" not found" pod="default/samplepod"
 Feb 06 13:51:11 dev microshift[1476]: kubelet E0206 13:51:11.696625    1476 pod_workers.go:1298] "Error syncing pod, skipping" err="failed to \"CreatePodSandbox\" for \"samplepod_default(5fa13105-1bfb-4c6b-aee7-3437cfb50e25)\" with CreatePodSandboxError: \"Failed to create sandbox for pod \\\"samplepod_default(5fa13105-1bfb-4c6b-aee7-3437cfb50e25)\\\": rpc error: code = Unknown desc = failed to create pod network sandbox k8s_samplepod_default_5fa13105-1bfb-4c6b-aee7-3437cfb50e25_0(7517818bd8e85f07b551f749c7529be88b4e7daef0dd572d049aa636950c76c6): error adding pod default_samplepod to CNI network \\\"multus-cni-network\\\": plugin type=\\\"multus\\\" name=\\\"multus-cni-network\\\" failed (add): Multus: [default/samplepod/5fa13105-1bfb-4c6b-aee7-3437cfb50e25]: error loading k8s delegates k8s args: TryLoadPodDelegates: error in getting k8s network for pod: GetNetworkDelegates: failed getting the delegate: getKubernetesDelegate: cannot find a network-attachment-definition (bad-conf) in namespace (default): network-attachment-definitions.k8s.cni.cncf.io \\\"bad-conf\\\" not found\"" pod="default/samplepod" podUID="5fa13105-1bfb-4c6b-aee7-3437cfb50e25"
 ```
-
-## Implementation History
-
-<!-- Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`. -->
 
 ## Alternatives
 
