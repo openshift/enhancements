@@ -251,11 +251,12 @@ install-dir/cluster-api/
 ```
 
 The cluster-api manifests are generated in parallel with all other manifests, particularly the machine-api manifests, which means that
-any changes to the control-plane machines within the manifests will also need to be made in the cluster-api manifests. Although, the
-machines are provisioned based off of the cluster-api manifests, post-install the control plane will be managed by the machine-api operator.
+any changes to the control-plane machines within the manifests will also need to be made in the cluster-api manifests. Guidelines will
+be provided in documentation to inform users of how to generally edit the new manifests.
 
 The resources specified within the cluster-api manifests won't be created in the resulting OpenShift cluster (or included in bootstrap ignition),
-but the manifest artifacts will be uploaded to the cluster as a configmap for reference (similarly to the install config).
+but the manifest artifacts will be uploaded to the cluster as a configmap for reference (similarly to the install config). Although, the
+machines are provisioned based off of the cluster-api manifests, post-install the control plane will be managed by the machine-api operator.
 In future work, we expect these manifests to be pivoted to the cluster to enable the target cluster to take over managing its own infrastructure.
 
 After installation, updated Cluster API manifests will be written to disk.
