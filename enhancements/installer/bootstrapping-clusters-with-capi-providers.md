@@ -572,7 +572,7 @@ featureGates:
 - Sufficient time for feedback.
 - Available by default.
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-  - Document detailed deltas in cluster infrastructure and credentials created by Terraform and Cluster API.
+  - Document detailed deltas in cluster infrastructure (including costs) and credentials created by Terraform and Cluster API.
 - Infrastructure topology security posture review for each provider.
 - Installer image is built by copying `kube-apiserver` & `etcd` binaries from release images.
 - FIPS-compliance is confirmed, particularly in the build process and certificates for local control plane
@@ -605,7 +605,7 @@ N/A
 
 During a failed install, the controller logs will contain useful information. The status of the CAPI manifests
 may also contain useful information, in which case it would be important to display that to users and collect
-for bugs and support cases. 
+for bugs and support cases.
 
 The Installer will need to be able to identify when infrastructure provisioning has failed during an installation.
 Initially this will be achieved through a timeout. In the case of a failure, controller logs and cluster-api manifests
