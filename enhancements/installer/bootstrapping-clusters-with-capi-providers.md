@@ -572,11 +572,12 @@ featureGates:
 - Sufficient time for feedback.
 - Available by default.
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-  - Document detailed deltas in cluster infrastructure created by Terraform and Cluster API.
+  - Document detailed deltas in cluster infrastructure and credentials created by Terraform and Cluster API.
 - Infrastructure topology security posture review for each provider.
 - Installer image is built by copying `kube-apiserver` & `etcd` binaries from release images.
 - FIPS-compliance is confirmed, particularly in the build process and certificates for local control plane
 - Stand-alone `openshift-install destroy bootstrap` command will be able to utilize CAPI system by reloading state from disk
+- Installer debug log bundle collects controller logs and capi manifests
 
 #### Post-GA
 - Follow `kube-apiserver` & `etcd` pattern, and copy CAPI controller binaries from release images
@@ -604,13 +605,11 @@ N/A
 
 During a failed install, the controller logs will contain useful information. The status of the CAPI manifests
 may also contain useful information, in which case it would be important to display that to users and collect
-for bugs and support cases. There is an open question about the best way to handle this UX, and we expect the answer to become more clear during development.
+for bugs and support cases. 
 
-As the infrastructure will be reconciled by a controller, it will be possible to resolve issues during an ongoing
-installation, although this would not necessarily be a feature we would call attention to for documented use cases.
-
-Finally, the Installer will need to be able to identify when infrastructure provisioning has failed during an installation.
-Initially this will be achieved through a timeout. There is an open question about whether this can be done in a more sophisticated manner.
+The Installer will need to be able to identify when infrastructure provisioning has failed during an installation.
+Initially this will be achieved through a timeout. In the case of a failure, controller logs and cluster-api manifests
+will be collected in the installer log bundle.
 
 #### Support Procedures
 
