@@ -4,6 +4,7 @@ authors:
   - "@patrickdillon"
   - "@vincepri"
   - "@JoelSpeed"
+  - "@r4f4"
 reviewers:
   - "@sdodson"
   - "@2uasimojo"
@@ -14,7 +15,6 @@ reviewers:
   - "@rvanderp3"
   - "@jcpowermac"
   - "@enxebre"
-  - "@wking"
   - "@dhellmann"
   - "@avishayt"
 approvers:
@@ -81,6 +81,7 @@ delivered upstream. By utilizing CAPI providers for Day-0 provisioning, our deve
 - To keep the user experience for day-zero operations unchanged or improved.
 - To not require any new runtime dependencies (e.g. containers).
 - To maintain compatibility for hive, particularly regarding `destroy` functionality
+- To maintain compatibility with assisted installer, particularly allowing the ability to generate manifests without requiring access to cloud platform endpoints
 - To continue delivering `openshift-install` for supported os/architectures: linux/x86, linux/arm, linux/powerpc, linux/s390x, darwin/x86, darwin/arm
 
 ### Non-Goals / Future work
@@ -91,7 +92,7 @@ delivered upstream. By utilizing CAPI providers for Day-0 provisioning, our deve
 - Non-goal: To change the machine bootstrapping process, e.g. implementing a CAPI bootstap provider
 - Future work: To use an existing management cluster to install OpenShift
 - Future work: To pivot the CAPI manifests to the newly-installed cluster to enable day-2 infrastructure management within the cluster.
-  - Collaborate with Assisted Installer and HIVE for any related changes required.
+- Future work: Collaborate with Assisted Installer and HIVE for any related changes required.
 - Future work: Replace Machine API (MAPI) with CAPI for day-2 machine management. This enhancement assumes we are still using MAPI Day 2.
 - Future work: To provide an extensible framework to plug-in new infrastructure cloud providers.
 
@@ -167,7 +168,6 @@ The following are CRD references for Installer-supported platforms:
 
 - AWS: [infrastructure.cluster.x-k8s.io/v1beta2][awsCRD]
 - Azure/AzureStack: [infrastructure.cluster.x-k8s.io/v1beta1][azureCRD]
-- Baremetal: [infrastructure.cluster.x-k8s.io/v1beta1][metalCRD]
 - GCP: [infrastructure.cluster.x-k8s.io/v1beta1][gcpCRD]
 - IBMCloud/PowerVS: [infrastructure.cluster.x-k8s.io/v1beta2][ibmCRD]
 - Nutanix: [infrastructure.cluster.x-k8s.io/v1beta1][nutanixCRD]
@@ -216,7 +216,7 @@ At a high level, the local control plane is responsible for:
     - Each controller manager will have its own `host:port` combination assigned.
     - Certificates are generated and injected in the server, and the client certs in the api-server webhook configuration.
 - For each process that the local control plane manages, a health check (ping to `/healthz`) is required to pass; similarly how, when running in a Deployment, a health probe is configured.
-  - The health check is only ran once, once OK, the process can continue.
+  - The health check is confirmed, the process can continue.
 
 
 The [envtest APIs][envtestAPI] are a thin layer on top of running binaries and setting up flags or variables.
@@ -254,12 +254,23 @@ The cluster-api manifests are generated in parallel with all other manifests, pa
 any changes to the control-plane machines within the manifests will also need to be made in the cluster-api manifests. Although, the
 machines are provisioned based off of the cluster-api manifests, post-install the control plane will be managed by the machine-api operator.
 
-The manifests within the `cluster-api` directory won't be written to the resulting OpenShift cluster, or included in bootstrap ignition.
+The resources specified within the cluster-api manifests won't be created in the resulting OpenShift cluster (or included in bootstrap ignition),
+but the manifest artifacts will be uploaded to the cluster as a configmap for reference (similarly to the install config).
 In future work, we expect these manifests to be pivoted to the cluster to enable the target cluster to take over managing its own infrastructure.
 
 After installation, updated Cluster API manifests will be written to disk.
 These manifests can be used by post-install commands such as `openshift-install gather bootstrap` in order to determine the IP addresses of the
 control-plane machines. The manifests would also be useful for debugging.
+
+##### Manifest Generation and the Assisted Installer
+
+The Assisted Installer does not collect user credentials and therefore cannot access a cloud platform while generating manifests. `openshift-install`
+on the other hand may use SDK calls to determine metadata which was not provided but can be determined based on user input. Specifically, for vSphere
+the installer determines the full inventory path of the network name (port groups) based on the data from the install config. In order to maintain
+compatibility with the assisted installer, `openshift-install` will leave any fields in the cluster-api manifests that require SDK access empty in the
+case where SDK access to the cloud environment fails. It may be necessary to condition this functionality based on the `invoker` env var. The result
+will be continued compabitility with assisted installer and the future possibility of the assisted installer developing a workflow to enable day-2
+infrastructure management.
 
 #### Infrastructure Provisioning
 
@@ -378,9 +389,8 @@ Accordingly, the bootstrap machine can be deleted by simply deleting the object.
 	});
 ```
 
-Further work needs to be done to determine how to delete additional bootstrap resources, such as SSH security group rules
-and the bootstrap ignition S3 bucket. These could be deleted either through updating the relevant manifests or created &
-deleted out-of-band using hooks.
+The CAPI provider interface will be extended to allow deletion of additional resources that do not get destroyed by
+this general pattern (e.g. SSH security rules on the bootstrap node).
 
 ##### Backward compatibility
 
@@ -440,12 +450,28 @@ in that providers are always rebuilt, even when unchanged.
 
 ##### Copying Dependencies from Container Images
 
-When building, the `kube-apiserver` and `etcd` dependencies will be copied from container images in the Installer Dockerfile.  For FIPS supported architectures
-the dependencies will be copied from the release image, while others will
+The previously described vendoring pattern presents disadvantages:
+* increase in the repo size;
+* security issues/warnings in code we do not own;
+* providers are rebuilt with every Installer change, whether or not the change is pertinent to the provider
+
+So as not to incur the same disadvantages, we opted to use a different approach for etcd and kube-apiserver needed for
+the provisioning via CAPI: they will be built into intermediary container images. During the Installer container build,
+those images are imported and the relevant binaries extracted. Because of that, etcd and kube-apiserver will have build
+cadences decoupled from the Installer's, being rebuilt only when needed.
+Because they run in the host machine, like the Installer, they will have to be built for all systems/arches supported,
+including cross-compiled darwin amd64/arm64.
+
+This architecture has 2 opposing disadvantages:
+* In CI: because there is no mechanism to detect and rebuild dependant images, Installer and etcd/KAS might temporarily
+drift apart and cause job failures when the expected versions do not match. This issue is probably alleviated by the
+frequent changes to the Installer repo and can be worked around by forcing an Installer rebuild.
+* In the release: in this case, there is a mechanism to trigger rebuilds automatically. Which means that the Installer
+image will be rebuilt with any changes to etcd/KAS, even if those changes don't necessarily require an Installer rebuild.
+
+For FIPS supported architectures the dependencies will be copied from the release image, while others will
 be copied from intermediary build images. During development, the dependencies
 can be obtained from the internet via a script.
-
-The method would eventually be used for CAPI controllers.
 
 #### Disk space and memory
 
@@ -547,9 +573,11 @@ featureGates:
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
   - Document detailed deltas in cluster infrastructure created by Terraform and Cluster API.
 - Infrastructure topology security posture review for each provider.
-- Installer image is built by copying `kube-apiserver` & `etcd` binaries from release images
+- Installer image is built by copying `kube-apiserver` & `etcd` binaries from release images.
+- FIPS-compliance is confirmed, particularly in the build process and certificates for local control plane
+- Stand-alone `openshift-install destroy bootstrap` command will be able to utilize CAPI system by reloading state from disk
 
-#### Future Work
+#### Post-GA
 - Follow `kube-apiserver` & `etcd` pattern, and copy CAPI controller binaries from release images
 
 
