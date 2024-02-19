@@ -336,6 +336,12 @@ Pods. If CRI-O is configured to use the Multus regardless of files in /etc/cni/n
 for the Multus. We can also use the Multus' config option of `--readiness-indicator-file` to make
 sure the Multus waits for the ovn-kubernetes.
 
+Another existing risk is users creating NetworkAttachmentDefinitions that want to reuse MicroShift's
+networks such as `10.42.0.0/16`, `10.43.0.0/16`, `10.44.0.0/16`, or `169.254.169.1/29`.
+We should warn users they should not use them unless they reconfigure MicroShift's networking to use
+different network (`.network.clusterNetwork`, `.cluster.serviceNetwork`, `.apiServer.advertiseAddress`
+in MicroShift config).
+
 ### Drawbacks
 
 This section includes limitations of the Multus itself, not its integration with MicroShift.
