@@ -173,7 +173,8 @@ names.
 MicroShift will default to listen to external IPs, the service IP and the
 apiserver IP, as this was the previous behavior and it needs to keep it for
 compatibility. Any advanced configuration, such as multiple interfaces, VLANs,
-etc. will need user's configuration.
+etc. will need user's configuration. Any user's configuration will override all
+of the defaults.
 
 The hostnames will be automatically resolved to their IP addresses by
 MicroShift, same as the NIC names.
