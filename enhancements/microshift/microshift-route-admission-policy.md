@@ -82,6 +82,19 @@ namespaces to claim different paths of the same host. This is the default
 value, as MicroShift's typical use cases are not multi-tenant and this is the
 most flexible value.
 
+### Topology Considerations
+#### Hypershift / Hosted Control Planes
+N/A
+
+#### Standalone Clusters
+N/A
+
+#### Single-node Deployments or MicroShift
+This enhancement is intended solely for MicroShift
+
+### Implementation Details/Notes/Constraints
+N/A
+
 ### Risks and Mitigations
 N/A
 
@@ -92,38 +105,38 @@ N/A
 See original [enhancement](https://github.com/openshift/enhancements/enhancements/ingress/openshift-route-admission-policy.md)
 for more details.
 
-### Test Plan
+## Test Plan
 Same as original [enhancement](https://github.com/openshift/enhancements/enhancements/ingress/openshift-route-admission-policy.md).
 These tests will be included as part of the automatic tests in CI.
 
-### Graduation Criteria
-#### Dev Preview -> Tech Preview
+## Graduation Criteria
+### Dev Preview -> Tech Preview
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 - Sufficient time for feedback
 - Available by default
 - User facing documentation created
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 N/A
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 N/A
 
-### Version Skew Strategy
+## Version Skew Strategy
 N/A
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 N/A
 
-#### Failure Modes
+### Failure Modes
 N/A
 
-#### Support Procedures
+## Support Procedures
 N/A
 
 ## Implementation History
