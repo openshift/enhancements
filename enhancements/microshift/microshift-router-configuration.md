@@ -267,9 +267,9 @@ ingress:
 ```
 
 The `ingress.policy.expose` option contains lists of hostnames, NIC names and
-IP addresses. These will translate to IP addresses and then configure the
-`status.loadBalancer` field in the `Service`. Ovnk will pick up this field to
-configure the iptables rules.
+IP addresses. MicroShift will translate them to IP addresses and then update
+the `status.loadBalancer` field in the `Service`. Ovnk will pick up this field
+to configure the iptables rules.
 ```yaml
 ingress:
   expose: # Defaults to IPs in the host. Details below.
