@@ -221,7 +221,17 @@ ingress:
 
 For more information check each individual section.
 
-### Implementation Details
+### Topology Considerations
+#### Hypershift / Hosted Control Planes
+N/A
+
+#### Standalone Clusters
+N/A
+
+#### Single-node Deployments or MicroShift
+Enhancement is solely intended for MicroShift.
+
+### Implementation Details/Notes/Constraints
 The default router is composed of a bunch of assets part of the MicroShift
 binary. These assets come from the rebase, copied from the original router in
 [cluster-ingress-operator](https://github.com/openshift/cluster-ingress-operator).
@@ -403,31 +413,31 @@ This setting is also the default in OCP when deploying in cloud, having a load
 balancer before the cluster. Manifests for both OCP and MicroShift are
 compatible in this regard.
 
-### Open Questions
+## Open Questions
 N/A
 
-### Test Plan
+## Test Plan
 All of the changes listed here will be included in the current e2e scenario
 testing harness in MicroShift.
 
-### Graduation Criteria
+## Graduation Criteria
 Targeting GA for MicroShift 4.16 release.
 
-#### Dev Preview -> Tech Preview
+### Dev Preview -> Tech Preview
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
 - Sufficient test coverage
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 - More testing (upgrade, downgrade)
 - Sufficient time for feedback
 - Available by default
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 N/A
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 In the previous implementation, using host ports, the router would listen on
 any interface (except loopback). This included some of the internal IP
 addresses from ovnk, such as `169.254.169.2`, which is the link local IP
@@ -436,18 +446,17 @@ address that ovnk uses in `br-ex` for internal handling of flows.
 The approach described in this enhancement does not expose the router in such
 IP, as it introduces conflicts between iptables rules and openflow.
 
-### Version Skew Strategy
+## Version Skew Strategy
 N/A
 
-### Operational Aspects of API Extensions
-N/A
+## Operational Aspects of API Extensions
 
-#### Failure Modes
+### Failure Modes
 If the configured entries in `ingress.expose.ipAddresses` and
 `ingress.expose.interfaces` do not exist in the node, MicroShift should fail
 to start.
 
-#### Support Procedures
+## Support Procedures
 Additional logging is added to the LoadBalancer controller to show the ports
 each service is using. Example:
 ```
