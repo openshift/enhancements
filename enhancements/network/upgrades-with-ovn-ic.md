@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "None"
 creation-date: 2023-05-26
-last-updated: 2023-07-17
+last-updated: 2024-02-20
 tracking-link:
   - https://issues.redhat.com/browse/SDN-3905
 ---
@@ -148,7 +148,7 @@ lrwxrwxrwx 1    44 Aug 17 15:25 ovnkube-node.yaml -> ../multi-zone-interconnect/
 
 CNO starts phase 2 by rolling out multizone ovnkube-node. Each node getting its ovnkube-node image updated will now run in its own zone with its own local ovnkube stack (ovnkube-controller, nbdb, northd, sbdb, ovn-controller) and will consider all other nodes as remote. Reversely, the rest of the cluster will consider this node as remote. 
 
-Once that is done, CNO will deploy the multizone ovnkube-control-plane deployment on master nodes. The ovnkube-control-plane pods only run ovnkube-cluster-manager: the three instances elect a leader, which will allocate IP subnets to nodes in a centralized manner.
+Once that is done, CNO will deploy the multizone ovnkube-control-plane deployment on master nodes. The ovnkube-control-plane pods only run ovnkube-cluster-manager: the two instances elect a leader, which will allocate IP subnets to nodes in a centralized manner. Beware that up to 4.14.13 there were three instances of ovnkube-control-plane pods.
 
 At this point of phase 2, the cluster runs:
 - multizone ovnkube-node (distributed per-node OVN stack)
@@ -241,6 +241,7 @@ NA
 
 
 ## Implementation History
+https://github.com/openshift/cluster-network-operator/pull/2154
 https://github.com/openshift/cluster-network-operator/pull/1874
 ## Alternatives
 NA
