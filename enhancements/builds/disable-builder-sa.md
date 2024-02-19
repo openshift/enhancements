@@ -40,7 +40,8 @@ In OCP 4.14, `Build` and `DeploymentConfig` were added as optional install
 capabilities to OpenShift [1]. When `Build` and `DeploymentConfig` capabilities
 are not enabled, the APIs and respective controllers are not enabled on the
 cluster. Cluster admins can enable these capabilites after installation, but
-they cannot disable these capabilities once enabled.
+they cannot disable these capabilities once enabled. Long-lived clusters
+upgrading to 4.14 cannot disable the `Build` capability.
 
 This feature will allow cluster administrators to disable the `builder` service
 account while keeping other components of the BuildConfig system available.
@@ -51,6 +52,15 @@ OpenShift internal registry if that feature is enabled. The builder service
 account does not need permission to create pods with elevated pod security
 permissions, as this has been delegated to the build controller's service
 account.
+
+This feature will address the following use cases:
+
+- Cluster administrators (or equvalent) upgrading large fleets of "application"
+  clusters that do not wish to run `Build` workloads alongside applications.
+  In the current state, disabling the `builder` service account and its RBAC is
+  not an option in OCP for clusters upgrading from 4.13 or earlier.
+- Cluster administrators (or equivalent) who want more fine grained control
+  over the permissions granted to service accounts.
 
 [1] https://issues.redhat.com/browse/WRKLDS-695
 
@@ -65,7 +75,8 @@ account.
   production/application clusters so that only service accounts related to
   applications are deployed, and they have the minimum permissions necessary.
 - As a software architect/platform engineer, I want to change the default
-  service account used for builds so I can customize its permissions.
+  "golden path" service account used for builds so I can customize its
+  permissions.
 - As a product manager, I want to know how many OpenShift clusters are
   disabling the builder service account so that I can understand the impact of
   this feature.
@@ -95,7 +106,8 @@ account.
   installation.
 - Refactoring “system:*” bootstrap roles and rolebindings related to BuildConfigs.
 - Add Service Accounts as a `buildDefault`/`buildOverride` feature.
-- Fine tune the RBAC of the generated `builder` service account.
+- Fine tune the RBAC of the _generated_ `builder` service account.
+- Improve metrics related to the success rate of `BuildConfig`-driven builds
 
 
 ## Proposal
@@ -252,6 +264,11 @@ tuning cluster configuration. These should be augmented to test the new
 Existing testing infrastructure for openshift-controller-manager-operator and
 openshift-controller-manager can address unit and integration testing.
 
+The build tests should also verify that builds can succeed if an alternative
+serivce account name is provided, and the service account has been granted
+appropriate permissions per the OCP documentation. If these tests do not exist
+already, they should be created.
+
 
 ### Graduation Criteria
 
@@ -316,8 +333,22 @@ value for `builderServiceAccount` is created through Kubernetes CRD features.
 
 This feature could impact user experience if cluster admins/platform engineers
 do not configure a `builder` service account on behalf of developers. This
-would result in an increase in faild builds on the cluster. We currently do not
-have SLIs for builds due to the their highly variable execution.
+would result in an increase in faild builds on the cluster. We do not have a
+"good" SLI for `BuildConfig`-driven builds at present:
+
+- The metric `openshift_build_status_phase_total` records the phase of the
+  `Build` objects on the cluster, with labels for phase state (`error`,
+  `completed`, `failed`, `canceled`, etc.).
+- The metric is a `Gauge` type, calculated by querying the state of OpenShift
+  when the metrics endpoint for `openshift-state-metrics` is hit.
+- This metric tends to over-report failures as a percent of total builds.
+  Builds have an integrated pruning mechanism that deletes `Build` objects over
+  time. By default, the 5 most recent successful and failed builds are
+  retained. Over time, the ratio of successful to "failed" category builds will
+  converge to 1.
+- `openshift_build_total` provides similar data, and suffers from the same
+  limitations as `openshift_build_status_phase_total`. This is sourced from the
+  openshift-controller-manager.
 
 #### Failure Modes
 
@@ -356,6 +387,14 @@ to remove this service account if the cluster does not need build capabilities
 OR if the security/platform engineering team wants to provide their own RBAC
 for builds. Adding cluster options to set an alternative default builder
 service account name could be addressed in a follow up enhancement.
+
+Finally, clusters can simply be installed with the `Build` capability disabled.
+This works for new clusters and deployments - however it does not help
+enterprises with large fleets of existing (pre 4.14) clusters that are
+upgrading over time. "Lift and shift" approaches may not scale in this context,
+or may not be feasbile due to anticipated disruptions of mission-critical
+applications.
+
 
 ## Infrastructure Needed [optional]
 
