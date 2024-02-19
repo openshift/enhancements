@@ -242,6 +242,14 @@ the `builder` service account.
   the internal registry. We may not be able to easily mitigate this, as the UX
   should be no different for failing to push to an external registry like
   quay.io.
+* Risk that this feature is enabled on clusters with a high magnitude of
+  namespaces (10k), resulting in a large number of objects being created at
+  once. This is mitigated by the rate limiters baked into the
+  `openshift-controller-manager` controllers and the QPS limits for the
+  controller clients. The current controller defaults (10 QPS, 100 burst) imply
+  an upper bound of ~40 objects created per second, each one of fairly small
+  size (under 1 KiB). At 10k namespaces, this represents at most 40 MiB of
+  storage - small in comparison to the etcd limit of 8GiB.
 
 ### Drawbacks
 
