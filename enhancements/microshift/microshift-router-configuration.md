@@ -238,14 +238,14 @@ new.
 Each of the configuration options described above has a direct effect on the
 manifests that MicroShift will apply after starting.
 
-The `router.status` option will drive whether the router `Deployment` and the
+The `ingress.status` option will drive whether the router `Deployment` and the
 `Service` get created.
 ```yaml
 ingress:
   status: <Enabled|Disabled> # Defaults to Enabled.
 ```
 
-The `router.policy.ports.http` and `router.policy.ports.https` will determine,
+The `ingress.policy.ports.http` and `ingress.policy.ports.https` will determine,
 within the `Deployment` and the `Service`, which ports get configured to be
 exposed.
 ```yaml
@@ -255,7 +255,7 @@ ingress:
     https: <int> # Defaults to 443.
 ```
 
-The `router.policy.expose` option contains lists of hostnames, NIC names and
+The `ingress.policy.expose` option contains lists of hostnames, NIC names and
 IP addresses. These will translate to IP addresses and then configure the
 `status.loadBalancer` field in the `Service`. Ovnk will pick up this field to
 configure the iptables rules.
