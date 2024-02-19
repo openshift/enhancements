@@ -101,6 +101,9 @@ data:
   zone-mode: singlezone
   temporary: true
 ```
+
+The "temporary: true" field above is only used up until 4.14.13 and is omitted in later 4.14.z.
+
 The cluster at this point runs 4.13 ovnkube, that is:
 - 4.13 ovnkube-master daemonset on master nodes (centralized control plane)
 - 4.13 ovnkube-node daemonset on all nodes (dataplane)
@@ -130,6 +133,8 @@ data:
   zone-mode: multizone
   temporary: false
 ```
+
+The "temporary: false" field above is only used up until 4.14.13 and is omitted in later 4.14.z.
 
 At the beginning of phase 2, the YAMLs are to be found in `bindata/network/ovn-kubernetes/self-hosted/multi-zone-interconnect-tmp`. The contents of this folder are symbolic links to:
 - the single-zone centralized control plane (`ovnkube-master.yaml -> ../single-zone-interconnect/ovnkube-master.yaml`), which we want to keep running until all nodes have successfully updated to IC multizone, that is until all nodes run multizone ovnkube-node;
@@ -210,6 +215,44 @@ $ ls -l bindata/network/ovn-kubernetes/managed/multi-zone-interconnect/
 ### Openshift 4.14 fresh install
 A fresh install of Openshift 4.14 will start directly with IC multizone. CNO will apply the YAMLs from `bindata/network/ovn-kubernetes/managed/multi-zone-interconnect/`
 
+### Troubleshooting
+The entire 2-phase upgrade described in this document relies on all the expected ovnkube instances eventually getting deployed and appearing as ready in order for CNO to move from one phase to the next. Nodes that are temporarily down or disconnected, regardless of the reason, will result in the ovnkube instances running on them to be marked as not ready and the 2-phase upgrade to stall until the underlying issue is resolved. Please notice that this also applied to previous upgrades, but might be more pronounced when upgrading to 4.14 because of the introduction of two roll outs.
+
+In the event that a cluster is not making progress during the upgrade to OVN IC, a cluster admin can edit the interconnect ConfigMap and instruct CNO to skip the first phase or both phases of the upgrade, depending on the specific 4.14.z version the cluster is upgrading to. While this approach accelerates the convergence of the cluster to the final ovnkube components, it may introduce potential disruptions due to the omission of the intermediate phases. No manual clean up is necessary after applying the ConfigMap.
+
+#### Until 4.14.13
+When upgrading from 4.13 to 4.14.13 or less, if the cluster is not making progress during phase 1 of the upgrade, the cluster admin can fast forward to phase 2 by setting the interconnect ConfigMap to the following values:
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ovn-interconnect-configuration
+  namespace: openshift-ovn-kubernetes
+data:
+  zone-mode: multizone
+  temporary: false
+  ongoing-upgrade: ""
+```
+CNO will then skip immediately phase 1 and continue the upgrade with phase 2. There's no support for skipping phase 2.
+
+
+![Upgrade from 4.13 to 4.14.13](./ICupgrades_from_413z_to_41413.svg)
+
+
+#### 4.14.14+
+Starting from 4.14.14, if a cluster is not making progress during phase 1 or phase 2 of the upgrade to OVN IC, a cluster admin can now edit the interconnect configmap and add a new key (fast-forward-to-multizone) to bypass the two-phase upgrade and let CNO apply directly the multizone YAMLs:
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ovn-interconnect-configuration
+  namespace: openshift-ovn-kubernetes
+data:
+  zone-mode: multizone
+  fast-forward-to-multizone: ""
+```
+CNO will then skip both phase 1 and phase 2 and will apply the final 4.14 YAMLs for ovn-kubernetes.
+![Upgrade from 4.13 to 4.14.14+](./ICupgrades_from_413z_to_41414plus.svg)
 
 ### Test Plan
 CI upgrade jobs from 4.13 to 4.14 on all supported platforms on the CI/CD pipeline, with special attention to disruption tests, will validate the new upgrade path for OVN interconnect.
@@ -241,6 +284,7 @@ NA
 
 
 ## Implementation History
+https://github.com/openshift/cluster-network-operator/pull/2076
 https://github.com/openshift/cluster-network-operator/pull/2154
 https://github.com/openshift/cluster-network-operator/pull/1874
 ## Alternatives
