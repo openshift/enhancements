@@ -369,6 +369,21 @@ To support hot-unplug scenarios (from Virtual Machines) the KubeVirt controller
 will need to remove the associated `IPAMClaim` objects. This should only happen
 if the NetworkAttachmentDefinition has the persistent IPs knob enabled.
 
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+Nothing special should be required to handle hosted control plane scenarios.
+
+#### Standalone Clusters
+Nothing special should be required to handle standalone cluster scenarios.
+
+#### Single-node Deployments or MicroShift
+Nothing special should be required to handle single-node deployments or MicroShift.
+
+The new CRD will result in slightly more memory / disk consumption, but we
+haven't measured it. If the feature is disabled, it should have no memory or
+disk impact.
+
 ### Implementation Details/Notes/Constraints
 
 ### Risks and Mitigations
@@ -708,7 +723,7 @@ Thus, to allow for foreground deletion of VMs, KubeVirt **must** create the
 2. should we update KubeVirt's VM API to present the "persistent" IPs in its
   status ?
 
-### Test Plan
+## Test Plan
 
 End to end tests will be required to assert the IP allocations for a given VM
 survive the following scenarios:
@@ -720,9 +735,9 @@ multi-network policy peers for secondary networks **with** IPAM.
 
 The tests should be available in the upstream project of the IPAM CNI plugin.
 
-### Graduation Criteria
+## Graduation Criteria
 
-#### Dev Preview -> Tech Preview
+### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
@@ -731,7 +746,7 @@ The tests should be available in the upstream project of the IPAM CNI plugin.
 - Enumerate service level indicators (SLIs), expose SLIs as metrics
 - Write symptoms-based alerts for the component(s)
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -741,19 +756,19 @@ The tests should be available in the upstream project of the IPAM CNI plugin.
 - Conduct load testing
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
 Does not apply.
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
 Does not apply.
 
-### Version Skew Strategy
+## Version Skew Strategy
 
 Does not apply.
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 
 All the API reads will happen via informers, thus the API impact will be minimal.
 
@@ -765,17 +780,13 @@ network. It will not impact it in any way.
 Performance impacts will impact IP address assignment in the network's scope,
 thus other networks are also not impacted.
 
-#### Support Procedures
+## Support Procedures
 
 If the IPAM plugin fails to generate an `IPAMClaim` for the VM, an event will
 be thrown, and the error logged.
 
 We can also create some `condition`s to highlight some specific errors in the
 `IPAMClaim` - e.g. IP pool is full, etc.
-
-## Implementation History
-
-TODO
 
 ## Alternatives
 
