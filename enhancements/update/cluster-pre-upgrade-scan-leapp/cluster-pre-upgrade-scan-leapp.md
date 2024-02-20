@@ -11,7 +11,7 @@ api-approvers:
 creation-date: 2024-02-13
 last-updated: 2024-02-13
 tracking-link:
-  - https://issues.redhat.com/browse/OAMG-10607
+  - https://issues.redhat.com/browse/OAMG-10748
 ---
 
 # OCP cluster pre-upgrades with Leapp
