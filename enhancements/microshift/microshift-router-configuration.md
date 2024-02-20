@@ -287,6 +287,9 @@ Some of the features in this enhancement proposal rely on the
 Some of the features rely on NetworkPolicy resources, so the CNI needs
 to support that.
 
+Disabling the router requires a MicroShift restart with all the associated
+consequences (apiserver downtime, etc.).
+
 ### Drawbacks
 Some of the features depend on a non-agnostic CNI design, which is the
 `LoadBalancer` controller. A different behavior should be expected if using a
@@ -335,6 +338,7 @@ immune to such configurations. In order to firewall ports the user needs to
 take action by either creating `NetworkPolicy` resources or disabling the
 router.
 
+TODO esto se va a los risks.
 Disabling the router might be disruptive, as not all traffic may come from
 external sources. This procedure also requires a restart, which might not be
 desirable/possible in all situations.
