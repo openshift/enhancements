@@ -147,7 +147,7 @@ flowchart TD
    field is populated with a valid value. If none is set, or it is set to an
    invalid value, the operator sets this to `Generate`.
 4. The cluster administrator edits the cluster build system configuration to
-   disable the generation of the builder serice account.
+   disable the generation of the builder service account.
 
    ```yaml
    apiVersion: config.openshift.io/v1
@@ -249,7 +249,7 @@ the `builder` service account.
   controller clients. The current controller defaults (10 QPS, 100 burst) imply
   an upper bound of ~40 objects created per second, each one of fairly small
   size (under 1 KiB). At 10k namespaces, this represents at most 40 MiB of
-  storage - small in comparison to the etcd limit of 8GiB.
+  storage - small in comparison to the etcd limit of 8 GiB (less than 1%).
 
 ### Drawbacks
 
