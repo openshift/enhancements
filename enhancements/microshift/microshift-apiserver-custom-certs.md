@@ -105,8 +105,17 @@ because certain values that configured in `names` field can cause  internal API 
 1. Certificates will be passed to the tls-sni-cert-key command line flag preceding all the other certificates.
 1. kube-apiserver picks up the certificates and start serving them on the configured SNI.
 
-### Implementation Details
+### Topology Considerations
+#### Hypershift / Hosted Control Planes
+N/A
 
+#### Standalone Clusters
+N/A
+
+#### Single-node Deployments or MicroShift
+Enhancement is solely intended for MicroShift.
+
+### Implementation Details/Notes/Constraints
 The certs will be prepended to the []configv1.NamedCertificate list before the api server is started. (it will be added to `-tls-sni-cert-key` flag)
 
 this certification paths configuration and names will be prepended into the kube-apiserver `tls-sni-cert-key` command line flag.
@@ -133,35 +142,35 @@ N/A
 ## Design Details
 N/A
 
-### Open Questions [optional]
+## Open Questions [optional]
 - How to handle kubeconfig generation for NamedCerts?
 
-### Test Plan
+## Test Plan
 add e2e test that will:
 - generate and sign certificates with custom ca.
 - change the default Microshift configuration to use the newly generated certs.
 - make sure system is functional using  generated external kubeconfig.
 
-### Graduation Criteria
-#### Dev Preview -> Tech Preview
+## Graduation Criteria
+### Dev Preview -> Tech Preview
 - Gather feedback from early adopters on possible issues.
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 - Extensive testing with various certificates variations.
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 N/A
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 N/A
 
-### Version Skew Strategy
+## Version Skew Strategy
 N/A
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 N/A
 
-#### Failure Modes
+### Failure Modes
 The provided certs value will be validated before is it passed to the api-server flag
 
 This check will prevent Microshift service from starting:
@@ -172,7 +181,7 @@ This check display warning message at the log and service will be started:
 1. certificates is expired.
 
 
-#### Support Procedures
+## Support Procedures
 Configured certs values to the tls-sni-cert-key TLS handshake command line flag which is passed to the kube-apiserver:
 
 ```shell
