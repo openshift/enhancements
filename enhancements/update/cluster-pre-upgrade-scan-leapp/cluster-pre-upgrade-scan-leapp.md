@@ -82,6 +82,20 @@ The workflow of proposed operator is following:
 
 This enhancment doesnt not alter the existing API surface, just adds a optional operator with a new CRD.
 
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+N/A
+
+#### Standalone Clusters
+
+N/A
+
+#### Single-node Deployments or MicroShift
+
+N/A
+
 ### Implementation Details
 
 A preview diagram of how the operator works:
@@ -100,34 +114,41 @@ There are no known drawbacks to this proposal.
 
 ## Design Details
 
-### Test Plan
+## Test Plan
 
 Leapp tooling is already tested and used in RHEL upgrade process. The testing will primarily focus on the integration of the leapp tool with the OpenShift cluster, and the operator itself.
 
-### Graduation Criteria
+## Graduation Criteria
 
 **Note:** *Section not required until targeted at a release.*
 
-### Version Skew Strategy
+### Dev Preview -> Tech Preview
+
+**Note:** *Section not required until targeted at a release.*
+
+### Tech Preview -> GA
+
+**Note:** *Section not required until targeted at a release.*
+
+### Removing a deprecated feature
+
+**Note:** *Section not required until targeted at a release.*
+
+## Upgrade / Downgrade Strategy
+
+**Note:** *Section not required until targeted at a release.*
+
+## Version Skew Strategy
 
 N/A
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 
 N/A
 
-#### Failure Modes
+## Support Procedures
 
 N/A
-
-#### Support Procedures
-
-N/A
-
-## Implementation History
-
-Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`.
 
 ## Alternatives
 
