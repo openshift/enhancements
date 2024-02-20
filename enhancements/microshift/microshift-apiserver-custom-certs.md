@@ -89,7 +89,7 @@ therefore custom certificates will have to be validated against CAs in the RHEL 
 For every certificate that contain `names` the first non-wildcard `name`  will be used,
 and placed inside the `server` section of the generated `kubeconfig`.
 
-because certain values that configured in `names` field can cause  internal API communication issues  ie:127.0.0.1,localhost we must not allow them.
+Certain values that configured in `names` field can cause  internal API communication issues  ie:127.0.0.1,localhost we must not allow them.
 
 ### Workflow Description
 
@@ -102,7 +102,7 @@ because certain values that configured in `names` field can cause  internal API 
 1. Device Administrator configures `namedCertificates` in the Microshift configuration yaml file (/etc/microshift/config.yaml).
 1. Device Administrator start/restarts MicroShift
 1. During startup the certifates paths will be checked and validated. in case of an error service will produce clear error log and if the file is missing it will exit.
-1. Certificates will be passed to the tls-sni-cert-key command line flag preceding all the other certificates.
+1. Certificates will be passed to the tls-sni-cert-key as apiserver command line option preceding all the other certificates.
 1. kube-apiserver picks up the certificates and start serving them on the configured SNI.
 
 ### Topology Considerations
