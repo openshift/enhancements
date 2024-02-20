@@ -125,12 +125,24 @@ The details are covered in the rest of this document.
 
 ### Risks and Mitigations
 
-There is a risk that some underlying data format will change between
-MicroShift versions (kubernetes storage versions, etcd file format,
-etc.). If that happens, someone will have to build a tool to support
-migrating from 4.Y-2 to 4.Y-1 _anyway_. MicroShift will need to carry
-over the use of that tool for an extra release to support the 2
-version upgrade capability.
+There is some risk in supporting multiple version upgrades in a way
+OCP does not. OCP upgrades from one EUS version to another while
+ensuring minimal disruption by upgrading the control plane to the Y+1
+version, then to the Y+2 version, then updating the worker nodes. SNO
+OCP does not claim support for upgrades without disruption, so it does
+not make a distinction between types of versions and requires stepping
+through one release at a time. MicroShift upgrades are significantly
+simpler because they are all single-node (so disruption is expected)
+and there are no operators for managing the host or cluster
+configuration that need to move the system through multiple states as
+part of the upgrade.
+
+There is a risk that some underlying data format for etcd will change
+between MicroShift versions (kubernetes storage versions, etcd file
+format, etc.). If that happens, someone will have to build a tool to
+support migrating from 4.Y-2 to 4.Y-1 _anyway_. MicroShift will need
+to carry over the use of that tool for an extra release to support the
+2 version upgrade capability.
 
 If we extend the supported upgrade skew, we would have to continue to
 carry the migration tool for the full length of the allowed upgrade
@@ -144,9 +156,13 @@ written assuming multi-node clusters. Even so, it supports 3
 kubernetes version difference between the API server and kubelet and 1
 version between the API server instances. This is what allows
 OpenShift's EUS upgrade process, in which the control plane is updated
-independently of the worker nodes, to work. In a single-node
-MicroShift deployment, the API server and kubelet are in the same
-binary and have the same version, so there is no skew at all.
+independently of the worker nodes, to work. While the version skew
+restriction is enforced, this is done to prevent old nodes from
+joining a cluster and there is no code in kubernetes that explicitly
+links skew to upgrades in order to prevent updating multiple versions
+at a time.  In a single-node MicroShift deployment, the API server and
+kubelet are in the same binary and have the same version, so there is
+no skew at all.
 
 If, in the future, MicroShift does need to support multi-node
 deployments there will be many other aspects of deployment and upgrade
@@ -214,6 +230,8 @@ packages built by the release team. Their test plan includes:
       1. RHEL 9.4 / 4.16.Z-1 → RHEL 9.4 / 4.16.Z
    1. Rollback of each upgrade listed above will be performed
    1. Z-stream upgrade testing for 4.14 and 4.15 will remain at Y-1 and Z-1
+   1. The multi-version update testing may be limited to EUS versions
+      to manage the test workload.
 1. RPM upgrades on RHEL hosts
    1. Given the support statement says MicroShift will support only
       "2 RHEL versions: the most recent EUS at the time of development
