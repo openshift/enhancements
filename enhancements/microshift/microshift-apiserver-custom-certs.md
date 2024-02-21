@@ -42,7 +42,7 @@ Some customers have very strict requirements regarding TLS certs. There are freq
 ### User Stories
 * As a MicroShift administrator, I want to be able to add  organization generated certificates. 
   - each certificate may contain:
-    - Single Common Name containing The API server DNS/IPAddress.
+    - Single Common Name containing The API server DNS/IPAddress or a wildcard entry (wildcard certificate).
     - Multiple Subject Alternative Names (SAN) containing the API server DNS/IPAddress.
 
 * As a MicroShift administrator, I want to provide additional DNS names for each certificate.
@@ -91,6 +91,33 @@ if the CN Section of the certificate will contain wildcard then `kubeconfig` won
 
 Certain values that configured in `names` field can cause  internal API communication issues  ie:127.0.0.1,localhost we must not allow them.
 
+when the `names` field is not contained in the certificate (ie: included in the wildcard),
+
+it will be served by the api-server:
+```
+> echo Q |   openssl s_client -connect example.com:6443 -showcerts 2>/dev/null |   openssl x509 -noout -subject -issuer -enddate  -ext subjectAltName
+
+subject=C = il, ST = il, L = , O = , OU = , CN = 192.168.2.130
+issuer=CN = 192.168.2.130
+notAfter=May 27 14:45:13 2051 GMT
+X509v3 Subject Alternative Name: 
+    DNS:api.example.com, DNS:localhost.localdomain, DNS:192.168.2.130, IP Address:192.168.2.130
+```
+
+while kubeconfig on the client contains:
+```
+> cat kubeconfig | grep server
+
+server: https://example.com:6443
+```
+but rejected by the oc client:
+```
+> oc get pods
+
+tls: failed to verify certificate: x509: certificate is valid for api.example.com, localhost.localdomain, not test.com
+```
+
+
 ### Workflow Description
 
 #### Default API Certs
@@ -134,6 +161,7 @@ N/A
   Microshift will start with a warning in the logs,kube-api will continue serve with an expired cert - similiar approach is taken by OpenShift.
   > users can mitigate this by using --insecure-skip-tls-verify client mode
 
+* Users might configure certs with the wrong names that doesnt match the certificate SAN,but openShift allows it so we will too.
 ### Drawbacks
 * External certificate wont be automaticly renewed, so it requires manual Certificate rotation. 
   similiar approach is taken by OpenShift.
