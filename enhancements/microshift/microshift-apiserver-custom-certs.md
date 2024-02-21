@@ -52,7 +52,7 @@ Some customers have very strict requirements regarding TLS certs. There are freq
 domain names.
 
 ### Non-Goals
-N/A
+Automatic certificate rotation and integration with 3rd party cert issuing services.
 
 ## Proposal
 Proposal suggests to provide Administrator means adding their own Certificates using microshift configuration file.
@@ -84,10 +84,10 @@ because we dont want to disrupt the internal API communication and make sure the
 Those certificate will extend the default  API server [external](https://github.com/openshift/microshift/blob/main/pkg/controllers/kube-apiserver.go#L194) certificate configuration.
 
 The generated `kubeconfig` for the custom certificates will omit the certificate-authority-data section,
-therefore custom certificates will have to be validated against CAs in the RHEL trust store. 
+therefore custom certificates will have to be validated against CAs in the RHEL Client trust store. 
 
-For every certificate that contain `names` the first non-wildcard `name`  will be used,
-and placed inside the `server` section of the generated `kubeconfig`.
+For every non-wildcard certificate CN content will be placed inside the `server` section of the generated `kubeconfig`.
+if the CN Section of the certificate will contain wildcard then `kubeconfig` wont be generated.
 
 Certain values that configured in `names` field can cause  internal API communication issues  ie:127.0.0.1,localhost we must not allow them.
 
@@ -98,11 +98,11 @@ Certain values that configured in `names` field can cause  internal API communic
 
 #### when custom namedCertificates configured
 1. Device Administrator copies the certificated to MicroShift host
-1. Device Administrator configures additonal CAs in the RHEL trust store.
+1. Device Administrator configures additonal CAs in the RHEL Client trust store on the client system.
 1. Device Administrator configures `namedCertificates` in the Microshift configuration yaml file (/etc/microshift/config.yaml).
 1. Device Administrator start/restarts MicroShift
-1. During startup the certifates paths will be checked and validated. in case of an error service will produce clear error log and if the file is missing it will exit.
-1. Certificates will be passed to the tls-sni-cert-key as apiserver command line option preceding all the other certificates.
+1. During startup, Microshift will check and validate the certificates paths. in case of an error service will produce clear error log and if the file is missing it will exit.
+1. Microshift passes the certificates to the tls-sni-cert-key as apiserver command line option preceding all the other certificates.
 1. kube-apiserver picks up the certificates and start serving them on the configured SNI.
 
 ### Topology Considerations
@@ -150,6 +150,7 @@ add e2e test that will:
 - generate and sign certificates with custom ca.
 - change the default Microshift configuration to use the newly generated certs.
 - make sure system is functional using  generated external kubeconfig.
+- intentionally configure invalid value in `names` (ie: 127.0.0.1,localhost) , Microshift should reject this configuration and exit with an error message.
 
 ## Graduation Criteria
 ### Dev Preview -> Tech Preview
@@ -157,6 +158,7 @@ add e2e test that will:
 
 ### Tech Preview -> GA
 - Extensive testing with various certificates variations.
+- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ### Removing a deprecated feature
 N/A
@@ -201,8 +203,7 @@ N/A
 ## Alternatives
 - Use [cert-manager](https://cert-manager.io/docs/) for managing Microshift external custom certs
  which allow MicroShift administrators to rotate certificates automatically (e.g. via ACME)
-    1. cert-manager is not supported on Microshift because it requires alot of internal API changes.
-    1. automatic certificate rotation and integration with 3rd party cert issuing services are non-goals.
+ cert-manager is not supported on Microshift because it requires alot of internal API changes.
 
 ## Infrastructure Needed [optional]
 N/A
