@@ -120,29 +120,43 @@ Providers.
 
 ### Workflow Description
 
-1.  The cluster administrator realizes that they need to add custom
-    content to the OS on each of their cluster nodes.
+1. The cluster administrator realizes that they need to add custom
+   content to the OS on each of their cluster nodes.
 
-2.  The cluster administrator edits the MachineConfigPool, adding a
-    Containerfile, as well as the one-time setup of what image registry to push the
-    final image to, the credentials needed to push to this registry, etc.
+2. The cluster administrator edits the MachineConfigPool, adding a
+   Containerfile, as well as the one-time setup of what image registry to push the
+   final image to, the credentials needed to push to this registry, etc.
 
-3.  The BuildController detects that these details are provided and
-    begins a build.
+3. The BuildController detects that these details are provided and
+   begins a build.
 
-4.  The built image is pushed to the cluster administrators’ image
-    registry of choice.
+4. The built image is pushed to the cluster administrators’ image
+   registry of choice.
 
-5.  NodeController updates the `desiredImage` annotation on each node within its
-    pool according to its rules such as maximum unavailable nodes, which nodes
-    haven't been updated yet, etc.
+5. NodeController updates the `desiredImage` annotation on each node within its
+   pool according to its rules such as maximum unavailable nodes, which nodes
+   haven't been updated yet, etc.
 
-6.  The MachineConfigDaemon drains the target node, applies the new OS
-    content to the node, and reboots the node upon completion.
+6. The MachineConfigDaemon drains the target node, applies the new OS
+   content to the node, and reboots the node upon completion.
 
-#### Variation and form factor considerations
+### Topology Considerations
 
-##### Single-Node OpenShift (SNO)
+#### Hypershift / Hosted Control Planes
+
+Hypershift on the other hand, would require distinct configurations for
+both the host cluster and the guest cluster. Additionally, some
+adaptations would be required to Hypershift in order to traverse the
+host \<-\> guest cluster barrier. (need to page Hypershift MCO process
+back in to have a more complete opinion around this).
+
+#### Standalone Clusters
+
+Clusters in disconnected environments will likely require special environment
+configurations such as a local package mirror, local image registry, etc.
+However, on-cluster builds should continue to work as-is in these environments.
+
+#### Single-node Deployments or MicroShift"
 
 Single-Node OpenShift (SNO) should not have any difficulty running the
 on-cluster build process as-is. However, there may be some efficiency
@@ -151,15 +165,9 @@ directly to the nodes’ filesystem before the handoff to rpm-ostree / bootc to
 avoid a registry roundtrip. These efficiency gains would be best handled as a
 separate enhancement.
 
-##### Hypershift
+### Variation Considerations
 
-Hypershift on the other hand, would require distinct configurations for
-both the host cluster and the guest cluster. Additionally, some
-adaptations would be required to Hypershift in order to traverse the
-host \<-\> guest cluster barrier. (need to page Hypershift MCO process
-back in to have a more complete opinion around this).
-
-##### Multi-Arch Clusters
+#### Multi-Arch Clusters
 
 Multiarch clusters have special considerations in terms of needing to
 orchestrate more than one build for each target architecture as well as
@@ -167,13 +175,7 @@ manifestlisting the final image. This consideration also extends to the image
 registry the final image will be pushed to. As of OpenShift 4.13, the on-cluster
 image registry now supports manifestlisted images, as does ImageStreams.
 
-##### Disconnected Environments
-
-Clusters in disconnected environments will likely require special environment
-configurations such as a local package mirror, local image registry, etc.
-However, on-cluster builds should continue to work as-is in these environments.
-
-##### FIPS-Enabled Environments
+#### FIPS-Enabled Environments
 
 FIPS-enabled environments have special requirements around ensuring that any
 cryptographic libraries used are certified. This may not impose any particular
@@ -319,7 +321,7 @@ the MCO namespace that the MCO could then hand directly off to bootc to allow
 for a more natural way of managing OS node configs. This is intended to
 supplement MachineConfigs, not replace them.
 
-### Implementation Details
+### Implementation Details/Notes/Constraints
 
 #### Sensible Defaults
 
@@ -972,7 +974,7 @@ TBD.
 
 - What is needed for RHEL entitlements to work?
 
-### Test Plan
+## Test Plan
 
 - The on-cluster builds portion of the MCO will have its own e2e testing
   target within the MCO’s CI configs. These aim to test the on-cluster
@@ -1000,31 +1002,35 @@ TBD.
   However, this could be worked around with a namespace in Quay.io
   exclusively for CI use-cases.
 
-### Graduation Criteria
+## Graduation Criteria
 
 TBD.
 
-#### Dev Preview -> Tech Preview
+### Dev Preview -> Tech Preview
 
 TBD.
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 
 TBD.
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
 TBD.
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
 TBD.
 
-### Version Skew Strategy
+## Version Skew Strategy
 
 TBD.
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
+
+- The additional CRDs for MachineOSBuild and MachineOSImage will increase
+  storage requirements slightly. It is expected that there will be a minimum of
+  one MachineOSBuild per MachineConfigPool.
 
 - The suggested annotations for the `corev1.Node` and `corev1.ConfigMap`
   objects should have no discernible effect on the operational aspects.
@@ -1038,7 +1044,7 @@ TBD.
   are updated by the cluster admin as well as the BuildController
   machinery. However, no major impact is anticipated at this time.
 
-#### Failure Modes
+### Failure Modes
 
 - The failure modes for the suggested annotations for corev1.Node
   objects will be the same as the preexisting desiredConfig /
@@ -1059,7 +1065,7 @@ TBD.
 - An escalation would likely involve the MCO team and well as the CoreOS
   team.
 
-#### Support Procedures
+## Support Procedures
 
 TBD.
 
