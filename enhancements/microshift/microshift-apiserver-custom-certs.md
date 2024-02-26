@@ -83,13 +83,23 @@ each certification file will be validated (see validation rules).
 because we dont want to disrupt the internal API communication and make sure the internal certificate will be automaticly renewed,
 Those certificate will extend the default  API server [external](https://github.com/openshift/microshift/blob/main/pkg/controllers/kube-apiserver.go#L194) certificate configuration.
 
-The generated `kubeconfig` for the custom certificates will omit the certificate-authority-data section,
+
+### Kubeconfig Generation
+Each configured certificate can contain multiple FQDN and wildcards values, for each unique FQDN address kubeconfig file will be generated on the filesystem.
+
+Every generated `kubeconfig` for the custom certificates will omit the certificate-authority-data section,
 therefore custom certificates will have to be validated against CAs in the RHEL Client trust store. 
 
-For every non-wildcard certificate CN content will be placed inside the `server` section of the generated `kubeconfig`.
-if the CN Section of the certificate will contain wildcard then `kubeconfig` wont be generated.
+each certificate will be examined and deteremined if its wildcard only.
+certificate will be considered as a wildcard only if there are no FQDN Entries found.
+the FQDN Address is searched in:
+- Certificate CN
+- Certificate Subject Alternative Name (SAN)
+- names configuration value.
 
-Certain values that configured in `names` field can cause  internal API communication issues  ie:127.0.0.1,localhost we must not allow them.
+when a Certificate found as a wildcard only , host public IP Address will be placed inside its kubeconfig's `server` section.
+
+Certain values that configured in `names` field can cause  internal API communication issues  ie:127.0.0.1,localhost therefore we must not allow them.
 
 when the `names` field is not contained in the certificate (ie: included in the wildcard),
 
@@ -171,7 +181,7 @@ N/A
 N/A
 
 ## Open Questions [optional]
-- How to handle kubeconfig generation for NamedCerts?
+N/A
 
 ## Test Plan
 add e2e test that will:
