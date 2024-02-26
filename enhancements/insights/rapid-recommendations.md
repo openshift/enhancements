@@ -160,11 +160,14 @@ request gathering of specific HyperShift resources.
 
 #### Standalone Clusters
 
-TBD
+This proposal is relevant to standalone (and especially connected) clusters. 
+Standalone cluster retrieves the remote configuration (based on its OCP version) and collects data accordingly. 
 
 #### Single-node Deployments or MicroShift
 
-TBD
+This proposal may lead to increased resource consumption by the Insights Operator 
+(described in the [Excessive use of cluster resources](#excessive-use-of-cluster-resources) section), 
+but the operator can be disabled in these environments or in case of problems. 
 
 ### Implementation Details/Notes/Constraints 
 
