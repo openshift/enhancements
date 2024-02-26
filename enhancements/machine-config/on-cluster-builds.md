@@ -252,14 +252,14 @@ MachineOSBuilds can also be augmented with the following annotations:
 
 #### MachineOSImage
 
-This represents the final OS image that is produced by the build process. The
-name of each MachineOSImage will be produced via a salted MD5 hash based upon
-the contents of the rendered MachineConfig, the Containerfile contents, and the
-base OS and extensions image pullspecs. It will look something like this:
-`worker-os-b1946ac92492d2347c6235b4d2611184` or
+MachineOSImages are a reference to the final OS image that is produced by the
+build process. The name of each MachineOSImage will be produced via a salted MD5
+hash based upon the contents of the rendered MachineConfig, the Containerfile
+contents, and the base OS and extensions image pullspecs. It will look something
+like this: `worker-os-b1946ac92492d2347c6235b4d2611184` or
 `infra-os-2e090af63118fafdb117115a677ae060`. Additionally, this name will be
-used as the image tag when the image is pushed to the container registry
-(see Image Tagging section for additional details):
+used as the image tag when the image is pushed to the container registry (see
+Image Tagging section for additional details):
 
 | **Field Name / Path (JSONPath):** | **Optional or Required:** | **Intended Use:**                                                                  |
 | --------------------------------- | ------------------------- | ---------------------------------------------------------------------------------- |
@@ -268,15 +268,19 @@ used as the image tag when the image is pushed to the container registry
 | `.spec.renderedMachineConfig`     | Required                  | The name of the rendered MachineConfig built into this image (if one is built in). |
 | `.spec.machineConfigPool`         | Required                  | The name of the MachineConfigPool this MachineOSImage was built for.               |
 
+If a cluster-admin were so inclined, they could potentially create their own
+MachineOSImage from an image built off-cluster. This could eventually replace
+the `osImageURL` mechanism provided today by MachineConfigs.
+
 #### Nodes (corev1.Node)
 
 The following annotations will be added to each node object to indicate
 the current and desired image states:
 
-| **Annotation Name:**                             | **Description:**                                                                       |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| `machineconfiguration.openshift.io/currentImage` | The fully-qualified image pullspec for the currently-booted OS image for a given node. |
-| `machineconfiguration.openshift.io/desiredImage` | The fully-qualified image pullspec for the desired OS image for a given node.          |
+| **Annotation Name:**                             | **Description:**                                                                                |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `machineconfiguration.openshift.io/currentImage` | The fully-qualified digested image pullspec for the currently-booted OS image for a given node. |
+| `machineconfiguration.openshift.io/desiredImage` | The fully-qualified digested image pullspec for the desired OS image for a given node.          |
 
 
 #### MachineConfigPools
@@ -379,7 +383,7 @@ flowchart TB
     RenderController--> |Rendered MachineConfig created\n and added to MachineConfigPool| BuildController
     ImageRegistry--> |Base OS Image Pull| ImageBuilder
     ImageBuilder--> |Final OS Image Push| ImageRegistry
-    ImageBuilder--> |Fully-Qualified Image Pullspec| BuildController
+    ImageBuilder--> |Fully-Qualified Digested\nImage Pullspec| BuildController
     ImageRegistry--> |Final OS Image Pull| RPMOStree
 ```
 
@@ -442,7 +446,7 @@ flowchart TB
     isOSContentChange--> |No| RenderController
     ImageRegistry--> |Base OS Image Pull| ImageBuilder
     ImageBuilder--> |Final OS Image Push| ImageRegistry
-    ImageBuilder--> |Fully-Qualified Image Pullspec| BuildController
+    ImageBuilder--> |Fully-Qualified Digested\nImage Pullspec| BuildController
     ImageRegistry--> |Final OS Image Pull| bootc
 ```
 
@@ -735,18 +739,18 @@ the cluster admin takes action.
 #### Image Tagging
 
 While images built on-cluster will be applied to nodes using their
-fully-qualified pullspec (e.g., `registry.host.com/org/repo@sha256:...`),
-tagging these images before pushing to the image registry would be
-beneficial to cluster administrators since it would allow them to
-quickly and easily identify what images live in what image registry.
+fully-qualified digested pullspec (e.g.,
+`registry.host.com/org/repo@sha256:e87f932628fb5112265fc34174784c72c7b1c6b0afbae19894bb00d13edb4b81`),
+tagging these images before pushing to the image registry would be beneficial to
+cluster administrators since it would allow them to quickly and easily identify
+what images live in what image registry.
 
-The first-pass implementation of on-cluster builds simply tagged each
-image with the name of the MachineConfig that was used to produce it.
-For example,
-`registry.host.com/org/repo:rendered-worker-abcdef1234567890`). However,
-for situations where the custom OS content is changed, we should aim to
-somehow work that into the tag name as well. The tagging convention
-could be something like this:
+The first-pass implementation of on-cluster builds simply tagged each image with
+the name of the MachineConfig that was used to produce it.  For example,
+`registry.host.com/org/repo:rendered-worker-4ec0e6462a311bfa6fe1b5b95f8c2eee`).
+However, for situations where the custom OS content is changed, we should aim to
+somehow work that into the tag name as well. The tagging convention could be
+something like this:
 
 `<machineconfig name>-<sha256 or md5 of merged Containerfile content>`
 
