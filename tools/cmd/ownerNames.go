@@ -6,18 +6,12 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"sort"
 
 	"github.com/openshift/enhancements/tools/util"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v2"
 )
-
-type Owners struct {
-	Approvers []string `yaml:"approvers"`
-}
 
 // ownerNamesCmd represents the ownerNames command
 var ownerNamesCmd = &cobra.Command{
@@ -27,12 +21,7 @@ var ownerNamesCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		initConfig()
 
-		content, err := ioutil.ReadFile("../OWNERS")
-		if err != nil {
-			return err
-		}
-		owners := Owners{}
-		err = yaml.Unmarshal(content, &owners)
+		owners, err := util.ReadOwners()
 		if err != nil {
 			return err
 		}
@@ -69,14 +58,4 @@ var ownerNamesCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(ownerNamesCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// ownerNamesCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// ownerNamesCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
