@@ -1,6 +1,7 @@
 package util
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -40,4 +41,15 @@ func ReadOwners() (*Owners, error) {
 		}
 	}
 	return nil, fmt.Errorf("Did not find OWNERS file at %v", candidateFilenames)
+}
+
+func (o *Owners) Write() error {
+	var b bytes.Buffer
+	encoder := yaml.NewEncoder(&b)
+	encoder.SetIndent(2)
+	err := encoder.Encode(&o)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(o.filename, b.Bytes(), 0644)
 }
