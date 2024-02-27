@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 type MetaData struct {
