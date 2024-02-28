@@ -147,18 +147,24 @@ spec:
           source: data:text/plain;charset=utf-8;base64,aW50ZXJmYWNlczoKLSBuYW1lOiBlbnAyczAKICB0eXBlOiBldGhlcm5ldAogIHN0YXRlOiB1cAogIGlwdjQ6CiAgICBlbmFibGVkOiBmYWxzZQogIGlwdjY6CiAgICBlbmFibGVkOiBmYWxzZQotIG5hbWU6IGJyLWV4CiAgdHlwZTogb3ZzLWJyaWRnZQogIHN0YXRlOiB1cAogIGNvcHktbWFjLWZyb206IGVucDJzMAogIGlwdjQ6CiAgICBlbmFibGVkOiBmYWxzZQogICAgZGhjcDogZmFsc2UKICBpcHY2OgogICAgZW5hYmxlZDogZmFsc2UKICAgIGRoY3A6IGZhbHNlCiAgYnJpZGdlOgogICAgcG9ydDoKICAgIC0gbmFtZTogZW5wMnMwCiAgICAtIG5hbWU6IGJyLWV4Ci0gbmFtZTogYnItZXgKICB0eXBlOiBvdnMtaW50ZXJmYWNlCiAgc3RhdGU6IHVwCiAgaXB2NDoKICAgIGVuYWJsZWQ6IHRydWUKICAgIGFkZHJlc3M6CiAgICAtIGlwOiAiMTkyLjE2OC4xMTEuMTEzIgogICAgICBwcmVmaXgtbGVuZ3RoOiAyNAogIGlwdjY6CiAgICBlbmFibGVkOiBmYWxzZQogICAgZGhjcDogZmFsc2UKZG5zLXJlc29sdmVyOgogIGNvbmZpZzoKICAgIHNlcnZlcjoKICAgIC0gMTkyLjE2OC4xMTEuMQpyb3V0ZXM6CiAgY29uZmlnOgogIC0gZGVzdGluYXRpb246IDAuMC4wLjAvMAogICAgbmV4dC1ob3AtYWRkcmVzczogMTkyLjE2OC4xMTEuMQogICAgbmV4dC1ob3AtaW50ZXJmYWNlOiBici1leA==
         mode: 0644
         overwrite: true
-        path: /etc/nmstate/worker-0.yaml
+        path: /etc/nmstate/openshift/worker-0.yaml
       - contents:
           source: data:text/plain;charset=utf-8;base64,aW50ZXJmYWNlczoKLSBuYW1lOiBlbnAyczAKICB0eXBlOiBldGhlcm5ldAogIHN0YXRlOiB1cAogIGlwdjQ6CiAgICBlbmFibGVkOiBmYWxzZQogIGlwdjY6CiAgICBlbmFibGVkOiBmYWxzZQotIG5hbWU6IGJyLWV4CiAgdHlwZTogb3ZzLWJyaWRnZQogIHN0YXRlOiB1cAogIGNvcHktbWFjLWZyb206IGVucDJzMAogIGlwdjQ6CiAgICBlbmFibGVkOiBmYWxzZQogICAgZGhjcDogZmFsc2UKICBpcHY2OgogICAgZW5hYmxlZDogZmFsc2UKICAgIGRoY3A6IGZhbHNlCiAgYnJpZGdlOgogICAgcG9ydDoKICAgIC0gbmFtZTogZW5wMnMwCiAgICAtIG5hbWU6IGJyLWV4Ci0gbmFtZTogYnItZXgKICB0eXBlOiBvdnMtaW50ZXJmYWNlCiAgc3RhdGU6IHVwCiAgaXB2NDoKICAgIGVuYWJsZWQ6IHRydWUKICAgIGFkZHJlc3M6CiAgICAtIGlwOiAiMTkyLjE2OC4xMTEuMTE0IgogICAgICBwcmVmaXgtbGVuZ3RoOiAyNAogIGlwdjY6CiAgICBlbmFibGVkOiBmYWxzZQogICAgZGhjcDogZmFsc2UKZG5zLXJlc29sdmVyOgogIGNvbmZpZzoKICAgIHNlcnZlcjoKICAgIC0gMTkyLjE2OC4xMTEuMQpyb3V0ZXM6CiAgY29uZmlnOgogIC0gZGVzdGluYXRpb246IDAuMC4wLjAvMAogICAgbmV4dC1ob3AtYWRkcmVzczogMTkyLjE2OC4xMTEuMQogICAgbmV4dC1ob3AtaW50ZXJmYWNlOiBici1leA==
         mode: 0644
         overwrite: true
-        path: /etc/nmstate/worker-1.yaml
+        path: /etc/nmstate/openshift/worker-1.yaml
 ```
 
 The filenames must correspond to the hostname of each node as that will be
 used to map the configuration to the node. A separate manifest will need
 to be provided for masters and workers, which is typical when working with
 machine-configs.
+
+When the new service runs, it will copy the appropriate YAML file (based on
+the hostname of the node) to /etc/nmstate so it will be applied by the normal
+system NMState service. If there is already a file in /etc/nmstate with the
+same name, the service will fail in order to avoid overwriting important
+system configuration.
 
 Alternatively, there will be a mechanism to deploy a single cluster-wide
 configuration. That might look like:
@@ -180,7 +186,7 @@ spec:
           source: data:text/plain;charset=utf-8;base64,aW50ZXJmYWNlczoKLSBuYW1lOiBlbnAyczAKICB0eXBlOiBldGhlcm5ldAogIHN0YXRlOiB1cAogIGlwdjQ6CiAgICBlbmFibGVkOiBmYWxzZQogIGlwdjY6CiAgICBlbmFibGVkOiBmYWxzZQotIG5hbWU6IGJyLWV4CiAgdHlwZTogb3ZzLWJyaWRnZQogIHN0YXRlOiB1cAogIGNvcHktbWFjLWZyb206IGVucDJzMAogIGlwdjQ6CiAgICBlbmFibGVkOiBmYWxzZQogICAgZGhjcDogZmFsc2UKICBpcHY2OgogICAgZW5hYmxlZDogZmFsc2UKICAgIGRoY3A6IGZhbHNlCiAgYnJpZGdlOgogICAgcG9ydDoKICAgIC0gbmFtZTogZW5wMnMwCiAgICAtIG5hbWU6IGJyLWV4Ci0gbmFtZTogYnItZXgKICB0eXBlOiBvdnMtaW50ZXJmYWNlCiAgc3RhdGU6IHVwCiAgaXB2NDoKICAgIGVuYWJsZWQ6IHRydWUKICAgIGRoY3A6IHRydWUKICBpcHY2OgogICAgZW5hYmxlZDogZmFsc2UKICAgIGRoY3A6IGZhbHNl
         mode: 0644
         overwrite: true
-        path: /etc/nmstate/cluster.yaml
+        path: /etc/nmstate/openshift/cluster.yaml
 ```
 
 The only difference is there will be a single file applied to each node of the
@@ -192,11 +198,25 @@ manifests will be needed for each role because of how MCO works.
 When this mechanism is in use, a flag will be set to indicate to configure-ovs
 that it should not attempt to configure br-ex.
 
-If changes to the bridge configuration are desired on day 2 (e.g. adding a VLAN
-or changing MTU), the user will need to install Kubernetes-NMState and use it
-to apply those changes directly to br-ex. The configuration applied initially
-should be copied into an NNCP and used as the basis for the update config.
-Modifying the machine-config for an already-deployed node will have no effect.
+Day 2 changes will be handled by Kubernetes-NMState. For the initial
+implementation, a limited set of changes will be supported. This is because
+some operations will be disruptive and we don't currently have any way to
+orchestrate such a change. To begin, we intend to support the following day 2
+changes:
+
+- DNS updates
+- MTU updates
+- Add more subordinate interfaces (such as VLANs) to the interface underlying br-ex
+  - Currently known to be blocked by https://issues.redhat.com/browse/OCPBUGS-14107
+    but a fix is in progress.
+- Change bond miimon, mode, and QoS configuration
+  - This has been tested and is already working with configure-ovs, so in
+    theory it should require little to no effort in this new model.
+- Rollback of any failed changes
+  - There are known issues with this that may require changes on the OVNK side.
+
+Details on writing NodeNetworkConfigurationPolicies for each of these cases
+will be provided in the product documentation.
 
 #### Scaleout
 
