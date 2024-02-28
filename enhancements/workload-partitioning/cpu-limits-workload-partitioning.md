@@ -62,6 +62,9 @@ The goals only apply to clusters where the workload partitioning is enabled.
 - Pods that set CPU limits and are annotated for workload partitioning will be
   modified for workload partitioning.
 - We will not modify the QoS of Pods and guaranteed Pods will not be modified.
+- This feature will not alter the behavior of the CRIO annotation
+  "disable-cpu-quota" since that is only relevant for guaranteed QoS pods which
+  would be excluded by this feature.
 - We will update existing e2e tests to account for this new behavior.
 - Clusters built in this way should pass the same kubernetes and OpenShift
   conformance and functional end-to-end tests as similar deployments that are
@@ -90,10 +93,11 @@ In order to support limits we will need to expose the runtime spec option for
 `CPUQuota` to the workload configuration. There are two components we need to
 modify for this change, CRI-O and the workloads admission webhook.
 
-CRI-O will be updated to expose the CPU quota at the container runtime level via
-the existing workloads configuration. We will modify the existing configuration
-to support the new value. We will make the default behavior to be 0 so existing
-CRI-O configuration files will not need to be modified.
+CRI-O will be updated to expose the CPU quota and CPU period at the container
+runtime level via the existing workloads configuration. We will modify the
+existing configuration to support the new values. We will make the default
+behavior to be 0 so existing CRI-O configuration files will not need to be
+modified and the default settings will be used.
 
 The admission webhook will be altered to no longer ignore modifying CPU limit
 requests. CPU limits will be used and added as annotation to the Pod similar to
@@ -103,17 +107,19 @@ guaranteed Pods will continue to not be altered.
 In short CRI-O and the admission webhook will be modified in the following way.
 
 1. CRI-O Workload Resource Configuration
-   - Expose the CPU quota runtime option by adding the `CPUQuota` to the
-     resource configuration.
+   - Expose the CPU quota and CPU period runtime option by adding the `CPUQuota`
+     and `CPUPeriod` to the resource configuration.
    - Update Mutating Spec call to modify CPU Quota
    - Update Cgroup Manager to set the CPUQuota for workload partitioned
      containers
    - Default value of 0 will be assumed for
-     `[crio.runtime.workloads.resources.cpuquota]`
+     `[crio.runtime.workloads.resources.cpuquota]` and
+     `[crio.runtime.workloads.resources.cpuperiod]`
 2. Admission Webhook
    - No longer ignore Pods with CPU limits defined
-   - Add the adjusted value for CPU quota as an annotation to the Pod
-   - Containers that do not contain limits will not have the `cpuquota`
+   - Add CPU limit as a milli value as an annotation to the Pod called
+     `cpulimit`
+   - Containers that do not contain limits will not have the `cpulimit`
      attribute set
    - Make sure a Pods QOS is not altered during this process
 
@@ -133,15 +139,21 @@ The addition here does not alter the existing behavior of the other variations.
 
 N/A
 
-### Implementation Details/Notes/Constraints [optional]
+### Implementation Details/Notes/Constraints
 
 ### CRI-O - Workload Resource Configuration
 
 We will need to update the CRI-O workload configuration to expose the cgroup CPU
-quota option.
+quota and CPU period option.
 
 In the code we will update the top level configuration `struct` to include the
-`CPUQuota` option.
+`CPUQuota` and `CPUPeriod` option. We will also create a wrapper `struct` to
+allow us to pass extra information in the annotations for workload partitioning
+that is not directly related to the CRIO config. We will pass the `CPULimit` in
+millicores from the pod definition through this annotation. This will allow us
+to calculate the CPU quota at the runtime level but still allow us to directly
+change the CPU quota and CPU period through the API via the webhook in the
+future.
 
 [workloads.go](https://github.com/cri-o/cri-o/blob/f243ba712d58d106dea1ba7adf33ed0911a3e563/pkg/config/workloads.go#L45-L50)
 
@@ -149,10 +161,20 @@ In the code we will update the top level configuration `struct` to include the
 type Resources struct {
 	// Specifies the number of CPU shares this pod has access to.
 	CPUShares uint64 `json:"cpushares,omitempty"`
-    // Specifies the CPU quota this pod is limited to in microseconds.
+	// Specifies the CPU quota this pod is limited to.
 	CPUQuota int64 `json:"cpuquota,omitempty"`
+	// Specifies the CPU period to use for these workloads
+	CPUPeriod uint64 `json:"cpuperiod,omitempty"`
 	// Specifies the cpuset this pod has access to.
 	CPUSet string `json:"cpuset,omitempty"`
+}
+
+// ResourceAnnotation describes extra information that is not part of the CRIO config but is used to contain
+// extra information that is passed down from the pod.
+type ResourcesAnnotation struct {
+	Resources
+	// Specifies the CPU limit in millicores this will be used to calculate the cpu quota.
+	CPULimit int64 `json:"cpulimit,omitempty"`
 }
 ```
 
@@ -172,8 +194,11 @@ func (r *Resources) MutateSpec(specgen *generate.Generator) {
 	if r.CPUShares != 0 {
 		specgen.SetLinuxResourcesCPUShares(r.CPUShares)
 	}
-    if r.CPUQuota != 0 {
+	if r.CPUQuota != 0 {
 		specgen.SetLinuxResourcesCPUQuota(r.CPUQuota)
+	}
+	if r.CPUPeriod != 0 {
+		specgen.SetLinuxResourcesCPUPeriod(r.CPUPeriod)
 	}
 }
 ```
@@ -202,6 +227,9 @@ func setWorkloadSettings(cgPath string, resources *rspec.LinuxResources) (err er
 	if resources.CPU.Quota != nil {
 		cg.Resources.CpuQuota = *resources.CPU.Quota
 	}
+  if resources.CPU.Period != nil {
+		cg.Resources.CpuPeriod = *resources.CPU.Period
+	}
 
 	mgr, err := libctrCgMgr.New(cg)
 	if err != nil {
@@ -217,33 +245,46 @@ This will all be exposed to the user via the `toml` configuration.
 [crio.runtime.workloads.management]
 activation_annotation = "target.workload.openshift.io/management"
 annotation_prefix = "resources.workload.openshift.io"
-resources = { "cpushares" = 0,  "cpuquota" = 0, "cpuset" = "0-1,52-53" }
+resources = { "cpushares" = 0,  "cpuquota" = 0, "cpuperiod" = 0, "cpuset" = "0-1,52-53" }
 ```
 
 ### Admission Webhook
 
 The admission webhook will be updated to use the CPU limit resource information
 to add the annotations to the Pod for each container. Pods with cpu limits will
-no longer be ignored and their limits will correctly be represented with the
-`management.workload.openshift.io/cores` in the same way that `requests` are.
-Containers that do not include `limits` will not have a `cpuquota` set. We will
-be utilizing the helper function in
-[cm.MilliCPUToQuota](https://github.com/openshift/kubernetes/blob/0e0d15b865ffc36177dc8770b4723dc14476a630/pkg/kubelet/cm/helpers_linux.go#L58-L82)
-to correctly pass along the CPU quota to the container runtime, but we will
-maintain the `milli` value for the `requests.limits.cpu` value so as to not
-cause confusion by changing the unit integer value. That is an implementation
-detail that does not need to be exposed to the user.
+no longer be ignored and their limits will correctly be utilized in the same way
+that `requests` are.
+
+We will add to the existing annotation fields a new `cpulimit` value, this value
+will contain the CPU limit of the container in millicores to be passed down to
+the runtime. This is done in the event that CPU period is changed for the
+specific workloads cgroups, we calculate that at the container runtime level not
+at the API level. However, with this change we will have the mechanisim in place
+to be able to change at the API level if it's ever desired to do so in the
+future.
+
+Containers that do not include `limits` will not have a `cpulimit` set. However,
+due to how [kubernetes handles extended
+resources](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#consuming-extended-resources),
+the current behavior of making `limits` and `requests` be equal will be
+maintained. When CPU limits are included the annotation will contain the correct
+`cpulimit` value in millicores.
 
 In the example below, The resulting Pod from the given Deployment will now
-correctly translate the `resources.limits.cpu` to
-`management.workload.openshift.io/cores` to `cpuquota`. The Pod will then be
-annotated to use the new `cpuquota` attribute for the `busybox` container for
+correctly translate the `resources.limits.cpu` as
+`management.workload.openshift.io/cores` to `cpulimit`. The Pod will then be
+annotated to use the new `cpulimit` attribute for the `busybox` container for
 the container runtime to alter the Cgroup
-`resources.workload.openshift.io/busybox: '{"cpushares": 20, "cpuquota":
-3000}'`. Note, the `cpuquota` correctly reflects the `30m` in microsecends. When
-no CPU limits are specified then the old behavior will still be in effect where
-no `cpuquota` is included, `resources.workload.openshift.io/busybox-no-limits:
-'{"cpushares": 20}'`
+`resources.workload.openshift.io/busybox: '{"cpushares": 20, "cpulimit": 30}'`.
+When no CPU limits are specified then the old behavior will still be in effect
+where no `cpulimit` is included,
+`resources.workload.openshift.io/busybox-no-limits: '{"cpushares": 20}'`
+
+Note, because of the requirement that [extended
+resources](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#consuming-extended-resources)
+must be equal, the `cpulimit` will correctly reflects the `30m` in millicores.
+However, `management.workload.openshift.io/cores` will be the same for
+`requests` and `limits`.
 
 ```yaml
 apiVersion: apps/v1
@@ -281,7 +322,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   annotations:
-    resources.workload.openshift.io/busybox: '{"cpushares": 20, "cpuquota": 3000}'
+    resources.workload.openshift.io/busybox: '{"cpushares": 20, "cpulimit": 30}'
     resources.workload.openshift.io/busybox-no-limits: '{"cpushares": 20}'
     target.workload.openshift.io/management: '{"effect":"PreferredDuringScheduling"}'
 ...
@@ -291,7 +332,7 @@ spec:
     name: busybox
     resources:
       limits:
-        management.workload.openshift.io/cores: "30"
+        management.workload.openshift.io/cores: "20"
         memory: 50Mi
       requests:
         management.workload.openshift.io/cores: "20"
@@ -305,6 +346,8 @@ spec:
         management.workload.openshift.io/cores: "20"
         memory: 50Mi
 ```
+
+### Topology Considerations
 
 #### Hypershift [optional]
 
@@ -322,7 +365,7 @@ different CPU period, those would need to be taken into account.
 
 Currently workload partitioning is only used by platform pods, any platform pods
 that use `limits` will correctly be modified to have limits and request be
-applied via `cpuquota` and `cpushares`. Since one of the key attributes of
+applied via `cpulimit` and `cpushares`. Since one of the key attributes of
 workload partitioning is pinning a workload to a specific CPU set, then those
 pods will correctly be moved over to those CPU sets and have limits imposed this
 might cause issues in performance for those pods.
@@ -406,7 +449,11 @@ N/A
 
 ## Implementation History
 
-WIP
+CRIO Implementation:
+https://github.com/cri-o/cri-o/pull/7822
+
+Webhook Implementation:
+https://github.com/openshift/kubernetes/pull/1902
 
 ## Alternatives
 
