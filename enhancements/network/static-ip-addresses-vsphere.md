@@ -34,7 +34,7 @@ Static IP addresses are emerging as a common requirement in environments where
 the usage of DHCP violates corporate security guidelines.  Additionally, many 
 users which require static IPs also require the use of the IPI installer. 
 The proposal described in this enhancement discusses the implementation of
-of assiging static IPs at both day 0 and day 2.
+assigning static IPs at both day 0 and day 2.
 
 ## Motivation
 
@@ -68,10 +68,10 @@ As an OpenShift administrator, I want to scale nodes with static IPs so that I c
 
 ### Static IPs Configured at Installation
 
-To faciliate the configuration of static IP address, network device configuration definitions are created for each node in the install-config.yaml. A `hosts` slice will be introduced to the installer platform specification to allow network device configurations to be specified for a nodes. 
+To facilitate the configuration of static IP address, network device configuration definitions are created for each node in the install-config.yaml. A `hosts` slice will be introduced to the installer platform specification to allow network device configurations to be specified for a nodes. 
 If a `hosts` slice is defined, enough `hosts` must be defined to cover the bootstrap, control plane, and compute nodes to be provisioned during the installation process.
 
-The bootstrap and control plane nodes will have their static IP addresses provisioned by CAPV.  Compute nodes will rely on the machine API to provision their IP addresses.
+The bootstrap and control plane nodes will have their static IP addresses provisioned by either Terraform or CAPV depending on the version of the installer.  Compute nodes will rely on the machine API to provision their IP addresses.
 
 Example of platform specification with IP addresses defined for bootstrap, control plane, and compute nodes:
 ~~~yaml
@@ -132,7 +132,7 @@ platform:
         - 192.168.101.2
 ~~~
 
-The install will be consuming the above config and will be creating custom resources following the CAPI static ip address process.  We will be generating an IPAddress and IPAddressClaim for each master and worker (bootstrap is not included but will have static IP directly applied to the VM based on the config).  These files will be a part of the openshift directory that is generated from `openshift-install create manifests`.  A sample of what is generated based on above config:
+The installer will be consuming the above config and will be creating custom resources following the CAPI static ip address process.  We will be generating an IPAddress and IPAddressClaim for each master and worker (bootstrap is not included but will have static IP directly applied to the VM based on the config).  These files will be a part of the openshift directory that is generated from `openshift-install create manifests`.  A sample of what is generated based on above config:
 
 ```shell
 [ngirard@fedora openshift]$ ls
@@ -391,6 +391,10 @@ spec:
             workspace: {}
 status: {}
 ~~~
+
+Prior to installation, the cluster admin may modify the generated machines, ControlPlaneMachineSet definition, IPAddresses and IPAddress claims to match how they wish to maintain the IPs after cluster creation. The installer will choose a default IPPool to create that is not owned by any IPAM controller present in the cluster.  This means after cluster creation, there will be nothing maintaining those IPs.
+
+If the CPMS definition is changed after the cluster creation, the CPMS Operator will assume that to be a global change to masters and will roll out new masters to meet requirements of the new definition.  If the changes are related to the AddressesFromPools, new machines will be created with references to that pool.  The IPAM controller owning the pool definition will need to generate new IPAddress custom resources and update the IPAddressClaims to reference these IPAddress custom resources.  Once these conditions are met, the Machine API operator will begin creation of the new masters.
 
 #### Changes Required
 
