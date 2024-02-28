@@ -14,7 +14,7 @@ approvers:
 api-approvers:
   - '@JoelSpeed'
 creation-date: 2023-01-31
-last-updated: 2023-09-06
+last-updated: 2024-02-29
 tracking-link:
   - https://issues.redhat.com/browse/CFE-748
 see-also:
@@ -128,20 +128,23 @@ type DNSNameResolver struct {
 	Status DNSNameResolverStatus `json:"status,omitempty"`
 }
 
+// DNSName is used for validation of a DNS name.
+// +kubebuilder:validation:Pattern=`^(\*\.)?([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\.){2,}$`
+// +kubebuilder:validation:MaxLength=254
+type DNSName string
+
 // DNSNameResolverSpec is a desired state description of DNSNameResolver.
 type DNSNameResolverSpec struct {
 	// name is the DNS name for which the DNS name resolution information will be stored.
 	// For a regular DNS name, only the DNS name resolution information of the regular DNS
 	// name will be stored. For a wildcard DNS name, the DNS name resolution information
-	// of all the DNS names, that matches the wildcard DNS name, will be stored.
+	// of all the DNS names that match the wildcard DNS name will be stored.
 	// For a wildcard DNS name, the '*' will match only one label. Additionally, only a single
 	// '*' can be used at the beginning of the wildcard DNS name. For example, '*.example.com.'
 	// will match 'sub1.example.com.' but won't match 'sub2.sub1.example.com.'
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.)*[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.$
-	// +kubebuilder:validation:MaxLength=254
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.name is immutable"
-	Name string `json:"name"`
+	Name DNSName `json:"name"`
 }
 
 // DNSNameResolverStatus defines the observed status of DNSNameResolver.
@@ -153,17 +156,20 @@ type DNSNameResolverStatus struct {
 	// +patchMergeKey=dnsName
 	// +patchStrategy=merge
 	// +optional
-	ResolvedNames []DNSNameResolverStatusItem `json:"resolvedNames,omitempty" patchStrategy:"merge" patchMergeKey:"dnsName"`
+	ResolvedNames []DNSNameResolverResolvedName `json:"resolvedNames,omitempty" patchStrategy:"merge" patchMergeKey:"dnsName"`
 }
 
-// DNSNameResolverStatusItem describes the details of a resolved DNS name.
-type DNSNameResolverStatusItem struct {
+// DNSNameResolverResolvedName describes the details of a resolved DNS name.
+type DNSNameResolverResolvedName struct {
 	// conditions provide information about the state of the DNS name.
-	// Known .status.conditions.type is: "Degraded"
+	// Known .status.conditions.type is: "Degraded".
+	// "Degraded" is true when the last resolution failed for the DNS name,
+	// and false otherwise.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
 	// dnsName is the resolved DNS name matching the name field of DNSNameResolverSpec. This field can
 	// store both regular and wildcard DNS names which match the spec.name field. When the spec.name
 	// field contains a regular DNS name, this field will store the same regular DNS name after it is
@@ -172,15 +178,15 @@ type DNSNameResolverStatusItem struct {
 	// If the wildcard DNS name can also be successfully resolved, then this field will store the wildcard
 	// DNS name as well.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.)*[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.$
-	// +kubebuilder:validation:MaxLength=254
-	DNSName string `json:"dnsName"`
+	DNSName DNSName `json:"dnsName"`
+
 	// resolvedAddresses gives the list of associated IP addresses and their corresponding TTLs and last
 	// lookup times for the dnsName.
 	// +kubebuilder:validation:Required
 	// +listType=map
 	// +listMapKey=ip
-	ResolvedAddresses []DNSNameResolverInfo `json:"resolvedAddresses"`
+	ResolvedAddresses []DNSNameResolverResolvedAddress `json:"resolvedAddresses"`
+
 	// resolutionFailures keeps the count of how many consecutive times the DNS resolution failed
 	// for the dnsName. If the DNS resolution succeeds then the field will be set to zero. Upon
 	// every failure, the value of the field will be incremented by one. The details about the DNS
@@ -189,19 +195,22 @@ type DNSNameResolverStatusItem struct {
 	ResolutionFailures int32 `json:"resolutionFailures,omitempty"`
 }
 
-type DNSNameResolverInfo struct {
+// DNSNameResolverResolvedAddress describes the details of an IP address for a resolved DNS name.
+type DNSNameResolverResolvedAddress struct {
 	// ip is an IP address associated with the dnsName. The validity of the IP address expires after
-	// lastLookupTime + ttlSeconds. To refresh the information a DNS lookup will be performed on the
-	// expiration of the IP address's validity. If the information is not refreshed then it will be
-	// removed with a grace period after the expiration of the IP address's validity.
+	// lastLookupTime + ttlSeconds. To refresh the information, a DNS lookup will be performed upon
+	// the expiration of the IP address's validity. If the information is not refreshed then it will
+	// be removed with a grace period after the expiration of the IP address's validity.
 	// +kubebuilder:validation:Required
 	IP string `json:"ip"`
+
 	// ttlSeconds is the time-to-live value of the IP address. The validity of the IP address expires after
 	// lastLookupTime + ttlSeconds. On a successful DNS lookup the value of this field will be updated with
 	// the current time-to-live value. If the information is not refreshed then it will be removed with a
 	// grace period after the expiration of the IP address's validity.
 	// +kubebuilder:validation:Required
 	TTLSeconds int32 `json:"ttlSeconds"`
+
 	// lastLookupTime is the timestamp when the last DNS lookup was completed successfully. The validity of
 	// the IP address expires after lastLookupTime + ttlSeconds. The value of this field will be updated to
 	// the current time on a successful DNS lookup. If the information is not refreshed then it will be
@@ -549,11 +558,11 @@ also validates that a label in a DNS name does not start or end with a `-`.
 type EgressFirewallDestination struct {
 	// ..
 
-	// dnsName is the domain name to allow/deny traffic to. If this is set, cidrSelector must be unset.
+	// dnsName is the domain name to allow/deny traffic to. If this is set, cidrSelector and nodeSelector must be unset.
 	// For a wildcard DNS name, the '*' will match only one label. Additionally, only a single '*' can be
 	// used at the beginning of the wildcard DNS name. For example, '*.example.com' will match 'sub1.example.com'
-	// but won't match 'sub2.sub1.example.com'
-	// +kubebuilder:validation:Pattern=^(\*\.)?([A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.)*[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?\.?$
+	// but won't match 'sub2.sub1.example.com'.
+	// +kubebuilder:validation:Pattern=`^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$`
 	DNSName string `json:"dnsName,omitempty"`
 	// ..
 }
@@ -572,9 +581,10 @@ apply consistently, even for DNS names that are resolved by custom upstream name
 plugin will watch and update the `DNSNameResolver` CRs in the `network.openshift.io` api-group, proper RBAC permissions will be needed
 to be added to the `ClusterRole` for CoreDNS.
 
-The new `DNSNameResolver` controller will be added to the Cluster DNS Operator. The controller will watch the `DNSNameResolver` CRs,
-and will send DNS lookup requests for the `spec.name` field. It will also re-resolve the `status.resolvedNames[*].dnsName` fields based on the
-corresponding next lookup time (TTL + last lookup time).
+The new `DNSNameResolver` controller will be added to the Cluster DNS Operator. The controller code will reside in the repository of the
+`ocp_dnsnameresolver` external plugin and the controller's package will be imported into Cluster DNS Operator. The controller will watch the
+`DNSNameResolver` CRs, and will send DNS lookup requests for the `spec.name` field. It will also re-resolve the `status.resolvedNames[*].dnsName`
+fields based on the corresponding next lookup time (TTL + last lookup time).
 
 For wildcard DNS names, the controller will query for the DNS names that get added to the `.status` of the corresponding `DNSNameResolver` CR,
 including the wildcard DNS name, even if it doesn't get added to the `.status`.
@@ -610,7 +620,7 @@ Add the support of a new flag `--enable-dns-name-resolver` to configure the use 
 
 For every unique DNS name used in EgressFirewall rules, OVN-K cluster manager will create a corresponding `DNSNameResolver` CR.
 The name of the CR will be assigned using a hash function (similar to the ComputeHash
-[here](https://github.com/openshift/kubernetes/blob/master/pkg/controller/controller_utils.go#L1157-L1172))
+[here](https://github.com/openshift/kubernetes/blob/6116860ab8000581009cd889e4cc1a1985207ddf/pkg/controller/controller_utils.go#L1198-L1213))
 prefixed by `dns-`. The input to the hash function will be the DNS name. It will also delete a `DNSNameResolver` CR, when all the rules containing
 the corresponding DNS name are deleted.
 
