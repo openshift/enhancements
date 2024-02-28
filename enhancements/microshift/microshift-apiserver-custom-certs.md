@@ -45,7 +45,7 @@ Some customers have very strict requirements regarding TLS certs. There are freq
     - Single Common Name containing The API server DNS/IPAddress or a wildcard entry (wildcard certificate).
     - Multiple Subject Alternative Names (SAN) containing the API server DNS/IPAddress.
 
-* As a MicroShift administrator, I want to provide additional DNS names for each certificate.
+* As a MicroShift administrator, I want to provide additional DNS names for each certificate (in the Microshift config).
 
 ### Goals
 * Allow MicroShift administrator to configure Microshift with externally generated certificates and
@@ -97,36 +97,9 @@ the FQDN Address is searched in:
 - Certificate Subject Alternative Name (SAN)
 - names configuration value.
 
-when a Certificate found as a wildcard only , host public IP Address will be placed inside its kubeconfig's `server` section.
+when a Certificate found as a wildcard only , node IP Address will be placed inside its kubeconfig's `server` section.
 
 Certain values that configured in `names` field can cause  internal API communication issues  ie:127.0.0.1,localhost therefore we must not allow them.
-
-when the `names` field is not contained in the certificate (ie: included in the wildcard),
-
-it will be served by the api-server:
-```
-> echo Q |   openssl s_client -connect example.com:6443 -showcerts 2>/dev/null |   openssl x509 -noout -subject -issuer -enddate  -ext subjectAltName
-
-subject=C = il, ST = il, L = , O = , OU = , CN = 192.168.2.130
-issuer=CN = 192.168.2.130
-notAfter=May 27 14:45:13 2051 GMT
-X509v3 Subject Alternative Name: 
-    DNS:api.example.com, DNS:localhost.localdomain, DNS:192.168.2.130, IP Address:192.168.2.130
-```
-
-while kubeconfig on the client contains:
-```
-> cat kubeconfig | grep server
-
-server: https://example.com:6443
-```
-but rejected by the oc client:
-```
-> oc get pods
-
-tls: failed to verify certificate: x509: certificate is valid for api.example.com, localhost.localdomain, not test.com
-```
-
 
 ### Workflow Description
 
@@ -134,11 +107,11 @@ tls: failed to verify certificate: x509: certificate is valid for api.example.co
 1. By default, when there is no namedCertificates configuration the behaviour will remain the same.
 
 #### when custom namedCertificates configured
-1. Device Administrator copies the certificated to MicroShift host
+1. Device Administrator copies the certificated to MicroShift host,files should be accessible by root only.
 1. Device Administrator configures additonal CAs in the RHEL Client trust store on the client system.
 1. Device Administrator configures `namedCertificates` in the Microshift configuration yaml file (/etc/microshift/config.yaml).
 1. Device Administrator start/restarts MicroShift
-1. During startup, Microshift will check and validate the certificates paths. in case of an error service will produce clear error log and if the file is missing it will exit.
+1. Check and validate the certificates see [Failure Modes](#failure-modes).
 1. Microshift passes the certificates to the tls-sni-cert-key as apiserver command line option preceding all the other certificates.
 1. kube-apiserver picks up the certificates and start serving them on the configured SNI.
 
@@ -216,6 +189,7 @@ The provided certs value will be validated before is it passed to the api-server
 This check will prevent Microshift service from starting:
 1. certificates files exists in the disk and readable by microshift process.
 1. certificates shouldnt override the internal local certificates which are managed internally.
+1. duplicate names (SNIs) exists in names among different certificates.
 
 This check display warning message at the log and service will be started:
 1. certificates is expired.
