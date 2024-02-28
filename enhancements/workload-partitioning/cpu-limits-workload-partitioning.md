@@ -349,9 +349,27 @@ spec:
 
 ### Topology Considerations
 
-#### Hypershift [optional]
+#### Hypershift / Hosted Control Planes
 
-N/A
+Currently this feature is not supported Hypershift or hosted control planes
+since NTO and the underlying mechanism need access to APIs that are not exposed
+via this type of topology.
+
+#### Standalone Clusters
+
+The overarching feature is already available on standalone clusters, this
+enhancement extends the existing implementation to support CPU limit, there
+should be no extra consideration for this type of topology outside of the
+described implementation.
+
+#### Single-node Deployments or MicroShift
+
+This enhancement is not adding any extra components to the existing feature, the
+original implementation was designed for Single Node as such there is no extra
+consideration outside of the described implementation.
+
+We are not adding any API changes as such MicroShift should not be effected by
+this change.
 
 ### Risks and Mitigations
 
@@ -383,18 +401,18 @@ would not be favorable.
 
 ## Design Details
 
-### Open Questions [optional]
+## Open Questions [optional]
 
 N/A
 
-### Test Plan
+## Test Plan
 
 We will update the origin tests for workload partitioning to also include checks
 for cpu limits on clusters where workload partitioning is enabled.
 
-### Graduation Criteria
+## Graduation Criteria
 
-#### Dev Preview -> Tech Preview
+### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
@@ -403,7 +421,7 @@ for cpu limits on clusters where workload partitioning is enabled.
 - Enumerate service level indicators (SLIs), expose SLIs as metrics
 - Write symptoms-based alerts for the component(s)
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
@@ -414,19 +432,19 @@ for cpu limits on clusters where workload partitioning is enabled.
 - User facing documentation created in
   [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
 N/A
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
 N/A
 
-### Version Skew Strategy
+## Version Skew Strategy
 
 N/A
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 
 N/A
 
@@ -443,17 +461,15 @@ ignored. These conditions are:
 3. When the feature is inactive because not all nodes are reporting the
    management resource
 
-#### Support Procedures
+## Support Procedures
 
 N/A
 
 ## Implementation History
 
-CRIO Implementation:
-https://github.com/cri-o/cri-o/pull/7822
+CRIO Implementation: https://github.com/cri-o/cri-o/pull/7822
 
-Webhook Implementation:
-https://github.com/openshift/kubernetes/pull/1902
+Webhook Implementation: https://github.com/openshift/kubernetes/pull/1902
 
 ## Alternatives
 
