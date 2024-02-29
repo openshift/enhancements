@@ -39,7 +39,7 @@ superseded-by: []
 
 ## Summary
 
-This document proposes a solution and a delivery plan for a unified installation and upgrading procedure of the logging for Red Hat OpenShift product (short OpenShift Logging) as well as auxiliary UI and correlation (See [korrel8r](korrel8r)) components via the [Cluster Observability Operator](cluster-observability-operator)(COO). The proposed solution is intended to complement the existing OpenShift Logging stack managed by the [Cluster Logging Operator](cluster-logging-operator)(CLO) and the the [Loki Operator](loki-operator)(LO). Furthermore the proposal aims to be a blueprint approach for other OpenShift Observability products (i.e distributed tracing, network observability, power monitoring).
+This document proposes a solution and a delivery plan for a unified installation and upgrading procedure of the logging for Red Hat OpenShift product (short OpenShift Logging) as well as auxiliary UI and correlation (See [korrel8r](korrel8r)) components via the [Cluster Observability Operator](cluster-observability-operator)(COO). The proposed solution is intended to complement the existing OpenShift Logging stack managed by the [Cluster Logging Operator](cluster-logging-operator)(CLO) and the [Loki Operator](loki-operator)(LO). Furthermore the proposal aims to be a blueprint approach for other OpenShift Observability products (i.e distributed tracing, network observability, power monitoring).
 
 ## Background
 
@@ -89,7 +89,7 @@ As an OpenShift administrator, I want to use metrics to logs correlation without
 
 ## Proposal
 
-A `LoggingStack` CRD be introduced. In addition the relation to the `ObservabilityUIPlugin` resource will be outlined on how to manage the [logging-view-plugin](logging-view-plugin) deployment. Finally the automation to manage and the [korrel8r](korrel8r) deployment for metrics-logs correlation will be introduced in the Cluster Observability Operator when a least a `MonitoringStack` and a `LoggingStack` resource are created by a user.
+A `LoggingStack` CRD will be introduced. In addition the relation to the `ObservabilityUIPlugin` resource will be outlined on how to manage the [logging-view-plugin](logging-view-plugin) deployment. Finally the automation to manage and the [korrel8r](korrel8r) deployment for metrics-logs correlation will be introduced in the Cluster Observability Operator when a least a `MonitoringStack` and a `LoggingStack` resource are created by a user.
 
 ### Workflow Description
 
@@ -100,8 +100,8 @@ For the OpenShift Logging administrator using the Cluster Observability Operator
 1. The user goes to the console and creates a `LoggingStack` resource. In this resource the user providers an OpenShift Logging subscription channel (e.g. `stable-5.8`).
 2. The Cluster Observability Operator creates an `OperatorGroup` and `Subscription` for CLO in `openshift-logging` from the catalog source `redhat-operator` and namespace `openshift-marketplace`.
 3. The Cluster Observability Operator creates an `OperatorGroup` and `Subscription` for LO in `openshift-operators-redhat` from the catalog source `redhat-operator` and namespace `openshift-marketplace`.
-4. The cluster observability tracks the corresponding `ClusterServiceVersions` for CLO and LO until they reach the phase `succeeded`.
-5. The cluster obserbability operator creates a `ClusterLogForwarder` and a `LokiStack` resource in `openshift-logging` which create and manage all logging stack components.
+4. The Cluster Observability Operator tracks the corresponding `ClusterServiceVersions` for CLO and LO until they reach the phase `succeeded`.
+5. The Cluster Observability Operator creates a `ClusterLogForwarder` and a `LokiStack` resource in `openshift-logging` which create and manage all logging stack components.
 6. The Cluster Observability Operator tracks on a high-level when all stack components (i.e. collection, storage, rules) reach the phase `ready`.
 7. The Cluster Observability Operator creates an `ObservabilityUIPlugin` resource that will create and manage the [logging-view-plugin](logging-view-plugin) plugin.
 8. **Optional**: The Cluster Observability Operator creates a [korrel8r](korrel8r) deployment resource if and only if a `MonitoringStack` resource exists.
@@ -187,14 +187,14 @@ In summary although the above workflow is feasible, the present proposal does **
 
 The Cluster Observability Operator's design is centered around the Kubernetes Server-Side-Apply capability. In short it allows sharing resources between separate operator on the resource field level. However each OpenShift Logging resource has mandatory requirements on field when created. These fields will inevitably change management ownership from CLO/LO to the Cluster Obserbability Operator.
 
-In detail the following `ClusterLogging` fields will be managed by COO exlusively without allowing user edits:
+In detail the following `ClusterLogging` fields will be managed by COO exclusively without allowing user edits:
 ```yaml
 spec:
   managementState: Managed
   logStore:
     type: lokistack
     lokistack:
-      name: <name-of-lokistack-resource>a
+      name: <name-of-lokistack-resource>
   collection:
     type: vector
 ```
@@ -226,7 +226,7 @@ However, if future enhancements address use cases relevant for `LoggingStack` re
 
 #### Migration of logging-view-plugin from CLO to COO
 
-As above mentioned this proposal aims to move managing of UI relevant deployments link [logging-view-plugin](logging-view-plugin) from CLO to the Cluster Obserbability Operator. To enable a smooth transition period from the present setup (i.e. CLO exlusively deployment management) to the future setup (i.e. COO exlusively deployment management), a step-by-step approach is proposed over several CLO releases:
+As above mentioned this proposal aims to move managing of UI relevant deployments link [logging-view-plugin](logging-view-plugin) from CLO to the Cluster Obserbability Operator. To enable a smooth transition period from the present setup (i.e. CLO exclusively deployment management) to the future setup (i.e. COO exclusively deployment management), a step-by-step approach is proposed over several CLO releases:
 
 When used with previous released CLO versions:
 1. COO creates a `Subscription` for CLO **without** enabling the Console plugin on the cluster-wide `Consoles` resource.
@@ -244,12 +244,12 @@ When used with future CLO version w/o [logging-view-plugin](logging-view-plugin)
 
 When an operator (i.e. COO) managing the installation/upgrade of further operators (i.e. CLO and LO) as well as resources owned by the managed operators, they key consideration should be on when managed CRDs will registered on the Kube APIserver. The registration event is a cornerstone for the kubernetes clientsets used in COO to reconcile shared custom resources such as `ClusterLogging` and `Lokistack`. In particular it is mandatory for client abstration such as `informers` and `listers` to execute **only** on resource known by the Kube APIserver.
 
-Therefore the Cluster Observability Operators requires a major design overhaul that supports the following aspects:
+Therefore the Cluster Observability Operator requires a major design overhaul that supports the following aspects:
 1. Independent reconciliation loops for installing/upgrading managed operators.
 2. Reconciliation loops for shared resources such as `ClusterLogging` and `Lokistack` only and only if registration of the corresponding CRD successful
 3. Robust signaling between the above two and in turn mindful setup and tear-down of underlying kubernetes clientsets/informers/listers.
 
-In summary the Cluster Observability Operator binary will hold two actively communicating sub-controllers each managing distict aspects for an owned resource like `LoggingStack`, i.e.:
+In summary the Cluster Observability Operator binary will hold two actively communicating sub-controllers each managing distinct aspects for an owned resource like `LoggingStack`, i.e.:
 1. **Operators-Controller**: This controller reconciles a `LoggingStack` resource into `OperatorGroup` and `Subscription` resources for CLO and LO only. It tracks success as well as failure conditions for each operator installation/upgrade phase on the `LoggingStack` status field.
 2. **Components-Controller**: This controller reconciles the same `LoggingStack` resource into the resources `ClusterLogging`, `LoggingStack` and `ObservabilityUIPlugin` that in turn install and manage the logging stack components (e.g. collection, storage and visualization plugin).
 
@@ -279,7 +279,7 @@ For OpenShift environments still depending on Cluster-Monitoring-Operator managi
 
 1. **Risk**: Tracking the installation/upgrading path following the trail of multiple Operator Framework resources (`Subscription` -> `InstallPlan` -> `ClusterServiceVersion`) requires detailed due dilligence on how to categorize and summarize their conditions into high-level ones for a better user experience.
 2. **Risk**: We are well advised to consider the long-term goal of the Operator Framework to migrate to a newly multi-tenant / multi-version operator management approach using new designed CRDs which introduce breaking changes.
-3. **Risk**: To manage install/uninstall robustly the Cluster Observability Operator is required to become aware of CRD registration at each time which in turn requires to re-instatiate internals like informers/listers/etc. This might require considerable custom design and work as per controller-runtime abstraction not designed or allowing restarting entire controllers.
+3. **Risk**: To manage install/uninstall robustly the Cluster Observability Operator is required to become aware of CRD registration at each time which in turn requires to re-instantiate internals like informers/listers/etc. This might require considerable custom design and work as per controller-runtime abstraction not designed or allowing restarting entire controllers.
 
 ### Drawbacks
 
