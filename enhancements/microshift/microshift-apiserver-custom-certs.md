@@ -97,7 +97,8 @@ the FQDN Address is searched in:
 - Certificate Subject Alternative Name (SAN)
 - names configuration value.
 
-when a Certificate found as a wildcard only , node IP Address will be placed inside its kubeconfig's `server` section.
+when a Certificate is found to be a wildcard only, Microshift will not be able to find the real FQDN, node IP Address will be placed inside its kubeconfig's `server` section.
+this kubeconfig should be treated as an example only and its `server` section value should be changed to the real FQDN.
 
 Certain values that configured in `names` field can cause  internal API communication issues  ie:127.0.0.1,localhost therefore we must not allow them.
 
