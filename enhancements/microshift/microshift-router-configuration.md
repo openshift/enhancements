@@ -71,9 +71,10 @@ specific IP addresses.
 * Allow users to configure in which IPs the router listens.
 * Allow users to allow traffic from specific IP addresses.
 * Allow users to deny traffic to the router.
+* Internal access from applications to the router must remain unchanged.
 
 ### Non-Goals
-* N/A
+N/A
 
 ## Proposal
 Each configuration option will get its own section with specifics and
@@ -109,11 +110,14 @@ With this option MicroShift will decide whether it should create the router
 upon starting. This includes not just the pod, but all the associated resources
 that come along with it: namespace, services, configmaps, etc.
 
-When setting the option to `Disabled`, the next MicroShift restart should delete
-all the router related resources, including APIs and controllers.
+When setting the option to `Disabled`, the next MicroShift restart will
+delete all the default router related resources.
 
-Setting the option to `Enabled` will deploy the router, while `Disabled` will disable
-it. Default will be `Enabled`.
+Note that any existing routes will stop being served and it will require an
+application deploying an OpenShift router instance.
+
+Setting the option to `Enabled` will deploy the router, while `Disabled` will
+disable it. Default will be `Enabled`.
 
 ### Listening ports
 The following configuration is proposed:
@@ -131,8 +135,8 @@ in other ports, hence the configuration options.
 
 In order to allow this configuration and many other advantages, the
 router service shall be changed so that it is exposed using `LoadBalancer`
-type instead of using host ports. See the Design Details section for more
-information.
+type instead of using host ports. See the [Design Details section](#why-loadbalancer-service)
+for more information.
 
 #### Firewalling ports
 Using `LoadBalancer` service type prevents the usage of firewalld to block
@@ -160,8 +164,9 @@ ingress:
     ipAddresses:
     - <IP address>
 ```
-As we have seen in previous sections, the use of `LoadBalancer` makes ovnk
-configure iptables rules to expose the service outside of the cluster.
+As described in [this section](#using-loadbalancer-service-type), the use of
+`LoadBalancer` makes ovnk configure iptables rules to expose the service
+outside of the cluster.
 Building on [LoadBalancer controller enhancement](loadbalancer-service-support.md),
 the service is exposed using the node IP and configured ports.
 
@@ -269,7 +274,7 @@ ingress:
 The `ingress.policy.expose` option contains lists of hostnames, NIC names and
 IP addresses. MicroShift will translate them to IP addresses and then update
 the `status.loadBalancer` field in the `Service`. Ovnk will pick up this field
-to configure the iptables rules.
+to configure the iptables rules. This is described [here](#using-loadbalancer-service-type).
 ```yaml
 ingress:
   expose: # Defaults to IPs in the host. Details below.
@@ -291,9 +296,12 @@ Disabling the router requires a MicroShift restart with all the associated
 consequences (apiserver downtime, etc.).
 
 ### Drawbacks
-Some of the features depend on a non-agnostic CNI design, which is the
-`LoadBalancer` controller. A different behavior should be expected if using a
-different CNI.
+Some of the features depend on a non-agnostic CNI design. The `LoadBalancer`
+service controller depends on ovnk to configure iptables rules so that the
+service is correctly exposed. The same applies to `NetworkPolicy` resources,
+which need the `LoadBalancer` service to be in place.
+
+A different behavior should be expected if using a different CNI.
 
 ## Design Details
 #### Why LoadBalancer service
@@ -326,10 +334,10 @@ picked up from ovnk (the CNI) and turned into iptables rules to forward them
 to the service IP. In this case, default router should be exposed using a
 LoadBalancer service type.
 
- When using this kind of service ovnk will configure special iptables rules
- that will forward traffic to the service IP instead. These rules are also
- configured to use the node IP as destination address, as per
- [LoadBalancer support](loadbalancer-service-support.md) feature.
+When using this kind of service ovnk will configure special iptables rules
+that will forward traffic to the `LoadBalancer` service network IP. These rules
+are also configured to use the node IP as destination address, as per
+[LoadBalancer support](loadbalancer-service-support.md) feature.
 
 #### Firewalling ports
 Using LoadBalancer service will create special iptables rules with more
@@ -338,7 +346,6 @@ immune to such configurations. In order to firewall ports the user needs to
 take action by either creating `NetworkPolicy` resources or disabling the
 router.
 
-TODO esto se va a los risks.
 Disabling the router might be disruptive, as not all traffic may come from
 external sources. This procedure also requires a restart, which might not be
 desirable/possible in all situations.
