@@ -46,7 +46,7 @@ Start by filling out the header with the metadata for this enhancement.
 
 ## Summary
 
-Starting OCP 4.1 Kubernetes Scheduler Operator’s `config.openshift.io/v1/scheduler` type was extended with `.spec.mastersSchedulable` field [[1]](#ref-1) set to `false` by default. Its purpose is to protect control plane nodes from receiving a user workload. When the field is set to `false` each control plane node is tainted with `node-role.kubernetes.io/master:NoSchedule`. If set to `true` the taint is removed from each control plane node. No user workload is expected to tolerate the taint. Unfortunatelly, there’s currently no protection from users (with pod’s create/update RBAC permissions) explicitly tolerating `node-role.kubernetes.io/master:NoSchedule` taint or setting `.spec.nodeName` field directly (thus by-passing the kube-scheduler).
+Starting OCP 4.1 Kubernetes Scheduler Operator’s `config.openshift.io/v1/scheduler` type was extended with `.spec.mastersSchedulable` field [[1]](#ref-1) set to `false` by default. Its purpose is to protect control plane nodes from receiving a user workload. When the field is set to `false` each control plane node is tainted with `node-role.kubernetes.io/master:NoSchedule`. If set to `true` the taint is removed from each control plane node. No user workload is expected to tolerate the taint. Unfortunately, there’s currently no protection from users (with pod’s create/update RBAC permissions) explicitly tolerating `node-role.kubernetes.io/master:NoSchedule` taint or setting `.spec.nodeName` field directly (thus by-passing the kube-scheduler).
 
 <a id="ref-1"></a>[1] https://docs.openshift.com/container-platform/latest/nodes/nodes/nodes-nodes-managing.html#nodes-nodes-working-master-schedulable_nodes-nodes-managing
 
@@ -211,7 +211,7 @@ This section outlines the workflow for enforcing the proposed scheduling policie
 - The admission controller processes requests based on the updated policies until the override is removed.
 - Any actor with pre-granted permissions to perform an emergency override will be part of the list of authorized service accounts/users.
 
-#### Variation and form factor considerations [optional]
+<!-- #### Variation and form factor considerations [optional]
 
 How does this proposal intersect with Standalone OCP, Microshift and Hypershift?
 - Hypershift does not need this protection as all the user control planes are separated from application workloads.
@@ -222,21 +222,19 @@ stand instead of sitting down.
 
 See
 https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md#high-level-end-to-end-workflow
-and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples.
+and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples. -->
 
 ### API Extensions
 
 API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
 and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
 
-- Name the API extensions this enhancement adds or modifies.
+- API extensions this enhancement adds or modifies.
   - introducing a new field under `config.openshift.io/v1/scheduler` allowing admins to extend the list of authorized service accounts and users
   - introducing a new `NodeSchedulingPolicyConfig` type extending the list of configurable plugins in `KubeAPIServerConfig` CRD
-- Does this enhancement modify the behaviour of existing resources, especially those owned
-  by other parties than the authoring team (including upstream resources), and, if yes, how?
-  Please add those other parties as reviewers to the enhancement.
-  - More strict about who can assign pod's `.spec.nodeName` to a control plane node. Control plane or critical components might fail to be assigned to control plane nodes if the default list of authorized service accouts and users is not properly populated.
-  - When upgrading to newer OCP versions new control plane and critical components can be introduced that are required to be assigned to control plane nodes. Thus, creating a dependency on newer Kube Apiserver Operator version to be upgraded first to refresh the list of authorized service accounts and users.
+- Modification of behavior and restrictions.
+  - More strict about who can assign pod's `.spec.nodeName` to a control plane node. Control plane or critical components might fail to be assigned to control plane nodes if the default list of authorized service accounts and users is not properly populated.
+  - When upgrading to newer OCP versions new control plane and critical components can be introduced that are required to be assigned to control plane nodes. Thus, creating a dependency on newer Kube API server Operator version to be upgraded first to refresh the list of authorized service accounts and users.
 
 <!--  Examples:
   - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
@@ -244,27 +242,22 @@ and finalizers, i.e. those mechanisms that change the OCP API surface and behavi
   - Defaults field Y on object kind Z.
 -->
 
-Fill in the operational impact of these API Extensions in the "Operational Aspects
-of API Extensions" section.
 
-### Implementation Details/Notes/Constraints [optional]
+<!-- ### Implementation Details/Notes/Constraints [optional]
 
 What are the caveats to the implementation? What are some important details that
 didn't come across above. Go in to as much detail as necessary here. This might
-be a good place to talk about core concepts and how they relate.
+be a good place to talk about core concepts and how they relate. -->
 
 
 
-#### Hypershift [optional]
+<!-- #### Hypershift [optional]
 
 Does the design and implementation require specific details to account for the Hypershift use case?
-See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282
+See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282 -->
 
 
 ### Risks and Mitigations
-
-What are the risks of this proposal and how do we mitigate. Think broadly. For example, consider both security and how this will impact the larger OKD
-ecosystem. How will security be reviewed and by whom? How will UX be reviewed and by whom? Consider including folks that also work outside your immediate sub-project.
 
 - Unawareness of workloads getting scheduled to control-plane nodes: Users might not be aware of workloads getting accidently scheduled to control-plane nodes. E.g. copy-pasted and altered workloads from available examples.
   - A KCS article informing about the right mitigation can be composed to inform users.
@@ -273,8 +266,6 @@ ecosystem. How will security be reviewed and by whom? How will UX be reviewed an
 - Extra authorization: Any additional components scheduling to control plane nodes that are not in the default list of authorized service accounts and users can extend the list through `config.openshift.io/v1/scheduler` singleton object.
 
 ### Drawbacks
-
-The idea is to find the best form of an argument why this enhancement should _not_ be implemented. What trade-offs (technical/efficiency cost, user experience, flexibility, supportability, etc) must be made in order to implement this? What are the reasons we might not want to undertake this proposal, and how do we overcome them? Does this proposal implement a behavior that's new/unique/novel? Is it poorly aligned with existing user expectations?  Will it be a significant maintenance burden?  Is it likely to be superceded by something else in the near future?
 
 - Any control-plane or critical component owner needs to be aware of this functionality. Forgetting to extend the list of authorized service accouts and users might cause these components to fail to start properly.
   - **TODO: exercise every control-plane and critical component while the admission plugin is enabled and enforcing to get a list of must-have service accounts and users required to run the components correctly.**
@@ -286,10 +277,7 @@ The idea is to find the best form of an argument why this enhancement should _no
 
 ### Open Questions [optional]
 
-This is where to call out areas of the design that require closure before deciding
-to implement the design.
-
-1. the default list of authorized service accounts and users needs to be kept in sync for each OCP version. A missing item in the list should be easily noticable as affected components fail to start. Nevertheless, we need to make an e2e test that will flake for each component under control plane and critical namespaces until each "important" pod is marked as "reviewed".
+1. the default list of authorized service accounts and users needs to be kept in sync for each OCP version. A missing item in the list should be easily noticeable as affected components fail to start. Nevertheless, we need to make an e2e test that will flake for each component under control plane and critical namespaces until each "important" pod is marked as "reviewed".
 
 2. When a service account or a user is no longer needed in the authorized list we need to keep at least one release for deprecation. The same holds for a service account or user renaming. Both the old and the new name must be kept in the list until the deprecation period is over.
 
@@ -458,7 +446,9 @@ to implement the design.
 
 **Note:** *Section not required until targeted at a release.*
 
-Consider the following in developing a test plan for this enhancement:
+TODO
+
+<!-- Consider the following in developing a test plan for this enhancement:
 - Will there be e2e and integration tests, in addition to unit tests?
 - How will it be tested in isolation vs with other components?
 - What additional testing is necessary to support managed OpenShift service-based offerings?
@@ -468,13 +458,15 @@ that would count as tricky in the implementation and anything particularly
 challenging to test should be called out.
 
 All code is expected to have adequate tests (eventually with coverage
-expectations).
+expectations). -->
 
 ### Graduation Criteria
 
 **Note:** *Section not required until targeted at a release.*
 
-Define graduation milestones.
+TODO
+
+<!-- Define graduation milestones.
 
 These may be defined in terms of API maturity, or as something else. Initial proposal
 should keep this high-level with a focus on what signals will be looked at to
@@ -500,20 +492,24 @@ In general, we try to use the same stages (alpha, beta, GA), regardless how the 
 please be sure to include in the graduation criteria.**
 
 **Examples**: These are generalized examples to consider, in addition
-to the aforementioned [maturity levels][maturity-levels].
+to the aforementioned [maturity levels][maturity-levels]. -->
 
 #### Dev Preview -> Tech Preview
 
-- Ability to utilize the enhancement end to end
+TODO
+
+<!-- - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
 - Sufficient test coverage
 - Gather feedback from users rather than just developers
 - Enumerate service level indicators (SLIs), expose SLIs as metrics
-- Write symptoms-based alerts for the component(s)
+- Write symptoms-based alerts for the component(s) -->
 
 #### Tech Preview -> GA
 
-- More testing (upgrade, downgrade, scale)
+TODO
+
+<!-- - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback
 - Available by default
 - Backhaul SLI telemetry
@@ -522,16 +518,14 @@ to the aforementioned [maturity levels][maturity-levels].
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 **For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
+end to end tests.** -->
 
-#### Removing a deprecated feature
-
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
 
 ### Upgrade / Downgrade Strategy
 
-If applicable, how will the component be upgraded and downgraded? Make sure this
+TODO
+
+<!-- If applicable, how will the component be upgraded and downgraded? Make sure this
 is in the test plan.
 
 Consider the following in developing an upgrade/downgrade strategy for this
@@ -568,11 +562,13 @@ Downgrade expectations:
   include:
   - Deleting any CVO-managed resources added by the new version. The
     CVO does not currently delete resources that no longer exist in
-    the target version.
+    the target version. -->
 
 ### Version Skew Strategy
 
-How will the component handle version skew with other components?
+TODO
+
+<!-- How will the component handle version skew with other components?
 What are the guarantees? Make sure this is in the test plan.
 
 Consider the following in developing a version skew strategy for this
@@ -582,11 +578,13 @@ enhancement:
   in the kubelet? How does an n-2 kubelet without this feature available behave
   when this feature is used?
 - Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
+  or CNI may require updating that component before the kubelet. -->
 
 ### Operational Aspects of API Extensions
 
-Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
+TODO
+
+<!-- Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
 admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
 especially how they impact the OCP system architecture and operational aspects.
 
@@ -611,20 +609,24 @@ especially how they impact the OCP system architecture and operational aspects.
 
 - How is the impact on existing SLIs to be measured and when (e.g. every release by QE, or
   automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
-  this enhancement)
+  this enhancement) -->
 
 #### Failure Modes
 
-- Describe the possible failure modes of the API extensions.
+TODO
+
+<!-- - Describe the possible failure modes of the API extensions.
 - Describe how a failure or behaviour of the extension will impact the overall cluster health
   (e.g. which kube-controller-manager functionality will stop working), especially regarding
   stability, availability, performance and security.
 - Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
-  and add them as reviewers to this enhancement.
+  and add them as reviewers to this enhancement. -->
 
 #### Support Procedures
 
-Describe how to
+TODO
+
+<!-- Describe how to
 - detect the failure modes in a support situation, describe possible symptoms (events, metrics,
   alerts, which log output in which component)
 
@@ -667,20 +669,16 @@ Describe how to
     webhook comes back online, there is a controller reconciling all objects, applying
     labels that were not applied during admission webhook downtime.
   - Namespaces deletion will not delete all objects in etcd, leading to zombie
-    objects when another namespace with the same name is created.
+    objects when another namespace with the same name is created. -->
 
 ## Implementation History
 
-Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`.
+TODO
+
+<!-- Major milestones in the life cycle of a proposal should be tracked in `Implementation
+History`. -->
 
 ## Alternatives
-
-* The proposed solution focus on a single set of constraints. An alternative solution could be made extensible enough to support multiple constraints, covering more use cases.
-
-Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement.
 
 ### Have control-plane nodes tainted with NoExecute taint
 
@@ -693,10 +691,3 @@ by an enhancement.
 - Each group will still need to keep a list of authorized service accouts and users
 - There's probably no guarantee for all control plane pods getting updated first (with the NoExecute toleration) before control plane nodes get tainted during an OCP upgrade. For that, all control plane pods need to tolerate the taint first in OCP X so nodes can be tainted in OCP X+1 without any unnecessary rejections/disruptions.
 
-## Infrastructure Needed [optional]
-
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
-
-Listing these here allows the community to get the process for these resources
-started right away.
