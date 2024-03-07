@@ -12,7 +12,7 @@ approvers:
 api-approvers:
 - "@alanconway"
 creation-date: 2023-10-30
-last-updated: 2023-10-30
+last-updated: 2024-03-07
 tracking-link:
 - https://issues.redhat.com/browse/LOG-2155
 see-also:
@@ -117,37 +117,44 @@ Administrators create an instance of **ClusterLogForwarder** which defines which
 
 
 Following are the additions to the InputSpec:
+
 * Application Input
 ```yaml
     spec:
     - name: my-app
       application:
-        namespaces: []           #exact string or glob
-        excludeNamespaces: []    #exact string or glob
+        namespaces: []           #deprecated: exact string or glob
+        includes:
+        - container:             #exact string or glob
+          namespace:             #exact string or glob
+        excludes:
+        - container:             #exact string or glob
+          namespace:             #exact string or glob
         selector:                #metav1.LabelSelector
           matchLabels: []
           matchExpressions:
           - key:
             operator:
             values: []
-        containers:
-          include: []            #exact string or glob
-          exclude: []            #exact string or glob
 ```
+
+**NOTE:** *application.namespaces* field is deprecated.
+
 ```golang
    type Application struct {
      Namespaces        []string
-     ExcludeNamespaces []string
+     Includes          *NamespaceContainerGlob
+     Excludes          *NamespaceContainerGlob
      Selector          *metav1.LabelSelector
-     Containers        *GlobSpec
    }
 
 
-   type GlobSpec struct {
-     Include []string
-     Exclude []string
+   type NamespaceContainerGlob struct {
+     Namespace string
+     Container string
    }
 ```
+
 * Infrastructure Input
 ```yaml
     spec:
@@ -166,6 +173,7 @@ Following are the additions to the InputSpec:
      InfrastructureSourceContainer string = "container"
    )
 ```
+
 * Audit Input
 ```yaml
     spec:
@@ -214,10 +222,10 @@ Following is an example of a **ClusterLogForwarder** that redefines "infrastruct
         application:
           namespaces:
           - openshift*
-          - mycompany-infra*
-          containers:
-            excludes:
-            - istio*
+          includes:
+          - namespace: mycompany-infra*
+          excludes:
+          - container: istio*
       - name: my-node-logs
         infrastructure:
           sources: ["node"]
