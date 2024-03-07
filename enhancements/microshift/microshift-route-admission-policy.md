@@ -67,7 +67,7 @@ will be the single hostname of that host.
 To allow configuring the router a new option is exposed through the MicroShift
 configuration file:
 ```yaml
-router:
+ingress:
   routerAdmissionPolicy:
     namespaceOwnership: <Strict|InterNamespaceAllowed> # Defaults to InterNamespaceAllowed.
 ```
