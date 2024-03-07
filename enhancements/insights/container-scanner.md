@@ -195,7 +195,7 @@ As the values are derived by the container scanner or correspond to software ver
 
 In its existing implementation, the OpenShift Insights Operator periodically gathers workload data every 12 hours.
 
-The Operator iterates over all containers in the cluster and captures their Image ID and entry points.
+The Operator iterates over containers in the cluster (up to a limit of 8000) and captures their Image ID and entry points.
 At that point, the operator would use a “container scanner” to extract information from running containers and augment the gathered data for its workload.
 
 ![container scannner workflow](./container-scanner-diagram-1.png "Container Scanner Worklow")
@@ -413,7 +413,8 @@ TBD
 
 ### Dev Preview -> Tech Preview
 
-* Make the container scanner disabled by default
+This enhancement would be behind the featuregate capabilities of OpenShift
+
 * Add a non-public flag to enable it on a cluster to collect runtime information
 * End User documentation is not required
 * Sufficient test coverage
