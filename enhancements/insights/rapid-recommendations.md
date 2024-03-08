@@ -206,8 +206,9 @@ It will validate the remote configuration using a hardcoded JSON schema
 (it is part of the Insights Operator GitHub repository).
 The schema can evolve over time; we intend to change it only between x-stream and y-stream versions 
 (no backports) to simplify reasoning about differences between data gathered 
-by different Insights operator versions.
-
+by different Insights operator versions. Changes in z-stream versions
+(backports) will still be possible in cases that we will be unable to handle at
+the level of the remote configuration service.
 
 Upon successful validation, the remote configuration will be stored in an immutable configmap, 
 and used to gather data and produce an archive. 
