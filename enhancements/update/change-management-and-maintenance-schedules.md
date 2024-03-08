@@ -35,6 +35,12 @@ material changes are completed by the close of a permitted change window (e.g. a
 may still be draining or rebooting) at the close of a maintenance schedule, 
 but it does prevent _additional_ material changes from being initiated. 
 
+Change management enforcement _does not_ attempt to define or control the detailed state of the
+system. It only pertains to whether controllers which support change management 
+will attempt to initiate material change themselves. For example, if changes are paused in the middle
+of a cluster update and a node is manually rebooted, change management does not define
+whether the node will rejoin the cluster with the new or old version. 
+
 A "material change" may vary by cluster profile and subsystem. For example, a 
 control-plane update (all components and control-plane nodes updated) is implemented as
 a single material change (e.g. the close of a scheduled permissive window
@@ -186,7 +192,8 @@ configuring platform resources as the top-level Maintenance Schedule control wil
 that potentially disruptive changes are limited to well known time windows.
 
 #### Reducing Service Delivery Operational Tooling
-Service Delivery, as part of our OpenShift Dedicated, ROSA and other offerings is keenly aware of
+Service Delivery, operating Red Hat's Managed OpenShift offerings (OpenShift Dedicated (OSD), 
+Red Hat OpenShift on AWS (ROSA) and Azure Red Hat OpenShift (ARO) ) is keenly aware of
 the issues motivating the Change Management / Maintenance Schedule concept. This is evidenced by their design
 and implementation of tooling to fill the gaps in the platform the preceding sections
 suggest exist.
@@ -198,7 +205,7 @@ there are reasons to supersede the customer's preference).
 
 By acknowledging the need for scheduled maintenance in the platform, we reduce the need for Service
 Delivery to develop and maintain custom tooling to manage the platform while 
-simultaneously reducing simplifying management for all customer facing similar challenges.
+simultaneously simplifying management for all customer facing similar challenges.
 
 ### User Stories
 For readability, "cluster lifecycle administrator" is used repeatedly in the user stories. This 
@@ -505,60 +512,62 @@ perspective, this strategy reports as paused indefinitely.
 1. User interactions with OCM to configure a maintenance schedule are identical to [OCM HCP Standard Change Management Scenario](#ocm-hcp-standard-change-management-scenario).
    This scenario differs after OCM accepts the maintenance schedule configuration. Control-plane updates are permitted to be initiated to any Saturday UTC.
    Worker-nodes must wait until the first Saturday of the month.
-1. OCM (through various layers) configures the ClusterVersion and worker MachineConfigPool(s) (MCP) for the cluster with appropriate `changeManagement` stanzas.
-1. Company workloads are added to the new cluster and the cluster provides value.
-1. To leverage a new feature in OpenShift, the service consumer plans to update the minor version of the platform.
-1. Via OCM, the service consumer requests the minor version update. They can do this at any time with confidence that the maintenance 
+2. OCM (through various layers) configures the ClusterVersion and worker MachineConfigPool(s) (MCP) for the cluster with appropriate `changeManagement` stanzas.
+3. Company workloads are added to the new cluster and the cluster provides value.
+4. To leverage a new feature in OpenShift, the service consumer plans to update the minor version of the platform.
+5. Via OCM, the service consumer requests the minor version update. They can do this at any time with confidence that the maintenance 
    schedule will be honored. They do so on Wednesday.
-1. OCM (through various layers) updates the ClusterVersion resource on the cluster indicating the new release payload in `desiredUpdate`.
-1. The Cluster Version Operator (CVO) detects that its `changeManagement` stanza does not permit the initiation of the change.
-1. The CVO sets a metric indicating that changes are pending for ClusterVersion. Irrespective of pending changes, the CVO also exposes a 
+6. OCM (through various layers) updates the ClusterVersion resource on the cluster indicating the new release payload in `desiredUpdate`.
+7. The Cluster Version Operator (CVO) detects that its `changeManagement` stanza does not permit the initiation of the change.
+8. The CVO sets a metric indicating that changes are pending for ClusterVersion. Irrespective of pending changes, the CVO also exposes a 
    metric indicating the number of seconds until the next window in which material changes can be initiated.
-1. Since MachineConfigs do not match in the desired update and the current manifests, the CVO also sets a metric indicating that MachineConfig
-   changes are pending. This is done because the MachineConfigOperator (MCO) cannot anticipate the coming manifest changes and cannot,
-   therefore, reflect expected changes to the worker-node MCPs. Anticipating this change ahead of time is necessary for an operation
+9. Since MachineConfigs likely do not match in the desired update and the current manifests (RHCOS changes occur 100% of the time for non-hotfix updates), 
+   the CVO also sets a metric indicating that MachineConfig changes are pending. This is an assumption, but the price of being wrong
+   on rare occasions is very low (pending changes will be reported, but disappear shortly after a permissive window begins).
+   This is done because the MachineConfigOperator (MCO) cannot anticipate the coming manifest changes and cannot,
+   therefore, reflect expected changes to the worker-node MCPs. Anticipating this change ahead of time is necessary for an operations
    team to be able to set an alert with the semantics (worker-node-update changes are pending & time remaining until changes are permitted < 2d).
    The MCO will expose its own metric for changes pending when manifests are updated. But this metric will only indicate when 
    there are machines in the pool that have not achieved the desired configuration. An operations team trying to implement the 2d 
    early warning for worker-nodes must use OR on these metrics to determine whether changes are actually pending.
-1. The MCO, irrespective of pending changes, exposes a metric for each MCP to indicate the number of seconds remaining until it is
-   permitted to initiate changes to nodes in that MCP.
-1. A privileged user on the cluster notices different options available for `changeManagement` in the ClusterVersion and MachineConfigPool
-   resources. They try to set them but are prevented by either RBAC or an admission webhook (details for Service Delivery). If they wish
-   to change the settings, they must update them through OCM.
-1. The privileged user does an `oc describe ...` on the resources. They can see that material changes are pending in ClusterVersion for 
-   the control-plane and for worker machine config. They can also see the date and time that the next material change will be permitted.
-   The MCP will not show a pending change at this time, but will show the next time at which material changes will be permitted.
-1. The next Saturday is _not_ the first Saturday of the month. The CVO detects that material changes are permitted at 00:00 UTC and
-   begins to apply manifests. This effectively initiates the control-plane update process, which is considered a single
-   material change to the cluster.
-1. The control-plane update succeeds. The CVO, having reconciled its state, unsets metrics suggesting changes are pending.
-1. As part of updating cluster manifests, MachineConfigs have been modified. The MachineConfigOperator (MCO) re-renders a
-   configuration for worker-nodes. However, because the MCP maintenance schedule precludes initiating material changes,
-   it will not begin to update Machines with that desired configuration.
-1. The MCO will set a metric indicating that desired changes are pending. 
-1. `oc get -o=yaml/describe` will both provide status information indicating that changes are pending for the MCP and
-   the time at which the next material changes can be initiated according to the maintenance schedule.
-1. On the first Saturday of the next month, 00:00 UTC, the MCO determines that material changes are permitted.
-   Based on limits like maxUnavailable, the MCO begins to annotate nodes with the desiredConfiguration. The 
-   MachineConfigDaemon takes over from there, draining, and rebooting nodes into the updated release.
-1. There are a large number of nodes in the cluster and this process continues for more than 24 hours. On Saturday
-   23:59, the MCO applies a round of desired configurations annotations to Nodes. At 00:00 on Sunday, it detects
-   that material changes can no longer be initiated, and pauses its activity. Node updates that have already
-   been initiated continue beyond the maintenance schedule window.
-1. Since not all nodes have been updated, the MCO continues to expose a metric informing the system of
-   pending changes.
-1. In the subsequent days, the cluster is scaled up to handle additional workload. The new nodes receive
-   the most recent, desired configuration.    
-1. On the first Saturday of the next month, the MCO resumes its work. In order to ensure that forward progress is
-   made for all nodes, the MCO will update nodes that have the oldest current configuration first. This ensures
-   that even if the desired configuration has changed multiple times while maintenance was not permitted,
-   no nodes are starved of updates. Consider the alternative where (a) worker-node updates required > 24h,
-   (b) updates to nodes are performed alphabetically, and (c) MachineConfigs are frequently being changed
-   during times when maintenance is not permitted. This strategy could leave nodes sorting last 
-   lexicographically no opportunity to receive updates. This scenario would eventually leave those nodes
-   more prone to version skew issues.
-1. During this window of time, all node updates are initiated, and they complete successfully. 
+10. The MCO, irrespective of pending changes, exposes a metric for each MCP to indicate the number of seconds remaining until it is
+    permitted to initiate changes to nodes in that MCP.
+11. A privileged user on the cluster notices different options available for `changeManagement` in the ClusterVersion and MachineConfigPool
+    resources. They try to set them but are prevented by a validating admission controller. If they wish
+    to change the settings, they must update them through OCM.
+12. The privileged user does an `oc describe ...` on the resources. They can see that material changes are pending in ClusterVersion for 
+    the control-plane and for worker machine config. They can also see the date and time that the next material change will be permitted.
+    The MCP will not show a pending change at this time, but will show the next time at which material changes will be permitted.
+13. The next Saturday is _not_ the first Saturday of the month. The CVO detects that material changes are permitted at 00:00 UTC and
+    begins to apply manifests. This effectively initiates the control-plane update process, which is considered a single
+    material change to the cluster.
+14. The control-plane update succeeds. The CVO, having reconciled its state, unsets metrics suggesting changes are pending.
+15. As part of updating cluster manifests, MachineConfigs have been modified. The MachineConfigOperator (MCO) re-renders a
+    configuration for worker-nodes. However, because the MCP maintenance schedule precludes initiating material changes,
+    it will not begin to update Machines with that desired configuration.
+16. The MCO will set a metric indicating that desired changes are pending. 
+17. `oc get -o=yaml/describe` will both provide status information indicating that changes are pending for the MCP and
+    the time at which the next material changes can be initiated according to the maintenance schedule.
+18. On the first Saturday of the next month, 00:00 UTC, the MCO determines that material changes are permitted.
+    Based on limits like maxUnavailable, the MCO begins to annotate nodes with the desiredConfiguration. The 
+    MachineConfigDaemon takes over from there, draining, and rebooting nodes into the updated release.
+19. There are a large number of nodes in the cluster and this process continues for more than 24 hours. On Saturday
+    23:59, the MCO applies a round of desired configurations annotations to Nodes. At 00:00 on Sunday, it detects
+    that material changes can no longer be initiated, and pauses its activity. Node updates that have already
+    been initiated continue beyond the maintenance schedule window.
+20. Since not all nodes have been updated, the MCO continues to expose a metric informing the system of
+    pending changes.
+21. In the subsequent days, the cluster is scaled up to handle additional workload. The new nodes receive
+    the most recent, desired configuration.    
+22. On the first Saturday of the next month, the MCO resumes its work. In order to ensure that forward progress is
+    made for all nodes, the MCO will update nodes that have the oldest current configuration first. This ensures
+    that even if the desired configuration has changed multiple times while maintenance was not permitted,
+    no nodes are starved of updates. Consider the alternative where (a) worker-node updates required > 24h,
+    (b) updates to nodes are performed alphabetically, and (c) MachineConfigs are frequently being changed
+    during times when maintenance is not permitted. This strategy could leave nodes sorting last 
+    lexicographically no opportunity to receive updates. This scenario would eventually leave those nodes
+    more prone to version skew issues.
+23. During this window of time, all node updates are initiated, and they complete successfully. 
 
 #### Service Delivery Emergency Patch
 1. SRE determines that a significant new CVE threatens the fleet.
@@ -592,7 +601,7 @@ perspective, this strategy reports as paused indefinitely.
 1. SRE can address the issue with a system configuration file applied in a MachineConfig.
 1. SRE creates the MachineConfig for the customer and provides the customer the option to either (a) wait until their
    configured maintenance schedule permits the material change from being initiated by the MachineConfigOperator
-   or (b) having SRE override the maintenance schedule and permitting its immediate application.   
+   or (b) modify change management to permit immediate application (e.g. setting `disabledUntil`).   
 1. The problem is not pervasive, so the customer chooses the deferred remediation. 
 1. The change is initiated and nodes are rebooted during the next permissive window.
 
@@ -742,26 +751,28 @@ spec:
         # Specifies a reoccurring permissive window. 
         permit:  
           # RRULEs (https://www.rfc-editor.org/rfc/rfc5545#section-3.3.10) are commonly used 
-          # for calendar management metadata. Only a subset of the RFC is supported. If
-          # unset, all dates are permitted and only exclude constrains permissive windows.
+          # for calendar management metadata. Only a subset of the RFC is supported.
+          # See "RRULE Constraints" section for details.
+          # If unset, all dates are permitted and only exclude constrains permissive windows.
           recurrence: <rrule|null>
-          # Given the identification of a date by an RRULE, at what time (relative to timezoneOffset) can the 
+          # Given the identification of a date by an RRULE, at what time (always UTC) can the 
           # permissive window begin. "00:00" if unset.
           startTime: <time-of-day|null>
-          # Given the identification of a date by an RRULE, at what time (relative to timezoneOffset) should the 
-          # permissive window end. "23:59:59" if unset.
-          endTime: <time-of-day|null>
+          # Given the identification of a date by an RRULE, after what offset from the startTime should
+          # the permissive window close. This can create permissive windows within days that are not
+          # identified in the RRULE. For example, recurrence="FREQ=Weekly;BYDAY=Sa;",
+          # startTime="20:00", duration="8h" would permit material change initiation starting
+          # each Saturday at 8pm and continuing through Sunday 4am (all times are UTC). The default
+          # duration is 24:00-startTime (i.e. to the end of the day).
+          duration: <duration|null>
+          
         
         # Excluded date ranges override RRULE selections.
         exclude:
-        # Dates should be specified in YYYY-MM-DD. Each date is excluded from 00:00<timezoneOffset> for 24 hours.
+        # Dates should be specified in YYYY-MM-DD. Each date is excluded from 00:00 UTC for 24 hours.
         - fromDate: <date>
           # Non-inclusive until. If null, until defaults to the day after from (meaning a single day exclusion).
           untilDate: <date|null>
-
-        # Specifies an RFC3339 style timezone offset to be applied across their datetime selections.
-        # "-07:00" indicates negative 7 hour offset from UTC. "+03:00" indicates positive 3 hour offset. If not set, defaults to "+00:00" (UTC). 
-        timezoneOffset: <null|str>
 
 ```
 
@@ -776,10 +787,10 @@ RRULE supports expressions that suggest recurrence without implying an exact dat
 - `RRULE:FREQ=YEARLY` - An event that occurs once a year on a specific date. 
 - `RRULE:FREQ=WEEKLY;INTERVAL=2` - An event that occurs every two weeks.
 
-All such expressions shall be evaluated with a starting date of Jan 1st, 1970 00:00<timezoneOffset>. In other
+All such expressions shall be evaluated with a starting date of Jan 1st, 1970 00:00Z. In other
 words, `RRULE:FREQ=YEARLY` would be considered permissive, for one day, at the start of each new year.
 
-If no `startTime` or `endTime` is specified, any day selected by the RRULE will suggest a
+If no `startTime` or `duration` is specified, any day selected by the RRULE will suggest a
 permissive 24h window unless a date is in the `exclude` ranges.
 
 **RRULE Constraints**
@@ -854,6 +865,7 @@ Labels:
 - kind=ClusterVersion|MachineConfigPool|HostedCluster|NodePool
 - object=<object-name>
 - system=<control-plane|worker-nodes>
+
 Value: 
 - `0`: no material changes are pending.
 - `1`: changes are pending but being initiated.
@@ -865,11 +877,12 @@ Labels:
 - kind=ClusterVersion|MachineConfigPool|HostedCluster|NodePool
 - object=<object-name>
 - system=<control-plane|worker-nodes>
+
 Value: 
 - `-2`: Error determining the time at which changes can be initiated (e.g. cannot check with ClusterVersion / change management hierarchy).
-- `-1`: Material changes are paused indefinitely OR no permissive window can be found within the next 1000 days (the latter ensures a brute force check of intersecting datetimes with hierarchy RRULEs is a valid method of calculating intersection).
+- `-1`: Material changes are paused indefinitely. 
 - `0`: Any pending changes can be initiated now (e.g. change management is disabled or inside machine schedule window).
-- `> 0`: The number seconds remaining until changes can be initiated. 
+- `> 0`: The number seconds remaining until changes can be initiated OR 1000*24*60*60 (1000 days) if no permissive window can be found within the next 1000 days (this ensures a brute force check of intersecting datetimes with hierarchy RRULEs is a valid method of calculating intersection). 
 
 `cm_strategy_enabled`
 Labels:
@@ -877,6 +890,7 @@ Labels:
 - object=<object-name>
 - system=<control-plane|worker-nodes>
 - strategy=MaintenanceSchedule|Manual|Assisted
+
 Value: 
 - `0`: Change management for this resource is not subject to this enabled strategy (**does** consider hierarchy based disable).
 - `1`: Change management for this resource is directly subject to this enabled strategy.
@@ -884,7 +898,7 @@ Value:
 - `3`: Change management for this resource is directly and indirectly subject to this enabled strategy.
 
 #### Change Management Status
-Each resource which exposes a `.spec.changeManagement` stanza should also expose `.status.changeManagement` . 
+Each resource which exposes a `.spec.changeManagement` stanza must also expose `.status.changeManagement` . 
 
 ```yaml
 status:
@@ -896,7 +910,7 @@ status:
     # Show effective state.
     effectiveState: <Changes Paused|Changes Permitted>
     description: "Human readable message explaining how strategies & configuration are resulting in the effective state."
-    # The start of the next permissive window, taking into account the hierarchy. "N/A" for indefinite pause or >1000 days.
+    # The start of the next permissive window, taking into account the hierarchy. "N/A" for indefinite pause.
     permitChangesETA: <datetime>
     changesPending: <Yes|No>
 ```
@@ -937,7 +951,8 @@ intersection between the permissive intervals it has stored for the control-plan
 worker-nodes.
 
 Since it is possible there is no overlap, limits must be placed on this search. Once dates >1000 days from
-the present moment are being tested, the operator can behave as if an indefinite pause has been requested.
+the present moment are being tested, the operator can behave as if the next window will occur in
+1000 days (prevents infinite search for overlap).
 
 This outcome does not need to be recomputed unless the operator restarts Or one of the RRULE involved
 is modified.
