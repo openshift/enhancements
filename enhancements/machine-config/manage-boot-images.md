@@ -13,7 +13,7 @@ approvers:
 api-approvers: 
   - "@joelspeed"
 creation-date: 2023-10-16
-last-updated: 2024-02-13
+last-updated: 2024-03-08
 tracking-link:
   - https://issues.redhat.com/browse/MCO-589
 see-also:
@@ -75,25 +75,29 @@ __Overview__
 - The `machine-config-controller`(MCC) pod will gain a new sub-controller `machine_set_boot_image_controller`(MSBIC) that monitors `MachineSet` changes and the `coreos-bootimages` [ConfigMap](https://github.com/openshift/installer/pull/4760) changes.
 - Before processing a MachineSet, the MSBIC will check if the following conditions are satisfied:
   - `ManagedBootImages` feature gate is active
-  - The cluster and/or the machineset is opted-in to boot image updates.
-  - The machineset does not have a valid owner reference. (eg. Hive, Cluster API and other managed machineset workflows)
-  - The golden configmap is verified to be in sync with the current version of the MCO. The MCO will "stamp"(annotate) the golden configmap with the new version of the MCO after atleast 1 master node has succesfully completed an update to the new OCP image. This helps prevent `machinesets` being updated too soon at the end of a cluster upgrade, before the MCO itself has updated and has had a chance to roll out the new OCP image to the cluster. 
+  - The cluster and/or the machineset is opted-in to boot image updates. This is done at the operator level, via the `MachineConfiguration` API object.
+  - The `machineset` does not have a valid owner reference. Having a valid owner reference typically indicates that the `MachineSet` is managed by another workflow, and that updates to it are likely going to cause thrashing. 
+  - The golden configmap is verified to be in sync with the current version of the MCO. The MCO will update("stamp") the golden configmap with version of the new MCO image after atleast 1 master node has succesfully completed an update to the new OCP image. This helps prevent `machinesets` being updated too soon at the end of a cluster upgrade, before the MCO itself has updated and has had a chance to roll out the new OCP image to the cluster. 
 
   If any of the above checks fail, the MSBIC will exit out of the sync.
 - Based on platform and architecture type, the MSBIC will check if the boot images referenced in the `providerSpec` field of the `MachineSet` is the same as the one in the ConfigMap. Each platform(gcp, aws...and so on) does this differently, so this part of the implementation will have to be special cased. The ConfigMap is considered to be the golden set of bootimage values, i.e. they will never go out of date. If it is not a match, the `providerSpec` field is cloned and updated with the new boot image reference.
 - Next, it will check if the stub secret referenced within the `providerSpec` field of the `MachineSet` is managed i.e. `worker-user-data-managed` and not `worker-user-data`. If it is unmanaged, the cloned `providerSpec` will be updated to reference the managed stub secret. This step is platform/arch agnostic.
 
-- Finally, the MSBIC will attempt to patch the `MachineSet` if required. Failure to do so will cause a degrade. 
+- Finally, the MSBIC will attempt to patch the `MachineSet` if an update is required.
 
-#### Degrade Mechanism
+#### Error & Alert Mechanism
 
-The MSBIC will degrade the worker `MachineConfigPool` via a new [MachineConfigPoolConditionType](https://github.com/openshift/api/blob/master/machineconfiguration/v1/types.go#L492). This would be an API change, but a fairly simple one is it only adding a new condition type. The node controller(another sub controller within the MCC) would then [check for this condition](https://github.com/openshift/machine-config-operator/blob/master/pkg/controller/node/status.go#L142C34-L142C34) and degrade the worker pool, effectively degrading the operator.
+MSBIC sync failures may be caused by multiple reasons:
+- The MSBIC notices an OwnerReference and is able to determine that updating the `MachineSet` will likely cause thrashing. This is considered a misconfiguration and in such cases, the user is expected to exclude this `MachineSet` from boot image management.
+- The `coreos-bootimages` ConfigMap is unavailable or in an incorrect format. This will likely happen if a user manually edits the ConfigMap, overriding the CVO.
+- The `coreos-bootimages` ConfigMap takes too long to be stamped by the MCO. This indicates that there are larger problems in the cluster such as an upgrade failure/timeout or an unrelated cluster failure.
+- Patching the `MachineSet` fails. This indicates a temporary API server blip, or larger RBAC issues.
 
-As mentioned in the above section, degrading will only happen when the patching of the MachineSet fails. This is likely due to a temporary API server outage and will resolve itself without user intervention. The degrade condition is calculated at the end of a sync loop. In the case of multiple such failures within a single sync loop, the message for the degrade will be accumulated to include the `MachineSets` associated with all the failures. 
+An error condition will be applied on the operator level `MachineConfiguration` object when the sync failures of a given `MachineSet` exceed a threshold amount for a period of time. The condition will include information regarding the sync failures and the logs of the MSBIC can be checked for additional details.
 
-#### Reverting to original bootimage
+In addition to this, a Prometheus alert will also be triggered by the MSBIC. This alert will list the misbehaving `MachineSet` and will be cleared automatically by the MSBIC if the sync is successfully completed later. 
 
-The proposal will introduce a CR, `BootImageHistory` to store the boot image history associated with a given machineset. By providing this CR and accompanying documentation, the user will be able to restore their machinesets to an earlier state if they wish to do so. 
+Note: In the future, patches to `MachineSets` will be prevented when they are not authoritative [#1465](https://github.com/openshift/enhancements/pull/1465). This will need to be accounted for within the logic of the MSBIC.
 
 ### Workflow Description
 
@@ -107,6 +111,7 @@ Any form factor using the MCO and `MachineSets` will be impacted by this proposa
 - Standalone OpenShift: Yes, this is the main target form factor.
 - microshift: No, as it does [not](https://github.com/openshift/microshift/blob/main/docs/contributor/enabled_apis.md) use `MachineSets`.
 - Hypershift: No, Hypershift does not have this issue.
+- Hive: Hive manages `MachineSets` via `MachinePools`. The MachinePool controller generates the `MachineSets` manifests (by invoking vendored installer code) which include the `providerSpec`. Once a `MachineSet` has been created on the spoke, the only things that will be reconciled on it are replicas, labels, and taints - [unless a backdoor is enabled](https://github.com/openshift/hive/blob/0d5507f91935701146f3615c990941f24bd42fe1/pkg/constants/constants.go#L518). If the `providerSpec` ever goes out of sync, a warning will be logged by the MachinePool controller but otherwise this discrepancy is ignored. In such cases, the MSBIC will not have any issue reconciling the `providerSpec` to the correct boot image. However, if the backdoor is enabled, both the MSBIC and the MachinePool Controller will attempt to reconcile the `providerSpec` field, causing churn. The Hive team will update the comment on the backdoor annotation to indicate that it is mutually exclusive with this feature.
 
 ##### Supported platforms
 
@@ -193,7 +198,7 @@ Based on the observation above, here is a rough outline of what CAPI support wou
 - Updating the Ignition stub in `bootstrap.dataSecretName` to the managed stub secret(`*-managed`) if needed.
 - CAPI backed MachineSet patching. Once patching is successfully completed, the original `InfrastructureMachineTemplate` can be garbage collected. 
 
-When [MachineDeployments](https://cluster-api.sigs.k8s.io/developer/architecture/controllers/machine-deployment#machinedeployment) are introduced into CAPI, this mechanism will need to be reworked to update those rather than the `MachineSet` itself. `MachineDeployments` manage a fleet of `MachineSets`, and this can be checked via the `OwnerReference` field in the `MachineSet` object.
+When [MachineDeployments](https://cluster-api.sigs.k8s.io/developer/architecture/controllers/machine-deployment#machinedeployment) are introduced into CAPI, this mechanism will need to be updated to reconcile them as well. `MachineDeployments` manage a fleet of `MachineSets`, and this can be checked via the `OwnerReference` field in the `MachineSet` object. In the long term, `MachineDeployments` and `MachineSets` are expected to co-exist so this feature will need to account for both cases. 
 
 Much of the existing design regarding architecture & platform detection, opt-in, degradation and storing boot image history can remain the same. 
 
@@ -203,7 +208,7 @@ Much of the existing design regarding architecture & platform detection, opt-in,
 This proposal introduces a new field in the MCO operator API, `ManagedBootImages` which encloses an array of `MachineManager` objects. A `MachineManager` object contains the resource type of the machine management object that is being opted-in, the API group of that object and a union discriminant object of the type `MachineManagerSelector`. This object `MachineManagerSelector` contains:
 
 - The union discriminator, `Mode`, can be set to two values : All and Partial.
-- Partial: This is a label selector that will be used by users to opt-in a custom selection of machine resources. When the Mode is set to Partial mode, all machinesets in the selector list would be considered enrolled for updates. For all other values of Mode, this selector does not exist.
+- Partial: This is a set of label selectors that will be used by users to opt-in a custom selection of machine resources. When the Mode is set to Partial mode, all machinesets matched by this object would be considered enrolled for updates. In the first iteration of this API, this object will only allow for label matching with MachineResources. In the future, additional ways of filtering may be added with another label selector, e.g. namespace. For all other values of Mode, this selector object i
 
 ```
 type ManagedBootImages struct {
@@ -242,15 +247,22 @@ type MachineManagerSelector struct {
 	// mode determines how machine managers will be selected for updates.
 	// Valid values are All and Partial.
 	// All means that every resource matched by the machine manager will be updated.
-	// Partial requires a specified selector and allows customisation of which resources matched by the machine manager will be updated.
+	// Partial requires specified selector(s) and allows customisation of which resources matched by the machine manager will be updated.
 	// +unionDiscriminator
 	// +kubebuilder:validation:Required
 	Mode MachineManagerSelectorMode `json:"mode"`
 
-	// partial provides a label selector that can be used to match machine management resources.
+	// partial provides label selector(s) that can be used to match machine management resources.
 	// Only permitted when mode is set to "Partial".
 	// +optional
-	Partial *metav1.LabelSelector `json:"partial,omitempty"`
+	Partial *PartialSelector `json:"partial,omitempty"`
+}
+
+// PartialSelector provides label selector(s) that can be used to match machine management resources.
+type PartialSelector struct {
+	// machineResourceSelector is a label selector that can be used to select machine resources like MachineSets.
+	// +kubebuilder:validation:Required
+	MachineResourceSelector *metav1.LabelSelector `json:"machineResourceSelector,omitempty"`
 }
 
 // MachineManagerSelectorMode is a string enum used in the MachineManagerSelector union discriminator.
@@ -296,7 +308,8 @@ managedBootImages:
     selection:
       mode: Partial
       partial:
-        matchLabels: {}
+        machineResourceSelector:
+          matchLabels: {}
   - resource: machinesets
     apiGroup: machine.openshift.io
     selection:
@@ -305,7 +318,9 @@ managedBootImages:
 The above example partially selects CAPI MachineSets and all MAPI Machinesets. Please note that for every unique pair of resource/APIGroup, only 1 entry is allowed in machineManagers. This is to avoid providing conflicting instructions for the same type of machine resource. The user can then use the partial label selector if further customization is required.
 
 It is also important to note that if a user opts out of the feature after having some machine resources updated, the opted out resources will retain the boot images that
-they were last updated to by this feature. There is no rollback to cluster install values, i.e. the original boot images that the resources started on before they were enrolled for updates. Opting out a machine resource simply means that the machine resources will no longer have updated boot images values
+they were last updated to by this feature. There is no rollback to cluster install values, i.e. the original boot images that the resources started on before they were enrolled for updates. Opting out a machine resource simply means that the machine resources will no longer have updated boot images values.
+
+An Success/Failure condition will be applied on the MachineConfiguration object by the MSBIC. This will require [some rework](https://github.com/openshift/api/pull/1789) of the `MachineConfigurationStatus` field before new condition types can be added to this object. The condition type names are still TBD, but could be as simple as `MSBICReconciled` and `MSBICFailed`. 
 
 A [ValidatingAdmissionPolicy](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/) will be implemented via an MCO manifest that will restrict updating the `ManagedBootImages` object to only supported platforms(initially, just GCP). This will be updated as we phase in support for other platforms. Here is a sample policy that would do this:
 
@@ -344,7 +359,9 @@ spec:
 ```
 #### Tracking boot image history
 
-This is just an idea for the moment and is not planned to included when the feature initially GAs. Based on customer feedback and team capacity, this will be implemented in a later release. Boot Image History will be tracked by a new CR called `BootImageHistory`. The MCO will not directly consume from this CR. As a starting point, here is a stub type definition for this:
+Note: This section is just an idea for the moment and is considered out of scope. This CR will require thorough API review in a follow-up enhancement.
+
+As a starting point, here is a stub type definition for a CRD to track the boot image history of a machine resource:
 
 ```
 type BootImageHistory struct {
