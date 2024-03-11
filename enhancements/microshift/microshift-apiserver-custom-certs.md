@@ -55,7 +55,7 @@ domain names.
 Automatic certificate rotation and integration with 3rd party cert issuing services.
 
 ## Proposal
-Proposal suggests to provide Administrator means adding their own Certificates using microshift configuration file.
+Proposal suggests to provide Administrator means adding their own Certificates using microshift configuration file (/etc/microshift/config.yaml).
 
 A new `apiServer` level section will be added to the configuration called `namedCertificates`:
 
@@ -80,9 +80,10 @@ For each provided certificate, the following configuration is proposed:
 Certificate files will be read from their configured location by the Microshift service,
 each certification file will be validated (see validation rules).
 
-because we dont want to disrupt the internal API communication and make sure the internal certificate will be automaticly renewed,
+Because we dont want to disrupt the internal API communication and make sure the internal certificate will be automaticly renewed,
 Those certificate will extend the default  API server [external](https://github.com/openshift/microshift/blob/main/pkg/controllers/kube-apiserver.go#L194) certificate configuration.
 
+Certificate will be validated and treated according to [Failure Modes](#failure-modes).
 
 ### Kubeconfig Generation
 Each configured certificate can contain multiple FQDN and wildcards values, for each unique FQDN address kubeconfig file will be generated on the filesystem.
@@ -162,7 +163,7 @@ add e2e test that will:
 - generate and sign certificates with custom ca.
 - change the default Microshift configuration to use the newly generated certs.
 - make sure system is functional using  generated external kubeconfig.
-- intentionally configure invalid value in `names` (ie: 127.0.0.1,localhost) , Microshift should reject this configuration and exit with an error message.
+- intentionally configure invalid value in `names` (ie: 127.0.0.1,localhost) , Microshift should ignore this configuration and skip this certificate.
 
 ## Graduation Criteria
 ### Dev Preview -> Tech Preview
@@ -187,12 +188,12 @@ N/A
 ### Failure Modes
 The provided certs value will be validated before is it passed to the api-server flag
 
-This check will prevent Microshift service from starting:
+This check will cause Microshift to ignore certificates and log the error:
 1. certificates files exists in the disk and readable by microshift process.
+1. certificate should be parseable by[x509.ParseCertificate](https://pkg.go.dev/crypto/x509#ParseCertificate).
 1. certificates shouldnt override the internal local certificates which are managed internally.
-1. duplicate names (SNIs) exists in names among different certificates.
 
-This check display warning message at the log and service will be started:
+This check display warning message at the log and certificate will served by the api-server:
 1. certificates is expired.
 
 
