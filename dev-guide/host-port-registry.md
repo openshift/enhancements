@@ -107,6 +107,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9446  | baremetal-operator || yes | metal | 4.9 | healthz; baremetal provisioning |
 | 9447  | baremetal-operator || yes | metal | 4.10 | webhook; baremetal provisioning |
 | 9448  | run-once-duration-override-operator ||| workloads | 4.13 | webhook; run-once-duration-override |
+| 9449  | cli-manager ||| workloads | 4.16 | HTTPS routes; cli-manager |
 | 9537  | crio      ||| node || metrics |
 | 9641  | ovn-kubernetes northd || yes | sdn | 4.3 | ovn-kubernetes only |
 | 9642  | ovn-kubernetes southd || yes | sdn | 4.3 | ovn-kubernetes only |
