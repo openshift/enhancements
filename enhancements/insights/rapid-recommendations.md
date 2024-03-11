@@ -342,7 +342,7 @@ Risk: No data found/gathered for the specific configuration/request.
 
 Mitigation: This should not be a major issue and should only affect the relevant 
 Insights recommendation that requires the data. 
-he Insights archive metadata and also the `insightsoperator.operator.openshift.io` CR should indicate
+The Insights archive metadata and also the `insightsoperator.operator.openshift.io` CR should indicate
 that no matching data was found in the cluster for a particular GVK request.
 
 #### Excessive Use of Cluster Resources
