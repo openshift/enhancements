@@ -691,3 +691,47 @@ History`. -->
 - Each group will still need to keep a list of authorized service accouts and users
 - There's probably no guarantee for all control plane pods getting updated first (with the NoExecute toleration) before control plane nodes get tainted during an OCP upgrade. For that, all control plane pods need to tolerate the taint first in OCP X so nodes can be tainted in OCP X+1 without any unnecessary rejections/disruptions.
 
+### Validating Admission Policy
+
+A validation admission policy can be defined to enforce a rule stating that pods are not allowed to specify toleration for the `node-role.kubernetes.io/master:NoExecute` taint:
+
+```yaml
+apiVersion: admissionregistration.k8s.io/v1beta1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "control-plane-scheduling-policy"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:   [""]
+      apiVersions: ["v1"]
+      operations:  ["CREATE", "UPDATE"]
+      resources:   ["pods"]
+  validations:
+    - expression: "spec.tolerations.all(toleration, !(toleration.key == 'node-role.kubernetes.io/master' && toleration.effect == 'NoExecute'))"
+```
+
+Afterward, installing a binding that enforces the validation specifically in namespaces that do not have the `openshift.io/control-plane-namespace` label key set:
+
+```yaml
+apiVersion: admissionregistration.k8s.io/v1beta1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "control-plane-scheduling-policy-binding"
+spec:
+  policyName: "control-plane-scheduling-policy"
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: openshift.io/control-plane-namespace
+        operator: DoesNotExist
+```
+
+**Limitation**: users with namespace create/update RBAC rule can label their namespaces accordingally to bypass the validation.
+
+**Advantage**: no need for the authorized list of service accounts and users.
+
+To allow pod scheduling during emergencies any affected namespace is expected to be labeled with the mentioned label.
+
