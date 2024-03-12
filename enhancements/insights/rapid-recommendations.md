@@ -411,8 +411,11 @@ but that is already the case today.
 This will be tested as part of the existing Insights Operator integration tests. 
 Following scenarios will need to be tested:
 
-- successful scenario - the operator gathers required data and provides info 
-  about successful gathering in the Insights archive metadata
+- successful scenarios:
+  - config is valid and it is used for the data gathering - the operator gathers required data and provides info 
+    about successful gathering in the Insights archive metadata
+  - config is updated (compared to the last known version) - the operator gathers newly required data and provides info
+    about successful gathering in the Insights archive metadata
 - unsuccessful/failure scenarios:
   - the operator cannot parse the remote configuration - expect appropriate information 
     in the Insights archive metadata
