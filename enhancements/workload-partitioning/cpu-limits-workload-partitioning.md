@@ -414,23 +414,17 @@ for cpu limits on clusters where workload partitioning is enabled.
 
 ### Dev Preview -> Tech Preview
 
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-- Enumerate service level indicators (SLIs), expose SLIs as metrics
-- Write symptoms-based alerts for the component(s)
+N/A
+
+The core feature is GA, this enhancement extends the existing feature to
+utilize CPU limits.
 
 ### Tech Preview -> GA
 
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-- Backhaul SLI telemetry
-- Document SLOs for the component
-- Conduct load testing
-- User facing documentation created in
-  [openshift-docs](https://github.com/openshift/openshift-docs/)
+N/A
+
+The core feature is GA, this enhancement extends the existing feature to
+utilize CPU limits.
 
 ### Removing a deprecated feature
 
