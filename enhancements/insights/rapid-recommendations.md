@@ -186,7 +186,7 @@ https://console.redhat.com/api/gathering/v2/%s/gathering_rules.json
 ```
 
 The `%s` parameter is the OCP version of the Insights Operator as set in the `.status.versions` map 
-of the Insights `clusteoperator.config.openshift.io` resource (consider partially upgraded clusters).
+of the Insights `clusteroperator.config.openshift.io` resource (consider partially upgraded clusters).
 The remote configuration service will be responsible for serving configuration that can be 
 successfully processed by an Insights Operator of the given version.
 
