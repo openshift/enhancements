@@ -52,7 +52,7 @@ and format:
   namespace and name. 
   They are represented as JSON or YAML objects.
 * Container logs - Container logs are identified by the namespace name, pod name, and messages of 
-  interest to be filtered from the log (the idea is to scan all the containers for the given Pod). 
+  interest to be filtered from the log (all the containers for the given Pod will be filtered). 
   They are represented as line-oriented text files.
 * Node logs - Similar to container logs, but identified/queried using different parameters.
 * Prometheus metrics and alerts - See the 
@@ -490,8 +490,13 @@ will be available in the Insights archive).
 This enhancement proposal considers only two components (which are not critical to the cluster). 
 It is the Insights Operator, which is versioned according to the OCP version and the remote configuration,
 which is versioned in the same way. 
-There should not be any version skew between the two 
-(you can see the [Remote configuration service](#remote-configuration-service) section).
+The version skew between these two components should not happen even during 
+the cluster upgrade (see the [Remote configuration service](#remote-configuration-service) section).
+However there may be a non-critical skew between the Insights Operator and the remaining control-plane components
+during cluster upgrades - for example the Insights Operator can be already running in version 1.2.4, 
+but some other components may still be in version 1.2.3. 
+This is acceptable in the sense that the operator will only collect available data 
+and provide information about the requested data, but which is not available in the cluster.
 
 ## Operational Aspects of API Extensions
 
