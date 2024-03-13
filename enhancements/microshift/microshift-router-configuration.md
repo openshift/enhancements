@@ -329,15 +329,43 @@ The following limitations apply to the current setup:
 
 ##### Using LoadBalancer service type
 Common ways of exposing services outside of the cluster are using services of
-types NodePort or LoadBalancer. In MicroShift, ports from the service are
-picked up from ovnk (the CNI) and turned into iptables rules to forward them
-to the service IP. In this case, default router should be exposed using a
-LoadBalancer service type.
+types NodePort or LoadBalancer. A NodePort service is unable to use ports
+outside of the configured range (30xxx-32xxx), while routers are typically
+reachable in ports 80 and 443. This is only achievable by using `LoadBalancer`
+service types.
 
-When using this kind of service ovnk will configure special iptables rules
-that will forward traffic to the `LoadBalancer` service network IP. These rules
-are also configured to use the node IP as destination address, as per
-[LoadBalancer support](loadbalancer-service-support.md) feature.
+When using this kind of service a special controller in MicroShift, referenced
+[here](loadbalancer-service-support.md) will include the node IP in the
+`.status.loadBalancer.ingress` list from the service. Afterwards, ovnk will
+pick up these IP addresses and create iptables rules to forward all incoming
+traffic to the service IP.
+
+An example follows:
+```bash
+$ sudo microshift show-config | grep nodeIP
+  nodeIP: 192.168.122.254
+$ oc get svc -n openshift-ingress router-default -o json | jq '.spec.clusterIP'
+"10.43.252.173"
+$ oc get svc -n openshift-ingress router-default -o json | jq '.status'
+{
+  "loadBalancer": {
+    "ingress": [
+      {
+        "ip": "192.168.122.254"
+      }
+    ]
+  }
+}
+$ oc get svc -n openshift-ingress router-default -o json | jq '.status.loadBalancer.ingress[]'
+{
+  "ip": "192.168.122.254"
+}
+$ sudo iptables -t nat -S
+...
+-A OVN-KUBE-EXTERNALIP -d 192.168.122.254/32 -p tcp -m tcp --dport 443 -j DNAT --to-destination 10.43.252.173:443
+-A OVN-KUBE-EXTERNALIP -d 192.168.122.254/32 -p tcp -m tcp --dport 80 -j DNAT --to-destination 10.43.252.173:80
+...
+```
 
 #### Firewalling ports
 Using LoadBalancer service will create special iptables rules with more
