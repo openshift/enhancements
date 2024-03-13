@@ -52,7 +52,7 @@ and format:
   namespace and name. 
   They are represented as JSON or YAML objects.
 * Container logs - Container logs are identified by the namespace name, pod name, and messages of 
-  interest to be filtered from the log. 
+  interest to be filtered from the log (the idea is to scan all the containers for the given Pod). 
   They are represented as line-oriented text files.
 * Node logs - Similar to container logs, but identified/queried using different parameters.
 * Prometheus metrics and alerts - See the 
@@ -185,8 +185,9 @@ with a new one:
 https://console.redhat.com/api/gathering/v2/%s/gathering_rules.json
 ```
 
-The `%s` parameter is the OCP version of the Insights Operator as set in the `.status.versions` map 
-of the Insights `clusteroperator.config.openshift.io` resource (consider partially upgraded clusters).
+The `%s` parameter is the OCP version provided (by the ClusterVersionOpeartor) as `RELEASE_VERSION` 
+environment variable in the Insights Operator deployment (this should prevent any version skew between
+the actual operator version and the remote configuration version). 
 The remote configuration service will be responsible for serving configuration that can be 
 successfully processed by an Insights Operator of the given version.
 
@@ -202,8 +203,11 @@ The frequency is the same as with the
 [conditional gathering configuration](../insights/conditional-data-gathering.md) (since OCP 4.10). 
 40k connected clusters requesting a remote configuration update every two hours mean 11 requests per second on average.
 
-It will validate the remote configuration using a hardcoded JSON schema 
-(it is part of the Insights Operator GitHub repository).
+If the download fails for any reason, the default configuration shipped in the operator binary is used 
+as the default fallback. 
+
+After a successful download, the remote configuration is validated using a hardcoded 
+JSON schema (it is part of the Insights Operator GitHub repository).
 The schema can evolve over time; we intend to change it only between x-stream and y-stream versions 
 (no backports) to simplify reasoning about differences between data gathered 
 by different Insights operator versions. Changes in z-stream versions
