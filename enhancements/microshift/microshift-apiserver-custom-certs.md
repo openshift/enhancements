@@ -7,7 +7,7 @@ reviewers:
   - "@pacevedom, MicroShift contributor"
   - "@ggiguash, MicroShift contributor"
   - "@benluddy, OpenShift API server team"
-  - "@standa, OpenShift Auth Team"
+  - "@stlaz, OpenShift Auth Team"
 
 approvers:
   - "@jerpeter"
@@ -42,8 +42,8 @@ Some customers have very strict requirements regarding TLS certs. There are freq
 ### User Stories
 * As a MicroShift administrator, I want to be able to add  organization generated certificates. 
   - each certificate may contain:
-    - Single Common Name containing The API server DNS/IPAddress or a wildcard entry (wildcard certificate).
-    - Multiple Subject Alternative Names (SAN) containing the API server DNS/IPAddress.
+    - Single Common Name containing The API server DNS/IPAddress .
+    - Multiple Subject Alternative Names (SAN) containing the API server DNS/IPAddress or a wildcard entry (wildcard certificate).
 
 * As a MicroShift administrator, I want to provide additional DNS names for each certificate (in the Microshift config).
 
@@ -78,23 +78,25 @@ For each provided certificate, the following configuration is proposed:
 1. `keyPath` -   certificate key full path.
 
 Certificate files will be read from their configured location by the Microshift service,
-each certification file will be validated (see validation rules).
+each certificate file will be validated (see validation rules).
 
-Because we dont want to disrupt the internal API communication and make sure the internal certificate will be automaticly renewed,
-Those certificate will extend the default  API server [external](https://github.com/openshift/microshift/blob/main/pkg/controllers/kube-apiserver.go#L194) certificate configuration.
+External custom certificates will extend Microshift self-signed internal certificates.
 
-Certificate will be validated and treated according to [Failure Modes](#failure-modes).
+Each certificate configured this way will be validated and treated according to [Failure Modes](#failure-modes).
 
 ### Kubeconfig Generation
+Wildcard certificate is a single certificate with a wildcard character (*) in the domain name,
+This allows the certificate to secure multiple sub domain names (hosts) .
+
 Each configured certificate can contain multiple FQDN and wildcards values, for each unique FQDN address kubeconfig file will be generated on the filesystem.
 
 Every generated `kubeconfig` for the custom certificates will omit the certificate-authority-data section,
 therefore custom certificates will have to be validated against CAs in the RHEL Client trust store. 
 
-each certificate will be examined and deteremined if its wildcard only.
-certificate will be considered as a wildcard only if there are no FQDN Entries found.
-the FQDN Address is searched in:
-- Certificate CN
+Each certificate gets examined in order to determine if it's purely wildcard.
+A certificate is considered to be purely wildcard only if there are no FQDN Entries found.
+Certificate will be considered as a wildcard only if there are no FQDN Entries found.
+The FQDN Address is searched in:
 - Certificate Subject Alternative Name (SAN)
 - names configuration value.
 
@@ -130,8 +132,8 @@ Enhancement is solely intended for MicroShift.
 ### Implementation Details/Notes/Constraints
 The certs will be prepended to the []configv1.NamedCertificate list before the api server is started. (it will be added to `-tls-sni-cert-key` flag)
 
-this certification paths configuration and names will be prepended into the kube-apiserver `tls-sni-cert-key` command line flag.
-when same SNI appear in the CN part of the provided certs,this certificate will take precedence over the `default` external-signer. [ref](https://github.com/kubernetes/kubernetes/blob/98358b8ce11b0c1878ae7aa1482668cb7a0b0e23/staging/src/k8s.io/apiserver/pkg/server/dynamiccertificates/named_certificates.go#L38)
+This certificate paths configuration and names will be prepended into the kube-apiserver `tls-sni-cert-key` command line flag.
+When the same SNI appears in the SAN part of the provided certs, this certificate will take precedence over the `default` external-signer. [ref](https://github.com/kubernetes/kubernetes/blob/98358b8ce11b0c1878ae7aa1482668cb7a0b0e23/staging/src/k8s.io/apiserver/pkg/server/dynamiccertificates/named_certificates.go#L38)
 
 
 ### API Extensions
@@ -143,7 +145,7 @@ N/A
   > users can mitigate this by using --insecure-skip-tls-verify client mode
 
 * User provided expired Certificate and Microshift service started/restarted 
-  Microshift will start with a warning in the logs,kube-api will continue serve with an expired cert - similiar approach is taken by OpenShift.
+  Microshift will start with a warning in the logs, kube-apiserver will continue serve with an expired cert - similiar approach is taken by OpenShift.
   > users can mitigate this by using --insecure-skip-tls-verify client mode
 
 * Users might configure certs with the wrong names that doesnt match the certificate SAN,but openShift allows it so we will too.
@@ -188,17 +190,17 @@ N/A
 ### Failure Modes
 The provided certs value will be validated before is it passed to the api-server flag
 
-This check will cause Microshift to ignore certificates and log the error:
+Those conditions will cause Microshift to ignore certificates and log the error:
 1. certificates files exists in the disk and readable by microshift process.
 1. certificate should be parseable by[x509.ParseCertificate](https://pkg.go.dev/crypto/x509#ParseCertificate).
-1. certificates shouldnt override the internal local certificates which are managed internally.
+1. certificate shouldnt override the internal local certificates which are managed internally.
 
-This check display warning message at the log and certificate will served by the api-server:
-1. certificates is expired.
+This condition will cause Microshift to accept ths certificate with a warning in the logs.
+1. certificate is expired.
 
 
 ## Support Procedures
-Configured certs values to the tls-sni-cert-key TLS handshake command line flag which is passed to the kube-apiserver:
+- Make sure that certificate is served by the kube-apiserver, verify that the certificate path is appended to the `--tls-sni-cert-key` FLAG
 
 ```shell
 > journalctl -u microshift -b0 | grep tls-sni-cert-key
@@ -206,7 +208,7 @@ Configured certs values to the tls-sni-cert-key TLS handshake command line flag 
 Jan 24 14:53:00 localhost.localdomain microshift[45313]: kube-apiserver I0124 14:53:00.649099   45313 flags.go:64] FLAG: --tls-sni-cert-key="[/home/eslutsky/dev/certs/server.crt,/home/eslutsky/dev/certs/server.key;/var/lib/microshift/certs/kube-apiserver-external-signer/kube-external-serving/server.crt,/var/lib/microshift/certs/kube-apiserver-external-signer/kube-external-serving/server.key;/var/lib/microshift/certs/kube-apiserver-localhost-signer/kube-apiserver-localhost-serving/server.crt,/var/lib/microshift/certs/kube-apiserver-localhost-signer/kube-apiserver-localhost-serving/server.key;/var/lib/microshift/certs/kube-apiserver-service-network-signer/kube-apiserver-service-network-serving/server.crt,/var/lib/microshift/certs/kube-apiserver-service-network-signer/kube-apiserver-service-network-serving/server.key
 ```
 
-Connecting to API server using external SNI yields external certificate.
+- Make sure the kube-apiserver is serving the correct certificate.
    ```shell
    $ openssl s_client -connect <SNI_ADDRESS>:6443 -showcerts | openssl x509 -text -noout -in - | grep -C 1 "Alternative\|CN"
    ```
@@ -216,7 +218,7 @@ N/A
 
 ## Alternatives
 - Use [cert-manager](https://cert-manager.io/docs/) for managing Microshift external custom certs
- which allow MicroShift administrators to rotate certificates automatically (e.g. via ACME)
+ which allow MicroShift administrators to rotate certificates automatically (e.g. via ACME).
  cert-manager is not supported on Microshift because it requires alot of internal API changes.
 
 ## Infrastructure Needed [optional]
