@@ -78,7 +78,7 @@ This is a proposal to:
 ### Graduation Criteria
 
 - [x] [OKD repository](https://github.com/openshift/okd/) exists for community issue and bug triage, and development tracking.
-- [x] The UBI-based container images for all components in the release payload are shared between OKD and OCP for testing in Prow (with a few exceptions, see below)
+- [ ] Container images for all components used to build or in the release payload are built atop Centos Stream base images most closely matching the majority of OCP images (as of Feb 2024, CS9) and do not contain any content from RHEL builds of any packages. Base images and builders will be maintained jointly by OKD and ART teams. OCP Engineering teams will be responsible for addressing bugs reported against OKD in their individual images but should otherwise have minimal steady state image maintenance burden, adding of net new packages will be required of the team adding those packages however.
 - [x] OKD build and release jobs are added to `openshift/release`
 - [x] Fedora RPM- and FCOS ostree-based `machine-os-content` container images are built continuously from the [`openshift/okd-machine-os`](https://github.com/openshift/okd-machine-os/) repository, with promotion gating for each minor version release stream.
 - [x] Mirror OKD release payloads from the internal registry to quay.io  
