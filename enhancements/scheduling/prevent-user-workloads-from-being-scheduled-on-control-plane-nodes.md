@@ -231,10 +231,10 @@ spec:
 
 4. Namespace Labeling for Exceptions:
 
-- Namespace Administrators are tasked with applying specific labels to their namespaces if exemptions to the default scheduling policies are warranted. This procedure enables selected workloads within these namespaces to bypass the standard restrictions by tolerating the designated NoExecute taints (should be performed on control plane nodes for control plane protection - should be performed on special node groups if that is what needs to be protected).
+- Namespace Administrators are tasked with applying specific labels to their namespaces if exemptions to the default scheduling policies are warranted. This procedure enables selected workloads within these namespaces to bypass the standard restrictions by tolerating the designated NoExecute taints (should be performed on control plane owned namespaces for control plane protection - should be performed on special node group namespaces if that is what needs to be protected).
 
 ```
-oc label <NAMESPACE_NAME> default openshift.io/control-plane-namespace=true
+oc label <NAMESPACE_NAME> openshift.io/control-plane-namespace=true
 ```
 
 5. Pod Scheduling Attempt:
@@ -392,19 +392,7 @@ History`. -->
 
 ## Alternatives
 
-### Have control-plane nodes tainted with NoExecute taint
-
-- Kubelet recognizes any NoExecute taint and rejects any pod that does not tolerate the taint. E.g. `node-role.kubernetes.io/master:NoExecute`.
-- The taint is a scheduler-free taint, i.e. no scheduler needs to understand taints and tolerations.
-- Any pod expected to be scheduled to a control plane node needs to tolerate the taint.
-- The admission plugin needs to reject any pod that is not allowed to tolerate the NoExecute taint.
-- When `masterSchedulable` is set to `true`, the admission plugin is disabled.
-- A scheduling group will no longer need a label selector. Instead, a list of taints will be required.
-- Each group will still need to keep a list of authorized service accouts and users
-- There's probably no guarantee for all control plane pods getting updated first (with the NoExecute toleration) before control plane nodes get tainted during an OCP upgrade. For that, all control plane pods need to tolerate the taint first in OCP X so nodes can be tainted in OCP X+1 without any unnecessary rejections/disruptions.
-
 ### Admission Plugin Approach (Discarded)
-
 
 Initially, the proposal considered using an admission plugin to enforce scheduling policies on control plane nodes. This approach involved developing or extending an existing admission controller/plugin that would reject pods attempting to schedule on protected nodes unless they met specific criteria defined by administrators, such as coming from selected service accounts or users.
 
