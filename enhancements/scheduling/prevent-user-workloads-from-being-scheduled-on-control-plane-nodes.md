@@ -177,6 +177,7 @@ Additional Considerations:
 1. Continuous Standardization of Shipped tolerations. 
 
 - OpenShift Engineers need to ensure that all control plane and essential workloads ship with the correct tolerations for the NoExecute taints being applied to control plane nodes. This is critical for maintaining uninterrupted operations of OpenShift's core services on these nodes. This involves getting multiple teams on the same page and that new projects also incorporate the needed tolerations.
+- If custom special node groups are being considered for protection, Cluster Administrators need to coordinate with Users/Developers to implement new tolerations for workloads intended for those specific node groups (e.g., GPU-enabled nodes). This coordination ensures that the designated workloads are appropriately scheduled on the protected nodes.
 
 #### Workflow Steps
 
