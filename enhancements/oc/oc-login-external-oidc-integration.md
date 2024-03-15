@@ -140,11 +140,8 @@ N/A
 
 ### Risks and Mitigations
 
-Additional configuration steps need to be performed in external OIDC side which may have slight negative impact on usability initially.
-For example;
-* User has to open the Keycloak dashboard
-* Creates a client-id by also setting `127.0.0.1` as valid redirect url
-* Enable Auth Code Flow
+Additional configuration steps need to be performed in external OIDC side which may have slight negative impact on usability initially. 
+For instance, an administrator must create an OIDC client within their identity provider so that it can be used by their users
 
 ### Drawbacks
 
