@@ -102,10 +102,7 @@ results in;
 Moreover, `oc login` command triggers authentication process by sending a request to Project API's whoami endpoint automatically so that
 client-go talks to `oc get-token` command to obtain id token (and also refresh token, if provider supports it).
 
-There are currently 7 authentication flows grouped around public and confidential clients. Due to the nature of `oc` that is being used widely on local, 
-we have decided to support authentication flows only for public clients for now but if there is any different use case in the future, this command can support confidential clients too. 
-
-Supportability (in terms of authentication flows) matrix of this feature is outlined below; 
+There are currently 7 authentication flows grouped around public and confidential clients. Supportability (in terms of authentication flows) matrix of this feature is outlined below; 
 
 |           | Authorization Code<br/>(public)                                            | Authorization Code<br/>(confidential)                                                                    | Authorization Code + PKCE<br/>(public)                                     | Authorization Code + PKCE<br/>(confidential)                                                             | Implicit Flow<br/>(public) | Client Credentials<br/>(confidential)                                    | Refresh Token<br/>(public/confidential) | Device Code<br/>(public) | Password Grant<br/>(confidential) |
 |-----------|----------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|----------------------------|--------------------------------------------------------------------------|-----------------------------------------|--------------------------|-----------------------------------|
