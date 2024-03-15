@@ -186,8 +186,7 @@ https://console.redhat.com/api/gathering/v2/%s/gathering_rules.json
 ```
 
 The `%s` parameter is the OCP version provided (by the ClusterVersionOpeartor) as `RELEASE_VERSION` 
-environment variable in the Insights Operator deployment (this should prevent any version skew between
-the actual operator version and the remote configuration version). 
+environment variable in the Insights Operator deployment. 
 The remote configuration service will be responsible for serving configuration that can be 
 successfully processed by an Insights Operator of the given version.
 
@@ -214,12 +213,8 @@ by different Insights operator versions. Changes in z-stream versions
 (backports) will still be possible in cases that we will be unable to handle at
 the level of the remote configuration service.
 
-Upon successful validation, the remote configuration will be stored in an immutable configmap, 
-and used to gather data and produce an archive. 
-The Insights Operator will use the cached configuration from the configmap when it will be unable 
-to download a valid version from the remote configuration service. 
-The Insights Operator will assume empty configuration if no copy of the remote configuration 
-will be available.
+The remote configuration will be stored in each archive (similarly to what is done today 
+for the conditional gathering) to facilitate troubleshooting. 
 See also [Status Reporting and Monitoring](#status-reporting-and-monitoring).
 
 Container log data is identified by namespace name, pod name and container name. 
@@ -271,7 +266,7 @@ The Insights Operator will unconditionally gather:
 * The Insights ClusterOperator resource (gathered already). 
   Red Hat (the Observability Intelligence team responsible for operating the pipeline that processes
   incoming archives) will monitor the two conditions to detect issues with remote configuration.
-* The config map with the remote configuration used for producing the archive. 
+* The remote configuration used for producing the archive. 
   This will help reproducing and troubleshooting issues.
 * Metrics about the gathering process.
   * The total real time of data gathering (gathered already)
@@ -330,7 +325,8 @@ In disconnected and air-gapped clusters, two behaviors can occur:
   attempt to download the configuration at all.
 * If data gathering is enabled or triggered manually, the Insights Operator will 
   [report](#status-reporting-and-monitoring) the failure 
-  and [proceed](#remote-configuration-processing) with empty remote configuration.
+  and [use](#remote-configuration-processing) the default configuration available
+  in the operator binary.
 
 #### Invalid Remote Configuration
 
