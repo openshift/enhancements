@@ -24,7 +24,7 @@ tracking-link:
 
 ## Summary
 MicroShift's default router is created as part of the platform, but does not
-allow configuring any of its specific parameters. For example, you can not
+allow configuring any of its specific parameters. For example, you cannot
 disable the router or change its listening ports.
 
 In order to allow these operations and many more, a set of configuration options
@@ -71,7 +71,8 @@ specific IP addresses.
 * Allow users to configure in which IPs the router listens.
 * Allow users to allow traffic from specific IP addresses.
 * Allow users to deny traffic to the router.
-* Internal access from applications to the router must remain unchanged.
+* Internal access from applications to the router must remain unchanged when
+  the router is enabled.
 
 ### Non-Goals
 N/A
@@ -124,8 +125,8 @@ The following configuration is proposed:
 ```yaml
 ingress:
   ports:
-    http: <int> # Defaults to 80.
-    https: <int> # Defaults to 443.
+    http: <uint16> # Defaults to 80.
+    https: <uint16> # Defaults to 443.
 ```
 
 MicroShift does not own the host, which means there might be other
@@ -137,6 +138,8 @@ In order to allow this configuration and many other advantages, the
 router service shall be changed so that it is exposed using `LoadBalancer`
 type instead of using host ports. See the [Design Details section](#why-loadbalancer-service)
 for more information.
+
+Possible values are restricted to 1-65535.
 
 #### Firewalling ports
 Using `LoadBalancer` service type prevents the usage of firewalld to block
@@ -164,6 +167,7 @@ ingress:
     ipAddresses:
     - <IP address>
 ```
+
 As described in [this section](#using-loadbalancer-service-type), the use of
 `LoadBalancer` makes ovnk configure iptables rules to expose the service
 outside of the cluster.
@@ -181,8 +185,13 @@ compatibility. Any advanced configuration, such as multiple interfaces, VLANs,
 etc. will need user's configuration. Any user's configuration will override all
 of the defaults.
 
-The hostnames will be automatically resolved to their IP addresses by
-MicroShift, same as the NIC names.
+If the configuration includes duplicates, in the form of same entries in the
+same list, or referring to the same IP in different ways (hostnames or NICs),
+these will be ignored without warnings/errors.
+
+The hostnames and interfaces will be automatically resolved to their IP
+addresses by MicroShift's [service controller](loadbalancer-service-support.md).
+This is described in more details in [this section](#using-loadbalancer-service-type).
 
 ### Allow specific IP addresses
 This may be seen as a special case of firewalling, but using IP addresses
@@ -202,10 +211,11 @@ cluster.
    MicroShift's start.
 2. After MicroShift started, the system will ingest the configuration and setup
    everything according to it.
-3. The router will enabled/disabled, be exposed on the specified ports, on the
-   specified IPs, allowing only specified IP addresses, all according to the
-   cluster admin provided configuration. This includes the status in the
-   LoadBalancer service type for the router.
+3. The router will be enabled/disabled, be exposed on the specified ports,
+   listen on the specified IPs, and allow connections from only specified the
+   IP addresses, all according to the cluster admin-provided configuration.
+   This is reflected in the status in the LoadBalancer-type service for the
+   router (if the router is enabled).
 
 ### API Extensions
 As described in the proposal, there is an entire new section in the configuration:
@@ -245,10 +255,10 @@ included, which MicroShift does not copy yet. Depending on the options
 configured in MicroShift, this resource will need further customization done
 by MicroShift's start process.
 
-The rest of the changes imply only additions. The LoadBalancer controller needs
-an expansion on its capabilities to include more IPs in the status and log any
-changes to services. All the logic to control NetworkPolicy resources is also
-new.
+The rest of the changes imply only additions. [MicroShift's service controller](loadbalancer-service-support.md)
+needs an expansion on its capabilities to include more IPs in the status and
+log any changes to services. All the logic to control NetworkPolicy resources
+is also new.
 
 #### How config options change manifests
 Each of the configuration options described above has a direct effect on the
@@ -305,10 +315,10 @@ A different behavior should be expected if using a different CNI.
 
 ## Design Details
 #### Why LoadBalancer service
-In the current implementation router ports are fixed and can not be configured.
-Back when there was no support for `LoadBalancer` service types, router was
+In the current implementation router ports are fixed and cannot be configured.
+Back when there was no support for `LoadBalancer`-type services, the router was
 forced to use a different way of getting exposed. Using ports 80 and 443 meant
-that NodePort service types can not be used. Using host network would also
+that NodePort service types could not be used. Using host network would also
 bind port 1936 to the host, which is used for internal metrics. The only option
 that was left was using host ports.
 
@@ -335,7 +345,7 @@ reachable in ports 80 and 443. This is only achievable by using `LoadBalancer`
 service types.
 
 When using this kind of service a special controller in MicroShift, referenced
-[here](loadbalancer-service-support.md) will include the node IP in the
+[here](loadbalancer-service-support.md) will include the configured IPs in the
 `.status.loadBalancer.ingress` list from the service. Afterwards, ovnk will
 pick up these IP addresses and create iptables rules to forward all incoming
 traffic to the service IP.
@@ -366,6 +376,14 @@ $ sudo iptables -t nat -S
 -A OVN-KUBE-EXTERNALIP -d 192.168.122.254/32 -p tcp -m tcp --dport 80 -j DNAT --to-destination 10.43.252.173:80
 ...
 ```
+
+Since ovnk picks up every element in `.status.loadBalancer.ingress` to create
+iptable rules, duplicates are ignored. Their rules already exist. However, for
+clarity reasons MicroShift should keep this list unique so that admins/users
+are not confused by it. MicroShift will not trigger warnings or errors if there
+are duplicate entries from the configuration (these include explicit duplicates
+or referring to the same IP in different ways, such as by their hostnames or
+interfaces).
 
 #### Firewalling ports
 Using LoadBalancer service will create special iptables rules with more
@@ -416,10 +434,27 @@ means the services are updated by this component. However, ovnk only turns IP
 addresses into iptables rules, it does not take Hostname, which is another
 valid field for the service status.
 
-Since the configuration uses NIC names and also host names, the controller
-needs to translate these to their corresponding IP addresses, and then
-configure them in the service. To keep up with the dynamic nature of IP
-addresses and names, it needs to perform periodic checks and updates.
+Since the configuration uses NIC names and also host names, the
+[service controller](loadbalancer-service-support.md) needs to translate these
+to their corresponding IP addresses, and then configure them in the service.
+
+The name resolution is performed within MicroShift binary. MicroShift runs just
+as any other application in the host, therefore it uses host level name
+resolution mechanisms such as /etc/hosts and /etc/resolv.conf.
+All of the IPs that have been resolved will be added to the service `status`
+field, replacing the previous ones.
+
+In order to keep the IP addresses updated the controller shall perform the name
+resolution periodically. Ideally this period could be self-calculated using TTL
+in DNS entries, but this is not available for NICs in the host.
+To keep a similar behavior as with the node IP change detection system, names
+will be resolved once every minute.
+
+Should the name resolution fail (DNS down, for example), the entries in the
+service `status` field should remain. A failure to contact a DNS server must
+not disrupt connections to the router. A failure to resolve the name because
+the record has been deleted does not keep the entry in the service, as
+mentioned above.
 
 #### Allowing specific IP addresses
 Allowing specific IP addresses is achieved through the use of `NetworkPolicy`
@@ -491,9 +526,17 @@ N/A
 ## Operational Aspects of API Extensions
 
 ### Failure Modes
-If the configured entries in `ingress.expose.ipAddresses` and
-`ingress.expose.interfaces` do not exist in the node, MicroShift should fail
-to start.
+* If the configured entries in `ingress.expose.ipAddresses` and
+  `ingress.expose.interfaces` do not exist in the node, MicroShift should fail
+  to start.
+
+* If the configured ports in `ingress.ports` are already in use by any other
+  process in the host, MicroShift will fail to start.
+
+* As explained in a previous [section](#exposing-the-router), DNS failures
+  (connectivity related, not failing to resolve a name) will not remove the old
+  entries in the service `status` field for stability. This could have an
+  impact on active connections over a temporary problem with the DNS.
 
 ## Support Procedures
 Additional logging is added to the LoadBalancer controller to show the ports
