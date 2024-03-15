@@ -42,7 +42,7 @@ As a cluster administrator, I'd like to use the same roles/users in external OID
 
 ### Goals
 
-- Add support in `oc login` which will enable users can still log in to their clusters (by copying log in command from console or manually), even if their cluster relies on external OIDC issuer.
+- Add support in `oc login` which will enable users to log in to their clusters if their cluster relies on external OIDC issuer, either by copying a log in command from webconsole, or manually.
 
 ### Non-Goals
 
@@ -50,7 +50,7 @@ As a cluster administrator, I'd like to use the same roles/users in external OID
 
 ## Proposal
 
-This enhancement proposal proposes one new oc command;
+This enhancement document proposes a new oc command;
 
 * `oc get-token`: Built-in credentials exec plugins of oc. It supports all the features that client-go requires to obtain the id token.
   * `--issuer-url`: Issuer URL of the external OIDC issuer and mandatory.
@@ -75,7 +75,7 @@ oc login generates a stanza in kubeconfig supporting credentials exec plugin fea
 For example;
 
 ```shell
-$ oc login localhost:8443 ---issuer-url=https://oidc.issuer.url -exec-plugin=oc-oidc --client-id=client-id --extra-scopes=email,profile --callback-port=8080
+$ oc login localhost:8443 ---issuer-url=https://oidc.issuer.url --exec-plugin=oc-oidc --client-id=client-id --extra-scopes=email,profile --callback-port=8080
 ```
 
 results in;
@@ -113,7 +113,7 @@ Supportability (in terms of authentication flows) matrix of this feature is outl
 | Comment   |                                                                            | Only if provider supports this[1]                                                                        |                                                                            | Only if provider supports this[1]                                                                        | Deprecated[3]              | Mostly used in CI systems that <br/>client-secret can be stored securely | If provider supports it                 |                          | Deprecated[4]                     |
 | Command   | `oc login api.url --issuer-url=external.oidc.issuer --client-id=client-id` | `oc login api.url --issuer-url=external.oidc.issuer --client-id=client-id --client-secret=client-secret` | `oc login api.url --issuer-url=external.oidc.issuer --client-id=client-id` | `oc login api.url --issuer-url=external.oidc.issuer --client-id=client-id --client-secret=client-secret` |                            |                                                                          | [2]                                     |                          |                                   |
 
-[1] For instance, Azure Entra ID supports configuring client secret to behave as confidential client. Contrarily, Keycloak does not.
+[1] For instance, Azure Entra ID supports configuring client secret to behave as confidential client in Auth Code Authentication Flow. Contrarily, Keycloak does not.
 
 [2] Refresh token does not provide any interface, because it is handled automatically by `oc get-token`, if provider supports it.
 
@@ -143,7 +143,11 @@ N/A
 
 ### Risks and Mitigations
 
-There is additional configuration steps should be performed in external OIDC side which may have slight negative impact on usability initially.
+Additional configuration steps need to be performed in external OIDC side which may have slight negative impact on usability initially.
+For example;
+* User has to open the Keycloak dashboard
+* Creates a client-id by also setting `127.0.0.1` as valid redirect url
+* Enable Auth Code Flow
 
 ### Drawbacks
 
