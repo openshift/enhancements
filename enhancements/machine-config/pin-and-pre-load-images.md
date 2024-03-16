@@ -17,7 +17,7 @@ api-approvers:
 - "@deads2k"
 - "@JoelSpeed"
 creation-date: 2023-09-21
-last-updated: 2023-09-21
+last-updated: 2023-03-15
 tracking-link:
 - https://issues.redhat.com/browse/RFE-4482
 see-also:
@@ -112,7 +112,7 @@ errors before the update is applied.
 
 1. The `MachineConfigDaemon` will ensure adequate storage, manage image prefetch
 logic, `CRI-O` configuration updates and status reporting through the
-`MachineConfigPool` using the new `prefetch_image_manager`.
+`MachineConfigPool` using the new `pinned_image_manager`.
 
 ### API Extensions
 
@@ -149,8 +149,7 @@ A new `PinnedImageSet` custom resource definition will be added to the
 	  // +listType=map
 	  // +listMapKey=name
 	  PinnedImageSets []PinnedImageSetRef `json:"pinnedImageSets,omitempty"`
-    
-    
+     
     type PinnedImageSetRef struct {
         // [docs]
 	      // +kubebuilder:validation:MinLength=1
@@ -176,8 +175,9 @@ configuration parameter to "", but that would affect all images, not just the
 pinned ones. This behavior needs to be changed in CRI-O so that pinned images
 aren't removed, regardless of the value of `version_file_persist`.
 
-The changes to `pinned_images` `CRI-O` configuration will be persisted to a
-static config file `/etc/crio/crio.conf.d/50-pinned-images` directory.
+The changes to `pinned_images` `CRI-O` configuration observed in the
+`PinnedImageSet` will be persisted to a static config file
+`/etc/crio/crio.conf.d/50-pinned-images` directly by the `pinned_image_manager`.
 
 ```yaml
 apiVersion: machineconfiguration.openshift.io/v1alpha1
@@ -204,30 +204,45 @@ pinned_images=[
 ]
 ```
 
-The `PinnedImageSet` is tightly coupled to `MachineConfigPool` and each `CR` can
-be referenced on the pool level via the `MachineConfigPoolSpec`. This is
-flexible becuase it allows a controller/admin the ability to prescribe sets to
-pools. Although a cluster only has two pools by default `master` and `worker`
-[custom pools](https://github.com/openshift/machine-config-operator/blob/master/docs/custom-pools.md)
-can be added for further fine grained controls.
+The PinnedImageSet is closely linked with the `MachineConfigPool`, and each
+Custom Resource (CR) can be associated with a pool at the
+`MachineConfigPoolSpec` level. This design is advantageous because it enables
+controllers or administrators to assign specific sets of images to different
+pools. By default, a cluster has two types of pools: master and worker. However,
+users can create [custom pools](https://github.com/openshift/machine-config-operator/blob/master/docs/custom-pools.md)
+for more precise control.
 
 This is specially convenient for pinning images for upgrades: there are many
 images that are needed only by the control plane nodes and there is no need to
 have them consuming disk space in worker nodes.
 
-The _machine-config-daemon_ will grow a new `prefetch_image_manager` utilizing
-the same general flow as the `certificate_writer` which is not dependent on
-defining the configuration as `MachineConfig`.  controller that will watch the
+The _machine-config-daemon_ will grow a new `pinned_image_manager` utilizing
+the same general flow as the existing `MAchineConfigDaemon` `certificate_writer`. This approach is not dependent on
+defining the configuration as `MachineConfig`. The controller that will watch on
 `PinnedImageSet` and `MachineConfigPool` resources. On sync the manager will
 perform the following tasks.
 
-1. Using the same mechanism as `MachineConfigDaemon` update() flow
-`nodeWriter.SetWorking()` will update the node annotation signaling to the pool
-that work has begun. If during this pull an error occurs it will be translated
-to `Degraded` = true status. By utilizing this exiting flow of
-`MachineConfigDaemon` we will require no additional node annotations. In the
-future when `MachineConfigDaemon` migrates to `MachineConfigNode`
-PinnedImageSets will also migrate.
+The _machine-config-daemon_ will add the following metrics for admins to track/verify image prefetch progress.
+
+- mcd_prefetch_image_pull_success_total: Total number of successful prefetched image pulls.
+
+- mcd_prefetch_image_pull_failure_total: Total number of prefetch image pull failures.
+
+The _machine-config-daemon_ will be enhanced with a new feature called
+`pinned_image_manager`, which follows a similar process to the existing
+`certificate_writer`. This new feature will operate independently of the
+`MachineConfig` for setting configurations. It is advantageous to not use
+`MachineConfig` because the configuration and image prefetching can happen
+across the nodes in the pool in parallel. The new controller will be watching
+both `PinnedImageSet` and `MachineConfigPool` resources. When synchronizing, the
+`pinned_image_manager` will:
+
+1. Begin by marking the node with an annotation to indicate the manager is
+`Working` utilizing the `nodeWriter`, similar to the `MachineConfigDaemon` `update`
+process. This approach helps to avoid the need for additional node annotations.
+If an error occurs during this phase, it will be indicated by setting the status
+of the `MachineConfigPool` to `Degraded=true`. The `pinned_image_manager` could
+later provide more detailed statuses via `MachineConfigNode`.
 
 ```sh
 NAME     CONFIG                UPDATED   UPDATING   DEGRADED   MACHINECOUNT   READYMACHINECOUNT   UPDATEDMACHINECOUNT   DEGRADEDMACHINECOUNT
@@ -258,8 +273,8 @@ complete OpenShift releases: blobs take 16 GiB and when they are written to disk
 they take 32 GiB.
 
 If the calculate disk space exceeds the available disk space then the
-`prefetch_image_manger` will report the error as a `Degraded` = `true` status
-for the MachineConfigPool with the error in the `message`.
+`pinned_image_manager` will report the error as a `Degraded=true` status
+for the `MachineConfigPool` with the error in the `message`.
 
 Note that even with this check it will still be possible (but less likely) to
 have failures to pull images due to disk space: the heuristic could be wrong,
@@ -267,9 +282,12 @@ and there may be other components pulling images or consuming disk space in
 some other way. Those failures will be detected and reported in the status of
 the `MachineConfigPool` when CRI-O fails to pull the image.
 
-When all the images have been successfully pinned and pulled in all the matching
-nodes the `MachineConfigPool` will use `nodeWriter.SetDone()` to communicate to
-the pool that work is done.
+Once all the relevant images are successfully pinned and downloaded to the
+matching nodes, the `pinned_image_manager` will signal the completion of the
+process by invoking nodeWriter.SetDone(). This action notifies the
+`MachineConfigPool` that the task has been completed and once all of the nodes
+report via existing Node annotation machineconfiguration.openshift.io/state:
+Done the resulting `MachineConfigPool` status will be `Updating=false` `Updated=true`.
 
 Today the Updated status reflects only the rendered worker config. The message
 will need to be slightly updated in the case where prefetch is a success.
@@ -284,8 +302,8 @@ will need to be slightly updated in the case where prefetch is a success.
 
 **Note:** As the API is introduced as `v1alpha1` via `TechPreview` this will not
 directly affect customer upgrades. The usage of `Node` annotations will not be a
-`v1` goal but this accommodation is intended to allow the maturity of
-`MachineConfigNode` before it is implemented. The goal is to use
+`v1` goal for status reporting but this accommodation is intended to allow the
+maturity of `MachineConfigNode` before it is implemented. The goal is to use
 `MachineConfigNode` directly when it has graduated to `v1`.
 
 ### Risks and Mitigation
@@ -378,7 +396,7 @@ Not applicable.
 
 Image pulling may fail due to lack of disk space or other reasons. This will be
 reported via the conditions in the `PinnedImageSet` custom resource. See the
-risks and mitigations section for details.
+risks and mitigation section for details.
 
 #### Support Procedures
 
