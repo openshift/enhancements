@@ -77,18 +77,15 @@ For each provided certificate, the following configuration is proposed:
 1. `certPath` -  certificate full path.
 1. `keyPath` -   certificate key full path.
 
-Certificate files will be read from their configured location by the Microshift service,
-each certificate file will be validated (see validation rules).
-
+Certificate files will be read from their configured location by the Microshift service.
 External custom certificates will extend Microshift self-signed internal certificates.
-
 Each certificate configured this way will be validated and treated according to [Failure Modes](#failure-modes).
 
 ### Kubeconfig Generation
-Wildcard certificate is a single certificate with a wildcard character (*) in the domain name,
+[Wildcard](https://www.rfc-editor.org/rfc/rfc6125#section-7.2) certificate is a single certificate with a wildcard character (*) in the left-most domain name  ,
 This allows the certificate to secure multiple sub domain names (hosts) .
 
-Each configured certificate can contain multiple FQDN and wildcards values, for each unique FQDN address kubeconfig file will be generated on the filesystem.
+Each configured certificate can contain multiple FQDN and wildcards values in dNSName component of SubjectAlternativeName, for each unique FQDN address kubeconfig file will be generated on the filesystem.
 
 Every generated `kubeconfig` for the custom certificates will omit the certificate-authority-data section,
 therefore custom certificates will have to be validated against CAs in the RHEL Client trust store. 
@@ -103,7 +100,7 @@ The FQDN Address is searched in:
 when a Certificate is found to be a wildcard only, Microshift will not be able to find the real FQDN, node IP Address will be placed inside its kubeconfig's `server` section.
 this kubeconfig should be treated as an example only and its `server` section value should be changed to the real FQDN.
 
-Certain values that configured in `names` field can cause  internal API communication issues  ie:127.0.0.1,localhost therefore we must not allow them.
+Certain [reserved](#reserved-names-values) values that configured in `names` field can cause  internal API communication issues  therefore we must not allow them.
 
 ### Workflow Description
 
@@ -111,7 +108,7 @@ Certain values that configured in `names` field can cause  internal API communic
 1. By default, when there is no namedCertificates configuration the behaviour will remain the same.
 
 #### when custom namedCertificates configured
-1. Device Administrator copies the certificated to MicroShift host,files should be accessible by root only.
+1. Device Administrator copies the certificates to MicroShift host, files should be accessible by root only.
 1. Device Administrator configures additonal CAs in the RHEL Client trust store on the client system.
 1. Device Administrator configures `namedCertificates` in the Microshift configuration yaml file (/etc/microshift/config.yaml).
 1. Device Administrator start/restarts MicroShift
@@ -130,7 +127,7 @@ N/A
 Enhancement is solely intended for MicroShift.
 
 ### Implementation Details/Notes/Constraints
-The certs will be prepended to the []configv1.NamedCertificate list before the api server is started. (it will be added to `-tls-sni-cert-key` flag)
+The certs will be prepended to the `[]configv1.NamedCertificate` list before the api server is started. (it will be added to `-tls-sni-cert-key` flag)
 
 This certificate paths configuration and names will be prepended into the kube-apiserver `tls-sni-cert-key` command line flag.
 When the same SNI appears in the SAN part of the provided certs, this certificate will take precedence over the `default` external-signer. [ref](https://github.com/kubernetes/kubernetes/blob/98358b8ce11b0c1878ae7aa1482668cb7a0b0e23/staging/src/k8s.io/apiserver/pkg/server/dynamiccertificates/named_certificates.go#L38)
@@ -192,26 +189,39 @@ The provided certs value will be validated before is it passed to the api-server
 
 Those conditions will cause Microshift to ignore certificates and log the error:
 1. certificates files exists in the disk and readable by microshift process.
-1. certificate should be parseable by[x509.ParseCertificate](https://pkg.go.dev/crypto/x509#ParseCertificate).
-1. certificate shouldnt override the internal local certificates which are managed internally.
+1. certificate should be parseable by [x509.ParseCertificate](https://pkg.go.dev/crypto/x509#ParseCertificate).
+1. certificate shouldn't override the internal certificates IPAddress/DNSNames in the SubjectAlternativeNames . see  [reserved](#reserved-names-values) names below.
 
-This condition will cause Microshift to accept ths certificate with a warning in the logs.
+This condition will cause Microshift to accept the certificate with a warning in the logs.
 1. certificate is expired.
+
+
+### Reserved Names values
+| Address                   | Type     | Comment         |
+|:--------------------------|:---------|:----------------| 
+| localhost                 |DNS       |                 |
+| 127.0.0.1                 |IPAddress |                 |
+| 10.42.0.0                 |IPAddress | Cluster Network |
+| 10.43.0.0/16,10.44.0.0/16 |IPAddress | Service Network |
+| kubernetes.default.svc    |DNS       |                 |
+| openshift.default.svc     |DNS       |                 |
+| svc.cluster.local         |DNS       |                 |
 
 
 ## Support Procedures
 - Make sure that certificate is served by the kube-apiserver, verify that the certificate path is appended to the `--tls-sni-cert-key` FLAG
 
-```shell
-> journalctl -u microshift -b0 | grep tls-sni-cert-key
+  ```shell
+  > journalctl -u microshift -b0 | grep tls-sni-cert-key
 
-Jan 24 14:53:00 localhost.localdomain microshift[45313]: kube-apiserver I0124 14:53:00.649099   45313 flags.go:64] FLAG: --tls-sni-cert-key="[/home/eslutsky/dev/certs/server.crt,/home/eslutsky/dev/certs/server.key;/var/lib/microshift/certs/kube-apiserver-external-signer/kube-external-serving/server.crt,/var/lib/microshift/certs/kube-apiserver-external-signer/kube-external-serving/server.key;/var/lib/microshift/certs/kube-apiserver-localhost-signer/kube-apiserver-localhost-serving/server.crt,/var/lib/microshift/certs/kube-apiserver-localhost-signer/kube-apiserver-localhost-serving/server.key;/var/lib/microshift/certs/kube-apiserver-service-network-signer/kube-apiserver-service-network-serving/server.crt,/var/lib/microshift/certs/kube-apiserver-service-network-signer/kube-apiserver-service-network-serving/server.key
-```
+  Jan 24 14:53:00 localhost.localdomain microshift[45313]: kube-apiserver I0124 14:53:00.649099   45313 flags.go:64] FLAG: --tls-sni-cert-key="[/home/eslutsky/dev/certs/server.crt,/home/eslutsky/dev/certs/server.key;/var/lib/microshift/certs/kube-apiserver-external-signer/kube-external-serving/server.crt,/var/lib/microshift/certs/kube-apiserver-external-signer/kube-external-serving/server.key;/var/lib/microshift/certs/kube-apiserver-localhost-signer/kube-apiserver-localhost-serving/server.crt,/var/lib/microshift/certs/kube-apiserver-localhost-signer/kube-apiserver-localhost-serving/server.key;/var/lib/microshift/certs/kube-apiserver-service-network-signer/kube-apiserver-service-network-serving/server.crt,/var/lib/microshift/certs/kube-apiserver-service-network-signer/kube-apiserver-service-network-serving/server.key
+  ```
 
 - Make sure the kube-apiserver is serving the correct certificate.
-   ```shell
-   $ openssl s_client -connect <SNI_ADDRESS>:6443 -showcerts | openssl x509 -text -noout -in - | grep -C 1 "Alternative\|CN"
-   ```
+  ```shell
+  $ openssl s_client -connect <SNI_ADDRESS>:6443 -showcerts | openssl x509 -text -noout -in - | grep -C 1 "Alternative\|CN"
+  ```
+ 
 
 ## Implementation History
 N/A
@@ -219,7 +229,7 @@ N/A
 ## Alternatives
 - Use [cert-manager](https://cert-manager.io/docs/) for managing Microshift external custom certs
  which allow MicroShift administrators to rotate certificates automatically (e.g. via ACME).
- cert-manager is not supported on Microshift because it requires alot of internal API changes.
+ cert-manager is not supported on Microshift because it requires a lot of internal API changes.
 
 ## Infrastructure Needed [optional]
 N/A
