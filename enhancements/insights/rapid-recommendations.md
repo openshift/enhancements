@@ -194,6 +194,46 @@ The new endpoint will return both the current conditional gathering configuratio
 configuration for container logs gathering. 
 In future versions, the endpoint may also include remote configuration for node logs and API resources.
 
+The remote configuration would look like this:
+
+```
+{
+  "conditional_gathering_rules": [
+    {
+      "conditions": [
+        {
+          "type": "alert_is_firing",
+          "alert": {
+            "name": "AlertmanagerFailedReload"
+          }
+        }
+      ],
+      "gathering_functions": {
+        "containers_logs": {
+          "alert_name": "AlertmanagerFailedReload",
+          "container": "alertmanager",
+          "tail_lines": 50
+        }
+      }
+    }
+  ],
+  "container_logs": [
+    {
+      "namespace": "openshift-something",
+      "pod_name_regex": "some-pod-.*",
+      "previous": false,
+      "messages": [ 
+        "log-line-regex-filter1",
+        "log-line-regex-filter2"
+      ]
+    }
+  ]
+}
+```
+
+Note that the request for container logs does not include any condition. The data would be gathered from all clusters supporting this feature. We might consider merging conditional gathering and this new feature in the future. 
+
+
 #### Remote Configuration Processing
 
 The Insights Operator will try to download the remote configuration before creating each archive (every 2 hours).
