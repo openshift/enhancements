@@ -19,6 +19,7 @@ see-also: []
 replaces: []
 superseded-by: []
 ---
+...
 
 # Converting Machine API resources to Cluster API
 
@@ -282,6 +283,23 @@ Creation of resources will be monitored by the admission control and will be all
 * If a Machine API resource already exists and a Cluster API resource is created, the admission will succeed only if the spec authoritative field is set to `MachineAPI`
 
 Deletion of resources will not be monitored by the admission controller.
+
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+This proposal does not affect HyperShift.
+HyperShift does not leverage Machine API.
+
+#### Standalone Clusters
+
+This cluster is aimed at standalone clusters that leverage Machine API.
+Typically this indicates that they were installed using the Installer-Provisioned-Infrastructure path, however,
+we understand that a subset of User-Provisioned-Infrastructure installed clusters retro-fit MachineSets on day 2.
+
+#### Single-node Deployments or MicroShift
+
+Single Node and MicroShift do not leverage Machine API.
 
 ### Implementation Details/Notes/Constraints
 
@@ -599,13 +617,13 @@ Documentation will be provided to explain to users the expected behaviours and t
 
 N/A
 
-### Test Plan
+## Test Plan
 
-#### Conversion of provider specs
+### Conversion of provider specs
 
 The conversion of provider specs from Machine API to Cluster API should be able to be statically tested. We will build out extensive conversion testing via unit tests to ensure that, with a desired input, the correct conversion happens for the provider specs and the associated resources.
 
-#### Authoritative API reconciliation
+### Authoritative API reconciliation
 
 Machine API and Cluster API controllers already use envtest as a way to provide integration testing with a "real" API server.
 We can extend the tests here to account for the cases where the `authoritativeAPI` feature is in use.
@@ -613,7 +631,7 @@ We can extend the tests here to account for the cases where the `authoritativeAP
 By extending the integration tests, we can sculpt the desired inputs for mirror resources existing, not existing, and authoritative in both API versions,
 and then determine whether the reconcile continued or exited based on these conditions.
 
-#### Full migration E2E
+### Full migration E2E
 
 The behaviours outlined [above][summary-of-rules] will be tested in a new E2E test suite specifically targeted at the conversion logic.
 
@@ -644,13 +662,13 @@ In addition to these tests, the following tests will provide a general coverage 
 
 [summary-of-rules]: #summary-of-the-rules-outlined-above
 
-### Graduation Criteria
+## Graduation Criteria
 
 The project will initially be introduced under a feature gate `MachineAPIMigration`.
 The new sync controller will be deployed on all `TechPreviewNoUpgrade`/`CustomNoUpgrade` clusters,
 but will check for the presence of the above feature gate before operating.
 
-#### Dev Preview -> Tech Preview
+### Dev Preview -> Tech Preview
 
 Initially the operator will be introduced behind a feature gate and only accessible with a `CustomNoUpgrade` feature set.
 Before promotion to the `TechPreviewNoUpgrade` feature set, we will ensure:
@@ -659,7 +677,7 @@ Before promotion to the `TechPreviewNoUpgrade` feature set, we will ensure:
 - Tests have been run to ensure the operator does not break the existing payload jobs
 - The operator can report its status via conditions on the Machine API cluster operator
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 
 Once the operator has been released under the `TechPreviewNoUpgrade` feature set, we will continue to enhance the operator
 before marking it as GA:
@@ -671,20 +689,20 @@ before marking it as GA:
 Note, we will not require 100% feature parity for promotion to GA.
 Some features supported by Machine API may be supported in conversion only in subsequent releases.
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
 No features will be deprecated as a part of this enhancement.
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
-#### On Upgrade
+### On Upgrade
 
 When upgrading into a release with the new sync controller,
 new Cluster API resources will be created and existing Machine API resources will have the new API fields added.
 
 There should be no effect on the cluster as each of these operations should be a no-op.
 
-#### On Downgrade
+### On Downgrade
 
 On downgrade, the synchronisation of resources will stop.
 To prevent both Machine API and Cluster API resources being reconciled,
@@ -693,7 +711,7 @@ Independent of the authoritative API.
 
 This will mean that on downgrade all Machine management reverts to Machine API controllers.
 
-### Version Skew Strategy
+## Version Skew Strategy
 
 In 4.N-1, all resources that are mirrored into Cluster API will be managed by the Machine API controllers.
 The mirroring relationship will be based on the names of the resources to create a 1:1 mapping between Machines and MachineSets/ControlPlaneMachineSets in Machine API and Cluster API.
@@ -701,7 +719,7 @@ Cluster API resources will be marked as paused when not authoritative. Since thi
 
 Since the authority of the resource is based on an API field, which is not present in prior releases, there should be no issue during upgrades due to version skew or incompatibility.
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 
 The new sync and migration controllers will operate in the `openshift-cluster-api` namespace alongside existing Cluster API operator and controllers.
 It forms the bases of the conversion between the two API groups, but as a controller, rather than a conversion webhook.
@@ -712,7 +730,7 @@ For wider failures, it will report a condition on the `machine-api` ClusterOpera
 
 There should be no impact on the operation of existing systems by the new synchronisation logic; it does not affect the functionality, rather it mirrors the resource for informational purposes primarily.
 
-#### Failure Modes
+### Failure Modes
 
 When non-functional, the sync controller will not update the non-authoritative resources in the cluster.
 This could lead to stale information being present in the non-authoritative API.
@@ -721,7 +739,7 @@ This could lead to a risk that the authoritative API is switched while the data 
 
 Since the sync controller is required to update the `status.authoritativeAPI` to enact the switch, the desired switch will not happen until the sync controller is restored.
 
-#### Support Procedures
+## Support Procedures
 
 During failures, we expect the Machine API ClusterOperator to report status of the sync controller.
 If the detail is not sufficient to understand the failure, logging will provide additional detail.
@@ -794,7 +812,7 @@ This alternative has been dismissed based on:
 Rather than using a controller to convert the resources after they have been accepted by the API server, we could use a ValidatingAdmissionWebhook to convert resources as updates are applied.
 This has the benefit of applying updates synchronously to both API groups.
 
-However, it also adds additional complexity"
+However, it also adds additional complexity
 - If the conversion webhook accepts the change and writes out the Cluster API resources
   - Does this then call the converse webhook and start to write out the Machine API resources, creating a loop?
   - What happens if a later admission webhook rejects the update?
