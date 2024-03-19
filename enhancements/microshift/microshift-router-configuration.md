@@ -87,38 +87,39 @@ apiServer:
    ...
 # new from here.
 ingress:
-  status: <Enabled|Disabled> # Defaults to Enabled.
+  status: <Managed|Removed> # Defaults to Managed.
   ports:
     http: <int> # Defaults to 80.
     https: <int> # Defaults to 443.
   expose: # Defaults to IPs in the host. Details below.
-    hostnames:
-    - <hostname>
-    interfaces:
-    - <NIC name>
-    ipAddresses:
-    - <IP address>
+    - <NIC name|IP address>
+    - ...
 ```
 
 ### Enable/disable the router
 The following configuration is proposed:
 ```yaml
 ingress:
-  status: <Enabled|Disabled> # Defaults to Enabled.
+  status: <Managed|Removed> # Defaults to Managed.
 ```
 
 With this option MicroShift will decide whether it should create the router
 upon starting. This includes not just the pod, but all the associated resources
 that come along with it: namespace, services, configmaps, etc.
 
-When setting the option to `Disabled`, the next MicroShift restart will
-delete all the default router related resources.
+When setting the option to `Removed`, the next MicroShift restart will
+delete all the default router related resources. Note that any existing routes
+will stop being served and it will require an application deploying an
+OpenShift router instance.
 
-Note that any existing routes will stop being served and it will require an
-application deploying an OpenShift router instance.
+Setting the option to `Managed` will deploy the router, while `Removed` will
+disable it. Default will be `Managed`.
 
-Setting the option to `Enabled` will deploy the router, while `Disabled` will
-disable it. Default will be `Enabled`.
+The choice of `Managed` and `Removed` is intentional and ressembles that of
+[OpenShift for operators](https://github.com/openshift/api/blob/4caef7fe3d0f78f3f3c26b5159f77bdbd00b9c2f/operator/v1/types.go#L33-L50).
+In MicroShift, however, `Managed`` does not have the exact same meaning, as
+the management of the resources happens only when MicroShift starts. Any
+changes made to the router will get reverted on the next restart.
 
 ### Listening ports
 The following configuration is proposed:
@@ -160,12 +161,8 @@ The following configuration is proposed:
 ```yaml
 ingress:
   expose: # Defaults to IPs in the host. Details below.
-    hostnames:
-    - <hostname>
-    interfaces:
-    - <NIC name>
-    ipAddresses:
-    - <IP address>
+    - <NIC name|IP address>
+    - ...
 ```
 
 As described in [this section](#using-loadbalancer-service-type), the use of
@@ -175,9 +172,8 @@ Building on [LoadBalancer controller enhancement](loadbalancer-service-support.m
 the service is exposed using the node IP and configured ports.
 
 All the IPs where the router is exposed need to be part of the `LoadBalancer`
-service status definition. In order to provide more flexibility, the
-configuration options are able to take IP addresses, hostnames and/or NIC
-names.
+service status definition. In order to simplify configuration the router will
+allow specifying only IP addresses and interface names.
 
 MicroShift will default to listen to external IPs, the service IP and the
 apiserver IP, as this was the previous behavior and it needs to keep it for
@@ -185,13 +181,13 @@ compatibility. Any advanced configuration, such as multiple interfaces, VLANs,
 etc. will need user's configuration. Any user's configuration will override all
 of the defaults.
 
-If the configuration includes duplicates, in the form of same entries in the
-same list, or referring to the same IP in different ways (hostnames or NICs),
+If the configuration includes duplicates in the form of same entries in the
+same list or referring to the same IP in different ways (hostnames or NICs),
 these will be ignored without warnings/errors.
 
-The hostnames and interfaces will be automatically resolved to their IP
-addresses by MicroShift's [service controller](loadbalancer-service-support.md).
-This is described in more details in [this section](#using-loadbalancer-service-type).
+The NIC IP addresses will be automatically picked up by MicroShift's
+[service controller](loadbalancer-service-support.md). This is described in
+more details in [this section](#using-loadbalancer-service-type).
 
 ### Allow specific IP addresses
 This may be seen as a special case of firewalling, but using IP addresses
@@ -221,17 +217,13 @@ cluster.
 As described in the proposal, there is an entire new section in the configuration:
 ```yaml
 ingress:
-  status: <Enabled|Disabled> # Defaults to Enabled.
+  status: <Managed|Removed> # Defaults to Managed.
   ports:
     http: <int> # Defaults to 80.
     https: <int> # Defaults to 443.
   expose: # Defaults to IPs in the host. Details below.
-    hostnames:
-    - <hostname>
-    interfaces:
-    - <NIC name>
-    ipAddresses:
-    - <IP address>
+    - <NIC name|IP address>
+    - ...
 ```
 
 For more information check each individual section.
@@ -268,7 +260,7 @@ The `ingress.status` option will drive whether the router `Deployment` and the
 `Service` get created.
 ```yaml
 ingress:
-  status: <Enabled|Disabled> # Defaults to Enabled.
+  status: <Managed|Removed> # Defaults to Managed.
 ```
 
 The `ingress.policy.ports.http` and `ingress.policy.ports.https` will determine,
@@ -280,20 +272,16 @@ ingress:
     http: <int> # Defaults to 80.
     https: <int> # Defaults to 443.
 ```
-
-The `ingress.policy.expose` option contains lists of hostnames, NIC names and
-IP addresses. MicroShift will translate them to IP addresses and then update
-the `status.loadBalancer` field in the `Service`. Ovnk will pick up this field
-to configure the iptables rules. This is described [here](#using-loadbalancer-service-type).
+The `ingress.policy.expose` option contains a list of NIC names and IP
+addresses. MicroShift will translate those that need it to IP addresses and
+then update the `status.loadBalancer` field in the `Service`. Ovnk will pick
+up this field to configure the iptables rules. This is described
+[here](#using-loadbalancer-service-type).
 ```yaml
 ingress:
   expose: # Defaults to IPs in the host. Details below.
-    hostnames:
-    - <hostname>
-    interfaces:
-    - <NIC name>
-    ipAddresses:
-    - <IP address>
+    - <NIC name|IP address>
+    - ...
 ```
 
 ### Risks and Mitigations
@@ -434,27 +422,14 @@ means the services are updated by this component. However, ovnk only turns IP
 addresses into iptables rules, it does not take Hostname, which is another
 valid field for the service status.
 
-Since the configuration uses NIC names and also host names, the
-[service controller](loadbalancer-service-support.md) needs to translate these
-to their corresponding IP addresses, and then configure them in the service.
+Since the configuration uses NIC names the [service controller](loadbalancer-service-support.md)
+needs to translate them to their corresponding IP addresses, and then
+configure them in the service.
 
-The name resolution is performed within MicroShift binary. MicroShift runs just
-as any other application in the host, therefore it uses host level name
-resolution mechanisms such as /etc/hosts and /etc/resolv.conf.
-All of the IPs that have been resolved will be added to the service `status`
-field, replacing the previous ones.
-
-In order to keep the IP addresses updated the controller shall perform the name
-resolution periodically. Ideally this period could be self-calculated using TTL
-in DNS entries, but this is not available for NICs in the host.
-To keep a similar behavior as with the node IP change detection system, names
-will be resolved once every minute.
-
-Should the name resolution fail (DNS down, for example), the entries in the
-service `status` field should remain. A failure to contact a DNS server must
-not disrupt connections to the router. A failure to resolve the name because
-the record has been deleted does not keep the entry in the service, as
-mentioned above.
+Since the NIC names are present in the host, MicroShift will need to list he IP
+addresses from them and include them in the service `status` field. Due to the
+changing nature of IP addresses, MicroShift will periodically check the listed
+NICs to update the service `status` as needed to minimize configuration drift.
 
 #### Allowing specific IP addresses
 Allowing specific IP addresses is achieved through the use of `NetworkPolicy`
@@ -526,17 +501,13 @@ N/A
 ## Operational Aspects of API Extensions
 
 ### Failure Modes
-* If the configured entries in `ingress.expose.ipAddresses` and
-  `ingress.expose.interfaces` do not exist in the node, MicroShift should fail
-  to start.
+* If any of the configured entries in `ingress.expose` are invalid (e.g. bad
+  format, a NIC not present in the host, etc.), MicroShift will fail to start.
+  This could render the router unreachable and thus, the applications behind
+  it.
 
-* If the configured ports in `ingress.ports` are already in use by any other
-  process in the host, MicroShift will fail to start.
-
-* As explained in a previous [section](#exposing-the-router), DNS failures
-  (connectivity related, not failing to resolve a name) will not remove the old
-  entries in the service `status` field for stability. This could have an
-  impact on active connections over a temporary problem with the DNS.
+* If the `ingress.status` is set to `Removed` then no validations will be
+  performed on the ingress configuration.
 
 ## Support Procedures
 Additional logging is added to the LoadBalancer controller to show the ports
