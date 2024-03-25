@@ -29,7 +29,7 @@ superseded-by:
 ## Summary
 
 This enhancement extends the Microshift apiserver Certs to allow the user to
-provide additional custom certificates (e.g. signed by a 3rd party CA) for API server SSL handkshake and external authentication.
+provide additional custom certificates (e.g. signed by a 3rd party CA) for API server SSL handshake and external authentication.
 
 
 > Anytime the document mentions API server, it refers to kube API server.
@@ -188,9 +188,9 @@ N/A
 The provided certs value will be validated before is it passed to the api-server flag
 
 Those conditions will cause Microshift to ignore certificates and log the error:
-1. certificates files exists in the disk and readable by microshift process.
-1. certificate should be parseable by [x509.ParseCertificate](https://pkg.go.dev/crypto/x509#ParseCertificate).
-1. certificate shouldn't override the internal certificates IPAddress/DNSNames in the SubjectAlternativeNames . see  [reserved](#reserved-names-values) names below.
+1. certificates files do not exist in the disk or are not readable by microshift process.
+1. certificate is not parseable by [x509.ParseCertificate](https://pkg.go.dev/crypto/x509#ParseCertificate).
+1. certificate override the internal certificates IPAddress/DNSNames in the SubjectAlternativeNames . see  [reserved](#reserved-names-values) names below.
 
 This condition will cause Microshift to accept the certificate with a warning in the logs.
 1. certificate is expired.
@@ -203,6 +203,7 @@ This condition will cause Microshift to accept the certificate with a warning in
 | 127.0.0.1                 |IPAddress |                 |
 | 10.42.0.0                 |IPAddress | Cluster Network |
 | 10.43.0.0/16,10.44.0.0/16 |IPAddress | Service Network |
+| 169.254.169.2/29          |IPAddress | br-ex Network   |
 | kubernetes.default.svc    |DNS       |                 |
 | openshift.default.svc     |DNS       |                 |
 | svc.cluster.local         |DNS       |                 |
@@ -224,7 +225,7 @@ This condition will cause Microshift to accept the certificate with a warning in
  
 
 ## Implementation History
-N/A
+Prototype implentation details https://github.com/openshift/microshift/pull/3130
 
 ## Alternatives
 - Use [cert-manager](https://cert-manager.io/docs/) for managing Microshift external custom certs
