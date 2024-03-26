@@ -89,11 +89,11 @@ storage driver in MicroShift and OpenShift we have to support for lvm2 support.
 
 ### Workflow Description
 
-1. Edge device administrator deploys a host with MicroShift 4.17
+1. Edge device administrator deploys a host with MicroShift 4.15
    installed, and maintains a storageClass, and deviceClass as per 
    [the documentation reference](https://github.com/openshift/microshift/blob/main/docs/contributor/storage/configuration.md).
 2. Software runs, time passes.
-3. Edge device administrator updates the host to run MicroShift 4.17.
+3. Edge device administrator updates the host to run MicroShift 4.16.
    * For ostree-based systems, the host is automatically rebooted as
      part of the update process.
    * For RPM-based systems, the user must reboot the host after the
@@ -106,10 +106,15 @@ storage driver in MicroShift and OpenShift we have to support for lvm2 support.
    * The LVMCluster is configured with `.spec.configurationPolicy=ExternalConfiguration`
      which will trigger a deployment of the driver which can use the existing
      deviceClasses and storageClasses.
-   * If LVMS does not detect a lvmd.yaml file, it will error out,
+   * If LVMS does not detect a lvmd.yaml file (at runtime), it will error out,
      as an external configuration is now mandatory for correct configuration.
+     Note that if the lvmd.yaml file is not present at install time, we should
+     keep the current behavior of not installing LVMS at all.
    * When External Configuration is not used, then not specifying any deviceClasses
      will result in rejection of the LVMCluster specification.
+   * Note that while it is eventually planned to decouple the CSI stack from MicroShifts
+     core resources, this enhancement only targets the migration of the existing solution,
+     not the adoption of LVMS as an external component out-of-tree.
 8. MicroShift continues to run, and LVMS starts the vg-manager DaemonSet with all CSI bindings included.
 9. All existing configurations continue to work
    * Errors of TopoLVM in the node will now be written to vg-manager.
@@ -163,6 +168,10 @@ is transparent to users.
 There is some risk that the LVMS deployment will not work with the existing
 deviceClasses and storageClasses. We will mitigate this risk by testing the
 upgrade process in CI and by providing a rollback mechanism in case of failure.
+Specific test scenarios that are not handled in the generic LVMS use cases should especially involve
+[Software RAIDs introduced with LVM Raid](https://github.com/topolvm/topolvm/blob/2597dc75821009230af3be4067d377eef4bbe0a4/docs/lvmd.md?plain=1#L28-L36) with custom create options
+This is because in LVMS, these are not supported by default and require a custom deviceClass
+and are now enabled for the first time within LVMS through the MicroShift deployment.
 
 Additionally, we will provide documentation on how to correctly set up an empty
 LVMCluster and how to run debugging procedures in case of failure.
@@ -195,7 +204,19 @@ also test that the documentation is correct and that users can follow it to set 
 
 Last but not least, we will add test cases to the MicroShift Storage Tests that will verify that
 LVMCluster can also be used without ExternalConfiguration and that a regular LVMS deployment would work
-as expected.
+as expected. LVMCluster as of today is not used within MicroShift, but can be used instead of a custom
+lvmd.yaml file to configure the storage driver. 
+
+In comparison to the lvmd.yaml file, the LVMCluster owns the full configuration of the volume group 
+and the logical volumes and can be used to configure the storage driver in a more declarative way. 
+This is especially useful for MicroShift users that want to extend the storage driver with custom configurations. 
+However, this is not a requirement for the upgrade process described in this proposal,
+and we can test these cases separately since the upgrade will only initialize an empty LVMCluster.
+
+Since Volume Groups can now be handled by LVMCluster, one might also want to consider introduction of
+setting up MicroShift Installations via LVMCluster. While in the past, the lvmd.yaml file was used to
+configure the storage driver, this EP does not want to break this process so it will not target moving
+from lvmd.yaml to LVMCluster as part of the initial setup process.
 
 
 ## Graduation Criteria
@@ -206,7 +227,7 @@ Regression passes in CI for the upgrade process from 4.15 to 4.16.
 
 ### Tech Preview -> GA
 
-- We will GA within the 4.17 release and there is no need to introduce Tech Preview for this feature.
+- We will GA within the 4.16 release and there is no need to introduce Tech Preview for this feature.
 
 ### Removing a deprecated feature
 
