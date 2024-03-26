@@ -604,3 +604,11 @@ and use the settings in the cluster APIServer config as the default settings for
 the component.  For example, see [the TLSSecurityProfile configuration in the
 IngressController
 API](https://github.com/openshift/api/blob/be926bb0d7511bd4e11519f794cd71df60454a31/operator/v1/types_ingress.go#L168-L179).
+
+#### Liveness, Readiness, and Startup Probes
+OpenShift should be responsive to pod failure in a timely manner. Thresholds for Liveness and Readiness probes should
+be relatively tight and an unresponsive pod restarted within 30 seconds. If your pods depend on other services or are
+themselves slow to start you should leverage a `startupProbe` to allow for that without relying on a high
+`initialDelaySeconds` value on your `livenessProbe` or `readinessProbe`, generally `initialDelaySeconds` should not
+be significantly higher than `periodSeconds`. See upstream [Probe
+documentation](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/).
