@@ -126,8 +126,8 @@ Additional specification of **audit** and **infrastructure** logs is allowed by 
     metadata:
       name:
     spec:
-      serviceAccountName:
-      namespace:         #namespace of deployment and resources
+      serviceAccount:
+        name:
       collector:
         resources:       #corev1.ResourceRequirements
           limits:        #cpu, memory
@@ -139,16 +139,14 @@ Additional specification of **audit** and **infrastructure** logs is allowed by 
         type:                      #enum: application,infrastructure,audit
         application:
           selector:                #labelselector
-          namespaces:
-            include: []            #glob
-            exclude: []            #glob
-          containers:
-            include: []            #glob
-            exclude: []            #glob
+          includes:
+          - namespace:
+            container:
+          excludes:
+          - namespace:
+            container:
           tuning:
-            ratelimitDefault:      # for containers not mentioned in rateLimitByContainer
-              recordsPerSecond:    # int
-            ratelimitByContainer:  # map[string]RateLimit (e.g ngnix: {recordsPerSecond: 20})
+            ratelimitByContainer:  # map[string]RateLimit, glob (e.g ngnix: {recordsPerSecond: 20})
         infrastructure:
           sources: []              #enum: node,container
         audit:
@@ -171,7 +169,7 @@ Additional specification of **audit** and **infrastructure** logs is allowed by 
         tls:
         secret:
         tuning:
-          rateLimitDefault:
+          rateLimit:
             recordsPerSecond:  #int - document per-forwarder/per-node multiplier
           delivery:         #AtMostOnce, AtLeastOnce
           maxWrite:         # quantity (e.g. 500k)
@@ -239,7 +237,6 @@ Example:
           sources: [container]
       serviceAccount:
         name: audit-collector-sa
-        namespace: acme-logging
       pipelines:
        - inputRefs:
          - infra-container
@@ -258,6 +255,12 @@ This example:
 * Expects the administrator to have bound the roles 'collect-audit-logs', 'collect-infrastructure-logs to the service account
 * Expects the administrator created a **LokiStack** CR named 'rh-loki' in the 'openshift-logging' namespace
 * Collects all audit log sources and only infrastructure container logs and writes them to the Red Hat managed lokiStack
+
+### Topology Considerations
+#### Hypershift / Hosted Control Planes
+#### Standalone Clusters
+#### Single-node Deployments or MicroShift
+
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -335,10 +338,7 @@ The largest drawback to implementing new APIs is the product continues to identi
 availability of technologies which are deprecated and will soon not be supported.  This will
 continue to confuse comsumers of logging and will require documentation and explainations of our technology decisions.  Furthermore, some customers will continue to delay the move to the newer technologies provided by Red Hat.
 
-
-## Design Details
-
-### Open Questions [optional]
+## Open Questions [optional]
 
 1. We prefer to force administors to migrate to the next MAJOR version of loggin which introduces the new APIs that are not fully compatible. Given he only way to support a new version of the same named CRD is to introduce a conversion webhook and choose a stored version, what does it mean to 'migrate' a logging stack that consists only of **ClusterLogging** with Fluentd as the collector and Elasticsearch as storage?
 2. Do we need to support forwarding an OTEL data model to a non-OTELP receiver (i.e. splunk, Elasticsearch)? Would that mean the model is exactly the same or a subset?
@@ -346,15 +346,15 @@ continue to confuse comsumers of logging and will require documentation and expl
 4. Is it posible to specify validation restrictions on the v2 API that do not break the stored version of the v1 API?
 
 
-### Test Plan
+## Test Plan
 
 * Exectue all existing tests for log collection, forwarding and storage with the exeception of tests specifically intended to test deprecated features (e.g. Elasticsearch).  Functionally, other tests are still applicable
 * Execute a test to verify the flow defined for collecting, storing, and visualizing logs from an on-cluster, Red Hat operator managed Loki Stack
 * Execute a test to verify legacy deployments of logging are no longer managed by the **cluster-logging-operator** after upgrade.
 
-### Graduation Criteria
+## Graduation Criteria
 
-#### Dev Preview Release
+### Dev Preview Release
 
 This release:
 
@@ -363,7 +363,7 @@ This release:
 * May introduce v2 of the VIAQ data model
 * Allows v2alpha1 APIs to exist along side v1 APIs (i.e. **ClusterLogging**, **ClusterLogForwarder**)
 
-#### GA Release
+### GA Release
 
 This release:
 
@@ -373,14 +373,14 @@ This release:
 * Drop support of v1 APIs (i.e. **ClusterLogging**, **ClusterLogForwarder**)
 
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
 Upon GA release of this enhancement:
 
 - The internally managed Elastic (e.g. Elasticsearch, Kibana) offering will no longer be available.
 - The Fluentd collector implementation will no longer be available
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
 There is an automated upgrade path between v1 and v2 of the **ClusterLogForwarder **API.  This primary affects users of log forwarding as
 
@@ -390,18 +390,11 @@ There is an automated upgrade path between v1 and v2 of the **ClusterLogForwarde
 Administrators of legacy **ClusterLogging** deployments will receive no migration and the **cluster-logging-operator** will cease managing 
 any collector, visualization, or log storage deployments.
 
-### Version Skew Strategy
+## Version Skew Strategy
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 
-#### Failure Modes
-
-#### Support Procedures
-
-## Implementation History
-
-Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`.
+## Support Procedures
 
 ## Alternatives
 
