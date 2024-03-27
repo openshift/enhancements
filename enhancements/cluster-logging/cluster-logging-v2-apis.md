@@ -354,7 +354,7 @@ continue to confuse comsumers of logging and will require documentation and expl
 
 ## Graduation Criteria
 
-### Dev Preview Release -> Tech Preview
+### Dev Preview -> Tech Preview
 
 This release:
 
