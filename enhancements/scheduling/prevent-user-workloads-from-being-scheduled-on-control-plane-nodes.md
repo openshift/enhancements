@@ -94,8 +94,6 @@ enhancement. -->
 
 - Granular Pod-Level Scheduling Controls: The enhancement will not introduce fine-grained controls for individual pod scheduling decisions beyond the existing Kubernetes mechanisms (e.g., taints, tolerations, and affinity rules).
 
-- Automated User or Service Account Management: Automatically managing or updating the list of service accounts or namespaces authorized to schedule workloads on control plane nodes is out of scope. This process remains a manual administrative responsibility.
-
 - Real-Time Resource Allocation Optimization: The proposal does not aim to dynamically optimize resource allocation or scheduling decisions based on real-time cluster utilization or performance metrics.
 
 ## Proposal
@@ -113,7 +111,7 @@ This enhancement proposes the implementation of a more robust and flexible mecha
 
 ### Implementation Strategies
 
-Update OpenShift Components for Taint Tolerance: Modify OpenShift operators and control plane components to include tolerations for the NoExecute taint on control plane nodes that admins can apply to achieve the goals described here. This will ensure that essential services and components are not evicted or prevented from scheduling on these nodes due to the taint. The update process should involve a thorough review of all default and critical components to add the necessary toleration, ensuring they continue to operate as expected in environments where the NoExecute taint is applied. This step is crucial for maintaining cluster stability and ensuring that core functionalities are not disrupted by the enforcement of the new scheduling policies. 
+Update OpenShift Components for Taint Tolerance: Modify OpenShift operators and control plane components to include tolerations for the NoExecute taint on control plane nodes that admins can apply to achieve the goals described here. This will ensure that essential services and components are not evicted or prevented from running on these nodes due to the taint. The update process should involve a thorough review of all default and critical components to add the necessary toleration, ensuring they continue to operate as expected in environments where the NoExecute taint is applied. This step is crucial for maintaining cluster stability and ensuring that core functionalities are not disrupted by the enforcement of the new scheduling policies. 
 
 NoExecute Taint Application: Admins seeking to implement this proposal will need to apply the NoExecute taints to control plane nodes (or specialized nodes) to automatically prevent pods without the specific toleration from being scheduled or remaining on these nodes. This approach leverages the kubelet's inherent behavior to ensure compliance with scheduling policies.
 
