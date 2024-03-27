@@ -1,0 +1,246 @@
+---
+title: ingress-dashboard
+authors:
+  - "@jotak"
+  - "@OlivierCazade"
+reviewers:
+  - "@Miciah"
+  - "@candita"
+approvers:
+  - "@Miciah"
+  - "@candita"
+api-approvers:
+  - "@deads2k"
+creation-date: 2023-06-28
+last-updated: 2023-06-28
+tracking-link:
+  - "https://issues.redhat.com/browse/OCPSTRAT-139"
+  - "https://issues.redhat.com/browse/NETOBSERV-1052"
+see-also:
+replaces:
+superseded-by:
+---
+
+# Ingress dashboard creation for the OpenShift Console
+
+## Release Signoff Checklist
+
+- [x] Enhancement is `implementable`.
+- [x] Design details are appropriately documented from clear requirements.
+- [x] Test plan is defined.
+- [ ] graduation criteria for dev preview, tech preview, GA: N/A
+- [ ] User-Facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/).
+
+## Summary
+
+The goal is to add a new dashboard in the OpenShift Console (in menu “Observe” > “Dashboards” of the Administrator view), dedicated to metrics related to Ingress.
+Such dashboards are deployed through configmaps, so a new controller will be added to the ingress operator to manage this configmap.
+
+Ingress components, such as HAProxy, already provide some metrics that are exposed and collected by Prometheus / Cluster Monitoring. Administrators should be able to get a consolidated view, using a subset of these metrics, to get a quick overview of the cluster state. This enhancement proposal is part of a wider initiative to improve the observability of networking components (see https://issues.redhat.com/browse/OCPSTRAT-139).
+
+## Motivation
+
+While ingress related metrics already exist and are accessible in the OpenShift Console (via the menu “Observe” > “Metrics”), there is no consolidated view presenting a summary of them. There are existing dashboards in other areas (such as etcd, compute resources, etc.), but networking today is less represented there, despite its importance for monitoring and troubleshooting.
+Metrics such as HAProxy error rates or latency can be made more visible by promoting them in a dashboard.
+
+In addition, product management has shown interest in providing and making more visible some cluster-wide statistics, such as the number of routes and shards in use.
+
+More details on the new dashboard content is provided below.
+
+### Goals
+
+1. Design and implement a new dashboard using a selection of metrics listed below.
+2. Update the Ingress Operator to deploy this dashboard configmap, making it accessible for the Cluster Monitoring stack.
+
+### Non-Goals
+
+- This work is not intended to provide a comprehensive set of metrics all at once. Instead, the intent is to "start small", setting in place all the mechanisms in code, and iterate later based on feedback to add or amend elements in the dashboard without any changes outside of the dashboard json definition file.
+- This enhancement does not include any new metric creation or exposition: only already available metrics are considered. If discussions lead to consider the creation of new metrics, this could be the purpose of a follow-up enhancement.
+- This work does not cover the Developer Console.
+
+### User Stories
+
+> As a cluster administrator, I want to get a quick overview of general cluster statistics, such as the number of routes or shards in use.
+
+> As a cluster administrator, I want to get a quick insight in incoming traffic statistics, such as on latency and HTTP errors.
+
+## Proposal
+
+To make a new dashboard discoverable by Cluster Monitoring, a `ConfigMap` needs to be created in the namespace `openshift-config-managed`, containing a static dashboard definition in Grafana format (JSON). The dashboard datasource has to be Cluster Monitoring's Prometheus.
+
+The Ingress Operator is responsible for creating and reconciling this `ConfigMap`. We assume all metrics used in the dashboard are present unconditionally, which allows us to create a static dashboard unconditionally as well.
+The Ingress Operator embeds a static json manifest for the full dashboard.
+If the operator detects any change between the deployed dashboard and the embedded one, the operator replaces the deployed dashboard with the embedded one.
+
+### Dashboard content
+
+At the top, a summary row presenting global cluster statistics as text panels:
+
+- Total current byte rate in (aggregated across all routes/shards)
+- Total current byte rate out (aggregated across all routes/shards)
+- Total current HTTP error rate
+- Total current HTTP server average response latency
+
+Below this top summary, more detailed time-series panels. Each of these panel come in two flavours: aggregated per route, application namespace and ingress shard.
+
+- Current byte rate in per route, application namespace or shard
+- Current byte rate out per route, application namespace or shard
+- Current HTTP error rate per route, application namespace or shard
+- Current HTTP server average response latency per route, application namespace or shard
+
+### Workflow Description
+
+A cluster administrator will be able to view this dashboard from the OpenShift Console, in the _Administrator_ view, under _Observe_ > _Dashboards_ menu.
+Several dashboards are already listed there, e.g:
+
+- `Kubernetes / Compute Resources / Pod` (tag: `kubernetes-mixin`)
+- `Kubernetes / Compute Resources / Workload` (tag: `kubernetes-mixin`)
+- `Kubernetes / Networking / Cluster` (tag: `kubernetes-mixin`)
+- `Node Exporter / USE Method / Cluster` (tag: `node-exporter-mixin`)
+- `Node Exporter / USE Method / Node` (tag: `node-exporter-mixin`)
+
+The new ingress dashboard will be listed there, as:
+- `Networking / Ingress` (tag: `networking-mixin`)
+
+This "Networking" category can potentially be used for other Network-related dashboards, such as for OVN, NetObserv, etc.
+
+Clicking on this dashboard will open it, showing time-series charts, such as cluster ingress stats and HAProxy metrics.
+On each chart, an "Inspect" link allows the user to view that metric from the _Metrics_ page, which allows the user to customize the query (for example, to modify the label filters, the grouping, etc.) and view the result directly.
+Note that editing a query from the _Metrics_ page does not affect dashboards displayed in the _Dashboards_ page.
+These behaviours are already implemented in the Console and do not necessitate any change.
+
+### API Extensions
+
+No planned change on the API.
+
+### Implementation Details / Notes / Constraints
+
+The new `ConfigMap` installed in `openshift-config-managed` should be named `grafana-dashboard-ingress` (the `grafana-dashboard-` prefix is common for all such dashboards).
+
+It needs to be labelled with `console.openshift.io/dashboard: "true"`.
+
+Dashboards have a `title` field as part of their Grafana JSON model, which is displayed in the OpenShift Console where dashboards are listed.
+Here `title` should be `Networking / Ingress`.
+
+Dashboards should also have a tag that identifies their supplier in the OpenShift Console; existing tags are: `kubernetes-mixin`, `node-exporter-mixin`, `prometheus-mixin`, `etcd-mixin`.
+A new tag named `networking-mixin` should be used for this new dashboard. This tag aims to group all dashboards related to networking, such as OVN dashboards and NetObserv dashboards that may be added in the future.
+This tag is directly set in the static JSON definition of the dashboard. No more action is required for tag creation.
+
+A typical procedure to design and create the dashboard is to use Grafana for designing purpose, then export the dashboard as JSON and save it as an asset in the target repository. Then, it can be embedded in the built artifact using `go:embed`, and injected into a `ConfigMap`. Example:
+
+```golang
+//go:embed dashboard.json
+var dashboardEmbed string
+
+func buildDashboard() *corev1.ConfigMap {
+	configMap := corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "grafana-dashboard-ingress",
+			Namespace: "openshift-config-managed",
+			Labels: map[string]string{
+				"console.openshift.io/dashboard": "true",
+			},
+		},
+		Data: map[string]string{
+			"dashboard.json": dashboardEmbed,
+		},
+	}
+	return &configMap
+}
+```
+
+This is achieved by a new controller added to the operator, in charge of reconciling the dashboard. This controller watches the Infrastructure object which it is bound to, and the generated configmap.
+
+The controller should deploy this configmap in the `openshift-config-managed` namespace. Any configmap deployed in this namespace with the `console.openshift.io/dashboard` label will be automatically picked by the monitoring operator and deployed in the OpenShift Console. The console is responsible for querying the monitoring stack according to the dashboard definition.
+
+When the Ingress operator is upgraded to a new version, if this upgrade brings changes to the dashboard, the existing ConfigMap will be overwritten through reconciliation.
+
+Note that, despite this work taking place in the Ingress Operator codebase, the implementation and initial maintenance are done by the NetObserv team.
+
+### Risks and Mitigations
+
+### Drawbacks
+
+A dashboard creates a dependency on the HAProxy metrics. Changing metrics (such as between two HAProxy versions) may cause defects in the dashboard, which would then need to be patched. Such defects are certainly not critical, as this isn't affecting any other component than the dashboard itself, and the actual metrics are still available in the "Metrics" page of the Console.
+
+Another potential risk is to misinterpret metrics as they can sometimes be ambiguous. For example, the metric named `haproxy_server_response_errors_total` could be seen as a counter of HTTP response errors (4xx / 5xx) whereas it actually counts internal HAProxy errors. To mitigate this risk, the dashboard is duely reviewed and tested to make sure it doesn't carry any ambiguity.
+
+## Design Details
+
+### Test Plan
+
+E2E Tests
+
+There are two scenarios depending on the cluster network topology
+
+1. Verify that the cluster network topology is not external
+2. Verify that the new ConfigMap dashboard was created.
+3. Delete the Configmap
+4. Verify that the ConfigMap dashboard is recreated.
+5. Modify the Configmap json
+6. Verify that the ConfigMap is reinitialized to the right value.
+
+1. Verify that the cluster network topology is external
+2. Verify that the ConfigMap was not deployed
+
+### Graduation Criteria
+
+This enhancement does not require graduation milestones.
+
+#### Dev Preview -> Tech Preview
+
+N/A; This feature will go directly to GA.
+
+#### Tech Preview -> GA
+
+N/A; This feature will go directly to GA.
+
+#### Removing a deprecated feature
+
+N/A
+
+### Upgrade / Downgrade Strategy
+
+Upgrading from a previous release must install the new dashboard without requiring any intervention.
+
+On next upgrades, if the dashboard already exists and if the new version brings changes to the dashboard, the existing one will be overwritten with the new one.
+
+In case of a downgrade to a version not having this dashboard, the related `ConfigMap` would remain in the cluster, hence the dashboard would still be visible. This should not cause any trouble since the related HAProxy metrics did already exist in prior versions. If for some reason this is still perceived as an issue, the `ConfigMap` can be manually deleted to remove the dashboard:
+
+```
+oc delete configmap grafana-dashboard-ingress -n openshift-config-managed
+```
+
+### Version Skew Strategy
+
+N/A
+
+### Operational Aspects of API Extensions
+
+#### Failure Modes
+
+N/A
+
+#### Support Procedures
+
+- If the dashboard doesn't show up in menu "Observe" > "Dashboards"
+
+Make sure a `ConfigMap` named `grafana-dashboard-ingress` was created in namespace `openshift-config-managed`.
+If not, check the ingress operator pod logs for any error that could be related to dashboard creation.
+
+- If the dashboard shows unexpected empty charts
+
+Click the "Inspect" link to see the Prometheus query from the "Observe" > "Metrics" view. You can verify if the metric exists by typing just the metric name: for instance, if the query is `avg(haproxy_server_http_average_response_latency_milliseconds != 0) by (route)`, try just looking at `haproxy_server_http_average_response_latency_milliseconds` and see if there is any data point.
+
+If there is not, check if other HAProxy metrics exist, such as `haproxy_server_up`. If not, something might be wrong in the HAProxy pods as they don't seem to be generating any metric.
+
+Another possibility is that some of the HAProxy metrics definitions changed (metrics names, or labels). In that case it requires to update the dashboards: please open an issue.
+
+
+## Implementation History
+
+## Alternatives
+
+A first alternative would be to expose the metric so a customer can create another dashboard outside of the console.
+
+Another alternative would be to let the customer create his own grafana dashboard and then create the configmap with the exported JSON. This requires some knowledge about the different metrics and about prometheus query language. This alternative is already possible for the customer.
