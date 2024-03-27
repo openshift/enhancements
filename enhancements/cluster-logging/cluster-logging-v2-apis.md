@@ -354,7 +354,7 @@ continue to confuse comsumers of logging and will require documentation and expl
 
 ## Graduation Criteria
 
-### Dev Preview Release
+### Dev Preview Release -> Tech Preview
 
 This release:
 
@@ -363,7 +363,7 @@ This release:
 * May introduce v2 of the VIAQ data model
 * Allows v2alpha1 APIs to exist along side v1 APIs (i.e. **ClusterLogging**, **ClusterLogForwarder**)
 
-### GA Release
+### Tech Preview -> GA"
 
 This release:
 
