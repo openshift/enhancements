@@ -377,7 +377,7 @@ should be updated to proxy that status information to the end users.
 
 ### Change Management Metrics
 Cluster wide change management information will be made available through cluster metrics. Each resource
-containing the stanza should expose the following metrics:
+containing the stanza must expose the following metrics:
 - The number of seconds until the next known permitted change window. 0 if changes can currently be initiated. -1 if changes are paused indefinitely. -2 if no permitted window can be computed.
 - Whether any change management strategy is enabled.
 - Which change management strategy is enabled.
@@ -773,6 +773,8 @@ spec:
         - fromDate: <date>
           # Non-inclusive until. If null, until defaults to the day after from (meaning a single day exclusion).
           untilDate: <date|null>
+          # Provide additional detail for status when the cluster is within an exclusion period.
+          reason: Optional human readable which will be included in status description.
 
 ```
 
@@ -1166,8 +1168,19 @@ Making accommodations for these strategies should be a subset of the overall imp
 of the MaintenanceSchedule strategy and they will enable a foundation for a range of 
 different persons not served by MaintenanceSchedule.
 
-
 ### Use CRON instead of RRULE
 The CRON specification is typically used to describe when something should start and 
 does not imply when things should end. CRON also cannot, in a standard way,
 express common semantics like "The first Saturday of every month."
+
+### Use a separate CRD instead of updating ClusterVersion, MCP, ...
+In this alternative, we introduce a CRD separate from ClusterVersion, MCP, HostedCluster, and NodePool. For example
+an independent `UpdatePolicy` CRD where administrator preferences can be captured. This approach [was explored](https://github.com/jupierce/oc-update-design-ideas/commit/a6364ee2f2c1ebf84ed6d50bc277f9736bf793bd). 
+Ultimately, it felt less intuitive across profiles. Consider a CRD called `UpdatePolicy` that tries to be a central config.
+
+1. Is it namespaced? If it is, that feels odd for an object that that should control the cluster. If it is not namespaced, the policy feels misplaced for HCP HostedCluster resources which live in a namespace.
+1. Where does someone check the status of the policy (e.g. when the next update is going to be possible on a given MCP?). If it is the UpdatePolicy object, you have multiple independent controllers controlling the status, which is an antipattern. If the UpdatePolicy controls multiple different MCPs differently, how do they independently report their status'? It also introduces the problem of having to look at multiple places (MCP and UpdatePolicy to understand what may be happening.
+1. As you pack policies for control-plane, MCPs, HCP primitives into an expressive UpdatePolicy, the schema options varied from too complex, to error prone, to overly abstract, to overly limiting.
+1. If you split the policy object up to simplify it, e.g. one for each MCP, you have the problem of associating it to the right MCP unambiguously. Planting the policy in the MCP itself solves this problem.
+
+In summary, it is possible, but the working group didn't believe the alternative was as elegant or user friendly as housing the policies directly in the resources they control.
