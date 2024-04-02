@@ -116,9 +116,11 @@ storage driver in MicroShift and OpenShift we have to support for lvm2 support.
      core resources, this enhancement only targets the migration of the existing solution,
      not the adoption of LVMS as an external component out-of-tree.
 8. MicroShift continues to run, and LVMS starts the vg-manager DaemonSet with all CSI bindings included.
-9. All existing configurations continue to work
-   * Errors of TopoLVM in the node will now be written to vg-manager.
-   * Errors of the LVMCluster deployment will be written to the lvms-controller.
+9. All existing configurations continue to work, with the following changes to log destinations
+   * Errors of TopoLVM in the node will now be written to the vg-manager Pod for all node-relevant logs and 
+     to the lvms-controller Pod for all CSI controller logs.
+   * Errors of LVMCluster reconciliation will be written to the lvms-controller Pod and Events
+     that are keyed to the LVMCluster resource.
 
 ### API Extensions
 
