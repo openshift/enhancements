@@ -91,7 +91,7 @@ ingress:
   ports:
     http: <int> # Defaults to 80.
     https: <int> # Defaults to 443.
-  expose: # Defaults to IPs in the host. Details below.
+  listenAddress: # Defaults to IPs in the host. Details below.
     - <NIC name|IP address>
     - ...
 ```
@@ -117,9 +117,10 @@ disable it. Default will be `Managed`.
 
 The choice of `Managed` and `Removed` is intentional and ressembles that of
 [OpenShift for operators](https://github.com/openshift/api/blob/4caef7fe3d0f78f3f3c26b5159f77bdbd00b9c2f/operator/v1/types.go#L33-L50).
-In MicroShift, however, `Managed`` does not have the exact same meaning, as
+In MicroShift, however, `Managed` does not have the exact same meaning, as
 the management of the resources happens only when MicroShift starts. Any
-changes made to the router will get reverted on the next restart.
+changes made to the router not using MicroShift's configuration will get
+reverted on the next restart.
 
 ### Listening ports
 The following configuration is proposed:
@@ -160,7 +161,7 @@ section in the documentation will be added to describe how to do this.
 The following configuration is proposed:
 ```yaml
 ingress:
-  expose: # Defaults to IPs in the host. Details below.
+  listenAddress: # Defaults to IPs in the host. Details below.
     - <NIC name|IP address>
     - ...
 ```
@@ -182,7 +183,7 @@ etc. will need user's configuration. Any user's configuration will override all
 of the defaults.
 
 If the configuration includes duplicates in the form of same entries in the
-same list or referring to the same IP in different ways (hostnames or NICs),
+same list or referring to the same IP in different ways (raw IPs or NICs),
 these will be ignored without warnings/errors.
 
 The NIC IP addresses will be automatically picked up by MicroShift's
@@ -221,7 +222,7 @@ ingress:
   ports:
     http: <int> # Defaults to 80.
     https: <int> # Defaults to 443.
-  expose: # Defaults to IPs in the host. Details below.
+  listenAddress: # Defaults to IPs in the host. Details below.
     - <NIC name|IP address>
     - ...
 ```
@@ -239,9 +240,9 @@ N/A
 Enhancement is solely intended for MicroShift.
 
 ### Implementation Details/Notes/Constraints
-The default router is composed of a bunch of assets part of the MicroShift
-binary. These assets come from the rebase, copied from the original router in
-[cluster-ingress-operator](https://github.com/openshift/cluster-ingress-operator).
+The default router is composed of a bunch of assets that are embedded as part
+of the MicroShift binary. These assets come from the rebase, copied from the
+original router in [cluster-ingress-operator](https://github.com/openshift/cluster-ingress-operator).
 There is already a [LoadBalancer service](https://github.com/openshift/cluster-ingress-operator/blob/master/pkg/manifests/assets/router/service-cloud.yaml)
 included, which MicroShift does not copy yet. Depending on the options
 configured in MicroShift, this resource will need further customization done
@@ -272,14 +273,14 @@ ingress:
     http: <int> # Defaults to 80.
     https: <int> # Defaults to 443.
 ```
-The `ingress.policy.expose` option contains a list of NIC names and IP
+The `ingress.policy.listenAddress` option contains a list of NIC names and IP
 addresses. MicroShift will translate those that need it to IP addresses and
 then update the `status.loadBalancer` field in the `Service`. Ovnk will pick
 up this field to configure the iptables rules. This is described
 [here](#using-loadbalancer-service-type).
 ```yaml
 ingress:
-  expose: # Defaults to IPs in the host. Details below.
+  listenAddress: # Defaults to IPs in the host. Details below.
     - <NIC name|IP address>
     - ...
 ```
@@ -370,8 +371,7 @@ iptable rules, duplicates are ignored. Their rules already exist. However, for
 clarity reasons MicroShift should keep this list unique so that admins/users
 are not confused by it. MicroShift will not trigger warnings or errors if there
 are duplicate entries from the configuration (these include explicit duplicates
-or referring to the same IP in different ways, such as by their hostnames or
-interfaces).
+or referring to the same IP in different ways, such as by the IP or NIC name).
 
 #### Firewalling ports
 Using LoadBalancer service will create special iptables rules with more
@@ -426,9 +426,9 @@ Since the configuration uses NIC names the [service controller](loadbalancer-ser
 needs to translate them to their corresponding IP addresses, and then
 configure them in the service.
 
-Since the NIC names are present in the host, MicroShift will need to list he IP
-addresses from them and include them in the service `status` field. Due to the
-changing nature of IP addresses, MicroShift will periodically check the listed
+Since the NIC names are present in the host, MicroShift will need to list the
+NIC's IP addresses and include them in the service `status` field. Due to the
+changing nature of IP addresses, MicroShift will start a watcher for the listed
 NICs to update the service `status` as needed to minimize configuration drift.
 
 #### Allowing specific IP addresses
@@ -501,8 +501,9 @@ N/A
 ## Operational Aspects of API Extensions
 
 ### Failure Modes
-* If any of the configured entries in `ingress.expose` are invalid (e.g. bad
-  format, a NIC not present in the host, etc.), MicroShift will fail to start.
+* If any of the configured entries in `ingress.listenAddress` are invalid (
+  e.g. bad format, a NIC not present in the host, etc.), MicroShift will fail
+  to start.
   This could render the router unreachable and thus, the applications behind
   it.
 
