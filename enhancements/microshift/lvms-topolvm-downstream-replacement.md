@@ -89,11 +89,11 @@ storage driver in MicroShift and OpenShift we have to support for lvm2 support.
 
 ### Workflow Description
 
-1. Edge device administrator deploys a host with MicroShift 4.15
+1. Edge device administrator deploys a host with MicroShift 4.15 or 4.16
    installed, and maintains a storageClass, and deviceClass as per 
    [the documentation reference](https://github.com/openshift/microshift/blob/main/docs/contributor/storage/configuration.md).
 2. Software runs, time passes.
-3. Edge device administrator updates the host to run MicroShift 4.16.
+3. Edge device administrator updates the host to run MicroShift 4.17.
    * For ostree-based systems, the host is automatically rebooted as
      part of the update process.
    * For RPM-based systems, the user must reboot the host after the
@@ -153,7 +153,7 @@ We have a prototype implementation that can be pushed into GA in time for the 4.
 #### Switching from TopoLVM to LVMS
 
 The switch from TopoLVM to LVMS will be done in a single release. We will support
-upgrading from 4.16 to 4.16, and from 4.14 to 4.16 (EUS).
+upgrading from 4.16 to 4.17, and from 4.15 to 4.17 (2 y-streams).
 
 The switch will be done by removing the TopoLVM deployment and installing the LVMS
 deployment. The LVMS deployment will be configured to use the existing deviceClasses
@@ -189,7 +189,7 @@ updates for the LVMS deployment in MicroShift and that will require adjustments
 
 ## Test Plan
 
-We will add an automated test to CI to upgrade the MicroShift version from 4.15 to 4.16 anyhow.
+We will add an automated test to CI to upgrade the MicroShift version from 4.15/4.16 to 4.17 anyhow.
 In this test, we will verify that the upgrade process works as expected and that the LVMS
 deployment is correctly configured to use the existing deviceClasses and storageClasses.
 
@@ -223,11 +223,11 @@ from lvmd.yaml to LVMCluster as part of the initial setup process.
 
 ### Dev Preview -> Tech Preview
 
-Regression passes in CI for the upgrade process from 4.15 to 4.16.
+Regression passes in CI for the upgrade process from 4.15 to 4.17.
 
 ### Tech Preview -> GA
 
-- We will GA within the 4.16 release and there is no need to introduce Tech Preview for this feature.
+- We will GA within the 4.17 release and there is no need to introduce Tech Preview for this feature.
 
 ### Removing a deprecated feature
 
