@@ -94,10 +94,6 @@ storage driver in MicroShift and OpenShift we have to support for lvm2 support.
    [the documentation reference](https://github.com/openshift/microshift/blob/main/docs/contributor/storage/configuration.md).
 2. Software runs, time passes.
 3. Edge device administrator updates the host to run MicroShift 4.17.
-   * For ostree-based systems, the host is automatically rebooted as
-     part of the update process.
-   * For RPM-based systems, the user must reboot the host after the
-     software update is completed.
 4. Edge device restarts.
 5. MicroShift restarts.
 6. MicroShift removes the old TopoLVM deployment without removing the CRDs.
