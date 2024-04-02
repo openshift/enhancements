@@ -104,8 +104,8 @@ storage driver in MicroShift and OpenShift we have to support for lvm2 support.
      deviceClasses and storageClasses.
    * If LVMS does not detect a lvmd.yaml file (at runtime), it will error out,
      as an external configuration is now mandatory for correct configuration.
-     Note that if the lvmd.yaml file is not present at install time, we should
-     keep the current behavior of not installing LVMS at all.
+     Note that if the lvmd.yaml file is not present when starting MicroShift, we should
+     [keep the current behavior of not enabling LVMS and skip deploying it from the assets.](https://github.com/openshift/microshift/blob/main/pkg/components/storage.go#L83)
    * When External Configuration is not used, then not specifying any deviceClasses
      will result in rejection of the LVMCluster specification.
    * Note that while it is eventually planned to decouple the CSI stack from MicroShifts
