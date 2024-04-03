@@ -128,8 +128,8 @@ be less controlled.
 This implies that even with separate CRD fields, upstream CSI driver could suddenly remove a supported feature, leaving
 us unable to simply remove the corresponding field from our releases without breaking compatibility.
 
-We propose releasing the feature initially as a "TechPreview" as described here:
-https://github.com/openshift/enhancements/blob/2894d936eca7c1fcc9cf38e7dc973bbdfa1d88ff/dev-guide/api-conventions.md#new-field-added-to-an-existing-crd
+We propose releasing the feature initially to be enabled by default as described here (no TechPreview):
+https://github.com/openshift/api/blob/6a96294dcfb7587088c5144fcc4c2ef22a6cf063/README.md?plain=1#L45-L53
 
 ### Drawbacks
 
@@ -149,10 +149,9 @@ TBD - depends on chosen solution.
 
 ### Graduation Criteria
 
-| OpenShift | Maturity     |
-|-----------|--------------|
-| 4.16      | Tech Preview |
-| 4.17      | GA           |
+| OpenShift | Maturity |
+|-----------|----------|
+| 4.16      | GA       |
 
 
 #### Dev Preview -> Tech Preview
