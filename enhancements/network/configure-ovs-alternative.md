@@ -1,19 +1,19 @@
 ---
 title: configure-ovs-alternative
 authors:
-  - @cybertron
-  - @cgoncalves
-reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - @jcaamano
-  - @trozet
-  - TODO: Someone from MCO
-approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
-  - TBD
-api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
+  - "@cybertron"
+  - "@cgoncalves"
+reviewers:
+  - "@jcaamano"
+  - "@trozet"
+  - "@sinnykumari"
+approvers:
+  - "@knobunc"
+api-approvers:
   - None
 creation-date: 2023-06-29
-last-updated: 2023-09-27
-tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
+last-updated: 2024-04-04
+tracking-link:
   - https://issues.redhat.com/browse/OPNET-265
 see-also:
   - https://docs.google.com/document/d/1Zp1J2HbVvu-v4mHc9M594JLqt6UwdKoix8xkeSzVL98/edit?usp=sharing
@@ -130,7 +130,7 @@ During initial deployment, the user will provide the installer with a
 machine-config manifest containing base64-encoded NMState YAML for each node
 in the cluster. This manifest may look something like:
 
-```
+```yaml
 apiVersion: machineconfiguration.openshift.io/v1
 kind: MachineConfig
 metadata:
@@ -169,7 +169,7 @@ system configuration.
 Alternatively, there will be a mechanism to deploy a single cluster-wide
 configuration. That might look like:
 
-```
+```yaml
 apiVersion: machineconfiguration.openshift.io/v1
 kind: MachineConfig
 metadata:
@@ -235,28 +235,28 @@ with Kubernetes-NMState, not by updating the machine-configs used here.
 
 #### Variation [optional]
 
-We have two paths forward for applying the configuration. One is to write a
-custom service that will select only the host-specific NMState file and
-apply it. This is what my [current prototype](https://docs.google.com/document/d/1Zp1J2HbVvu-v4mHc9M594JLqt6UwdKoix8xkeSzVL98/edit#heading=h.fba4j9nvp0nl) does.
-
-The other is to use the NMState service already included in the OS image to
-apply the configurations. One issue with this is that it will apply everything
-in the /etc/nmstate directory rather than just the host-specific file.
-To get around that, we could still implement a custom service, but instead of
-applying the configurations, it would only be responsible for copying the
-correct file to /etc/nmstate so the regular service can apply it. This has
-the benefit of not reinventing the NMState service and still gives us full
-control over what gets applied to the host, and also leaves us a way to signal
-to ovs-configuration that we've already handled the bridge setup.
-
-I'm currently leaning toward the second option just so we avoid having two
-NMState services that may conflict with each other.
+We have settled on an approach and are not currently pursuing other options.
 
 ### API Extensions
 
 This will not directly modify the API of OpenShift. The API for this feature is
 implemented in Kubernetes-NMState, and this does not require any specific
 modifications in that project at this time.
+
+### Topology Considerations
+#### Hypershift / Hosted Control Planes
+
+This should not have any hypershift-specific considerations.
+
+#### Standalone Clusters
+
+This is primarily directed at standalone clusters, specifically baremetal and
+other on-prem environments.
+
+#### Single-node Deployments or MicroShift
+
+This does not introduce any new runtime components so should not affect
+resource consumption in SNO and MicroShift deployments.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -270,11 +270,11 @@ as many parts of the process as possible) would look something like this:
   * `oc apply -f ./extraworker-secret.yaml`
 * Create and apply a BareMetalHost resource with the network secret attached
   via the `preprovisioningNetworkDataName` field.
-```
+```yaml
 apiVersion: metal3.io/v1alpha1
 kind: BareMetalHost
 spec:
-...
+  # ...
   preprovisioningNetworkDataName: ostest-extraworker-0-network-config-secret
 ```
 * Scale out the machineset to deploy the new node.
@@ -318,9 +318,7 @@ applied by this process and generate an NNCP automatically when it is
 installed.
 
 
-## Design Details
-
-### Open Questions [optional]
+## Open Questions [optional]
 
 * There has been resistance to using the NMState API in OpenShift in the past
   because it is not compliant with the OpenShift API Guidelines. There is work
@@ -351,178 +349,42 @@ installed.
   those platforms tend not to use things like static IPs that may require per-host
   configuration.
 
-**** End of current document. Everything below here is unedited template sections ****
+## Test Plan
 
+We will want to add this feature to one of the baremetal e2e jobs.
 
-### Test Plan
+## Graduation Criteria
 
-**Note:** *Section not required until targeted at a release.*
+### Dev Preview -> Tech Preview
 
-Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
-- What additional testing is necessary to support managed OpenShift service-based offerings?
+We do not plan on a Dev Preview phase for this feature.
 
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
+### Tech Preview -> GA
 
-All code is expected to have adequate tests (eventually with coverage
-expectations).
+Our primary concern for GA at this time is error-handling. In particular,
+there is a known bug with rollback that has significant impacts on this
+feature. If we are able to get that fixed by 4.16 GA this will be shipped
+as GA. Otherwise it will remain tech preview.
 
-### Graduation Criteria
+### Removing a deprecated feature
 
-**Note:** *Section not required until targeted at a release.*
+NA
 
-Define graduation milestones.
+## Upgrade / Downgrade Strategy
 
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
+Only relevant for Kubernetes-NMState and will be handled the same way it is
+today.
 
-Consider the following in developing the graduation criteria for this
-enhancement:
+## Version Skew Strategy
 
-- Maturity levels
-  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
-- [Deprecation policy][deprecation-policy]
+Only relevant for Kubernetes-NMState and will be handled the same way it is
+today.
 
-Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
-or by redefining what graduation means.
+## Operational Aspects of API Extensions
 
-In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
+NA
 
-[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
-[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
-
-**If this is a user facing change requiring new or updated documentation in [openshift-docs](https://github.com/openshift/openshift-docs/),
-please be sure to include in the graduation criteria.**
-
-**Examples**: These are generalized examples to consider, in addition
-to the aforementioned [maturity levels][maturity-levels].
-
-#### Dev Preview -> Tech Preview
-
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-- Enumerate service level indicators (SLIs), expose SLIs as metrics
-- Write symptoms-based alerts for the component(s)
-
-#### Tech Preview -> GA
-
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-- Backhaul SLI telemetry
-- Document SLOs for the component
-- Conduct load testing
-- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
-
-#### Removing a deprecated feature
-
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
-
-### Upgrade / Downgrade Strategy
-
-If applicable, how will the component be upgraded and downgraded? Make sure this
-is in the test plan.
-
-Consider the following in developing an upgrade/downgrade strategy for this
-enhancement:
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to keep previous behavior?
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to make use of the enhancement?
-
-Upgrade expectations:
-- Each component should remain available for user requests and
-  workloads during upgrades. Ensure the components leverage best practices in handling [voluntary
-  disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to
-  this should be identified and discussed here.
-- Micro version upgrades - users should be able to skip forward versions within a
-  minor release stream without being required to pass through intermediate
-  versions - i.e. `x.y.N->x.y.N+2` should work without requiring `x.y.N->x.y.N+1`
-  as an intermediate step.
-- Minor version upgrades - you only need to support `x.N->x.N+1` upgrade
-  steps. So, for example, it is acceptable to require a user running 4.3 to
-  upgrade to 4.5 with a `4.3->4.4` step followed by a `4.4->4.5` step.
-- While an upgrade is in progress, new component versions should
-  continue to operate correctly in concert with older component
-  versions (aka "version skew"). For example, if a node is down, and
-  an operator is rolling out a daemonset, the old and new daemonset
-  pods must continue to work correctly even while the cluster remains
-  in this partially upgraded state for some time.
-
-Downgrade expectations:
-- If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
-  misbehaving, it should be possible for the user to rollback to `N`. It is
-  acceptable to require some documented manual steps in order to fully restore
-  the downgraded cluster to its previous state. Examples of acceptable steps
-  include:
-  - Deleting any CVO-managed resources added by the new version. The
-    CVO does not currently delete resources that no longer exist in
-    the target version.
-
-### Version Skew Strategy
-
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
-
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
-
-### Operational Aspects of API Extensions
-
-Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
-admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
-especially how they impact the OCP system architecture and operational aspects.
-
-- For conversion/admission webhooks and aggregated apiservers: what are the SLIs (Service Level
-  Indicators) an administrator or support can use to determine the health of the API extensions
-
-  Examples (metrics, alerts, operator conditions)
-  - authentication-operator condition `APIServerDegraded=False`
-  - authentication-operator condition `APIServerAvailable=True`
-  - openshift-authentication/oauth-apiserver deployment and pods health
-
-- What impact do these API extensions have on existing SLIs (e.g. scalability, API throughput,
-  API availability)
-
-  Examples:
-  - Adds 1s to every pod update in the system, slowing down pod scheduling by 5s on average.
-  - Fails creation of ConfigMap in the system when the webhook is not available.
-  - Adds a dependency on the SDN service network for all resources, risking API availability in case
-    of SDN issues.
-  - Expected use-cases require less than 1000 instances of the CRD, not impacting
-    general API throughput.
-
-- How is the impact on existing SLIs to be measured and when (e.g. every release by QE, or
-  automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
-  this enhancement)
-
-#### Failure Modes
-
-- Describe the possible failure modes of the API extensions.
-- Describe how a failure or behaviour of the extension will impact the overall cluster health
-  (e.g. which kube-controller-manager functionality will stop working), especially regarding
-  stability, availability, performance and security.
-- Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
-  and add them as reviewers to this enhancement.
-
-#### Support Procedures
+## Support Procedures
 
 Describe how to
 - detect the failure modes in a support situation, describe possible symptoms (events, metrics,
@@ -569,21 +431,11 @@ Describe how to
   - Namespaces deletion will not delete all objects in etcd, leading to zombie
     objects when another namespace with the same name is created.
 
-## Implementation History
-
-Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`.
-
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used to
-highlight and record other possible approaches to delivering the value proposed
-by an enhancement.
+Continue adding features and customizability to configure-ovs. This has not
+proven to be an effective strategy up to now, but it is an option.
 
 ## Infrastructure Needed [optional]
 
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
-
-Listing these here allows the community to get the process for these resources
-started right away.
+Nothing new, this will build on existing infrastructure.
