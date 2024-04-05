@@ -376,16 +376,18 @@ The container scanner is running with its own memory and CPU requirements and do
 The workload data is gathered every 12 hours by the Insights Operator.
 Gathering the runtime data will increase the overall executing time of the workload gatherer. The increase must remain reasonable.
 
-In the existing initial implementation of the container scanner, it takes __~180 ms to scan a single container__.
-
-It could be possible to scan containers in parallel instead of doing it iteratively.
+In the existing initial implementation of the container scanner, it takes __~200 ms to scan a single container__.
+As the scanning is done in parallel on each worker node, its overall duration is impacted by
+the density of the cluster (number of containers per worker node).
+On a fresh OpenShift cluster (with no user workload and only OpenShift own containers), it takes ~15 seconds to scan all containers.
+For a 8-worker node with 800 containers, assuming the containers are spread evenly, it would take around 20 seconds to scan the whole cluster. In practice, it will be a bit longer and capped by the scanning of the worker node with the most containers.
 
 The additional data in the `workloadRuntimeInfoContainer` will increase the size of the insights payload that is archived and sent to Red Hat backends.
 
 At most, the additional data adds __~200 uncompressed bytes per WorkloadContainerShape in the JSON payload__.
-The current maximum number of pods that are checked by the Insights Operator is 8000 pods.
 
-This additional payload does not scale with the number of pods but with the number of `WorkloadContainerShape` which can be approximated as the number of applications (deployments,statefulsets,...) times the number of containers per pod.
+This additional payload does not scale with the number of pods but with the number of `WorkloadContainerShape` which is difficult to estimate. There is an upper limit of 8000 pods
+in the Insights operator but that does not give a limit on the number of containers. It is also very likely that some of the pods are replicas and their containers would only count for 1 `WorkloadContainerShape` in their gathered data.
 
 #### UX Risk & Mitigation
 
