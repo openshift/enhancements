@@ -177,9 +177,12 @@ Any issues discovered during this process will be remediated with custom adjustm
 
 ### Drawbacks
 
-The main draw back of this change is that it might require manual remediation
-if a failure occurs during the upgrade process. Since this is a one-time change,
-we believe that the benefits of moving to LVMS outweigh this potential issue.
+The main draw back of this change is that it might cause issues during upgrade / downgrade of MicroShift. 
+However, we plan to circumvent this by carefully testing the LVMS upgrade/downgrade in MicroShift through 
+greenboot and the E2E test suite. Additionally, we will make sure that a rollback is possible even in case
+of upgrade/downgrade failure through our usual asset recreation.
+Since this is a one-time change, we believe that the benefits of moving to LVMS outweigh this potential issue
+after testing accordingly.
 
 Additionally, the change will require some additional testing to ensure that
 the upgrade process works as expected. From now on we will need to issue rebase
