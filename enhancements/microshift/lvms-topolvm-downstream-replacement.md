@@ -156,7 +156,7 @@ upgrading from 4.16 to 4.17, and from 4.15 to 4.17 (2 y-streams).
 The switch will be done by removing the TopoLVM deployment and installing the LVMS
 deployment. The LVMS deployment will be configured to use the existing deviceClasses
 and storageClasses. There will be leftover images from the TopoLVM deployment that
-can be removed manually from the registry after the upgrade.
+will be removed during regular garbage collection cycles of the container runtime.
 
 There should not be other regressions in the upgrade process, as the LVMS migration
 is transparent to users.
