@@ -55,7 +55,7 @@ As an OpenShift administrator, I want to scale nodes with static IPs so that I c
 - All nodes created during the installation are configured with static IPs.  
   Rationale: Many environments, due to security policies, do not allow DHCP.
 
-- The IPI installation method is able to provide static IPs to the nodes
+- The IPI installation method is able to provide static IPs to the nodes.
   Rationale: Some users must qualify each tool used in their environment. 
   Leveraging IPI greatly reduces the number of tools required to provision
   a cluster.
@@ -329,7 +329,7 @@ The IP address pool specifies the CRD which defines the address pool configurati
 Control Plane Machinesets (CPMS) works similar to the way compute machinesets work.  When the installer generates the CPMS for the cluster, it will inject the AddressFromPools information to be used for future node scaling.  One difference is that the networkName will not be populated.  This is due to how each FailureDomain can define a different networkName.  This information will be populated when the machine object gets created dynamically after evaluating which failure domain the machine will be placed into.
 
 Example:
-~~~
+~~~yaml
 apiVersion: machine.openshift.io/v1
 kind: ControlPlaneMachineSet
 metadata:
@@ -422,13 +422,13 @@ type Host struct {
 }
 
 type NetworkDeviceSpec struct {
-  // gateway is an IPv4 or IPv6 address which represents the subnet gateway,
+  // Gateway is an IPv4 or IPv6 address which represents the subnet gateway,
   // for example, 192.168.1.1.
   // +kubebuilder:validation:Format=ipv4
   // +kubebuilder:validation:Format=ipv6
   Gateway string `json:"gateway,omitempty"`
   
-  // ipAddrs is a list of one or more IPv4 and/or IPv6 addresses and CIDR to assign to
+  // IPAddrs is a list of one or more IPv4 and/or IPv6 addresses and CIDR to assign to
   // this device, for example, 192.168.1.100/24. IP addresses provided via ipAddrs are
   // intended to allow explicit assignment of a machine's IP address.
   // +kubebuilder:validation:Format=ipv4
@@ -438,7 +438,7 @@ type NetworkDeviceSpec struct {
   // +kubebuilder:validation:Required
   IPAddrs []string `json:"ipAddrs"`
   
-  // nameservers is a list of IPv4 and/or IPv6 addresses used as DNS nameservers, for example,
+  // Nameservers is a list of IPv4 and/or IPv6 addresses used as DNS nameservers, for example,
   // 8.8.8.8. a nameserver is not provided by a fulfilled IPAddressClaim. If DHCP is not the
   // source of IP addresses for this network device, nameservers should include a valid nameserver.
   // +kubebuilder:validation:Format=ipv4
