@@ -92,6 +92,7 @@ type ClusterVersionSpec struct {
 	// Items in this list should be a valid absolute http/https URI of an upstream signature store as per rfc1738.
 	// +kubebuilder:validation:XValidation:rule="self.all(x, isURL(x))",message="signatureStores must contain only valid absolute URLs per the Go net/url standard"
 	// +kubebuilder:validation:MaxItems=32
+	// +openshift:enable:FeatureSets=TechPreviewNoUpgrade
 	// +listType=set
 	// +optional
 	SignatureStores []string `json:"signatureStores"`
@@ -119,10 +120,17 @@ N/A.
 * We'll be using unit tests to check if CVO's default stores are replaced with custom ones. 
 * QE will be testing upgrading the cluster in a disconnected environment with custom signatures served using 
   OpenShift Update Service
+* New periodics will be created testing the new feature against the most recent `candidate-4.y` Engineering Candidate releases, because those are the first point where we have CVO-trusted signatures to test with.
+  The periodics will:
+  1. Configure a custom signature store in ClusterVersion.
+  1. Request the cluster update to a pinned older release.
+  1. Confirm that the update request is rejected because no signature is found in the custom store.
+  1. Add the target's signature to the custom store.
+  1. Confirm that the update request is rejected because the version of the requested target is older than the Engineering Candidate being tested.
 
 ### Graduation Criteria
 
-GA. When it works, we ship it.
+The plan is to introduce the first version of the new API behind the `TechPreviewNoUpgrade` feature gate, and later promote to GA.
 
 #### Dev Preview -> Tech Preview
 
@@ -130,7 +138,7 @@ N/A. This is not expected to be released as Dev Preview.
 
 #### Tech Preview -> GA
 
-N/A. This is not expected to be released as Tech Preview.
+Once tech-preview periodics discussed in [the Test Plan section](#test-plan) are passing, the feature will be promoted to GA.
 
 #### Removing a deprecated feature
 
