@@ -3,7 +3,7 @@ title: static-ip-addresses-vsphere
 authors:
   - rvanderp3
   - vr4manta
-reviewers: 
+reviewers:
   - JoelSpeed - machine API
   - elmiko - machine API
   - patrickdillon - installer
@@ -14,11 +14,11 @@ approvers:
   - JoelSpeed
   - patrickdillon
   - 2uasimojo
-api-approvers: 
+api-approvers:
   - JoelSpeed
 creation-date: 2022-10-21
-last-updated: 2024-01-02
-tracking-link: 
+last-updated: 2024-04-12
+tracking-link:
 - https://issues.redhat.com/browse/OCPPLAN-9654
 see-also:
   - /enhancements/installer/vsphere-ipi-zonal.md
@@ -31,8 +31,8 @@ superseded-by:
 ## Summary
 
 Static IP addresses are emerging as a common requirement in environments where
-the usage of DHCP violates corporate security guidelines.  Additionally, many 
-users which require static IPs also require the use of the IPI installer. 
+the usage of DHCP violates corporate security guidelines.  Additionally, many
+users which require static IPs also require the use of the IPI installer.
 The proposal described in this enhancement discusses the implementation of
 assigning static IPs at both day 0 and day 2.
 
@@ -52,11 +52,11 @@ As an OpenShift administrator, I want to scale nodes with static IPs so that I c
 
 ### Goals
 
-- All nodes created during the installation are configured with static IPs.  
+- All nodes created during the installation are configured with static IPs.
   Rationale: Many environments, due to security policies, do not allow DHCP.
 
 - The IPI installation method is able to provide static IPs to the nodes.
-  Rationale: Some users must qualify each tool used in their environment. 
+  Rationale: Some users must qualify each tool used in their environment.
   Leveraging IPI greatly reduces the number of tools required to provision
   a cluster.
 
@@ -68,7 +68,7 @@ As an OpenShift administrator, I want to scale nodes with static IPs so that I c
 
 ### Static IPs Configured at Installation
 
-To facilitate the configuration of static IP address, network device configuration definitions are created for each node in the install-config.yaml. A `hosts` slice will be introduced to the installer platform specification to allow network device configurations to be specified for a nodes. 
+To facilitate the configuration of static IP address, network device configuration definitions are created for each node in the install-config.yaml. A `hosts` slice will be introduced to the installer platform specification to allow network device configurations to be specified for each node.
 If a `hosts` slice is defined, enough `hosts` must be defined to cover the bootstrap, control plane, and compute nodes to be provisioned during the installation process.
 
 The bootstrap and control plane nodes will have their static IP addresses provisioned by either Terraform or CAPV depending on the version of the installer.  Compute nodes will rely on the machine API to provision their IP addresses.
@@ -261,7 +261,7 @@ spec:
   prefix: 23
 ```
 
-If the cluster admin wishes to change anything about the ipaddress or ipaddress claim information, they may do so at this time.  Once all changes are made, it is now find to continue the rest of the cluster create process.
+If the cluster admin wishes to change anything about the ipaddress or ipaddress claim information, they may do so at this time.  Once all changes are made, it is now fine to continue the rest of the cluster create process.
 
 ### Scaling in Additional Machines
 
@@ -291,7 +291,7 @@ spec:
             - 192.168.101.244/24
             gateway4: 192.168.101.1
             nameservers:
-            - 192.168.101.2            
+            - 192.168.101.2
       ...
 ~~~
 
@@ -311,12 +311,12 @@ spec:
   ...
   template:
     ...
-    spec:          
+    spec:
       ...
       network:
         devices:
-        - networkName: port-group-vlan-101          
-          addressesFromPools:                   
+        - networkName: port-group-vlan-101
+          addressesFromPools:
           - group: machine.openshift.io
             resource: IPPool
             name: example-pool
@@ -400,21 +400,22 @@ If the CPMS definition is changed after the cluster creation, the CPMS Operator 
 
 ##### Installer
 
-1. Modify the `install-config.yaml` vSphere platform specification to support the definition of the 
+1. Modify the `install-config.yaml` vSphere platform specification to support the definition of the node IPs.
 ~~~go
 // Hosts defines `Host` configurations to be applied to nodes deployed by the installer
 type Hosts []Host
 
-// Host defines host VMs to generate as part of the installation.
+// Host defines a single VM network configuartion to apply as part of the installation.
 type Host struct {
-  // FailureDomain refers to the name of a FailureDomain as described in https://github.com/openshift/enhancements/blob/master/enhancements/installer/vsphere-ipi-zonal.md
+  // FailureDomain refers to the name of a FailureDomain as described in https://github.com/openshift/enhancements/blob/master/enhancements/installer/vsphere-ipi-zonal.md.
+  // If not defined, the NetworkDevice will be applied to any node of the defined role needing an address.
   // +optional
   FailureDomain string `json:"failureDomain"`
-  
+
   // NetworkDeviceSpec to be applied to the host
   // +kubebuilder:validation:Required
   NetworkDevice *NetworkDeviceSpec `json:"networkDevice"`
-  
+
   // Role defines the role of the node
   // +kubebuilder:validation:Enum="";bootstrap;control-plane;compute
   // +kubebuilder:validation:Required
@@ -426,8 +427,9 @@ type NetworkDeviceSpec struct {
   // for example, 192.168.1.1.
   // +kubebuilder:validation:Format=ipv4
   // +kubebuilder:validation:Format=ipv6
+  // +optional
   Gateway string `json:"gateway,omitempty"`
-  
+
   // IPAddrs is a list of one or more IPv4 and/or IPv6 addresses and CIDR to assign to
   // this device, for example, 192.168.1.100/24. IP addresses provided via ipAddrs are
   // intended to allow explicit assignment of a machine's IP address.
@@ -437,20 +439,21 @@ type NetworkDeviceSpec struct {
   // +kubebuilder:example=2001:DB8:0000:0000:244:17FF:FEB6:D37D/64
   // +kubebuilder:validation:Required
   IPAddrs []string `json:"ipAddrs"`
-  
+
   // Nameservers is a list of IPv4 and/or IPv6 addresses used as DNS nameservers, for example,
-  // 8.8.8.8. a nameserver is not provided by a fulfilled IPAddressClaim. If DHCP is not the
+  // 8.8.8.8. A nameserver is not provided by a fulfilled IPAddressClaim. If DHCP is not the
   // source of IP addresses for this network device, nameservers should include a valid nameserver.
   // +kubebuilder:validation:Format=ipv4
   // +kubebuilder:validation:Format=ipv6
   // +kubebuilder:example=8.8.8.8
+  // +optional
   Nameservers []string `json:"nameservers,omitempty"`
 }
 
 ~~~
 
 2. Add validation for the modified/added fields in the platform specification.
-3. For compute nodes, produce machine manifests with associated network device configuration.  
+3. For compute nodes, produce machine manifests with associated network device configuration.
 4. For bootstrap and control plane nodes, provide network device configuration to a VM guestinfo parameter in the capv machine spec for each VM to be created.
 
 As the assets are generated for the control plane and compute nodes, the slice of `host`s for each node role will be used to populate network device configuration.  The number of `host`s must match the number of replicas defined in the associated machine pool.
@@ -461,7 +464,7 @@ Additionally, each defined host may optionally define a failure domain.  This in
 ##### Machine API
 - Modify vSphere machine controller to convert IP configuration to VM guestinfo parameter
 - Introduce new types to facilitate IP allocation by a controller.
-- Modify [types_vsphereprovider.go](https://github.com/openshift/api/blob/master/machine/v1beta1/types_vsphereprovider.go) to support network device configuration. 
+- Modify [types_vsphereprovider.go](https://github.com/openshift/api/blob/master/machine/v1beta1/types_vsphereprovider.go) to support network device configuration.
 
 
 ###### network device configuration of Machines
@@ -471,7 +474,7 @@ IP configuration for a given network device may be derived from three configurat
 2. An external IPAM IP Pool
 3. Static IP configuration defined in the provider spec
 
-The machine API `VSphereMachineProviderSpec.Network` will be extended to include a subset of additional properties as defined in https://github.com/kubernetes-sigs/cluster-api-provider-vsphere/blob/main/apis/v1beta1/types.go.  See [openshift/api#1338](https://github.com/openshift/api/pull/1338) for further details on the API extension to the provider specification.  
+The machine API `VSphereMachineProviderSpec.Network` will be extended to include a subset of additional properties as defined in https://github.com/kubernetes-sigs/cluster-api-provider-vsphere/blob/main/apis/v1beta1/types.go.  See [openshift/api#1338](https://github.com/openshift/api/pull/1338) for further details on the API extension to the provider specification.
 
 
 ### Workflow Description
@@ -479,7 +482,7 @@ The machine API `VSphereMachineProviderSpec.Network` will be extended to include
 #### Installation
 1. OpenShift administrator reserves IP addresses for installation.
 2. OpenShift administrator constructs `install-config.yaml` to define an network device configuration for each node that will receive a static IP address.
-3. OpenShift administrator initiates an installation with `openshift-install create cluster`.  
+3. OpenShift administrator initiates an installation with `openshift-install create cluster`.
 4. The installer will proceed to:
 - provision bootstrap and control plane nodes with the specified network device configuration
 - create machine resources containing specified network device configuration
@@ -488,7 +491,7 @@ The machine API `VSphereMachineProviderSpec.Network` will be extended to include
 #### Scaling new Nodes without `machinesets`
 1. OpenShift administrator reserves IP addresses for new nodes to be scaled up.
 2. OpenShift administrator constructs machine resource to define a network device configuration for each new node that will receive a static IP address.
-3. OpenShift administrator initiates the creation of new machines by running `oc create -f machine.yaml`.  
+3. OpenShift administrator initiates the creation of new machines by running `oc create -f machine.yaml`.
 4. The machine API will render the nodes with the specified network device configuration.
 
 #### Scaling new Nodes with `machinesets`
@@ -500,8 +503,8 @@ The machine API `VSphereMachineProviderSpec.Network` will be extended to include
 - Set the condition `IPAddressClaimed` of the associated `Machine` to indicate that it it awaiting IPAddressClaims to be bound
 - Block the creation of the underlying machine in the infrastructure until all associated `IPAddressClaim`s are bound
 4. An external controller will watch for `IPAddressClaim` instances that reference a address pool type known to the external controller.
-5. The external controller will create an `IPAddress` and bind it to its associated `IPAddressClaim`.  
-6. The machine controller will update the condition `IPAddressClaimed` of the associated `Machine` to indicate its `IPAddressClaim`(s) is bound.  If a `Machine` 
+5. The external controller will create an `IPAddress` and bind it to its associated `IPAddressClaim`.
+6. The machine controller will update the condition `IPAddressClaimed` of the associated `Machine` to indicate its `IPAddressClaim`(s) is bound.  If a `Machine`
 has multiple associated `IPAddressClaims`, a single `IPAddressClaimed` condition will report the number of outstanding claims.
 7. The machine controller will then create the virtual machine with the network configuration in the network device spec and the `IPAddress`.
 
@@ -510,7 +513,7 @@ sequenceDiagram
     machineset controller->>+machine: creates machine with<br> IPPool
     machine controller-->machine controller: create IPAddressClaim<br>and wait for claim<br>to be bound
     machine controller-->machine controller: IPAddressClaim ownerReference<br>refers to the machine
-    IP controller-->IP controller: processes claim and<br>allocates IP address    
+    IP controller-->IP controller: processes claim and<br>allocates IP address
     IP controller-->IP controller: create IPAddress and bind IPAddressClaim
     machine controller-->machine controller: build guestinfo.afterburn.initrd.network-kargs<br>and clone VM
 ~~~
@@ -520,7 +523,7 @@ On scale down:
 2. The kubernetes API will garbage collect the `IPAddressClaim` and `IPAddress` formerly associated with the `Machine`.
 3. Once the `IPAddress` associated with the machine is deleted, the external controller can reuse the address.
 
-In this workflow, the controller is responsible for managing, claiming, and releasing IP addresses.  
+In this workflow, the controller is responsible for managing, claiming, and releasing IP addresses.
 
 A sample project [machine-ipam-controller](https://github.com/openshift-splat-team/machine-ipam-controller) is an example of a controller that implements this workflow.
 
@@ -540,7 +543,7 @@ The CRDs `machines.machine.openshift.io` and `machinesets.machine.openshift.io` 
 
 See https://github.com/openshift/api/pull/1338 for details and discussion related to the API.
 
-### Implementation Details/Notes/Constraints 
+### Implementation Details/Notes/Constraints
 
 #### Eventual Migration to CAPI/CAPV
 
@@ -608,6 +611,6 @@ end-to-end tests.**
 
 ## Alternatives
 
-Lifecycle hook 
+Lifecycle hook
 
 ## Infrastructure Needed [optional]
