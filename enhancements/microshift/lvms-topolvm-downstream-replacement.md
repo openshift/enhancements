@@ -148,6 +148,19 @@ an empty deviceClass in the LVMCluster and then coordinating that with the vg-ma
 We have a prototype implementation that can be pushed into GA in time for the 4.17 release based on
 [OCPEDGE-830](https://issues.redhat.com//browse/OCPEDGE-830) that proves this is possible.
 
+##### Why is this a constraint? Why should we not introduce a migration Path for unmanaged deviceClasses to LVMCluster?
+
+The main issue with the current discrepancy between TopoLVM and LVMS is that TopoLVM allows for the configuration of deviceClasses with arbitrary options for supporting
+custom scenarios such as LVM RAID. This is not supported in LVMS (due to incompatibility with thin provisioning).
+
+If we would switch the stance to migrate existing MicroShift Installations fully to LVMCluster, we would need to
+maintain this migration while ensuring that existing RAID configurations are still supported. This is not feasible
+because a custom created volume group without constraints is introducing a lot of complexity to a potential test matrix
+that would explode the scope of LVMCluster testing and supported scenarios for OpenShift, which we expressively not want.
+
+Instead we want to allow for a classic "build for 80%, allow the rest to be configured manually" approach, where
+LVMCluster is used for the 80% of the use cases and all custom use cases should be possible through own configuration.
+
 #### Switching from TopoLVM to LVMS
 
 The switch from TopoLVM to LVMS will be done in a single release. We will support
