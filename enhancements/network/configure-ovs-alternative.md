@@ -18,6 +18,7 @@ tracking-link:
 see-also:
   - https://docs.google.com/document/d/1Zp1J2HbVvu-v4mHc9M594JLqt6UwdKoix8xkeSzVL98/edit?usp=sharing
   - enhancements/network/baremetal-ipi-network-configuration.md
+  - https://issues.redhat.com/browse/RFE-5401
 replaces:
   - NA
 superseded-by:
@@ -164,7 +165,10 @@ When the new service runs, it will copy the appropriate YAML file (based on
 the hostname of the node) to /etc/nmstate so it will be applied by the normal
 system NMState service. If there is already a file in /etc/nmstate with the
 same name, the service will fail in order to avoid overwriting important
-system configuration.
+system configuration. When this mechanism is used to provide host network
+configuration, other NMState files deployed by (for example) MCO should not
+be used. All necessary network configuration should be in the single file
+provided via this new feature.
 
 Alternatively, there will be a mechanism to deploy a single cluster-wide
 configuration. That might look like:
@@ -233,6 +237,23 @@ will never be necessary to reboot a node when updates are made. Note that,
 as mentioned above, if changes are desired on day 2 they should be made
 with Kubernetes-NMState, not by updating the machine-configs used here.
 
+#### Migration
+
+An existing cluster using configure-ovs to manage br-ex can be migrated to
+this new mechanism. In order to do so, the user will take the following
+actions:
+
+- Create machine-configs in the same manner as those passed to the installer
+  for initial deployment.
+- Trigger a rolling reboot of the cluster to apply those new configurations.
+  Since the machine-configs for this feature explicitly do not cause a reboot,
+  this could be done by applying a trivial separate machine-config. At some
+  point in the future, we expect MCO to implement a new feature that will
+  allow an administrator to specify the reboot behavior of the machine-config,
+  which will eliminate the need for this step.
+  More details on this can be found in the enhancement:
+  https://github.com/openshift/enhancements/pull/1525
+
 #### Variation [optional]
 
 We have settled on an approach and are not currently pursuing other options.
@@ -250,8 +271,10 @@ This should not have any hypershift-specific considerations.
 
 #### Standalone Clusters
 
-This is primarily directed at standalone clusters, specifically baremetal and
-other on-prem environments.
+Initially, this feature will target just baremetal clusters. Once we are
+confident that the design is working as intended in what are usually the most
+complex networking environments for OpenShift, we will extend support to all
+platforms.
 
 #### Single-node Deployments or MicroShift
 
@@ -336,7 +359,7 @@ installed.
   reboot?
 
   Reply from @cgoncalves:
-  > OVN-Kubernetes will not handle the replacement of the gateway interface (enp2s0 in the example above). This is an existing limitation where OVN-Kubernetes installs an OpenFlow rule in br-ex that states the gateway interface is the OVS port ID of enp2s0 (port 1) and where attaching a new interface, say enp3s0, its OVS port ID will be different hence no egress traffic forwarding.
+  > OVN-Kubernetes will not handle the replacement of the gateway interface (e.g. enp2s0). This is an existing limitation where OVN-Kubernetes installs an OpenFlow rule in br-ex that states the gateway interface is the OVS port ID of enp2s0 (port 1) and where attaching a new interface, say enp3s0, its OVS port ID will be different hence no egress traffic forwarding.
 
   That doesn't have to block this feature being implemented, but it's something
   we should look into as a followup with the OVNK team.
@@ -365,6 +388,8 @@ Our primary concern for GA at this time is error-handling. In particular,
 there is a known bug with rollback that has significant impacts on this
 feature. If we are able to get that fixed by 4.16 GA this will be shipped
 as GA. Otherwise it will remain tech preview.
+
+The bug tracking this can be found here: https://issues.redhat.com/browse/RHEL-31972
 
 ### Removing a deprecated feature
 
