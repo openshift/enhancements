@@ -117,7 +117,7 @@ Update OpenShift Components for Taint Tolerance: Modify OpenShift operators and 
 
 NoExecute Taint Application: Admins seeking to implement this proposal will need to apply the NoExecute taints to control plane nodes (or specialized nodes) to automatically prevent pods without the specific toleration from being scheduled or remaining on these nodes. This approach leverages the kubelet's inherent behavior to ensure compliance with scheduling policies.
 
-Validating Admission Policy and Binding: Admins seeking to i/mplement this proposal will need to write and apply a new or extend an existing validating admission policy (and binding) to enforce scheduling policies based on namespace labels and pod tolerations. This policy will validate incoming pod creation and update requests to ensure they do not include tolerations for the node-role.kubernetes.io/control-plane:NoExecute taint (or any other taint/toleration the admin wishes to configure, for special node groups) unless the namespace is explicitly labeled to allow such tolerations.
+Validating Admission Policy and Binding: Admins seeking to implement this proposal will need to write and apply a new or extend an existing validating admission policy (and binding) to enforce scheduling policies based on namespace labels and pod tolerations. This policy will validate incoming pod creation and update requests to ensure they do not include tolerations for the node-role.kubernetes.io/control-plane:NoExecute taint (or any other taint/toleration the admin wishes to configure, for special node groups) unless the namespace is explicitly labeled to allow such tolerations.
 
 Namespace Label Management: Admins seeking to implement this proposal need to introduce tools, scripts or organizational processes to assist administrators in managing labels on namespaces that should be exempt from the default scheduling restrictions. This could include automation for emergency situations where rapid response is necessary.
 
@@ -164,8 +164,8 @@ Pre-Workflow:
 
 Workflow:
 
-- Cluster Administrator: Tasked with applying NoExecute taints to control plane nodes or nodes belonging to other specialized groups. For extending this approach to other special node groups, they must coordinate with relevant teams to ensure those workloads include necessary tolerations. They are also responsible for creating and applying ValidatingAdmissionPolicy and ValidatingAdmissionPolicyBinding resources to configure which taint tolerations are disallowed for pods, except in specific namespaces designated by a particular label (e.g., openshift.io/control-plane-namespace, or another custom label). This role involves a strategic overview of the cluster's security and workload management policies.
-- Namespace Administrator: Manages their namespaces, including labeling them appropriately (e.g., with openshift.io/control-plane-namespace, or another custom label) when exemptions to the default scheduling policies are needed. This role requires understanding the impact of these labels on workload scheduling and compliance with the cluster's security policies.
+- Cluster Administrator: Tasked with applying NoExecute taints to control plane nodes or nodes belonging to other specialized groups. For extending this approach to other special node groups, they must coordinate with relevant teams to ensure those workloads include necessary tolerations. They are also responsible for creating and applying ValidatingAdmissionPolicy and ValidatingAdmissionPolicyBinding resources to configure which taint tolerations are disallowed for pods, except in specific namespaces designated by a particular label (e.g., openshift.io/control-plane, or another custom label). This role involves a strategic overview of the cluster's security and workload management policies.
+- Namespace Administrator: Manages their namespaces, including labeling them appropriately (e.g., with openshift.io/control-plane, or another custom label) when exemptions to the default scheduling policies are needed. This role requires understanding the impact of these labels on workload scheduling and compliance with the cluster's security policies.
 - User/Developer: Those deploying workloads within the cluster must ensure their applications carry the correct tolerations as advised by Cluster Administrators, especially when targeting special node groups. They need to stay informed about the cluster's scheduling policies and adapt their workloads accordingly.
 
 Additional Considerations:
@@ -212,7 +212,7 @@ spec:
 
 3. Validating Admission Policy Binding:
 
-- Concurrently, the Cluster Administrator establishes a ValidatingAdmissionPolicyBinding to dictate the realms of policy application. By default, it affects all namespaces, excluding those marked with a predefined exception label (e.g., openshift.io/control-plane-namespace, or another custom label), to manage exceptions systematically.
+- Concurrently, the Cluster Administrator establishes a ValidatingAdmissionPolicyBinding to dictate the realms of policy application. By default, it affects all namespaces, excluding those marked with a predefined exception label (e.g., openshift.io/control-plane, or another custom label), to manage exceptions systematically.
 
 ```
 apiVersion: admissionregistration.k8s.io/v1beta1
@@ -225,7 +225,7 @@ spec:
   matchResources:
     namespaceSelector:
       matchExpressions:
-      - key: openshift.io/control-plane-namespace
+      - key: openshift.io/control-plane
         operator: DoesNotExist
 ```
 
@@ -234,7 +234,7 @@ spec:
 - Namespace Administrators are tasked with applying specific labels to their namespaces if exemptions to the default scheduling policies are warranted. This procedure enables selected workloads within these namespaces to bypass the standard restrictions by tolerating the designated NoExecute taints (should be performed on control plane owned namespaces for control plane protection - should be performed on special node group namespaces if that is what needs to be protected).
 
 ```
-oc label <NAMESPACE_NAME> openshift.io/control-plane-namespace=true
+oc label <NAMESPACE_NAME> openshift.io/control-plane=true
 ```
 
 5. Pod Scheduling Attempt:
