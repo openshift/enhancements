@@ -59,6 +59,8 @@ requests to off-cluster services, and those that use a
   + [Additional certificate authorities](https://docs.openshift.com/container-platform/4.12//rest_api/config_apis/proxy-config-openshift-io-v1.html#spec-trustedca) required to validate the proxy's certificate
 * Configure the proxy settings in WMCO-managed components on Windows nodes (kubelet, containerd runtime)
 * React to changes to the cluster-wide proxy settings during WMCO runtime
+* Synchronize environment variables `NO_PROXY`, `HTTP_PROXY`, and `HTTPS_PROXY` on Windows nodes with cluster-wide 
+  proxy in both shells _CMD_ and _PowerShell_
 * Maintain normal functionality in non-proxied clusters
 
 ### Non-Goals
@@ -66,6 +68,10 @@ requests to off-cluster services, and those that use a
 * First-class support/enablement of proxy utilization for user-provided applications
 * *ingress* and reverse proxy settings are out of scope
 * Monitor cert expiration dates or automatically replace expired CAs in the cluster's trust bundle
+* Windows workloads created in Windows nodes with cluster-wide proxy enabled do not inherit proxy settings from the 
+  node. This is the default behavior on Linux Nodes side as well.
+* PowerShell's shell sessions do not inherit proxy settings by default on Windows nodes with cluster-wide proxy enabled 
+  (See [Risks and Mitigations](#risks-and-mitigations) section for recommendations) 
 
 ## Proposal
 
@@ -109,6 +115,29 @@ The risks and mitigations are similar to those on the [Linux side of the cluster
 Although cluster infra resources already do a best effort validation on the user-provided proxy URL schema and CAs,
 a user could provide non-functional proxy settings/certs. This would be propagated to their Windows nodes and workloads,
 taking down existing application connectivity and preventing new Windows nodes from being bootstrapped.
+
+In case users use Windows nodes with PowerShell as the default shell, then there is a risk that outbound traffic 
+from the PowerShell CLI wouldn't go through the cluster-wide proxy by default. Although this does not affect 
+WMCO/OpenShift's view of the Node, this is different on-instance behavior than an admin would see if they were using 
+CMD Prompt. To mitigate this enable global HTTP proxy by default on Windows nodes with cluster-wide proxy for all
+PowerShell's sessions, the cluster administrator must create a default PowerShell profile script that reads the 
+proxy environment variables maintained by WMCO and populate the [DefaultWebProxy](https://learn.microsoft.com/en-us/dotnet/api/system.net.webrequest.defaultwebproxy) property
+
+The Powershell profile file location for all users is `$PROFILE.AllUsersCurrentHost` and, the proxy settings can be 
+updated with:
+```powershell
+    [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.Webproxy("<PROXY_URL>")
+```
+where `PROXY_URL` is the URI of the cluster-wide proxy.
+
+Run the following commands in the Windows Node with cluster-wide proxy enabled to create a default profile for the 
+Powershell sessions that reads the `HTTP_PROXY` environment variable maintained by WMCO and populate the `DefaultWebProxy` property:
+```powershell
+    Set-Content -Path $PROFILE.AllUsersCurrentHost -Value '$proxyValue=[Environment]::GetEnvironmentVariable("HTTP_PROXY", "Process")' -Force
+    Add-Content -Path $PROFILE.AllUsersCurrentHost -Value '[System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.Webproxy("$proxyValue")' -Force
+```
+A similar approach can be used to set the proxy settings for HTTPS traffic and /custom certificates. See [official 
+Microsoft documentation](https://learn.microsoft.com/en-us/dotnet/api/system.net.webproxy.-ctor). 
 
 ### Drawbacks
 
