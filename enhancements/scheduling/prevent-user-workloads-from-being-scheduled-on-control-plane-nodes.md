@@ -290,6 +290,24 @@ This message clearly indicates the failed policy expression, aiding Users/Develo
 
 No new API or fields added. Solution works out of the box, given we ship necessary tolerations for control plane workloads managed by us.
 
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+Cluster admins won´t be able to taint control-plane nodes in this scenario. It would not be possible to apply this workflow.
+
+#### Standalone Clusters
+
+This workflow shines here, where cluster admins have full control over their clusters. This workflow is targeting this topology.
+
+#### Single-node Deployments or MicroShift
+
+Tainting a single-node cluster would not make sense, then this workflow is not aimed at those types of topologies.
+
+### Implementation Details/Notes/Constraints
+
+See Alternatives section. The previous discarded approach required actual implementation of a admission plugin/controller or some other way to avoid tolerations with new code provided by us, but the accepted workflow is now available out-of-the-box with ValidatingAdmissionPolicies with CEL (still in tech preview, but available if enabled) combined with the NoExecute taint enforcement. So no implementation from our side is needed, only documentation and guidance on how to apply this workflow.
+
 ### Risks and Mitigations
 
 - Unintended Namespace Labeling: Administrators or namespace owners might inadvertently label namespaces in a way that bypasses the scheduling restrictions, potentially exposing control plane or special nodes to unauthorized workloads.
@@ -313,73 +331,47 @@ No new API or fields added. Solution works out of the box, given we ship necessa
 
 - Challenges with Third-Party Workloads: Ensuring that third-party operators or helm charts comply with the new scheduling restrictions could be challenging, especially if those workloads require updates to include the necessary tolerations.
 
-#### Dev Preview -> Tech Preview -> GA
+## Test Plan
+
+The workflow was manually tested as seen in the comment: https://github.com/openshift/enhancements/pull/1583#discussion_r1519556102. Since these will be the manual steps customers/cluster admins would have to follow, it is validated.
+
+For this to work out we need to be sure that all workloads running in control-plane nodes have the relevant tolerations, so a new test enforcing that will be added to our test suites.
+
+## Graduation Criteria
+
+### Dev Preview -> Tech Preview
 
 The necessary feature for this solution (ValidatingAdmissionPolicy) is already available, even though it is in Tech Preview (it is in beta but disabled by default upstream). The evolution of this solution ties with the evolution of [ValidatingAdmissionPolicy](https://github.com/kubernetes/enhancements/blob/master/keps/sig-api-machinery/3488-cel-admission-control/README.md) and the decisions to graduate it downstream on Openshift.
 
-#### Failure Modes
+### Tech Preview -> GA
 
-TODO
+As soon as ValidatingAdmissionPolicy is graduated to GA we can consider this workflow to be graduated as well.
 
-<!-- - Describe the possible failure modes of the API extensions.
-- Describe how a failure or behaviour of the extension will impact the overall cluster health
-  (e.g. which kube-controller-manager functionality will stop working), especially regarding
-  stability, availability, performance and security.
-- Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
-  and add them as reviewers to this enhancement. -->
+### Removing a deprecated feature
 
-#### Support Procedures
+N/A
 
-TODO
+## Upgrade / Downgrade Strategy
 
-<!-- Describe how to
-- detect the failure modes in a support situation, describe possible symptoms (events, metrics,
-  alerts, which log output in which component)
+N/A
 
-  Examples:
-  - If the webhook is not running, kube-apiserver logs will show errors like "failed to call admission webhook xyz".
-  - Operator X will degrade with message "Failed to launch webhook server" and reason "WehhookServerFailed".
-  - The metric `webhook_admission_duration_seconds("openpolicyagent-admission", "mutating", "put", "false")`
-    will show >1s latency and alert `WebhookAdmissionLatencyHigh` will fire.
+## Version Skew Strategy
 
-- disable the API extension (e.g. remove MutatingWebhookConfiguration `xyz`, remove APIService `foo`)
+N/A
 
-  - What consequences does it have on the cluster health?
+## Operational Aspects of API Extensions
 
-    Examples:
-    - Garbage collection in kube-controller-manager will stop working.
-    - Quota will be wrongly computed.
-    - Disabling/removing the CRD is not possible without removing the CR instances. Customer will lose data.
-      Disabling the conversion webhook will break garbage collection.
+N/A
 
-  - What consequences does it have on existing, running workloads?
+## Support Procedures
 
-    Examples:
-    - New namespaces won't get the finalizer "xyz" and hence might leak resource X
-      when deleted.
-    - SDN pod-to-pod routing will stop updating, potentially breaking pod-to-pod
-      communication after some minutes.
+### Failure Modes
 
-  - What consequences does it have for newly created workloads?
-
-    Examples:
-    - New pods in namespace with Istio support will not get sidecars injected, breaking
-      their networking.
-
-- Does functionality fail gracefully and will work resume when re-enabled without risking
-  consistency?
-
-  Examples:
-  - The mutating admission webhook "xyz" has FailPolicy=Ignore and hence
-    will not block the creation or updates on objects when it fails. When the
-    webhook comes back online, there is a controller reconciling all objects, applying
-    labels that were not applied during admission webhook downtime.
-  - Namespaces deletion will not delete all objects in etcd, leading to zombie
-    objects when another namespace with the same name is created. -->
+N/A
 
 ## Implementation History
 
-TODO
+N/A
 
 <!-- Major milestones in the life cycle of a proposal should be tracked in `Implementation
 History`. -->
