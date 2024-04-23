@@ -1,7 +1,6 @@
 approvers:
   - 2uasimojo
   - adambkaplan
-  - aravindhp
   - ashcrow
   - bear-redhat
   - bn222
@@ -27,11 +26,13 @@ approvers:
   - flavianmissi
   - frobware
   - hasbro17
+  - ingvagabund
   - jan--f
   - jaypoulz
   - jcantrill
   - jeffdyoung
   - jerpeter1
+  - jhjaggars
   - jmguzik
   - joelanford
   - joelspeed
@@ -55,11 +56,11 @@ approvers:
   - pacevedom
   - patrickdillon
   - pavolloffay
+  - Prashanth684
   - rphillips
   - runcom
   - russellb
   - rvanderp3
-  - s-urbaniak
   - sadasu
   - sdodson
   - shawn-hurley
@@ -71,7 +72,9 @@ approvers:
   - stbenjam
   - stevekuznetsov
   - stlaz
+  - stleerh
   - sudhaponnaganti
+  - suleymanakbas91
   - syed
   - tjungblu
   - tkashem

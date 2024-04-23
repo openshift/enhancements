@@ -14,7 +14,7 @@ above.
 Upstream [defines](https://kubernetes.io/blog/2020/08/21/moving-forward-from-beta/) 3 tiers of maturity:
 * alpha - off by default, can change freely, no commitment to help migrate a user to new versions
 * beta - on by default, still may change freely, but higher expectation that a GA version will arrive and users *may* be aided in a migration to a GA version
-* GA/Stable  
+* GA/Stable
 
 When bringing an alpha or beta api/feature downstream, we need to carefully consider the implications and support expectations.
 
@@ -25,10 +25,10 @@ There are significant risks associated with exposing customers to Alpha-level up
 * The api/feature may change in a way that we cannot migrate customer workloads/configuration/resources
 * The api/feature may be removed entirely in a future k8s version leaving us having to carry patches or manually help customers to move forward which may even require an entirely new cluster installation
 
-Given these risks, alpha features **MUST NOT** be turned on downstream unless behind a feature gate that can only be enabled via the TechPreviewNoUpgrade 
-or CustomNoUpgrade featuresets.  If you/your team intend to enable (without a TechPreview gate) an upstream alpha feature, downstream, you must bring the request to 
-the staff engineering group for discussion.  This can be done by adding it to the agenda of an appropriate themed architecture calls (this may not get you approval 
-but it is a good place to start the conversation about what you want to do and why), or tagging `@aos-staff-engineers` on `#forum-arch`.  Approval won't be granted 
+Given these risks, alpha features **MUST NOT** be turned on downstream unless behind a feature gate that can only be enabled via the TechPreviewNoUpgrade
+or CustomNoUpgrade featuresets.  If you/your team intend to enable (without a TechPreview gate) an upstream alpha feature, downstream, you must bring the request to
+the staff engineering group for discussion.  This can be done by adding it to the agenda of an appropriate themed architecture calls (this may not get you approval
+but it is a good place to start the conversation about what you want to do and why), or tagging `@aos-staff-engineers` on `#forum-arch`.  Approval won't be granted
 without a set of people who clearly own working on the feature upstream and ensuring it will be driven to beta/GA state.
 
 Enabling an upstream alpha feature by putting it behind a TechPreviewNoUpgrade feature gate is acceptable as long as the team that is enabling it understands
@@ -36,9 +36,25 @@ they are going to be responsible for helping debug issues associated with it.
 
 ## Enabling Upstream Beta features
 
-TBD - we'd like to disable these by default(and then have a relatively lower bar for enabling them), but right no there's no good way to disable the associated 
+Before describing how to handle beta features it's important to define the difference
+between API and a feature:
+* *feature* - is/can be enabled by default in upstream, see [Kubernetes Feature Gates](https://kubernetes.io/docs/reference/command-line-tools-reference/feature-gates/). A feature can:
+  * rely on a specific beta API group, in which case its feature enablement will be tied with that of the API group;
+  * rely on an beta field in a stable API group, in which case its feature enablement will rely on the feature's author discretion;
+  * not rely on any API, in which case its feature enablement will rely on the feature's author discretion;
+* *API/API group* - (eg. `group/v1beta1`) is disabled by default in upstream, see [Enabling API groups](https://kubernetes.io/docs/reference/using-api/#enabling-or-disabling).
+
+We'd like to disable beta features by default (and then have a relatively lower bar for enabling them), but right now there's no good way to disable the associated
 upstream tests, so if we disabled them we'd break those tests w/o additional work to explicitly disable the associated tests.
 
+Any upstream beta features that are are enabled by default in OpenShift fall under Tier 2 support, as described in [our documentation](https://docs.openshift.com/container-platform/latest/rest_api/understanding-api-support-tiers.html#mapping-support-tiers-to-kubernetes-api-groups_understanding-api-tiers).
+This allows us to align their lifecycle with the [Kubernetes Deprecation Policy](https://kubernetes.io/docs/reference/using-api/deprecation-policy/).
+
+Every team is responsible for documenting the Tier 2 support for a beta feature, and including that information in the release notes.
+
+The above rule applies equally to features not providing any API resources as well as those that extend stable APIs (ie. `v1`).
+Features relying on beta APIs, are disabled by default and are [guaranteed to not be required for conformance tests](https://github.com/kubernetes/enhancements/tree/master/keps/sig-architecture/1333-conformance-without-beta), thus the guidance here is that such features will require a TechPreviewNoUpgrade
+feature gate.
 
 ## What does it mean to be Tech Preview
 
@@ -56,14 +72,11 @@ setting the upgradeable=false condition on your ClusterOperator and utilizing th
 * You still need to provide education to CEE about the feature
 * You must also follow Red Hat's [support policy for tech preview](https://access.redhat.com/support/offerings/techpreview)
 
-
-
 ## Reasons to declare something Tech Preview
 
 * You aren’t confident you got the API right and want flexibility to change it without having to deal with migrations
   * Bearing in mind the aforementioned restrictions on changing field types w/o revising the apiversion.
 * You aren’t confident in the implementation quality (scalability, stability, etc) and do not want to have to support customers using it in production in ways the implementation cannot handle
-
 
 ## Downsides to declaring something Tech Preview
 
@@ -72,7 +85,6 @@ CI job that enables the TP feature if you want automated coverage
 * To date we have seen very few customers enabling feature gates (in part because they block upgrading that cluster) so if your
 feature is behind the cluster feature gate, you are unlikely to get meaningful feedback from the field to help you evolve the
 feature anyway.  It may be better to just hold the feature until it’s GA ready.
-
 
 ## Official process/mechanism for delivering a Tech Preview feature
 
@@ -86,7 +98,6 @@ feature gate mechanism, but you must have the feature gate mechanism.
 1. optional:  if your feature gate is not enabled and the TP fields are populated by the user it is recommended that your
 component should clear that data from the fields to avoid user confusion when they think they’ve configured the feature but
 it’s not actually active/enabled.
-
 
 ### Following this process means
 

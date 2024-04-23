@@ -12,7 +12,7 @@ approvers:
 api-approvers:
 - "@alanconway"
 creation-date: 2023-10-30
-last-updated: 2023-10-30
+last-updated: 2024-03-07
 tracking-link:
 - https://issues.redhat.com/browse/LOG-2155
 see-also:
@@ -117,76 +117,80 @@ Administrators create an instance of **ClusterLogForwarder** which defines which
 
 
 Following are the additions to the InputSpec:
+
 * Application Input
 ```yaml
     spec:
     - name: my-app
       application:
-        namespaces: []           #exact string or glob
-        excludeNamespaces: []    #exact string or glob
+        namespaces: []           #deprecated: exact string or glob
+        includes:
+        - container:             #exact string or glob
+          namespace:             #exact string or glob
+        excludes:
+        - container:             #exact string or glob
+          namespace:             #exact string or glob
         selector:                #metav1.LabelSelector
           matchLabels: []
           matchExpressions:
           - key:
             operator:
             values: []
-        containers:
-          include: []            #exact string or glob
-          exclude: []            #exact string or glob
 ```
+
+**NOTE:** *application.namespaces* field is deprecated.
+
 ```golang
    type Application struct {
      Namespaces        []string
-     ExcludeNamespaces []string
+     Includes          *NamespaceContainerGlob
+     Excludes          *NamespaceContainerGlob
      Selector          *metav1.LabelSelector
-     Containers        *GlobSpec
    }
 
 
-   type GlobSpec struct {
-     Include []string
-     Exclude []string
+   type NamespaceContainerGlob struct {
+     Namespace string
+     Container string
    }
 ```
+
 * Infrastructure Input
 ```yaml
     spec:
     - name: my-infra
       infrastructure:
-        include: ["node","container"]
+        sources: ["node","container"]
 
 ```
 ```golang
    type Infrastructure struct {
-     Includes     []InfrastructureSource
+     Sources     []string
    }
 
-
-   type InfrastructureSource string
    const (
-     InfrastructureSourceNode InfrastructureSource      = "node"
-     InfrastructureSourceContainer InfrastructureSource = "container"
+     InfrastructureSourceNode string      = "node"
+     InfrastructureSourceContainer string = "container"
    )
 ```
+
 * Audit Input
 ```yaml
     spec:
     - name: my-audit
       audit:
-        include: ["kubeAPI","openshiftAPI","auditd","ovn"]
+        sources: ["kubeAPI","openshiftAPI","auditd","ovn"]
 ```
 ```golang
    type Audit struct {
-     Includes     []AuditSource
+     Sources     []string
    }
 
-
-   type AuditSource string
    const (
-     AuditSourceKube AuditSource      = "kubeAPI"
-     AuditSourceOpenShift AuditSource = "openShiftAPI"
-     AuditSourceAuditd AuditSource    = "auditd"
-     AuditSourceOVN AuditSource       = "ovn"
+     AuditSourceKube string      = "kubeAPI"
+     AuditSourceOpenShift string = "openShiftAPI"
+     AuditSourceAuditd string    = "auditd"
+     AuditSourceOVN string       = "ovn"
    )
 ```
 
@@ -195,11 +199,11 @@ The operator will validate resources upon reconciliation of a **ClusterLogForwar
 
 
 * The **ClusterLogForwarder** CR defines a valid spec
-* Input spec fields that are "globs" (i.e. Namespace, container) match RE: '`[a-zA-Z0-9\*]*`'
+* Input spec fields that are "globs" (i.e. Namespace, container) match RE: '`^[a-zA-Z0-9\*]*$`'
 * Input field 'selector' is a valid metav1.LabelSelector 
 * Input enum fields accept only the values listed
-* type "infrastructure" include specs at least one value
-* type "audit" include specs at least one value
+* type "infrastructure" sources specs at least one value
+* type "audit" sources specs at least one value
 
 
 ##### Examples
@@ -218,13 +222,13 @@ Following is an example of a **ClusterLogForwarder** that redefines "infrastruct
         application:
           namespaces:
           - openshift*
-          - mycompany-infra*
-          containers:
-            excludes:
-            - istio*
+          includes:
+          - namespace: mycompany-infra*
+          excludes:
+          - container: istio*
       - name: my-node-logs
         infrastructure:
-          include: ["node"]
+          sources: ["node"]
       pipelines:
        - inputRefs:
          - my-infra-container-logs

@@ -25,7 +25,9 @@ if [ -z "$DAYSBACK" ]; then
     DAYSBACK=$(expr ${today_num} - ${latest_num})
 fi
 
-(cd ./tools; go run ./main.go report --days-back $DAYSBACK) > this-week/${REPORT_FILE}
+pushd ./tools
+go run ./main.go report --days-back $DAYSBACK > ../this-week/${REPORT_FILE}
+popd
 
 git checkout -b twie-${TODAY}
 git add this-week/${REPORT_FILE}

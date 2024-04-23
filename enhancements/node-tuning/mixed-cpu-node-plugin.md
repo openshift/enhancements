@@ -166,21 +166,21 @@ The following table shows the shared-cpus origin in each flow:
 | Enable    | Enable           | All cpus - `reserved` - `isolated` | 
 
 #### Workload configuration
-A workload that wants to access the shared cpu should request for `openshift.io/enabled-shared-cpus` under its spec.
-The `openshift.io/enabled-shared-cpus` should be treated as a boolean value.
+A workload that wants to access the shared cpu should request for `workload.openshift.io/enable-shared-cpus` under its spec.
+The `workload.openshift.io/enable-shared-cpus` should be treated as a boolean value.
 In other words, the resource request only uses as a hint that shared-cpus required for the container and
 does not indicate any actual value.
 
 For example:
 ```yaml
 requests:
-   openshift.io/enabled-shared-cpus: 1
+  workload.openshift.io/enable-shared-cpus: 1
 ```
 Fine.
 
 ```yaml
 requests:
-   openshift.io/enabled-shared-cpus: 2
+  workload.openshift.io/enable-shared-cpus: 2
 ```
 Wrong. An error will be returned to the user explaining how to fix the pod spec.
 
@@ -197,29 +197,31 @@ will be present under the container's environment variables:
 Those environment variables help the application's user to pin its processes/threads to the desired CPU set. 
 
 #### Kubelet
-Kubelet needs to be updated to advertise the `openshift.io/enabled-shared-cpus` resources 
+Kubelet needs to be updated to advertise the `workload.openshift.io/enable-shared-cpus` resources 
 as [Extended Resources](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#extended-resources).
-Kubelet will look for a configuration file `/etc/kubernetes/openshift-shared-cpus`, to enable the resource advertisement.
+Kubelet will look for a configuration file `/etc/kubernetes/openshift-workload-mixed-cpus`, to enable the resource advertisement.
 The configuration file should be look like this (the number of resources might be varied)
 ``` json
 {
-  "shared-cpus": {
-     "containersLimit": "15"
+  "shared_cpus": {
+     "containers_limit": "15"
   }
 }
 ```
-`containersLimit` limit the number of containers that can access the shared cpus in parallel.
-At first, this number will be static, and based on user feedback, we can make it configurable.
+`containers_limit` limit the number of containers that can access the shared cpus in parallel.
+At first, this number will be static (256), and based on user feedback, we can make it configurable.
 
 #### API Server Admission Hook
 A new admission hook for [OpenShift Kubernetes API Server](https://github.com/openshift/kubernetes/tree/master/openshift-kube-apiserver/admission)
 will be added for handling the following:
-1. In case a user specifies more than a single `openshift.io/enabled-shared-cpus` resource, it rejects the pod request with an error explaining the user how to fix its pod spec.
+1. In case a user specifies more than a single `workload.openshift.io/enable-shared-cpus` resource, it rejects the pod request with an error explaining the user how to fix its pod spec.
 2. It adds an annotation `cpu-shared.crio.io` that will be used to tell the runtime that shared cpus were requested.
 For every container requested for shared cpus, it adds an annotation with the following scheme:
 `cpu-shared.crio.io/<container name>`
 In addition, the `cpu-shared.crio.io` annotation needs 
-to be added under the performance-runtime [allowed_annotation](https://github.com/openshift/cluster-node-tuning-operator/blob/master/assets/performanceprofile/configs/99-runtimes.conf#L20)   
+to be added under the performance-runtime [allowed_annotation](https://github.com/openshift/cluster-node-tuning-operator/blob/master/assets/performanceprofile/configs/99-runtimes.conf#L20)
+3. It allows pod to request for `workload.openshift.io/enable-shared-cpus` resource, only it resides within  
+a namespace with `workload.mixedcpus.openshift.io/allowed: ""` annotation
 
 #### CRI-O
 CRI-O will be updated to add a new performance hook to support the shared-cpu logic.
@@ -320,7 +322,7 @@ The premise is that OCP cluster is running, and there's an active performance-pr
 3. The cluster administrator waits for MCO to kick in, update and reboot the nodes.
 4. The cluster administrator waits for the node to come back from reboot.
 5. The application administrator wants to deploy their DPDK application as a Guaranteed pod with shared CPUs.
-6. The application administrator specifies a request for `openshift.io/enabled-shared-cpus: 1` under the pod's `spec.containers[].resources.requests`.
+6. The application administrator specifies a request for `workload.openshift.io/enable-shared-cpus: 1` under the pod's `spec.containers[].resources.requests`.
 7. The application administrator is waiting for the DPDK pod to be `Running`.
 8. The DPDK's app user/developer wants to run a light-weight task (threads) on shared cpus.
 9. The DPDK's app user/developer should pin the light-weight threads to CPUs that have shown in the `OPENSHIFT_SHARED_CPUS` environment variable of the container's process.
@@ -328,7 +330,7 @@ The premise is that OCP cluster is running, and there's an active performance-pr
 
 ### API Extensions
 A new admission hook in the Kubernetes API Server within OpenShift will 
-mutate pod spec if more than a single `openshift.io/enabled-shared-cpus` was requested 
+mutate pod spec if more than a single `workload.openshift.io/enable-shared-cpus` was requested 
 and annotate the pod with `cpu-shared.crio.io` annotation as describe at API Server Admission Hook [section](#api-server-admission-hook)
 
 ### Risks and Mitigations
@@ -358,7 +360,7 @@ better integration would require more invasive changes which are out of scope no
 N/A
 
 ### Enabling Feature
-A new feature gate will be defined for this feature (e.g. `MixedCPUAllocation`).
+A new feature gate will be defined for this feature (e.g. `MixedCPUsAllocation`).
 
 Multiple components affected by this feature:
 * Cluster-Node-Tuning-Operator
@@ -413,15 +415,20 @@ N/A
 N/A
 
 ## Implementation History
-N/A
+
+* Kubelet changes: https://github.com/openshift/kubernetes/pull/1795
+* Admission plugin changes:  https://github.com/openshift/kubernetes/pull/1799
+* NTO changes: https://github.com/openshift/cluster-node-tuning-operator/pull/853
+* CRI-O changes: https://github.com/cri-o/cri-o/pull/7502
+* CI job added to NTO: https://github.com/openshift/release/pull/46767
 
 ## Alternatives
 * Taint the nodes with `NoSchedule`, `NoExecute` in order to keep the node from scheduling/run on nodes when
 the plugin is not ready (critical for reboot scenarios). 
-This replaces the `openshift.io/enabled-shared-cpu` request and eliminate the need in device plugin API.
+This replaces the `workload.openshift.io/enable-shared-cpus` request and eliminate the need in device plugin API.
 
 Pros:
-1. Using an annotation for shared-cpus request which is more descriptive than the `openshift.io/enabled-shared-cpu` request
+1. Using an annotation for shared-cpus request which is more descriptive than the `workload.openshift.io/enable-shared-cpus` request
 which is fitter for counted resources while here it's a static request.
 2. simplifies the node-plugin by removing the device plugin implementation part.
 

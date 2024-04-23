@@ -569,7 +569,10 @@ When a core operator exposes Prometheus metrics, it should comply with the follo
    should be configured with TLS client certificate only (the certificate path to
    use is `/etc/prometheus/secrets/metrics-client-certs/tls.crt` and the key
    path is `/etc/prometheus/secrets/metrics-client-certs/tls.key`).
-3. It should support local authorization and always allow the well-know metrics
+3. It should read the [API server's TLS security
+   profile](https://github.com/openshift/api/blob/be926bb0d7511bd4e11519f794cd71df60454a31/config/v1/types_apiserver.go#L53-L59)
+   to determine the allowed TLS versions and ciphers.
+4. It should support local authorization and always allow the well-known metrics
    scraping identity
    (`system:serviceaccount:openshift-monitoring:prometheus-k8s`) to access the
    /metrics endpoint. It may support delegated authorization check.
@@ -582,3 +585,22 @@ For guidance about how to implement the requirements in practice, refer to the
 RHOBS handbook's ["Collecting metrics with
 Prometheus"](https://rhobs-handbook.netlify.app/products/openshiftmonitoring/collecting_metrics.md/)
 page.
+
+#### TLS configuration
+
+When a component configures TLS for an internal service that belongs to that
+component, such as the component's metrics endpoint or admission webhook, the
+component should use the ciphers and minimum TLS version that are specified in
+the [TLS security profile](enhancements/kube-apiserver/tls-config.md) in the
+cluster [APIServer
+config](https://github.com/openshift/api/blob/be926bb0d7511bd4e11519f794cd71df60454a31/config/v1/types_apiserver.go#L53-L59).
+
+Components generally should not have TLS settings that can be configured
+independently from the APIServer's.  Exceptions to this rule require staff-eng
+approval.  Any component that does define its own TLS configuration API must
+re-use [the TLS security profile
+types](https://github.com/openshift/api/blob/be926bb0d7511bd4e11519f794cd71df60454a31/config/v1/types_tlssecurityprofile.go)
+and use the settings in the cluster APIServer config as the default settings for
+the component.  For example, see [the TLSSecurityProfile configuration in the
+IngressController
+API](https://github.com/openshift/api/blob/be926bb0d7511bd4e11519f794cd71df60454a31/operator/v1/types_ingress.go#L168-L179).

@@ -9,7 +9,7 @@ reviewers:
 approvers:
   - "@russelb"
 creation-date: 2020-08-26
-last-updated: 2022-10-26
+last-updated: 2023-11-23
 status: informational
 ---
 
@@ -98,6 +98,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9193  | cluster-machine-approver-capi ||| cluster infra | 4.11 | metrics |
 | 9194  | cluster-machine-approver-capi ||| cluster infra | 4.11 | metrics |
 | 9200-9219  | various CSI drivers ||| storage | 4.8 | metrics |
+| 9257  | cluster-cloud-controller-manager-operator ||| cluster infra | 4.15 | metrics, control plane only |
 | 9258  | cluster-cloud-controller-manager-operator ||| cluster infra | 4.9 | metrics, control plane only |
 | 9300  | kube-proxy ||| sdn | 4.12 | metrics, ingress node firewall |
 | 9301  | kube-proxy ||| sdn | 4.12 | metrics, ingress node firewall |
@@ -106,6 +107,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9446  | baremetal-operator || yes | metal | 4.9 | healthz; baremetal provisioning |
 | 9447  | baremetal-operator || yes | metal | 4.10 | webhook; baremetal provisioning |
 | 9448  | run-once-duration-override-operator ||| workloads | 4.13 | webhook; run-once-duration-override |
+| 9449  | cli-manager ||| workloads | 4.16 | HTTPS routes; cli-manager |
 | 9537  | crio      ||| node || metrics |
 | 9641  | ovn-kubernetes northd || yes | sdn | 4.3 | ovn-kubernetes only |
 | 9642  | ovn-kubernetes southd || yes | sdn | 4.3 | ovn-kubernetes only |
