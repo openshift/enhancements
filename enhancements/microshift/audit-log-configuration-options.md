@@ -143,7 +143,7 @@ The kube-apiserver provides three CLI flags to dictate log rotation and retentio
 
 * `--audit-log-maxage` defines the maximum number of days to retain old audit log files.  MicroShift defaults to 0, disabling the age limit.
 * `--audit-log-maxbackup` defines the maximum number of audit log files to retain. MicroShift defaults to 10 files.
-* `--audit-log-maxsize` defines the size of rotated log files in megabytes. Kube-apiserver overrides a 0 value to 100MB.  If unset, MicroShift default is 200MB.
+* `--audit-log-maxsize` defines the size of rotated and live log files in megabytes. Kube-apiserver overrides a 0 value to 100MB.  If unset, MicroShift default is 200MB.
 
 Thus, the default maximum storage consumption of audit logs will be 2000Mb, provided all files are younger than 10 days.
 
