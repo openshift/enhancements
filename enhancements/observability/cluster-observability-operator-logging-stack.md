@@ -15,7 +15,7 @@ api-approvers:
   - "@simonpasquier"
   - "@alanconway"
 creation-date: 2024-02-19
-last-updated: 2024-02-20
+last-updated: 2024-04-24
 tracking-link:
   - https://issues.redhat.com/browse/LOG-5114
 see-also:
@@ -44,10 +44,10 @@ This document proposes a solution and a delivery plan for a unified installation
 
 ## Background
 
-OpenShift Logging is a multi-purpose product composed of two operators CLO (managing collection/normalization/forwarding) and LO (managing Loki-based storage, rules and alerts). Over time the two following usage themes emerged:
+OpenShift Logging is a multi-purpose product composed of two operators CLO (managing collection/normalization/forwarding) and LO (managing Loki-based storage, rules and alerts). Over time two main usage themes emerged:
 
-1. **Collection and Forwarding only**: This theme emerges in customer environments where storage and visualization are outsourced to third-party solutions (e.g. AWS Cloudwatch, Apache Kafka, Splunk). The requirements emphasize the need to export logs from a cluster **only** and focus on the efficiency aspects of that task (e.g. tuning, filtering, pruning, etc.).
-2. **All-In-One stack**: This theme has been at the product's core since inception. It manifests in a single custom resource namely `ClusterLogging` to manage the installation of all components (collection/normalization/forwarding, storage and visualization). However, migrating to Loki-based storage as well as an OpenShift Console based visualization enabled more configuration flexibility but at the expense of installation/upgrade user experience, i.e.:
+1. **Collection and Forwarding only**: This theme can be found in customer environments where storage and visualization are outsourced to third-party solutions (e.g. AWS Cloudwatch, Apache Kafka, Splunk). The emphasis is on **just** exporting logs from a cluster. The main focus lays on the efficiency aspects (e.g. tuning, filtering, pruning, etc.).
+2. **All-In-One stack**: This is the product core theme since inception. It is expressed as a single custom resource namely `ClusterLogging` to manage the installation of all components (collection/normalization/forwarding, storage and visualization) which is deprecated and will be removed in 6.0. In addition, the migration from Elasticsearch to Loki storage and from Kibana to OpenShift Console based visualization enabled more flexibel configuration but at the expense of installation/upgrade user experience, i.e.:
     1. The `ClusterLogging` resource does not directly manage the Loki-based storage installation (as previously with `Elasticsearch`). Nowadays it is an installation prerequisite, by the user, to create a `LokiStack` resource.
     2. The OpenShift Console visualization plugin namely [logging-view-plugin](logging-view-plugin) is not installed/upgraded by any resource. The user can **only** opt-in to use it when installing CLO.
 
@@ -55,33 +55,35 @@ Therefore this proposal aims to address the challenges users face when they foll
 
 ## Motivation
 
-Red Hat Observability products underwent similar inception and evolution paths as OpenShift Logging to gradually support a variety of customer environments: on-premises, OpenShift Dedicated and Managed Services.
+Red Hat Observability products followed similar evolution paths as OpenShift Logging by gradually adding support for a variety of customer environments: on-premises, OpenShift Dedicated and Managed Services.
 
-Even though each product's development lifecycle is and should stay independent the sheer amount of installation/upgrading procedures impose a high tax on users. Auxiliary components that unify user experience under the hood of the OpenShift Console as well as emerging ones like correlation applify this negative impact over the product lifecycles.
+Even though each product's development lifecycle is and should stay independent the sheer amount of installation/upgrading procedures impose a high tax on users. Auxiliary components that unify user experience under the hood of the OpenShift Console as well as emerging ones like correlation amplifies this trend.
 
 As a result, to enhance user experience with OpenShift Observability products this proposal aims to be a foundation for future observability enhancements on:
 
-* How to declaratively request the installation and/or upgrade of a specific Observability signal without applying separate procedures each time.
+* How to declaratively install/upgrade each Observability product without applying separate procedures each time using COO only.
 * How to uniformly handle the lifecycle, version skew and OpenShift Console dependencies of all Observability view plugins.
 * How to add more value across signals applying automation (i.e. enable correlation components, sharing scheduling primitives, labeling rules/alerts).
+
+Notwithstanding this proposal is limited to accomplish the above for the OpenShift Logging product only.
 
 ![coo-vision](./assets/coo-vision.png)
 
 ### User Stories
 
-As an OpenShift administrator, I want to install each observability capability creating a single custom resource, so I can easily set up custom-tailored observability for infrastructure and workloads.
+As an OpenShift administrator, I want to install the logging capability creating a single custom resource, so I can easily set up custom-tailored logging for infrastructure and workloads.
 
-As an OpenShift administrator, I want to upgrade each observability capability editing a custom resource, so I can focus only on post-upgrade steps.
+As an OpenShift administrator, I want to upgrade the logging capability editing a custom resource, so I can focus only on post-upgrade steps.
 
-As an OpenShift administrator, I want to edit observability components through underlying custom resoures, so I can improve overall reliability and performance of individual components when needed.
+As an OpenShift administrator, I want to edit loggging components through underlying custom resoures, so I can improve overall reliability and performance of individual components when needed.
 
 As an OpenShift administrator, I want to use metrics to logs correlation without additional installation procedure, so I can troubleshoot infrastructure/workloads by navigating from metrics to logs and vice versa.
 
 ### Goals
 
-* Provide a custom resource managed by the COO that is responsible for installing and upgrading the OpenShift Logging stack (i.e. operators and operands).
-* Provide a custom resource managed by the COO that is responsible for installing and upgrading each OpenShift Console observability UI plugin.
-* Provide automation for installing and upgrading correlation components when at least two observability signals are available.
+* Provide custom resources managed by the COO that are responsible for installing and upgrading the OpenShift Logging stack (i.e. operators and operands).
+* Provide a custom resource managed by the COO that is responsible for installing and upgrading the OpenShift Console logging UI plugin.
+* Provide automation for installing and upgrading correlation components when metrics and logging are available.
 
 ### Non-Goals
 
@@ -98,7 +100,7 @@ Two CRDs will be introduced namely `OperatorConfig` to manage installation of de
 
 For the OpenShift Logging administrator using the COO installation under the proposed system:
 
-1. The user goes to the console and creates a `OperatorConfig` resource. In this resource the user providers an OpenShift Logging subscription channel for both dependent operators (e.g. `stable-5.8`).
+1. The user goes to the console and creates an `OperatorConfig` resource. In this resource the user providers an OpenShift Logging subscription channel for both dependent operators (e.g. `stable-5.8`).
 2. The COO creates an `OperatorGroup` and `Subscription` for CLO in `openshift-logging` from the catalog source `redhat-operator` and namespace `openshift-marketplace`.
 3. The COO creates an `OperatorGroup` and `Subscription` for LO in `openshift-operators-redhat` from the catalog source `redhat-operator` and namespace `openshift-marketplace`.
 4. The COO tracks the corresponding `ClusterServiceVersions` for CLO and LO until they reach the phase `succeeded`.
@@ -130,7 +132,7 @@ The `OperatorConfig` resource is the entry point to tell COO on which operator i
 apiVersion: observability.openshift.io/v1alpha1
 kind: OperatorConfig
 metadata:
-  name:
+  name: coo-config
 spec:
   subscriptions:
   - type: logging
@@ -200,20 +202,38 @@ In summary although the above workflow is feasible, the present proposal does **
 
 The COO's design is centered around the Kubernetes Server-Side-Apply capability. In short it allows sharing resources between separate operator on the resource field level. However each OpenShift Logging resource has mandatory requirements on field when created. These fields will inevitably change management ownership from CLO/LO to the Cluster Obserbability Operator.
 
-In detail the following `ClusterLogging` fields will be managed by COO exclusively without allowing user edits:
+In detail the following `ClusterLogForwarder` fields will be managed by COO exclusively without allowing user edits:
+
 ```yaml
+apiVersion: observability.openshift.io/v1
+kind: ClusterLogForwarder
+metadata:
+  name: instance
+  namespace: openshift-logging
 spec:
-  managementState: Managed
-  logStore:
-    type: lokistack
-    lokistack:
-      name: <name-of-lokistack-resource>
-  collection:
-    type: vector
+  serviceAccount:
+    name: cluster-logging
+  outputs:
+  - type: lokistack
+    name: logging-loki
+    service:
+      name: logging-loki-lokistack-gateway-http
+  pipelines:
+  - inputRefs:
+    - application
+    - infrastructure
+    outputRefs:
+    - logging-loki
 ```
 
 Also the following `LokiStack` fields will be managed by COO and allowing user edits through the `LoggingStack` resource:
+
 ```yaml
+apiVersion: loki.grafana.com/v1
+kind: LokiStack
+metadata:
+  name: logging-loki
+  namespace: openshift-logging
 spec:
   storage:
     size: 1x.demo
@@ -230,9 +250,9 @@ When using Server-Side-Apply the implementation needs to be informed of several 
 1. Fields that have default values will inevitably show up being managed by the COO.
 2. List fields missing CRD markers such as OpenAPI `x-kubernetes-list-type` and `x-kubernetes-list-map-keys` the entire list is replaced which means the full list is managed by the COO.
 
-The first caveat is not relevant because neither `ClusterLogging` nor `LokiStack` resource make use of the `+kubebuilder:default` CRD marker in fields required for creation. The second once has severe impact on when managing `ClusterLogForwarder` resource. As per now the `ClusterLogForwarder` spec consists mainly of list fields namely `inputs`, `outputs` and `pipelines` where none is annotated with the OpenAPI `x-kubernetes-list-type` and `x-kubernetes-list-map-keys` markers. Therefore managing a `ClusterLogForwarder` via `LoggingStack` effectively means re-exposing the whole API which is considered harmful and on the opposite of the entire proposal.
+The first caveat is not relevant because the `LokiStack` resource is not using any of the `+kubebuilder:default` CRD marker in fields required for creation. The second once has severe impact on when managing `ClusterLogForwarder` resource. As per now the `ClusterLogForwarder` spec consists mainly of list fields namely `inputs`, `outputs` and `pipelines` where none is annotated with the OpenAPI `x-kubernetes-list-type` and `x-kubernetes-list-map-keys` markers. Therefore managing a `ClusterLogForwarder` via `LoggingStack` effectively means re-exposing the whole API which is considered harmful and on the opposite of the entire proposal.
 
-However, if future enhancements address use cases relevant for `LoggingStack` resources owning `ClusterLogForwarder` resources, then it will need the following markers:
+Therefore to address the above for `LoggingStack` owning a `ClusterLogForwarder` resource, the following markers will be needed on the `ClusterLogForwarder` CRD:
 * For `inputs`: The `x-kubernetes-list-type: map` in companion with `x-kubernetes-list-map-keys: ["name"]`.
 * For `outputs`: The `x-kubernetes-list-type: map` in companion with `x-kubernetes-list-map-keys: ["name"]`.
 * For `pipelines`: The `x-kubernetes-list-type: map` in companion with `x-kubernetes-list-map-keys: ["name"]`.
@@ -243,36 +263,36 @@ As above mentioned this proposal aims to move managing of UI relevant deployment
 
 When used with previous released CLO versions:
 1. COO creates a `Subscription` for CLO **without** enabling the Console plugin on the cluster-wide `Consoles` resource.
-2. COO creates a `ClusterLogging` resource setting `spec.visualization.type: console`.
+2. COO creates a `ClusterLogForwarder` resource with at least an output of type `lokistack` (See [API Extentions](#api-extensions)).
 2. CLO creates and continues managing the [logging-view-plugin](logging-view-plugin) deployment resource.
-3. COO patches the `Consoles` resource when reconciling the `ObserbabilityUIPlugin` resource owned by `LoggingStack`.
+3. COO patches the `Consoles` resource when reconciling the `UIPlugin` resource owned by `LoggingStack`.
 
 When used with future CLO version w/o [logging-view-plugin](logging-view-plugin) management:
 1. COO simply creates a `Subscription` for CLO to install the operator. A Console plugin option is omitted as not existing anymore.
-2. COO creates a `ClusterLogging` resource managing only `spec.collection` and `spec.logStorage`.
-3. COO creates a deployment for [logging-view-plugin](logging-view-plugin) when reconciling the `ObserbabilityUIPlugin` resource owned by `LoggingStack`.
-4. COO patches the `Consoles` resource when reconciling the `ObserbabilityUIPlugin` resource owned by `LoggingStack`.
+2. COO creates a `ClusterLogForwarder` resource with at least an output of type `lokistack` (See [API Extentions](#api-extensions)).
+3. COO creates a deployment for [logging-view-plugin](logging-view-plugin) when reconciling the `UIPlugin` resource owned by `LoggingStack`.
+4. COO patches the `Consoles` resource when reconciling the `UIPlugin` resource owned by `LoggingStack`.
 
 ### Cluster Obserbability Operator design impact managing OLM-based operators
 
-When an operator (i.e. COO) managing the installation/upgrade of further operators (i.e. CLO and LO) as well as resources owned by the managed operators, they key consideration should be on when managed CRDs will registered on the Kube APIserver. The registration event is a cornerstone for the kubernetes clientsets used in COO to reconcile shared custom resources such as `ClusterLogging` and `Lokistack`. In particular it is mandatory for client abstration such as `informers` and `listers` to execute **only** on resource known by the Kube APIserver.
+When an operator (i.e. COO) managing the installation/upgrade of further operators (i.e. CLO and LO) as well as resources owned by the managed operators, they key consideration should be on when managed CRDs will registered on the Kube APIserver. The registration event is a cornerstone for the kubernetes clientsets used in COO to reconcile shared custom resources such as `ClusterLogForwarder` and `Lokistack`. In particular it is mandatory for client abstration such as `informers` and `listers` to execute **only** on resource known by the Kube APIserver.
 
 Therefore the COO requires a major design overhaul that supports the following aspects:
 1. Independent reconciliation loops for installing/upgrading managed operators.
-2. Reconciliation loops for shared resources such as `ClusterLogging` and `Lokistack` only and only if registration of the corresponding CRD successful
+2. Reconciliation loops for shared resources such as `ClusterLogForwarder` and `Lokistack` only and only if registration of the corresponding CRD successful
 3. Robust signaling between the above two and in turn mindful setup and tear-down of underlying kubernetes clientsets/informers/listers.
 
 In summary the COO binary will hold two actively communicating sub-controllers each managing distinct aspects for an owned resource like `LoggingStack`, i.e.:
-1. **Operators-Controller**: This controller reconciles a `LoggingStack` resource into `OperatorGroup` and `Subscription` resources for CLO and LO only. It tracks success as well as failure conditions for each operator installation/upgrade phase on the `LoggingStack` status field.
-2. **Components-Controller**: This controller reconciles the same `LoggingStack` resource into the resources `ClusterLogging`, `LoggingStack` and `ObservabilityUIPlugin` that in turn install and manage the logging stack components (e.g. collection, storage and visualization plugin).
+1. **Operators-Controller**: This controller reconciles a `OperatorConfig` resource into `OperatorGroup` and `Subscription` resources for CLO and LO only. It tracks success as well as failure conditions for each operator installation/upgrade phase on the `LoggingStack` status field.
+2. **Components-Controller**: This controller reconciles the same `LoggingStack` resource into the resources `ClusterLogForwarder`, `LoggingStack` and `UIPlugin` that in turn install and manage the logging stack components (e.g. collection, storage and visualization plugin).
 
 ### LoggingStack status conditions
 
-To effectively track the success/failure status at any point in time of the managed operators (i.e. CLO and LO), the following conditions will be aggregated from OLM resources into the `LoggingStack` status conditions:
+To effectively track the success/failure status at any point in time of the managed operators (i.e. CLO and LO), the following conditions will be aggregated from OLM resources into the `OperatorConfig` status conditions:
 1. TBD
 2. ...
 
-To effectively track the success/failure status of the managed but shared custom resources, the following conditions will be aggregated from the `ClusterLogging` and `LokiStack` resources into the `LoggingStack` status conditions:
+To effectively track the success/failure status of the managed but shared custom resources, the following conditions will be aggregated from the `ClusterLogForwarder` and `LokiStack` resources into the `LoggingStack` status conditions:
 1. TBD
 2. ...
 
@@ -282,7 +302,7 @@ Finally the following conditions will be managed in the `LoggingStack` status co
 
 ### Automated korrel8r deployment management
 
-A separate controller namely `correlation_controller` will be introduced in the Cluster Obserbability Operator watching only on create and delete events of `MonitoringStack` and `LoggingStack` resources. If both exist the [korrel8r](korrel8r) deployment will be fully automated on the COO installation namespace.
+A separate controller namely `correlation_controller` available in the Cluster Obserbability Operator will be adapted to watch for `LoggingStack` events in addition to `MonitoringStack`. If both exist the [korrel8r](korrel8r) deployment will be fully automated on the COO installation namespace.
 
 #### Automated korrel8r deployment with CMO/UWM
 
@@ -297,9 +317,7 @@ For OpenShift environments still depending on Cluster-Monitoring-Operator managi
 ### Drawbacks
 
 The key threats of the above design that could lead to poor user experience and maybe higher migration/maintenance burden are:
-1. If and when the Operator Framework switches from existing resources (i.e. `Subscription` and `ClusterServiceVersion`) to new resources designed for multi-tenancy and allowing co-hosting multiple version of the same operator, will eventually mean a rewrite the entire machinery managing for example a `LoggingStack` resource.
-2. Lifting the current limitation from allowing a single `LoggingStack` to multiple ones requires to manage upgrade paths from `ClusterLogForwarder/v1` to the upcoming `ClusterLogForwarder/v2` CRD. This tasks is considered to be undertaken by a conversion webhook in CLO but uncertain if and when it materializes. Thus the COO complexity might grow over time to supplement missing behavior as such to cope with user expectations.
-
+1. If and when the Operator Framework switches from existing resources (i.e. `Subscription` and `ClusterServiceVersion`) to new resources designed for multi-tenancy and allowing co-hosting multiple version of the same operator, will eventually mean a rewrite the entire machinery managing for example a `OperatorConfig` resource.
 
 ## Open Questions [optional]
 
