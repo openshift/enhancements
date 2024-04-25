@@ -472,8 +472,6 @@ However, it will consume a certain amount of CPU and memory on each worker node 
 These consumptions must be bounded to avoid disrupting the user workload.
 
 Scanning containers will also increase the time to collect insights by the operator. The workload gatherer is performed every 12 hours and its execution will depend on the number of containers that are scanned.
-	
-In the existing initial implementation of the container scanner, it takes __~180 ms to scan a single container__.
 
 ---
 **TBD** Provide measures of resource consumption (memory and CPU)
@@ -506,14 +504,12 @@ The products are mentioned in the section not as alternatives but to give a comp
 
 A new Git repository is needed to contain the code of the container scanner image.
 
-This code could alternatively be put inside the https://github.com/openshift/insights-operator Git repository. However a separate Git repo for the container scanner would help maintain and improve it without affecting its integration in the Insights Operator directly.
+As this enhancement is integrated into the OpenShift Insights Operator, this code repository should go in the same organization and live in the  https://github.com/openshift/insights-operator-runtime (that does not exist at the moment).
 
-Continuous Integration for the container scanner needs to be in place to test and qualify it before updates in the Insights Operator.
+The code from this repository will be delivered as a container image pushed to `quay.io/openshift/origin-insights-operator-runtime:latest` (that does not exist at the moment)
 
-A container registry is needed to store the container scanner image. 
+Continuous Integration for the container scanner needs to be in place to test and qualify it before it is updated in the Insights Operator.
 
----
-**TBD** Determine ownership of the container scanner, its maintenance, and support policy.
+The maintenance and development of the container scanner is tied and integrated into the OpenShift Insights Operator releases.
 
----
-
+Issue management must comply to the OpenShift Container Platform issue tracker. It can be under the [existing component for the Insights Operator](https://issues.redhat.com/issues/?jql=project%20%3D%20OCPBUGS%20AND%20component%20%3D%20%22Insights%20Operator%22) as it is ultimately the component that delivers its capabilities.
