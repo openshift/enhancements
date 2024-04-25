@@ -429,7 +429,6 @@ As the container scanner is sanitizing the data extracted from the containers, i
 
 The Insights Operator must be able to deploy the container scanner from an image that is available by default in the cluster image registry.
 
-How can we configure a _related image_ in the Insights Operator from its `ClusterVersion` What is the equivalent of a ClusterServiceVersion (CSV)’s `.spec.relatedImages` for OpenShift cluster operators?
 
 ## Test Plan
 
@@ -523,7 +522,8 @@ A new Git repository is needed to contain the code of the container scanner imag
 
 As this enhancement is integrated into the OpenShift Insights Operator, this code repository should go in the same organization and live in the  https://github.com/openshift/insights-operator-runtime (that does not exist at the moment).
 
-The code from this repository will be delivered as a container image pushed to `quay.io/openshift/origin-insights-operator-runtime:latest` (that does not exist at the moment)
+The code from this repository will be delivered as a container image pushed to `quay.io/openshift/origin-insights-operator-runtime:latest` (that does not exist at the moment).
+This image will be made available by default in cluster installations by being listed as an [image reference](https://github.com/openshift/insights-operator/blob/master/manifests/image-references) on the OpenShift Insights operator.
 
 Continuous Integration for the container scanner needs to be in place to test and qualify it before it is updated in the Insights Operator.
 
