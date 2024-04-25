@@ -104,20 +104,25 @@ This new `workloadRuntimeInfoContainer` is defined as:
 
 ```go
 type workloadRuntimeInfoContainer struct {
-   // Hash of the identifier of the Operating System
-   Os string `json:"os,omitempty"`
-   // Hash of the version identifier of the Operating System
-   OsVersion string `json:"osVersion,omitempty"`
-   // Hash of identifier of the kind of runtime
-   Kind string `json:"kind,omitempty"`
-   // Hash of the version of the kind of runtime
-   KindVersion string `json:"kindVersion,omitempty"`
-   // Hash of the entity that provides the runtime-kind implementation
-   KindImplementer string `json:"kindImplementer,omitempty"`
-   // Hash of the name of the runtime used to run the application in the container
-   Name string `json:"name,omitempty"`
-   // Hash of the version of the runtime used to run the application
-   Version string `json:"version,omitempty"`
+	// Hash of the identifier of the Operating System (based on /etc/os-release ID)
+	Os string `json:"os,omitempty"`
+	// Hash of the version identifier of the Operating System (based on /etc/os-release VERSION_ID)
+	OsVersion string `json:"osVersion,omitempty"`
+	// Identifier of the kind of runtime
+	Kind string `json:"kind,omitempty"`
+	// Version of the kind of runtime
+	KindVersion string `json:"kindVersion,omitempty"`
+	// Entity that provides the runtime-kind implementation
+	KindImplementer string `json:"kindImplementer,omitempty"`
+	// Runtimes components
+	Runtimes []RuntimeComponent `json:"runtimes,omitempty"`
+}
+
+type RuntimeComponent struct {
+	// Name of a runtime used to run the application in the container
+	Name string `json:"name,omitempty"`
+	// The version of this runtime
+	Version string `json:"version,omitempty"`
 }
 ```
 
@@ -151,7 +156,7 @@ The additional data are:
     * Raw value (based on the existence of various files in the containers, eg  `$JAVA_HOME/release` for Java)
     * Optional
     * Value is a hash of the detected implementers: `Red Hat, inc., Oracle Corporation, Eclipse Adoptium` (list not exhaustive)
-* Runtime Information - The container scanner can selectively identify runtime libraries/frameworks that run in the containers.
+* Runtime Information - The container scanner can selectively identify runtime libraries/frameworks that run in the containers. They are represented with the `RuntimeComponent` type that has the fields:
   * __`Name`__ - Name of the runtime used to run the application in the container
     * Derived value (set by the container scanner)
     * Optional - based on the capabilities of the container scanner to detect such runtimes
@@ -172,8 +177,12 @@ It is not planned to add more fields to the `workloadRuntimeInfoContainer` type.
   "kind": "wbpgzhNYZQOi",
   "kindVersion": "cAsoUDy8JFNV",
   "kindImplementer": "DzP5-GS6tDOQ",
-  "name": "zBVuVhrrC_vC",
-  "version": "lyAE7Oh63WPU"
+  "runtimes": [
+    {
+      "name": "zBVuVhrrC_vC",
+      "version": "lyAE7Oh63WPU"
+    }
+  ]
 }
 ```
 
@@ -186,8 +195,12 @@ As the values are derived by the container scanner or correspond to software ver
   "kind": "Java",
   "kindVersion": "17.0.7",
   "kindImplementer": "Red Hat, Inc.",
-  "name": "Quarkus",
-  "version": "2.13.8.Final-redhat-00004"
+  "runtimes": [
+    {
+      "name": "Quarkus",
+      "version": "2.13.8.Final-redhat-00004"
+    }
+  ]
 }
 ```
 
@@ -264,8 +277,12 @@ The Insights Operator communicates with the Container Scanner pods deployed by i
         "runtime-kind": "Java",
         "runtime-kind-version": "17.0.8",
         "runtime-kind-implementer": "Red Hat, Inc.",
-        "runtime-name": "Quarkus",
-        "runtime-version": "3.4.1"
+        "runtimes": [
+          {
+            "name": "Quarkus",
+            "version": "3.4.1",
+          }
+        ],
       },
       "cri-o://yyyy": {
         "os-release-id": "rhel",
@@ -384,7 +401,7 @@ For a 8-worker node with 800 containers, assuming the containers are spread even
 
 The additional data in the `workloadRuntimeInfoContainer` will increase the size of the insights payload that is archived and sent to Red Hat backends.
 
-At most, the additional data adds __~200 uncompressed bytes per WorkloadContainerShape in the JSON payload__.
+The additional data adds __~200 uncompressed bytes per WorkloadContainerShape in the JSON payload__.
 
 This additional payload does not scale with the number of pods but with the number of `WorkloadContainerShape` which is difficult to estimate. There is an upper limit of 8000 pods
 in the Insights operator but that does not give a limit on the number of containers. It is also very likely that some of the pods are replicas and their containers would only count for 1 `WorkloadContainerShape` in their gathered data.
