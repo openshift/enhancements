@@ -639,6 +639,7 @@ See also
    in openshift/api.
 2. [CVO conditional manifests](https://github.com/openshift/enhancements/blob/6704279c30e975368f6f6fa5b6b7ee00adf4aeb9/enhancements/update/cvo-techpreview-manifests.md)
    in openshift/enhancements.
+3. [Process](https://github.com/openshift/enhancements/blob/b99a80d976385faa87f251dbbcd4260a37406921/dev-guide/featuresets.md#id-like-to-declare-a-feature-accessible-by-default--what-is-the-process) for declaring a feature Accessible-by-default
 
 This capability is important to use because it requires users to opt-in for TechPreview functionality on their cluster
 and prevents the accidental usage of TechPreview fields and types on production clusters.
