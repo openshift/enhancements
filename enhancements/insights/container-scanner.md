@@ -208,7 +208,7 @@ As the values are derived by the container scanner or correspond to software ver
 
 In its existing implementation, the OpenShift Insights Operator periodically gathers workload data every 12 hours.
 
-The Operator iterates over containers in the cluster (up to a limit of 8000) and captures their Image ID and entry points.
+The Operator iterates over pods in the cluster (up to a limit of 8000) and, for each pod's containers, captures their Image ID and entry points.
 
 When the operator starts gathering workload information, it would first gather runtime information for all the containers running on the cluster's worker nodes and then
 populate the existing gathered info with these additional runtime information.
@@ -221,14 +221,14 @@ The DaemonSet for the container scanner is deployed on-demand when the operator 
 
 From the operator perspective, the Container Scanner is a black box, and its requirements are:
 
-* Deploy the container scanner `DaemonSet` when gathering workload is starting
+* Create the container scanner `DaemonSet` when gathering workload is starting
   * The DaemonSet pods are doing nothing when they start. The operator must wait until it is ready and if that takes too long, gather workload without scanning the containers. In that case, an error will be reported by the operator in the archive’s gathers.json file in the `"workloads/workload_info"` section.
   * The container scanner image must be present in the cluster at installation. The existing tolerations of the Insights Operator should be sufficient to cover the container scanner execution..
 * Determine the Pod name of each container-scanner’s Pod (as the container scanner is deployed as a DaemonSet, there is a single pod instance on each worker node) and map it to its worker node.
   * There is no service exposing the Container Scanner and its pods are accessed directly.
-* When the operator starts gathering workload information, execute the  `/scan-containers` executable on each container-scanner pod. The executable will output a JSON payload that represents a tree of `namespace/pod-name/container-id/runtime-info`. 
-* Undeploy the container scanner when all containers have been scanned.
-  * If the DaemonSet can not be properly undeployed in a timely fashion, an error will be reported by the operator and its resources pruned.
+* When the operator starts gathering workload information, execute the  `/scan-containers` executable on each container-scanner pod. The executable will return a JSON payload in the standard output that represents a tree of `namespace/pod-name/container-id/runtime-info`.
+* Delete the container scanner when all containers have been scanned.
+  * If the DaemonSet can not be properly deleted in a timely fashion, an error will be reported by the operator and its resources pruned.
 * As the operator iterates over the containers in the cluster, check if there is a runtime-info entry for the `namespace/pod-name/container-id` and add it to the existing `workloadContainerShape` (after hashing all the values)
 
 The container scanner functionality is provided by an image that must be pullable from the `openshift-insights` namespace and present in the cluster at installation.
@@ -307,7 +307,7 @@ The Insights Operator communicates with the Container Scanner pods deployed by i
 
 Scanning a container is achieved by running on the same worker node that the scanned container and looking at the host process table. The container scanner enters the container’s process namespaces to extract meaningful information about the runtime stack.
 
-The extraction of data from the running container is achieved by executing “fingerprint” executables in the process `mnt` namespace to find the relevant information by reading specific files. These fingerprints executables are self-contained executables
+The extraction of data from the running container is achieved by executing “fingerprint” executables in the process `mnt` namespace to find the relevant information by reading specific files (e.g. the `Os` and `OsVersion` values are read from the `/etc/os-release` file if it is present). These fingerprints executables are self-contained executables
 
 This cannot be achieved by a program running in the OpenShift Insights Operator deployment.
 This requires an additional resource for the operator, which is a DaemonSet that would deploy a “container scanner” image on all the cluster worker nodes.
@@ -332,7 +332,7 @@ The fingerprint programs are written in Rust (with some written in Go).
 This image would contain a set of commands to:
 
 * Find the running containers and their root PID based with the `crictl` tool
-* Scan running containrers
+* Scan running containers
 * Run “fingerprints”, self-contained executables that run in the container’s process namespaces to identify what the container is running.
 
 Due to the self-contained nature of these commands, the container scanner is built from scratch (and not from an existing base image).
