@@ -6,13 +6,13 @@ reviewers:
   - "@damdo" # Cluster API and Machine API maintainer
   - "@nrb" # Cluster API and Machine API maintainer
   - "@mdbooth" # OpenStack Cluster API and Machine API maintainer
-  - "2uasimojo" # Hive maintainer
+  - "@2uasimojo" # Hive maintainer
 approvers: 
-  - "@vincepri" # Cluster API maintainer within OpenShift
+  - "@elmiko"
 api-approvers:
   - "@deads2k"
 creation-date: 2023-08-30
-last-updated: 2024-03-19
+last-updated: 2024-04-30
 tracking-link: 
   - https://issues.redhat.com/browse/OCPCLOUD-1578
 see-also: []
@@ -120,7 +120,7 @@ We will implement a two-way sync controller that synchronises Machines and relat
 Using a new field on the Machine API resource, users will be able to choose which API is authoritative.
 Any discrepancy between the non-authoritative resource and the authoritative resource will be overwritten by the sync controller to match the authoritative resource.
 
-When the API is non-authoritative, the controllers should be paused (ignore the resource),
+When the API is non-authoritative, the resources should be paused (the controllers should ignore the resource),
 allowing the authoritative API’s controller to perform the reconciliation actions required.
 
 ### Workflow Description
@@ -132,7 +132,7 @@ This workflow allows switching management of the infrastructure resources (eg EC
 When the cluster admin wishes to migrate a MachineSet from Machine API to Cluster API, the following procedure is required:
 1. Identify the MachineSet to migrate to Cluster API
 1. Use the `oc edit` or a patch command to update the value of the `spec.authoritativeAPI` field to `ClusterAPI`
-1. The migration controller verifies that the `Snychonrized` condition is currently set to `True`, verifying no long standing synchronization errors
+1. The migration controller verifies that the `Snychronized` condition is currently set to `True`, verifying no long standing synchronization errors
 1. The `status.authoritativeAPI` field is updated to `Migrating` by the migration controller
 1. The Machine API controller acknowledges the change and sets the `Paused` condition to `True`
 1. The sync controller ensures the latest changes are synchronised between the old authoritative resource and the new, the `status.synchronizedGeneration` is then updated to the current generation of the old authoritative resource
@@ -154,7 +154,7 @@ When the conversion cannot proceed for some reason, for example, a feature is in
 1. The Machine API controllers continue to manage the MachineSet.
 1. Where appropriate, the cluster admin contacts support for additional help/timelines for availability of the missing feature
 
-Long standing syhcnronization errors, where the admin has requested a transition by changing the `authoritativeAPI`, will result in alerts firing to indicate to the
+Long standing syhcnronization errors, where the admin has requested a transition by changing the `authoritativeAPI`, will result in AlertManager alerts firing to indicate to the
 cluster admin that the transition is not occurring as they requested.
 
 #### Workflow extension
@@ -170,7 +170,7 @@ The users intention to migrate will be persisted, and the sync controller will c
 
 This extension is not required for the minimum viable version of this project, but, will be added in a future iteration, prior to the GA release.
 
-If the migration request is not reversed within some reasonable time frame, and alert will be fired to ensure the user has visibility that their request was not fulfilled.
+If the migration request is not reversed within some reasonable time frame, an alert will be fired to ensure the user has visibility that their request was not fulfilled.
 
 ### API Extensions
 
@@ -223,36 +223,55 @@ An admission time mutation to ensure the `status.authoritativeAPI` is set to mat
 The APIs will be extended as follows:
 
 ```go
+type MachineAuthority string
+
+const (
+	// MachineAuthorityMachineAPI indicates that the Machine API resource should be the authoritative API.
+	MachineAuthorityMachineAPI MachineAuthority = "MachineAPI"
+
+	// MachineAuthorityClusterAPI indicates that the Cluster API resource should be the authoritative API.
+	MachineAuthorityClusterAPI MachineAuthority = "ClusterAPI"
+
+	// MachineAuthorityMigrating indicates that the authoritative API is currently migrating between states.
+	// Only applicable for status usages of the MachineAuthority.
+	MachineAuthorityMigrating MachineAuthority = "Migrating"
+)
+
 type xxxSpec struct {
   // authoritativeAPI is the API that is authoritative for this resource.
-  // Valid values are MachineAPI and ClusterAPI.
-  // When set to MachineAPI, writes to the spec of the machine.openshift.io copy of this resource will be reflected into the cluster.x-k8s.io copy.
-  // When set to ClusterAPI, writes to the spec of the cluster.x-k8s.io copy of this resource will be reflected into the machine.openshift.io copy.
-  // Updates to the status will be reflected in both copies of the resource, based on the controller implementing the functionality of the API.
-  // Currently the authoritative API determines which controller will manage the resource, this will change in a future release.
-  // To ensure the change has been accepted, please verify that the `status.authoritativeAPI` field has been updated to the desired value and that the `Synchronized` condition is present and set to `True`.
-  // +kubebuilder:validation:Enum=MachineAPI;ClusterAPI
-  // +kubebuilder:validation:Default:=MachineAPI
-  // +default:=MachineAPI
-  // +optional
-  AuthoritativeAPI string `json:"authoritativeAPI,omitempty"`
+	// Valid values are MachineAPI and ClusterAPI.
+	// When set to MachineAPI, writes to the spec of the machine.openshift.io copy of this resource will be reflected into the cluster.x-k8s.io copy.
+	// When set to ClusterAPI, writes to the spec of the cluster.x-k8s.io copy of this resource will be reflected into the machine.openshift.io copy.
+	// Updates to the status will be reflected in both copies of the resource, based on the controller implementing the functionality of the API.
+	// Currently the authoritative API determines which controller will manage the resource, this will change in a future release.
+	// To ensure the change has been accepted, please verify that the `status.authoritativeAPI` field has been updated to the desired value and that the `Synchronized` condition is present and set to `True`.
+	// +kubebuilder:validation:Enum=MachineAPI;ClusterAPI
+	// +kubebuilder:validation:Default:=MachineAPI
+	// +default:=MachineAPI
+	// +openshift:enable:FeatureGate=MachineAPIMigration
+	// +optional
+	AuthoritativeAPI MachineAuthority `json:"authoritativeAPI,omitempty"`
 }
 
+// +openshift:validation:FeatureGateAwareXValidation:featureGate=MachineAPIMigration,rule="!has(oldSelf.synchronizedGeneration) || (has(self.synchronizedGeneration) && self.synchronizedGeneration >= oldSelf.synchronizedGeneration) || (oldSelf.authoritativeAPI == 'Migrating' && self.authoritativeAPI != 'Migrating')",message="synchronizedGeneration must not decrease unless authoritativeAPI is transitioning from Migrating to another value"
 type xxxStatus struct {
   // authoritativeAPI is the API that is authoritative for this resource.
-  // Valid values are MachineAPI, ClusterAPI and Migrating.
-  // This value is updated by the migration controller to reflect the authoritative API.
-  // Machine API and Cluster API controllers use this value to determine whether or not to reconcile the resource.
-  // When set to Migrating, the migration controller is currently performing the handover of authority from one API to the other.
-  // +kubebuilder:validation:Enum=MachineAPI;ClusterAPI;Migrating
-  // +optional
-  AuthoritativeAPI string `json:"authoritativeAPI,omitempty"`
+	// Valid values are MachineAPI, ClusterAPI and Migrating.
+	// This value is updated by the migration controller to reflect the authoritative API.
+	// Machine API and Cluster API controllers use this value to determine whether or not to reconcile the resource.
+	// When set to Migrating, the migration controller is currently performing the handover of authority from one API to the other.
+	// +kubebuilder:validation:Enum=MachineAPI;ClusterAPI;Migrating
+	// +kubebuilder:validation:XValidation:rule="self == 'Migrating' || self == oldSelf || oldSelf == 'Migrating'",message="The authoritativeAPI field must not transition directly from MachineAPI to ClusterAPI or vice versa. It must transition through Migrating."
+	// +openshift:enable:FeatureGate=MachineAPIMigration
+	// +optional
+	AuthoritativeAPI MachineAuthority `json:"authoritativeAPI,omitempty"`
 
-  // synchronizedGeneration is the generation of the authoritative resource that the non-authoritative resource is synchronised with.
-  // This field is set when the authoritative resource is updated and the sync controller has updated the non-authoritative resource to match.
-  // +kubebuilder:validation:Minimum=0
-  // +optional
-  SynchronizedGeneration int64 `json:"synchronizedGeneration,omitempty"`
+	// synchronizedGeneration is the generation of the authoritative resource that the non-authoritative resource is synchronised with.
+	// This field is set when the authoritative resource is updated and the sync controller has updated the non-authoritative resource to match.
+	// +kubebuilder:validation:Minimum=0
+  // +openshift:enable:FeatureGate=MachineAPIMigration
+	// +optional
+	SynchronizedGeneration int64 `json:"synchronizedGeneration,omitempty"`
 }
 ```
 
@@ -444,7 +463,7 @@ It should then wait until the authoritative Machine controller removes its final
 In scenarios where both Machine API and Cluster API have been authoritative, it is expected that both Machine controllers will have added their own Finalizers, therefore we expect the synchronisation controller should be able to handle this.
 
 The migration controller should, as part of the handover mechanism of authority, handle moving the Finalizer between the old and new authoritative resources when appropriate.
-The migration controller must first ensure the snyhconrization is up to date and then, prior to switching the `status.authoritativeAPI`,
+The migration controller must first ensure the snychronization is up to date and then, prior to switching the `status.authoritativeAPI`,
 first add the Finalizer to the new resource, and then remove the Finalizer from the old resoucre once it has observed the event persisting the addition of the Finalizer on the new resource.
 
 It is also feasible that a customer may want to remove the Machine API resources after they have migrated to Cluster API and no longer require the Machine API synchronisation.
@@ -665,7 +684,7 @@ In addition to these tests, the following tests will provide a general coverage 
 ## Graduation Criteria
 
 The project will initially be introduced under a feature gate `MachineAPIMigration`.
-The new sync controller will be deployed on all `TechPreviewNoUpgrade`/`CustomNoUpgrade` clusters,
+The new sync and migration controllers will be deployed on all `TechPreviewNoUpgrade`/`CustomNoUpgrade` clusters,
 but will check for the presence of the above feature gate before operating.
 
 ### Dev Preview -> Tech Preview
