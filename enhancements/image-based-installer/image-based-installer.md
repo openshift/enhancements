@@ -1,0 +1,219 @@
+---
+title: image-based-installer
+authors:
+  - "@mresvanis"
+  - "@eranco74"
+reviewers:
+  - "@patrickdillon"
+  - "@romfreiman"
+approvers:
+  - "@zaneb"
+api-approvers:
+  - None
+creation-date: 2024-04-30
+last-updated: 2024-04-30
+tracking-link:
+  - https://issues.redhat.com/browse/MGMT-17600
+see-also:
+  - "/enhancements/agent-installer/agent-based-installer.md"
+replaces: N/A
+superseded-by: N/A
+---
+
+# Image-based Installer
+
+## Summary
+
+The image-based installer is an installation method for on-premise single-node
+OpenShift (SNO) clusters, that will use a bootable, installer image running on
+the hosts that are to become SNO clusters (much like what is implemented by the
+functionality of the [Agent-based Installer](/enhancements/agent-installer-agent-based-installer.md))
+and a configuration image. The user will generate both images using a
+command-line tool. The first image will contain components (such as the
+[lifecycle-agent](https://github.com/openshift-kni/lifecycle-agent) operator)
+and a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md).
+The seed image is an [OCI image](https://github.com/opencontainers/image-spec/blob/main/spec.md)
+generated from a SNO system installed with the target OpenShift version and is installed onto a target SNO
+as a new [ostree stateroot](https://ostreedev.github.io/ostree/deployment/#stateroot-aka-osname-group-of-deployments-that-share-var).
+The second image will contain the site specific configuration data (e.g. the cluster name, domain and crypto objects), which
+need to be set up per cluster and are derived mainly from the OpenShift
+installer [install config](https://github.com/openshift/installer/tree/release-4.15/pkg/asset/installconfig).
+
+## Motivation
+
+Telecommunications providers continue to deploy OpenShift at the Far Edge. The
+acceleration of this adoption and the nature of existing Telecommunication
+infrastructure and processes drive the need to improve OpenShift provisioning
+speed at the Far Edge site and the simplicity of preparation and deployment of
+Far Edge clusters, at scale.
+
+The image-based installer provides users with such speed and simplicity, but it
+currently needs the [multicluster engine](https://docs.openshift.com/container-platform/4.15/architecture/mce-overview-ocp.html)
+and/or the [Image-based Install operator](https://github.com/openshift/image-based-install-operator)
+to generate the required installation and configuration artifacts. We would like
+to enable users to generate the latter intuitively and independently, using
+their own automation or even manual intervention to boot the host.
+
+### User Stories
+
+- As a user in a disconnected environment with no existing management cluster,
+  I want to deploy a single-node OpenShift cluster using a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
+  and my own automation for provisioning.
+
+### Goals
+
+- Install clusters with single-node topology.
+- Install clusters in fully disconnected environments.
+- Perform reproducible cluster builds from configuration artifacts.
+- Require no machines in the cluster environment other than the one to be the
+  single node of the cluster.
+- Be agnostic to the tools used to provision machines, so that users can
+  leverage their own tooling and provisioning.
+
+### Non-Goals
+
+- Replace any other OpenShift installation method in any capacity.
+- Generate image formats other than ISO.
+- Automate booting of the ISO image on the machines.
+- Support installation configurations for cloud-based platforms.
+
+## Proposal
+
+A command-line tool will enable users to build a single custom RHCOS seed image
+in ISO format, containing the components needed to provision multiple
+single-node OpenShift clusters from that single ISO and multiple site
+configuration ISO images, one per cluster to be installed.
+
+The command-line tool will download the base RHCOS ISO, create an [Ignition](https://coreos.github.io/ignition/)
+file with generic configuration data (i.e. configuration that is going to be
+included in all clusters to be installed with that ISO) and produce an
+image-based installation ISO. The Ignition file will configure the live ISO such
+that once the machine is booted with the latter, it will install RHCOS to the
+installation disk, mount the installation disk, restore the single-node
+OpenShift from the [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
+and optionally precache all release container images under the
+`/var/lib/containers` directory. The command-line tool will also support
+generating a configuration ISO with all the site specific configuration data for
+the cluster to be installed provided as input.
+
+### Workflow Description
+
+TBD
+
+### API Extensions
+
+N/A
+
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+N/A
+
+#### Standalone Clusters
+
+N/A
+
+#### Single-node Deployments or MicroShift
+
+The image-based installer targets single-node OpenShift deployments.
+
+### Implementation Details/Notes/Constraints
+
+Since we must allow users to provision hosts themselves, either manually or
+using automated tooling of their choice, the ISO format offers the widest range
+of compatibility. Building a single ISO to boot multiple hosts makes it
+considerably easier for the user to manage. The additional site configuration
+ISO is necessary for configuring each cluster securely and independently.
+
+The user, before running the image-based installer, must generate a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
+via the [Lifecycle Agent SeedGenerator Custom Resouce (CR)](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md).
+The prerequisites to generating a seed image are the following:
+
+- An already provisioned single-node OpenShift cluster (seed SNO).
+   - The CPU topology of that host must align with the target host(s), i.e. they
+     should have the same number of cores.
+- The [Lifecycle Agent](https://github.com/openshift-kni/lifecycle-agent/tree/main)
+  operator must be installed on the seed SNO.
+
+### Risks and Mitigations
+
+N/A
+
+### Drawbacks
+
+N/A
+
+## Open Questions [optional]
+
+- Should the command-line tool be a subcommand of the OpenShift installer, or a
+  standalone binary?
+
+  Having the functionality provided by the command-line tool in the OpenShift
+  installer would be a natural addition to the latter, as the former refers to
+  the provisioning of single-node OpenShift clusters and generates the
+  required installation artifacts in the same way as the [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md).
+
+## Test Plan
+
+The image-based installer will be covered by end-to-end testing using virtual
+machines (in a baremetal configuration), automated by some variation on the
+metal platform [dev-scripts](https://github.com/openshift-metal3/dev-scripts/#readme).
+This is similar to the testing of the agent-based installer, the baremetal IPI
+and assisted installation flows.
+
+## Graduation Criteria
+
+**Note:** *Section not required until targeted at a release.*
+
+TBD
+
+### Dev Preview -> Tech Preview
+
+- Ability to utilize the enhancement end to end
+- End user documentation, relative API stability
+- Sufficient test coverage
+- Gather feedback from users rather than just developers
+- Enumerate service level indicators (SLIs), expose SLIs as metrics
+- Write symptoms-based alerts for the component(s)
+
+### Tech Preview -> GA
+
+- More testing (upgrade, downgrade, scale)
+- Sufficient time for feedback
+- Available by default
+- Backhaul SLI telemetry
+- Document SLOs for the component
+- Conduct load testing
+- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+
+**For non-optional features moving to GA, the graduation criteria must include
+end to end tests.**
+
+### Removing a deprecated feature
+
+N/A
+
+## Upgrade / Downgrade Strategy
+
+N/A
+
+## Version Skew Strategy
+
+N/A
+
+## Operational Aspects of API Extensions
+
+N/A
+
+## Support Procedures
+
+N/A
+
+## Alternatives
+
+TBD
+
+## Infrastructure Needed [optional]
+
+N/A
