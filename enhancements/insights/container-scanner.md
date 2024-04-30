@@ -14,7 +14,7 @@ status: implementable
 tracking-link: 
   - TBD
 see-also:
-  - "https://issues.redhat.com/browse/CCXDEV-CCXDEV-11505"
+  - "https://issues.redhat.com/browse/CCXDEV-11505"
   - "https://issues.redhat.com/browse/CCX-138"
 ---
 
