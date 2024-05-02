@@ -183,9 +183,9 @@ graph LR;
         end
 
         subgraph hosted-control-plane-namespace
-            NodePoolController -->|8:Reconcile| PP_Status(ConfigMap<br> name:func_of_PerformanceProfile_name<br> label:`hypershift.openshift.io/nto-generated-performance-profile-status` : `true`<br> label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`<br> label: `hypershift.openshift.io/nodePool` : `NodePool` API name<br> data.status: < serialized PerformanceProfile.status object >)
+            NodePoolController -->|4:Watch| PP_Status(ConfigMap<br> name:func_of_PerformanceProfile_name<br> label:`hypershift.openshift.io/nto-generated-performance-profile-status` : `true`<br> label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`<br> label: `hypershift.openshift.io/nodePool` : `NodePool` API name<br> data.status: < serialized PerformanceProfile.status object >)
             PPController-->|6:Creates|PP_Status
-            NodePoolController -->|9:Updates status| NodePool_A
+            NodePoolController -->|8:Reconcile| NodePool_A
 
             NodePoolController ==>|2:Propagate|PP_ConfigMap(ConfigMap<br> name:PPConfigMap<br> tuned: PerformanceProfile)
             NodePoolController ==>|3:Add label|PP_ConfigMap_01(ConfigMap<br> name:PPConfigMap<br> tuned: PerformanceProfile<br> label:hypershift.openshift.io/performanceprofile-config=true)
@@ -208,7 +208,7 @@ graph LR;
             PPController-->|7:Creates and Embed|MC_CM(ConfigMap<br> name:func_of_PerformanceProfile_name<br> label:`hypershift.openshift.io/nto-generated-machine-config` : `true`<br> label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`<br> label: `hypershift.openshift.io/nodePool` : `NodePool` API name<br> data.config: < serialized MachineConfig object >)
             MC_01-. embedded into .-MC_CM
 
-            PPController-->|7:Creates and Embed|KC_CM(ConfigMap<br> name:func_of_PerformanceProfile_name<br> label:`hypershift.openshift.io/nto-generated-kubelet-config` : `true` : `true`<br> label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`<br> label: `hypershift.openshift.io/nodePool` : `NodePool` API name<br> data.config: < serialized KubeletConfig object >)
+            PPController-->|7:Creates and Embed|KC_CM(ConfigMap<br> name:func_of_PerformanceProfile_name<br> label:`hypershift.openshift.io/nto-generated-kubelet-config` : `true` <br> label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`<br> label: `hypershift.openshift.io/nodePool` : `NodePool` API name<br> data.config: < serialized KubeletConfig object >)
             KC_01-. embedded into .-KC_CM
 
 
@@ -317,7 +317,7 @@ classDiagram
   class ConfigMap_K {
     name: "kc-" + PerformanceProfile.name
     labels : [
-      "hypershift.openshift.io/nto-generated-machine-config" : "true",
+      "hypershift.openshift.io/nto-generated-kubelet-config" : "true",
       "hypershift.openshift.io/performanceProfileName" : PerformanceProfile.name,
       "hypershift.openshift.io/nodePool" : NodePool.Name
     ]
