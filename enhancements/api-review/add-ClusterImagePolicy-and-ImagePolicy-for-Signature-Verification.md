@@ -16,7 +16,7 @@ api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggreg
   - "@mrunalp"
   - "@JoelSpeed"
 creation-date: 2023-05-17
-last-updated: 2023-10-19
+last-updated: 2024-05-02
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/OCPNODE-1628
 ---
@@ -63,7 +63,7 @@ tools, so that I can utilize the increased security of my software supply chain.
 1. The application administrator requests the addition of signature verification configurations at the namespace scope.
 2. The application administrator writes the verification certification to the ImagePolicy YAML file and creates a ImagePolicy CR using `oc create -f imagepolicy.yaml`.
 Please note that the application administrator cannot override cluster-scoped policies, as they are treated with higher priority. The [Implementation Details](#Update-container-runtime-config-controller-to-watch-ClusterImagePolicy-and-ImagePolicy) explains the conflict resolution rules. 
-3. The application administrator can retrieve the cluster override and merged policies by checking `<NAMESPACE>.json` within the `99-<pool>-generated-imagepolicies` machine-config. 
+3. The application administrator can retrieve the cluster override and merged policies by checking `<NAMESPACE>.json` within the `99-<pool>-generated-registries` machine-config. 
 4. The application administrator has the option to remove the signature verification configuration by deleting its ImagePolicy instances.
 
 ### API Extensions
@@ -116,46 +116,38 @@ type ImagePolicySpec struct {
 	Policy Policy `json:"policy"`
 }
 
-// +kubebuilder:validation:XValidation:rule="self.matches('^[a-zA-Z0-9-_+.*@:/]+$')",message="invalid
-// image scope format, scope contained invalid characters, valid characters are [a-zA-Z0-9-*.@_]"
-// +kubebuilder:validation:XValidation:rule="size(self.split('/')[0].split('.')) == 1 ? self.split('/')[0].split('.')[0].split(':')[0] == 'localhost' : true",message="invalid image scope format,
-// scope must contain a fully qualified domain name or 'localhost'"
-// +kubebuilder:validation:XValidation:rule=`self.contains('*') ? self.matches('^\\*(?:\\.(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]))+$') : true`,message="invalid image scope with wildcard, a wildcard
-// can only be at the start of the domain and does not contain subdomains"
+// +kubebuilder:validation:XValidation:rule="size(self.split('/')[0].split('.')) == 1 ? self.split('/')[0].split('.')[0].split(':')[0] == 'localhost' : true",message="invalid image scope format, scope must contain a fully qualified domain name or 'localhost'"
+// +kubebuilder:validation:XValidation:rule=`self.contains('*') ? self.matches('^\\*(?:\\.(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]))+$') : true`,message="invalid image scope with wildcard, a wildcard can only be at the start of the domain and is only supported for subdomain matching, not path matching"
+// +kubebuilder:validation:XValidation:rule=`!self.contains('*') ? self.matches('^((((?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9])(?:\\.(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]))+(?::[0-9]+)?)|(localhost(?::[0-9]+)?))(?:(?:/[a-z0-9]+(?:(?:(?:[._]|__|[-]*)[a-z0-9]+)+)?)+)?)(?::([\\w][\\w.-]{0,127}))?(?:@([A-Za-z][A-Za-z0-9]*(?:[-_+.][A-Za-z][A-Za-z0-9]*)*[:][[:xdigit:]]{32,}))?$') : true`,message="invalid repository namespace or image specification in the image scope"
 // +kubebuilder:validation:MaxLength=512
 type ImageScope string
 
 // Policy defines the verification policy for the items in the scopes list.
-// +kubebuilder:validation:XValidation:rule="(has(self.rootOfTrust) && has(self.rootOfTrust.policyType) && self.rootOfTrust.policyType == 'FulcioCAWithRekor') == has(self.fulcioSubject)",message="fulcioSubject must be set exactly when policyType is FulcioCAWithRekor"
 type Policy struct {
 	// rootOfTrust specifies the root of trust for the policy.
 	// +kubebuilder:validation:Required
 	RootOfTrust PolicyRootOfTrust `json:"rootOfTrust"`
-	// fulcioSubject specifies OIDC issuer and the email of the Fulcio authentication configuration.
-	// Required if rootOfTrust is based on Fulcio.
-	// +optional
-	FulcioSubject PolicyFulcioSubject `json:"fulcioSubject,omitempty"`
-	// signedIdentity specifies what image identity the signature claims about the image.
+	// signedIdentity specifies what image identity the signature claims about the image. The required matchPolicy field specifies the approach used in the verification process to verify the identity in the signature and the actual image identity, the default matchPolicy is "MatchRepoDigestOrExact".
 	// +optional
 	SignedIdentity PolicyIdentity `json:"signedIdentity,omitempty"`
 }
 
 // PolicyRootOfTrust defines the root of trust based on the selected policyType.
 // +union
-// +kubebuilder:validation:XValidation:rule="has(self.policyType) && self.policyType == 'PublicKey' ? has(self.publicKey) : true",message="must set publicKey if policyType is PublicKey"
-// +kubebuilder:validation:XValidation:rule="has(self.policyType) && self.policyType == 'FulcioCAWithRekor' ? has(self.fulcioCAWithRekor) : true",message="must set fulcioCAWithRekor if policyType is FulcioCAWithRekor"
+// +kubebuilder:validation:XValidation:rule="has(self.policyType) && self.policyType == 'PublicKey' ? has(self.publicKey) : !has(self.publicKey)",message="publicKey is required when policyType is PublicKey, and forbidden otherwise"
+// +kubebuilder:validation:XValidation:rule="has(self.policyType) && self.policyType == 'FulcioCAWithRekor' ? has(self.fulcioCAWithRekor) : !has(self.fulcioCAWithRekor)",message="fulcioCAWithRekor is required when policyType is FulcioCAWithRekor, and forbidden otherwise"
 type PolicyRootOfTrust struct {
 	// policyType serves as the union's discriminator. Users are required to assign a value to this field, choosing one of the policy types that define the root of trust.
-	// "PublicKey" indicates that the policy relies on a PGP publicKey and may optionally use a Rekor verification.
+	// "PublicKey" indicates that the policy relies on a sigstore publicKey and may optionally use a Rekor verification.
 	// "FulcioCAWithRekor" indicates that the policy is based on the Fulcio certification and incorporates a Rekor verification.
 	// +unionDiscriminator
 	// +kubebuilder:validation:Required
 	PolicyType PolicyType `json:"policyType"`
-	// PublicKey defines the root of trust based on a PGP public key.
+	// publicKey defines the root of trust based on a sigstore public key.
 	// +optional
 	PublicKey *PublicKey `json:"publicKey,omitempty"`
-	// FulcioCAWithRekor defines the root of trust based on the Fulcio certificate and the Rekor public key.
-  // For more information about Fulcio and Rekor, please refer to the document at:
+	// fulcioCAWithRekor defines the root of trust based on the Fulcio certificate and the Rekor public key.
+	// For more information about Fulcio and Rekor, please refer to the document at:
 	// https://github.com/sigstore/fulcio and https://github.com/sigstore/rekor
 	// +optional
 	FulcioCAWithRekor *FulcioCAWithRekor `json:"fulcioCAWithRekor,omitempty"`
@@ -169,41 +161,54 @@ const (
 	FulcioCAWithRekorRootOfTrust PolicyType = "FulcioCAWithRekor"
 )
 
-// PublicKey defines the root of trust based on a PGP public key.
+// PublicKey defines the root of trust based on a sigstore public key.
 type PublicKey struct {
-	// keyData contains inline base64 encoded data of the public key.
+	// keyData contains inline base64-encoded data for the PEM format public key.
+	// KeyData must be at most 8192 characters.
 	// +kubebuilder:validation:Required
-	KeyData string `json:"keyData"`
-	// rekorKeyData contains inline base64 data of the Rekor public key.
+	// +kubebuilder:validation:MaxLength=8192
+	KeyData []byte `json:"keyData"`
+	// rekorKeyData contains inline base64-encoded data for the PEM format from the Rekor public key.
+	// rekorKeyData must be at most 8192 characters.
 	// +optional
-	RekorKeyData string `json:"rekorKeyData,omitempty"`
+	// +kubebuilder:validation:MaxLength=8192
+	RekorKeyData []byte `json:"rekorKeyData,omitempty"`
 }
 
 // FulcioCAWithRekor defines the root of trust based on the Fulcio certificate and the Rekor public key.
 type FulcioCAWithRekor struct {
-	// fulcioCAData contains inline base64 data for the fulcio CA certificate.
+	// fulcioCAData contains inline base64-encoded data for the PEM format fulcio CA.
+	// fulcioCAData must be at most 8192 characters.
 	// +kubebuilder:validation:Required
-	FulcioCAData string `json:"fulcioCAData"`
-	// rekorKeyData contains inline base64 data of the Rekor public key.
+	// +kubebuilder:validation:MaxLength=8192
+	FulcioCAData []byte `json:"fulcioCAData"`
+	// rekorKeyData contains inline base64-encoded data for the PEM format from the Rekor public key.
+	// rekorKeyData must be at most 8192 characters.
 	// +kubebuilder:validation:Required
-	RekorKeyData string `json:"rekorKeyData"`
+	// +kubebuilder:validation:MaxLength=8192
+	RekorKeyData []byte `json:"rekorKeyData"`
+	// fulcioSubject specifies OIDC issuer and the email of the Fulcio authentication configuration.
+	// +kubebuilder:validation:Required
+	FulcioSubject PolicyFulcioSubject `json:"fulcioSubject,omitempty"`
 }
 
 // PolicyFulcioSubject defines the OIDC issuer and the email of the Fulcio authentication configuration.
 type PolicyFulcioSubject struct {
-	// oidcIssuer contains the expected OIDC issuer.
+	// oidcIssuer contains the expected OIDC issuer. It will be verified that the Fulcio-issued certificate contains a (Fulcio-defined) certificate extension pointing at this OIDC issuer URL. When Fulcio issues certificates, it includes a value based on an URL inside the client-provided ID token.
 	// Example: "https://expected.OIDC.issuer/"
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="isURL(self)",message="oidcIssuer must be a valid URL"
 	OIDCIssuer string `json:"oidcIssuer"`
-	// signedEmail holds the email address the the certificate is issued for.
+	// signedEmail holds the email address the the Fulcio certificate is issued for.
 	// Example: "expected-signing-user@example.com"
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule=`self.matches('^\\S+@\\S+$')`,message="invalid email address"
 	SignedEmail string `json:"signedEmail"`
 }
 
 // PolicyIdentity defines image identity the signature claims about the image. When omitted, the default matchPolicy is "MatchRepoDigestOrExact".
-// +kubebuilder:validation:XValidation:rule="(has(self.matchPolicy) && self.matchPolicy == 'ExactRepository') ? has(self.exactRepository) : true",message="must set exactRepository if matchPolicy is ExactRepository"
-// +kubebuilder:validation:XValidation:rule="(has(self.matchPolicy) && self.matchPolicy == 'RemapIdentity') ? has(self.remapIdentity) : true",message="must set remapIdentity if matchPolicy is RemapIdentity"
+// +kubebuilder:validation:XValidation:rule="(has(self.matchPolicy) && self.matchPolicy == 'ExactRepository') ? has(self.exactRepository) : !has(self.exactRepository)",message="exactRepository is required when matchPolicy is ExactRepository, and forbidden otherwise"
+// +kubebuilder:validation:XValidation:rule="(has(self.matchPolicy) && self.matchPolicy == 'RemapIdentity') ? has(self.remapIdentity) : !has(self.remapIdentity)",message="remapIdentity is required when matchPolicy is RemapIdentity, and forbidden otherwise"
 // +union
 type PolicyIdentity struct {
 	// matchPolicy sets the type of matching to be used.
@@ -225,24 +230,32 @@ type PolicyIdentity struct {
 	PolicyMatchRemapIdentity *PolicyMatchRemapIdentity `json:"remapIdentity,omitempty"`
 }
 
+// +kubebuilder:validation:MaxLength=512
+// +kubebuilder:validation:XValidation:rule=`self.matches('.*:([\\w][\\w.-]{0,127})$')? self.matches('^(localhost:[0-9]+)$'): true`,message="invalid repository or prefix in the signedIdentity, should not include the tag or digest"
+// +kubebuilder:validation:XValidation:rule=`self.matches('^(((?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9])(?:\\.(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]))+(?::[0-9]+)?)|(localhost(?::[0-9]+)?))(?:(?:/[a-z0-9]+(?:(?:(?:[._]|__|[-]*)[a-z0-9]+)+)?)+)?$')`,message="invalid repository or prefix in the signedIdentity"
+type IdentityRepositoryPrefix string
+
 type PolicyMatchExactRepository struct {
 	// repository is the reference of the image identity to be matched.
-	// the value should be a repository (by omitting the tag or digest) in a registry implementing the "Docker Registry HTTP API V2". For example, docker.io/library/busybox
+	// The value should be a repository name (by omitting the tag or digest) in a registry implementing the "Docker Registry HTTP API V2". For example, docker.io/library/busybox
 	// +kubebuilder:validation:Required
-	Repository string `json:"repository"`
+	Repository IdentityRepositoryPrefix `json:"repository"`
 }
 
 type PolicyMatchRemapIdentity struct {
 	// prefix is the prefix of the image identity to be matched.
 	// If the image identity matches the specified prefix, that prefix is replaced by the specified “signedPrefix” (otherwise it is used as unchanged and no remapping takes place).
+	// This useful when verifying signatures for a mirror of some other repository namespace that preserves the vendor’s repository structure.
 	// The prefix and signedPrefix values can be either host[:port] values (matching exactly the same host[:port], string), repository namespaces,
 	// or repositories (i.e. they must not contain tags/digests), and match as prefixes of the fully expanded form.
 	// For example, docker.io/library/busybox (not busybox) to specify that single repository, or docker.io/library (not an empty string) to specify the parent namespace of docker.io/library/busybox.
 	// +kubebuilder:validation:Required
-	Prefix string `json:"prefix"`
-	// signedPrefix is the prefix of the image identity to be matched in the signature. The format is the same as "prefix".
+	Prefix IdentityRepositoryPrefix `json:"prefix"`
+	// signedPrefix is the prefix of the image identity to be matched in the signature. The format is the same as "prefix". The values can be either host[:port] values (matching exactly the same host[:port], string), repository namespaces,
+	// or repositories (i.e. they must not contain tags/digests), and match as prefixes of the fully expanded form.
+	// For example, docker.io/library/busybox (not busybox) to specify that single repository, or docker.io/library (not an empty string) to specify the parent namespace of docker.io/library/busybox.
 	// +kubebuilder:validation:Required
-	SignedPrefix string `json:"signedPrefix"`
+	SignedPrefix IdentityRepositoryPrefix `json:"signedPrefix"`
 }
 
 // IdentityMatchPolicy defines the type of matching for "matchPolicy".
@@ -276,7 +289,7 @@ Enhance the MCO container runtime config controller to manage ClusterImagePolicy
   - Check for conflicts between cluster scope and namespace scope policies. If the namespaced ImagePolicy scope is equal to or nests inside an existing cluster-scoped ClusterImagePolicy CR, do not deploy the namespaced policy.
   Update the `status` of both CRs and the machine config controller logs to indicate that the ClusterImagePolicy will be applied, while the non-global ImagePolicy will not be applied.
 - Adds following configurations to machine configs
-  - machine config `99-<pool>-generated-imagepolicies` adds [/etc/containers/registries.d/*.yaml](https://github.com/containers/image/blob/main/docs/containers-registries.d.5.md) to allow matching sigstore signatures, for example:
+  - machine config `99-<pool>-generated-registries` adds [/etc/containers/registries.d/*.yaml](https://github.com/containers/image/blob/main/docs/containers-registries.d.5.md) to allow matching sigstore signatures, for example:
 
     ```yaml
     docker:
@@ -304,12 +317,11 @@ Enhance the MCO container runtime config controller to manage ClusterImagePolicy
     append the policy to existing policy; the policy will be written to `<NAMESPACE>.json`
     - if none of the above cases apply:
     the policy will be written to `/path/to/policies/\<NAMESPACE\>.json`
-  - the policies will be coordinated with the base [/etc/containers/policy.json](https://github.com/openshift/machine-config-operator/blob/master/templates/master/01-master-container-runtime/_base/files/policy.yaml) file or the Image CR, inheriting the `default` policy from them.
-  If the signature policy scope is also configured as `insecureAcceptAnything` or `reject`, the rollout will fail. In such a case, the error will be reported to the machine config logs.
+  - the policies will be coordinated with the base [/etc/containers/policy.json](https://github.com/openshift/machine-config-operator/blob/master/templates/master/01-master-container-runtime/_base/files/policy.yaml) file or the Image CR, inheriting the `default` policy from them. The rollout will fail if the following validation with Image CR fails. In such a case, the error will be reported to the machine config logs.
+    - if blockedRegistries exists, the clusterimagepolicy scopes must not equal to or nested under blockedRegistries
+    - if allowedRegistries exists, the clusterimagepolicy scopes nested under the allowedRegistries
   - the `/etc/containers/policy.json` holds the cluster wide policy. `\<NAMESPACE\>.json` holds the merged cluster override policy and namespaced policy.
-- Image policies that are written to `/etc/containers/policy.json` will be rolled out by machine config `99-<pool>-generated-registries`. Merged policies that are written to `<NAMESPACE>.json` will be rolled out by machine config `99-<pool>-generated-imagepolicies`.
-- Once an ImagePolicy or ClusterImagePolicy object gets created/updated, container runtime config controller will call the syncHandler, create machine config `99-<pool>-generated-imagepolicies` if the namespaced CR can successfully rollout.
-Once the last ImagePolicy or ClusterImagePolicy object get deleted, container runtime config controller will delete the machine config `99-[pool]-generated-imagepolicies`. It then runs the syncHandler to coordinate policy updates with the Image CR.
+- Image policies that are written to `/etc/containers/policy.json` will be rolled out by machine config `99-<pool>-generated-registries`.
 
 |                                                                                                                 	|process the policies from the CRs                |                                                                                    	|   	|   	|
 |-----------------------------------------------------------------------------------------------------------------	|------------------------------------------------	|-----------------------------------------------------------------------------------	|---	|---	|
@@ -386,7 +398,7 @@ Feedback from the container runtime config controller:
 ```yaml
 - lastTransitionTime: "4321-03-07T11:21:39Z"
   message: Policy has scopes test0.com configured for both cluster scope non-global namespaces, only cluster scoped policy will be rolled out
-  type: PolicyPending
+  type: Pending
 ```
 
 Apply the above CRs, if no Image CRs changes the policy.json. The below `/etc/containers/policy.json` will be rolled out. The condensed json string of the file will be updated to the `status.policyJSON` of `openshift-config` CR:
@@ -624,7 +636,8 @@ The OCP Node team is likely to be called upon in case of escalation with one of 
 
 ## Implementation History
 
-[OCPNODE-1628: Sigstore Support - OpenShift Container Image Validation (Dev Preview)](https://issues.redhat.com/browse/OCPNODE-1628) epic will keep track of the implementation.
+- [OCPNODE-1628: Sigstore Support - OpenShift Container Image Validation for cluster wide policies (Dev Preview)](https://issues.redhat.com/browse/OCPNODE-1628) epic will keep track of the ClusterImagePolicy implementation.
+- [OCPNODE-2253: OpenShift Container Image Validation for namespaced policies](https://issues.redhat.com/browse/OCPNODE-2253) epic will keep track of the ImagePolicy implementation.
 
 ## Alternatives
 
