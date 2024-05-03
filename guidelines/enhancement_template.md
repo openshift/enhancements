@@ -294,6 +294,8 @@ Principles to consider:
 - The permissions you grant should be well scoped and follow the principle of least privilege. Do not use wildcard permissions.
 - If the feature operates at the host level, the host root user should not be able to escalate to the cluster level. The feature may only modify resources directly related to the node it operates on.
 
+Consider the above principles as mandatory. These should be considered as part of your E2E test plan. How will you ensure that the principles are upheld?
+
 ### Security Context
 
 What security context will the new component run with? What is the impact of the security context on the security posture of the cluster?
