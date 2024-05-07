@@ -79,6 +79,20 @@ during the upgrade, while also intending to migrate the new `Subnets` API field.
 See [Unmanaged Subnet Annotation Migration Workflow](#unmanaged-subnet-annotation-migration-workflow)
 for the workflow for this user story.
 
+#### Automate Changing an Existing IngressController's Subnets
+
+_"As the provider of a managed service, I want to automate changing
+an existing IngressController's subnets, without having to delete
+the LoadBalancer-type service."_
+
+A managed service that uses configuration management tooling, such as Hive, should
+have the ability to update an existing IngressController's subnets and ensure that
+the Ingress Operator effectuates these changes automatically (see [Effectuating Subnet Updates](#effectuating-subnet-updates)
+for more context).
+
+See [Automatically Updating an existing IngressController with new Subnets Workflow](#automatically-updating-an-existing-ingresscontroller-with-new-subnets-workflow)
+for the workflow for this user story.
+
 ### Goals
 
 - Introduce new fields in the IngressController API for subnet selection in AWS.
@@ -323,6 +337,15 @@ deletion will effectuate these changes.
 See [CCM Doesn't Reconcile NLB Subnets Updates](#ccm-doesnt-reconcile-nlb-subnets-updates)
 for more details on why the CCM doesn't reconcile these updates.
 
+##### Auto Effectuation with auto-delete-load-balance Annotation
+
+In addition to deleting the IngressController explicitly, it is possible to use the existing
+`ingress.operator.openshift.io/auto-delete-load-balancer` annotation to instruct the Ingress Operator to automatically
+delete the service after a subnet update. While this annotation was initially introduced to enable automatic scope
+changes in [Ingress Mutable Publishing Scope](/enhancements/ingress/mutable-publishing-scope.md), we've chosen to extend
+its usage to support the `Subnets` fields. The auto-delete annotation is not intended for end-users to use directly, but
+instead for configuration management tooling.
+
 ### Implementation Details/Notes/Constraints
 
 When an IngressController is created with
@@ -339,7 +362,10 @@ cluster admin deletes the LoadBalancer-type service as instructed by the
 `LoadBalancerProgressing` status (see [Effectuating Subnet Updates](#effectuating-subnet-updates)).
 When the Ingress Operator recreates the LoadBalancer-type service, it will
 then configure `service.beta.kubernetes.io/aws-load-balancer-subnets` with
-the new `Subnets` value.
+the new `Subnets` value. The only exception is if the
+`ingress.operator.openshift.io/auto-delete-load-balancer` annotation is set
+on the IngressController, in which case the operator automatically deletes
+the service and effectuates the subnet update.
 
 The`...aws.neworkLoadBalancer.subnets` and `...aws.classicLoadBalancer.subnets` fields in `status.endpointPublishingStrategy`
 will eventually reflect the configured subnet value by mirroring the value of
@@ -390,6 +416,20 @@ to be deleted and is disruptive:
    `service.beta.kubernetes.io/aws-load-balancer-subnets` on the LoadBalancer-type
    service, thus creating the load balancer with the desired subnets specified by the
    cluster admin.
+
+#### Automatically Updating an existing IngressController with new Subnets Workflow
+
+A cluster admin can add the `ingress.operator.openshift.io/auto-delete-load-balancer`
+annotation to update the subnets without requiring manual deletion of the service:
+
+1. A cluster admin adds the `ingress.operator.openshift.io/auto-delete-load-balancer`
+   annotation to the IngressController.
+2. A cluster admin edits an IngressController's
+   `spec.endpointPublishingStrategy.loadBalancer.providerParameters.aws.classicLoadBalancer.subnets` or
+   `...aws.neworkLoadBalancer.subnets` specified, depending on whether they are using a CLB or NLB.
+3. The Ingress Operator automatically deletes and recreates the LoadBalancer-type service
+   with `service.beta.kubernetes.io/aws-load-balancer-subnets` configured, thus creating
+   the load balancer with the desired subnets specified by the cluster admin.
 
 #### Unmanaged Subnet Annotation Migration Workflow
 
@@ -538,6 +578,10 @@ E2E tests will cover the following scenarios:
   LoadBalancer-type service and setting `Subnets` on the IngressController while observing
   `LoadBalancerProgressing` transitioning back to `Status: False` (as described in
   [Unmanaged Subnet Annotation Migration Workflow](#unmanaged-subnet-annotation-migration-workflow)).
+- Creating a IngressController with the `ingress.operator.openshift.io/auto-delete-load-balancer`
+  annotation, updating an IngressController with new `Subnets`, and observing the service
+  get automatically deleted and recreated with `service.beta.kubernetes.io/aws-load-balancer-subnets`
+  configured to the new `Subnets`.
 
 ## Graduation Criteria
 
