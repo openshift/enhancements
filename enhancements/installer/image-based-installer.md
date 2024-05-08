@@ -114,6 +114,23 @@ deployment process and reducing the need for multiple customized ISO images.
 
 The command-line tool will also support generating a configuration ISO with all the site specific configuration data for
 the cluster to be installed provided as input.
+The Config Image Contents:
+* ClusterInfo (cluster name, base domain, hostname, nodeIP)
+* SSH authorized_keys
+* Pull Secret
+* Extra Manifests
+* Generated keys and certs (compatible the generated admin kubeconfig)
+* Static networking config
+
+The site specific configuration data will be generated according to information provided
+in the install-config.yaml and the manifests provided in the installation directory as input.
+To complete the installation at the edge site:
+The cluster configuration for the edge location can be delivered by copying the config iso content onto the node
+and placing it under /opt/openshift/cluster-configuration/
+The cluster configuration can also b delivered using an attached ISO, a systemd service running on the host
+pre-installed Image-based Installer will mount that ISO (identified by known label) and copy the cluster configuration
+to /opt/openshift/cluster-configuration/
+The cluster configuration data on the disk will be used to configure the cluster and allow OCP to start successfully.
 
 ### Workflow Description
 
