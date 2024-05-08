@@ -26,8 +26,7 @@ superseded-by: N/A
 
 The image-based installer is an installation method for on-premise single-node
 OpenShift (SNO) clusters, that will use a bootable, installer image running on
-the hosts that are to become SNO clusters (much like what is implemented by the
-functionality of the [Agent-based Installer](/enhancements/agent-installer-agent-based-installer.md))
+the hosts that are to become SNO clusters.
 and a configuration image. The user will generate both images using a
 command-line tool. The first image will contain components (such as the
 [lifecycle-agent](https://github.com/openshift-kni/lifecycle-agent) operator)
@@ -41,6 +40,7 @@ installer [install config](https://github.com/openshift/installer/tree/release-4
 
 ## Motivation
 
+The primary motivation for relocatable SNO is the fast deployment of single-node OpenShift.
 Telecommunications providers continue to deploy OpenShift at the Far Edge. The
 acceleration of this adoption and the nature of existing Telecommunication
 infrastructure and processes drive the need to improve OpenShift provisioning
@@ -92,8 +92,27 @@ that once the machine is booted with the latter, it will install RHCOS to the
 installation disk, mount the installation disk, restore the single-node
 OpenShift from the [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
 and optionally precache all release container images under the
-`/var/lib/containers` directory. The command-line tool will also support
-generating a configuration ISO with all the site specific configuration data for
+`/var/lib/containers` directory.
+
+The installation ISO approach is very similar to what is already implemented by the
+functionality of the [Agent-based Installer](/enhancements/agent-installer-agent-based-installer.md))
+Although the similarity to Agent-based Installer in regards to the installer ISO image the image-based installer
+proposed here differs from the OpenShift agent-based installer in several key aspects:
+While the agent-based installer may offer flexibility and versatility in certain scenarios, 
+it may not meet the stringent time constraints requirements of far-edge deployments
+in the telecommunications industry due to the inherently long installation process, 
+exacerbated by low bandwidth and high packet latency.
+Additionally, with the Agent-based Installer all cluster configuration needs to be provided upfront
+during the generation of the ISO image.
+
+The image-based installer offers key advantages, where fast and reliable deployment at the edge is crucial.
+By generating an ISO images containing all necessary components, the image-based installer significantly accelerates
+deployment times. Moreover, unlike the agent-based installer, the image-based approach allows for cluster configuration
+to be supplied upon deployment at the edge, rather than during the initial ISO generation process. 
+This flexibility enables operators to use a single generic image for installing multiple clusters, streamlining the
+deployment process and reducing the need for multiple customized ISO images.
+
+The command-line tool will also support generating a configuration ISO with all the site specific configuration data for
 the cluster to be installed provided as input.
 
 ### Workflow Description
