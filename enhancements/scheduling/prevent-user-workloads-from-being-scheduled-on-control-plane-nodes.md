@@ -395,7 +395,7 @@ Tainting a single-node cluster would not make sense, then this workflow is not a
 
 ### Implementation Details/Notes/Constraints
 
-See Alternatives section. The previous discarded approach required actual implementation of a admission plugin/controller or some other way to avoid tolerations with new code provided by us, but the accepted workflow is now available out-of-the-box with ValidatingAdmissionPolicies with CEL (still in tech preview, but available if enabled) combined with the NoExecute taint enforcement. So no real implementation from our side is needed, besides providing the default ValidatingAdmissionPolicy and writing documentation/guidance on how to apply this workflow.
+See Alternatives section. The previous discarded approach required actual implementation of a admission plugin/controller or some other way to avoid tolerations with new code provided by us, but the accepted workflow is now available out-of-the-box with ValidatingAdmissionPolicies with CEL (still in tech preview, but available if enabled) combined with the NoExecute taint enforcement. So no real implementation from our side is needed, besides providing the default ValidatingAdmissionPolicy, adding the right tolerations to our core workloads, adding the right permissions into relevant roles and writing documentation/guidance on how to apply this workflow.
 
 ### Risks and Mitigations
 
