@@ -205,7 +205,7 @@ oc taint nodes ip-XX-XX-XX-XXX.ec2.internal node-role.kubernetes.io/control-plan
 
 2. Validating Admission Policy provided:
 
-- As part of this proposal a `ValidatingAdmissionPolicy` will be provided as part of the static manifests applied by Kube Scheduler Operator ([staticresourcecontroller](https://github.com/openshift/cluster-kube-scheduler-operator/blob/master/pkg/operator/starter.go#L108-L123)).
+- As part of this proposal a `ValidatingAdmissionPolicy` will be provided as part of the static manifests applied by Kube Scheduler Operator ([staticresourcecontroller](https://github.com/openshift/cluster-kube-scheduler-operator/blob/67304344622e50cbcd95e7a05056294e9d96df99/pkg/operator/starter.go#L108)).
 
 ```
 apiVersion: admissionregistration.k8s.io/v1beta1
