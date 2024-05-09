@@ -371,7 +371,7 @@ This message clearly indicates the failed policy expression, aiding Users/Develo
 
 9. Emergency Overrides and Adjustments:
 
-- For emergency scenarios necessitating temporary deviations from the norm, Cluster Administrators have the option to swiftly allow new tolerations through the RBAC mechanism or adjust the ValidatingAdmissionPolicy and ValidatingAdmissionPolicyBinding resources. This flexibility ensures that critical operations can proceed unhindered, even under exceptional circumstances.
+- For emergency scenarios necessitating temporary deviations from the norm, Cluster Administrators have the option to swiftly allow new tolerations through the RBAC mechanism or adjust the ValidatingAdmissionPolicyBinding resource to unbind the ValidatingAdmissioPolicy (or change the binding rule). This flexibility ensures that critical operations can proceed unhindered, even under exceptional circumstances.
 
 **Note:** While the ValidatingAdmissionPolicy feature is in Tech Preview within OpenShift, an initial step requires Cluster Administrators to enable the TechPreview feature gate on their cluster and subsequently restart the API Servers to facilitate the creation of policies and bindings. It's important to note that activating this feature marks the cluster as non-upgradable. This significant consideration should be carefully weighed when deciding to implement this enforcement approach.
 
