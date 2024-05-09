@@ -410,7 +410,7 @@ See Alternatives section. The previous discarded approach required actual implem
 
 - Increased Complexity for Cluster Administrators: The introduction of NoExecute taints and the requirement to manage Validating Admission Policies and Bindings may increase the complexity of cluster administration. Administrators now need a deeper understanding of how taints, tolerations, and admission policies interact to enforce these constraints.
 
-- Potential for Misconfiguration: The reliance RBAC rules to exempt certain workloads from scheduling restrictions introduces a risk of misconfiguration, either by applying incorrect rules or failing to update rules as policies evolve.
+- Potential for Misconfiguration: The reliance on RBAC rules to exempt certain workloads from scheduling restrictions introduces a risk of misconfiguration, either by applying incorrect rules or failing to update rules as policies evolve.
 
 - Risk of Disruption to Existing Workloads: Applying NoExecute taints to nodes could lead to the eviction of existing workloads that do not have the necessary tolerations, potentially disrupting services.
 
