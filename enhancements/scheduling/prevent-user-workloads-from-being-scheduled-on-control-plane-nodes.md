@@ -238,15 +238,11 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1beta1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: "control-plane-scheduling-policy-binding"
+  name: enforce-tolerations-policy-binding
 spec:
-  policyName: "control-plane-scheduling-policy"
+  policyName: enforce-tolerations-policy
   validationActions: [Deny]
-  matchResources:
-    namespaceSelector:
-      matchExpressions:
-      - key: openshift.io/control-plane
-        operator: DoesNotExist
+
 ```
 
 4. Service Account to be used by the workload:
