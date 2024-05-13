@@ -128,11 +128,14 @@ This will ensure that essential services and components are not evicted or preve
 The update process should involve a thorough review of all default and critical components to add the necessary toleration, ensuring they continue to operate as expected in environments where the NoExecute taint is applied.
 This step is crucial for maintaining cluster stability and ensuring that core functionalities are not disrupted by the enforcement of the new scheduling policies.
 
-NoExecute Taint Application: Admins seeking to implement this proposal will need to apply the NoExecute taints to control plane nodes (or specialized nodes) to automatically prevent pods without the specific toleration from being scheduled or remaining on these nodes. This approach leverages the kubelet's inherent behavior to ensure compliance with scheduling policies.
+NoExecute Taint Application: Admins seeking to implement this proposal will need to apply the NoExecute taints to control plane nodes (or specialized nodes) to automatically prevent pods without the specific toleration from being scheduled or remaining on these nodes.
+This approach leverages the kubelet's inherent behavior to ensure compliance with scheduling policies.
 
-Validating Admission Policy and Binding: Admins seeking to implement this proposal will need to write and apply a new or extend an existing validating admission policy (and binding) to enforce scheduling policies based on namespace labels and pod tolerations. This policy will validate incoming pod creation and update requests to ensure they do not include tolerations for the node-role.kubernetes.io/control-plane:NoExecute taint (or any other taint/toleration the admin wishes to configure, for special node groups) unless the namespace is explicitly labeled to allow such tolerations.
+Validating Admission Policy and Binding: Admins seeking to implement this proposal will need to write and apply a new or extend an existing validating admission policy (and binding) to enforce scheduling policies based on namespace labels and pod tolerations.
+This policy will validate incoming pod creation and update requests to ensure they do not include tolerations for the node-role.kubernetes.io/control-plane:NoExecute taint (or any other taint/toleration the admin wishes to configure, for special node groups) unless the namespace is explicitly labeled to allow such tolerations.
 
-Namespace Label Management: Admins seeking to implement this proposal need to introduce tools, scripts or organizational processes to assist administrators in managing labels on namespaces that should be exempt from the default scheduling restrictions. This could include automation for emergency situations where rapid response is necessary.
+Namespace Label Management: Admins seeking to implement this proposal need to introduce tools, scripts or organizational processes to assist administrators in managing labels on namespaces that should be exempt from the default scheduling restrictions.
+This could include automation for emergency situations where rapid response is necessary.
 
 ### Expected Outcomes
 
@@ -177,7 +180,10 @@ Pre-Workflow:
 
 Workflow:
 
-- Cluster Administrator: Tasked with applying NoExecute taints to control plane nodes or nodes belonging to other specialized groups. For extending this approach to other special node groups, they must coordinate with relevant teams to ensure those workloads include necessary tolerations and permissions. They are also responsible for creating and applying the ValidatingAdmissionPolicyBinding (that will enable the enforcement of the provided ValidatingAdmissionPolicy we ship) resources to configure which taint tolerations are disallowed for pods. This role involves a strategic overview of the cluster's security and workload management policies.
+- Cluster Administrator: Tasked with applying NoExecute taints to control plane nodes or nodes belonging to other specialized groups.
+For extending this approach to other special node groups, they must coordinate with relevant teams to ensure those workloads include necessary tolerations and permissions.
+They are also responsible for creating and applying the ValidatingAdmissionPolicyBinding (that will enable the enforcement of the provided ValidatingAdmissionPolicy we ship) resources to configure which taint tolerations are disallowed for pods.
+This role involves a strategic overview of the cluster's security and workload management policies.
 - Namespace Administrator: Manages their namespaces, including adding new RBAC rules to allow certain workloads to tolerate the applied NoExecute taint.
 - User/Developer: Those deploying workloads within the cluster must ensure their applications carry the correct tolerations as advised by Cluster Administrators, especially when targeting special node groups. They need to stay informed about the cluster's scheduling policies and adapt their workloads accordingly.
 
@@ -189,15 +195,19 @@ Additional Considerations:
 
 1. Continuous Standardization of Shipped tolerations.
 
-- OpenShift Engineers need to ensure that all control plane and essential workloads ship with the correct tolerations for the NoExecute taints being applied to control plane nodes. This is critical for maintaining uninterrupted operations of OpenShift's core services on these nodes. This involves getting multiple teams on the same page and that new projects also incorporate the needed tolerations.
+- OpenShift Engineers need to ensure that all control plane and essential workloads ship with the correct tolerations for the NoExecute taints being applied to control plane nodes.
+This is critical for maintaining uninterrupted operations of OpenShift's core services on these nodes.
+This involves getting multiple teams on the same page and that new projects also incorporate the needed tolerations.
 - OpenShift Engineers also need to guarantee that those workloads have the right permissions to tolerate the NoExecute taint, as the ValidatingAdmissionPolicy checks for custom taint/toleration key and verbs.
-- If custom special node groups are being considered for protection, Cluster Administrators need to coordinate with Users/Developers to implement new tolerations for workloads intended for those specific node groups (e.g., GPU-enabled nodes). This coordination ensures that the designated workloads are appropriately scheduled on the protected nodes.
+- If custom special node groups are being considered for protection, Cluster Administrators need to coordinate with Users/Developers to implement new tolerations for workloads intended for those specific node groups (e.g., GPU-enabled nodes).
+This coordination ensures that the designated workloads are appropriately scheduled on the protected nodes.
 
 #### Workflow Steps
 
 1. Node tainting:
 
-- Cluster Administrator applies NoExecute taints to control plane nodes and any other special node groups deemed necessary to protect. This foundational step prevents unauthorized workloads from being scheduled (or directly placed with spec.nodeName field) on these critical nodes.
+- Cluster Administrator applies NoExecute taints to control plane nodes and any other special node groups deemed necessary to protect.
+This foundational step prevents unauthorized workloads from being scheduled (or directly placed with spec.nodeName field) on these critical nodes.
 
 ```
 oc taint nodes ip-XX-XX-XX-XXX.ec2.internal node-role.kubernetes.io/control-plane:NoExecute-
@@ -259,7 +269,9 @@ metadata:
 
 5. Role and RoleBinding with custom verbs
 
-- Namespace Administrators or application developers must grant the necessary permissions to this special Service Account to tolerate the relevant taints required. We are using custom verbs and keys, and those are never used by kubernetes itself. We can use the authorizer in the ValidatingAdmissionPolicy to check this custom verbs specific to this workflow.
+- Namespace Administrators or application developers must grant the necessary permissions to this special Service Account to tolerate the relevant taints required.
+We are using custom verbs and keys, and those are never used by kubernetes itself.
+We can use the authorizer in the ValidatingAdmissionPolicy to check this custom verbs specific to this workflow.
 
 ```
 apiVersion: rbac.authorization.k8s.io/v1
@@ -320,7 +332,8 @@ roleRef:
 
 6. Pod Scheduling Attempt:
 
-- Users/Developers proceed to deploy or update pods, embedding scheduling preferences, such as necessary tolerations. Example of adding a relevant tolerations:
+- Users/Developers proceed to deploy or update pods, embedding scheduling preferences, such as necessary tolerations.
+Example of adding a relevant tolerations:
 
 ```
 apiVersion: v1
@@ -355,7 +368,8 @@ spec:
 
 7. Admission Policy Enforcement:
 
-- Upon receiving pod deployment or update requests, the Kubernetes API server invokes the ValidatingAdmissionPolicy. It evaluates the pod's tolerations against the policy's defined CEL expressions, determining the request's compatibility with established configured guidelines.
+- Upon receiving pod deployment or update requests, the Kubernetes API server invokes the ValidatingAdmissionPolicy.
+It evaluates the pod's tolerations against the policy's defined CEL expressions, determining the request's compatibility with established configured guidelines.
 
 8. Policy Decision Feedback:
 
@@ -371,9 +385,12 @@ This message clearly indicates the failed policy expression, aiding Users/Develo
 
 9. Emergency Overrides and Adjustments:
 
-- For emergency scenarios necessitating temporary deviations from the norm, Cluster Administrators have the option to swiftly allow new tolerations through the RBAC mechanism or adjust the ValidatingAdmissionPolicyBinding resource to unbind the ValidatingAdmissioPolicy (or change the binding rule). This flexibility ensures that critical operations can proceed unhindered, even under exceptional circumstances.
+- For emergency scenarios necessitating temporary deviations from the norm, Cluster Administrators have the option to swiftly allow new tolerations through the RBAC mechanism or adjust the ValidatingAdmissionPolicyBinding resource to unbind the ValidatingAdmissioPolicy (or change the binding rule).
+This flexibility ensures that critical operations can proceed unhindered, even under exceptional circumstances.
 
-**Note:** While the ValidatingAdmissionPolicy feature is in Tech Preview within OpenShift, an initial step requires Cluster Administrators to enable the TechPreview feature gate on their cluster and subsequently restart the API Servers to facilitate the creation of policies and bindings. It's important to note that activating this feature marks the cluster as non-upgradable. This significant consideration should be carefully weighed when deciding to implement this enforcement approach.
+**Note:** While the ValidatingAdmissionPolicy feature is in Tech Preview within OpenShift, an initial step requires Cluster Administrators to enable the TechPreview feature gate on their cluster and subsequently restart the API Servers to facilitate the creation of policies and bindings.
+It's important to note that activating this feature marks the cluster as non-upgradable.
+This significant consideration should be carefully weighed when deciding to implement this enforcement approach.
 
 ### API Extensions
 
@@ -395,7 +412,8 @@ Tainting a single-node cluster would not make sense, then this workflow is not a
 
 ### Implementation Details/Notes/Constraints
 
-See Alternatives section. The previous discarded approach required actual implementation of a admission plugin/controller or some other way to avoid tolerations with new code provided by us, but the accepted workflow is now available out-of-the-box with ValidatingAdmissionPolicies with CEL (still in tech preview, but available if enabled) combined with the NoExecute taint enforcement. So no real implementation from our side is needed, besides providing the default ValidatingAdmissionPolicy, adding the right tolerations to our core workloads, adding the right permissions into relevant roles and writing documentation/guidance on how to apply this workflow.
+See Alternatives section. The previous discarded approach required actual implementation of a admission plugin/controller or some other way to avoid tolerations with new code provided by us, but the accepted workflow is now available out-of-the-box with ValidatingAdmissionPolicies with CEL (still in tech preview, but available if enabled) combined with the NoExecute taint enforcement.
+So no real implementation from our side is needed, besides providing the default ValidatingAdmissionPolicy, adding the right tolerations to our core workloads, adding the right permissions into relevant roles and writing documentation/guidance on how to apply this workflow.
 
 ### Risks and Mitigations
 
@@ -408,7 +426,8 @@ See Alternatives section. The previous discarded approach required actual implem
 
 ### Drawbacks
 
-- Increased Complexity for Cluster Administrators: The introduction of NoExecute taints and the requirement to manage Validating Admission Policies and Bindings may increase the complexity of cluster administration. Administrators now need a deeper understanding of how taints, tolerations, and admission policies interact to enforce these constraints.
+- Increased Complexity for Cluster Administrators: The introduction of NoExecute taints and the requirement to manage Validating Admission Policies and Bindings may increase the complexity of cluster administration.
+Administrators now need a deeper understanding of how taints, tolerations, and admission policies interact to enforce these constraints.
 
 - Potential for Misconfiguration: The reliance on RBAC rules to exempt certain workloads from scheduling restrictions introduces a risk of misconfiguration, either by applying incorrect rules or failing to update rules as policies evolve.
 
