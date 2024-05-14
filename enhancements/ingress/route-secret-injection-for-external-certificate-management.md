@@ -14,7 +14,7 @@ approvers:
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - '@joelspeed'
 creation-date: 2022-12-13
-last-updated: 2023-07-28
+last-updated: 2024-05-14
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/CM-815
 ---
@@ -241,7 +241,7 @@ use the default certificates only when `.spec.tls.certificate/key` or `.spec.tls
 are not provided.
 
 The cluster-ingress-operator will propagate the relevant Tech-Preview feature gate down to the
-router. This feature gate will be added as a command-line argument called `ROUTER_EXTERNAL_CERTIFICATE`
+router. This feature gate will be added as a command-line argument called `ROUTER_ENABLE_EXTERNAL_CERTIFICATE`
 to the router and will not be user configurable.
 
 ### Risks and Mitigations
