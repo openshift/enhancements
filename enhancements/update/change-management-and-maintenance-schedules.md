@@ -160,6 +160,12 @@ and intuitive method of deferring worker-node updates: not initiating them. Leav
 discretion, within safe skew-bounds, gives them the flexibility to make the right choices for their
 unique circumstances.
 
+It should also be noted that Service Delivery does not permit customers to directly modify machine config
+pools. This means that the existing machine config pool based pause is not directly available. It is 
+not exposed via OCM either. This enhancement seeks to create high level abstractions supporting the 
+separation of control-plane and worker-nodes that will be straight-forward and intuitive options
+to expose through OCM.
+
 #### Enhancing Operational Control
 The preceding section delved deeply into a motivation for Change Management / Maintenance Schedules based on our desire to 
 separate control-plane and worker-node updates without increasing operational burden on end-users. However,
@@ -183,9 +189,12 @@ MachineConfigPool to limit the impact of that merge to a particular time window 
 significant forethought by the user. Even with that forethought, if an enterprise wants 
 changes to only be applied during weekends, additional custom mechanics would need
 to be employed to ensure the change merged during the weekend without needing someone present.
+Even this approach is unavailable to our managed services customers who are restricted
+from modifying machine config pool directly.
 
-Contrast this complexity with the user setting a Change Management / Maintenance Schedule on the cluster. The user
-is then free to merge configuration changes and gitops can apply those changes to OpenShift
+Contrast this complexity with the user setting a Change Management / Maintenance Schedule 
+on the cluster (or indirectly via OCM when Service Delivery exposes the option for managed clusters). 
+The user is then free to merge configuration changes and gitops can apply those changes to OpenShift
 resources, but material change to the cluster will not be initiated until a time permitted
 by the Maintenance Schedule. Users do not require special insight into the implications of
 configuring platform resources as the top-level Maintenance Schedule control will help ensure
@@ -378,7 +387,9 @@ should be updated to proxy that status information to the end users.
 ### Change Management Metrics
 Cluster wide change management information will be made available through cluster metrics. Each resource
 containing the stanza must expose the following metrics:
-- The number of seconds until the next known permitted change window. 0 if changes can currently be initiated. -1 if changes are paused indefinitely. -2 if no permitted window can be computed.
+- The number of seconds until the next known permitted change window. See `cm_change_eta` metric.
+- The number of seconds until the current change window closes. See `cm_change_remaining` metric.
+- The last datetime at which changes were permitted (can be nil). See `cm_change_last` metric (which represents this as seconds instead of a datetime).
 - Whether any change management strategy is enabled.
 - Which change management strategy is enabled.
 - If changes are pending due to change management controls.
@@ -593,7 +604,7 @@ perspective, this strategy reports as paused indefinitely.
 1. The customer chooses immediate application. 
 1. SRE applies a change to the relevant control-plane AND worker-node resource's `changeManagement` stanza
    (both must be changed because of the change management hierarchy), setting `disabledUntil` to
-   a time 48 hours in the future. The configured change management schedule is ignored for 48 as the system 
+   a time 48 hours in the future. The configured change management schedule is ignored for 48 hours as the system 
    initiates all necessary node changes.
 
 #### Service Delivery Deferred Remediation
@@ -797,10 +808,10 @@ permissive 24h window unless a date is in the `exclude` ranges.
 
 **RRULE Constraints**
 A valid RRULE for change management:
-- must identify a date, so, although RRULE supports `FREQ=HOURLY`, it will not be supported.
+- must identify a date, so, although RRULE supports `FREQ=HOURLY`, it will be rejected if an attempt it made to use it.
 - cannot specify an end for the pattern. `RRULE:FREQ=DAILY;COUNT=3` suggests
   an event that occurs every day for three days only. As such, neither `COUNT` nor `UNTIL` is 
-  supported.
+  supported and will be rejected if an attempt is made to use them.
 - cannot specify a permissive window more than 2 years away.
 
 **Overview of Interactions**
@@ -885,6 +896,29 @@ Value:
 - `-1`: Material changes are paused indefinitely. 
 - `0`: Any pending changes can be initiated now (e.g. change management is disabled or inside machine schedule window).
 - `> 0`: The number seconds remaining until changes can be initiated OR 1000*24*60*60 (1000 days) if no permissive window can be found within the next 1000 days (this ensures a brute force check of intersecting datetimes with hierarchy RRULEs is a valid method of calculating intersection). 
+
+`cm_change_remaining`
+Labels:
+- kind=ClusterVersion|MachineConfigPool|HostedCluster|NodePool
+- object=<object-name>
+- system=<control-plane|worker-nodes>
+
+Value: 
+- `-2`: Error determining the time at which current permissive window will close.
+- `-1`: Material changes are permitted indefinitely (e.g. `strategy: disabled`). 
+- `0`: Material changes are not presently permitted (i.e. the cluster is outside of a permissive window).
+- `> 0`: The number seconds remaining in the current permissive change window (or the equivalent of 1000 days if end of window cannot be computed). 
+
+`cm_change_last`
+Labels:
+- kind=ClusterVersion|MachineConfigPool|HostedCluster|NodePool
+- object=<object-name>
+- system=<control-plane|worker-nodes>
+
+Value: 
+- `-1`: Datetime unknown. 
+- `0`: Material changes are currently permitted.
+- `> 0`: The number of seconds which have elapsed since the material changes were last permitted.
 
 `cm_strategy_enabled`
 Labels:
@@ -974,10 +1008,10 @@ standalone cluster to use the Assisted strategy and failing to trigger worker-no
 leave unpatched CVEs on worker-nodes much longer than necessary. It will also eventually lead to
 the need to resolve version skew (Upgradeable=False will be reported by the API cluster operator).
 
-Service Delivery understands that expose the full range of options to cluster
+Service Delivery understands that exposing the full range of options to cluster
 lifecycle administrators could dramatically increase the overhead of managing their fleet. To
 prevent this outcome, Service Delivery will only expose a subset of the change management
-strategies. They will also implement sanitization of the configuration options a use can
+strategies. They will also implement sanitization of the configuration options a user can
 supply to those strategies. For example, a simplified interface in OCM for building a
 limited range of RRULEs that are compliant with Service Delivery's update policies.
 
