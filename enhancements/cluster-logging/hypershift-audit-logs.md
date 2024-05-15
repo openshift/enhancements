@@ -87,8 +87,8 @@ Please read that proposal for details not covered here.
 1. Create a `ClusterLogForwarder` for each HCP to forward to desired outputs.
 1. Install the new Hypershift Logging Operator (HLO) watching each HCP namespace.
    - The HLO watches CLF configurations _in the data plane_, not the control plane.
-   - When the HLO detects a _control plane_ CLF requesting audit log forwarding, it updates
-     the _data plane_ CLF for that HCP to forward audit logs via a HTTP output to the _control plane_ CLF.
+   - When the HLO detects a _data plane_ CLF requesting audit log forwarding, it updates
+     the _control plane_ CLF for that HCP to forward audit logs via a HTTP output to the _data plane_ CLF.
    - The HLO should copy audit log policies from  _control plane_ CLF pipelines to the _data plane_,
      to forward only those logs that will also be forwarded by the data plane CLF.
 
