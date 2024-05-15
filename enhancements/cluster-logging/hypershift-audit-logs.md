@@ -84,7 +84,7 @@ Please read that proposal for details not covered here.
 #### Management Cluster, control plane
 
 1. Install the Cluster Logging Operator (CLO).
-1. Create a `ClusterLogForwarder` for each HCP to forward to Splunk and management-side CloudWatch.
+1. Create a `ClusterLogForwarder` for each HCP to forward to desired outputs.
 1. Install the new Hypershift Logging Operator (HLO) watching each HCP namespace.
    - The HLO watches CLF configurations _in the data plane_, not the control plane.
    - When the HLO detects a _control plane_ CLF requesting audit log forwarding, it updates
