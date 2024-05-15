@@ -181,7 +181,7 @@ This is unusual but not unprecedented, SREs need to be aware to understand and f
 - Custom Splunk forwarder will be removed.
 
 **Note**: The custom Splunk forwarder MUST be removed and replaced with the CLO for all this to work.
-For non-hypbershift clusters the Splunk exporter and the CLO can coexist by both scraping the API audit log files.
+For non-hypershift clusters the Splunk exporter and the CLO can coexist by both scraping the API audit log files.
 In hypershift there is no accessible log file, and only one process can act as webhook to intercept the API audit logs.
 
 #### Failure Modes
