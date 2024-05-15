@@ -31,7 +31,7 @@ and forward them to customer-configured destinations.
 
 On the management cluster, this proposal adds a "Hypershift Logging Operator" (HLO).
 The HLO watches _data-plane_ CLF resources, when it sees one configured to receive audit logs it updates a _control_plane_ CLF to do the forwarding.
-The control plane CLF is also used to forward to Splunk and optionally CloudWatch from the control plane directly.
+The control plane CLF can be configured to forward to additional supported outputs from the control plane directly.
 
 **NOTE**: This proposal depends on [api-audit-log-policy](api-audit-log-policy.md)
 Please read that proposal for details not covered here.
