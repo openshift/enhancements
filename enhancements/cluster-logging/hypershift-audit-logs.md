@@ -76,7 +76,7 @@ Please read that proposal for details not covered here.
 #### Hosted Cluster, data plane
 
 1. Install the Cluster Logging Operator (CLO).
-1. Create a `ClusterLogForwarder` with a HTTP intupt.
+1. Create a `ClusterLogForwarder` with a HTTP input.
  - Receiver should be identified with a special input name e.g. `hypershiftAPIAudit`
  - Pipelines from the receiver may include an [api-audit-log-policy](/api-audit-log-policy.md) filter.
 1. Forward logs to any outputs as desired.
