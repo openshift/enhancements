@@ -3,36 +3,28 @@ title: ovn-kubernetes-ns-ipsec
 authors:
   - "@yuvalk"
 reviewers:
-  - "@pperiyasamy"
-  - "@dcbw"
-  - "@trozet"
+  - "@pperiyasamy" ## for 4.15 and upgrade parts
+  - "@dcbw" ## for E-W interaction parts
+  - "@trozet" ## overall
 approvers:
-  - "@dcbw"
   - "@trozet"
 api-approvers:
   - "@JoelSpeed"
   - "@deads2k"
 creation-date: 2023-07-26
 last-updated: 2024-05-15
-tracking-link: https://issues.redhat.com/browse/SDN-4034
-status: implemented
+tracking-link:
+  - https://issues.redhat.com/browse/SDN-4034
 see-also:
   - "/enhancements/network/ovn-kubernetes-ipsec.md"
 replaces:
-  - N/A
+  - NA
 superseded-by:
-  - N/A
+  - NA
 ---
 
+
 # OVN Kubernetes North-South IPsec
-
-## Release Signoff Checklist
-
-- [X] Enhancement is `implementable`
-- [X] Design details are appropriately documented from clear requirements
-- [X] Test plan is defined
-- [X] Graduation criteria for dev preview, tech preview, GA
-- [X] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
@@ -42,7 +34,7 @@ virtualization overlay encapsulation protocol, to tunnel traffic across the
 underlay network between Kubernetes Nodes.
 
 IPsec is a protocol suite that enables secure network communications between
-IP endpoints by providing the following services:
+IP endpoints by providing the following services
 - Confidentiality
 - Authentication
 - Data Integrity
