@@ -328,7 +328,6 @@ type TLSConfig struct {
 	// RootCAFile is for setting the file location containing the root CA which is
 	// present in the configured IssuerRef. File should be made available using the
 	// Volume and VolumeMount options.
-	// +kubebuilder:default:="/var/run/secrets/istio-csr/ca.crt"
 	// +optional
 	RootCAFile string `json:"rootCAFile,omitempty"`
 
@@ -391,7 +390,7 @@ type IstioConfig struct {
 	// Revisions are the istio revisions that are currently installed in the cluster.
 	// Changing this field will modify the DNS names that will be requested for
 	// the istiod certificate.
-	// +kubebuilder:default:=["basic"]
+	// +kubebuilder:default:=["default"]
 	// +optional
 	Revisions []string `json:"revisions,omitempty"`
 }
