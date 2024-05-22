@@ -25,9 +25,9 @@ superseded-by: N/A
 ## Summary
 
 The image-based installer is an installation method for on-premise single-node
-OpenShift (SNO) clusters, that will use a bootable, installer image running on
+OpenShift (SNO) clusters, that will use a bootable, installer ISO running on
 the hosts that are to become SNO clusters.
-and a configuration image. The user will generate both images using a
+and a configuration image. The user will generate each image using a
 command-line tool. The first image will contain components (such as the
 [lifecycle-agent](https://github.com/openshift-kni/lifecycle-agent) operator)
 and a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md).
@@ -112,7 +112,7 @@ to be supplied upon deployment at the edge, rather than during the initial ISO g
 This flexibility enables operators to use a single generic image for installing multiple clusters, streamlining the
 deployment process and reducing the need for multiple customized ISO images.
 
-The command-line tool will also support generating a configuration ISO with all the site specific configuration data for
+The OpenShift installer will support generating a configuration ISO with all the site specific configuration data for
 the cluster to be installed provided as input.
 The Config Image Contents:
 * ClusterInfo (cluster name, base domain, hostname, nodeIP)
@@ -182,13 +182,22 @@ N/A
 
 ## Open Questions [optional]
 
-- Should the command-line tool be a subcommand of the OpenShift installer, or a
+- Should the command-line tool that generates the installer ISO be a subcommand of the OpenShift installer, or a
   standalone binary?
 
   Having the functionality provided by the command-line tool in the OpenShift
   installer would be a natural addition to the latter, as the former refers to
   the provisioning of single-node OpenShift clusters and generates the
   required installation artifacts in the same way as the [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md).
+
+- Should the command-line tool that generates the configuration ISO be a subcommand of the OpenShift installer, or a
+  standalone binary?
+
+  Having the functionality provided by the command-line tool in the OpenShift
+  installer would be a natural addition to the latter, as the former refers to
+  the provisioning of single-node OpenShift clusters and consumes the OpenShift
+  installer `install-config.yaml`. In addition, it generates the required
+  installation artifacts in the same way as the [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md).
 
 ## Test Plan
 
