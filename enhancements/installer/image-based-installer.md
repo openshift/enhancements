@@ -34,9 +34,11 @@ and a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/do
 The seed image is an [OCI image](https://github.com/opencontainers/image-spec/blob/main/spec.md)
 generated from a SNO system installed with the target OpenShift version and is installed onto a target SNO
 as a new [ostree stateroot](https://ostreedev.github.io/ostree/deployment/#stateroot-aka-osname-group-of-deployments-that-share-var).
-The second image will contain the site specific configuration data (e.g. the cluster name, domain and crypto objects), which
-need to be set up per cluster and are derived mainly from the OpenShift
-installer [install config](https://github.com/openshift/installer/tree/release-4.15/pkg/asset/installconfig).
+The latter includes, among other files, the `/var`, `/etc` (with specific exclusions) and `/ostree/repo`
+directories, which contain the target OpenShift version and most of its configuration, amounting approximately
+to just over 1GB in size. The second image will contain the site specific configuration data (e.g. the cluster
+name, domain and crypto objects), which need to be set up per cluster and are derived mainly from the
+OpenShift installer [install config](https://github.com/openshift/installer/tree/release-4.15/pkg/asset/installconfig).
 
 ## Motivation
 
