@@ -465,6 +465,7 @@ Relevant tests need to be written before we provide this workflow outside the fe
 - test to ensure all future ocp payload namespaces have proper permissions and tolerations
 - test to ensure enablement works appropriately
 - test to ensure enablement evicts pods without tolerations
+- test to ensure information needed is available to the must-gather
 
 Additions to must-gather to collect all VAP and VAPB resources, VAP audit logs, and events involving VAP.
 
