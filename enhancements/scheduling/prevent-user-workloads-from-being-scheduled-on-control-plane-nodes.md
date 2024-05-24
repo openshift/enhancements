@@ -132,7 +132,7 @@ NoExecute Taint Application: Admins seeking to implement this proposal will need
 This approach leverages the kubelet's inherent behavior to ensure compliance with scheduling policies.
 
 Validating Admission Policy and Binding: Admins seeking to implement this proposal will need to extend an existing validating admission policy binding (shipped by us, together with its validating admission policy) to enforce scheduling policies.
-This policy will validate incoming pod creation and update requests to ensure they do not include tolerations for the node-role.kubernetes.io/control-plane:NoExecute taint (or any other taint/toleration the admin wishes to configure, for special node groups) with exceptions cofigured through RBAC.
+This policy will validate incoming pod creation and update requests to ensure they do not include tolerations for the node-role.kubernetes.io/control-plane:NoExecute taint (or any other taint/toleration the admin wishes to configure, for special node groups) with exceptions configured through RBAC.
 
 RBAC with custom verbs: Admins seeking to implement this proposal need to introduce tools, scripts or organizational processes to assist administrators in managing new RBAC rules on namespaces that should be exempt from the default scheduling restrictions.
 This could include automation for emergency situations where rapid response is necessary.
@@ -182,7 +182,7 @@ Workflow:
 
 - Cluster Administrator: Tasked with applying NoExecute taints to control plane nodes or nodes belonging to other specialized groups.
   For extending this approach to other special node groups, they must coordinate with relevant teams to ensure those workloads include necessary tolerations and permissions.
-  They are also responsible for updating the provided ValidatingAdmissionPolicyBinding (that will enable the enforcement of the provided ValidatingAdmissionPolicy we also ship) resources to configure which taint tolerations are disallowed for pods. ValidatingAdmissionPolicyBinding is provided with `validationActions` set to [Audit, Warn], while this approach is not enforced. It needs to be set to [Deny] to actually enable the policy enforcement.
+  They are also responsible for updating the provided ValidatingAdmissionPolicyBinding (that will enable the enforcement of the provided ValidatingAdmissionPolicy we also ship). The ValidatingAdmissionPolicyBinding is provided with `validationActions` set to [Audit, Warn], while this approach is not enforced. It needs to be set to [Deny] to actually enable the policy enforcement.
   This role involves a strategic overview of the cluster's security and workload management policies.
 - Namespace Administrator: Manages their namespaces, including adding new RBAC rules to allow certain workloads to tolerate the applied NoExecute taint. While `validationActions` is set to [Audit, Warn] they can monitor audit logs to determine how disruptive the approach could be to their setup.
 - User/Developer: Those deploying workloads within the cluster must ensure their applications carry the correct tolerations as advised by Cluster Administrators, especially when targeting special node groups. They need to stay informed about the cluster's scheduling policies and adapt their workloads accordingly.
@@ -277,7 +277,7 @@ metadata:
 
 - Namespace Administrators or application developers must grant the necessary permissions to this special Service Account to tolerate the relevant taints required.
   We are using custom verbs and keys, and those are never used by kubernetes itself.
-  We can use the authorizer in the ValidatingAdmissionPolicy to check this custom verbs specific to this workflow.
+  We can use the authorizer in the ValidatingAdmissionPolicy to check these custom verbs specific to this workflow.
 
 ```
 apiVersion: rbac.authorization.k8s.io/v1
@@ -393,7 +393,7 @@ This message clearly indicates the failed policy expression, aiding Users/Develo
 
 9. Emergency Overrides and Adjustments:
 
-- For emergency scenarios necessitating temporary deviations from the norm, Cluster Administrators have the option to swiftly allow new tolerations through the RBAC mechanism or adjust the ValidatingAdmissionPolicyBinding resource to unbind the ValidatingAdmissioPolicy (or change the binding rule).
+- For emergency scenarios necessitating temporary deviations from the norm, Cluster Administrators have the option to swiftly allow new tolerations through the RBAC mechanism or adjust the ValidatingAdmissionPolicyBinding resource to stop denying requests.
   This flexibility ensures that critical operations can proceed unhindered, even under exceptional circumstances.
 
 **Note:** While the ValidatingAdmissionPolicy feature is in Tech Preview within OpenShift, an initial step requires Cluster Administrators to enable the TechPreview feature gate on their cluster and subsequently restart the API Servers to facilitate the creation of policies and bindings.
