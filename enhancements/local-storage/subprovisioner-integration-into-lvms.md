@@ -101,19 +101,19 @@ API scheme for `LVMCluster` CR:
 
 ```go
 
-  // The DeviceAccessPolicy type defines the accessibility of the create lvm2 volume group backing the deviceClass. 
+  // The DeviceAccessPolicy type defines the accessibility of the lvm2 volume group backing the deviceClass. 
   type DeviceAccessPolicy string
   
   const (
     DeviceAccessPolicyShared DeviceAccessPolicy = "shared"
-    DeviceAccessPolicyNodeLocal  DeviceAccessPolicy = "nodeLocal"
+    DeviceAccessPolicyNodeLocal DeviceAccessPolicy = "nodeLocal"
   )
 
   // LVMClusterSpec defines the desired state of LVMCluster
   type LVMClusterSpec struct {
     // Important: Run "make" to regenerate code after modifying this file
     
-    // Tolerations to apply to nodes to act on
+    // Tolerations applied to CSI driver pods
     // +optional
     Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
     // Storage describes the deviceClass configuration for local storage devices
@@ -143,7 +143,8 @@ API scheme for `LVMCluster` CR:
     // +optional
     NodeSelector *corev1.NodeSelector `json:"nodeSelector,omitempty"`
     
-    // ThinPoolConfig contains configurations for the thin-pool
+    // ThinPoolConfig contains configurations for the thin-pool. 
++   // MUST NOT be set for shared deviceClasses.
     // +optional
     ThinPoolConfig *ThinPoolConfig `json:"thinPoolConfig,omitempty"`
     
