@@ -344,7 +344,7 @@ The status reporting will include:
 - **Phase 3**: Performance testing, bug fixes, and documentation. Preparing for Alpha release.
 - **Phase 4**: Developer Preview release with comprehensive manual and QE testing. Gathering user feedback and making improvements.
 - **Phase 5**: Technology PReview with Documentation Extension and preparation of GA.
-- **Phase 5**: General Availability (GA) release with proven stability and performance in production environments.
+- **Phase 6**: General Availability (GA) release with proven stability and performance in production environments.
 
 ### Drawbacks
 
