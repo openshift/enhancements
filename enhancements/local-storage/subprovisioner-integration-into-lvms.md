@@ -101,13 +101,13 @@ API scheme for `LVMCluster` CR:
 
 ```go
 
-  // The DeviceAccessPolicy type defines the accessibility of the lvm2 volume group backing the deviceClass. 
-  type DeviceAccessPolicy string
++ // The DeviceAccessPolicy type defines the accessibility of the lvm2 volume group backing the deviceClass. 
++ type DeviceAccessPolicy string
   
-  const (
-    DeviceAccessPolicyShared DeviceAccessPolicy = "shared"
-    DeviceAccessPolicyNodeLocal DeviceAccessPolicy = "nodeLocal"
-  )
++ const (
++   DeviceAccessPolicyShared DeviceAccessPolicy = "shared"
++   DeviceAccessPolicyNodeLocal DeviceAccessPolicy = "nodeLocal"
++ )
 
   // LVMClusterSpec defines the desired state of LVMCluster
   type LVMClusterSpec struct {
@@ -160,11 +160,11 @@ API scheme for `LVMCluster` CR:
     // +optional
     FilesystemType DeviceFilesystemType `json:"fstype,omitempty"`
     
-    // Policy defines the policy for the deviceClass.
-    // TECH PREVIEW: shared will allow accessing the deviceClass from multiple nodes.
-    // The deviceClass will then be configured via shared volume group.
-    // +optional	  
-    // +kubebuilder:validation:Enum=shared;local
++   // Policy defines the policy for the deviceClass.
++   // TECH PREVIEW: shared will allow accessing the deviceClass from multiple nodes.
++   // The deviceClass will then be configured via shared volume group.
++   // +optional	  
++   // +kubebuilder:validation:Enum=shared;local
 +   DeviceAccessPolicy DeviceAccessPolicy `json:"deviceAccessPolicy,omitempty"`
   }
 
