@@ -213,43 +213,148 @@ API scheme for `LVMCluster` CR:
   }
 ```
 
-## Design Details on volume group orchestration and management via vgmanager
+## Design Details on Volume Group Orchestration and Management via vgmanager
 
-TBD
+The `vgmanager` component will be responsible for managing volume groups (VGs) and coordinating the orchestration between TopoLVM and Subprovisioner CSI drivers. This includes:
+
+1. **Detection and Configuration**:
+  - Detecting devices that match the `DeviceSelector` criteria specified in the `LVMCluster` CR.
+  - Configuring volume groups based on the `DeviceAccessPolicy` (either `shared` for Subprovisioner or `local` for TopoLVM).
+  - Ensuring that shared volume groups are correctly initialized and managed across multiple nodes.
+
+2. **Dynamic Provisioning**:
+  - Creating and managing VGs dynamically based on incoming requests and the policy defined in the CR.
+  - For shared deviceClasses, ensure that the VG is accessible and consistent across all nodes in the cluster.
+  - For shared volume groups mandated by a shared deviceClass, the VG will be created in shared mode and a SAN lock might need to be initialized
+  
+3. **Monitoring and Maintenance**:
+  - Continuously monitor the health and status of the VGs.
+  - Handling any required maintenance tasks, such as resizing, repairing, or migrating VGs must be performed manually for shared Volume Groups.
+
+4. **Synchronization**:
+  - Ensure synchronization mechanisms (such as locks) are in place for shared VGs to prevent data corruption and ensure consistency.
+  - Utilize `sanlock` or similar technologies to manage and synchronize access to shared storage at all times.
+  - For SAN lock initialization, a race-free initialization of the lock space will be required. This can be achieved by using a Lease Object,
+    which is a Kubernetes object that can be used to coordinate distributed systems. The Lease Object will be used to ensure that only one node
+    can initialize the lock space at a time. The Lease will be owned on a first-come-first-serve basis, and the node that acquires the Lease will
+    will be used for shared lockspace initialization. [A sample implementation can be found here](https://github.com/openshift/lvm-operator/commit/8ba6307c7bcaccc02953e0e2bdad5528636d5e2d)
+
 
 ## Design Details for Status Reporting
 
-TBD
+The status reporting will include:
+
+1. **VG Status**:
+  - Report the health and state of each VG managed by `vgmanager`.
+  - Include details such as size, available capacity, and any errors or warnings.
+  - Health reporting per node is still mandatory.
+
+2. **Node-Specific Information**:
+  - Report node-specific information related to the VGs, such as which nodes have access to shared VGs.
+  - Include status of node-local VGs and any issues detected.
+
+3. **CSI Driver Status**:
+  - Provide status updates on the CSI drivers (both TopoLVM and Subprovisioner) deployed in the cluster.
+  - Include information on driver health, performance metrics, and any incidents.
+  - Ideally, subprovisioner implements Volume Health Monitoring CSI calls.
+
+4. **Event Logging**:
+  - Maintain detailed logs of all events related to VG management and CSI driver operations.
+  - Ensure that any significant events (such as failovers, recoveries, and maintenance actions) are logged and reported.
 
 ### Test Plan
 
-- The integration tests for the LVMS already exist. These tests will need to be updated to test this feature.
-- The tests must ensure that detection of devices are working/updating correctly.
+- **Integration Tests**:
+  - Update existing LVMS integration tests to include scenarios for shared storage provisioning with Subprovisioner.
+  - Ensure that device detection and VG management are functioning correctly with both TopoLVM and Subprovisioner.
+  - QE will be extending the existing test suites to include shared storage provisioning and synchronization tests.
+
+- **E2E Tests**:
+  - Implement end-to-end tests to validate the complete workflow from device discovery to VG provisioning and usage.
+  - Include multi-node scenarios to test shared storage provisioning and synchronization.
+
+- **Performance and Stress Tests**:
+  - Conduct performance tests to assess the scalability and robustness of the VG management and CSI driver operations.
+  - The performance tests will have the same scope as the existing TopoLVM performance tests, mainly provisioning times and I/O
+  - Perform stress tests to evaluate system behavior under high load and failure conditions.
+  - We will run these tests before any graduation to GA at the minimum.
 
 ### Graduation Criteria
 
-TBD
+- **Developer Preview (Early Evaluation and Feedback)**:
+  - Initial implementation with basic functionality for shared and node-local VG provisioning.
+  - Basic integration and E2E tests in place.
+  - Feedback from early adopters and stakeholders collected.
+  - No official Product Support.
+  - Functionality is provided with very limited, if any, documentation. Documentation is not included as part of the product’s documentation set.
 
-#### Removing a deprecated feature
+- **Technology Preview**:
+  - Feature-complete implementation with all planned functionality.
+  - Comprehensive test coverage including performance and stress tests.
+  - Functionality is documented as part of the products documentation set (on the Red Hat Customer Portal) and/or via the release notes.
+  - Functionality is provided with LIMITED support by Red Hat. Customers can open support cases, file bugs, and request feature enhancements. However, support is provided with NO commercial SLA and no commitment to implement any changes.
+  - Functionality has undergone more complete Red Hat testing for the configurations supported by the underlying product.
+  - Functionality is, with rare exceptions, on Red Hat’s product roadmap for a future release.
 
-- None of the features are getting deprecated
+- **GA**:
+  - Proven stability and performance in production-like environments.
+  - Positive feedback from initial users.
+  - Full documentation, including troubleshooting guides and best practices.
+  - Full LVMS Support Lifecycle
 
 ### Upgrade / Downgrade Strategy
 
-TBD
+- **Upgrade**:
+  - Ensure that upgrades are seamless with no downtime for existing workloads. Migrating to a subprovisioner enabled version is a no-break operation
+  - Test upgrade paths thoroughly to ensure compatibility and data integrity. The subprovisioner to topolvm (or vice versa) switch should be excluded and forbidden explicitly.
+  - New deviceClasses with the shared policy should be able to be added to existing LVMClusters without affecting existing deviceClasses.
+
+- **Downgrade**:
+  - Allow safe downgrades by maintaining backward compatibility. Downgrading from a subprovisioner enabled version to a purely topolvm enabled version should be a no-break operation for the topolvm part. For the subprovisioner part, the operator should ensure that the shared VGs can be cleaned up manually
+  - Provide rollback mechanisms and detailed instructions to revert to previous versions. Ensure that downgrades do not result in data loss or service interruptions.
+    The operator should ensure that the shared VGs can be cleaned up manually.
+  - Ensure that downgrades do not result in data loss or service interruptions. The operator should ensure that the shared VGs can be cleaned up without data loss on other device classes.
 
 ### Version Skew Strategy
 
-TBD
+- Ensure compatibility between different versions of LVMS and the integrated Subprovisioner CSI driver.
+  - Implement version checks and compatibility checks in the `vgmanager` component.
+  - Ensure that the operator can handle version skew between the LVMS operator and the Subprovisioner CSI driver where required.
+  - Provide clear guidelines on how to manage version skew and perform upgrades in a controlled manner.
+  - One version of LVMS should be able to handle one version of the Subprovisioner CSI driver.
+- Document supported version combinations and any known issues with version mismatches.
+- Provide clear guidelines on how to manage version skew and perform upgrades in a controlled manner.
 
-## Implementation History
+### Security Considerations
 
-TBD
+- **Access Control**:
+  - Ensure that access to shared storage is controlled and restricted to authorized users. Node-level access control should be enforced similarly to TopoLVM.
+  - Implement RBAC policies to restrict access to VGs and CSI drivers based on user roles and permissions.
+  - Ensure that shared VGs are only accessible by nodes that are authorized to access them.
+- **CVE Scanning**:
+  - Ensure that the Subprovisioner CSI driver is regularly scanned for vulnerabilities and that any identified issues are addressed promptly.
+  - Implement a process for CVE scanning and remediation for the Subprovisioner CSI driver.
+  - Fixes for CVEs should be handled in a dedicated midstream openshift/subprovisioner for critical CVEs when Red Hat decides to no longer solely own the project. Until then, the fixes will be handled by the Red Hat team and a midstream is optional.
 
-## Drawbacks
+### Implementation Milestones
 
-TBD
+- **Phase 1**: Initial design and prototyping. Basic integration with Subprovisioner and updates to the LVMCluster CR.
+- **Phase 2**: Development of `vgmanager` functionalities for VG orchestration and management. Integration and E2E testing.
+- **Phase 3**: Performance testing, bug fixes, and documentation. Preparing for Alpha release.
+- **Phase 4**: Developer Preview release with comprehensive manual and QE testing. Gathering user feedback and making improvements.
+- **Phase 5**: Technology PReview with Documentation Extension and preparation of GA.
+- **Phase 5**: General Availability (GA) release with proven stability and performance in production environments.
 
-## Alternatives
+### Drawbacks
 
-TBD
+- Increased complexity in managing both node-local and shared storage.
+- Potential for increased maintenance burden with the integration of a new CSI driver.
+- Risks associated with the stability and maturity of the Subprovisioner project.
+- Complex testing matrix and shared volume group use cases can be hard to debug / troubleshoot.
+
+### Alternatives
+
+- Continue using TopoLVM exclusively for local storage provisioning.
+- Evaluate and integrate other CSI drivers that support shared storage.
+- Develop a custom CSI driver to meet the specific needs of LVMS and OpenShift.
+- Move Subprovisioner to CNV and package it in a separate product.
