@@ -23,117 +23,25 @@ replaces:
 superseded-by:
 ---
 
-To get started with this template:
-1. **Pick a domain.** Find the appropriate domain to discuss your enhancement.
-1. **Make a copy of this template.** Copy this template into the directory for
-   the domain.
-1. **Fill out the metadata at the top.** The embedded YAML document is
-   checked by the linter.
-1. **Fill out the "overview" sections.** This includes the Summary and
-   Motivation sections. These should be easy and explain why the community
-   should desire this enhancement.
-1. **Create a PR.** Assign it to folks with expertise in that domain to help
-   sponsor the process.
-1. **Merge after reaching consensus.** Merge when there is consensus
-   that the design is complete and all reviewer questions have been
-   answered so that work can begin.  Come back and update the document
-   if important details (API field names, workflow, etc.) change
-   during code review.
-1. **Keep all required headers.** If a section does not apply to an
-   enhancement, explain why but do not remove the section. This part
-   of the process is enforced by the linter CI job.
-
-See ../README.md for background behind these instructions.
-
-Start by filling out the header with the metadata for this enhancement.
-
 # vSphere Multi vCenter Support
 
 ## Summary
 
-```
-The `Summary` section is important for producing high quality
-user-focused documentation such as release notes or a development roadmap. It
-should be possible to collect this information before implementation begins in
-order to avoid requiring implementors to split their attention between writing
-release notes and implementing the feature itself.
-
-Your summary should be one paragraph long. More detail
-should go into the following sections.
-```
-The desire for OpenShift to support IPI installs across multiple vCenters is
-emerging as a common environments where customers have multiple vCenters that 
+The desire for OpenShift to support IPI and UPI installs across multiple vCenters 
+is emerging as a common environments where customers have multiple vCenters that 
 they would like to leverage for clusters.  Additionally, there is a growing
 demand for UPI installs as well.  The proposal described in this document 
 discusses the implementation of configuring clusters across vCenters as day 0 
 and day 2 operations.
 
 ## Motivation
-```
-This section is for explicitly listing the motivation, goals and non-goals of
-this proposal. Describe why the change is important and the benefits to users.
-```
+
 Users of OpenShift would like the ability to install a vSphere IPI cluster
 across multiple vCenters.
 
 - https://issues.redhat.com/browse/OCPSTRAT-697
 
 ### User Stories
-```
-Detail the things that people will be able to do if this is implemented and
-what goal that allows them to achieve. In each story, explain who the actor
-is based on their role, explain what they want to do with the system,
-and explain the underlying goal they have, what it is they are going to
-achieve with this new feature.
-
-Use the standard three part formula:
-
-> "As a _role_, I want to _take some action_ so that I can _accomplish a
-goal_."
-
-Make the change feel real for users, without getting bogged down in
-implementation details.
-
-Here are some example user stories to show what they might look like:
-
-* As an OpenShift engineer, I want to write an enhancement, so that I
-  can get feedback on my design and build consensus about the approach
-  to take before starting the implementation.
-* As an OpenShift engineer, I want to understand the rationale behind
-  a particular feature's design and alternatives considered, so I can
-  work on a new enhancement in that problem space knowing the history
-  of the current design better.
-* As a product manager, I want to review this enhancement proposal, so
-  that I can make sure the customer requirements are met by the
-  design.
-* As an administrator, I want a one-click OpenShift installer, so that
-  I can easily set up a new cluster without having to follow a long
-  set of operations.
-
-In each example, the persona's goal is clear, and the goal is clearly provided
-by the capability being described.
-The engineer wants feedback on their enhancement from their peers, and writing
-an enhancement allows for that feedback.
-The product manager wants to make sure that their customer requirements are fulfilled,
-reviewing the enhancement allows them to check that.
-The administrator wants to set up his OpenShift cluster as easily as possible, and
-reducing the install to a single click simplifies that process.
-
-Here are some real examples from previous enhancements:
-* [As a member of OpenShift concerned with the release process (TRT, dev, staff engineer, maybe even PM),
-I want to opt in to pre-release features so that I can run periodic testing in CI and obtain a signal of
-feature quality.](https://github.com/openshift/enhancements/blob/master/enhancements/installer/feature-sets.md#user-stories)
-* [As a cloud-provider affiliated engineer / platform integrator / RH partner
-I want to have a mechanism to signal OpenShift's built-in operators about additional
-cloud-provider specific components so that I can inject my own platform-specific controllers into OpenShift
-to improve the integration between OpenShift and my cloud provider.](https://github.com/openshift/enhancements/blob/master/enhancements/cloud-integration/infrastructure-external-platform-type.md#user-stories)
-* [As an OpenShift cluster administrator, I want to add worker nodes to my
-existing single control-plane node cluster, so that it'll be able to meet
-growing computation demands.](https://github.com/openshift/enhancements/blob/master/enhancements/single-node/single-node-openshift-with-workers.md#user-stories)
-
-Include a story on how this proposal will be operationalized:
-life-cycled, monitored and remediated at scale.
-```
 
 As a system administrator, I would like OpenShift to support an installation 
 across multiple vCenters so that I can leverage multiple vCenters as part of
@@ -143,6 +51,9 @@ As a system administrator, I would like to scale new nodes across multiple
 vSphere vCenters so that I can leverage various availability zones for 
 workloads depending on our organization's needs.
 
+As a system administrator, I would like to add a new vCenter to the existing
+OCP cluster so that I can scale out new workloads across a new vCenter.
+
 ### Goals
 ```
 Summarize the specific goals of the proposal. How will we know that
@@ -151,16 +62,25 @@ their perspective, and does not include the implementation details
 from the proposal.
 ```
 
-- Installation acknowledges the configuration of multiple vCenters and the 
-  control plane / compute nodes are spread across the configured failure 
-  domains.
+- During installation, all nodes are created in all defined vCenters.
+  Rational: multiple vCenters is another twist on failure domains.  A new vCenter 
+  will appear as a new failure domain to the OCP cluster.  Control plane and 
+  compute nodes must be able to be assigned to any FD.
 
-- An existing cluster is able to add a new failure domain with the failure
-  domain's vCenter being a different one than the one that was used during 
-  the installation.
+- OCP clusters will be enhanced to leverage new yaml cloud provider config for
+  vSphere.
+  Rational: The ini configuration has been deprecated and the newer yaml format
+  supports multiple vCenters.
 
-- As a system administrator, I would like to add a new vCenter to the existing 
-  OCP cluster so that I can scale out new workloads across a new vCenter.
+- When updating infrastructure after initial installation, the cluster should be
+  able to accept the newly defined failure domain which points leverages a new 
+  vCenter.  
+
+- Updating the cloud provider config from ini to yaml will be supported.
+  Rational: Existing clusters wish to take advantage of migrating loads to a new
+  vCenter.  In order for this to happen, we must be able to allow customers to
+  update their existing cloud provider config to contain all relevant information
+  for the new vCenter.
 
 ### Non-Goals
 
@@ -169,19 +89,465 @@ focus discussion and make progress. Highlight anything that is being
 deferred to a later phase of implementation that may call for its own
 enhancement.
 
+- Updating cloud config to yaml format for existing clusters (upgrading OCP to 4.17+)
+
 ## Proposal
 
-This section should explain what the proposal actually is. Enumerate
-*all* of the proposed changes at a *high level*, including all of the
-components that need to be modified and how they will be
-different. Include the reason for each choice in the design and
-implementation that is proposed here.
+### Multiple vCenters Configured at Installation
 
-To keep this section succinct, document the details like API field
-changes, new images, and other implementation details in the
-**Implementation Details** section and record the reasons for not
-choosing alternatives in the **Alternatives** section at the end of
-the document.
+This section will discuss all the enhancements being made to support installing
+a new cluster for use with multiple vCenters.
+
+#### Installer Changes
+
+The OCP installer is going to be enhanced to allow the system administrator to 
+configure the cluster to use multiple vCenters. In order for this to happen, we
+will be locking the multi vCenter ability behind a new feature gate: **VSphereMultiVCenters**.
+The installer will also be enhanced to handle creating resources via CAPI env and
+will also be enhanced to generate the new YAML vSphere cloud config.
+
+##### Feature Gate
+
+While the multi vCenter feature is not GA'd, you can configure cluster using the
+feature set CustomNoUpgrade.  An example of configuring feature gate in the install-config.yaml
+using CustomNoUpgrade:
+```yaml
+apiVersion: v1
+baseDomain: openshift.manta-lab.net
+featureSet: CustomNoUpgrade
+featureGates:
+- ClusterAPIInstall=true
+- VSphereMultiVCenters=true
+```
+
+You may also use the featureSet TechPreviewNoUpgrade to enable multi vCenter 
+support; however this will also pull in all other non GA'd features that may
+still be a work in progress.  An example of enabling with TechPreviewNoUpgrade:
+```yaml
+apiVersion: v1
+baseDomain: openshift.manta-lab.net
+featureSet: TechPreviewNoUpgrade
+```
+
+This new feature gate will also be available for various operators to use do
+control if multiple vCenters are allowed to be configured and used within each
+operator's domain.  More on this in later sections.
+
+##### Install-Config.yaml
+
+The schema for the install-config already allows for the configuration of multiple
+vCenters.  The installer originally blocked the configuration of multiple via the
+installer code.  This code has now been enhanced to check for the configuration of
+the new feature gate.
+
+An example of configuring the install-config.yaml for multiple vCenters:
+```yaml
+apiVersion: v1
+baseDomain: openshift.manta-lab.net
+featureSet: CustomNoUpgrade
+featureGates:
+- ClusterAPIInstall=true
+- VSphereMultiVCenters=true
+compute:
+- architecture: amd64
+  hyperthreading: Enabled
+  name: worker
+  platform: 
+    vsphere:
+      zones:      
+      - fd-1
+      - fd-2
+      cpus: 4
+      coresPerSocket: 2
+      memoryMB: 8192
+      osDisk:
+        diskSizeGB: 60
+  replicas: 0
+controlPlane:
+  architecture: amd64
+  hyperthreading: Enabled
+  name: master
+  platform:
+    vsphere: 
+      zones:
+      - fd-1
+      - fd-2
+      cpus: 8 
+      coresPerSocket: 2
+      memoryMB: 16384
+      osDisk:
+        diskSizeGB: 100
+  replicas: 3
+metadata:
+  creationTimestamp: null
+  name: ngirard-multi
+networking:
+  clusterNetwork:
+  - cidr: 10.128.0.0/14
+    hostPrefix: 23
+  machineNetwork:
+  - cidr: 10.93.43.128/25
+  serviceNetwork:
+  - 172.30.0.0/16
+platform:
+  vsphere: 
+    apiVIPs:
+    - 10.93.43.132
+    ingressVIPs:
+    - 10.93.43.133
+    failureDomains: 
+    - name: fd-1
+      region: us-east
+      server: vcs8e-vc.ocp2.dev.cluster.com
+      topology:
+        computeCluster: "/IBMCloud/host/vcs-ci-workload"
+        datacenter: IBMCloud
+        datastore: "/IBMCloud/datastore/vsanDatastore"
+        networks:
+        - ci-vlan-1148
+      zone: us-east-4a
+    - name: fd-2
+      region: us-east
+      server: vcenter.ci.ibmc.devcluster.openshift.com
+      topology:
+        computeCluster: "/cidatacenter/host/cicluster"
+        datacenter: cidatacenter
+        datastore: "/cidatacenter/datastore/vsanDatastore"
+        networks:
+        - ci-vlan-1148
+      zone: us-east-1a
+    vcenters:
+    - datacenters:
+      - IBMCloud
+      password: "password"
+      port: 443
+      server: vcs8e-vc.ocp2.dev.cluster.com
+      user: user
+    - datacenters:
+      - cidatacenter
+      password: "password"
+      port: 443
+      server: vcenter.ci.ibmc.devcluster.openshift.com
+      user: user
+```
+
+In the above example, each vCenter will need to be configured in the **vcenters**
+section.  Once the vcenters are configured, you can then use them as server for
+any of the configured failure domains.  In this example, each failure domain is 
+configured to use a different server.
+
+The installer will consume the install-config and begin creating all artifacts
+for the installation process.  Since each vCenter is considered part of one or
+more failure domains, the failure domain logic will treat each failure domain
+as it did before.  The primary difference comes into play when creating the
+bootstrap and control plane machines / nodes.
+
+The installer will only support installing with multiple vCenters when using the
+CAPI version of the installer is in use.  The installer by the time this feature
+is release may already be changed to have CAPI install logic as the default for
+vSphere.  
+
+Due to limitations in CAPI, multiple vCenters cannot be used for a single 
+cluster definition.  However, we are able to create multiple CAPI clusters to 
+achieve our goal of creating VMs across multiple vCenters.  With this approach,
+we will create one CAPI cluster for each vCenter we wish to create a VM for either
+bootstrap or control plane machines.  We will not create a CAPI cluster definition
+for vCenters that will only have compute nodes.
+
+The generated output files for CAPI wil look as follows.
+
+Directory:
+```bash
+[ngirard@ip-192-168-133-14 cluster-api]$ ls -lah
+total 36K
+drwxr-x---. 3 ngirard ngirard 4.0K May 31 14:07 .
+drwxr-xr-x. 5 ngirard ngirard  126 May 31 14:07 ..
+-rw-r-----. 1 ngirard ngirard  124 May 31 14:07 000_capi-namespace.yaml
+-rw-r-----. 1 ngirard ngirard  498 May 31 14:07 01_capi-cluster-0.yaml
+-rw-r-----. 1 ngirard ngirard  498 May 31 14:07 01_capi-cluster-1.yaml
+-rw-r-----. 1 ngirard ngirard  395 May 31 14:07 01_vsphere-cluster-0.yaml
+-rw-r-----. 1 ngirard ngirard  406 May 31 14:07 01_vsphere-cluster-1.yaml
+-rw-r-----. 1 ngirard ngirard  214 May 31 14:07 01_vsphere-creds-0.yaml
+-rw-r-----. 1 ngirard ngirard  238 May 31 14:07 01_vsphere-creds-1.yaml
+drwxr-x---. 2 ngirard ngirard 4.0K May 31 14:07 machines
+```
+
+Each 01_capi-cluster-*.yaml file represents each vCenter.
+
+01_capi-cluster-0.yaml
+```yaml 
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  creationTimestamp: null
+  name: ngirard-multi-8tpnt-0
+  namespace: openshift-cluster-api-guests
+spec:
+  clusterNetwork:
+    apiServerPort: 6443
+  controlPlaneEndpoint:
+    host: ""
+    port: 0
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+    kind: VSphereCluster
+    name: ngirard-multi-8tpnt-0
+    namespace: openshift-cluster-api-guests
+status:
+  controlPlaneReady: false
+  infrastructureReady: false
+```
+
+01_capi-cluster-1.yaml:
+```yaml 
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  creationTimestamp: null
+  name: ngirard-multi-8tpnt-1
+  namespace: openshift-cluster-api-guests
+spec:
+  clusterNetwork:
+    apiServerPort: 6443
+  controlPlaneEndpoint:
+    host: ""
+    port: 0
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+    kind: VSphereCluster
+    name: ngirard-multi-8tpnt-1
+    namespace: openshift-cluster-api-guests
+status:
+  controlPlaneReady: false
+  infrastructureReady: false
+```
+
+When we look at the infrastructureRefs, you'll see each one reference the individual
+vCenters.
+
+01_vsphere-cluster-0.yaml
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: VSphereCluster
+metadata:
+  creationTimestamp: null
+  name: ngirard-multi-8tpnt-0
+  namespace: openshift-cluster-api-guests
+spec:
+  controlPlaneEndpoint:
+    host: api.ngirard-multi.openshift.manta-lab.net
+    port: 6443
+  identityRef:
+    kind: Secret
+    name: vsphere-creds-0
+  server: https://vcs8e-vc.ocp2.dev.cluster.com
+status: {}
+```
+
+01_vsphere-cluster-1.yaml
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: VSphereCluster
+metadata:
+  creationTimestamp: null
+  name: ngirard-multi-8tpnt-1
+  namespace: openshift-cluster-api-guests
+spec:
+  controlPlaneEndpoint:
+    host: api.ngirard-multi.openshift.manta-lab.net
+    port: 6443
+  identityRef:
+    kind: Secret
+    name: vsphere-creds-1
+  server: https://vcenter.ci.ibmc.devcluster.openshift.com
+status: {}
+```
+
+With CAPI configured this way, each vCenter will reference to allow the configured
+bootstrap and control plane VMs to get created.  The machines directory will still
+contain all machines needing to be created.  If we look at each one individually, 
+we will see that not all machines are for the same vcenter.
+
+```bash
+[ngirard@ip-192-168-133-14 cluster-api]$ ls -lah machines/
+total 40K
+drwxr-x---. 2 ngirard ngirard 4.0K May 31 14:07 .
+drwxr-x---. 3 ngirard ngirard 4.0K May 31 14:07 ..
+-rw-r-----. 1 ngirard ngirard  667 May 31 14:07 10_inframachine_ngirard-multi-8tpnt-bootstrap.yaml
+-rw-r-----. 1 ngirard ngirard  868 May 31 14:07 10_inframachine_ngirard-multi-8tpnt-master-0.yaml
+-rw-r-----. 1 ngirard ngirard  887 May 31 14:07 10_inframachine_ngirard-multi-8tpnt-master-1.yaml
+-rw-r-----. 1 ngirard ngirard  868 May 31 14:07 10_inframachine_ngirard-multi-8tpnt-master-2.yaml
+-rw-r-----. 1 ngirard ngirard  483 May 31 14:07 10_machine_ngirard-multi-8tpnt-bootstrap.yaml
+-rw-r-----. 1 ngirard ngirard  520 May 31 14:07 10_machine_ngirard-multi-8tpnt-master-0.yaml
+-rw-r-----. 1 ngirard ngirard  520 May 31 14:07 10_machine_ngirard-multi-8tpnt-master-1.yaml
+-rw-r-----. 1 ngirard ngirard  520 May 31 14:07 10_machine_ngirard-multi-8tpnt-master-2.yaml
+```
+
+machines/10_inframachine_ngirard-multi-8tpnt-master-0.yaml
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: VSphereMachine
+metadata:
+  creationTimestamp: null
+  labels:
+    cluster.x-k8s.io/control-plane: ""
+  name: ngirard-multi-8tpnt-master-0
+  namespace: openshift-cluster-api-guests
+spec:
+  cloneMode: fullClone
+  customVMXKeys:
+    guestinfo.domain: ngirard-multi.openshift.manta-lab.net
+    guestinfo.hostname: ngirard-multi-8tpnt-master-0
+    stealclock.enable: "TRUE"
+  datacenter: IBMCloud
+  datastore: /IBMCloud/datastore/vsanDatastore
+  diskGiB: 100
+  folder: /IBMCloud/vm/ngirard-multi-8tpnt
+  memoryMiB: 16384
+  network:
+    devices:
+    - dhcp4: true
+      networkName: /IBMCloud/host/vcs-ci-workload/ci-vlan-1148
+  numCPUs: 8
+  resourcePool: /IBMCloud/host/vcs-ci-workload/Resources
+  server: vcs8e-vc.ocp2.dev.cluster.com
+  template: ngirard-multi-8tpnt-rhcos-us-east-us-east-4a
+status:
+  ready: false
+```
+
+machines/10_inframachine_ngirard-multi-8tpnt-master-1.yaml
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: VSphereMachine
+metadata:
+  creationTimestamp: null
+  labels:
+    cluster.x-k8s.io/control-plane: ""
+  name: ngirard-multi-8tpnt-master-1
+  namespace: openshift-cluster-api-guests
+spec:
+  cloneMode: fullClone
+  customVMXKeys:
+    guestinfo.domain: ngirard-multi.openshift.manta-lab.net
+    guestinfo.hostname: ngirard-multi-8tpnt-master-1
+    stealclock.enable: "TRUE"
+  datacenter: cidatacenter
+  datastore: /cidatacenter/datastore/vsanDatastore
+  diskGiB: 100
+  folder: /cidatacenter/vm/ngirard-multi-8tpnt
+  memoryMiB: 16384
+  network:
+    devices:
+    - dhcp4: true
+      networkName: /cidatacenter/host/cicluster/ci-vlan-1148
+  numCPUs: 8
+  resourcePool: /cidatacenter/host/cicluster/Resources
+  server: vcenter.ci.ibmc.devcluster.openshift.com
+  template: ngirard-multi-8tpnt-rhcos-us-east-us-east-1a
+status:
+  ready: false
+```
+
+##### YAML Cloud Config
+
+In addition to updating the CAPI process, the installer is being updated to create
+the newer upstream YAML configuration for the vSphere cloud provider.  The YAML 
+cloud provider config was designed to handle multiple vCenters.  The config will
+be generated and placed into the same config map that is used today: `oc get cm cloud-provider-config -n openshift-config`
+
+New YAML config:
+```yaml
+global:
+  user: ""
+  password: ""
+  server: ""
+  port: 0
+  insecureFlag: true
+  datacenters: []
+  soapRoundtripCount: 0
+  caFile: ""
+  thumbprint: ""
+  secretName: vsphere-creds
+  secretNamespace: kube-system
+  secretsDirectory: ""
+  apiDisable: false
+  apiBinding: ""
+  ipFamily: []
+vcenter:
+  vcenter.ci.ibmc.devcluster.openshift.com:
+    user: ""
+    password: ""
+    tenantref: ""
+    server: vcenter.ci.ibmc.devcluster.openshift.com
+    port: 443
+    insecureFlag: true
+    datacenters:
+    - cidatacenter
+    soapRoundtripCount: 0
+    caFile: ""
+    thumbprint: ""
+    secretref: ""
+    secretName: ""
+    secretNamespace: ""
+    ipFamily: []
+  vcs8e-vc.ocp2.dev.cluster.com:
+    user: ""
+    password: ""
+    tenantref: ""
+    server: vcs8e-vc.ocp2.dev.cluster.com
+    port: 443
+    insecureFlag: true
+    datacenters:
+    - IBMCloud
+    soapRoundtripCount: 0
+    caFile: ""
+    thumbprint: ""
+    secretref: ""
+    secretName: ""
+    secretNamespace: ""
+    ipFamily: []
+labels:
+  zone: openshift-zone
+  region: openshift-region
+```
+
+The usage of this new YAML file means several operators will need to be enhanced
+to properly use this new config.  It is also important to note that storage details
+are not defined in this file.  The infrastructure object and its failure domains are
+used to configure these parts.  For all clusters that are still using the legacy ini
+file format, we will make sure the INI data can be loaded and used as well.  More on
+this in later sections with each operator.
+
+##### Installer `Create Cluster` Process
+
+The rest of the bootstrapping process is business as usual.  The CAPI testenv
+will read in each of these configs and create the resources as configured.  The
+installer will monitor each CAPI cluster to verify when the infrastructure is up
+and running.  After that, the normal OCP installation process will happen with
+the Bootstrap node configuring each of the control plane nodes.
+
+#### Machine API Operator Enhancements
+
+
+
+#### Cluster Storage Operator
+
+
+
+#### vSphere CSI Operator
+
+
+
+### Multiple vCenters Configured as Day 2
+
+- Update cloud provider config
+  - Convert ini to yaml
+  - Updating YAML if coming from install that only had 1 vCenter at install with YAML support.
+- Update infrastructure (cluster) to contain Failure Domains
+  - Infrastructure already has defined failure domains
+  - Infrastructure has generated single failure domain
+  - Infrastructure is legacy with no failure domains
 
 ### Workflow Description
 
