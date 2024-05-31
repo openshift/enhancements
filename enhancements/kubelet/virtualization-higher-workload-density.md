@@ -167,6 +167,8 @@ from the proposal.
 #### Functionality
 
 * Fit more virtual machines onto a node once higher workload density is enabled
+* **Technology Preview** - Enable higher density at all, limited support for stressed clusters
+* **General Availability** - Improve handling of stressed clusters
 
 #### Usability
 
@@ -343,14 +345,133 @@ Single-node and MicroShift deployments are out of scope of this proposal.
 
 ### Implementation Details/Notes/Constraints
 
+<!--
 What are some important details that didn't come across above in the
 **Proposal**? Go in to as much detail as necessary here. This might be
 a good place to talk about core concepts and how they relate. While it is useful
 to go into the details of the code changes required, it is not necessary to show
 how the code will be rewritten in the enhancement.
+-->
+
+#### WASP Agent
+
+At it's core the [wasp agent] is a `DaemonSet` delivering an [OCI Hook]
+which is used to turn on swap for selected workloads.
+
+Overall the agent is intended to align - and specifically not conflict - with
+the upstream Kubernetes SWAP design and bhevior in order to simplify a transition.
+
+##### Design
+
+The design is driven by a few guiding principles:
+
+* System services are more important than workloads. Because workload health
+  depends on the health of system services.
+
+###### Provisioning swap
+
+Provisioning of swap is left to the cluster administrator.
+The hook itself is not making any assumption where the swap is located.
+
+As logn as there is no additional tooling available, the recommendation is
+to use `MachineConfig` objects to provision swap on nodes.
+
+###### Enabling swap
+
+An OCI Hook to enable swap by setting the containers cgroup `memory.swap.max=max`.
+
+* **Technology Preview** - Limited to virt launcher pods
+* **General Availability** - Limited to burstable QoS class pods
+
+###### Node service protection
+
+All container workloads are run in the `kubepods.slice` cgroup.
+All system services are run in the `system.slice` cgroup.
+
+By default the `system.slice` is permitted to swap, however, system
+services are critical for a node's health and in turn critical for the workloads.
+
+Without system services such as `kubelet` or `crio`, any container will
+not be able to run well.
+
+Thus, in order to protect the `system.slice` and ensure that the nodes
+infrastructure health is prioritized over workload health, the agent is
+reconfiguring the `system.slice` and setting `memory.swap.max=0` to
+prevent any system service within from swapping.
+
+###### Preventing SWAP traffic I/O saturation
+
+One risk of heavy swapping is to saturate the disk bus with swap traffic,
+potentially preventing other processes from performing I/O.
+
+In order to ensure that system services are able to perform I/O, the
+agent is configuring `io.latency=50` for the `system.slice` in order
+to ensure that it's I/O requests are prioritized over any other slice.
+This is, because by default, no other slice is configured to have
+`io.latency` set.
+
+###### Critical workload protection
+
+Even critical pod workloads are run in burstable QoS class pods, thus
+at **General Availability** time they will be eligible to swap.
+However, swapping can lead to increased latencies and response times.
+For example, if a critical pod is depending on `LivenessProbe`s, then
+these checks can start to fail, once the pod is starting to swap.
+
+This is undesirable and can put a node or a cluster (i.e. if a critical
+Operator is affected) at risk.
+
+In order to prevent this problem, swap will be selectively disabled
+for pod using the two well-known [critical `priorityClass`es]:
+
+* `system-cluster-critical`
+* `system-node-critical`
+
+###### Node memory pressure handling
+
+Dealing with memory pressure on a node is differentiating the TP fom GA.
+
+* **Technology Preview** - `memory.high` is set on the `kubepods.slice`
+  in order to force the node to swap, once the memory is filling up.
+  Only once swap is full, the system will cross `memory.high` and trigger
+  soft evictions.
+
+  * Pro
+    * Simple to achieve.
+  * Con
+    * A lot of memory pressure has ot be present in order to trigger
+      soft eviction.
+
+* **General Availability** - Memory based soft and hard eviction is going to
+  be disabled, in favor of enabling swap based hard evictions, based on new
+  swap traffic and swap utilization eviction metrics.
+
+  * Pro
+    * Simpel mental model. With memory only, memory eviction is used.
+      With swap, swap eviction is used.
+    * [LLN] applies, because all pods share the nodes memory
+  * Con
+    * If there are no burstable QoS pods on a node, then no swapping
+      can take place, and no swap related signal will be triggered.
+      Only way to remove pressure is cgroup level OOM.
+      This is considered to be an edge case and highly unlikely.
+      Prometheus alerts for this edge case will be added.
+
+##### Differences between Technology Preview vs GA
+
+|                              | TP            | GP                 |
+|------------------------------|---------------|--------------------|
+| SWAP Provisioning            | MachineConfig | MachineConfig      |
+| SWAP Eligibility             | VM pods       | burstable QoS pods |
+| Node service protection      | Yes           | Yes                |
+| I/O saturation protection    | Yes           | Yes                |
+| Critical workload protection | No            | Yes                |
+| Memory pressure handling     | Memory based  | Swap based         |
+
 
 ### Risks and Mitigations
 
+<!--
 What are the risks of this proposal and how do we mitigate. Think broadly. For
 example, consider both security and how this will impact the larger OKD
 ecosystem.
@@ -360,6 +481,18 @@ How will security be reviewed and by whom?
 How will UX be reviewed and by whom?
 
 Consider including folks that also work outside your immediate sub-project.
+-->
+
+#### Phase 1
+
+| Risk                                       | Mitigation             |
+|--------------------------------------------|------------------------|
+| Miss details and introduce instability     | Limit to VM pods       |
+| Difficult transition from WASP to K8s SWAP | Explicit API to choose |
+
+#### Phase 2
+
+Handled un upstream Kubernetes.
 
 ### Drawbacks
 
@@ -656,3 +789,5 @@ subproject, repos requested, github details, and/or testing infrastructure.
 [Kubernetes SWAP]: https://github.com/kubernetes/enhancements/issues/2400
 [WASP Agent]: https://github.com/openshift-virtualization/wasp-agent
 [OCI hook]: https://github.com/containers/common/blob/main/pkg/hooks/docs/oci-hooks.5.md
+[LLN]: https://en.wikipedia.org/wiki/Law_of_large_numbers
+[critical `priorityClass`es]: https://kubernetes.io/docs/tasks/administer-cluster/guaranteed-scheduling-critical-addon-pods/
