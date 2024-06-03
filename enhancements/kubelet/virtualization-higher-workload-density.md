@@ -95,7 +95,7 @@ A higher workload density is achieved by combining two mechanisms
    to extend the virtual memory. This is owned by the platform and not
    available today.
 
-### Applicability
+#### Applicability
 
 We expect to mitigate the following situations
 
