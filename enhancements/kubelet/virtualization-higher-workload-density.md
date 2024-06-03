@@ -2,6 +2,7 @@
 title: virtualization-higher-workload-density
 authors:
   - enp0s3
+  - iholder101
   - fabiand
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - TBD
@@ -73,10 +74,19 @@ A higher workload density is achieved by combining two mechanisms
 2. Compensate for the memory over-committment by using SWAP in order
    to extend the virtual memory. This is owned by the platform and not available today.
 
+### Applicability
+
+We expect to mitigate the following situations
+
+* Underutilized guest memory (as described above)
+* Infrastructure related memory spikes in an over-committed environment
+* Considerable amount of "cold memory allocations" - thus allocations
+  which are rarely used
+
 #### Scope
 
 Memory over-committment, and as such swapping, will be limited to virtual machines running in the burstable QoS class.
-Virtual machines in the guaranteed and best-effort QoS classes are not getting over committed due to alignment with upstream Kubernetes.
+Virtual machines in the guaranteed QoS classes are not getting over committed due to alignment with upstream Kubernetes. Virtual machines will never be in the best-effort QoS because memory requests are always set.
 
 #### Timeline & Phases
 
@@ -145,17 +155,18 @@ the upstream Kubernetes SWAP design and bhevior in order to simplify a transitio
 
 ##### Design
 
-The design is driven by a few guiding principles:
+The design is driven by the following guiding principles:
 
 * System services are more important than workloads. Because workload health
   depends on the health of system services.
+* Try to stay aligned to upstream Kubernetes swap behaviours
 
 ###### Provisioning swap
 
 Provisioning of swap is left to the cluster administrator.
 The hook itself is not making any assumption where the swap is located.
 
-As logn as there is no additional tooling available, the recommendation is
+As long as there is no additional tooling available, the recommendation is
 to use `MachineConfig` objects to provision swap on nodes.
 
 ###### Enabling swap
@@ -258,17 +269,16 @@ Dealing with memory pressure on a node is differentiating the TP fom GA.
 | Risk                                       | Mitigation             |
 |--------------------------------------------|------------------------|
 | Miss details and introduce instability     | Limit to VM pods       |
-| Difficult transition from WASP to K8s SWAP | Explicit API to choose |
 
 #### Phase 2
 
-Handled un upstream Kubernetes.
+Handled by upstream Kubernetes.
 
 ### Drawbacks
 
-The major drawback and risk of the [WASP Agent] approach in phase 1 is due to the lack of integration with Kubenrnetes. It's prone to regressions due to changes in Kubernetes.
+The major drawback and risk of the [WASP Agent] approach in phase 1 is due to the lack of integration with Kubernetes. It's prone to regressions due to changes in Kubernetes.
 
-Thus phase 2 is critical in order to eliminate thoe risks and drawbacks.
+Thus phase 2 is critical in order to eliminate those risks and drawbacks.
 
 ## Open Questions [optional]
 
