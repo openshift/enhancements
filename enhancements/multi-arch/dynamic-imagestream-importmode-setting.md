@@ -119,9 +119,9 @@ API essentially allowed users to toggle between:
 #### Installation
 1. User triggers installation through
 openshift-installer.
-2. CVO inspects the payload and updates the status
-field of `ClusterVersion` with the payload type
-(inferred through
+2. CVO inspects the payload and updates the `Desired`
+status field of `ClusterVersion` with the payload
+type (inferred through
 `release.openshift.io/architecture`).
 3. cluster-image-registry-operator updates the
 `imageStreamImportMode` status field based on
@@ -146,8 +146,8 @@ payload.
 2. User triggers an update to multi-arch payload
 using `oc adm upgrade --to-multi-arch`.
 3. CVO triggers the update, inspects the payload
-and updates the status field of `ClusterVersion`
-with the payload type.
+and updates the `Desired` status field of
+`ClusterVersion` with the payload type.
 4. The rest is the same as steps 3-6 in the
 install section.
 
@@ -173,6 +173,27 @@ openshift-apiserver
 
 ### API Extensions
 
+- CVO would add a new field to the `Desired`
+  status whose value would either be `multi` or
+  empty (single-arch) - which indicates the version it
+  is trying to reconcile to. This would be the same
+  as the `Architecture` field that can optionally be
+  set for updates[^6].
+
+```
+type Release struct {
+...
+...
+// architecture is an optional field that indicates the
+// value of the cluster architecture. In this context cluster
+// architecture means either a single architecture or a multi
+// architecture.
+// Valid values are 'Multi' and empty.
+//
+// +optional
+Architecture ClusterVersionArchitecture `json:"architecture,omitempty"`
+}
+```
 - image.config.openshift.io: Add
   `ImageStreamImportMode` config flag to CRD spec
   and status.
@@ -299,7 +320,7 @@ N/A
 ### Implementation Details/Notes/Constraints
 
 - CVO: The cluster version operator would expose a
-  field in its status indicating the
+  field in its `Desired` status indicating the
   type of the payload. This is inferred by CVO from
   the `release.openshift.io/architecture` property
   in the release payload. If the payload is a multi
@@ -393,16 +414,7 @@ given for why they were not pursued:
 
 ## Open Questions
 
-- How should CVO expose the payload type in the
-  Status section? is it through:
-    - string value of `single` and `multi` 
-    - individual architectures, i.e
-      `amd64`/`arm64`/`ppc64le`/`s390x` and
-      `multi`?
-    - array which lists all architectures for
-      `multi` and just one for single arch?
-      (in case there is ever a possibility of multiple
-      payloads with only certain architectures).
+N/A
 
 ## Test Plan
 
@@ -499,6 +511,7 @@ affected customers about the remediation.
 ## References
 [^1]:https://github.com/openshift/cluster-version-operator/pull/1035#issue-2133730335
 [^2]:https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-fleet-evaluation.md
-[^3]:https://github.com/openshift/api/blob/master/config/v1/types_cluster_operator.go#L211
+[^3]:https://github.com/openshift/api/blob/b01900f1982a40d2b71a3c742de5755f3f28264f/config/v1/types_cluster_operator.go#L211
 [^4]:https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-fleet-evaluation.md#interacting-with-telemetry
 [^5]:https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-fleet-evaluation.md#alerting-customers
+[^6]:https://github.com/openshift/api/blob/b01900f1982a40d2b71a3c742de5755f3f28264f/config/v1/types_cluster_version.go#L654-L664
