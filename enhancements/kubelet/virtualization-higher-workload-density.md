@@ -298,7 +298,7 @@ Dealing with memory pressure on a node is differentiating the TP fom GA.
 
 ##### Differences between Technology Preview vs GA
 
-|                              | TP            | GP                 |
+|                              | TP            | GA                 |
 |------------------------------|---------------|--------------------|
 | SWAP Provisioning            | MachineConfig | MachineConfig      |
 | SWAP Eligibility             | VM pods       | burstable QoS pods |
