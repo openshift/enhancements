@@ -67,8 +67,11 @@ This proposal is about increasing the workload - virtual machine - density per n
 
 A higher workload density is achieved by combining two mechanisms
 
-1. Under-request memory resources for virtual machines by having the VM pods (`launcher`) `requests.memory` being smaller than the VMs `requests.memory` according to a configured ratio. This is owned by [KubeVirt and present today](https://kubevirt.io/user-guide/operations/node_overcommit/).
-2. Compensate for the memory over-committment by using SWAP in order to extend the virtual memory. This is owned by the platform and not available today.
+1. Under-request memory resources for virtual machines by having the VM
+   pods (`launcher`) `requests.memory` being smaller than the VMs `guest.memory`
+   according to a configured ratio. This is owned by [KubeVirt and present today](https://kubevirt.io/user-guide/operations/node_overcommit/).
+2. Compensate for the memory over-committment by using SWAP in order
+   to extend the virtual memory. This is owned by the platform and not available today.
 
 #### Scope
 
@@ -226,7 +229,7 @@ Dealing with memory pressure on a node is differentiating the TP fom GA.
   swap traffic and swap utilization eviction metrics.
 
   * Pro
-    * Simpel mental model. With memory only, memory eviction is used.
+    * Simple mental model. With memory only, memory eviction is used.
       With swap, swap eviction is used.
     * [LLN] applies, because all pods share the nodes memory
   * Con
