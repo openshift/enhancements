@@ -75,7 +75,7 @@ The Subprovisioner CSI driver is a great solution for shared storage provisionin
     - we will not GA the solution until we have a clear understanding of the maintenance burden. The solution will stay in TechPreview until then.
 - There is a risk that Subprovisioner is so different from TopoLVM that behavior changes can not be accomodated in the current CRD
   - we will scrap this effort for integration and look for alternative solutions if the integration is not possible with reasonable effort.
-- There is a risk that Subprovisioner is gonna break easily as its a really young project
+- There is a risk that Subprovisioner will break easily as its a really young project
   - we will not GA the solution until we have a clear understanding of the stability of the Subprovisioner project. The solution will stay in TechPreview until then.
 
 ## Proposal
@@ -308,6 +308,7 @@ The status reporting will include:
 - **Upgrade**:
   - Ensure that upgrades are seamless with no downtime for existing workloads. Migrating to a subprovisioner enabled version is a no-break operation
   - Test upgrade paths thoroughly to ensure compatibility and data integrity. The subprovisioner to topolvm (or vice versa) switch should be excluded and forbidden explicitly.
+  - The "default" deviceClass cannot be changed as well and changeing from shared to local or vice versa is not supported without resetting the LVMCluster.
   - New deviceClasses with the shared policy should be able to be added to existing LVMClusters without affecting existing deviceClasses.
 
 - **Downgrade**:
