@@ -26,21 +26,34 @@ superseded-by:
 
 ## Summary
 
-Fit more workloads onto a give node - achieve a higher workload density - by overcommitting it's memory resources. Due to timeline needs a two-phased approach is considered.
+Fit more workloads onto a give node - achieve a higher workload
+density - by overcommitting it's memory resources. Due to timeline
+needs a two-phased approach is considered.
 
 ## Motivation
 
-Today, OpenShift Virtualization is reserving memory (`requests.memory`) according to the needs of the virtual machine itself. However, usually an application within the virtual machine does not utilize _all_ the memory _all_ the time. Instead, only _sometimes_ there are memory spikes within the virtual machine. Extrapolating this behavior to all virtual machines on a given node leads to the observation that _most often_ there is no memory pressure and a low memory utilization.
+Today, OpenShift Virtualization is reserving memory (`requests.memory`)
+according to the needs of the virtual machine itself. However, usually
+an application within the virtual machine does not utilize _all_ the
+memory _all_ the time. Instead, only _sometimes_ there are memory spikes
+within the virtual machine. Extrapolating this behavior to all virtual
+machines on a given node leads to the observation that _most often_ there
+is no memory pressure and a low memory utilization.
 Underutilized hardware resources are a cost factor to end-users.
 
-This proposal is about increasing the workload - virtual machine - density per node, in order to increase the memory utilization, in order to reduce the cost per virtual machine.
+This proposal is about increasing the workload - virtual machine - density
+per node, in order to increase the memory utilization, in order to
+reduce the cost per virtual machine.
 
 > [!NOTE]
-> CPU resources are already over-committed in OpenShift today, thus the limiting factor - usually - are memory resources.
+> CPU resources are already over-committed in OpenShift today, thus the
+> limiting factor - usually - are memory resources.
 
 ### User Stories
 
-* As an administrator, I want to be able to enable higher workload density for OpenShift Virtualization clusters so that I can increase the memory utilization.
+* As an administrator, I want to be able to enable higher workload
+  density for OpenShift Virtualization clusters so that I can increase
+  the memory utilization.
 
 ### Goals
 
@@ -50,18 +63,24 @@ This proposal is about increasing the workload - virtual machine - density per n
 
 #### Functionality
 
-* Fit more virtual machines onto a node once higher workload density is enabled
-* **Technology Preview** - Enable higher density at all, limited support for stressed clusters
+* Fit more virtual machines onto a node once higher workload density
+  is enabled
+* **Technology Preview** - Enable higher density at all, limited
+  support for stressed clusters
 * **General Availability** - Improve handling of stressed clusters
 
 #### Usability
 
-* Provide a boolean in the OpenShift Console for enabling higher-density. Do not require any additional configuration.
+* Provide a boolean in the OpenShift Console for enabling higher-density.
+  Do not require any additional workload or cluster level configuration
+  besides the initial provisioning.
 
 ### Non-Goals
 
-* Complete life-cycling of the WASP Agent. We are not intending to write an Operator for memory over commit for two reasons:
-  * [Kubernetes SWAP] is close, writing a fully fledged operator seems to be no good use of resources
+* Complete life-cycling of the WASP Agent. We are not intending to write
+  an Operator for memory over commit for two reasons:
+  * [Kubernetes SWAP] is close, writing a fully fledged operator seems
+    to be no good use of resources
   * To simplify the transition from WASP to [Kubernetes SWAP]
 
 ## Proposal
@@ -70,9 +89,11 @@ A higher workload density is achieved by combining two mechanisms
 
 1. Under-request memory resources for virtual machines by having the VM
    pods (`launcher`) `requests.memory` being smaller than the VMs `guest.memory`
-   according to a configured ratio. This is owned by [KubeVirt and present today](https://kubevirt.io/user-guide/operations/node_overcommit/).
+   according to a configured ratio. This is owned by
+   [KubeVirt and present today](https://kubevirt.io/user-guide/operations/node_overcommit/).
 2. Compensate for the memory over-committment by using SWAP in order
-   to extend the virtual memory. This is owned by the platform and not available today.
+   to extend the virtual memory. This is owned by the platform and not
+   available today.
 
 ### Applicability
 
@@ -85,39 +106,57 @@ We expect to mitigate the following situations
 
 #### Scope
 
-Memory over-committment, and as such swapping, will be limited to virtual machines running in the burstable QoS class.
-Virtual machines in the guaranteed QoS classes are not getting over committed due to alignment with upstream Kubernetes. Virtual machines will never be in the best-effort QoS because memory requests are always set.
+Memory over-committment, and as such swapping, will be limited to
+virtual machines running in the burstable QoS class.
+Virtual machines in the guaranteed QoS classes are not getting over
+committed due to alignment with upstream Kubernetes. Virtual machines
+will never be in the best-effort QoS because memory requests are
+always set.
 
 #### Timeline & Phases
 
-Because [Kubernetes SWAP] is currently in Beta only expect to GA with Kube 1.32 (OpenShift 4.19, approx mid 2025) this proposal is taking a two phased approach in order to meet the timeline requirements.
+Because [Kubernetes SWAP] is currently in Beta only expect to GA with
+Kube 1.32 (OpenShift 4.19, approx mid 2025) this proposal is taking a
+two phased approach in order to meet the timeline requirements.
 
-* **Phase 1** - OpenShift Virtualization will provide an out-of-tree solution to enable higher workload density.
-* **Phase 2** - OpenShift Virtualization will transition to [Kubernetes SWAP] (in-tree) whenever this feature is generally available in OpenShift itself.
+* **Phase 1** - OpenShift Virtualization will provide an out-of-tree
+  solution to enable higher workload density.
+* **Phase 2** - OpenShift Virtualization will transition to
+  [Kubernetes SWAP] (in-tree) whenever this feature is generally
+  available in OpenShift itself.
 
-This enhnacement is focusing on Phase 1 and the transition to Phase 2. Phase 2 is covered by the upstream [Kubernetes SWAP] enhnacements.
+This enhnacement is focusing on Phase 1 and the transition to Phase 2.
+Phase 2 is covered by the upstream [Kubernetes SWAP] enhnacements.
 
 #### Phase 1 - Out-Of-Tree SWAP with WASP
 
-[WASP Agent] is a component which is providing an [OCI hook] to enable SWAP for selected containers hosting virtual machines.
+[WASP Agent] is a component which is providing an [OCI hook] to enable
+SWAP for selected containers hosting virtual machines.
 
 ### Workflow Description
 
-**cluster administrator** (Cluster Admin) is a human user responsible for deploying
-and administering a cluster.
+**cluster administrator** (Cluster Admin) is a human user responsible
+for deploying and administering a cluster.
 
-**virtual machine owner** (VM Owner) is a human user operating a virtual machine
-in a cluster.
+**virtual machine owner** (VM Owner) is a human user operating a
+virtual machine in a cluster.
 
 #### Workflow: Configuring higher workload density
 
 1. The cluster admin is deploying a bare-metal OpenShift cluster
 2. The cluster admin is deploying the OpenShift Virtualization Operator
-3. The cluster admin is deploying the WASP Agent according to the documentation
-   a. The cluster admin is calculating the amount of swap space to provision based on the amount of physical ram and overcommittment ratio
-   b. The cluster admin is creating a `MachineConfig` for provisioning swap on worker nodes
+3. The cluster admin is deploying the WASP Agent according to the
+   documentation
+
+   a. The cluster admin is calculating the amount of swap space to
+      provision based on the amount of physical ram and overcommittment
+      ratio
+   b. The cluster admin is creating a `MachineConfig` for provisioning
+      swap on worker nodes
    c. The cluster admin is deploying the [WASP Agent] DaemonSet
-4. The cluster admin is configuring OpenShift Virtualization via the `HCO` API for higher workload density
+
+4. The cluster admin is configuring OpenShift Virtualization via the
+   `HCO` API for higher workload density
 
 The cluster is now set up for higher workload density.
 
@@ -127,21 +166,25 @@ The cluster is now set up for higher workload density.
 
 ### API Extensions
 
-Phase 1 does not require any Kubernetes, OpenShift, or OpenShift Virtualization API changes.
+Phase 1 does not require any Kubernetes, OpenShift, or OpenShift
+Virtualization API changes.
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-The `MachineConfig` based swap provisioning will not work, as HCP does not provide the `MachineConfig` APIs.
+The `MachineConfig` based swap provisioning will not work, as HCP does
+not provide the `MachineConfig` APIs.
 
 #### Standalone Clusters
 
-Standalone regular, and compact clusters are the primary use-cases for swap.
+Standalone regular, and compact clusters are the primary use-cases for
+swap.
 
 #### Single-node Deployments or MicroShift
 
-Single-node and MicroShift deployments are out of scope of this proposal.
+Single-node and MicroShift deployments are out of scope of this
+proposal.
 
 ### Implementation Details/Notes/Constraints
 
@@ -150,15 +193,16 @@ Single-node and MicroShift deployments are out of scope of this proposal.
 At it's core the [wasp agent] is a `DaemonSet` delivering an [OCI Hook]
 which is used to turn on swap for selected workloads.
 
-Overall the agent is intended to align - and specifically not conflict - with
-the upstream Kubernetes SWAP design and bhevior in order to simplify a transition.
+Overall the agent is intended to align - and specifically not
+conflict - with the upstream Kubernetes SWAP design and bhevior in
+order to simplify a transition.
 
 ##### Design
 
 The design is driven by the following guiding principles:
 
-* System services are more important than workloads. Because workload health
-  depends on the health of system services.
+* System services are more important than workloads. Because workload
+  health depends on the health of system services.
 * Try to stay aligned to upstream Kubernetes swap behaviours
 
 ###### Provisioning swap
@@ -166,12 +210,13 @@ The design is driven by the following guiding principles:
 Provisioning of swap is left to the cluster administrator.
 The hook itself is not making any assumption where the swap is located.
 
-As long as there is no additional tooling available, the recommendation is
-to use `MachineConfig` objects to provision swap on nodes.
+As long as there is no additional tooling available, the recommendation
+is to use `MachineConfig` objects to provision swap on nodes.
 
 ###### Enabling swap
 
-An OCI Hook to enable swap by setting the containers cgroup `memory.swap.max=max`.
+An OCI Hook to enable swap by setting the containers cgroup
+`memory.swap.max=max`.
 
 * **Technology Preview** - Limited to virt launcher pods
 * **General Availability** - Limited to burstable QoS class pods
@@ -182,7 +227,8 @@ All container workloads are run in the `kubepods.slice` cgroup.
 All system services are run in the `system.slice` cgroup.
 
 By default the `system.slice` is permitted to swap, however, system
-services are critical for a node's health and in turn critical for the workloads.
+services are critical for a node's health and in turn critical for the
+workloads.
 
 Without system services such as `kubelet` or `crio`, any container will
 not be able to run well.
@@ -276,9 +322,12 @@ Handled by upstream Kubernetes.
 
 ### Drawbacks
 
-The major drawback and risk of the [WASP Agent] approach in phase 1 is due to the lack of integration with Kubernetes. It's prone to regressions due to changes in Kubernetes.
+The major drawback and risk of the [WASP Agent] approach in phase 1 is
+due to the lack of integration with Kubernetes. It's prone to
+regressions due to changes in Kubernetes.
 
-Thus phase 2 is critical in order to eliminate those risks and drawbacks.
+Thus phase 2 is critical in order to eliminate those risks and
+drawbacks.
 
 ## Open Questions [optional]
 
@@ -424,11 +473,14 @@ TBD
 
 ## Alternatives
 
-1. [Kubernetes SWAP] - Will be used as soon as possible, but it was not available early enough in order to meet our timeline requirements.
+1. [Kubernetes SWAP] - Will be used as soon as possible, but it was
+   not available early enough in order to meet our timeline
+   requirements.
 
 ## Infrastructure Needed [optional]
 
-* OCP CI coverage for [WASP Agent] in order to preform regression testing.
+* OCP CI coverage for [WASP Agent] in order to preform regression
+  testing.
 
 [Kubernetes SWAP]: https://github.com/kubernetes/enhancements/issues/2400
 [WASP Agent]: https://github.com/openshift-virtualization/wasp-agent
