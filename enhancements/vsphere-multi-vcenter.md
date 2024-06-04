@@ -93,6 +93,38 @@ enhancement.
 
 ## Proposal
 
+### CRD Changes
+
+The multiple vCenter feature will begin allowing more than one vCenter to be 
+configured in the infrastructure resource.  We will be controlling this via
+a new feature (VSphereMultiVCenters) and will have different CRDs installed
+based on this gate.
+
+Initially, the plans are to allow a max of 3 vCenters to be configured when the
+feature gate is enabled.  The way we are going to control this is by adding new
+control annotations to the model objects.
+
+The OpenShift controller tools will be enhanced to allow a new Feature Gate 
+Aware config option for max size.
+
+Example:
+```go
+// +kubebuilder:validation:MinItems=0
+// +openshift:validation:FeatureGateAwareMaxItems:featureGate="",maxItems=1
+// +openshift:validation:FeatureGateAwareMaxItems:featureGate=VSphereMultiVCenters,maxItems=3
+// +listType=atomic
+// +optional
+VCenters []VSpherePlatformVCenterSpec `json:"vcenters,omitempty"`
+```
+
+Here you can see the new FeatureGateAwareMaxItems flag that will control how 
+the maximum items allowed is configured.  The default feature set config is 
+configured with the **featureGate=""**.  This is to cover when the feature gate
+VSphereMultiVCenters is not present.  The following line has 
+**featureGate=VSphereMultiVCenters** which will generate a config that allows 3
+vCenters when the feature gate is enabled (including TechPreview which will be
+set feature gate creation).
+
 ### Multiple vCenters Configured at Installation
 
 This section will discuss all the enhancements being made to support installing
@@ -529,15 +561,33 @@ the Bootstrap node configuring each of the control plane nodes.
 
 #### Machine API Operator Enhancements
 
-
+The Machine API Operator (MAO) will need to be enhanced to handle the new yaml
+config format.  Currently, the operator only supports the deprecated legacy 
+ini config.  By updating the operator to use the newer upstream config object,
+the operator will be able to handle both the ini config and the yaml config.
 
 #### Cluster Storage Operator
 
+The Cluster Storage Operator (CSO) is in charge of multiple components.  The
+important parts being the vSphere CSI Driver Operator and the vSphere CSI
+drivers.  For the CSO itself, we are just going to update it to know about the
+new changes to the infrastructure CRD.  Additionally, it will need to update the
+permissions / roles of the vSphere CSI Driver Operator.
+
+#### vSphere CSI Driver Operator
 
 
-#### vSphere CSI Operator
 
+#### vSphere CSI Driver
 
+For complete support of multiple vCenters, the vSphere CSI driver needs to be
+updated to v3.2 in order to get the enhancements made upstream for multiple
+vCenter support.  With the current version of the driver (3.1.x), we will
+have a log message stating that multiple vCenters are not supported yet.
+
+There is already a card for updating the version of the driver to the latest
+version in the backlog of the cluster storage team.  These changes will be 
+tracked separately of this enhancement.
 
 ### Multiple vCenters Configured as Day 2
 
