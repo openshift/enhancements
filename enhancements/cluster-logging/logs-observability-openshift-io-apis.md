@@ -259,10 +259,9 @@ spec:
         minRetryDuration:
         maxRetryDuration:
     googleCloudLogging:
-      billingAccountID:
-      organizationID:
-      folderID:        # templating?
-      projectID:       # templating?
+      ID:
+        type:          #enum: billingAccount,folder,project,organization
+        value:         
       logID:           # templating?
       authorization:   # output specific auth keys
       tuning:
