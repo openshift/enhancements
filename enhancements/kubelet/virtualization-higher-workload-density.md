@@ -65,6 +65,7 @@ reduce the cost per virtual machine.
 
 * Fit more virtual machines onto a node once higher workload density
   is enabled
+* Integrate well with [KSM] and [FPR]
 * **Technology Preview** - Enable higher density at all, limited
   support for stressed clusters
 * **General Availability** - Improve handling of stressed clusters
@@ -203,7 +204,8 @@ The design is driven by the following guiding principles:
 
 * System services are more important than workloads. Because workload
   health depends on the health of system services.
-* Try to stay aligned to upstream Kubernetes swap behaviours
+* Try to stay aligned to upstream Kubernetes swap behaviours in order
+  to ease the transition to Kubernetes SWAP once available
 
 ###### Provisioning swap
 
@@ -212,6 +214,9 @@ The hook itself is not making any assumption where the swap is located.
 
 As long as there is no additional tooling available, the recommendation
 is to use `MachineConfig` objects to provision swap on nodes.
+
+The `MachineConfig` object would include the necessary scripts
+in order to provision swap on a disk, partition, or in a file.
 
 ###### Enabling swap
 
@@ -296,6 +301,27 @@ Dealing with memory pressure on a node is differentiating the TP fom GA.
       This is considered to be an edge case and highly unlikely.
       Prometheus alerts for this edge case will be added.
 
+###### Node memory reduction
+
+Swap (with wasp or kube swap) are mechanisms in order to increase the
+virtual address space, this is required in order to reduce the
+likelihood for workloads to OOM significantly.
+
+Besides _increasing_ the virtual address space, there are two
+mechanisms which help to reduce the memory footprint of a workload.
+
+They are not being discussed in depth here, but are mentioned, as they
+help to reduce or avoid memory pressure, which in turn leads less usage
+of swap.
+
+The mechanisms are:
+* _Free Page Reporting ([FPR])_ - A mechanism to free memory on the
+  hypervisor side if it is not used by the guest anymore.
+* _Kernel Samepage Merging ([KSM])_ - A mechanism to merge/deduplicate
+  memory pages with the same content. This is particularly helpful
+  in situations where similar guests are running on a hypervisor.
+  It has however some security implications.
+
 ##### Differences between Technology Preview vs GA
 
 |                              | TP            | GA                 |
@@ -306,7 +332,6 @@ Dealing with memory pressure on a node is differentiating the TP fom GA.
 | I/O saturation protection    | Yes           | Yes                |
 | Critical workload protection | No            | Yes                |
 | Memory pressure handling     | Memory based  | Swap based         |
-
 
 ### Risks and Mitigations
 
@@ -487,3 +512,5 @@ TBD
 [OCI hook]: https://github.com/containers/common/blob/main/pkg/hooks/docs/oci-hooks.5.md
 [LLN]: https://en.wikipedia.org/wiki/Law_of_large_numbers
 [critical `priorityClass`es]: https://kubernetes.io/docs/tasks/administer-cluster/guaranteed-scheduling-critical-addon-pods/
+[KSM]: https://issues.redhat.com/browse/CNV-23960
+[FPR]: https://issues.redhat.com/browse/CNV-25921
