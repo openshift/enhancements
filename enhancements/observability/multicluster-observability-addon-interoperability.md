@@ -61,7 +61,13 @@ technology stacks (Prometheus, ClusterLoggingForwarder, OpenTelemetry collector)
 Every tool uses a different configuration API, export protocol and provides (or does 
 not provide) filtering/PII capabilities.
 
-https://www.redhat.com/en/blog/red-hat-openshift-opentelemetry-otlp-native-platform
+### Prior art and user requests
+
+* Red Hat OpenShift as OpenTelemetry (OTLP) native platform: https://www.redhat.com/en/blog/red-hat-openshift-opentelemetry-otlp-native-platform
+* Export in-cluster metrics to 3rd party vendor https://github.com/openshift/cluster-monitoring-operator/issues/2000
+* Exporting metrics to Dynatrace https://issues.redhat.com/browse/OBSDA-433
+* Export all metrics to Dynatrace https://issues.redhat.com/browse/OBSDA-450
+* Customer asking to export metric to Splunk https://redhat-internal.slack.com/archives/C04TFRRKUA2/p1687853284985279
 
 ### User Stories
 
