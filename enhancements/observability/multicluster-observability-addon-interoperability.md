@@ -3,16 +3,19 @@ title: multicluster-logs-traces-forwarding
 authors:
   - "@pavolloffay"
 reviewers:
+  - "@moadz"
   - "@periklis"
   - "@alanconway"
   - "@jcantrill"
   - "@berenss"
   - "@bjoydeep"
 approvers:
+  - "@moadz"
   - "@periklis"
   - "@alanconway"
   - "@jcantrill"
 api-approvers:
+  - "@moadz"
   - "@periklis"
   - "@alanconway"
   - "@jcantrill"
@@ -91,6 +94,8 @@ The following sections describe in detail the required resources as well as the 
 
 The following section describes how data exportation, routing and filtering is 
 configured in MCO and MCOA.
+
+![Architecture](./multicluster-observability-addon-interoperability-arch.jpg)
 
 ### Workflow Description
 
