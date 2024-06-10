@@ -1,10 +1,20 @@
 ---
-title: CRD Based CMO
+title: Configuration CRD for the Cluster Monitoring Operator
 authors:
   - "@marioferh"
   - "@danielmellado"
+  - "@jan--f"
+  - "@moadz"
+  - "simonpasquier"
 reviewers:
+  - "@jan--f"
+  - "@moadz"
+  - "simonpasquier"
 approvers:
+  - "@jan--f"
+  - "@moadz"
+  - "simonpasquier"
+  - "@openshift/openshift-team-monitoring"
 creation-date: 2024-04-26
 last-updated: 2024-04-26
 status: provisional
@@ -28,7 +38,6 @@ status: provisional
 ## Motivation
 
 * The specification is well known and to a degree self-documenting
-* We can specify validation and legal values right in the CRD.
 * The APIServer will validate user resources based on our specifications, so users get immediate feedback on errors instead of having to check if their config was applied and check logs.
 * Many users expect to interact with operators through a CRD
 * Compatible with GitOps workflows. 
@@ -85,10 +94,6 @@ One proposal for a minimal DoD was:
     
 - Correct name for apiVersion? In monitoring.coreos.com/v1 are all prometheus operator components, should we create a new one?
 
-- Reconcile logic is not SDK compliand. Phase 2 of feature could be rely on sdk reconcile mecanism. 
-
-- Operator best practises is one CRD by controller, how could we take this approach as we have different configmaps for CMO and UWM.
-
 - Refactor and clean up operator.go client.go manifests.config 
 
 
@@ -102,10 +107,9 @@ One proposal for a minimal DoD was:
 #### CRD
 
 apiVersion: cmo.example.com/v1
-kind: ClusterMonitoringOperator 
+kind: ClusterMonitoring
 metadata:
-  name: clustermonitoringoperator
-  namespace: openshift-monitoring
+  name: cluster
 spec:
   telemeterClient:
     enabled: true
