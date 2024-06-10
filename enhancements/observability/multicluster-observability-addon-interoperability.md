@@ -119,8 +119,10 @@ None - no new APIs for CRDs are introduced.
 
 To support above workflow MCOA deploys additional collector which forwards all data to 
 MCO telemetry store and/or 3rd party OTLP endpoint.
-- 
-- An `OpenTelemetryCollector` resource that describes the trace exporters to be used for traces collection and forwarding on all managed clusters.
+
+- An `OpenTelemetryCollector` resource that enables receivers for all telemetry 
+  signals and an OTLP exporter for and forwarding to the MCO store and 3rd party 
+  vendor.
 
 #### Hypershift [optional]
 
