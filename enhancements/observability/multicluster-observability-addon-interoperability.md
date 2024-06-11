@@ -99,7 +99,7 @@ configured in MCO and MCOA.
 
 1. Configure OTLP endpoint in MCO (`MultiClusterObservability`) CR.
 2. The MCOA configures an additional OTLP exporter in the OpenTelemetry collector. The 
-   exporter is in the pipeline that receives all data.
+   exporter is in the pipeline that receives all supported telemtery signals.
 3. (optional) Filtering (e.g. for PII) can be configured in 
    `OpenTelemetryCollector` CR manged by MCOA by [transformprocessor](https://github.
    com/open-telemetry/opentelemetry-collector-contrib/blob/main/processor/transformprocessor/README.md).
@@ -115,12 +115,12 @@ None - no new APIs for CRDs are introduced.
 
 #### General configuration and fleet-wide stanzas
 
-To support above workflow MCOA deploys additional collector which forwards all data to 
-MCO telemetry store and/or 3rd party OTLP endpoint.
+To support above workflow MCOA deploys additional collector which forwards collected 
+data to 3rd party OTLP endpoint.
 
-- An `OpenTelemetryCollector` resource that enables receivers for all telemetry 
-  signals and an OTLP exporter for and forwarding to the MCO store and 3rd party 
-  vendor.
+- An `OpenTelemetryCollector` resource that enables receivers for supported telemetry 
+  signals. The individual telemetry stacks will forward data to these endpoints. 
+   The collector enables OTLP exporter for and forwarding to 3rd party vendor.
 
 #### Hypershift [optional]
 
