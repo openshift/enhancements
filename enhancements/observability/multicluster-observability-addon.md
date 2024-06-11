@@ -49,11 +49,11 @@ superseded-by:
 
 Multi-Cluster Observability has been an integrated concept in Red Hat Advanced Cluster Management (RHACM) since its inception but only incorporates one of the core signals, namely metrics, to manage fleets of OpenShift Container Platform (OCP) based clusters (See [RHACM Multi-Cluster-Observability-Operator (MCO)](rhacm-multi-cluster-observability)). The underlying architecture of RHACM observability consists of a set of observability components to collect a dedicated set of OCP metrics, visualizing them and alerting on fleet-relevant events.
 
-This enhancement proposal seeks to bring a unified approach to collect and forward logs and traces from a fleet of OCP clusters based on the RHACM addon facility (See Open Cluster Management (OCM) [addon framework](ocm-addon-framework)) by enabling these signals events to land on third-party managed storage solutions (e.g. AWS Cloudwatch, Google Cloud Logging, Splunk). The proposed addon is an optional RHACM component. It is installed by the MCO Operator. It provides a unified installation approach of required dependencies (e.g. operator subscriptions) and resources (custom resources, certificates, CA Bundles, configuration) on the managed clusters to collect and forward logs and traces. The addon's name is MultiCluster-Observability-Addon (short MCOA).
+This enhancement proposal seeks to bring a unified approach to collect and forward logs and traces from a fleet of OCP clusters based on the RHACM addon facility (See Open Cluster Management (OCM) [addon framework](ocm-addon-framework)) by enabling these signals to land on third-party managed storage solutions (e.g. AWS Cloudwatch, Google Cloud Logging, Splunk). The proposed addon is an optional RHACM component. It is installed by the MCO Operator. It provides a unified installation approach of required dependencies (e.g. operator subscriptions) and resources (custom resources, certificates, CA Bundles, configuration) on the managed clusters to collect and forward logs and traces. The addon's name is MultiCluster-Observability-Addon (short MCOA).
 
 ## Motivation
 
-The main goal here is to simplify and unify the installation of logs and traces collection and forwarding on a RHACM managed fleet of OCP clusters. The core function of the addon is to install required operators (i.e. [Red Hat OpenShift Logging](ocp-cluster-logging-operator) and [Red Hat OpenShift distributed tracing platform](opentelemetry-operator)), configure required custom
+The main goal here is to simplify and unify the installation of logs and traces collection and forwarding on a RHACM managed fleet of OCP clusters. The core function of the addon is to install required operators (i.e. [Red Hat OpenShift Logging](ocp-cluster-logging-operator) and [Red Hat Build of OpenTelemetry](opentelemetry-operator)), configure required custom
 resources (i.e. `ClusterLogForwarder`, `OpenTelemetryCollector`) and reconcile per-cluster-related authentication resources (i.e. `Secrets`, `ConfigMaps`). This enables fleet-wide control of logs and traces collection and forwarding.
 
 ### User Stories
@@ -450,7 +450,7 @@ spec:
 
 #### Multi Cluster OTLP Collection and Forwarding
 
-For all managed clusters the fleet administrator is required to provide a single `OpenTelemetryCollector` resource stanza that describes the OpenTelemetry forwarding configuration for the entire fleet in the default namespace `open-cluster-management`.
+For all managed clusters the fleet administrator is required to provide, at least, a single `OpenTelemetryCollector` resource stanza that describes the OpenTelemetry forwarding configuration for the entire fleet in the default namespace `open-cluster-management`.
 
 The following example resource describes a configuration where a `OpenTelemetryCollector` instance is deployed per spoke cluster and it sends data to a Hub OTEL Cluster (note that this cluster can be different from the RHACM Hub cluster). The Hub OTEL Cluster then exports the received telemetry to a third-party storage solution.
 
@@ -683,8 +683,8 @@ TBD
 #### Dev Preview
 
 - Installation of the ClusterLogForwarder and OpenTelemetryCollector CRs.
-- Support for all the authentication methods supported by ClusterLogForwarder (i.e. static auth, mTLS auth, etc).
-- Support for Per-ClusterSet ClusterLogForwarder.
+- Support for all the authentication methods supported by ClusterLogForwarder and Red Hat Build of OpenTelemetry (i.e. static auth, mTLS auth, etc).
+- Support for Per-ClusterSet ClusterLogForwarder and OpenTelemetryCollector.
 - Health probing per Signal
 - Status reporting
 
@@ -763,5 +763,7 @@ None
 [rhacm-multi-cluster-observability]:https://github.com/stolostron/multicluster-observability-operator
 
 ## RANDOM  IDEAS 
+- Support the creation of multiple OpenTelemetry Collector instances instead of just one to export the telemetry data outside the cluster
+- Support TempoStack to store some of the traces locally in the cluster
 - What happens if we need to reference multiple static secrets?
 - Maybe we can use annotations for the authentication methods instead of having to create a seperate resouce for that
