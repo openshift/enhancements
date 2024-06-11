@@ -5,7 +5,8 @@ authors:
 reviewers:
   - "@pacevedom: MicroShift team-lead"
   - "@jerpeter1, Edge Enablement Staff Engineer"
-  - "Edge Enable LVM-O Engineer, TBD"
+  - "@jakobmoellerdev Edge Enablement LVMO SME"
+  - "@suleymanakbas91,  Edge Enablement LVMO SME"
 approvers:
   - "@jerpeter1, Edge Enablement Staff Engineer"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
