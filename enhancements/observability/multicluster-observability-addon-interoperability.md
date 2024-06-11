@@ -80,7 +80,7 @@ not provide) filtering/PII capabilities.
 
 ### Goals
 
-* Use a single protocol (OTLP) for exporting all data to MCO and/or 3rd party system.
+* Use OTLP protocol to export all telemetry data to a 3rd party system.
 * Provide a single configuration API on MCO CRD for exporting all telemetry data.
 * Provide unified filtering and routing capabilities for all exported telemetry data.
 
