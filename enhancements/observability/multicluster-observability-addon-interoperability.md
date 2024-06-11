@@ -59,7 +59,7 @@ fine-grained filtering and routing on exported data to configurable sinks.
 
 ## Motivation
 
-At the moment exporting all telemetry data from OpenShift is fragmented to tree 
+At the moment exporting all telemetry data from OpenShift is fragmented to three 
 technology stacks (Prometheus, ClusterLoggingForwarder, OpenTelemetry collector). 
 Every tool uses a different configuration API, export protocol and provides (or does 
 not provide) filtering/PII capabilities.
@@ -89,8 +89,6 @@ not provide) filtering/PII capabilities.
 * Data visualization and querying.
 
 ## Proposal
-
-The following sections describe in detail the required resources as well as the workflow to enable collection and forwarding of logs and traces on an RHACM managed fleet of OCP clusters.
 
 The following section describes how data exportation, routing and filtering is 
 configured in MCO and MCOA.
@@ -196,7 +194,7 @@ OTLP exporter/sink could be implemented in all telemetry collectors (`Prometheus
 `ClusterLogForwarder`, `OpenTelemetryCollector`), however providing a common filtering 
 and routing capabilities will be problematic if not possible.
 
-In addition to exporting in OTLP a single collector will enable MCO easily support 
+In addition to exporting in OTLP, a single collector will enable MCO to easily support 
 exporting data to other systems with custom protocols (e.g. AWS CloudWatch, 
 Google Cloud Monitoring/Logging, Azure Monitor).
 
