@@ -107,6 +107,7 @@ cluster. Doing so endangers users' data and could lead to orphaning of LVM volum
 1. User determines there is not a requirement for persistent storage and volume snapshotting.
 2. User specifies an ostree blueprint which include the following sections:
     1. Packages:  microshift-lvms, microshift-lvms-snapshotting
+    2. File (Optional): lvmd.yaml
 3. User compiles an ostree commit from the blueprint
 4. User deploys the ostree commit to host
 5. MicroShift host reboots
