@@ -5,9 +5,9 @@ authors:
 reviewers:
   - "@tremes"
 approvers:
-  - TBD
+  - "@mrunalp"
 api-approvers:
-  - TBD
+  - TBD (not relevant as this RFE does not impact API?)
 creation-date: 2024-03-04
 last-updated: 2024-03-04
 status: implementable
