@@ -364,6 +364,10 @@ TBD
 
 ## Graduation Criteria
 
+### Dev Preview -> Tech Preview
+
+Dev Preview is not planned.
+
 ### Tech Preview -> GA
 
 Specific needs
