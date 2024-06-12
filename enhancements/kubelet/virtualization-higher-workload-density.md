@@ -1,25 +1,23 @@
 ---
 title: virtualization-higher-workload-density
 authors:
-  - enp0s3
-  - iholder101
-  - fabiand
-reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
-approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
-  - TBD
-api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - TBD
-creation-date: yyyy-mm-dd
-last-updated: yyyy-mm-dd
+  - "@enp0s3"
+  - "@iholder101"
+  - "@fabiand"
+reviewers:
+  - "@rphilips"
+  - "@sjenning"
+approvers:
+  - "@mrunalp"
+api-approvers:
+  - "@mrunalp"
+creation-date: "2024-05-05"
+last-updated: "2024-06-12"
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - TBD
+  - "https://issues.redhat.com/browse/CNV-28178"
 see-also:
-  - "/enhancements/this-other-neat-thing.md"
-replaces:
-  - "/enhancements/that-less-than-great-idea.md"
-superseded-by:
-  - "/enhancements/our-past-effort.md"
+  - "https://github.com/kubernetes/enhancements/issues/2400"
+status: implementable
 ---
 
 # Virtualization higher workload density
