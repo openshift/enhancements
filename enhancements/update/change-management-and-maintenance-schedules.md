@@ -55,7 +55,7 @@ the need to fix critical bugs or update a cluster to supported software versions
 it should be possible to safely leave changes pending indefinitely. That said,
 Service Delivery and/or higher level management systems may choose to prevent
 such problematic change management settings from being applied by using 
-validating webhooks.
+validating webhooks or admission policies.
 
 ## Motivation
 This enhancement is designed to improve user experience during the OpenShift 
@@ -178,7 +178,8 @@ Since these are such well established principles, I will summarize the motivatio
 OpenShift meet industry standard expectations with respect to limiting potentially disruptive change 
 outside well planned time windows. 
 
-It could be argued that rigorous and time sensitive management of OpenShift cluster API resources could prevent
+It could be argued that rigorous and time sensitive management of OpenShift API resources 
+(e.g. ClusterVersion, MachineConfigPool, HostedCluster, NodePool, etc.) could prevent
 unplanned material changes, but Change Management / Maintenance Schedules introduce higher level, platform native, and more 
 intuitive guard rails. For example, consider the common pattern of a gitops configured OpenShift cluster.
 If a user wants to introduce a change to a MachineConfig, it is simple to merge a change to the
@@ -246,7 +247,7 @@ risks and disruption when rolling out changes to their environments.
 > like to be able to pause that change manually so that the team will not have to work on the weekend."
 
 > "As a cluster lifecycle administrator, I need to stop all material changes on my cluster
-> quickly and indefinitely until I can understand a potential issue. I not want to consider dates or
+> quickly and indefinitely until I can understand a potential issue. I do not want to consider dates or
 > timezones in this delay as they are not known and irrelevant to my immediate concern."
 
 > "As a cluster lifecycle administrator, I want to ensure any material changes to my 
@@ -343,8 +344,8 @@ Each strategy may require an additional configuration element within the stanza.
 spec:
   changeManagement:
     strategy: "MaintenanceSchedule"
-    pausedUntil: false
-    disabledUntil: false
+    pausedUntil: "false"
+    disabledUntil: "false"
     config:
        maintenanceSchedule:
          ..options to configure a detailed policy for the maintenance schedule..
@@ -370,12 +371,12 @@ is always permissive -- allowing material changes to be initiated (see [Change M
 Hierarchy](#change-management-hierarchy) for caveats).
 
 All change management strategies, except `Disabled`, are subject to the following `changeManagement` fields:
-- `changeManagement.disabledUntil: <bool|date>`: When `disabledUntil: true` or `disabledUntil: <future-date>`, the interpreted strategy for 
+- `changeManagement.disabledUntil: "<bool|date>"`: When `disabledUntil: "true"` or `disabledUntil: "<future-date>"`, the interpreted strategy for 
   change management in the resource is `Disabled`. Setting a future date in `disabledUntil` offers a less invasive (i.e. no important configuration needs to be changed) method to 
   disable change management constraints (e.g. if it is critical to roll out a fix) and a method that
   does not need to be reverted (i.e. it will naturally expire after the specified date and the configured
   change management strategy will re-activate).
-- `changeManagement.pausedUntil: <bool|date>`: Unless the effective active strategy is Disabled, `pausedUntil: true` or `pausedUntil: <future-date>`, change management must 
+- `changeManagement.pausedUntil: "<bool|date>"`: Unless the effective active strategy is Disabled, `pausedUntil: "true"` or `pausedUntil: "<future-date>"`, change management must 
   pause material changes.
 
 ### Change Management Status
@@ -387,12 +388,13 @@ should be updated to proxy that status information to the end users.
 ### Change Management Metrics
 Cluster wide change management information will be made available through cluster metrics. Each resource
 containing the stanza must expose the following metrics:
-- The number of seconds until the next known permitted change window. See `cm_change_eta` metric.
-- The number of seconds until the current change window closes. See `cm_change_remaining` metric.
-- The last datetime at which changes were permitted (can be nil). See `cm_change_last` metric (which represents this as seconds instead of a datetime).
 - Whether any change management strategy is enabled.
-- Which change management strategy is enabled.
-- If changes are pending due to change management controls.
+- Which change management strategy is enabled. This can be used not notify SRE when a cluster begins using a non-standard strategy (e.g. during emergency corrective action).
+- The number of seconds until the next known permitted change window. See `change_management_next_change_eta` metric. This might be used to notify an SRE team of an approaching permissive window.
+- The number of seconds until the current change window closes. See `change_management_permissive_remaining` metric.
+- The last datetime at which changes were permitted (can be nil). See `change_management_last_change` metric (which represents this as seconds instead of a datetime). This could be used to notify an SRE team if a cluster has not had the opportunity to update for a non-compliant period.
+- If changes are pending due to change management controls. When combined with other metrics (`change_management_next_change_eta`, `change_management_permissive_remaining`), this can be used to notify SRE when an upcoming permissive window is going to initiate changes and whether changes are still pending as a permissive window closes.
+
 
 ### Change Management Hierarchy
 Material changes to worker-nodes are constrained by change management policies in their associated resource AND 
@@ -643,14 +645,14 @@ perspective, this strategy reports as paused indefinitely.
 1. The user determines the most recent rendered worker configuration. They configure the `manual` change
    management policy to use that exact configuration as the `desiredConfig`. 
 1. The MCO is thus being asked to ignite any new node or rebooted node with the desired configuration, but it
-   is **not** being permitted to apply that configuration to existing nodes because it is change management, in effect,
+   is **not** being permitted to apply that configuration to existing nodes because change management, in effect,
    is paused indefinitely by the manual strategy.
 1. The MCO metric for the MCP indicating the number of seconds remaining until changes can be initiated is `-1` - indicating
    that there is presently no time in the future where it will initiate material changes. The operations team
    has an alert configured if this value `!= -1`.
 1. The MCO metric for the MCP indicating that changes are pending is set because not all nodes are running
    the most recently rendered configuration. This is irrespective of the `desiredConfig` in the `manual` 
-   policy. Abstractly, it means, if change management were disabled, whether changes be initiated.
+   policy. Abstractly, it means, if change management were disabled, whether changes would be initiated.
 1. The cluster lifecycle administrator manually drains and reboots nodes in the cluster. As they come back online,
    the MachineConfigServer offers them the desiredConfig requested by the manual policy.
 1. After updating all nodes, the cluster lifecycle administrator does not need make any additional 
@@ -662,18 +664,18 @@ perspective, this strategy reports as paused indefinitely.
    Instead, updates are negotiated and planned far in advance. 
 1. The cluster workloads are not HA and unplanned drains are considered a business risk.
 1. To prevent surprises, the cluster lifecycle administrator sets the Assisted strategy on the worker MCP.
-1. In the `assisted` strategy change management policy, the lifecycle administrator configures `pausedUntil: true`
+1. In the `assisted` strategy change management policy, the lifecycle administrator configures `pausedUntil: "true"`
    and the most recently rendered worker configuration in the policy's `renderedConfigsBefore: <current datetime>`.
 1. The MCO is being asked to ignite any new node or any rebooted node with the latest rendered configuration
-   before the present datetime. However, because of `pausedUntil: true`, it is also being asked not to 
+   before the present datetime. However, because of `pausedUntil: "true"`, it is also being asked not to 
    automatically initiate that material change for existing nodes.
 1. The MCO metric for the MCP indicating the number of seconds remaining until changes can be initiated is `-1` - indicating
    that there is presently no time in the future where it will initiate material changes. The operations team
    has an alert configured if this value `!= -1`.
 1. The MCO metric for the MCP indicating that changes are pending is set because not all nodes are running
    the most recent, rendered configuration. This is irrespective of the `renderedConfigsBefore` in the `assisted` 
-   configuration. Abstractly, it means, if change management were disabled, whether changes be initiated.
-1. When the lifecycle administrator is ready to permit disruption, they set `pausedUntil: false`.
+   configuration. Abstractly, it means, if change management were disabled, whether changes would be initiated.
+1. When the lifecycle administrator is ready to permit disruption, they set `pausedUntil: "false"`.
 1. The MCO sets the number of seconds until changes are permitted to `0`.
 1. The MCO begins to initiate worker node updates. This rollout abides by documented OpenShift constraints
    such as the MachineConfigPool `maxUnavailable` setting.
@@ -736,12 +738,12 @@ spec:
     # The active strategy for change management (unless disabled by disabledUntil).
     strategy: <strategy-name|Disabled|null>
     
-    # If set to true or a future date, the effective change management strategy is Disabled. Date 
-    # must be RFC3339. 
+    # If set to "true" or a future date (represented as string), the effective change 
+    # management strategy is Disabled. Date must be RFC3339. 
     disabledUntil: <bool|date|null>
     
-    # If set to true or a future date, all strategies other than Disabled are paused. Date 
-    # must be RFC3339. 
+    # If set to "true" or a future date (represented as string), all strategies other 
+    # than Disabled are paused. Date must be RFC3339. 
     pausedUntil: <bool|date|null>    
     
     # If a strategy needs additional configuration information, it can read a 
@@ -873,7 +875,7 @@ is always paused state.
 
 #### Metrics
 
-`cm_change_pending`
+`change_management_change_pending`
 Labels:
 - kind=ClusterVersion|MachineConfigPool|HostedCluster|NodePool
 - object=<object-name>
@@ -885,7 +887,7 @@ Value:
 - `2`: changes are pending and blocked based on this resource's change management policy.
 - `3`: changes are pending and blocked based on another resource in the change management hierarchy.
 
-`cm_change_eta`
+`change_management_next_change_eta`
 Labels:
 - kind=ClusterVersion|MachineConfigPool|HostedCluster|NodePool
 - object=<object-name>
@@ -897,7 +899,7 @@ Value:
 - `0`: Any pending changes can be initiated now (e.g. change management is disabled or inside machine schedule window).
 - `> 0`: The number seconds remaining until changes can be initiated OR 1000*24*60*60 (1000 days) if no permissive window can be found within the next 1000 days (this ensures a brute force check of intersecting datetimes with hierarchy RRULEs is a valid method of calculating intersection). 
 
-`cm_change_remaining`
+`change_management_permissive_remaining`
 Labels:
 - kind=ClusterVersion|MachineConfigPool|HostedCluster|NodePool
 - object=<object-name>
@@ -909,7 +911,7 @@ Value:
 - `0`: Material changes are not presently permitted (i.e. the cluster is outside of a permissive window).
 - `> 0`: The number seconds remaining in the current permissive change window (or the equivalent of 1000 days if end of window cannot be computed). 
 
-`cm_change_last`
+`change_management_last_change`
 Labels:
 - kind=ClusterVersion|MachineConfigPool|HostedCluster|NodePool
 - object=<object-name>
@@ -920,7 +922,7 @@ Value:
 - `0`: Material changes are currently permitted.
 - `> 0`: The number of seconds which have elapsed since the material changes were last permitted.
 
-`cm_strategy_enabled`
+`change_management_strategy_enabled`
 Labels:
 - kind=ClusterVersion|MachineConfigPool|HostedCluster|NodePool
 - object=<object-name>
@@ -939,9 +941,9 @@ Each resource which exposes a `.spec.changeManagement` stanza must also expose `
 ```yaml
 status:
   changeManagement:
-    # Always show control-plane level strategy. Disabled if disabledUntil is true.
+    # Always show control-plane level strategy. Disabled if disabledUntil is "true".
     clusterStrategy: <Disabled|MaintenanceSchedule>
-    # If this a worker-node related resource (e.g. MCP), show local strategy. Disabled if disabledUntil is true.
+    # If this a worker-node related resource (e.g. MCP), show local strategy. Disabled if disabledUntil is "true".
     workerNodeStrategy: <Disabled|MaintenanceSchedule|Manual|Assisted>
     # Show effective state.
     effectiveState: <Changes Paused|Changes Permitted>
