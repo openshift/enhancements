@@ -57,6 +57,47 @@ Service Delivery and/or higher level management systems may choose to prevent
 such problematic change management settings from being applied by using 
 validating webhooks or admission policies.
 
+## Definitions and Reference
+
+**RRULE**
+RRULE, or "Recurrence Rule", is an RFC https://icalendar.org/RFC-Specifications/iCalendar-RFC-5545/
+commonly used to express reoccurring windows of time. Consider a calendar invite for a meeting that
+should occur on the last Friday of every month. RRULE can express this as `FREQ=MONTHLY;INTERVAL=1;BYDAY=-1FR`.
+While commonly employed for calendar data interchange, it is used in this enhancement to allow users
+the ability to specify maintenance schedules.
+Tools for generating RRULES:
+- Simple: https://icalendar.org/rrule-tool.html
+- Complex: https://exontrol.com/exicalendar.jsp?config=/js#calendar
+
+**Change Management Terminology**
+This document uses unique terms to describe the key aspects of change management. 
+It is worth internalizing the meaning of these terms before reviewing sections of the document.
+- "Material Change". A longer definition is provided in the Summary, but in short, any configuration
+  change a platform operator wishes to apply which would necessitate the reboot or replacement of one 
+  or more nodes is considered a material change. For example, updating the control-plane version is 
+  a material change as it requires rebooting master nodes. 
+- "Enabled" / "Disabled". Change management can be enabled or disabled through various configuration options.
+  When "Disabled" via any of those options, change management is not active and any pending material changes 
+  will be applied. Existing versions of OpenShift, without this enhancement, are, conceptually,
+  always running with change management disabled.
+- "Paused" / "Unpaused" are enforcement states _when change management is enabled_. "Paused" means that
+  material changes will be deferred / left pending. "Unpaused" means that pending material changes
+  can be applied. 
+  "Disabled" supersedes "Paused". In other words, if change management is disabled, it does not matter
+  if a configured strategy would be enforcing a change pause or not -- because that disabled strategy
+  is not being considered.
+- "Permissive". When change management is disabled xor enabled & unpaused, the cluster is described to be in
+  a permissive window. This is another way to say that material changes can be applied. When change
+  management is enabled & paused, material changes will be left in a pending state and the cluster
+  is not in a permissive window.
+- "Strategy". There are multiple change management strategies proposed. Each informs a different behavior
+  for a controller to pause and unpause changes. "Disabled" is a special strategy that means change management
+  is indefinitely disabled -- meaning material changes can be freely applied. This will be the default
+  strategy for OpenShift for the foreseeable future in order to provide consistent behavior with past versions.
+- "Maintenance Schedule" is one type of change management strategy. When enabled, based on a recurrence
+  rule (RRULE) and exclusion periods, a controller will pause or unpause changes according to the 
+  current datetime.
+
 ## Motivation
 This enhancement is designed to improve user experience during the OpenShift 
 upgrade process and other key operational moments when configuration updates
@@ -963,8 +1004,6 @@ This annotation will be present on `00-master` to ensure that, once the CVO upda
 the remainder of the control-plane update will be treated as a single material change.
 
 ### Special Handling
-These cases are mentioned or implied elsewhere in the enhancement documentation, but they deserve special
-attention.
 
 #### Change Management on Master MachineConfigPool
 In order to allow control-plane updates as a single material change, the MCO will only honor change the management configuration for the 
@@ -1016,6 +1055,15 @@ prevent this outcome, Service Delivery will only expose a subset of the change m
 strategies. They will also implement sanitization of the configuration options a user can
 supply to those strategies. For example, a simplified interface in OCM for building a
 limited range of RRULEs that are compliant with Service Delivery's update policies.
+
+#### Node Disruption Policy
+https://github.com/openshift/enhancements/pull/1525 describes the addition of `nodeDisruptionPolicy`
+to `MachineConfiguration`. Through this configuration, an administrator can convey that
+a configuration should not trigger a node to be rebooted.
+
+When `nodeDisruptionPolicy` indicates that a `MachineConfiguration` should not trigger
+a node reboot, it becomes a non-material change from the perspective of a maintenance
+schedule. In other words, it can be applied immediately, even outside a permissive window.
 
 ### Risks and Mitigations
 
