@@ -40,7 +40,7 @@ superseded-by:
 ## Release Signoff Checklist
 
 - [x] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
+- [x] Design details are appropriately documented from clear requirements
 - [ ] Test plan is defined
 - [ ] Graduation criteria for dev preview, tech preview, GA
 - [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
@@ -81,9 +81,9 @@ The following sections describe in detail the required resources as well as the 
 
 The workflow described in this proposal enables fleet-wide collection and forwarding of logs and traces as follows. Note that the steps described here are an example and do not cover all the different ways of configuring MCOA:
 
-1. When the fleet administrator enables Logs and Traces collection in the `capabilities` section of the `MultiClusterObservability` resource, then MCO will configure the `AddOnDeploymentConfig` resource that will configure MCOA.
-2. The fleet administrator creates a `ClusterLogForwarder` stanza in the `open-cluster-management` namespace that describes the list of log forwarding outputs. This stanza will eventually be deployed on all the managed clusters.
-3. The fleet administrator creates a `OpenTelemetryCollector` stanza in the `open-cluster-management` namespace that describes the list of trace receivers, processors, connectors and exporters. This stanza will eventually be deployed on all the managed clusters.
+1. When the fleet administrator enables Logs and Traces collection in the `capabilities` section of the `MultiClusterObservability` resource, then MCO will create a `ClusterManagementAddon` and a `AddOnDeploymentConfig` resource that will be used by the MCOA deployment as configuration.
+2. The fleet administrator creates a `ClusterLogForwarder` stanza in the `open-cluster-management-observability` namespace that describes the list of log forwarding outputs. This stanza will eventually be deployed on all the managed clusters.
+3. The fleet administrator creates a `OpenTelemetryCollector` stanza in the `open-cluster-management-observability` namespace that describes the list of trace receivers, processors, connectors and exporters. This stanza will eventually be deployed on all the managed clusters.
 4. For each managed cluster the MCOA or the fleet administrator provides on the managed cluster namespace additional configuration resources:
    1. The addon-manager will create a `ManagedClusterAddon` resource specifying the resources (CLF + OTELCol) that should be used by the addon to configure the addon deployment on the managed cluster.
    2. For both CLF & OTELCol everytime a secret is needed the MCOA addon will look for a secret with that name in the namespace of the managed cluster if no secret is found it will instead look for it in the namespace of the resource (CLF/OTELCol).
@@ -92,15 +92,13 @@ The workflow described in this proposal enables fleet-wide collection and forwar
 
 #### Variation and form factor considerations [optional]
 
-_TODO @JoaoBraveCoding replace HackMD with ADR once we have the link_
 
-The workflow above describes the default configuration for MCOA, however, it will also support deploying for both logs and traces multiple collectors. This is described in more detail in [HackMD](https://hackmd.io/aBUzPTEZRuCPp_kZqm4x2A)
+The workflow above describes the default configuration for MCOA, however, it will also support deploying for both logs and traces multiple collectors. This is described in more detail in the [ACM-DDR-025: Multi-cluster Observability Addon](https://docs.google.com/document/d/1Yha0IvwmTOzc3HMqG0gj9edRjlPIzIAwvotIFqCBJ9E/edit#heading=h.pcdmckal8d53) document.
 
 ### API Extensions
 
-_TODO @JoaoBraveCoding replace HackMD with ADR once we have the link_
 
-With the introduction of MCOA we will extend the `MultiClusterObservability` resource with a new set of fields under an optional field called `capabilities`. The capabilities is the user's expression on which of the supported observability data collection and storage methods is desired to be used across the fleet. More detail in [HackMD](https://hackmd.io/aBUzPTEZRuCPp_kZqm4x2A)
+With the introduction of MCOA we will extend the `MultiClusterObservability` resource with a new set of fields under an optional field called `capabilities`. The capabilities is the user's expression on which of the supported observability data collection and storage methods is desired to be used across the fleet. More detail in [ACM-DDR-025: Multi-cluster Observability Addon](https://docs.google.com/document/d/1Yha0IvwmTOzc3HMqG0gj9edRjlPIzIAwvotIFqCBJ9E/edit#heading=h.pcdmckal8d53) document.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -252,7 +250,7 @@ apiVersion: logging.openshift.io/v1
 kind: ClusterLogForwarder
 metadata:
   name: instance
-  namespace: open-cluster-management
+  namespace: open-cluster-management-observability
 spec:
   outputs:
   - loki:
@@ -265,14 +263,14 @@ spec:
     type: loki
     url: https://loki-foo.grafana.com
     secret: 
-       name: loki-foo-mTLS-credentials
+       name: application-logs-loki-mtls-credentials
   - cloudwatch:
       groupBy: logType
       region: eu-central-1
     name: cluster-logs
     type: cloudwatch
     secret: 
-       name: aws-credentials
+       name: cluster-logs-aws-cloudwatch-credentials
   pipelines:
   - inputRefs:
     - application
@@ -291,21 +289,21 @@ spec:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: aws-credentials
+  name: cluster-logs-aws-cloudwatch-credentials
   namespace: spoke-cluster
 data:
   access_key_id: "Base64 access key id"
   access_key_secret: "Base64 access key secret"
 ```
 
-Notice that secrets referenced on CLF can either exist in the spoke namespace or on the CLF namespace as is the case for `application-logs` secret:
+Notice that secrets referenced on CLF can either exist in the managed cluster namespace or on the CLF namespace (i.e. `open-cluster-management-observability`) as is the case for `application-logs` secret:
 
 ```yaml
 apiVersion: v1
 kind: Secret
 metadata:
-  name: loki-foo-mTLS-credentials
-  namespace: open-cluster-management
+  name: application-logs-loki-mtls-credentials
+  namespace: open-cluster-management-observability
 stringData:
   'tls.crt': "TLS client certificate"
   'tls.key': "TLS key"
@@ -338,7 +336,7 @@ spec:
     - apiVersion: v1
       kind: Secret
       metadata:
-        name: aws-credentials
+        name: cluster-logs-aws-cloudwatch-credentials
         namespace: openshift-logging
       data:
         access_key_id: "Base64 access key id"
@@ -346,7 +344,7 @@ spec:
     - apiVersion: v1
       kind: Secret
       metadata:
-        name: loki-foo-mTLS-credentials
+        name: application-logs-loki-mtls-credentials
         namespace: openshift-logging
       data:
         'tls.crt': "Base64 encoded TLS client certificate"
@@ -356,7 +354,7 @@ spec:
       kind: ClusterLogForwarder
       metadata:
         name: instance
-        namespace: open-cluster-management
+        namespace: openshift-logging
       spec:
         outputs:
         - loki:
@@ -369,14 +367,14 @@ spec:
           type: loki
           url: "https://loki-foo.grafana.com"
           secret:
-            name: loki-foo-mTLS-credentials
+            name: application-logs-loki-mtls-credentials
         - name: cluster-logs
           type: cloudwatch
           cloudwatch:
             groupBy: logType
             region: eu-central-1
           secret:
-            name: aws-credentials
+            name: cluster-logs-aws-cloudwatch-credentials
         pipelines:
         - inputRefs:
           - application
@@ -393,7 +391,7 @@ spec:
 
 #### Multi Cluster OTLP Collection and Forwarding
 
-For all managed clusters the fleet administrator is required to provide, at least, a single `OpenTelemetryCollector` resource stanza that describes the OpenTelemetry forwarding configuration for the entire fleet in the default namespace `open-cluster-management`.
+For all managed clusters the fleet administrator is required to provide, at least, a single `OpenTelemetryCollector` resource stanza that describes the OpenTelemetry forwarding configuration for the entire fleet in the default namespace `open-cluster-management-observability`.
 
 The following example resource describes a configuration where a `OpenTelemetryCollector` instance is deployed per spoke cluster and it sends data to a Hub OTEL Cluster (note that this cluster can be different from the RHACM Hub cluster). The Hub OTEL Cluster then exports the received telemetry to a third-party storage solution.
 
@@ -430,7 +428,7 @@ apiVersion: opentelemetry.io/v1alpha1
 kind: OpenTelemetryCollector
 metadata:
   name: spoke-otelcol
-  namespace: open-cluster-management
+  namespace: open-cluster-management-observability
 spec:
   config: |
     receivers:
@@ -479,10 +477,14 @@ metadata:
 spec:
   workload:
     manifests:
-    - apiVersion: project.openshift.io/v1
-      kind: Project
+    - apiVersion: v1
+      kind: Namespace
       metadata:
         name: openshift-opentelemetry-operator
+    - apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: mcoa-opentelemetry
     - apiVersion: operators.coreos.com/v1
       kind: OperatorGroup
       metadata:
