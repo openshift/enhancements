@@ -31,7 +31,7 @@ in the presence of poorly configured workloads.
 
 During a typical worker node update for an OpenShift cluster, it is necessary to "cordon" nodes (prevent new pods from being scheduled on a node)
 and "drain" them (attempt to migrate workloads by rescheduling its pods onto uncordoned nodes). Workers generally need to be rebooted during a
-cluster update and draining nodes is best practice before rebooting them. If they were not drained first, pods running
+cluster update and draining nodes is standard practice before rebooting them. If they were not drained first, pods running
 on a node targeted by the update process could be terminated with no other viable pods on the cluster to 
 handle the workload. This outcome can cause a disruption in the service the terminated pod was attempt to provide. For example,
 an incoming web request may not be routable to a pod for a given Kubernetes service - resulting in errors being returned
@@ -44,38 +44,46 @@ from pod replicas to cluster topology.
 ### Managing Worker Node Capacity
 
 One aspect of this challenge is ensuring that, while a node is being drained, there is sufficient worker node capacity (CPU/memory/other
-resources) available for new pods to take the place of old pods from the node being drained. Consider the reductive example of 
+resources/topology) available for new pods to take the place of old pods from the node being drained. Consider the reductive example of 
 a static cluster with a single worker node. If there is an attempt to drain the node in this example, there is no additional worker 
 node capacity available to schedule new pods to replace the pods being drained. This can result in a stalled drain -- one that 
 does not terminate until there is external intervention.
 
 Stalled drains create a frustrating experience for operations teams as they require analysis and intervention. They can also
 make it impossible to predict when an update will complete -- complicating work schedules and communications. There are a number of reasons 
-drains can stall, but simple lack of spare worker node capacity is a common one. The reason is that running an over-provisioned cluster
-(i.e. with more worker nodes than actually required for the steady state workloads) is not always cost-effective. Running
-an extra node 24x7 simply to ensure capacity for the short period while another node is being drained is inefficient.
+drains can stall, but simple lack of spare worker node capacity is a common one. One solution to this problem is
+to turn on autoscaling - allowing a cluster to add nodes if pods are unschedulable. This reduces the likelihood of the problem
+without eliminating it (i.e. if the cluster is at capacity and has provisioned the maximum number of nodes permitted by its
+autoscaler configuration). Administrators may also hesitant to use autoscaling (e.g. they prefer a fixed number of 
+nodes to guarantee they do not significantly exceed expected opex). 
 
-One cost-effective approach to ensure capacity is called "surging". With a surge strategy, during an update, the platform
-is permitted to bring additional worker nodes online, to accommodate workloads being drained from existing nodes. After an 
-update concludes, the surged nodes are scaled down and the cluster resumes its steady state.
+Capacity related stalled drains are particularly troublesome for our managed fleet. Our SRE team needs to be able to 
+ensure that updates across the fleet can proceed without individual manual attention. With customer managed 
+configurations and workloads, the ability to drain nodes in a customer environment is highly unpredictable.
+
+One cost-effective approach to ensure capacity is called "surging". With a surge strategy, during an update and
+only during an update, the platform is permitted to bring additional worker nodes online, to accommodate workloads 
+being drained from existing nodes. After the update concludes, the surged nodes are scaled down and the cluster 
+resumes its steady state.
 
 HyperShfit Hosted Control Planes (HCP) already support the surge concept. HyperShift `NodePools`
 expose `maxUnavailable` and `maxSurge` as configurable options during updates: https://hypershift-docs.netlify.app/reference/api/#hypershift.openshift.io/v1beta1.RollingUpdate . 
 Unfortunately, standalone OpenShift, which uses `MachineConfigPools`, does not. To workaround this
-limitation for managed services customers, Service Delivery developed a custom Machine Update Operator (MUO)
+limitation for managed services customers, Service Delivery developed a custom Managed Upgrade Operator (MUO)
 which can surge a standalone cluster during an update (see [reserved capacity feature](https://github.com/openshift/managed-upgrade-operator/blob/a56079fda6ab4088f350b05ed007896a4cabcd97/docs/faq.md)).
 
 ### Preventing Other Stalled Drains
 
-As previously mentioned, there are other reasons that drains can stall. For example, `PodDisruptionBudgets` can
+There are other reasons that drains can stall. For example, `PodDisruptionBudgets` can
 be configured in such a way as to prevent pods from draining even if there is sufficient capacity for them
 to be rescheduled on other nodes. A powerful (though blunt) tool to prevent drain stalls is to limit the amount of time
 a drain operation is permitted to run before forcibly terminating pods and allowing an update to proceed. 
 `NodeDrainTimeout`, in HCP's `NodePools` allows users to configure this timeout.
-The Managed Update Operator also supports this feature with [`PDBForceDrainTimeout`](https://github.com/openshift/managed-upgrade-operator/blob/master/docs/faq.md).
+The Managed Upgrade Operator also supports this feature with [`PDBForceDrainTimeout`](https://github.com/openshift/managed-upgrade-operator/blob/master/docs/faq.md).
 
 This enhancement includes adding `NodeDrainTimeout` to `MachineConfigPools` to provide this feature in standlone 
-cluster environments.
+cluster environments. The timeout will only apply to drains triggered by the Machine Config Operator (e.g.
+it will not impact drains triggered by the CLI).
 
 ### User Stories
 
@@ -90,7 +98,7 @@ more of the core platform).
   ensure my cluster update makes steady progress by limiting the amount of time a node drain can
   consume.
 * As an engineer in the Service Delivery organization, I want to use core platform
-  features instead of developing, evolving, and testing the Managed Update Operator.
+  features instead of developing, evolving, and testing the Managed Upgrade Operator.
 * As an Operations team managing standalone and HCP based OpenShift clusters, I
   want a consistent update experience leveraging a surge strategy and/or 
   node drain timeouts regardless of the cluster profile.
@@ -106,7 +114,7 @@ more of the core platform).
 ### Non-Goals
 
 - Address all causes of problematic updates.
-- Prevent workload disruption when `NodeDrainTImeout` is utilized.
+- Prevent workload disruption when `NodeDrainTimeout` is utilized.
 - Fully unify the update experience for Standalone vs HCP.
 
 ## Proposal
@@ -149,7 +157,9 @@ spec:
   # Existing spec fields are not shown.    
 
   # Adopted from NodePool to create consistency and further our goal
-  # to improve the reliability of worker updates.
+  # to improve the reliability of worker updates. This only applies
+  # to drains triggered by the MCO (e.g. CLI triggered drains will
+  # not be impacted).
   nodeDrainTimeout: 10m
       
   # New policy analog to NodePool.NodePoolManagement.
@@ -211,6 +221,14 @@ spec:
 with a MachineConfigPool, and `MaxSurge` is set to 4, then it is possible for the cluster to surge up to 12 nodes
 (4 for each of the 3 MachineSets).
 
+The `OnDelete` strategy is included for consistency with HCP. It does not directly support
+the consistent update experience motivation driving this enhancement. However, it does provide
+value to customers with highly static environments. Consider a standalone customer using a 
+provider where they have a fixed quota of machines. Autoscaling and surging are not options
+in this case. To provide a reliable update, they would select 'OnDelete' and specify a 'NodeDrainTimeout'.
+This will likely result in workload disruption for an at-capacity cluster during an upgrade, but the administrator 
+is at least empowered to make that tradeoff.
+
 ### Topology Considerations
 
 Multi-AZ (availability zone) clusters function by using one or more `MachineSets` per zone. In order for this enhancement
@@ -247,10 +265,40 @@ N/A.
 
 ### Implementation Details/Notes/Constraints
 
-`MachineSets` or CAPI equivalents must support `MachineConfigPool` values for `MaxSurge`. When `MaxSurge` is greater
-than 0, the controller can instantiate more machines than the number of specified `MachineSet` replicas. 
-This must work seamlessly with all cluster autoscaler options. The cluster autoscaler may need to be aware of 
-surge operations to prevent conflicting management of cluster machines.
+#### MaxSurge Implementation
+
+##### Surge Setup
+During a configuration update rollout, the Machine Config Operator (MCO) will determine which `MachineSets` are associated with
+a `MachineConfigPool` with `MaxSurge` greater than 0. For each `MachineSet` meeting this requirement (if it does not possess
+a proposed annotation `machineconfiguration.openshift.io/noSurge`) , the MCO will create a near duplicate of the `MachineSet` with a few
+key differences:
+- The name of the resource will be `<~machineset-name>-surge-<nonce>`. The implementation must handle:
+  - the truncation of the original `MachineSet` name if appending `surge-<nonce>` will violate k8s name length limitations.
+  - the calculation of a nonce value that does not conflict any existing resource that the controller did not, itself, create (as indication by a special label).
+- The new `MachineSet` will be labeled to clearly indicate that the MCO created the resource in order to satisfy a surge operation.
+- The new `MachineSet` will be set with a replica count of 0 if `ClusterAutoscaler` exists and `MaxSurge` if `ClusterAutoscaler` does not exist.
+
+##### Surge With ClusterAutoscaler
+If `ClusterAutoscaler` exists, for each surge `MachineSet`, an associated `MachineAutoscaler` will be instantiated with its 
+minimum replica value set to 0 and its maximum replica count set to `MaxSurge`. The `MachineAutoscaler` instance will also be labeled to indicate it
+was created programmatically for the surge procedure.
+
+As nodes are drained, any unschedulable pods will cause the `ClusterAutoscaler` to scale an appropriate surge 
+`MachineSet` to supply the necessary capacity requirement.
+
+##### Surge Without ClusterAutoscaler
+If the `ClusterAutoscaler` does not exist, `MachineAutoscalers` will not work. Instead, the surge `MachineSets` will have
+their replica count set to `MaxSurge`. This is a less efficient use of cloud resources, so customer facing documentation
+should suggest the use of `ClusterAutoscaler` when a surge strategy is being used.
+
+##### Surge Teardown
+Once a `MachineConfigPool` has consistent, up-to-date, machines associated with it, the surge `MachineSet` and
+(optional) `MachineAutoscaler` resources will be deleted. This will cause drain of the nodes created for the
+surge. This drain should obey the `NodeDrainTimeout` set in the `MachineConfigPool`.
+
+#### Node Drain Timeout
+When non-zero, a normal cordon and drain should be attempted. However, if the duration of the attempt 
+surpasses `NodeDrainTimeout`, the node can be forcibly terminated. 
 
 ### Risks and Mitigations
 
