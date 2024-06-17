@@ -113,6 +113,7 @@ advertises VPN routes via BGP sessions over said VRFs.
 ### Future Goals
 
 * Support EVPN configuration and integration with a user’s DC fabric, along with MAC-VRFs and IP-VRFs.
+* Support iBGP with route reflectors.
 
 ## Proposal
 
@@ -134,7 +135,7 @@ networks for their namespace, but requires admin permission in order to expose t
 fabric. A typical workflow will be for a user or admin to create a user-defined network, and then the admin will be
 responsible to:
 
-1. If setting up VRF-Lite, do any host modifications necessary via NMState to enslave a physical interface to the
+1. If setting up VRF-Lite, do any host modifications necessary via NMState to enslave an IP interface to the
    matching network VRF.
 2. Configure BGP peering via interacting with the FRR-K8S API for a given set of worker nodes. Also define filters for
 what routes should be received from the provider network.
@@ -189,9 +190,10 @@ a dynamic routing protocol.
 #### BGP Peering
 
 FRR-K8S shall support both internal BGP (iBGP) and external BGP (eBGP). With iBGP, a full mesh topology is required. This
-can be cumbersome and have issues with scaling in large clusters. Therefore, FRR-K8S shall also support designating one
-or more nodes as route reflectors. With route reflectors, nodes only have to connect to the route reflectors and do not
-have to maintain a full mesh with all other nodes in the cluster.
+can be cumbersome and have issues with scaling in large clusters. In the future, FRR-K8S shall also support designating one
+or more nodes as route reflectors (https://issues.redhat.com/browse/CNF-10719). With route reflectors, nodes only have
+to connect to the route reflectors and do not have to maintain a full mesh with all other nodes in the cluster. Therefore,
+support for iBGP in this enhancement will be restricted to full mesh only.
 
 #### FRR-K8S Integration
 
@@ -232,11 +234,13 @@ metadata:
 spec:
     # networkSelector:
     # nodeSelector:
+    # frrConfigurationSelector:
     targetVRF: default
     advertisements:
       podNetwork: true
       egressIP: true
       clusterIPs: true
+      externalIPs: true
 ```      
 
 In the above example, an optional networkSelector may also be optionally supplied which will match namespaces/networks.
@@ -248,14 +252,26 @@ A networkSelector may select more than one network, including user-defined netwo
 will be checked by OVN-Kubernetes to determine if there is any overlap of the IP subnets. If so, an error status will be
 reported to the CRD and no BGP configuration will be done by OVN-Kubernetes.
 
-The CRD will support enabling advertisements for pod subnet, egress IPs, as well as cluster IPs for services on the
-selected networks. Note, MetalLB only handles advertising LoadBalancer IP and External IP so there is no conflict of
-responsibilities here.
+The CRD will support enabling advertisements for pod subnet, egress IPs, as well as cluster IPs and external IPs for
+services on the selected networks. Note, MetalLB only handles advertising LoadBalancer IP so there is no conflict of
+responsibilities here. When the pod network is set to be advertised, there is no longer a need to SNAT pod IPs for this
+network to the node IP. Therefore when pod network advertisements are enabled, the traffic from these pods will no longer
+be SNAT'ed on egress.
 
-The "targetVRF" key is used to determine which VRF the routes should be advertised in. The default value is "default",
-which indicates the routes from the selected network should be advertised in the default VRF. Alternatively, the user
-may specify the value "auto", in which case OVN-Kubernetes will advertise routes in the VRF that corresponds to the
-selected network.
+The "targetVRF" key is used to determine which VRF the routes should be advertised in. The default value is "auto", in
+which case OVN-Kubernetes will advertise routes in the VRF that corresponds to the selected network. Alternatively, the
+user may specify the name of the VRF, which would cause routes to be leaked for this network onto that VRF. One use case
+for this would be when a user wants to define a network with a specific IP addressing scheme, and then wants to advertise
+the pod IPs into the provider BGP network without VPN. By specifying the targetVRF as "default", routes will be leaked
+into the default VRF. Note that by using route leaking with a user-defined network, the network is no longer fully
+isolated, as now any other networks also leaked or attached to that VRF may reach this user-defined network. If a user
+attempts to leak routes into a targetVRF for a user-defined network whose IP subnet would collide with another,
+OVN-Kubernetes will report an error to the RouteAdvertisement status.
+
+The frrConfigurationSelector is used in order to determine which FRRConfiguration CR to use for building the OVN-Kubernetes
+driven FRRConfiguration. OVN-Kubernetes needs to leverage a pre-existing FRRConfiguration to be able to find required
+pieces of configuration like BGP peering, etc. If more than one FRRConfiguration is found matching the selector, then
+an error will be propagated to the RouteAdvertisements CR and no configuration shall be done.
 
 ##### No Tunnel/Overlay Mode
 
@@ -284,6 +300,8 @@ metadata:
   namespace: metallb-system
   resourceVersion: "1323"
   uid: 99b64be3-4f36-4e0b-8704-75aa5182d89f
+  labels:
+    routeAdvertisements: default
 spec:
   bgp:
     routers:
@@ -329,8 +347,11 @@ spec:
     matchLabels: 
       k8s.ovn.org/metadata.name: blue
   nodeSelector:
-   matchLabels:
+    matchLabels:
       kubernetes.io/hostname: ovn-worker
+  frrConfigurationSelector:
+    matchLabels:
+      routeAdvertisements: default
 ```
 
 OVNKube-Controller will now see it needs to generate corresponding FRRConfiguration:
@@ -391,6 +412,8 @@ kind: FRRConfiguration
 metadata:
   name: vpn-ovn-worker
   namespace: metallb-system
+  labels:
+    routeAdvertisements: vpn-blue-red
 spec:
   bgp:
     routers:
@@ -442,8 +465,11 @@ spec:
     matchExpressions:
       - { key: k8s.ovn.org/metadata.name, operator: In, values: [blue,red] } 
   nodeSelector:
-   matchLabels:
+    matchLabels:
       kubernetes.io/hostname: ovn-worker
+  frrConfigurationSelector:
+    matchLabels:
+      routeAdvertisements: vpn-blue-red
 ```
 
 In the above CR, the targetVRF is set to auto, meaning the advertisements will occur within the VRF corresponding to the
@@ -605,33 +631,9 @@ of OVN-Kubernetes integration, we need this as a day 0 function. For pods relyin
 encapsulation, the BGP routes will need to be learned by the time the pods come up.
 
 In order to achieve day 0 functionality, FRR-K8S will be launched by CNO as a host networked pod on each node (where
-applicable). MetalLB Operator will be modified so that it can launch in FRR-K8S mode, without deploying FRR-K8S, and
-integrate with the one launched by CNO.
-
-This means, there will be two ways of operating:
-- The current behaviour, which is: CNO does not deploy FRR-K8s, the MetalLB Operator deploys both MetalLB and FRR-K8s
-- CNO deploys FRR-K8s and MetalLB leverages the FRR-K8s instance deployed by CNO
-
-###### MetalLB deploys FRR-K8s
-This is the behaviour implemented in 4.16 as Tech Preview and planned to be GA in 4.17. The users don't care about pod
-to pod reachability with BGP, they want to use MetalLB and possibly FRR-K8s for learning routes on the nodes.
-The MetalLB operator will deploy FRR-K8s and MetalLB in the same namespace.
-
-###### CNO deploys FRR-K8s
-In this version, CNO deploys FRR-K8s in a separate namespace, so it can be used for the extra features described in this
-proposal. The user will need to set:
-
-- A flag on the CNO configuration, to deploy FRR-K8s and to instruct OVN-K of the presence of the FRR controller
-- A deployment mode "FRR-K8s already present" in the "MetalLB" resource, to instruct the operator to deploy MetalLB in
-FRR-K8s mode but without deploying FRR-K8s
-- In this scenario the permissions given to MetalLB over the FRR-K8s resources must be changed from namespace scoped to
-cluster scoped.
-
-## Handling configuration errors
-Because of this dual way of deploying, we must be careful in handling the scenario where a user mistakenly deployed
-FRR-K8s both from the MetalLB Operator and from CNO. In this scenario, the FRR-K8s instance of CNO must take precedence
-and the MetalLB Operator must produce an error as soon as it sees the extra FRR-K8s instance, and possibly un-deploy
-the MetalLB pods, so it's clear some exceptional scenario is happening.
+applicable) via a new OpenShift API. MetalLB Operator will be modified so that it can launch in FRR-K8S mode, and will
+directly write to the API to signal that CNO should deploy FRR-K8S. CNO will deploy FRR-K8s in a separate namespace, and
+MetalLB RBAC will be updated so that it may write and have access to resources in the FRR-K8S namespace.
 
 ##### Bare Metal
 
