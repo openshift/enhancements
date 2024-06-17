@@ -490,7 +490,8 @@ This strategy is motivated by the desire to support the separation of control-pl
 conceptually for users and in real technical terms. One way to do this for users who do not benefit from the
 `MaintenanceSchedule` strategy is to ask them to initiate, pause, and resume the rollout of material
 changes to their worker nodes. Contrast this with the fully self-managed state today, where worker-nodes
-(normally) begin to be updated automatically and directly after the control-plane update.
+(normally) begin to be updated automatically and directly after the control-plane update (subject to constraints
+like `maxUnavailable` in each MachineConfigPool).
 
 Clearly, if this was the only mode of updating worker-nodes, we could never successfully disentangle the
 concepts of control-plane vs worker-node updates in Standalone environments since one implies the other.
