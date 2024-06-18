@@ -3,6 +3,7 @@ package enhancements
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,7 +22,14 @@ type MetaData struct {
 func NewMetaData(content []byte) (*MetaData, error) {
 	result := MetaData{}
 
-	err := yaml.Unmarshal(content, &result)
+	strContent := string(content)
+	parts := strings.Split(strContent, "---")
+	if len(parts) < 3 {
+		return nil, fmt.Errorf("could not extract meta data from header: yaml was not delineated by '---' per the template")
+	}
+	yamlContent := strings.TrimSpace(parts[1])
+	yamlBytes := []byte(yamlContent)
+	err := yaml.Unmarshal(yamlBytes, &result)
 	if err != nil {
 		return nil, fmt.Errorf("could not extract meta data from header: %w", err)
 	}
