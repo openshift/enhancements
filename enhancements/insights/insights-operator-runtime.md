@@ -1,5 +1,5 @@
 ---
-title: container-scanner
+title: insights-operator-runtime
 authors:
   - "@jmesnil"
 reviewers:
@@ -28,9 +28,9 @@ The Insights operator periodically gathers cluster data and sends it to Red Hat.
 
 In many cases, the image ID and its layers do not provide any meaningful information about the actual application or application language/platform/framework...  
 To get this level of information, we can gather additional data on the running containers.   
-By scanning running containers, the Insights Operator can enrich the gathered data and capture the kind of workload that is running on OpenShift. This information can be used by Red Hat to target  OpenShift investments at the most popular workloads, inform decisions around long-life offerings for application platforms and frameworks, identify growth opportunities in emerging workloads, and measure the success of our strategic initiatives in AI and Middleware.
+By inspecting running containers, the Insights Operator can enrich the gathered data and capture the kind of workload that is running on OpenShift. This information can be used by Red Hat to target  OpenShift investments at the most popular workloads, inform decisions around long-life offerings for application platforms and frameworks, identify growth opportunities in emerging workloads, and measure the success of our strategic initiatives in AI and Middleware.
 
-For example, scanning the container allows to gather additional data such as:
+For example, inspecting the container allows to gather additional data such as:
 
 * The container (with the ID `sha256:5edd4b...`) is based on __RHEL 8.9__ ands runs a __Kafka Broker 3.6.1__ with __Java OpenJDK 17.0.9__
 * The container (with the ID `sha256:4redc...`)  is based on __Fedora 17__, and runs a __Quarkus 3.6.2__ application with __Java Eclipse Adoptium 21.0.1__ 
@@ -69,7 +69,7 @@ to help shape the future of our product offerings.
 
 ### Goals
 
-The goal of this proposal is to scan running containers and pop a few key pieces of data to identify the workload that they are running. This data will enrich and complement the information already gathered by the Insights Operator to get a more accurate representation of workloads running on OpenShift.
+The goal of this proposal is to inspect running containers and pop a few key pieces of data to identify the workload that they are running. This data will enrich and complement the information already gathered by the Insights Operator to get a more accurate representation of workloads running on OpenShift.
 
 ### Non-Goals
 
@@ -135,7 +135,7 @@ These new data elements are all optional (as they may not be relevant depending 
 
 ### Runtime Info Description
 
-With the ability to scan running containers in OpenShift clusters, Red Hat can collect additional data about the software running on the cluster to improve its products.
+With the ability to inspect running containers in OpenShift clusters, Red Hat can collect additional data about the software running on the cluster to improve its products.
 
 The additional data are:
 
@@ -150,8 +150,8 @@ The additional data are:
     * Value is a hash of the corresponding `VERSION_ID` field: `11.0, 7.9, 17,..` (list not exhaustive)
 * Kind of runtime information - Based on the process name or ELF headers, determine the kind of runtime that is running:
   * __`Kind`__ - Identifier of the kind of runtime
-    * Derived value (set by the container scanner)
-    * Optional (if detected by the scanner)
+    * Derived value (set by the insights-operator-runtime component)
+    * Optional (if detected by the insights-operator-runtime component)
     * Value is a hash of the detected runtime kind: `Java, Golang, Node.js, GraalVM` (exhaustive list based on the capabilities of the container scanner)
   * __`KindVersion`__ - Version of the kind of runtime.
     * Raw value (depending on the value of runtime-kind, the version is read from different files in the container)
@@ -163,15 +163,15 @@ The additional data are:
     * Value is a hash of the detected implementers: `Red Hat, inc., Oracle Corporation, Eclipse Adoptium` (list not exhaustive)
 * Runtime Information - The container scanner can selectively identify runtime libraries/frameworks that run in the containers. They are represented with the `RuntimeComponent` type that has the fields:
   * __`Name`__ - Name of the runtime used to run the application in the container
-    * Derived value (set by the container scanner)
+    * Derived value (set by the insights-operator-runtime component)
     * Optional - based on the capabilities of the container scanner to detect such runtimes
-    * Value is a hash of the detected runtimes `Quarkus, Spring Boot, Apache Tomcat, WildFly, JBoss EAP, RH-SSO, Kafka <x.y>, PostgreSQL` (exhaustive list based on the capabilities of the container scanner, might be enhanced with additional development)
+    * Value is a hash of the detected runtimes `Quarkus, Spring Boot, Apache Tomcat, WildFly, JBoss EAP` (list based on the capabilities of the container scanner, might be enhanced with additional development)
   * __`Version`__ - The version of the runtime used to run the application
     * Raw values (read from files in the containers)
-    * Optional - based on the capabilities of the container scanner to detect the runtime and the availability of its version from files in the container
+    * Optional - based on the capabilities of the insights-operator-runtime component to detect the runtime and the availability of its version from files in the container
     * Value is a hash of the detected runtime version: `2.10.3.Final, 7.4.7.GA, 2.7.1, 3.6.0.redhat-00005,...` (list not exhaustive)
 
-It is not planned to add more fields to the `workloadRuntimeInfoContainer` type. However, the container scanner can be enhanced to detect more runtimes without impacting the integration in the Insights Operator.
+It is not planned to add more fields to the `workloadRuntimeInfoContainer` type. However, the insights-operator-runtime component can be enhanced to detect more runtimes without impacting the integration in the Insights Operator.
 
 ##### Examples
 
@@ -191,7 +191,7 @@ It is not planned to add more fields to the `workloadRuntimeInfoContainer` type.
 }
 ```
 
-As the values are derived by the container scanner or correspond to software versions, it is possible to create a dictionary of the hashes and retrieve the unobfuscated values. The example above corresponds to:
+As the values are derived by the insights-operator-runtime component or correspond to software versions, it is possible to create a dictionary of the hashes and retrieve the unobfuscated values. The example above corresponds to:
 
 ```json
 "runtimeInfo": {
@@ -218,25 +218,21 @@ The Operator iterates over pods in the cluster (up to a limit of 8000) and, for 
 When the operator starts gathering workload information, it would first gather runtime information for all the containers running on the cluster's worker nodes and then
 populate the existing gathered info with these additional runtime information.
 
-![container scannner workflow](./container-scanner-diagram-1.png "Container Scanner Worklow")
+![insights-operator-runtime workflow](./insights-operator-runtime-1.png "Insights Operator Runtime Worklow")
 
 This is not a user-facing feature. It is achieved within the OpenShift Insights Operator gathering workflow.
 The user is able to examine the gathered data by unarchiving the archive generated by the operator.
-The DaemonSet for the container scanner is deployed on-demand when the operator gathers workload data and is not accessible outside of the `openshift-insights` namespace.
 
-From the operator perspective, the Container Scanner is a black box, and its requirements are:
+The DaemonSet for the insights-operator-runtime is deployed when the Insights Operator is installed in the cluster and is not accessible outside of the `openshift-insights` namespace.
 
-* Create the container scanner `DaemonSet` when gathering workload is starting
-  * The DaemonSet pods are doing nothing when they start. The operator must wait until it is ready and if that takes too long, gather workload without scanning the containers. In that case, an error will be reported by the operator in the archive’s gathers.json file in the `"workloads/workload_info"` section.
-  * The container scanner image must be present in the cluster at installation. The existing tolerations of the Insights Operator should be sufficient to cover the container scanner execution..
-* Determine the Pod name of each container-scanner’s Pod (as the container scanner is deployed as a DaemonSet, there is a single pod instance on each worker node) and map it to its worker node.
-  * There is no service exposing the Container Scanner and its pods are accessed directly.
-* When the operator starts gathering workload information, execute the  `/scan-containers` executable on each container-scanner pod. The executable will return a JSON payload in the standard output that represents a tree of `namespace/pod-name/container-id/runtime-info`.
-* Delete the container scanner when all containers have been scanned.
-  * If the DaemonSet can not be properly deleted in a timely fashion, an error will be reported by the operator and its resources pruned.
+From the operator perspective, the insights-operator-runtime is a black box, and its requirements are:
+
+* Determine the Pod name of each insights-operator-runtime’s Pod (as the insights-operator-runtime is deployed as a DaemonSet, there is a single pod instance on each worker node) and map it to its worker node.
+  * There is no service exposing the insights-operator-runtime and its pods are accessed directly.
+* When the operator starts gathering workload information, execute the  `/scan-containers` executable on each insights-operator-runtime pod. The executable will return a JSON payload in the standard output that represents a tree of `namespace/pod-name/container-id/runtime-info`.
 * As the operator iterates over the containers in the cluster, check if there is a runtime-info entry for the `namespace/pod-name/container-id` and add it to the existing `workloadContainerShape` (after hashing all the values)
 
-The container scanner functionality is provided by an image that must be pullable from the `openshift-insights` namespace and present in the cluster at installation.
+The insights-operator-runtime functionality is provided by an image that must be pullable from the `openshift-insights` namespace and present in the cluster at installation.
 
 #### Variation and form factor considerations [optional]
 
@@ -252,7 +248,7 @@ This proposal does not require any API Extensions to the OpenShift Insights Oper
 
 #### Hypershift [optional]
 
-This proposal only aims to gather data about the Data plane and will not scan any containers running in the Control Plane.
+This proposal only aims to gather data about the Data plane and will not inspect any containers running in the Control Plane.
 
 #### Standalone Clusters
 
@@ -267,10 +263,10 @@ when the Insights Operator gathers workload data that will affect the only worke
 
 #### Container Scanner API
 
-The Insights Operator communicates with the Container Scanner pods deployed by its DaemonSet with a simple executable `/scan-containers`:
+The Insights Operator communicates with the insights-operator-runtime pods deployed by its DaemonSet with a simple executable `/scan-containers`:
 
 * `/scan-containers`
-  * Scan the all the containers running on the worker node. The executable returns a JSON payload with the extracted data organized in a tree of `namespace/pod-name/container-id/runtime-info`:
+  * Inspect the all the containers running on the worker node. The executable returns a JSON payload with the extracted data organized in a tree of `namespace/pod-name/container-id/runtime-info`:
 
 ```json
 {
@@ -308,39 +304,39 @@ The Insights Operator communicates with the Container Scanner pods deployed by i
 }
 ```
 
-#### Container Scanner Implementation
+#### insights-operator-runtime Implementation
 
-Scanning a container is achieved by running on the same worker node that the scanned container and looking at the host process table. The container scanner enters the container’s process namespaces to extract meaningful information about the runtime stack.
+Inspecting a container is achieved by running on the same worker node that the inspected container and looking at the host process table. The insights-operator-runtime enters the container’s process namespaces to extract meaningful information about the runtime stack.
 
 The extraction of data from the running container is achieved by executing “fingerprint” executables in the process `mnt` namespace to find the relevant information by reading specific files (e.g. the `Os` and `OsVersion` values are read from the `/etc/os-release` file if it is present). These fingerprints executables are self-contained executables
 
 This cannot be achieved by a program running in the OpenShift Insights Operator deployment.
-This requires an additional resource for the operator, which is a DaemonSet that would deploy a “container scanner” image on all the cluster worker nodes.
+This requires an additional resource for the operator, which is a DaemonSet that would deploy a “insights-operator-runtime” image on all the cluster worker nodes.
 
-The container scanner image requires high privileges to run (access the worker node’s host table, enter process namespaces, etc.) and needs to be configured with a specific security context constraint.
+The insights-operator-runtime image requires high privileges to run (access the worker node’s host table, enter process namespaces, etc.) and needs to be configured with a specific security context constraint.
 
-![container scannner implementation](./container-scanner-diagram-2.png "Container Scanner Implementation")
+![insights-operator-runtime implementation](./insights-operator-runtime-2.png "Insights-operator-runtimer Implementation")
 
 
-#### Container Scanner Constraints
+#### insights-operator-runtime Constraints
 
-The container scanner is sensitive software that requires high privileges to function.
+The insights-operator-runtime is sensitive software that requires high privileges to function.
 It needs to run as privileged and access the host table of Worker Nodes to read their `/proc` tables and run as root to be able to enter in process namespaces.
 
-A specific `SecurityContextConstraints` should be added to the `openshift-insights` to deploy the container scanner with the required permissions.
+A specific `SecurityContextConstraints` should be added to the `openshift-insights` to deploy the insights-operator-runtime with the required permissions.
 
 In order to minimize any security risks, its code will be audited for security and its image will be as minimal as possible.
 
-The container scanner main program is an executable written in Rust.
+The insights-operator-runtime main program is an executable written in Rust.
 The fingerprint programs are written in Rust (with some written in Go).
 
 This image would contain a set of commands to:
 
 * Find the running containers and their root PID based with the `crictl` tool
-* Scan running containers
+* Inspect running containers
 * Run “fingerprints”, self-contained executables that run in the container’s process namespaces to identify what the container is running.
 
-Due to the self-contained nature of these commands, the container scanner is built from scratch (and not from an existing base image).
+Due to the self-contained nature of these commands, the insights-operator-runtime is built from `scratch` (and not from an existing base image).
 
 ### Risks and Mitigations
 
@@ -350,11 +346,11 @@ Due to the self-contained nature of these commands, the container scanner is bui
 
 Introspecting the runtime environment of an arbitrary running container requires certain root-like system capabilities. First, the ability to introspect the host process table (`/proc` on a root pid namespace) is necessary to detect key processes running in all containers. Second, the ability to switch to an arbitrary mount namespace hosting the inspected container’s overlay filesystem is required to be able to examine and identify file contents within the container.  Third, read & write access to the container runtime socket (`/var/run/crio.sock`) is needed to portably correlate container metadata with a discovered process. Finally, for safety reasons described below, the ability to switch to an arbitrary user is required to drop privileges yet retain the necessary permission to analyze file contents.
 
-Any code running under such a high level of privilege is an attractive target for privilege escalation, since it can be leveraged to gain complete access to the node’s underlying operating system, and all hosted data. It is therefore essential to minimize the potential attack surface area and harden all essential code of the container scanner.
+Any code running under such a high level of privilege is an attractive target for privilege escalation, since it can be leveraged to gain complete access to the node’s underlying operating system, and all hosted data. It is therefore essential to minimize the potential attack surface area and harden all essential code of the insights-operator-runtime component.
 
 ##### Reducing Attack Surface Area through Modular Process Design
 
-Splitting the scanning logic into multiple plugins/modules not only allows for extensibility but also provides for the ability to partition critical privilege requiring code from code which requires only point in time access to a specific container. Following this approach, privileged actions can be limited to a thin coordinator process, with the bulk of logic executed as a forked downgraded process limited to the same access afforded the inspected container target. Additionally, limiting the lifespan of the downgraded logic’s process to a per-container execution basis mitigates potential attacks where a rogue container corrupts the scanning logic to modify or gain access to a second victim container. 
+Splitting the inspection logic into multiple plugins/modules not only allows for extensibility but also provides for the ability to partition critical privilege requiring code from code which requires only point in time access to a specific container. Following this approach, privileged actions can be limited to a thin coordinator process, with the bulk of logic executed as a forked downgraded process limited to the same access afforded the inspected container target. Additionally, limiting the lifespan of the downgraded logic’s process to a per-container execution basis mitigates potential attacks where a rogue container corrupts the inspection logic to modify or gain access to a second victim container. 
 
 ##### Thin Privileged Coordinator Process
 
@@ -368,7 +364,7 @@ As such, three key key rules should be followed in the design and implementation
 
 ##### Defensive Input and Memory Guarding
 
-While keeping the bulk of analysis logic out of the coordinator process reduces risk, there is still the potential for a deprivileged scanner to influence the coordinator as a corrupted relay through its required communication channel. As an example, a corrupted container could lead a scanner process to write a carefully crafted payload which triggers a buffer overflow and potentially arbitrary code execution in the coordinator. Therefore the coordinator process should take particular care in the handling of all input, assuming potentially hostile data. Additionally, the coordinator process should take advantage of technologies and techniques that mitigate memory corruption defects. As an example, Rust’s memory access model provides strong guarantees of memory safety, and limits state mutability to the smaller set of intended write code paths. Usage of a defensive language like Rust over a traditional memory unsafe language like C would mitigate risk further by providing a second line of defense, as well as preventing a number of common issues frequently leveraged in exploits. 
+While keeping the bulk of analysis logic out of the coordinator process reduces risk, there is still the potential for a deprivileged insights-operator-runtime component to influence the coordinator as a corrupted relay through its required communication channel. As an example, a corrupted container could lead a insights-operator-runtime process to write a carefully crafted payload which triggers a buffer overflow and potentially arbitrary code execution in the coordinator. Therefore the coordinator process should take particular care in the handling of all input, assuming potentially hostile data. Additionally, the coordinator process should take advantage of technologies and techniques that mitigate memory corruption defects. As an example, Rust’s memory access model provides strong guarantees of memory safety, and limits state mutability to the smaller set of intended write code paths. Usage of a defensive language like Rust over a traditional memory unsafe language like C would mitigate risk further by providing a second line of defense, as well as preventing a number of common issues frequently leveraged in exploits. 
 
 #### Privacy Risk & Mitigation
 
@@ -384,25 +380,25 @@ To make sure customer confidentiality is preserved, any new collected data is ha
 
 Since a fingerprint executable runs under a downgraded privilege model, with a limited process life-span, significantly more freedom is afforded to it, but some care is still necessary. Notably, a fingerprint executable can have a larger dependency set beyond the core language SDK to meet its needs. Additionally, fingerprint executables can leverage languages with a greater emphasis on productivity (e.g. Golang), provided the implementations still utilize input and output hardening techniques, and do not load potentially rogue code in the container. Each fingerprint implementation may even have a different language runtime than its peers. The following rules should be followed:
 
-1. __Scanning code must be statically compiled and not rely on dynamic library loading.__ This is essentially already required to achieve stable execution on arbitrary container layers, including those with differing libc implementations, or even scratch containers with no additional libraries
+1. __Inspecting code must be statically compiled and not rely on dynamic library loading.__ This is essentially already required to achieve stable execution on arbitrary container layers, including those with differing libc implementations, or even scratch containers with no additional libraries
 2. __All analysis I/O operations should be limit-bound.__ A container either through error or design may have files of arbitrary size, or files in a corrupt state. Any potentially unbounded operation (e.g. reading to the end of a file or following a reference data structure to its arbitrary end) is prohibited.
-3. __Memory and CPU usage should not be input derived.__ In addition to achieving system stability and performance goals, ensuring the overhead of a scanning process does not increase significantly relative to input data is critical in preventing potential Denial-of-Service attacks relying on a specially crafted container filesystem.  
+3. __Memory and CPU usage should not be input derived.__ In addition to achieving system stability and performance goals, ensuring the overhead of a inspecting process does not increase significantly relative to input data is critical in preventing potential Denial-of-Service attacks relying on a specially crafted container filesystem.  
 
 ##### No Impact on Workloads
 
-Scanning containers must not disrupt the containers that are scanned and have an impact on their quality of service.
-The container scanner is running with its own memory and CPU requirements and does not consume resources from the scanned container.
+Inspecting containers must not disrupt the containers that are inspected and have an impact on their quality of service.
+The insights-operator-runtime is running with its own memory and CPU requirements and does not consume resources from the inspected container.
 
 ##### Measurable Impact on Gathering Time & Payload
 
 The workload data is gathered every 12 hours by the Insights Operator.
 Gathering the runtime data will increase the overall executing time of the workload gatherer. The increase must remain reasonable.
 
-In the existing initial implementation of the container scanner, it takes __~200 ms to scan a single container__.
-As the scanning is done in parallel on each worker node, its overall duration is impacted by
+In the existing initial implementation of the insights-operator-runtime, it takes __~200 ms to scan a single container__.
+As the inspection is done in parallel on each worker node, its overall duration is impacted by
 the density of the cluster (number of containers per worker node).
 On a fresh OpenShift cluster (with no user workload and only OpenShift own containers), it takes ~15 seconds to scan all containers.
-For a 8-worker node with 800 containers, assuming the containers are spread evenly, it would take around 20 seconds to scan the whole cluster. In practice, it will be a bit longer and capped by the scanning of the worker node with the most containers.
+For a 8-worker node with 800 containers, assuming the containers are spread evenly, it would take around 20 seconds to scan the whole cluster. In practice, it will be a bit longer and capped by the inspection of the worker node with the most containers.
 
 The additional data in the `workloadRuntimeInfoContainer` will increase the size of the insights payload that is archived and sent to Red Hat backends.
 
@@ -421,32 +417,32 @@ Exposing these data to the user with a clean user interface (eg within console.r
 
 If implemented, Red Hat will document the addition of this new collection. We  introduce the risk that some number of customers who would have or are sending telemetry data via the Insights operator will choose to turn it off because they are uncomfortable sharing this additional data. 
 
-The container scanner needs to be continually updated to detect new workloads  that Red Hat wants information about. 
-This can be done iteratively and will require an updated reference to the container scanner image in the Insights Operator to take into account the additional detections.
+The insights-operator-runtime needs to be continually updated to detect new workloads  that Red Hat wants information about. 
+This can be done iteratively and will require an updated reference to the insights-operator-runtime image in the Insights Operator to take into account the additional detections.
 
-As the container scanner is sanitizing the data extracted from the containers, it is not able to retrieve "raw" data (such as processes' name and command line) which limits its ability to detect emerging trends. The container scanner must provide fingerprints executables for workloads that Red Hat wants to monitor.
+As the insights-operator-runtime is sanitizing the data extracted from the containers, it is not able to retrieve "raw" data (such as processes' name and command line) which limits its ability to detect emerging trends. The insights-operator-runtime must provide fingerprints executables for workloads that Red Hat wants to monitor.
 
 ## Design Details
 
 ### Open Questions [optional]
 
-#### Container Scanner Image Availability
+#### insights-operator-runtime Image Availability
 
-The Insights Operator must be able to deploy the container scanner from an image that is available by default in the cluster image registry.
+The Insights Operator must be able to deploy the insights-operator-runtime from an image that is available by default in the cluster image registry.
 
 
 ## Test Plan
 
-### Container Scanner Test Plan
+### insights-operator-runtime Test Plan
 
-The container scanner can be tested in isolation to verify its capability to scan containers and collect the expected runtime info.
+The insights-operator-runtime can be tested in isolation to verify its capability to scan containers and collect the expected runtime info.
 
-Testing the container scanner can be done outside of the Insights Operator test suite.
-It requires integration tests with applications based on the detectable runtime stacks. A end-to-end (e2e) test suite can be developed to verify the capabilities of the container scanner.
+Testing the insights-operator-runtime can be done outside of the Insights Operator test suite.
+It requires integration tests with applications based on the detectable runtime stacks. A end-to-end (e2e) test suite can be developed to verify the capabilities of the insights-operator-runtime.
 
 ### Insights Operator Test Plan
 
-The integration tests for the Insights Operator will verify that it is able to properly deploy the container scanner as a `DaemonSet` and have some smoke tests to validate that the additional runtime info can effectively be collected.
+The integration tests for the Insights Operator will verify that it is able to properly deploy the insights-operator-runtime as a `DaemonSet` and have some smoke tests to validate that the additional runtime info can effectively be collected.
 
 ## Graduation Criteria
 
@@ -476,8 +472,8 @@ Not relevant for this proposal
 
 ## Upgrade / Downgrade Strategy
 
-Upgrades/downgrades of the container scanner will be handled by updating its image URL in the Insights Operator configuration.
-The release cycle of the container scanner is bound to the Insight Operator release cycle.
+Upgrades/downgrades of the insights-operator-runtime will be handled by updating its image URL in the Insights Operator configuration.
+The release cycle of the insights-operator-runtime is bound to the Insight Operator release cycle.
 
 This proposal does not bring additional change to the upgrade/downgrade of the OpenShift Insights Operator.
 
@@ -487,12 +483,12 @@ This proposal does not impact the version skew strategy of the Insights Operator
 
 ## Operational Aspects of API Extensions
 
-The container scanner runs with its own cgroups and does not impact the scanned containers.
+The insights-operator-runtime runs with its own cgroups and does not impact the inspected containers.
 
-However, it will consume a certain amount of CPU and memory on each worker node while it is scanning.
+However, it will consume a certain amount of CPU and memory on each worker node while it is inspecting.
 These consumptions must be bounded to avoid disrupting the user workload.
 
-Scanning containers will also increase the time to collect insights by the operator. The workload gatherer is performed every 12 hours and its execution will depend on the number of containers that are scanned.
+Inspecting containers will also increase the time to collect insights by the operator. The workload gatherer is performed every 12 hours and its execution will depend on the number of containers that are inspected.
 
 ---
 **TBD** Provide measures of resource consumption (memory and CPU)
@@ -501,14 +497,13 @@ Scanning containers will also increase the time to collect insights by the opera
 
 ## Support Procedures
 
-The failure of scanning containers must not impact the ability of the Insights operator to finish collecting workload data.
+The failure of inspecting containers must not impact the ability of the Insights operator to finish collecting workload data.
 
-Failures to deploy the container-scanner will be reported as an error in the `"workloads/workload_info"` stanza of the `insights-operator/gathers.json` file inside the archive generated by the operator.
+Failures to inspect running containers will be reported as an error in the `"workloads/workload_info"` stanza of the `insights-operator/gathers.json` file inside the archive generated by the operator.
 
 ## Implementation History
 
-Major milestones in the life cycle of a proposal should be tracked in `Implementation
-History`.
+Major milestones in the life cycle of a proposal should be tracked in `Implementation History`.
 
 ## Alternatives
 
@@ -523,15 +518,15 @@ The products are mentioned in the section not as alternatives but to give a comp
 
 ## Infrastructure Needed
 
-A new Git repository is needed to contain the code of the container scanner image.
+A new Git repository is needed to contain the code of the insights-operator-runtime image.
 
 As this enhancement is integrated into the OpenShift Insights Operator, this code repository should go in the same organization and live in the  https://github.com/openshift/insights-operator-runtime (that does not exist at the moment).
 
 The code from this repository will be delivered as a container image pushed to `quay.io/openshift/origin-insights-operator-runtime:latest` (that does not exist at the moment).
 This image will be made available by default in cluster installations by being listed as an [image reference](https://github.com/openshift/insights-operator/blob/master/manifests/image-references) on the OpenShift Insights operator.
 
-Continuous Integration for the container scanner needs to be in place to test and qualify it before it is updated in the Insights Operator.
+Continuous Integration for the insights-operator-runtime needs to be in place to test and qualify it before it is updated in the Insights Operator.
 
-The maintenance and development of the container scanner is tied and integrated into the OpenShift Insights Operator releases.
+The maintenance and development of the insights-operator-runtime is tied and integrated into the OpenShift Insights Operator releases.
 
 Issue management must comply to the OpenShift Container Platform issue tracker. It can be under the [existing component for the Insights Operator](https://issues.redhat.com/issues/?jql=project%20%3D%20OCPBUGS%20AND%20component%20%3D%20%22Insights%20Operator%22) as it is ultimately the component that delivers its capabilities.
