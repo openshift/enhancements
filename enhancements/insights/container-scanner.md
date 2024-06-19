@@ -45,9 +45,14 @@ It proposes to do so while keeping the existing constraints and requirements tha
 
 ## Motivation
 
-The bulk of the workloads on OpenShift reported by the Insights operator do not use a RHEL or UBI container. Workloads that are built on a UBI container and add an application layer appear to Red Hat tools as a custom UBI container, but we don’t know what the customization is. 
+Currently, the Insights operator tries to identify what workload is used on OpenShift by looking for known fingerprinting in layers of containers, but there are a lot of issues with this approach where we can only identify base-level containers.
+We do, for example, not know if a python container is using AI libraries.
+Another issue is that we can only identify containers using known base containers (like OpenJDK), but we do not know what type of workload is more popular (Spring Boot, Quarkus, WildFly, EAP, etc.).
 
- Red Hat’s current Insights capability is unable to identify the workload in all of  those containers in a manner that scales. Gathering this data will enable better data driven decisions by the Hybrid Platform Business Unit and every other business unit that’s working to drive OpenShift workload. 
+The Insights operator can also not tell if a container is using a non-Red Hat provided base containers like Ubuntu or Debian. Knowing this data means that BU and product leadership can use this data to prioritise future work and realign investment.
+
+The proof of concept for this has been demonstrated to Red Hat leeadership, who agree that this is important data for us to know in order 
+to help shape the future of our product offerings.
 
 ### User Stories
 
