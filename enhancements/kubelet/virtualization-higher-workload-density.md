@@ -31,17 +31,24 @@ needs a two-phased approach is considered.
 ## Motivation
 
 Today, OpenShift Virtualization is reserving memory (`requests.memory`)
-according to the needs of the virtual machine itself. However, usually
-an application within the virtual machine does not utilize _all_ the
-memory _all_ the time. Instead, only _sometimes_ there are memory spikes
-within the virtual machine. Extrapolating this behavior to all virtual
-machines on a given node leads to the observation that _most often_ there
-is no memory pressure and a low memory utilization.
-Underutilized hardware resources are a cost factor to end-users.
+according to the needs of the virtual machine and it's infrastructure
+(the VM related pod). However, usually an application within the virtual
+machine does not utilize _all_ the memory _all_ the time. Instead,
+only _sometimes_ there are memory spikes within the virtual machine.
+And usually this is also true for the infrastucture part (the pod) of a VM:
+Not all the memory is used all the time. Because of this assumption, in
+the following we are not differentiating between the guest of a VM and the
+infrastructure of a VM, instead we are just speaking colectively of a VM.
 
-This proposal is about increasing the workload - virtual machine - density
-per node, in order to increase the memory utilization, in order to
-reduce the cost per virtual machine.
+Now - Extrapolating this behavior from one to all virtual machines on a
+given node leads to the observation that _on average_ there is no memory
+ressure and often a rather low memory utilization - despite the fact that
+much memory has been reserved.
+Reserved but underutilized hardware resources - like memory in this case -
+are a cost factor to cluster owners.
+
+This proposal is about increasing the virtual machine density and thus
+memory utilization per node, in order to reduce the cost per virtual machine.
 
 > [!NOTE]
 > CPU resources are already over-committed in OpenShift today, thus the
