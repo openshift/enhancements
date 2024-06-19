@@ -232,6 +232,8 @@ spec:
       resources:   ["pods"]
   validations:
     - expression: >
+        (request.userInfo.groups.exists(g, g == 'system:nodes') &&
+        "kubernetes.io/config.mirror" in object.metadata.annotations) ||
         object.spec.tolerations.all(toleration,
           toleration.effect != 'NoExecute' ||
           authorizer.subjectAccessReview(object.metadata.namespace, object.spec.serviceAccountName)
@@ -245,6 +247,8 @@ spec:
         "Pod toleration for 'NoExecute' is not authorized for service account '" + object.spec.serviceAccountName + "' in namespace '" + object.metadata.namespace + "'."
 
 ```
+
+- Note that as part of the expression we also exclude static/mirror pods submitted by kubelet (group 'system:node'). If the static pod manifest is on the node, the pod will run regardless, so there is no point in validating the permissions there, but we need to make sure that is the case by checking the group, and accept this exception.
 
 3. Validating Admission Policy Binding:
 
