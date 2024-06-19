@@ -24,21 +24,21 @@ superseded-by: N/A
 
 ## Summary
 
-The image-based installer is an installation method for on-premise single-node
-OpenShift (SNO) clusters, that will use a bootable, installer ISO running on
-the hosts that are to become SNO clusters.
-and a configuration image. The user will generate each image using a
-command-line tool. The first image will contain components (such as the
-[lifecycle-agent](https://github.com/openshift-kni/lifecycle-agent) operator)
+The Image-based Installer is an installation method for on-premise single-node
+OpenShift (SNO) clusters, that will use a bootable, installer ISO and a
+configuration ISO running on the hosts that are to become SNO clusters.
+The user will generate each ISO using a command-line tool. The first ISO will
+contain components (such as the [lifecycle-agent](https://github.com/openshift-kni/lifecycle-agent) operator)
 and a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md).
 The seed image is an [OCI image](https://github.com/opencontainers/image-spec/blob/main/spec.md)
-generated from a SNO system installed with the target OpenShift version and is installed onto a target SNO
+generated from a SNO system provisioned with the target OpenShift version and is installed onto a target SNO
 as a new [ostree stateroot](https://ostreedev.github.io/ostree/deployment/#stateroot-aka-osname-group-of-deployments-that-share-var).
-The latter includes, among other files, the `/var`, `/etc` (with specific exclusions) and `/ostree/repo`
-directories, which contain the target OpenShift version and most of its configuration, amounting approximately
-to just over 1GB in size. The second image will contain the site specific configuration data (e.g. the cluster
-name, domain and crypto objects), which need to be set up per cluster and are derived mainly from the
-OpenShift installer [install config](https://github.com/openshift/installer/tree/release-4.15/pkg/asset/installconfig).
+The latter includes, among other files, the `/var`, `/etc` (with specific
+exclusions) and `/ostree/repo` directories, which contain the target OpenShift
+version and most of its configuration, amounting approximately to just over 1GB
+in size. The second ISO will contain the site specific configuration data (e.g.
+the cluster name, domain and crypto objects), which need to be set up per cluster
+and are derived mainly from the OpenShift installer [install config](https://github.com/openshift/installer/tree/release-4.15/pkg/asset/installconfig).
 
 ## Motivation
 
@@ -49,7 +49,7 @@ infrastructure and processes drive the need to improve OpenShift provisioning
 speed at the Far Edge site and the simplicity of preparation and deployment of
 Far Edge clusters, at scale.
 
-The image-based installer provides users with such speed and simplicity, but it
+The Image-based Installer provides users with such speed and simplicity, but it
 currently needs the [multicluster engine](https://docs.openshift.com/container-platform/4.15/architecture/mce-overview-ocp.html)
 and/or the [Image-based Install operator](https://github.com/openshift/image-based-install-operator)
 to generate the required installation and configuration artifacts. We would like
@@ -88,7 +88,7 @@ configuration ISO images, one per cluster to be installed.
 
 The command-line tool will download the base RHCOS ISO, create an [Ignition](https://coreos.github.io/ignition/)
 file with generic configuration data (i.e. configuration that is going to be
-included in all clusters to be installed with that ISO) and produce an
+included in all clusters to be installed with that ISO) and generate an
 image-based installation ISO. The Ignition file will configure the live ISO such
 that once the machine is booted with the latter, it will install RHCOS to the
 installation disk, mount the installation disk, restore the single-node
@@ -96,27 +96,32 @@ OpenShift from the [seed image](https://github.com/openshift-kni/lifecycle-agent
 and optionally precache all release container images under the
 `/var/lib/containers` directory.
 
-The installation ISO approach is very similar to what is already implemented by the
-functionality of the [Agent-based Installer](/enhancements/agent-installer-agent-based-installer.md))
-Although the similarity to Agent-based Installer in regards to the installer ISO image the image-based installer
-proposed here differs from the OpenShift agent-based installer in several key aspects:
-While the agent-based installer may offer flexibility and versatility in certain scenarios, 
-it may not meet the stringent time constraints requirements of far-edge deployments
-in the telecommunications industry due to the inherently long installation process, 
-exacerbated by low bandwidth and high packet latency.
-Additionally, with the Agent-based Installer all cluster configuration needs to be provided upfront
-during the generation of the ISO image.
+The installation ISO approach is very similar to what is already implemented by
+the functionality of the [Agent-based Installer](/enhancements/agent-installer-agent-based-installer.md))
+Although the Image-based Installer proposed here differs from the OpenShift
+Agent-based Installer in several key aspects:
 
-The image-based installer offers key advantages, where fast and reliable deployment at the edge is crucial.
-By generating an ISO images containing all necessary components, the image-based installer significantly accelerates
-deployment times. Moreover, unlike the agent-based installer, the image-based approach allows for cluster configuration
-to be supplied upon deployment at the edge, rather than during the initial ISO generation process. 
-This flexibility enables operators to use a single generic image for installing multiple clusters, streamlining the
-deployment process and reducing the need for multiple customized ISO images.
+- while the Agent-based Installer may offer flexibility and versatility in certain scenarios,
+  it may not meet the stringent time constraints and requirements of far-edge deployments
+  in the telecommunications industry due to the inherently long installation process, 
+  exacerbated by low bandwidth and high packet latency.
+- with the Agent-based Installer all cluster configuration needs to be provided upfront
+  during the generation of the ISO image, while with the Image-based Installer the cluster 
+  configuration is provided in an additional step.
 
-The OpenShift installer will support generating a configuration ISO with all the site specific configuration data for
-the cluster to be installed provided as input.
-The Config Image Contents:
+The Image-based Installer offers key advantages, where fast and reliable
+deployment at the edge is crucial. By generating ISO images containing all
+the necessary components, the Image-based Installer significantly accelerates
+deployment times. Moreover, unlike the Agent-based Installer, the image-based
+approach allows for cluster configuration to be supplied upon deployment at the
+edge, rather than during the initial ISO generation process. This flexibility
+enables operators to use a single generic image for installing multiple
+clusters, streamlining the deployment process and reducing the need for multiple
+customized ISO images.
+
+The OpenShift installer will support generating a configuration ISO with all the
+site specific configuration data for the cluster to be installed provided as
+input. The configuration ISO contents are the following:
 * ClusterInfo (cluster name, base domain, hostname, nodeIP)
 * SSH authorized_keys
 * Pull Secret
@@ -124,15 +129,17 @@ The Config Image Contents:
 * Generated keys and certs (compatible the generated admin kubeconfig)
 * Static networking config
 
-The site specific configuration data will be generated according to information provided
-in the install-config.yaml and the manifests provided in the installation directory as input.
-To complete the installation at the edge site:
-The cluster configuration for the edge location can be delivered by copying the config iso content onto the node
-and placing it under /opt/openshift/cluster-configuration/
-The cluster configuration can also b delivered using an attached ISO, a systemd service running on the host
-pre-installed Image-based Installer will mount that ISO (identified by known label) and copy the cluster configuration
-to /opt/openshift/cluster-configuration/
-The cluster configuration data on the disk will be used to configure the cluster and allow OCP to start successfully.
+The site specific configuration data will be generated according to information
+provided in the `install-config.yaml` and the manifests provided in the
+installation directory as input. To complete the installation at the edge site:
+- the cluster configuration for the edge location can be delivered by copying
+  the config ISO content onto the node and placing it under `/opt/openshift/cluster-configuration/`.
+- the cluster configuration can also be delivered using an attached ISO, a
+  systemd service running on the host pre-installed Image-based Installer will
+  mount that ISO (identified by a known label) and copy the cluster configuration
+  to `/opt/openshift/cluster-configuration/`.
+- the cluster configuration data on the disk will be used to configure the
+  cluster and allow OCP to start successfully.
 
 ### Workflow Description
 
@@ -154,7 +161,7 @@ N/A
 
 #### Single-node Deployments or MicroShift
 
-The image-based installer targets single-node OpenShift deployments.
+The Image-based Installer targets single-node OpenShift deployments.
 
 ### Implementation Details/Notes/Constraints
 
@@ -164,14 +171,14 @@ of compatibility. Building a single ISO to boot multiple hosts makes it
 considerably easier for the user to manage. The additional site configuration
 ISO is necessary for configuring each cluster securely and independently.
 
-The user, before running the image-based installer, must generate a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
+The user, before running the Image-based Installer, must generate a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
 via the [Lifecycle Agent SeedGenerator Custom Resouce (CR)](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md).
 The prerequisites to generating a seed image are the following:
 
-- An already provisioned single-node OpenShift cluster (seed SNO).
+- an already provisioned single-node OpenShift cluster (seed SNO).
    - The CPU topology of that host must align with the target host(s), i.e. they
      should have the same number of cores.
-- The [Lifecycle Agent](https://github.com/openshift-kni/lifecycle-agent/tree/main)
+- the [Lifecycle Agent](https://github.com/openshift-kni/lifecycle-agent/tree/main)
   operator must be installed on the seed SNO.
 
 ### Risks and Mitigations
@@ -184,29 +191,31 @@ N/A
 
 ## Open Questions [optional]
 
-- Should the command-line tool that generates the installer ISO be a subcommand of the OpenShift installer, or a
-  standalone binary?
+- Should the command-line tool that generates the installation ISO be a subcommand
+  of the OpenShift installer, or a standalone binary?
 
   Having the functionality provided by the command-line tool in the OpenShift
   installer would be a natural addition to the latter, as the former refers to
   the provisioning of single-node OpenShift clusters and generates the
-  required installation artifacts in the same way as the [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md).
+  required installation artifacts in the same way as the
+  [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md).
 
-- Should the command-line tool that generates the configuration ISO be a subcommand of the OpenShift installer, or a
-  standalone binary?
+- Should the command-line tool that generates the configuration ISO be a subcommand
+  of the OpenShift installer, or a standalone binary?
 
   Having the functionality provided by the command-line tool in the OpenShift
   installer would be a natural addition to the latter, as the former refers to
   the provisioning of single-node OpenShift clusters and consumes the OpenShift
   installer `install-config.yaml`. In addition, it generates the required
-  installation artifacts in the same way as the [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md).
+  installation artifacts in the same way as the
+  [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md).
 
 ## Test Plan
 
-The image-based installer will be covered by end-to-end testing using virtual
+The Image-based Installer will be covered by end-to-end testing using virtual
 machines (in a baremetal configuration), automated by some variation on the
 metal platform [dev-scripts](https://github.com/openshift-metal3/dev-scripts/#readme).
-This is similar to the testing of the agent-based installer, the baremetal IPI
+This is similar to the testing of the Agent-based Installer, the baremetal IPI
 and assisted installation flows.
 
 ## Graduation Criteria
