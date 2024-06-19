@@ -20,7 +20,7 @@ tracking-link:
   - https://issues.redhat.com/browse/OCPEDGE-1147
 ---
 
-# Subprovisioner CSI Driver Integration into LVMS
+# subprovisioner-csi-driver-integration-into-lvms
 
 [Subprovisioner](https://gitlab.com/subprovisioner/subprovisioner) 
 is a CSI plugin for Kubernetes that enables you to provision Block volumes 
