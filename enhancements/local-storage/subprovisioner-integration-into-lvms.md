@@ -69,6 +69,38 @@ The Subprovisioner CSI driver is a great solution for shared storage provisionin
 - Implementing a new CSI driver from scratch.
 - Integrating the Subprovisioner CSI driver into TopoLVM.
 
+### User Stories
+
+As a Data Center OCP Admin:
+- I want to seamlessly add my existing SAN infrastructure to OCP nodes to host VM workloads, enabling better (live) migration of VMs from vSphere to OCP Virt and from one OCP node to another.
+- I want to provision shared block storage across multiple nodes, ensuring high availability and resiliency for my virtualization workloads.
+- I want to manage both local and shared storage within the same OpenShift cluster to optimize resource utilization and simplify storage management.
+
+As a Developer:
+- I want to deploy applications that require shared storage across multiple pods and nodes, ensuring data consistency and high availability.
+- I want to use a single, unified API to provision and manage both local and shared storage classes, reducing complexity in my deployment scripts.
+- I want to benefit from the unique capabilities of Subprovisioner for shared storage without having to manage separate storage solutions, both TopoLVM and Subprovisioner use lvm2 under the hood.
+
+As a Storage Administrator:
+- I want to easily configure and manage volume groups using the new deviceClass policy field in the LVMCluster CRD, ensuring that my storage setup is consistent and efficient.
+- I want to monitor the health and status of my volume groups, receiving alerts and logs for any issues that arise with the shared storage.
+- I want to leverage existing expensive SAN infrastructure to provide shared storage, maximizing the return on investment for our hardware.
+
+As an IT Operations Engineer:
+- I want to ensure that upgrades and downgrades of the LVMS operator and Subprovisioner CSI driver are seamless and do not cause downtime for my existing workloads.
+- I want to follow clear guidelines and best practices for managing version skew between LVMS and Subprovisioner, ensuring compatibility and stability.
+- I want detailed documentation and troubleshooting guides to help resolve any issues that arise during the deployment and operation of shared storage.
+
+As a Quality Assurance Engineer:
+- I want to execute comprehensive integration and end-to-end tests that validate the functionality of shared storage provisioning with Subprovisioner.
+- I want to conduct performance and stress tests to ensure that the solution can handle high load and failure conditions without degradation of service.
+- I want to gather and analyze feedback from early adopters to improve the stability and performance of the integrated solution before general availability.
+
+As a Product Manager:
+- I want to offer a unique value proposition with LVMS by integrating Subprovisioner, enabling OCP customers to use shared block storage seamlessly.
+- I want to ensure that the solution meets the needs of our enterprise customers, providing high availability, resiliency, and performance for their critical workloads.
+- I want to manage the roadmap and release cycles effectively, ensuring that each phase of the project is delivered on time and meets quality standards.
+
 ### Risks and Mitigations
 - There is a risk of increased maintenance burden by integrating a new CSI driver into LVMS without gaining traction
   - tested separately in the Subprovisioner project as pure CSI Driver similar to TopoLVM and within LVMS with help of QE
@@ -85,8 +117,9 @@ We will use this field as a hook in lvm-operator, our orchestrating operator, to
 Whenever LVMCluster discovers a new deviceClass with the Subprovisioner associated policy, it will create a new CSI driver deployment for Subprovisioner and configure it to use the shared storage deviceClass.
 As such, it will handover the provisioning of shared storage to the Subprovisioner CSI driver. Also internal engineering such as sanlock orchestration will be managed by the driver.
 
+### Workflow Description
 
-### Workflow of Subprovisioner instantiation via LVMCluster
+#### Subprovisioner instantiation via LVMCluster
 
 1. The user is informed of the intended use case of Subprovisioner, and decides to use it for its multi-node capabilities before provisioning Storage
 2. The user configures LVMCluster with non-default values for the Volume Group and the deviceClass policy field
@@ -95,7 +128,9 @@ As such, it will handover the provisioning of shared storage to the Subprovision
 5. The user can now provision shared storage via Subprovisioner on the OpenShift Container Platform cluster.
 6. The user can also provision regular TopoLVM deviceClasses side-by-side with shared storage deviceClasses in the same cluster. Then, TopoLVM gets provisioned side-by-side.
 
-## Design Details for `LVMCluster CR extension`
+### API Extensions
+
+#### Design Details for `LVMCluster CR extension`
 
 API scheme for `LVMCluster` CR:
 
@@ -214,7 +249,9 @@ API scheme for `LVMCluster` CR:
   }
 ```
 
-## Design Details on Volume Group Orchestration and Management via vgmanager
+### Implementation Details/Notes/Constraints
+
+#### Design Details on Volume Group Orchestration and Management via vgmanager
 
 The `vgmanager` component will be responsible for managing volume groups (VGs) and coordinating the orchestration between TopoLVM and Subprovisioner CSI drivers. This includes:
 
@@ -241,7 +278,7 @@ The `vgmanager` component will be responsible for managing volume groups (VGs) a
     will be used for shared lockspace initialization. [A sample implementation can be found here](https://github.com/openshift/lvm-operator/commit/8ba6307c7bcaccc02953e0e2bdad5528636d5e2d)
 
 
-## Design Details for Status Reporting
+#### Design Details for Status Reporting
 
 The status reporting will include:
 
@@ -263,7 +300,33 @@ The status reporting will include:
   - Maintain detailed logs of all events related to VG management and CSI driver operations.
   - Ensure that any significant events (such as failovers, recoveries, and maintenance actions) are logged and reported.
 
-### Test Plan
+
+### Drawbacks
+
+- Increased complexity in managing both node-local and shared storage.
+- Potential for increased maintenance burden with the integration of a new CSI driver.
+- Risks associated with the stability and maturity of the Subprovisioner project.
+- Complex testing matrix and shared volume group use cases can be hard to debug / troubleshoot.
+
+### Topology Considerations
+
+* The primary use case for Subprovisioner is to enable shared storage across multiple nodes. This capability is critical for environments where high availability and data redundancy are required.
+* Ensure that all nodes in the cluster can access the shared storage devices consistently and reliably. This may involve configuring network settings and storage paths appropriately.
+
+#### Hypershift / Hosted Control Planes
+
+N/A
+
+#### Standalone Clusters
+
+LVMS can be installed on standalone clusters, but the shared storage provisioning will only work in a multi-node environment.
+
+#### Single-node Deployments or MicroShift
+
+* While LVMS can be installed on single-node deployments and MicroShift, the shared storage provisioning feature enabled by Subprovisioner is designed for multi-node environments. Single-node setups can still use local storage provisioning through TopoLVM.
+* MicroShift deployments will include the Subprovisioner binaries but will not use shared storage provisioning due to the single-node nature of MicroShift.
+
+## Test Plan
 
 - **Integration Tests**:
   - Update existing LVMS integration tests to include scenarios for shared storage provisioning with Subprovisioner.
@@ -280,7 +343,9 @@ The status reporting will include:
   - Perform stress tests to evaluate system behavior under high load and failure conditions.
   - We will run these tests before any graduation to GA at the minimum.
 
-### Graduation Criteria
+## Graduation Criteria
+
+### Dev Preview -> Tech Preview
 
 - **Developer Preview (Early Evaluation and Feedback)**:
   - Initial implementation with basic functionality for shared and node-local VG provisioning.
@@ -297,13 +362,19 @@ The status reporting will include:
   - Functionality has undergone more complete Red Hat testing for the configurations supported by the underlying product.
   - Functionality is, with rare exceptions, on Red Hat’s product roadmap for a future release.
 
+### Tech Preview -> GA
+
 - **GA**:
   - Proven stability and performance in production-like environments.
   - Positive feedback from initial users.
   - Full documentation, including troubleshooting guides and best practices.
   - Full LVMS Support Lifecycle
 
-### Upgrade / Downgrade Strategy
+### Removing a deprecated feature
+
+N/A
+
+## Upgrade / Downgrade Strategy
 
 - **Upgrade**:
   - Ensure that upgrades are seamless with no downtime for existing workloads. Migrating to a subprovisioner enabled version is a no-break operation
@@ -317,7 +388,7 @@ The status reporting will include:
     The operator should ensure that the shared VGs can be cleaned up manually.
   - Ensure that downgrades do not result in data loss or service interruptions. The operator should ensure that the shared VGs can be cleaned up without data loss on other device classes.
 
-### Version Skew Strategy
+## Version Skew Strategy
 
 - Ensure compatibility between different versions of LVMS and the integrated Subprovisioner CSI driver.
   - Implement version checks and compatibility checks in the `vgmanager` component.
@@ -327,7 +398,30 @@ The status reporting will include:
 - Document supported version combinations and any known issues with version mismatches.
 - Provide clear guidelines on how to manage version skew and perform upgrades in a controlled manner.
 
-### Security Considerations
+## Operational Aspects of API Extensions
+
+The integration of the Subprovisioner CSI driver into LVMS introduces several new API extensions, primarily within the LVMCluster CRD. These extensions include new fields for the deviceClass policy, specifically designed to support shared storage provisioning. The operational aspects of these API extensions are as follows:
+
+* Configuration and Management:
+  * Administrators can configure shared storage by setting the DeviceAccessPolicy field in the DeviceClass section of the LVMCluster CRD to shared.
+  * The API ensures that only valid configurations are accepted, providing clear error messages for any misconfigurations, such as setting a filesystem type for shared device classes.
+
+* Validation and Enforcement:
+  * The operator will enforce constraints on shared storage configurations, such as requiring shared volume groups to use the shared policy and prohibiting thin pool configurations.
+  * The vgmanager component will validate device paths and ensure that they are consistent across all nodes in the cluster.
+
+* Dynamic Provisioning:
+  * When a shared device class is configured, the operator will dynamically create and manage the corresponding Subprovisioner CSI driver deployment, ensuring that the shared storage is properly initialized and synchronized across nodes.
+
+Monitoring and Reporting:
+  * The status of the shared storage, including health and capacity metrics, will be reported through the LVMCluster CRD status fields.
+  * Node-specific information and events related to the shared storage will be logged and made available for troubleshooting and auditing purposes.
+
+## Support Procedures
+
+Regular product support for LVMS will continue to be established through the LVMS team. In addition, Subprovisioner will receive upstream issues through consumption in the LVMS project and will serve as a repackaging customer for the Subprovisioner project.
+
+## Security Considerations
 
 - **Access Control**:
   - Ensure that access to shared storage is controlled and restricted to authorized users. Node-level access control should be enforced similarly to TopoLVM.
@@ -338,7 +432,7 @@ The status reporting will include:
   - Implement a process for CVE scanning and remediation for the Subprovisioner CSI driver.
   - Fixes for CVEs should be handled in a dedicated midstream openshift/subprovisioner for critical CVEs when Red Hat decides to no longer solely own the project. Until then, the fixes will be handled by the Red Hat team and a midstream is optional.
 
-### Implementation Milestones
+## Implementation Milestones
 
 - **Phase 1**: Initial design and prototyping. Basic integration with Subprovisioner and updates to the LVMCluster CR.
 - **Phase 2**: Development of `vgmanager` functionalities for VG orchestration and management. Integration and E2E testing.
@@ -347,14 +441,8 @@ The status reporting will include:
 - **Phase 5**: Technology PReview with Documentation Extension and preparation of GA.
 - **Phase 6**: General Availability (GA) release with proven stability and performance in production environments.
 
-### Drawbacks
 
-- Increased complexity in managing both node-local and shared storage.
-- Potential for increased maintenance burden with the integration of a new CSI driver.
-- Risks associated with the stability and maturity of the Subprovisioner project.
-- Complex testing matrix and shared volume group use cases can be hard to debug / troubleshoot.
-
-### Alternatives
+## Alternatives
 
 - Continue using TopoLVM exclusively for local storage provisioning.
 - Evaluate and integrate other CSI drivers that support shared storage.
