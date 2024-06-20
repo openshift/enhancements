@@ -24,7 +24,7 @@ status: implementable
 
 ## Summary
 
-Fit more workloads onto a give node - achieve a higher workload
+Fit more workloads onto a given node - achieve a higher workload
 density - by overcommitting it's memory resources. Due to timeline
 needs a two-phased approach is considered.
 
@@ -154,6 +154,9 @@ virtual machine in a cluster.
 3. The cluster admin is deploying the WASP Agent according to the
    documentation
 
+   a. The cluster admin is adding the `failOnSwap=false` flag to the
+      kubelet configuration via a `KubeletConfig` CR, in order to ensure
+      that the kubelet will start once swap has been rolled out.
    a. The cluster admin is calculating the amount of swap space to
       provision based on the amount of physical ram and overcommittment
       ratio
@@ -161,8 +164,11 @@ virtual machine in a cluster.
       swap on worker nodes
    c. The cluster admin is deploying the [WASP Agent] DaemonSet
 
-4. The cluster admin is configuring OpenShift Virtualization via the
-   `HCO` API for higher workload density
+4. The cluster admin is configuring OpenShift Virtualization for higher
+   workload density via
+
+   a. the OpenShift Virtualization Console "Settings" page
+   b. or `HCO` API
 
 The cluster is now set up for higher workload density.
 
