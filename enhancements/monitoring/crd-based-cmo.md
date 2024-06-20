@@ -32,7 +32,7 @@ status: provisional
 
 ## Summary
 
-* Currently, the monitoring stack is configured using a configmap. In OpenShift though the best practice is to configure operators using custom resources.
+* Currently, the monitoring stack is configured using a configmaps. In OpenShift though the best practice is to configure operators using custom resources.
 
 
 ## Motivation
