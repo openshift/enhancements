@@ -31,8 +31,8 @@ The user will generate each ISO using a command-line tool. The first ISO will
 contain components (such as the [lifecycle-agent](https://github.com/openshift-kni/lifecycle-agent) operator)
 and a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md).
 The seed image is an [OCI image](https://github.com/opencontainers/image-spec/blob/main/spec.md)
-generated from a SNO system provisioned with the target OpenShift version and is installed onto a target SNO
-as a new [ostree stateroot](https://ostreedev.github.io/ostree/deployment/#stateroot-aka-osname-group-of-deployments-that-share-var).
+generated from a SNO system provisioned with the target OpenShift version and is
+installed onto a target SNO as a new [ostree stateroot](https://ostreedev.github.io/ostree/deployment/#stateroot-aka-osname-group-of-deployments-that-share-var).
 The latter includes, among other files, the `/var`, `/etc` (with specific
 exclusions) and `/ostree/repo` directories, which contain the target OpenShift
 version and most of its configuration, amounting approximately to just over 1GB
@@ -42,12 +42,12 @@ and are derived mainly from the OpenShift installer [install config](https://git
 
 ## Motivation
 
-The primary motivation for relocatable SNO is the fast deployment of single-node OpenShift.
-Telecommunications providers continue to deploy OpenShift at the Far Edge. The
-acceleration of this adoption and the nature of existing Telecommunication
-infrastructure and processes drive the need to improve OpenShift provisioning
-speed at the Far Edge site and the simplicity of preparation and deployment of
-Far Edge clusters, at scale.
+The primary motivation for relocatable SNO is the fast deployment of single-node
+OpenShift. Telecommunications providers continue to deploy OpenShift at the Far
+Edge. The acceleration of this adoption and the nature of existing
+Telecommunication infrastructure and processes drive the need to improve
+OpenShift provisioning speed at the Far Edge site and the simplicity of
+preparation and deployment of Far Edge clusters, at scale.
 
 The Image-based Installer provides users with such speed and simplicity, but it
 currently needs the [multicluster engine](https://docs.openshift.com/container-platform/4.15/architecture/mce-overview-ocp.html)
@@ -58,8 +58,8 @@ their own automation or even manual intervention to boot the host.
 
 ### User Stories
 
-- As a user in a disconnected environment with no existing management cluster,
-  I want to deploy a single-node OpenShift cluster using a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
+- As a user in a on-premise disconnected environment with no existing management
+  cluster, I want to deploy a single-node OpenShift cluster using a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
   and my own automation for provisioning.
 
 ### Goals
@@ -103,10 +103,10 @@ Agent-based Installer in several key aspects:
 
 - while the Agent-based Installer may offer flexibility and versatility in certain scenarios,
   it may not meet the stringent time constraints and requirements of far-edge deployments
-  in the telecommunications industry due to the inherently long installation process, 
+  in the telecommunications industry due to the inherently long installation process,
   exacerbated by low bandwidth and high packet latency.
 - with the Agent-based Installer all cluster configuration needs to be provided upfront
-  during the generation of the ISO image, while with the Image-based Installer the cluster 
+  during the generation of the ISO image, while with the Image-based Installer the cluster
   configuration is provided in an additional step.
 
 The Image-based Installer offers key advantages, where fast and reliable
@@ -122,12 +122,12 @@ customized ISO images.
 The OpenShift installer will support generating a configuration ISO with all the
 site specific configuration data for the cluster to be installed provided as
 input. The configuration ISO contents are the following:
-* ClusterInfo (cluster name, base domain, hostname, nodeIP)
-* SSH authorized_keys
-* Pull Secret
-* Extra Manifests
-* Generated keys and certs (compatible the generated admin kubeconfig)
-* Static networking config
+- `ClusterInfo` (cluster name, base domain, hostname, node IP)
+- SSH `authorized_keys`
+- Pull Secret
+- Extra Manifests
+- Generated keys and certs (compatible with the generated admin `kubeconfig`)
+- Static networking configuration
 
 The site specific configuration data will be generated according to information
 provided in the `install-config.yaml` and the manifests provided in the
@@ -196,9 +196,9 @@ N/A
 
   Having the functionality provided by the command-line tool in the OpenShift
   installer would be a natural addition to the latter, as the former refers to
-  the provisioning of single-node OpenShift clusters and generates the
-  required installation artifacts in the same way as the
-  [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md).
+  the provisioning of single-node OpenShift clusters. It generates the required
+  installation artifacts in the same way as the [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md)
+  `openshift-install agent create image` command.
 
 - Should the command-line tool that generates the configuration ISO be a subcommand
   of the OpenShift installer, or a standalone binary?
@@ -206,9 +206,9 @@ N/A
   Having the functionality provided by the command-line tool in the OpenShift
   installer would be a natural addition to the latter, as the former refers to
   the provisioning of single-node OpenShift clusters and consumes the OpenShift
-  installer `install-config.yaml`. In addition, it generates the required
-  installation artifacts in the same way as the
-  [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md).
+  installer `install-config.yaml`. It generates the required installation
+  artifacts in the same way as the [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md)
+  `openshift-install agent create config-image` command.
 
 ## Test Plan
 
@@ -280,7 +280,11 @@ However, for the Assisted Installer service this would be a completely new
 flow, as the image-based installation ISO is not generated per cluster, but for
 multiple SNO clusters with similar underlying hardware (due to the requirements
 of the Image-based Installer flow) and its configuration input is different than
-what is currently supported.
+what is currently supported. This would require an non-negligible expansion of
+the current scope of the Assisted Installer service. Moreover, integrating the
+installation ISO generation to the OpenShift installer would facilitate any
+future efforts on providing such a feature via the Assisted Installer service, as
+the latter could leverage the respective OpenShift installer command.
 
 In addition, a local command-line tool used in a disconnected environment will
 be able to connect to the registry serving the seed OCI image and verify
@@ -301,15 +305,17 @@ fit:
   installation ISOs (e.g. with different installation disks).
 - the user persona to generate the image-based installation ISO must have a
   running OpenShift cluster, generate the ISO via the Lifecycle Agent
-  Operator, download the ISO and move it around. Howerver, given an already
+  Operator, download the ISO and move it around. However, given an already
   generated seed OCI image, which can be generated earlier by another user
-  persona, we can facilitate this user persona by not requiring a running
+  persona, we can facilitate the first user persona by not requiring a running
   OpenShift cluster and the Lifecycle Agent Operator for the installation ISO
   generation.
 - having 2 (installation ISO and configuration ISO) out of 3 (the 3rd is the
   seed OCI image used by both the Image-based Upgrade and the Image-based
   Installer) Image-based Installer artifacts generated by the same command-line
   tool simplifies the user experience.
+- as a future enhancement we can provide generic seed OCI images, in order to skip
+  the seed OCI image generation step altogether.
 
 ## Infrastructure Needed [optional]
 
