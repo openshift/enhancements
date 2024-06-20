@@ -11,11 +11,11 @@ reviewers:
 approvers:
   - "@jerpeter1"
 api-approvers:
-  - TBD
+  - "@jerpeter1"
 creation-date: 2024-06-12
 last-updated: 2024-06-12
 tracking-link:
-  - USHIFT-2981
+  - https://issues.redhat.com/browse/USHIFT-2981
 ---
 
 # Low Latency workloads on MicroShift
@@ -38,23 +38,23 @@ ready to use packages to kickstart customers' usage of low latency workloads.
 
 ### User Stories
 
-* As a MicroShift administrator, I want to configure MicroShift host,
+* As a MicroShift administrator, I want to configure MicroShift host and all involved subsystems
   so that I can run low latency workloads.
 
 
 ### Goals
 
-Provide relatively easy way to configure system for low latency workload running on MicroShift:
+Provide guidance and example artifacts for configuring the system for low latency workload running on MicroShift:
 - Prepare low latency TuneD profile for MicroShift
 - Prepare necessary CRI-O configurations
 - Allow configuration of Kubelet via MicroShift config
-- Add small systemd daemon to enable TuneD profile and (optionally) reboot the host if the kernel
-  arguments change to make them effective
-  
+- Introduce a mechanism to automatically apply a tuned profile upon boot.
+- Document how to create a new tuned profile for users wanting more control.
+
 
 ### Non-Goals
 
-- Workload partitioning (i.e. pinning MicroShift control plane components)
+- Workload partitioning (i.e. pinning MicroShift control plane components) (see [OCPSTRAT-1068](https://issues.redhat.com/browse/OCPSTRAT-1068))
 - Duplicate all capabilities of Node Tuning Operator
 
 
@@ -62,11 +62,11 @@ Provide relatively easy way to configure system for low latency workload running
 
 To ease configuration of the system for running low latency workloads on MicroShift following
 parts need to be put in place:
-- TuneD profile
+- `microshift-low-latency` TuneD profile
 - CRI-O configuration + Kubernetes' RuntimeClass
-- Kubelet configuration (CPU, Memory, and Topology Managers)
-- Small systemd daemon to activate TuneD profile on boot and reboot the host if the kernel args
-  are changed.
+- Kubelet configuration (CPU, Memory, and Topology Managers and other)
+- `microshift-tuned.service` to activate user selected TuneD profile on boot and reboot the host
+  if the kernel args are changed.
 
 New RPM will be created that will contain tuned profile, CRI-O configs, and mentioned systemd daemon.
 We'll leverage existing know how of Performance and Scalability team expertise and look at
@@ -96,12 +96,13 @@ Workflow consists of two parts:
 1. User creates an osbuild blueprint:
    - (optional) User configures `[customizations.kernel]` in the blueprint if the values are known
      beforehand. This could prevent from necessary reboot after applying tuned profile.
-   - User adds `kernel-rt` package to the blueprint
-   - User adds `microshift-low-latency` RPM to the blueprint
+   - (optional) User adds `kernel-rt` package to the blueprint
+   - User adds `microshift-tuned.rpm` to the blueprint
    - User enables `microshift-tuned.service`
    - User supplies additional configs using blueprint:
      - /etc/tuned/microshift-low-latency-variables.conf
      - /etc/microshift/config.yaml to configure Kubelet
+     - /etc/microshift/tuned.json to configure `microshift-tuned.service`
 1. User builds the blueprint
 1. User deploys the commit / installs the system.
 1. System boots
@@ -109,11 +110,95 @@ Workflow consists of two parts:
    - Saves current kernel args
    - Applies tuned `microshift-low-latency` profile
    - Verifies expected kernel args
-     - ostree: `rpm-ostree kargs`
+     - ostree: `rpm-ostree kargs` or checking if new deployment was created[0]
      - rpm: `grubby`
    - If the current and expected kernel args are different, reboot the node
 1. Host boots again, everything for low latency is in place,
    `microshift.service` can continue start up.
+
+[0] changing kernel arguments on ostree system results in creating new deployment.
+
+Example blueprint:
+
+```toml
+name = "microshift-low-latency"
+version = "0.0.1"
+modules = []
+groups = []
+distro = "rhel-94"
+
+[[packages]]
+name = "microshift"
+version = "4.17.*"
+
+[[packages]]
+name = "microshift-tuned"
+version = "4.17.*"
+
+[[customizations.services]]
+enabled = ["microshift", "microshift-tuned"]
+
+[[customizations.kernel]]
+append = "some already known kernel args"
+name = "KERNEL-rt"
+
+[[customizations.files]]
+path = "/etc/tuned/microshift-low-latency-variables.conf"
+data = """
+isolated_cores=1-2
+hugepagesDefaultSize = 2M
+hugepages2M = 128
+hugepages1G = 0
+additionalArgs = ""
+"""
+
+[[customizations.files]]
+path = "/etc/microshift/config.yaml"
+data = """
+kubelet:
+  cpuManagerPolicy: static
+  memoryManagerPolicy: Static
+"""
+
+[[customizations.files]]
+path = "/etc/microshift/tuned.json"
+data = """
+{
+  "auto_reboot_enabled": "true",
+  "profile": "microshift-low-latency"
+}
+"""
+```
+
+
+##### bootc
+
+1. User creates Containerfile that:
+   - (optional) installs `kernel-rt`
+   - installs `microshift-tuned.rpm`
+   - enables `microshift-tuned.service`
+   - adds following configs
+     - /etc/tuned/microshift-low-latency-variables.conf
+     - /etc/microshift/config.yaml to configure Kubelet
+     - /etc/microshift/tuned.json to configure `microshift-tuned.service`
+1. User builds the blueprint
+1. User deploys the commit / installs the system.
+1. System boots - rest is just like in OSTree flow
+
+Example Containerfile:
+
+```
+FROM registry.redhat.io/rhel9/rhel-bootc:9.4
+
+# ... MicroShift installation ...
+
+RUN dnf install kernel-rt microshift-tuned
+COPY microshift-low-latency-variables.conf /etc/tuned/microshift-low-latency-variables.conf
+COPY microshift-config.yaml                /etc/microshift/config.yaml
+COPY microshift-tuned.json                 /etc/microshift/tuned.json
+
+RUN systemctl enable microshift-tuned.service
+```
 
 ##### RPM
 
@@ -121,29 +206,40 @@ Workflow consists of two parts:
 1. User creates following configs:
    - /etc/tuned/microshift-low-latency-variables.conf
    - /etc/microshift/config.yaml to configure Kubelet
-1. User enables `microshift-tuned.service` or uses `tuned-adm` directly to activate the profile
-   (and reboot the host if needed).
-1. If host was not rebooted, CRI-O and MicroShift services need to be restarted to make new settings
-   active.
+   - /etc/microshift/tuned.json to configure `microshift-tuned.service`
+1. user starts/enables `microshift-tuned.service`:
+   - Saves current kernel args
+   - Applies tuned `microshift-low-latency` profile
+   - Verifies expected kernel args
+     - ostree: `rpm-ostree kargs`
+     - rpm: `grubby`
+   - If the current and expected kernel args are different, reboots the node
+1. Host boots again, everything for low latency is in place,
+1. User starts/enables `microshift.service`
+
 
 #### Preparing low latency workload
 
 - Setting `.spec.runtimeClassName: microshift-low-latency` in Pod spec.
 - Setting Pod's memory limit and memory request to the same value, and
   setting CPU limit and CPU request to the same value to ensure Pod has guaranteed QoS class.
-- Use annotations to get desired behavior:
+- Use annotations to get desired behavior
+  (unless link to a documentation is present, these annotations only take two values: enabled and disabled):
   - `cpu-load-balancing.crio.io: "disable"` - disable CPU load balancing for Pod 
     (only use with CPU Manager `static` policy and for Guaranteed QoS Pods using whole CPUs)
   - `cpu-quota.crio.io: "disable"` - disable Completely Fair Scheduler (CFS)
   - `irq-load-balancing.crio.io: "disable"` - disable interrupt processing
     (only use with CPU Manager `static` policy and for Guaranteed QoS Pods using whole CPUs)
   - `cpu-c-states.crio.io: "disable"` - disable C-states
-  - `cpu-freq-governor.crio.io: "<governor>"` - specify governor type for CPU Freq scaling (e.g. `performance`)
+    ([see doc for possible values](https://docs.openshift.com/container-platform/4.15/scalability_and_performance/low_latency_tuning/cnf-provisioning-low-latency-workloads.html#cnf-configuring-high-priority-workload-pods_cnf-provisioning-low-latency))
+  - `cpu-freq-governor.crio.io: "<governor>"` - specify governor type for CPU Freq scaling (e.g. `performance`) 
+    ([see doc for possible values](https://www.kernel.org/doc/Documentation/cpu-freq/governors.txt))
+
 
 ### API Extensions
 
 Following API extensions are expected:
-- A passthrough from MicroShift to Kubelet config.
+- A passthrough from MicroShift's config to Kubelet config.
 - Variables file for TuneD profile to allow customization of the profile for specific host.
 
 
@@ -218,6 +314,18 @@ hugepages1G = 0
 
 # Additional kernel arguments
 additionalArgs = ""
+```
+
+#### `microshift-tuned.service` configuration
+
+Config file to specify which profile to re-apply each boot and if host should be rebooted if
+the kargs before and after applying profile are mismatched.
+
+```json
+{
+  "auto_reboot_enabled": "true",
+  "profile": "microshift-low-latency"
+}
 ```
 
 #### CRI-O configuration
@@ -337,8 +445,9 @@ if these are integral part of the low latency.
 
 - Verify if osbuild blueprint can override a file from RPM 
   (variables.conf needs to exist for tuned profile, so it's nice to have some fallback)?
-- NTO runs tuned in non-daemon one shot mode using systemd unit.
-  Should we try doing the same or we want the tuned daemon to run continuously?
+- ~~NTO runs tuned in non-daemon one shot mode using systemd unit.~~
+  ~~Should we try doing the same or we want the tuned daemon to run continuously?~~
+  > Let's stick to default RHEL behaviour. MicroShift doesn't own the OS.
 - NTO's profile includes several other beside cpu-partitioning: 
   [openshift-node](https://github.com/redhat-performance/tuned/blob/master/profiles/openshift-node/tuned.conf)
   and [openshift](https://github.com/redhat-performance/tuned/blob/master/profiles/openshift/tuned.conf) - should we include them or incorporate their settings?
@@ -383,6 +492,9 @@ that would need migration.
 User installs the RPM with TuneD profile and configures MicroShift (either manually,
 using blueprint, or using image mode) and that exact configuration is applied on boot
 and MicroShift start.
+
+For the newly added section in MicroShift config, if it's present after downgrading to previous
+MicroShift minor version, the section will be simply ignored because it's not represented in the Go structure.
 
 ## Version Skew Strategy
 
