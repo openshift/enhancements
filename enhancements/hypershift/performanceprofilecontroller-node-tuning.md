@@ -3,6 +3,7 @@ title: performanceprofilecontroller-node-tuning
 
 authors:
   - "@jlojosnegros"
+  - "@rbaturov"
 
 reviewers:
   - "@dagrayvid"
@@ -32,7 +33,7 @@ see-also:
   - "/enhancements/hypershift/node-tuning.md"
 
 creation-date: 2022-09-19
-last-updated: 2022-12-14
+last-updated: 2024-05-01
 ---
 
 # Performance Profile Controller Adaptation to Hypershift
@@ -105,7 +106,7 @@ The proposal for this output object is to use the way NTO has already put in pla
 
 - Once Performance Profile Controller has created the `tuned` object as usual, it will embeded the `tuned` into a `configmap` in the `hosted-control-plane-namespace`.
   - This `configmap` will have:
-    - name: will be function of the `PeformanceProfile` name
+    - name: function of the `PeformanceProfile` name
     - label: `hypershift.openshift.io/tuned-config` : `true`
     - label: `hypershift.openshift.io/nodePool` : `NodePool` API name where the `PeformanceProfile` which generate this `tuned` was referenced.
     - label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`,
@@ -119,7 +120,7 @@ The proposal for this output object is to use the way NTO has already put in pla
 
 - Once Performance Profile Controller has created the `MachineConfig` object as usual, it will embeded the object into a `configmap` in the `hosted-control-plane-namespace`.
 - This `configmap` will have:
-  - name: will be function of the `PeformanceProfile` name
+  - name: function of the `PeformanceProfile` name
   - label: `hypershift.openshift.io/nto-generated-machine-config` : `true`
   - label: `hypershift.openshift.io/nodePool` : `NodePool` API name where the `PeformanceProfile` which generate this `MachineConfig` was referenced.
   - label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`,
@@ -133,7 +134,7 @@ Being this object also handled by MachineConfig Operator (MCO) as `MachineConfig
 
 - Once Performance Profile Controller has created the `Kubeletconfig` object as usual, it will embeded the object into a `configmap` in the `hosted-control-plane-namespace`.
 - This `configmap` will have:
-  - name: will be function of the `PeformanceProfile` name
+  - name: function of the `PeformanceProfile` name
   - label: `hypershift.openshift.io/nto-generated-kubelet-config` : `true`
   - label: `hypershift.openshift.io/nodePool` : `NodePool` API name where the `PeformanceProfile` which generate this `MachineConfig` was referenced.
   - label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`,
@@ -144,6 +145,22 @@ Being this object also handled by MachineConfig Operator (MCO) as `MachineConfig
 #### RuntimeClass
 
 The proposal is to handle these objects like NTO handles its `tuned` configurations once they are in the `hosted-control-plane-namespace`, that is synchronize them directly with the ones in the hosted cluster using the proper KubeConfig.
+
+#### Performance Profile Status
+
+Since we cannot change the `configmap` nor the `PeformanceProfile` embedded in it since it controlled by the NodePool controller, a different resolution is needed to handle and expose the performance profile status. A proper place to inform an overview of it would be `NodePool.status.condition`.
+Since `NTO` can't modify the `NodePool` directly, a `configmap` will be used to pass this data as a middle-ware obj, watched by the `NodePool` controller which will reflect this overview under `NodePool.status.condition`.
+
+- Once Performance Profile Controller has created the performance profiles components listed above,  a `configmap` will be created in the `hosted-control-plane-namespace`, in order to inform the current status conditions.
+- This `configmap` will have:
+  - name: function of the `PeformanceProfile` name
+  - label: `hypershift.openshift.io/nto-generated-performance-profile-status` : `true`
+  - label: `hypershift.openshift.io/nodePool` : `NodePool` API name where the `PeformanceProfile` which generates this `ConfigMap` was referenced.
+  - label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`,
+  - annotation: `hypershift.openshift.io/nodePool` : `NodePool` API namespaced name where the `PeformanceProfile` which generates this `ConfigMap` was referenced.
+  - data: `PerformanceProfile.status` serialized object in the "status" key.
+- This will trigger the reconcile operation in NodePool Controller for these objects.
+
 
 ### Workflow Diagram
 
@@ -166,6 +183,10 @@ graph LR;
         end
 
         subgraph hosted-control-plane-namespace
+            NodePoolController -->|4:Watch| PP_Status(ConfigMap<br> name:func_of_PerformanceProfile_name<br> label:`hypershift.openshift.io/nto-generated-performance-profile-status` : `true`<br> label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`<br> label: `hypershift.openshift.io/nodePool` : `NodePool` API name<br> data.status: < serialized PerformanceProfile.status object >)
+            PPController-->|6:Creates|PP_Status
+            NodePoolController -->|8:Reconcile| NodePool_A
+
             NodePoolController ==>|2:Propagate|PP_ConfigMap(ConfigMap<br> name:PPConfigMap<br> tuned: PerformanceProfile)
             NodePoolController ==>|3:Add label|PP_ConfigMap_01(ConfigMap<br> name:PPConfigMap<br> tuned: PerformanceProfile<br> label:hypershift.openshift.io/performanceprofile-config=true)
             PP_ConfigMap-. 2:is moved to .->PP_ConfigMap_01
@@ -187,7 +208,7 @@ graph LR;
             PPController-->|7:Creates and Embed|MC_CM(ConfigMap<br> name:func_of_PerformanceProfile_name<br> label:`hypershift.openshift.io/nto-generated-machine-config` : `true`<br> label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`<br> label: `hypershift.openshift.io/nodePool` : `NodePool` API name<br> data.config: < serialized MachineConfig object >)
             MC_01-. embedded into .-MC_CM
 
-            PPController-->|7:Creates and Embed|KC_CM(ConfigMap<br> name:func_of_PerformanceProfile_name<br> label:`hypershift.openshift.io/nto-generated-kubelet-config` : `true` : `true`<br> label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`<br> label: `hypershift.openshift.io/nodePool` : `NodePool` API name<br> data.config: < serialized KubeletConfig object >)
+            PPController-->|7:Creates and Embed|KC_CM(ConfigMap<br> name:func_of_PerformanceProfile_name<br> label:`hypershift.openshift.io/nto-generated-kubelet-config` : `true` <br> label: `hypershift.openshift.io/performanceProfileName` : `PerformanceProfile.name`<br> label: `hypershift.openshift.io/nodePool` : `NodePool` API name<br> data.config: < serialized KubeletConfig object >)
             KC_01-. embedded into .-KC_CM
 
 
@@ -212,7 +233,7 @@ class PPController,NodePoolController,ClusterServiceCustomer,NTO actor
 
 class PP_01,RTC_01,RTC_02,MC_01,KC_01,Tuned_01,NodePool_A object_prim
 
-class PP_ConfigMap,PP_ConfigMap_01,Tuned_CM,KC_CM,MC_CM object_sec
+class PP_ConfigMap,PP_ConfigMap_01,Tuned_CM,KC_CM,MC_CM,PP_Status object_sec
 
 class StartHere starthere
 
@@ -244,10 +265,12 @@ classDiagram
   PerformanceProfile --> ConfigMap_T : name & label
   PerformanceProfile --> ConfigMap_M : name & label
   PerformanceProfile --> ConfigMap_K : name & label
+  PerformanceProfile --> ConfigMap_PPS : name & label
 
   ConfigMap_PP --> ConfigMap_T : OwnerReference
   ConfigMap_PP --> ConfigMap_M : OwnerReference
   ConfigMap_PP --> ConfigMap_K : OwnerReference
+  ConfigMap_PP --> ConfigMap_PPS : OwnerReference
 
 
   class NodePoolController {
@@ -294,12 +317,26 @@ classDiagram
   class ConfigMap_K {
     name: "kc-" + PerformanceProfile.name
     labels : [
-      "hypershift.openshift.io/nto-generated-machine-config" : "true",
+      "hypershift.openshift.io/nto-generated-kubelet-config" : "true",
       "hypershift.openshift.io/performanceProfileName" : PerformanceProfile.name,
       "hypershift.openshift.io/nodePool" : NodePool.Name
     ]
     annotations: [
       "hypershift.openshift.io/nodePool" : NodePoolNamespacedName
+    ]
+  }
+    class ConfigMap_PPS {
+    name: PerformanceProfile.name + "-status"
+    labels : [
+      "hypershift.openshift.io/nto-generated-performance-profile-status" : "true",
+      "hypershift.openshift.io/performanceProfileName" : PerformanceProfile.name,
+      "hypershift.openshift.io/nodePool" : NodePool.Name
+    ]
+    annotations: [
+      "hypershift.openshift.io/nodePool" : NodePoolNamespacedName
+    ]
+    data: [
+      status: PerformanceProfile.status
     ]
   }
 ```
@@ -361,6 +398,11 @@ See openshift/hypershift#1782
 To be able to handle `KubeletConfig` propagation properly NodePool controller should be changed to recognize a `KubeletConfig` as a valid content and set its defaults properly, that is mainly to ensure label `machineconfiguration.openshift.io/role=worker` is set.
 This can be made by changing [`defaultAndValidateConfigManifest`](https://github.com/openshift/hypershift/blob/fa0ca3d09fab02ebff64d45b97cc1abaf4f1c27a/hypershift-operator/controllers/nodepool/nodepool_controller.go#L1439)  to handle `KubeletConfig` almost as it is handling `MachineConfig` right now.
 
+To view if the performance profile has been applied successfully, NodePool controller will watch the performance profile status configmap located in the hosted control plane namespace, and updates the PerformanceProfileAppliedSuccessfully condition under NodePool.status.conditions.
+This condition signal if the performance profile has been applied successfully.
+The condition will be set to false in two scenarios: either the performance profile tuning has not been completed yet, or a failure has occurred.
+The reason and message will provide details specific to the scenario.
+
 ### Performance Profile controller
 
 1. Change SetUp to watch over ConfigMaps with Label: `hypershift.openshift.io/performanceprofile-config=true`
@@ -381,7 +423,8 @@ In Hypershift Performance Profile controller (PPC) will not be reconciling Perfo
        - If it already exist
          - Extract the content and only if there is a difference update it properly and write it again.
    - Update PerformanceProfile status conditions with the status of the different components created from the PerformanceProfile (MachineConfig, KubeletConfig, Tuned)
-     - Still not defined if and how this will be done.
+     - Performance Profile controller will create and update the performance profile status ConfigMap in the hosted control plane namespace, to reflect the updated status of the components. 
+     
 ## Background
 
 ### Hypershift docs
