@@ -1,5 +1,5 @@
 ---
-title: subprovisioner-csi-driver-integration-into-lvms
+title: kubesan-csi-driver-integration-into-lvms
 authors:
   - "@jakobmoellerdev"
 reviewers:
@@ -20,15 +20,15 @@ tracking-link:
   - https://issues.redhat.com/browse/OCPEDGE-1147
 ---
 
-# Subprovisioner CSI Driver Integration into LVMS
+# KubeSAN CSI Driver Integration into LVMS
 
-[Subprovisioner](https://gitlab.com/subprovisioner/subprovisioner) 
+[KubeSAN](https://gitlab.com/kubesan/kubesan) 
 is a CSI plugin for Kubernetes that enables you to provision Block volumes 
 backed by a single, cluster-wide, shared block device (e.g., a single big LUN on a SAN).
 
 Logical Volume Manager Storage (LVMS) uses the TopoLVM CSI driver to dynamically provision local storage on the OpenShift Container Platform clusters.
 
-This proposal is about integrating the Subprovisioner CSI driver into the LVMS operator to enable the provisioning of 
+This proposal is about integrating the KubeSAN CSI driver into the LVMS operator to enable the provisioning of 
 shared block devices on the OpenShift Container Platform clusters. 
 
 This enhancement will significantly increase scope of LVMS, but allows LVMS to gain the unique value proposition
@@ -56,20 +56,20 @@ TopoLVM as our existing in-tree driver of LVMS is a great solution for local sto
 This is a significant limitation for virtualization workloads that require shared storage for their VMs that can dynamically be provisioned and deprovisioned 
 on multiple nodes. Since OCP 4.15, LVMS support Multi-Node Deployments as a Topology, but without Replication or inbuilt resiliency behavior.
 
-The Subprovisioner CSI driver is a great solution for shared storage provisioning, but it is currently not productized as part of OpenShift Container Platform.
+The KubeSAN CSI driver is a great solution for shared storage provisioning, but it is currently not productized as part of OpenShift Container Platform.
 
 ### Goals
 
-- Extension of the LVMCluster CRD to support a new deviceClass policy field that can be used to provision shared storage via Subprovisioner.
-- Find a way to productize the Subprovisioner CSI driver as part of OpenShift Container Platform and increasing the Value Proposition of LVMS.
+- Extension of the LVMCluster CRD to support a new deviceClass policy field that can be used to provision shared storage via KubeSAN.
+- Find a way to productize the KubeSAN CSI driver as part of OpenShift Container Platform and increasing the Value Proposition of LVMS.
 - Allow provisioning of regular TopoLVM deviceClasses and shared storage deviceClasses side-by-side in the same cluster.
 
 ### Non-Goals
 
-- Compatibility with other CSI drivers than Subprovisioner. 
-- Switching the default CSI driver for LVMS from TopoLVM to Subprovisioner or the other way around.
+- Compatibility with other CSI drivers than KubeSAN. 
+- Switching the default CSI driver for LVMS from TopoLVM to KubeSAN or the other way around.
 - Implementing a new CSI driver from scratch.
-- Integrating the Subprovisioner CSI driver into TopoLVM.
+- Integrating the KubeSAN CSI driver into TopoLVM.
 
 ### User Stories
 
@@ -81,7 +81,7 @@ As a Data Center OCP Admin:
 As a Developer:
 - I want to deploy applications that require shared storage across multiple pods and nodes, ensuring data consistency and high availability.
 - I want to use a single, unified API to provision and manage both local and shared storage classes, reducing complexity in my deployment scripts.
-- I want to benefit from the unique capabilities of Subprovisioner for shared storage without having to manage separate storage solutions, both TopoLVM and Subprovisioner use lvm2 under the hood.
+- I want to benefit from the unique capabilities of KubeSAN for shared storage without having to manage separate storage solutions, both TopoLVM and KubeSAN use lvm2 under the hood.
 
 As a Storage Administrator:
 - I want to easily configure and manage volume groups using the new deviceClass policy field in the LVMCluster CRD, ensuring that my storage setup is consistent and efficient.
@@ -89,45 +89,45 @@ As a Storage Administrator:
 - I want to leverage existing expensive SAN infrastructure to provide shared storage, maximizing the return on investment for our hardware.
 
 As an IT Operations Engineer:
-- I want to ensure that upgrades and downgrades of the LVMS operator and Subprovisioner CSI driver are seamless and do not cause downtime for my existing workloads.
-- I want to follow clear guidelines and best practices for managing version skew between LVMS and Subprovisioner, ensuring compatibility and stability.
+- I want to ensure that upgrades and downgrades of the LVMS operator and KubeSAN CSI driver are seamless and do not cause downtime for my existing workloads.
+- I want to follow clear guidelines and best practices for managing version skew between LVMS and KubeSAN, ensuring compatibility and stability.
 - I want detailed documentation and troubleshooting guides to help resolve any issues that arise during the deployment and operation of shared storage.
 
 As a Quality Assurance Engineer:
-- I want to execute comprehensive integration and end-to-end tests that validate the functionality of shared storage provisioning with Subprovisioner.
+- I want to execute comprehensive integration and end-to-end tests that validate the functionality of shared storage provisioning with KubeSAN.
 - I want to conduct performance and stress tests to ensure that the solution can handle high load and failure conditions without degradation of service.
 - I want to gather and analyze feedback from early adopters to improve the stability and performance of the integrated solution before general availability.
 
 As a Product Manager:
-- I want to offer a unique value proposition with LVMS by integrating Subprovisioner, enabling OCP customers to use shared block storage seamlessly.
+- I want to offer a unique value proposition with LVMS by integrating KubeSAN, enabling OCP customers to use shared block storage seamlessly.
 - I want to ensure that the solution meets the needs of our enterprise customers, providing high availability, resiliency, and performance for their critical workloads.
 - I want to manage the roadmap and release cycles effectively, ensuring that each phase of the project is delivered on time and meets quality standards.
 
 ### Risks and Mitigations
 - There is a risk of increased maintenance burden by integrating a new CSI driver into LVMS without gaining traction
-  - tested separately in the Subprovisioner project as pure CSI Driver similar to TopoLVM and within LVMS with help of QE
+  - tested separately in the KubeSAN project as pure CSI Driver similar to TopoLVM and within LVMS with help of QE
     - we will not GA the solution until we have a clear understanding of the maintenance burden. The solution will stay in TechPreview until then.
-- There is a risk that Subprovisioner is so different from TopoLVM that behavior changes can not be accomodated in the current CRD
+- There is a risk that KubeSAN is so different from TopoLVM that behavior changes can not be accomodated in the current CRD
   - we will scrap this effort for integration and look for alternative solutions if the integration is not possible with reasonable effort.
-- There is a risk that Subprovisioner will break easily as its a really young project
-  - we will not GA the solution until we have a clear understanding of the stability of the Subprovisioner project. The solution will stay in TechPreview until then.
+- There is a risk that KubeSAN will break easily as its a really young project
+  - we will not GA the solution until we have a clear understanding of the stability of the KubeSAN project. The solution will stay in TechPreview until then.
 
 ## Proposal
 
-The proposal is to extend the LVMCluster CRD with a new deviceClass policy field that can be used to provision shared storage via Subprovisioner.
-We will use this field as a hook in lvm-operator, our orchestrating operator, to provision shared storage via Subprovisioner instead of TopoLVM.
-Whenever LVMCluster discovers a new deviceClass with the Subprovisioner associated policy, it will create a new CSI driver deployment for Subprovisioner and configure it to use the shared storage deviceClass.
-As such, it will handover the provisioning of shared storage to the Subprovisioner CSI driver. Also internal engineering such as sanlock orchestration will be managed by the driver.
+The proposal is to extend the LVMCluster CRD with a new deviceClass policy field that can be used to provision shared storage via KubeSAN.
+We will use this field as a hook in lvm-operator, our orchestrating operator, to provision shared storage via KubeSAN instead of TopoLVM.
+Whenever LVMCluster discovers a new deviceClass with the KubeSAN associated policy, it will create a new CSI driver deployment for KubeSAN and configure it to use the shared storage deviceClass.
+As such, it will handover the provisioning of shared storage to the KubeSAN CSI driver. Also internal engineering such as sanlock orchestration will be managed by the driver.
 
 ### Workflow Description
 
-#### Subprovisioner instantiation via LVMCluster
+#### KubeSAN instantiation via LVMCluster
 
-1. The user is informed of the intended use case of Subprovisioner, and decides to use it for its multi-node capabilities before provisioning Storage
+1. The user is informed of the intended use case of KubeSAN, and decides to use it for its multi-node capabilities before provisioning Storage
 2. The user configures LVMCluster with non-default values for the Volume Group and the deviceClass policy field
-3. The lvm-operator detects the new deviceClass policy field and creates a new CSI driver deployment for Subprovisioner.
-4. The Subprovisioner CSI driver is configured to use the shared storage deviceClass, initializes the global lock space, and starts provisioning shared storage.
-5. The user can now provision shared storage via Subprovisioner on the OpenShift Container Platform cluster.
+3. The lvm-operator detects the new deviceClass policy field and creates a new CSI driver deployment for KubeSAN.
+4. The KubeSAN CSI driver is configured to use the shared storage deviceClass, initializes the global lock space, and starts provisioning shared storage.
+5. The user can now provision shared storage via KubeSAN on the OpenShift Container Platform cluster.
 6. The user can also provision regular TopoLVM deviceClasses side-by-side with shared storage deviceClasses in the same cluster. Then, TopoLVM gets provisioned side-by-side.
 
 ### API Extensions
@@ -255,11 +255,11 @@ API scheme for `LVMCluster` CR:
 
 #### Design Details on Volume Group Orchestration and Management via vgmanager
 
-The `vgmanager` component will be responsible for managing volume groups (VGs) and coordinating the orchestration between TopoLVM and Subprovisioner CSI drivers. This includes:
+The `vgmanager` component will be responsible for managing volume groups (VGs) and coordinating the orchestration between TopoLVM and KubeSAN CSI drivers. This includes:
 
 1. **Detection and Configuration**:
   - Detecting devices that match the `DeviceSelector` criteria specified in the `LVMCluster` CR.
-  - Configuring volume groups based on the `DeviceAccessPolicy` (either `shared` for Subprovisioner or `local` for TopoLVM).
+  - Configuring volume groups based on the `DeviceAccessPolicy` (either `shared` for KubeSAN or `local` for TopoLVM).
   - Ensuring that shared volume groups are correctly initialized and managed across multiple nodes.
 
 2. **Dynamic Provisioning**:
@@ -294,9 +294,9 @@ The status reporting will include:
   - Include status of node-local VGs and any issues detected.
 
 3. **CSI Driver Status**:
-  - Provide status updates on the CSI drivers (both TopoLVM and Subprovisioner) deployed in the cluster.
+  - Provide status updates on the CSI drivers (both TopoLVM and KubeSAN) deployed in the cluster.
   - Include information on driver health, performance metrics, and any incidents.
-  - Ideally, subprovisioner implements Volume Health Monitoring CSI calls.
+  - Ideally, kubesan implements Volume Health Monitoring CSI calls.
 
 4. **Event Logging**:
   - Maintain detailed logs of all events related to VG management and CSI driver operations.
@@ -307,12 +307,12 @@ The status reporting will include:
 
 - Increased complexity in managing both node-local and shared storage.
 - Potential for increased maintenance burden with the integration of a new CSI driver.
-- Risks associated with the stability and maturity of the Subprovisioner project.
+- Risks associated with the stability and maturity of the KubeSAN project.
 - Complex testing matrix and shared volume group use cases can be hard to debug / troubleshoot.
 
 ### Topology Considerations
 
-* The primary use case for Subprovisioner is to enable shared storage across multiple nodes. This capability is critical for environments where high availability and data redundancy are required.
+* The primary use case for KubeSAN is to enable shared storage across multiple nodes. This capability is critical for environments where high availability and data redundancy are required.
 * Ensure that all nodes in the cluster can access the shared storage devices consistently and reliably. This may involve configuring network settings and storage paths appropriately.
 
 #### Hypershift / Hosted Control Planes
@@ -325,14 +325,14 @@ LVMS can be installed on standalone clusters, but the shared storage provisionin
 
 #### Single-node Deployments or MicroShift
 
-* While LVMS can be installed on single-node deployments and MicroShift, the shared storage provisioning feature enabled by Subprovisioner is designed for multi-node environments. Single-node setups can still use local storage provisioning through TopoLVM.
-* MicroShift deployments will include the Subprovisioner binaries but will not use shared storage provisioning due to the single-node nature of MicroShift.
+* While LVMS can be installed on single-node deployments and MicroShift, the shared storage provisioning feature enabled by KubeSAN is designed for multi-node environments. Single-node setups can still use local storage provisioning through TopoLVM.
+* MicroShift deployments will include the KubeSAN binaries but will not use shared storage provisioning due to the single-node nature of MicroShift.
 
 ## Test Plan
 
 - **Integration Tests**:
-  - Update existing LVMS integration tests to include scenarios for shared storage provisioning with Subprovisioner.
-  - Ensure that device detection and VG management are functioning correctly with both TopoLVM and Subprovisioner.
+  - Update existing LVMS integration tests to include scenarios for shared storage provisioning with KubeSAN.
+  - Ensure that device detection and VG management are functioning correctly with both TopoLVM and KubeSAN.
   - QE will be extending the existing test suites to include shared storage provisioning and synchronization tests.
 
 - **E2E Tests**:
@@ -379,30 +379,30 @@ N/A
 ## Upgrade / Downgrade Strategy
 
 - **Upgrade**:
-  - Ensure that upgrades are seamless with no downtime for existing workloads. Migrating to a subprovisioner enabled version is a no-break operation
-  - Test upgrade paths thoroughly to ensure compatibility and data integrity. The subprovisioner to topolvm (or vice versa) switch should be excluded and forbidden explicitly.
+  - Ensure that upgrades are seamless with no downtime for existing workloads. Migrating to a kubesan enabled version is a no-break operation
+  - Test upgrade paths thoroughly to ensure compatibility and data integrity. The kubesan to topolvm (or vice versa) switch should be excluded and forbidden explicitly.
   - The "default" deviceClass cannot be changed as well and changeing from shared to local or vice versa is not supported without resetting the LVMCluster.
   - New deviceClasses with the shared policy should be able to be added to existing LVMClusters without affecting existing deviceClasses.
 
 - **Downgrade**:
-  - Allow safe downgrades by maintaining backward compatibility. Downgrading from a subprovisioner enabled version to a purely topolvm enabled version should be a no-break operation for the topolvm part. For the subprovisioner part, the operator should ensure that the shared VGs can be cleaned up manually
+  - Allow safe downgrades by maintaining backward compatibility. Downgrading from a kubesan enabled version to a purely topolvm enabled version should be a no-break operation for the topolvm part. For the kubesan part, the operator should ensure that the shared VGs can be cleaned up manually
   - Provide rollback mechanisms and detailed instructions to revert to previous versions. Ensure that downgrades do not result in data loss or service interruptions.
     The operator should ensure that the shared VGs can be cleaned up manually.
   - Ensure that downgrades do not result in data loss or service interruptions. The operator should ensure that the shared VGs can be cleaned up without data loss on other device classes.
 
 ## Version Skew Strategy
 
-- Ensure compatibility between different versions of LVMS and the integrated Subprovisioner CSI driver.
+- Ensure compatibility between different versions of LVMS and the integrated KubeSAN CSI driver.
   - Implement version checks and compatibility checks in the `vgmanager` component.
-  - Ensure that the operator can handle version skew between the LVMS operator and the Subprovisioner CSI driver where required.
+  - Ensure that the operator can handle version skew between the LVMS operator and the KubeSAN CSI driver where required.
   - Provide clear guidelines on how to manage version skew and perform upgrades in a controlled manner.
-  - One version of LVMS should be able to handle one version of the Subprovisioner CSI driver.
+  - One version of LVMS should be able to handle one version of the KubeSAN CSI driver.
 - Document supported version combinations and any known issues with version mismatches.
 - Provide clear guidelines on how to manage version skew and perform upgrades in a controlled manner.
 
 ## Operational Aspects of API Extensions
 
-The integration of the Subprovisioner CSI driver into LVMS introduces several new API extensions, primarily within the LVMCluster CRD. These extensions include new fields for the deviceClass policy, specifically designed to support shared storage provisioning. The operational aspects of these API extensions are as follows:
+The integration of the KubeSAN CSI driver into LVMS introduces several new API extensions, primarily within the LVMCluster CRD. These extensions include new fields for the deviceClass policy, specifically designed to support shared storage provisioning. The operational aspects of these API extensions are as follows:
 
 * Configuration and Management:
   * Administrators can configure shared storage by setting the DeviceAccessPolicy field in the DeviceClass section of the LVMCluster CRD to shared.
@@ -413,7 +413,7 @@ The integration of the Subprovisioner CSI driver into LVMS introduces several ne
   * The vgmanager component will validate device paths and ensure that they are consistent across all nodes in the cluster.
 
 * Dynamic Provisioning:
-  * When a shared device class is configured, the operator will dynamically create and manage the corresponding Subprovisioner CSI driver deployment, ensuring that the shared storage is properly initialized and synchronized across nodes.
+  * When a shared device class is configured, the operator will dynamically create and manage the corresponding KubeSAN CSI driver deployment, ensuring that the shared storage is properly initialized and synchronized across nodes.
 
 Monitoring and Reporting:
   * The status of the shared storage, including health and capacity metrics, will be reported through the LVMCluster CRD status fields.
@@ -421,7 +421,7 @@ Monitoring and Reporting:
 
 ## Support Procedures
 
-Regular product support for LVMS will continue to be established through the LVMS team. In addition, Subprovisioner will receive upstream issues through consumption in the LVMS project and will serve as a repackaging customer for the Subprovisioner project.
+Regular product support for LVMS will continue to be established through the LVMS team. In addition, KubeSAN will receive upstream issues through consumption in the LVMS project and will serve as a repackaging customer for the KubeSAN project.
 
 ## Security Considerations
 
@@ -430,13 +430,13 @@ Regular product support for LVMS will continue to be established through the LVM
   - Implement RBAC policies to restrict access to VGs and CSI drivers based on user roles and permissions.
   - Ensure that shared VGs are only accessible by nodes that are authorized to access them.
 - **CVE Scanning**:
-  - Ensure that the Subprovisioner CSI driver is regularly scanned for vulnerabilities and that any identified issues are addressed promptly.
-  - Implement a process for CVE scanning and remediation for the Subprovisioner CSI driver.
-  - Fixes for CVEs should be handled in a dedicated midstream openshift/subprovisioner for critical CVEs when Red Hat decides to no longer solely own the project. Until then, the fixes will be handled by the Red Hat team and a midstream is optional.
+  - Ensure that the KubeSAN CSI driver is regularly scanned for vulnerabilities and that any identified issues are addressed promptly.
+  - Implement a process for CVE scanning and remediation for the KubeSAN CSI driver.
+  - Fixes for CVEs should be handled in a dedicated midstream openshift/kubesan for critical CVEs when Red Hat decides to no longer solely own the project. Until then, the fixes will be handled by the Red Hat team and a midstream is optional.
 
 ## Implementation Milestones
 
-- **Phase 1**: Initial design and prototyping. Basic integration with Subprovisioner and updates to the LVMCluster CR.
+- **Phase 1**: Initial design and prototyping. Basic integration with KubeSAN and updates to the LVMCluster CR.
 - **Phase 2**: Development of `vgmanager` functionalities for VG orchestration and management. Integration and E2E testing.
 - **Phase 3**: Performance testing, bug fixes, and documentation. Preparing for Alpha release.
 - **Phase 4**: Developer Preview release with comprehensive manual and QE testing. Gathering user feedback and making improvements.
@@ -449,4 +449,4 @@ Regular product support for LVMS will continue to be established through the LVM
 - Continue using TopoLVM exclusively for local storage provisioning.
 - Evaluate and integrate other CSI drivers that support shared storage.
 - Develop a custom CSI driver to meet the specific needs of LVMS and OpenShift.
-- Move Subprovisioner to CNV and package it in a separate product.
+- Move KubeSAN to CNV and package it in a separate product.
