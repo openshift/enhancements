@@ -298,18 +298,10 @@ disconnected environment, the user could generate the ISO via the Assisted
 Installer service and then carry it over to the disconnected environment.
 
 However, for the Assisted Installer service this would be a completely new
-flow, as the image-based installation ISO is not generated per cluster, but for
+scope, as the image-based installation ISO is not generated per cluster, but for
 multiple SNO clusters with similar underlying hardware (due to the requirements
 of the Image-based Installer flow) and its configuration input is different than
-what is currently supported. This would require an non-negligible expansion of
-the current scope of the Assisted Installer service. Moreover, integrating the
-installation ISO generation to the OpenShift installer would facilitate any
-future efforts on providing such a feature via the Assisted Installer service, as
-the latter could leverage the respective OpenShift installer command.
-
-In addition, a local command-line tool used in a disconnected environment will
-be able to connect to the registry serving the seed OCI image and verify
-it, whereas the Assisted Installer service cannot support this.
+what is currently supported.
 
 ### Building the installation ISO in the Lifecycle Agent Operator
 
