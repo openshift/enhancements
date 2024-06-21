@@ -256,7 +256,28 @@ N/A
 
 ## Version Skew Strategy
 
-TBD
+### Configuration ISO version and Seed OCI Image version
+
+The Image-based Installer configuration ISO content version should be compatible
+with the seed OCI image version contained in the Image-based Installer
+installation ISO. The Lifecycle Agent Operator, which is contained in the
+installation ISO, is responsible for ensuring the compatibility of those two at
+the time of the Image-based installation. The configuration version does not
+depend on the OpenShift versions used to generate either one of the Image-based
+installer artifacts (i.e. configuration ISO and installation ISO). In the case
+of incompatibility between the configuration version and the seed OCI image
+version, the Image-based installation will fail with the respective error
+message.
+
+### Installation ISO RHCOS ISO version and Seed OCI Image version
+
+The RHCOS base ISO, which is contained in the Image-based Installer installation
+ISO and derived from the OpenShift release payload, has no strict requirements
+to be tied to the seed OCI image OpenShift version. The features and
+configuration of the underlying tools required to successfully complete an
+Image-based installation, e.g. Podman, cri-o, SELinux, ostree, do not frequently
+change between OpenShift versions. The risk of version skew is small and in such
+case the Image-based installation will fail with the respective error message.
 
 ## Operational Aspects of API Extensions
 
