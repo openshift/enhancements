@@ -24,9 +24,9 @@ superseded-by: N/A
 
 ## Summary
 
-The Image-based Installer is an installation method for on-premise single-node
-OpenShift (SNO) clusters, that will use a bootable, installer ISO and a
-configuration ISO running on the hosts that are to become SNO clusters.
+The Image-based Installer (IBI) is an installation method for on-premise
+single-node OpenShift (SNO) clusters, that will use a bootable, installer ISO
+and a configuration ISO running on the hosts that are to become SNO clusters.
 The user will generate each ISO using a command-line tool. The first ISO will
 contain components (such as the [lifecycle-agent](https://github.com/openshift-kni/lifecycle-agent) operator)
 and a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md).
@@ -49,8 +49,8 @@ Telecommunication infrastructure and processes drive the need to improve
 OpenShift provisioning speed at the Far Edge site and the simplicity of
 preparation and deployment of Far Edge clusters, at scale.
 
-The Image-based Installer provides users with such speed and simplicity, but it
-currently needs the [multicluster engine](https://docs.openshift.com/container-platform/4.15/architecture/mce-overview-ocp.html)
+IBI provides users with such speed and simplicity, but it currently needs the
+[multicluster engine](https://docs.openshift.com/container-platform/4.15/architecture/mce-overview-ocp.html)
 and/or the [Image-based Install operator](https://github.com/openshift/image-based-install-operator)
 to generate the required installation and configuration artifacts. We would like
 to enable users to generate the latter intuitively and independently, using
@@ -97,30 +97,28 @@ and optionally precache all release container images under the
 `/var/lib/containers` directory.
 
 The installation ISO approach is very similar to what is already implemented by
-the functionality of the [Agent-based Installer](/enhancements/agent-installer-agent-based-installer.md))
-Although the Image-based Installer proposed here differs from the OpenShift
-Agent-based Installer in several key aspects:
+the functionality of the [Agent-based Installer](/enhancements/agent-installer-agent-based-installer.md), although
+IBI differs from the OpenShift Agent-based Installer in several key aspects:
 
 - while the Agent-based Installer may offer flexibility and versatility in certain scenarios,
   it may not meet the stringent time constraints and requirements of far-edge deployments
   in the telecommunications industry due to the inherently long installation process,
   exacerbated by low bandwidth and high packet latency.
 - with the Agent-based Installer all cluster configuration needs to be provided upfront
-  during the generation of the ISO image, while with the Image-based Installer the cluster
+  during the generation of the ISO image, while with IBI the cluster
   configuration is provided in an additional step.
 
-The Image-based Installer offers key advantages, where fast and reliable
-deployment at the edge is crucial. By generating ISO images containing all
-the necessary components, the Image-based Installer significantly accelerates
-deployment times. Moreover, unlike the Agent-based Installer, the image-based
-approach allows for cluster configuration to be supplied upon deployment at the
-edge, rather than during the initial ISO generation process. This flexibility
-enables operators to use a single generic image for installing multiple
-clusters, streamlining the deployment process and reducing the need for multiple
-customized ISO images.
+IBI offers key advantages, where fast and reliable deployment at the edge is
+crucial. By generating ISO images containing all the necessary components,
+IBI significantly accelerates deployment times. Moreover, unlike the Agent-based
+Installer, the image-based approach allows for cluster configuration to be
+supplied upon deployment at the edge, rather than during the initial ISO
+generation process. This flexibility enables operators to use a single generic
+image for installing multiple clusters, streamlining the deployment process and
+reducing the need for multiple customized ISO images.
 
-The OpenShift installer will support generating a configuration ISO with all the
-site specific configuration data for the cluster to be installed provided as
+The command-line tool will also support generating a configuration ISO with all
+the site specific configuration data for the cluster to be installed provided as
 input. The configuration ISO contents are the following:
 - `ClusterInfo` (cluster name, base domain, hostname, node IP)
 - SSH `authorized_keys`
@@ -135,7 +133,7 @@ installation directory as input. To complete the installation at the edge site:
 - the cluster configuration for the edge location can be delivered by copying
   the config ISO content onto the node and placing it under `/opt/openshift/cluster-configuration/`.
 - the cluster configuration can also be delivered using an attached ISO, a
-  systemd service running on the host pre-installed Image-based Installer will
+  systemd service running on the host pre-installed and IBI will
   mount that ISO (identified by a known label) and copy the cluster configuration
   to `/opt/openshift/cluster-configuration/`.
 - the cluster configuration data on the disk will be used to configure the
@@ -258,26 +256,25 @@ N/A
 
 ### Configuration ISO version and Seed OCI Image version
 
-The Image-based Installer configuration ISO content version should be compatible
-with the seed OCI image version contained in the Image-based Installer
-installation ISO. The Lifecycle Agent Operator, which is contained in the
-installation ISO, is responsible for ensuring the compatibility of those two at
-the time of the Image-based installation. The configuration version does not
-depend on the OpenShift versions used to generate either one of the Image-based
-installer artifacts (i.e. configuration ISO and installation ISO). In the case
-of incompatibility between the configuration version and the seed OCI image
-version, the Image-based installation will fail with the respective error
-message.
+The IBI configuration ISO content version should be compatible with the seed
+OCI image version contained in the IBI installation ISO. The Lifecycle Agent
+Operator, which is contained in the installation ISO, is responsible for
+ensuring the compatibility of those two at the time of the image-based
+installation. The configuration version does not depend on the OpenShift
+versions used to generate either one of the IBI artifacts (i.e. configuration
+ISO and installation ISO). In the case of incompatibility between the
+configuration version and the seed OCI image version, the image-based
+installation will fail with the respective error message.
 
 ### Installation ISO RHCOS ISO version and Seed OCI Image version
 
-The RHCOS base ISO, which is contained in the Image-based Installer installation
-ISO and derived from the OpenShift release payload, has no strict requirements
-to be tied to the seed OCI image OpenShift version. The features and
-configuration of the underlying tools required to successfully complete an
-Image-based installation, e.g. Podman, cri-o, SELinux, ostree, do not frequently
-change between OpenShift versions. The risk of version skew is small and in such
-case the Image-based installation will fail with the respective error message.
+The RHCOS base ISO, which is contained in the IBI installation ISO and derived
+from the OpenShift release payload, has no strict requirements to be tied to the
+seed OCI image OpenShift version. The features and configuration of the
+underlying tools required to successfully complete an image-based
+installation, e.g. Podman, cri-o, SELinux, ostree, do not frequently change
+between OpenShift versions. The risk of version skew is small and in such case
+the image-based installation will fail with the respective error message.
 
 ## Operational Aspects of API Extensions
 
@@ -300,20 +297,20 @@ Installer service and then carry it over to the disconnected environment.
 However, for the Assisted Installer service this would be a completely new
 scope, as the image-based installation ISO is not generated per cluster, but for
 multiple SNO clusters with similar underlying hardware (due to the requirements
-of the Image-based Installer flow) and its configuration input is different than
-what is currently supported.
+of the IBI flow) and its configuration input is different than what is currently
+supported.
 
 ### Building the installation ISO in the Lifecycle Agent Operator
 
 The Lifecycle Agent Operator could be used to generate and serve the image-based
 installation ISO, as this is the component used to generate the seed OCI
-image, which is the basis of the Image-based Installer flow.
+image, which is the basis of the IBI flow.
 
 However, the following reasons constitute a separate command-line tool a better
 fit:
 
-- the seed OCI image is not only used for the Image-based Installer, but
-  also for the Image-based Upgrade flow, supported by different user personas.
+- the seed OCI image is not only used for IBI, but also for the
+  Image-based Upgrade (IBU) flow, supported by different user personas.
 - the same seed OCI image can be used to generate multiple image-based
   installation ISOs (e.g. with different installation disks).
 - the user persona to generate the image-based installation ISO must have a
@@ -324,9 +321,8 @@ fit:
   OpenShift cluster and the Lifecycle Agent Operator for the installation ISO
   generation.
 - having 2 (installation ISO and configuration ISO) out of 3 (the 3rd is the
-  seed OCI image used by both the Image-based Upgrade and the Image-based
-  Installer) Image-based Installer artifacts generated by the same command-line
-  tool simplifies the user experience.
+  seed OCI image used by both IBU and IBI) IBI artifacts generated by the same
+  command-line tool simplifies the user experience.
 - as a future enhancement we can provide generic seed OCI images, in order to skip
   the seed OCI image generation step altogether.
 
