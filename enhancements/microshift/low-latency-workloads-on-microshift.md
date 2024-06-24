@@ -107,12 +107,12 @@ Workflow consists of two parts:
 1. User deploys the commit / installs the system.
 1. System boots
 1. `microshift-tuned.service` starts (after `tuned.service`, before `microshift.service`):
-   - Saves current kernel args
-   - Applies tuned `microshift-baseline` profile
-   - Verifies expected kernel args
-     - ostree: `rpm-ostree kargs` or checking if new deployment was created[0]
-     - rpm: `grubby`
-   - If the current and expected kernel args are different, reboot the node
+   - Queries tuned for active profile
+   - Compares active profile with requested profile
+   - If profile are the same: do nothing, exit.
+   - If profiles are different:
+     - Apply requested profile
+     - If `reboot_after_apply` is True, then reboot the host
 1. Host boots again, everything for low latency is in place,
    `microshift.service` can continue start up.
 
@@ -163,7 +163,7 @@ kubelet:
 [[customizations.files]]
 path = "/etc/microshift/microshift-tuned.yaml"
 data = """
-auto_reboot_enabled: True
+reboot_after_apply: True
 profile: microshift-baseline
 """
 ```
@@ -204,14 +204,8 @@ RUN systemctl enable microshift-tuned.service
 1. User creates following configs:
    - `/etc/tuned/microshift-baseline-variables.conf`
    - `/etc/microshift/config.yaml` to configure Kubelet
-   - `/etc/microshift/microshift-tuned.yaml` to configure `microshift-tuned.service`
-1. user starts/enables `microshift-tuned.service`:
-   - Saves current kernel args
-   - Applies tuned `microshift-low-latency` profile
-   - Verifies expected kernel args
-     - ostree: `rpm-ostree kargs`
-     - rpm: `grubby`
-   - If the current and expected kernel args are different, reboots the node
+1. User runs `sudo tuned-adm profile microshift-baseline` to enable the profile.
+1. User reboots the host to make changes to kernel arguments active.
 1. Host boots again, everything for low latency is in place,
 1. User starts/enables `microshift.service`
 
@@ -320,8 +314,8 @@ Config file to specify which profile to re-apply each boot and if host should be
 the kargs before and after applying profile are mismatched.
 
 ```yaml
-auto_reboot_enabled: True
 profile: microshift-baseline
+reboot_after_apply: True
 ```
 
 #### CRI-O configuration
@@ -553,6 +547,13 @@ by the users, but this enhancement focuses solely on Low Latency.
 This is least UX friendly way of providing the functionality.
 Responsibility of dev team is to remove common hurdles from user's path so they make less mistakes
 and want to continue using the product.
+
+
+### Applying user requested TuneD profile on every start of the `microshift-tuned.service`
+
+This was preferred option before it was discovered that when profile is applied, tuned will
+first remove all the old kernel args, then append new kernel args resulting in creation of new staged OSTree deployment.
+This happens even if the the same profile is being reapplied.
 
 
 ## Infrastructure Needed [optional]
