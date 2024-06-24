@@ -102,7 +102,7 @@ Workflow consists of two parts:
    - User supplies additional configs using blueprint:
      - `/etc/tuned/microshift-baseline-variables.conf` to configure tuned profile
      - `/etc/microshift/config.yaml` to configure Kubelet
-     - `/etc/microshift/microshift-tuned.json` to configure `microshift-tuned.service`
+     - `/etc/microshift/microshift-tuned.yaml` to configure `microshift-tuned.service`
 1. User builds the blueprint
 1. User deploys the commit / installs the system.
 1. System boots
@@ -161,12 +161,10 @@ kubelet:
 """
 
 [[customizations.files]]
-path = "/etc/microshift/microshift-tuned.json"
+path = "/etc/microshift/microshift-tuned.yaml"
 data = """
-{
-  "auto_reboot_enabled": "true",
-  "profile": "microshift-baseline"
-}
+auto_reboot_enabled: True
+profile: microshift-baseline
 """
 ```
 
@@ -180,7 +178,7 @@ data = """
    - adds following configs
      - `/etc/tuned/microshift-baseline-variables.conf`
      - `/etc/microshift/config.yaml` to configure Kubelet
-     - `/etc/microshift/microshift-tuned.json` to configure `microshift-tuned.service`
+     - `/etc/microshift/microshift-tuned.yaml` to configure `microshift-tuned.service`
 1. User builds the blueprint
 1. User deploys the commit / installs the system.
 1. System boots - rest is just like in OSTree flow
@@ -195,7 +193,7 @@ FROM registry.redhat.io/rhel9/rhel-bootc:9.4
 RUN dnf install kernel-rt microshift-tuned
 COPY microshift-baseline-variables.conf /etc/tuned/microshift-low-latency-variables.conf
 COPY microshift-config.yaml             /etc/microshift/config.yaml
-COPY microshift-tuned.json              /etc/microshift/microshift-tuned.json
+COPY microshift-tuned.yaml              /etc/microshift/microshift-tuned.yaml
 
 RUN systemctl enable microshift-tuned.service
 ```
@@ -204,9 +202,9 @@ RUN systemctl enable microshift-tuned.service
 
 1. User installs `microshift-low-latency` RPM.
 1. User creates following configs:
-   - `/etc/tuned/microshift-low-latency-variables.conf`
+   - `/etc/tuned/microshift-baseline-variables.conf`
    - `/etc/microshift/config.yaml` to configure Kubelet
-   - `/etc/microshift/microshift-tuned.json` to configure `microshift-tuned.service`
+   - `/etc/microshift/microshift-tuned.yaml` to configure `microshift-tuned.service`
 1. user starts/enables `microshift-tuned.service`:
    - Saves current kernel args
    - Applies tuned `microshift-low-latency` profile
@@ -321,11 +319,9 @@ additionalArgs = ""
 Config file to specify which profile to re-apply each boot and if host should be rebooted if
 the kargs before and after applying profile are mismatched.
 
-```json
-{
-  "auto_reboot_enabled": "true",
-  "profile": "microshift-baseline"
-}
+```yaml
+auto_reboot_enabled: True
+profile: microshift-baseline
 ```
 
 #### CRI-O configuration
