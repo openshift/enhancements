@@ -62,13 +62,13 @@ Provide guidance and example artifacts for configuring the system for low latenc
 
 To ease configuration of the system for running low latency workloads on MicroShift following
 parts need to be put in place:
-- `microshift-low-latency` TuneD profile
+- `microshift-baseline` TuneD profile
 - CRI-O configuration + Kubernetes' RuntimeClass
 - Kubelet configuration (CPU, Memory, and Topology Managers and other)
 - `microshift-tuned.service` to activate user selected TuneD profile on boot and reboot the host
   if the kernel args are changed.
 
-New RPM will be created that will contain tuned profile, CRI-O configs, and mentioned systemd daemon.
+New `microshift-low-latency` RPM will be created that will contain tuned profile, CRI-O configs, and mentioned systemd daemon.
 We'll leverage existing know how of Performance and Scalability team expertise and look at
 Node Tuning Operator capabilities.
 
@@ -97,18 +97,18 @@ Workflow consists of two parts:
    - (optional) User configures `[customizations.kernel]` in the blueprint if the values are known
      beforehand. This could prevent from necessary reboot after applying tuned profile.
    - (optional) User adds `kernel-rt` package to the blueprint
-   - User adds `microshift-tuned.rpm` to the blueprint
+   - User adds `microshift-low-latency.rpm` to the blueprint
    - User enables `microshift-tuned.service`
    - User supplies additional configs using blueprint:
-     - /etc/tuned/microshift-low-latency-variables.conf
-     - /etc/microshift/config.yaml to configure Kubelet
-     - /etc/microshift/tuned.json to configure `microshift-tuned.service`
+     - `/etc/tuned/microshift-baseline-variables.conf` to configure tuned profile
+     - `/etc/microshift/config.yaml` to configure Kubelet
+     - `/etc/microshift/microshift-tuned.json` to configure `microshift-tuned.service`
 1. User builds the blueprint
 1. User deploys the commit / installs the system.
 1. System boots
 1. `microshift-tuned.service` starts (after `tuned.service`, before `microshift.service`):
    - Saves current kernel args
-   - Applies tuned `microshift-low-latency` profile
+   - Applies tuned `microshift-baseline` profile
    - Verifies expected kernel args
      - ostree: `rpm-ostree kargs` or checking if new deployment was created[0]
      - rpm: `grubby`
@@ -132,7 +132,7 @@ name = "microshift"
 version = "4.17.*"
 
 [[packages]]
-name = "microshift-tuned"
+name = "microshift-low-latency"
 version = "4.17.*"
 
 [[customizations.services]]
@@ -143,7 +143,7 @@ append = "some already known kernel args"
 name = "KERNEL-rt"
 
 [[customizations.files]]
-path = "/etc/tuned/microshift-low-latency-variables.conf"
+path = "/etc/tuned/microshift-baseline-variables.conf"
 data = """
 isolated_cores=1-2
 hugepagesDefaultSize = 2M
@@ -161,11 +161,11 @@ kubelet:
 """
 
 [[customizations.files]]
-path = "/etc/microshift/tuned.json"
+path = "/etc/microshift/microshift-tuned.json"
 data = """
 {
   "auto_reboot_enabled": "true",
-  "profile": "microshift-low-latency"
+  "profile": "microshift-baseline"
 }
 """
 ```
@@ -175,12 +175,12 @@ data = """
 
 1. User creates Containerfile that:
    - (optional) installs `kernel-rt`
-   - installs `microshift-tuned.rpm`
+   - installs `microshift-low-latency.rpm`
    - enables `microshift-tuned.service`
    - adds following configs
-     - /etc/tuned/microshift-low-latency-variables.conf
-     - /etc/microshift/config.yaml to configure Kubelet
-     - /etc/microshift/tuned.json to configure `microshift-tuned.service`
+     - `/etc/tuned/microshift-baseline-variables.conf`
+     - `/etc/microshift/config.yaml` to configure Kubelet
+     - `/etc/microshift/microshift-tuned.json` to configure `microshift-tuned.service`
 1. User builds the blueprint
 1. User deploys the commit / installs the system.
 1. System boots - rest is just like in OSTree flow
@@ -193,9 +193,9 @@ FROM registry.redhat.io/rhel9/rhel-bootc:9.4
 # ... MicroShift installation ...
 
 RUN dnf install kernel-rt microshift-tuned
-COPY microshift-low-latency-variables.conf /etc/tuned/microshift-low-latency-variables.conf
-COPY microshift-config.yaml                /etc/microshift/config.yaml
-COPY microshift-tuned.json                 /etc/microshift/tuned.json
+COPY microshift-baseline-variables.conf /etc/tuned/microshift-low-latency-variables.conf
+COPY microshift-config.yaml             /etc/microshift/config.yaml
+COPY microshift-tuned.json              /etc/microshift/microshift-tuned.json
 
 RUN systemctl enable microshift-tuned.service
 ```
@@ -204,9 +204,9 @@ RUN systemctl enable microshift-tuned.service
 
 1. User installs `microshift-low-latency` RPM.
 1. User creates following configs:
-   - /etc/tuned/microshift-low-latency-variables.conf
-   - /etc/microshift/config.yaml to configure Kubelet
-   - /etc/microshift/tuned.json to configure `microshift-tuned.service`
+   - `/etc/tuned/microshift-low-latency-variables.conf`
+   - `/etc/microshift/config.yaml` to configure Kubelet
+   - `/etc/microshift/microshift-tuned.json` to configure `microshift-tuned.service`
 1. user starts/enables `microshift-tuned.service`:
    - Saves current kernel args
    - Applies tuned `microshift-low-latency` profile
@@ -261,9 +261,9 @@ Purely MicroShift enhancement.
 
 #### TuneD Profile
 
-New `microshift-low-latency` tuned profile will be created and will include existing `cpu-partitioning` profile.
+New `microshift-baseline` tuned profile will be created and will include existing `cpu-partitioning` profile.
 
-`/etc/tuned/microshift-low-latency-variables.conf` will be used by users to provide custom values for settings such as:
+`/etc/tuned/microshift-baseline-variables.conf` will be used by users to provide custom values for settings such as:
 - isolated CPU set
 - hugepage count (both 2M and 1G)
 - additional kernel arguments
@@ -274,7 +274,7 @@ summary=Optimize for running low latency workloads on MicroShift
 include=cpu-partitioning
 
 [variables]
-include=/etc/tuned/microshift-low-latency-variables.conf
+include=/etc/tuned/microshift-baseline-variables.conf
 
 [bootloader]
 cmdline_microshift=+default_hugepagesz=${hugepagesDefaultSize} hugepagesz=2M hugepages=${hugepages2M} hugepagesz=1G hugepages=${hugepages1G}
@@ -302,7 +302,7 @@ isolated_cores=${f:calc_isolated_cores:1}
 # To disable the kernel load balancing in certain isolated CPUs:
 # no_balance_cores=5-10
 
-### microshift-low-latency variables
+### microshift-baseline variables
 # Default hugepages size
 hugepagesDefaultSize = 2M
 
@@ -324,7 +324,7 @@ the kargs before and after applying profile are mismatched.
 ```json
 {
   "auto_reboot_enabled": "true",
-  "profile": "microshift-low-latency"
+  "profile": "microshift-baseline"
 }
 ```
 
@@ -420,7 +420,7 @@ Also, it is assumed that users are not pushing new image to production devices w
 
 It may happen that some users need to use TuneD plugins that are not handled by the profile we'll create.
 In such case we may investigate if it's something generic enough to include, or we can instruct them
-to create new profile that would include `microshift-low-latency` profile.
+to create new profile that would include `microshift-baseline` profile.
 
 Systemd daemon we'll provide to enable TuneD profile should have a strict requirement before it
 reboots the node, so it doesn't put it into a boot loop.
@@ -610,7 +610,7 @@ Kubelet, CRI-O, Tuned, Sysctls, or MachineConfig.
 - .HardwareTuning
   - Tuned: if !.PerPodPowerManagement, then cmdline =+ `intel_pstate=active`
     > cpu-partitioning sets `intel_pstate=disable`, if user wants different value they can use
-    > `additionalArgs` in `microshift-low-latency-variables.conf` - in case of duplicated parameters,
+    > `additionalArgs` in `microshift-baseline-variables.conf` - in case of duplicated parameters,
     > last one takes precedence
   - .IsolatedCpuFreq (int) - defines a minimum frequency to be set across isolated cpus
     - Tuned: `/sys/devices/system/cpu/cpufreq/policy{{ <<CPU>> }}/scaling_max_freq={{$.IsolatedCpuMaxFreq}}`
