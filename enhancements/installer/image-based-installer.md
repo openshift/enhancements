@@ -254,27 +254,38 @@ N/A
 
 ## Version Skew Strategy
 
-### Configuration ISO version and Seed OCI Image version
+### Configuration ISO and Seed OCI Image
 
-The IBI configuration ISO content version should be compatible with the seed
-OCI image version contained in the IBI installation ISO. The Lifecycle Agent
-Operator, which is contained in the installation ISO, is responsible for
-ensuring the compatibility of those two at the time of the image-based
-installation. The configuration version does not depend on the OpenShift
-versions used to generate either one of the IBI artifacts (i.e. configuration
-ISO and installation ISO). In the case of incompatibility between the
-configuration version and the seed OCI image version, the image-based
+The IBI configuration ISO contains the [cluster configuration file](https://github.com/openshift-kni/lifecycle-agent/blob/release-4.16/api/seedreconfig/seedreconfig.go).
+The component responsible for parsing and using the latter is part of the seed
+OCI image, which in turn is contained in the IBI installation ISO. That
+component validates its compatibility with the cluster configuration file [version](https://github.com/openshift-kni/lifecycle-agent/blob/release-4.16/api/seedreconfig/seedreconfig.go#L6)
+during the image-based installation. In the case of incompatibility between the
+cluster configuration version and the seed OCI image version, the image-based
 installation will fail with the respective error message.
 
-### Installation ISO RHCOS ISO version and Seed OCI Image version
+### RHCOS ISO and Seed OCI Image
 
 The RHCOS base ISO, which is contained in the IBI installation ISO and derived
-from the OpenShift release payload, has no strict requirements to be tied to the
-seed OCI image OpenShift version. The features and configuration of the
-underlying tools required to successfully complete an image-based
-installation, e.g. Podman, cri-o, SELinux, ostree, do not frequently change
-between OpenShift versions. The risk of version skew is small and in such case
-the image-based installation will fail with the respective error message.
+from the OpenShift release image, has currently no strict requirements to be
+tied to the seed OCI image OpenShift version. The features and configuration of
+the underlying tools required to successfully complete an image-based
+installation, e.g. Podman, SELinux, ostree, do not frequently change between
+OpenShift/RHCOS/RHEL versions. In such a case the image-based installation will
+fail with the respective error message. Although, the risk of version skew is
+low, we plan on supporting either creating an installation ISO using the same
+RHCOS base ISO version as the one contained in the seed OCI image OpenShift
+version or documenting explicitly the supported version skew policy in the
+future.
+
+### RHCOS ISO and Ignition
+
+Since the IBI installation ISO is customized via an Ignition file, we need to
+ensure that the RHCOS base ISO version is compatible with the latter. To that
+end, the RHCOS base ISO will be fetched by looking into the [coreos stream metadata](https://github.com/openshift/installer/blob/master/data/data/coreos/rhcos.json)
+embedded in the OpenShift installer binary and it will either be extracted from
+the OpenShift release image, which contains the same version, or be downloaded
+from the mirror URL in the metadata.
 
 ## Operational Aspects of API Extensions
 
