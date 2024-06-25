@@ -65,7 +65,7 @@ their own automation or even manual intervention to boot the host.
 ### User Stories
 
 - As a user in a on-premise disconnected environment with no existing management
-  cluster, I want to deploy a single-node OpenShift cluster using a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
+  cluster, I want to deploy a single-node OpenShift cluster using a [seed OCI image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
   and my own automation for provisioning.
 
 ### Goals
@@ -98,7 +98,7 @@ included in all clusters to be installed with that ISO) and generate an
 image-based installation ISO. The Ignition file will configure the live ISO such
 that once the machine is booted with the latter, it will install RHCOS to the
 installation disk, mount the installation disk, restore the single-node
-OpenShift from the [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
+OpenShift from the [seed OCI image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
 and optionally precache all release container images under the
 `/var/lib/containers` directory.
 
@@ -175,9 +175,9 @@ of compatibility. Building a single ISO to boot multiple hosts makes it
 considerably easier for the user to manage. The additional site configuration
 ISO is necessary for configuring each cluster securely and independently.
 
-The user, before running the Image-based Installer, must generate a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
+The user, before running the Image-based Installer, must generate a [seed OCI image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
 via the [Lifecycle Agent SeedGenerator Custom Resouce (CR)](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md).
-The prerequisites to generating a seed image are the following:
+The prerequisites to generating a seed OCI image are the following:
 
 - an already provisioned single-node OpenShift cluster (seed SNO).
    - The CPU topology of that host must align with the target host(s), i.e. they
