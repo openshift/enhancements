@@ -25,20 +25,26 @@ superseded-by: N/A
 ## Summary
 
 The Image-based Installer (IBI) is an installation method for on-premise
-single-node OpenShift (SNO) clusters, that will use a bootable, installer ISO
-and a configuration ISO running on the hosts that are to become SNO clusters.
-The user will generate each ISO using a command-line tool. The first ISO will
-contain components (such as the [lifecycle-agent](https://github.com/openshift-kni/lifecycle-agent) operator)
-and a [seed image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md).
-The seed image is an [OCI image](https://github.com/opencontainers/image-spec/blob/main/spec.md)
-generated from a SNO system provisioned with the target OpenShift version and is
-installed onto a target SNO as a new [ostree stateroot](https://ostreedev.github.io/ostree/deployment/#stateroot-aka-osname-group-of-deployments-that-share-var).
-The latter includes, among other files, the `/var`, `/etc` (with specific
-exclusions) and `/ostree/repo` directories, which contain the target OpenShift
-version and most of its configuration, amounting approximately to just over 1GB
-in size. The second ISO will contain the site specific configuration data (e.g.
-the cluster name, domain and crypto objects), which need to be set up per cluster
-and are derived mainly from the OpenShift installer [install config](https://github.com/openshift/installer/tree/release-4.15/pkg/asset/installconfig).
+single-node OpenShift (SNO) clusters, that will use the following to run on the
+hosts that are to become SNO clusters:
+
+1. A seed [OCI image](https://github.com/opencontainers/image-spec/blob/main/spec.md)
+   [generated](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md))
+   via the [lifecycle-agent](https://github.com/openshift-kni/lifecycle-agent)
+   operator from a SNO system provisioned with the target OpenShift version.
+2. A bootable installation ISO generated to provision multiple SNO clusters.
+3. A configuration ISO generated to be used in a single SNO cluster installation.
+
+This enhancement focuses on the last two, which the user will generate using a
+command-line tool. The installation ISO will be configured with a [seed OCI image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md).
+The latter is installed onto a SNO as a new [ostree stateroot](https://ostreedev.github.io/ostree/deployment/#stateroot-aka-osname-group-of-deployments-that-share-var)
+and includes, among other files, the `/var`, `/etc` (with specific exclusions)
+and `/ostree/repo` directories, which contain the target OpenShift version and
+most of its configuration, but no site specific configuration and amounts
+approximately to just over 1GB in size. The configuration ISO will contain the
+site specific configuration data (e.g. the cluster name, domain and crypto
+objects), which need to be set up per cluster and are derived mainly from the
+OpenShift installer [install config](https://github.com/openshift/installer/tree/release-4.15/pkg/asset/installconfig).
 
 ## Motivation
 
