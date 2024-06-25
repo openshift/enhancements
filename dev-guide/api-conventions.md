@@ -109,6 +109,18 @@ This means, that any end user fetching the resource from the API can observe tha
 This has the effect of helping our users to understand how they might be able to configure their cluster, without
 having to search for features or review API schemas within the product docs.
 
+##### Pointers to structs
+
+An exception to this rule is when using a pointer to a struct in combination with an API validation that requires the field to be unset.
+
+The JSON tag `omitempty` is not compatible with struct references. Meaning any struct will always, when empty, be marshalled to `{}`. If the struct **must** genuinely be omitted, it must be a pointer.
+
+When used in combination with a validation such as `minProperties` on the parent, or a required field within the struct, the struct itself must be
+omitted to avoid validations being applied to the empty struct and returning
+false positives.
+
+For a concrete example, view this [thread](https://github.com/openshift/enhancements/pull/1411/files#r1212790070).
+
 ### Only one phrasing for each idea
 
 Each idea should have a single possible expression in the API structures, without having multiple ways to say the same thing.
