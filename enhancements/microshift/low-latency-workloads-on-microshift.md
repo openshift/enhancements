@@ -107,12 +107,13 @@ Workflow consists of two parts:
 1. User deploys the commit / installs the system.
 1. System boots
 1. `microshift-tuned.service` starts (after `tuned.service`, before `microshift.service`):
-   - Queries tuned for active profile
    - Compares active profile with requested profile
-   - If profile are the same: do nothing, exit.
-   - If profiles are different:
-     - Apply requested profile
-     - If `reboot_after_apply` is True, then reboot the host
+   - If requested profile is already active:
+     - Compare checksum of requested profile with cached checksum.
+     - If checksums are the same - exit.
+   - Apply requested profile
+   - Calculate checksum of the profile and the variables file and save it
+   - If `reboot_after_apply` is True, then reboot the host
 1. Host boots again, everything for low latency is in place,
    `microshift.service` can continue start up.
 
@@ -204,10 +205,25 @@ RUN systemctl enable microshift-tuned.service
 1. User creates following configs:
    - `/etc/tuned/microshift-baseline-variables.conf`
    - `/etc/microshift/config.yaml` to configure Kubelet
-1. User runs `sudo tuned-adm profile microshift-baseline` to enable the profile.
-1. User reboots the host to make changes to kernel arguments active.
-1. Host boots again, everything for low latency is in place,
-1. User starts/enables `microshift.service`
+1. Development environment
+   - User runs `sudo tuned-adm profile microshift-baseline` to enable the profile.
+   - User reboots the host to make changes to kernel arguments active.
+   - Host boots again, everything for low latency is in place,
+   - User starts/enables `microshift.service`
+1. Production environment
+   - User creates `/etc/microshift/microshift-tuned.yaml` to configure `microshift-tuned.service`
+   - User enables `microshift.service`
+   - User enables and starts `microshift-tuned.service` which:
+     - Compares active profile with requested profile
+     - If requested profile is already active:
+       - Compare checksum of requested profile with cached checksum.
+       - If checksums are the same - exit.
+     - Apply requested profile
+     - Calculate checksum of the profile and the variables file and save it
+     - If `reboot_after_apply` is True, then reboot the host
+   - Host is rebooted: MicroShift starts because it was enabled
+   - Host doesn't need reboot:
+     - User starts `microshift.service`
 
 
 #### Preparing low latency workload
