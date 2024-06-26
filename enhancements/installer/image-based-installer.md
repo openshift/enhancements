@@ -203,8 +203,9 @@ via the [Lifecycle Agent SeedGenerator Custom Resouce (CR)](https://github.com/o
 The prerequisites to generating a seed OCI image are the following:
 
 - an already provisioned single-node OpenShift cluster (seed SNO).
-   - The CPU topology of that host must align with the target host(s), i.e. they
-     should have the same number of cores.
+   - The CPU topology of that host must align with the target host(s), i.e. it
+     should have the same number of cores and the same tuned performance
+     configuration (ie. reserved CPUs).
 - the [Lifecycle Agent](https://github.com/openshift-kni/lifecycle-agent/tree/main)
   operator must be installed on the seed SNO.
 
