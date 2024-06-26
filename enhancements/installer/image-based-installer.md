@@ -157,7 +157,20 @@ installation directory as input. To complete the installation at the edge site:
 
 ### Workflow Description
 
-TBD
+The image-based installation high-level flow consists of the following
+stages, each of which is performed by a different user:
+
+1. Generate a [seed OCI image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
+   via the [Lifecycle Agent operator](https://github.com/openshift-kni/lifecycle-agent)
+   and is set up with the desired OpenShift version. This OCI image will be used
+   for multiple SNO cluster installations.
+2. Generate a bootable installation ISO using the seed OCI image generated in
+   the previous stage. This ISO will be also used for multiple SNO cluster
+   installations.
+3. Generate a configuration ISO, which will contain site specific configuration
+   for a single SNO cluster installation.
+4. Use the aforementioned installation ISO and configuration ISO to boot a host
+   to be provisioned as a SNO cluster.
 
 ### API Extensions
 
