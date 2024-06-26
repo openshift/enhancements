@@ -202,8 +202,11 @@ N/A
 
   Having the functionality provided by the command-line tool in the OpenShift
   installer would be beneficial to the users, as the former refers to the
-  provisioning of single-node OpenShift clusters. It generates the required
-  installation artifacts in the same way as the [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md)
+  provisioning of single-node OpenShift clusters and it should follow the
+  OpenShift versions (i.e. the installation ISO generating tool for a specific
+  OpenShift version should be used to install a seed OCI image with the same
+  OpenShift version). It generates the required installation artifacts in the
+  same way as the [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md)
   `openshift-install agent create image` command.
 
 - Should the command-line tool that generates the configuration ISO be a subcommand
@@ -278,13 +281,10 @@ The RHCOS base ISO, which is contained in the IBI installation ISO and derived
 from the OpenShift release image, has currently no strict requirements to be
 tied to the seed OCI image OpenShift version. The features and configuration of
 the underlying tools required to successfully complete an image-based
-installation, e.g. Podman, SELinux, ostree, do not frequently change between
-OpenShift/RHCOS/RHEL versions. In such a case the image-based installation will
-fail with the respective error message. Although, the risk of version skew is
-low, we plan on supporting either creating an installation ISO using the same
-RHCOS base ISO version as the one contained in the seed OCI image OpenShift
-version or documenting explicitly the supported version skew policy in the
-future.
+installation are Podman, SELinux and ostree. In order to remove the risk of
+version skew between the RHCOS ISO and the seed OCI image, we plan on restricting
+users to generating an installation ISO using the same RHCOS base ISO version as
+the one contained in the seed OCI image OpenShift version.
 
 ### RHCOS ISO and Ignition
 
