@@ -1,5 +1,5 @@
 ---
-title: insights-operator-runtime
+title: insights-runtime-extractor
 authors:
   - "@jmesnil"
 reviewers:
@@ -131,7 +131,9 @@ type RuntimeComponent struct {
 }
 ```
 
-These new data elements are all optional (as they may not be relevant depending on the type of workloads) and are hashed (and truncated) to preserve anonymity (the hashing algorithm is [the same one that is currently used by the gatherer](https://github.com/openshift/insights-operator/blob/30b161f98eb185bb357ac84f8aca58e369d34bcd/pkg/gatherers/workloads/workloads_info.go#L336)).
+These new data elements are all optional (as they may not be relevant depending on the type of workloads) and are hashed (and truncated) to preserve shoulder-surfing anonymity (the hashing algorithm is [the same one that is currently used by the gatherer](https://github.com/openshift/insights-operator/blob/30b161f98eb185bb357ac84f8aca58e369d34bcd/pkg/gatherers/workloads/workloads_info.go#L336)).
+
+Someone with access to the date and who knows what they are looking for ("How many containers are running Go 1.21.3?") will be able to unobscure the data.
 
 ### Runtime Info Description
 
@@ -150,8 +152,8 @@ The additional data are:
     * Value is a hash of the corresponding `VERSION_ID` field: `11.0, 7.9, 17,..` (list not exhaustive)
 * Kind of runtime information - Based on the process name or ELF headers, determine the kind of runtime that is running:
   * __`Kind`__ - Identifier of the kind of runtime
-    * Derived value (set by the insights-operator-runtime component)
-    * Optional (if detected by the insights-operator-runtime component)
+    * Derived value (set by the insights-runtime-extractor component)
+    * Optional (if detected by the insights-runtime-extractor component)
     * Value is a hash of the detected runtime kind: `Java, Golang, Node.js, GraalVM` (exhaustive list based on the capabilities of the container scanner)
   * __`KindVersion`__ - Version of the kind of runtime.
     * Raw value (depending on the value of runtime-kind, the version is read from different files in the container)
@@ -163,15 +165,15 @@ The additional data are:
     * Value is a hash of the detected implementers: `Red Hat, inc., Oracle Corporation, Eclipse Adoptium` (list not exhaustive)
 * Runtime Information - The container scanner can selectively identify runtime libraries/frameworks that run in the containers. They are represented with the `RuntimeComponent` type that has the fields:
   * __`Name`__ - Name of the runtime used to run the application in the container
-    * Derived value (set by the insights-operator-runtime component)
+    * Derived value (set by the insights-runtime-extractor component)
     * Optional - based on the capabilities of the container scanner to detect such runtimes
     * Value is a hash of the detected runtimes `Quarkus, Spring Boot, Apache Tomcat, WildFly, JBoss EAP` (list based on the capabilities of the container scanner, might be enhanced with additional development)
   * __`Version`__ - The version of the runtime used to run the application
     * Raw values (read from files in the containers)
-    * Optional - based on the capabilities of the insights-operator-runtime component to detect the runtime and the availability of its version from files in the container
+    * Optional - based on the capabilities of the insights-runtime-extractor component to detect the runtime and the availability of its version from files in the container
     * Value is a hash of the detected runtime version: `2.10.3.Final, 7.4.7.GA, 2.7.1, 3.6.0.redhat-00005,...` (list not exhaustive)
 
-It is not planned to add more fields to the `workloadRuntimeInfoContainer` type. However, the insights-operator-runtime component can be enhanced to detect more runtimes without impacting the integration in the Insights Operator.
+It is not planned to add more fields to the `workloadRuntimeInfoContainer` type. However, the insights-runtime-extractor component can be enhanced to detect more runtimes without impacting the integration in the Insights Operator.
 
 ##### Examples
 
@@ -191,7 +193,7 @@ It is not planned to add more fields to the `workloadRuntimeInfoContainer` type.
 }
 ```
 
-As the values are derived by the insights-operator-runtime component or correspond to software versions, it is possible to create a dictionary of the hashes and retrieve the unobfuscated values. The example above corresponds to:
+As the values are derived by the insights-runtime-extractor component or correspond to software versions, it is possible to create a dictionary of the hashes and retrieve the unobfuscated values. The example above corresponds to:
 
 ```json
 "runtimeInfo": {
@@ -218,21 +220,21 @@ The Operator iterates over pods in the cluster (up to a limit of 8000) and, for 
 When the operator starts gathering workload information, it would first gather runtime information for all the containers running on the cluster's worker nodes and then
 populate the existing gathered info with these additional runtime information.
 
-![insights-operator-runtime workflow](./insights-operator-runtime-1.png "Insights Operator Runtime Worklow")
+![insights-runtime-extractor workflow](./insights-operator-runtime-1.png "Workflow of the Insights Runtime Extractor")
 
 This is not a user-facing feature. It is achieved within the OpenShift Insights Operator gathering workflow.
 The user is able to examine the gathered data by unarchiving the archive generated by the operator.
 
-The DaemonSet for the insights-operator-runtime is deployed when the Insights Operator is installed in the cluster and is not accessible outside of the `openshift-insights` namespace.
+The DaemonSet for the insights-runtime-extractor is deployed when the Insights Operator is installed in the cluster and is not accessible outside of the `openshift-insights` namespace.
 
-From the operator perspective, the insights-operator-runtime is a black box, and its requirements are:
+From the operator perspective, the insights-runtime-extractor is a black box, and its requirements are:
 
-* Determine the Pod name of each insights-operator-runtime’s Pod (as the insights-operator-runtime is deployed as a DaemonSet, there is a single pod instance on each worker node) and map it to its worker node.
-  * There is no service exposing the insights-operator-runtime and its pods are accessed directly.
-* When the operator starts gathering workload information, execute the  `/scan-containers` executable on each insights-operator-runtime pod. The executable will return a JSON payload in the standard output that represents a tree of `namespace/pod-name/container-id/runtime-info`.
+* Determine the Pod name of each insights-runtime-extractor’s Pod (as the insights-runtime-extractor is deployed as a DaemonSet, there is a single pod instance on each worker node) and map it to its worker node.
+  * There is no service exposing the insights-runtime-extractor and its pods are accessed directly.
+* When the operator starts gathering workload information, execute the  `/scan-containers` executable on each insights-runtime-extractor pod. The executable will return a JSON payload in the standard output that represents a tree of `namespace/pod-name/container-id/runtime-info`.
 * As the operator iterates over the containers in the cluster, check if there is a runtime-info entry for the `namespace/pod-name/container-id` and add it to the existing `workloadContainerShape` (after hashing all the values)
 
-The insights-operator-runtime functionality is provided by an image that must be pullable from the `openshift-insights` namespace and present in the cluster at installation.
+The insights-runtime-extractor functionality is provided by an image that must be pullable from the `openshift-insights` namespace and present in the cluster at installation.
 
 #### Variation and form factor considerations [optional]
 
@@ -263,7 +265,7 @@ when the Insights Operator gathers workload data that will affect the only worke
 
 #### Container Scanner API
 
-The Insights Operator communicates with the insights-operator-runtime pods deployed by its DaemonSet with a simple executable `/scan-containers`:
+The Insights Operator communicates with the insights-runtime-extractor pods deployed by its DaemonSet with a simple executable `/scan-containers`:
 
 * `/scan-containers`
   * Inspect the all the containers running on the worker node. The executable returns a JSON payload with the extracted data organized in a tree of `namespace/pod-name/container-id/runtime-info`:
@@ -304,30 +306,30 @@ The Insights Operator communicates with the insights-operator-runtime pods deplo
 }
 ```
 
-#### insights-operator-runtime Implementation
+#### insights-runtime-extractor Implementation
 
-Inspecting a container is achieved by running on the same worker node that the inspected container and looking at the host process table. The insights-operator-runtime enters the container’s process namespaces to extract meaningful information about the runtime stack.
+Inspecting a container is achieved by running on the same worker node that the inspected container and looking at the host process table. The insights-runtime-extractor enters the container’s process namespaces to extract meaningful information about the runtime stack.
 
 The extraction of data from the running container is achieved by executing “fingerprint” executables in the process `mnt` namespace to find the relevant information by reading specific files (e.g. the `Os` and `OsVersion` values are read from the `/etc/os-release` file if it is present). These fingerprints executables are self-contained executables
 
 This cannot be achieved by a program running in the OpenShift Insights Operator deployment.
-This requires an additional resource for the operator, which is a DaemonSet that would deploy a “insights-operator-runtime” image on all the cluster worker nodes.
+This requires an additional resource for the operator, which is a DaemonSet that would deploy a “insights-runtime-extractor” image on all the cluster worker nodes.
 
-The insights-operator-runtime image requires high privileges to run (access the worker node’s host table, enter process namespaces, etc.) and needs to be configured with a specific security context constraint.
+The insights-runtime-extractor image requires high privileges to run (access the worker node’s host table, enter process namespaces, etc.) and needs to be configured with a specific security context constraint.
 
-![insights-operator-runtime implementation](./insights-operator-runtime-2.png "Insights-operator-runtimer Implementation")
+![insights-runtime-extractor implementation](./insights-operator-runtime-2.png "Implementation of the insights-runtime-extractor")
 
 
-#### insights-operator-runtime Constraints
+#### insights-runtime-extractor Constraints
 
-The insights-operator-runtime is sensitive software that requires high privileges to function.
+The insights-runtime-extractor is sensitive software that requires high privileges to function.
 It needs to run as privileged and access the host table of Worker Nodes to read their `/proc` tables and run as root to be able to enter in process namespaces.
 
-A specific `SecurityContextConstraints` should be added to the `openshift-insights` to deploy the insights-operator-runtime with the required permissions.
+A specific `SecurityContextConstraints` should be added to the `openshift-insights` to deploy the insights-runtime-extractor with the required permissions.
 
 In order to minimize any security risks, its code will be audited for security and its image will be as minimal as possible.
 
-The insights-operator-runtime main program is an executable written in Rust.
+The insights-runtime-extractor main program is an executable written in Rust.
 The fingerprint programs are written in Rust (with some written in Go).
 
 This image would contain a set of commands to:
@@ -336,7 +338,7 @@ This image would contain a set of commands to:
 * Inspect running containers
 * Run “fingerprints”, self-contained executables that run in the container’s process namespaces to identify what the container is running.
 
-Due to the self-contained nature of these commands, the insights-operator-runtime is built from `scratch` (and not from an existing base image).
+Due to the self-contained nature of these commands, the insights-runtime-extractor is built from `scratch` (and not from an existing base image).
 
 ### Risks and Mitigations
 
@@ -346,7 +348,7 @@ Due to the self-contained nature of these commands, the insights-operator-runtim
 
 Introspecting the runtime environment of an arbitrary running container requires certain root-like system capabilities. First, the ability to introspect the host process table (`/proc` on a root pid namespace) is necessary to detect key processes running in all containers. Second, the ability to switch to an arbitrary mount namespace hosting the inspected container’s overlay filesystem is required to be able to examine and identify file contents within the container.  Third, read & write access to the container runtime socket (`/var/run/crio.sock`) is needed to portably correlate container metadata with a discovered process. Finally, for safety reasons described below, the ability to switch to an arbitrary user is required to drop privileges yet retain the necessary permission to analyze file contents.
 
-Any code running under such a high level of privilege is an attractive target for privilege escalation, since it can be leveraged to gain complete access to the node’s underlying operating system, and all hosted data. It is therefore essential to minimize the potential attack surface area and harden all essential code of the insights-operator-runtime component.
+Any code running under such a high level of privilege is an attractive target for privilege escalation, since it can be leveraged to gain complete access to the node’s underlying operating system, and all hosted data. It is therefore essential to minimize the potential attack surface area and harden all essential code of the insights-runtime-extractor component.
 
 ##### Reducing Attack Surface Area through Modular Process Design
 
@@ -364,7 +366,7 @@ As such, three key key rules should be followed in the design and implementation
 
 ##### Defensive Input and Memory Guarding
 
-While keeping the bulk of analysis logic out of the coordinator process reduces risk, there is still the potential for a deprivileged insights-operator-runtime component to influence the coordinator as a corrupted relay through its required communication channel. As an example, a corrupted container could lead a insights-operator-runtime process to write a carefully crafted payload which triggers a buffer overflow and potentially arbitrary code execution in the coordinator. Therefore the coordinator process should take particular care in the handling of all input, assuming potentially hostile data. Additionally, the coordinator process should take advantage of technologies and techniques that mitigate memory corruption defects. As an example, Rust’s memory access model provides strong guarantees of memory safety, and limits state mutability to the smaller set of intended write code paths. Usage of a defensive language like Rust over a traditional memory unsafe language like C would mitigate risk further by providing a second line of defense, as well as preventing a number of common issues frequently leveraged in exploits. 
+While keeping the bulk of analysis logic out of the coordinator process reduces risk, there is still the potential for a deprivileged insights-runtime-extractor component to influence the coordinator as a corrupted relay through its required communication channel. As an example, a corrupted container could lead a insights-runtime-extractor process to write a carefully crafted payload which triggers a buffer overflow and potentially arbitrary code execution in the coordinator. Therefore the coordinator process should take particular care in the handling of all input, assuming potentially hostile data. Additionally, the coordinator process should take advantage of technologies and techniques that mitigate memory corruption defects. As an example, Rust’s memory access model provides strong guarantees of memory safety, and limits state mutability to the smaller set of intended write code paths. Usage of a defensive language like Rust over a traditional memory unsafe language like C would mitigate risk further by providing a second line of defense, as well as preventing a number of common issues frequently leveraged in exploits. 
 
 #### Privacy Risk & Mitigation
 
@@ -387,14 +389,20 @@ Since a fingerprint executable runs under a downgraded privilege model, with a l
 ##### No Impact on Workloads
 
 Inspecting containers must not disrupt the containers that are inspected and have an impact on their quality of service.
-The insights-operator-runtime is running with its own memory and CPU requirements and does not consume resources from the inspected container.
+The insights-runtime-extractor is running with its own memory and CPU requirements and does not consume resources from the inspected container.
+
+###### Risk of misbehaving code execution
+
+A few fingerprints relies on executing process in the user namespace (for example, executing `node --version` to determine the version of Node.js).
+There is a risk of side-effects if this execution does not match the expectation (if the `node` process is not the Node.js executable and its `--version` parameter triggers a `rm -rf /`).
+Executing such code should be done conservatively on well-identified workloads (`python`, `node`, etc.) if they provide a way to get their versions without side-effect.
 
 ##### Measurable Impact on Gathering Time & Payload
 
 The workload data is gathered every 12 hours by the Insights Operator.
 Gathering the runtime data will increase the overall executing time of the workload gatherer. The increase must remain reasonable.
 
-In the existing initial implementation of the insights-operator-runtime, it takes __~200 ms to scan a single container__.
+In the existing initial implementation of the insights-runtime-extractor, it takes __~200 ms to scan a single container__.
 As the inspection is done in parallel on each worker node, its overall duration is impacted by
 the density of the cluster (number of containers per worker node).
 On a fresh OpenShift cluster (with no user workload and only OpenShift own containers), it takes ~15 seconds to scan all containers.
@@ -417,63 +425,65 @@ Exposing these data to the user with a clean user interface (eg within console.r
 
 If implemented, Red Hat will document the addition of this new collection. We  introduce the risk that some number of customers who would have or are sending telemetry data via the Insights operator will choose to turn it off because they are uncomfortable sharing this additional data. 
 
-The insights-operator-runtime needs to be continually updated to detect new workloads  that Red Hat wants information about. 
-This can be done iteratively and will require an updated reference to the insights-operator-runtime image in the Insights Operator to take into account the additional detections.
+The insights-runtime-extractor needs to be continually updated to detect new workloads  that Red Hat wants information about. 
+This can be done iteratively and will require an updated reference to the insights-runtime-extractor image in the Insights Operator to take into account the additional detections.
 
-As the insights-operator-runtime is sanitizing the data extracted from the containers, it is not able to retrieve "raw" data (such as processes' name and command line) which limits its ability to detect emerging trends. The insights-operator-runtime must provide fingerprints executables for workloads that Red Hat wants to monitor.
+As the insights-runtime-extractor is sanitizing the data extracted from the containers, it is not able to retrieve "raw" data (such as processes' name and command line) which limits its ability to detect emerging trends. The insights-runtime-extractor must provide fingerprints executables for workloads that Red Hat wants to monitor.
 
 ## Design Details
 
 ### Open Questions [optional]
 
-#### insights-operator-runtime Image Availability
+#### insights-runtime-extractor Image Availability
 
-The Insights Operator must be able to deploy the insights-operator-runtime from an image that is available by default in the cluster image registry.
+The Insights Operator must be able to deploy the insights-runtime-extractor from an image that is available by default in the cluster image registry.
 
 
 ## Test Plan
 
-### insights-operator-runtime Test Plan
+### insights-runtime-extractor Test Plan
 
-The insights-operator-runtime can be tested in isolation to verify its capability to scan containers and collect the expected runtime info.
+The insights-runtime-extractor can be tested in isolation to verify its capability to scan containers and collect the expected runtime info.
 
-Testing the insights-operator-runtime can be done outside of the Insights Operator test suite.
-It requires integration tests with applications based on the detectable runtime stacks. A end-to-end (e2e) test suite can be developed to verify the capabilities of the insights-operator-runtime.
+Testing the insights-runtime-extractor can be done outside of the Insights Operator test suite.
+It requires integration tests with applications based on the detectable runtime stacks. A end-to-end (e2e) test suite can be developed to verify the capabilities of the insights-runtime-extractor.
 
 ### Insights Operator Test Plan
 
-The integration tests for the Insights Operator will verify that it is able to properly deploy the insights-operator-runtime as a `DaemonSet` and have some smoke tests to validate that the additional runtime info can effectively be collected.
+The integration tests for the Insights Operator will verify that it is able to properly deploy the insights-runtime-extractor as a `DaemonSet` and have some smoke tests to validate that the additional runtime info can effectively be collected.
 
 ## Graduation Criteria
 
-TBD
+The plan is to introduce the first version of this enhancement behind the `TechPreviewNoUpgrade` feature gate.
+It would be an opt-in feature called `InsightsRuntimeExtractor`.
 
 ### Dev Preview -> Tech Preview
 
 This enhancement would be behind the featuregate capabilities of OpenShift
 
-* Add a non-public flag to enable it on a cluster to collect runtime information
-* End User documentation is not required
-* Sufficient test coverage
-* Gather feedback from users
-* Generate reports to validate the consumption of the additional runtime information
+When `TechPreviewNoUpgrade` feature gate is not enabled, the Insights operator works and reports in the same way. 
+When `TechPreviewNoUpgrade` feature is enabled, the extractor's daemon set is deployed and the runtime info will be added to the gathered workload payload.
 
 ### Tech Preview -> GA
 
-*  More testing
+The `TechPreviewNoUpgrade` feature gate requirement is removed. The behavior defined above in the [Dev Preview -> Tech Preview](#dev-preview---tech-preview) section is still true. 
+
+Other than that we would like to:
+
+*  More testing (including end-to-end testing)
 *  Sufficient time for feedback
-*  Available by default
 *  Conduct load testing
 * User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/blob/main/support/remote_health_monitoring/using-insights-operator.adoc) if needed
 
 ### Removing a deprecated feature
 
-Not relevant for this proposal
+The additional field `runtimeInfo` introduced in the `workloadContainerShape` would remain (and be documented as `Deprecated`).
+It would always be empty.
 
 ## Upgrade / Downgrade Strategy
 
-Upgrades/downgrades of the insights-operator-runtime will be handled by updating its image URL in the Insights Operator configuration.
-The release cycle of the insights-operator-runtime is bound to the Insight Operator release cycle.
+Upgrades/downgrades of the insights-runtime-extractor will be handled by updating its image URL in the Insights Operator manifests.
+The release cycle of the insights-runtime-extractor is bound to the Insight Operator release cycle.
 
 This proposal does not bring additional change to the upgrade/downgrade of the OpenShift Insights Operator.
 
@@ -483,7 +493,7 @@ This proposal does not impact the version skew strategy of the Insights Operator
 
 ## Operational Aspects of API Extensions
 
-The insights-operator-runtime runs with its own cgroups and does not impact the inspected containers.
+The insights-runtime-extractor runs with its own cgroups and does not impact the inspected containers.
 
 However, it will consume a certain amount of CPU and memory on each worker node while it is inspecting.
 These consumptions must be bounded to avoid disrupting the user workload.
@@ -518,15 +528,15 @@ The products are mentioned in the section not as alternatives but to give a comp
 
 ## Infrastructure Needed
 
-A new Git repository is needed to contain the code of the insights-operator-runtime image.
+A new Git repository is needed to contain the code of the insights-runtime-extractor image.
 
-As this enhancement is integrated into the OpenShift Insights Operator, this code repository should go in the same organization and live in the  https://github.com/openshift/insights-operator-runtime (that does not exist at the moment).
+As this enhancement is integrated into the OpenShift Insights Operator, this code repository should go in the same organization and live in the  https://github.com/openshift/insights-runtime-extractor (that does not exist at the moment).
 
-The code from this repository will be delivered as a container image pushed to `quay.io/openshift/origin-insights-operator-runtime:latest` (that does not exist at the moment).
+The code from this repository will be delivered as a container image pushed to `quay.io/openshift/origin-insights-runtime-extractor:latest` (that does not exist at the moment).
 This image will be made available by default in cluster installations by being listed as an [image reference](https://github.com/openshift/insights-operator/blob/master/manifests/image-references) on the OpenShift Insights operator.
 
-Continuous Integration for the insights-operator-runtime needs to be in place to test and qualify it before it is updated in the Insights Operator.
+Continuous Integration for the insights-runtime-extractor needs to be in place to test and qualify it before it is updated in the Insights Operator.
 
-The maintenance and development of the insights-operator-runtime is tied and integrated into the OpenShift Insights Operator releases.
+The maintenance and development of the insights-runtime-extractor is tied and integrated into the OpenShift Insights Operator releases.
 
 Issue management must comply to the OpenShift Container Platform issue tracker. It can be under the [existing component for the Insights Operator](https://issues.redhat.com/issues/?jql=project%20%3D%20OCPBUGS%20AND%20component%20%3D%20%22Insights%20Operator%22) as it is ultimately the component that delivers its capabilities.
