@@ -199,8 +199,8 @@ N/A
   of the OpenShift installer, or a standalone binary?
 
   Having the functionality provided by the command-line tool in the OpenShift
-  installer would be a natural addition to the latter, as the former refers to
-  the provisioning of single-node OpenShift clusters. It generates the required
+  installer would be beneficial to the users, as the former refers to the
+  provisioning of single-node OpenShift clusters. It generates the required
   installation artifacts in the same way as the [Agent-based Installer](/enhancements/agent-installer/agent-based-installer.md)
   `openshift-install agent create image` command.
 
