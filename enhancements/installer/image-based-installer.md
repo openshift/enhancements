@@ -29,7 +29,7 @@ single-node OpenShift (SNO) clusters, that will use the following to run on the
 hosts that are to become SNO clusters:
 
 1. A seed [OCI image](https://github.com/opencontainers/image-spec/blob/main/spec.md)
-   [generated](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md))
+   [generated](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
    via the [lifecycle-agent](https://github.com/openshift-kni/lifecycle-agent)
    operator from a SNO system provisioned with the target OpenShift version.
 2. A bootable installation ISO generated to provision multiple SNO clusters.
