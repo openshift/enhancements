@@ -69,6 +69,14 @@ their own automation or even manual intervention to boot the host.
 - As a user in a on-premise disconnected environment with no existing management
   cluster, I want to deploy a single-node OpenShift cluster using a [seed OCI image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md)
   and my own automation for provisioning.
+- As a user in a on-premise disconnected environment with no existing management
+  cluster, I want to generate a bootable installation ISO, common for a large
+  number of hosts that are to be provisioned as single-node OpenShift
+  clusters, using a [seed OCI image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md).
+- As a user in a on-premise disconnected environment with no existing management
+  cluster, I want to generate a configuration ISO for a specific host that is to
+  be provisioned as a single-node OpenShift cluster using an already generated
+  bootable installation ISO containing a [seed OCI image](https://github.com/openshift-kni/lifecycle-agent/blob/main/docs/seed-image-generation.md).
 
 ### Goals
 
