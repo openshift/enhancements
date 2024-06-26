@@ -114,6 +114,7 @@ advertises VPN routes via BGP sessions over said VRFs.
 
 * Support EVPN configuration and integration with a user’s DC fabric, along with MAC-VRFs and IP-VRFs.
 * Support iBGP with route reflectors.
+* Potentially advertising other IP addresses, including the Kubernetes API VIP across the BGP fabric.
 
 ## Proposal
 
@@ -149,7 +150,8 @@ For detailed examples, see the [BGP Configuration](#bgp-configuration) section.
 FRR-K8S API will be used in order to create BGP Peering and configure other BGP related configuration. A
 RouteAdvertisements CRD will be introduced in order to determine which routes should be advertised for specific networks.
 Additionally, the network CRD will be modified in order to expose a new transport field to determine if encapsulation
-should be used for east/west traffic.
+should be used for east/west traffic. Finally, the OpenShift API itself will be modified to expose a setting so that
+Cluster Network Operator (CNO) can deploy FRR and FRR-K8S.
 
 ### Topology Considerations
 
@@ -220,6 +222,23 @@ will happen irrespective of gateway mode, as some features in local gateway mode
 
 #### API Changes
 
+##### OpenShift API
+
+The OpenShift API will be modified in order to allow CNO to deploy FRR and FRR-K8S CRDs:
+
+```golang
+// NetworkSpec is the top-level network configuration object.
+type NetworkSpec struct {
+    // ...
+    // deployFRR specifies whether or not the Free Range Routing (FRR) stack
+    // along with FRR-K8S API should be deployed by the operator.
+    // FRR is required for enabling for using any OpenShift features that require dynamic
+    // routing. This includes BGP support for OVN-Kubernetes and MetalLB.
+    // +optional
+    DeployFRR *bool `json:"deployFRR,omitempty"`
+}
+```
+
 ##### Route Advertisements
 
 When OVN-Kubernetes detects that a FRR-K8S CR has been created for BGP peering, OVN-Kubernetes will by default
@@ -239,8 +258,6 @@ spec:
     advertisements:
       podNetwork: true
       egressIP: true
-      clusterIPs: true
-      externalIPs: true
 ```      
 
 In the above example, an optional networkSelector may also be optionally supplied which will match namespaces/networks.
@@ -252,11 +269,10 @@ A networkSelector may select more than one network, including user-defined netwo
 will be checked by OVN-Kubernetes to determine if there is any overlap of the IP subnets. If so, an error status will be
 reported to the CRD and no BGP configuration will be done by OVN-Kubernetes.
 
-The CRD will support enabling advertisements for pod subnet, egress IPs, as well as cluster IPs and external IPs for
-services on the selected networks. Note, MetalLB only handles advertising LoadBalancer IP so there is no conflict of
-responsibilities here. When the pod network is set to be advertised, there is no longer a need to SNAT pod IPs for this
-network to the node IP. Therefore when pod network advertisements are enabled, the traffic from these pods will no longer
-be SNAT'ed on egress.
+The CRD will support enabling advertisements for pod subnet and egress IPs. Note, MetalLB still handles advertising
+LoadBalancer IP so there is no conflict of responsibilities here. When the pod network is set to be advertised, there is
+no longer a need to SNAT pod IPs for this network to the node IP. Therefore, when pod network advertisements are enabled,
+the traffic from these pods will no longer be SNAT'ed on egress.
 
 The "targetVRF" key is used to determine which VRF the routes should be advertised in. The default value is "auto", in
 which case OVN-Kubernetes will advertise routes in the VRF that corresponds to the selected network. Alternatively, the
@@ -542,9 +558,7 @@ eliminates the need for nodes to be on the same layer 2 segment, as we no longer
 
 ##### Services
 
-LoadBalancer and External IP are supported by MetalLB. This feature will handle advertising cluster IPs for services.
-Note, the usefulness of advertising ClusterIP may be limited as it will be advertised by multiple nodes (similar to
-anycast) and may not work well with stateful connections.
+MetalLB will still be used in order to advertise services across the BGP fabric.
 
 ##### Egress Service
 
@@ -637,12 +651,10 @@ applicable) via a new OpenShift API. MetalLB Operator will be modified so that i
 directly write to the API to signal that CNO should deploy FRR-K8S. CNO will deploy FRR-K8s in a separate namespace, and
 MetalLB RBAC will be updated so that it may write and have access to resources in the FRR-K8S namespace.
 
-##### Bare Metal
+This deployment methodology will solve the following use cases:
 
-Bare Metal deployments expose a virtual IP (VIP) using keepalived. This VIP is moved between control-plane nodes, and
-the implementation assumes the master nodes are on the same layer 2 network. With BGP integration, this may no longer be
-the case. Therefore, we may need changes to keepalived scripts in order to add FRR configuration for routes to the VIP
-when the VIP goes up/down on a node, so that the VIP is announced correctly over the BGP network.
+1. The user needs BGP from node start up to serve pods by the time OVN-Kubernetes and pods are brought up by kubelet.
+2. The user does not care about BGP in OVN-Kubernetes, and simply wants to use MetalLB as a day 2 operation.
 
 ## Test Plan
 
