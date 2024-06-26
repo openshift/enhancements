@@ -95,7 +95,7 @@ A higher workload density is achieved by combining two mechanisms
 
 1. Under-request memory resources for virtual machines by having the VM
    pods (`launcher`) `requests.memory` being smaller than the VMs `guest.memory`
-   according to a configured ratio. This is owned by
+   according to a configured ratio[^1]. This is owned by
    [KubeVirt and present today](https://kubevirt.io/user-guide/operations/node_overcommit/).
 2. Compensate for the memory over-committment by using SWAP in order
    to extend the virtual memory. This is owned by the platform and not
@@ -112,12 +112,15 @@ We expect to mitigate the following situations
 
 #### Scope
 
-Memory over-committment, and as such swapping, will be limited to
+Memory over-committment, and as such swapping, will be initially limited to
 virtual machines running in the burstable QoS class.
 Virtual machines in the guaranteed QoS classes are not getting over
 committed due to alignment with upstream Kubernetes. Virtual machines
 will never be in the best-effort QoS because memory requests are
 always set.
+
+Later SWAP will be extended to burstable pods - by WASP as well as by
+Kube swap.
 
 #### Timeline & Phases
 
@@ -206,7 +209,7 @@ At it's core the [wasp agent] is a `DaemonSet` delivering an [OCI Hook]
 which is used to turn on swap for selected workloads.
 
 Overall the agent is intended to align - and specifically not
-conflict - with the upstream Kubernetes SWAP design and bhevior in
+conflict - with the upstream Kubernetes SWAP design and behavior in
 order to simplify a transition.
 
 ##### Design
@@ -215,8 +218,16 @@ The design is driven by the following guiding principles:
 
 * System services are more important than workloads. Because workload
   health depends on the health of system services.
-* Try to stay aligned to upstream Kubernetes swap behaviours in order
+* Try to stay aligned to upstream Kubernetes swap behavior in order
   to ease the transition to Kubernetes SWAP once available
+
+###### Enabling swap
+
+An OCI Hook to enable swap by setting the containers cgroup
+`memory.swap.max=max`.
+
+* **Technology Preview** - Limited to virt launcher pods
+* **General Availability** - Limited to burstable QoS class pods
 
 ###### Provisioning swap
 
@@ -228,14 +239,6 @@ is to use `MachineConfig` objects to provision swap on nodes.
 
 The `MachineConfig` object would include the necessary scripts
 in order to provision swap on a disk, partition, or in a file.
-
-###### Enabling swap
-
-An OCI Hook to enable swap by setting the containers cgroup
-`memory.swap.max=max`.
-
-* **Technology Preview** - Limited to virt launcher pods
-* **General Availability** - Limited to burstable QoS class pods
 
 ###### Node service protection
 
@@ -287,9 +290,9 @@ for pod using the two well-known [critical `priorityClass`es]:
 Dealing with memory pressure on a node is differentiating the TP fom GA.
 
 * **Technology Preview** - `memory.high` is set on the `kubepods.slice`
-  in order to force the node to swap, once the memory is filling up.
-  Only once swap is full, the system will cross `memory.high` and trigger
-  soft evictions.
+  in order to force the node to swap, once the `kubepods.slice` memory is
+  filling up. Only once swap is full, the system will cross `memory.high`
+  and trigger soft evictions.
 
   * Pro
     * Simple to achieve.
@@ -371,7 +374,8 @@ None.
 
 ## Test Plan
 
-TBD
+Add e2e tests for the WASP agent repository for regression testing against
+OpenShift.
 
 ## Graduation Criteria
 
@@ -439,7 +443,9 @@ Downgrade expectations:
     CVO does not currently delete resources that no longer exist in
     the target version.
 
-TBD
+* On the cgroup level WASP agent supports only cgroups v2
+* On OpenShift level no specific action needed, since all of the APIs used
+  by the WASP agent deliverables are stable (DaemonSet, OCI Hook, MachineConfig, KubeletConfig)
 
 ## Version Skew Strategy
 
@@ -529,3 +535,7 @@ TBD
 [critical `priorityClass`es]: https://kubernetes.io/docs/tasks/administer-cluster/guaranteed-scheduling-critical-addon-pods/
 [KSM]: https://issues.redhat.com/browse/CNV-23960
 [FPR]: https://issues.redhat.com/browse/CNV-25921
+
+[^1]: Because `requests.memory == guest.memory + additional_infra_overhead` in
+      some cases it can happen that the pod's memory is not smaller than the VM's
+      memory.
