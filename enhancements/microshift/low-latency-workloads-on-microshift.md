@@ -572,6 +572,14 @@ first remove all the old kernel args, then append new kernel args resulting in c
 This happens even if the the same profile is being reapplied.
 
 
+### Using Kubelet's drop-in config directory feature
+
+This is alternative to "MicroShift config -> Kubelet config" passthrough.
+Using drop-ins would mean there is less implementation on MicroShift side, but it also gives away
+full power of Kubelet config. With passthrough we can later introduce some validation or
+limit configuration options to keep the exposed configuration surface minimal.
+
+
 ## Infrastructure Needed [optional]
 
 Nothing.
