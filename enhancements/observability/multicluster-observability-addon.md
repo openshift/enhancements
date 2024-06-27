@@ -49,11 +49,11 @@ superseded-by:
 
 Multi-Cluster Observability has been an integrated concept in Red Hat Advanced Cluster Management (RHACM) since its inception but only incorporates one of the core signals, namely metrics, to manage fleets of OpenShift Container Platform (OCP) based clusters (See [RHACM Multicluster-Observability-Operator (MCO)](rhacm-multi-cluster-observability)). The underlying architecture of RHACM observability consists of a set of observability components to collect a dedicated set of OCP metrics, visualizing them and alerting on fleet-relevant events.
 
-This enhancement proposal seeks to bring a unified approach to collect and forward logs and traces from a fleet of OCP clusters based on the RHACM addon facility (See Open Cluster Management (OCM) [addon framework](ocm-addon-framework)) by enabling these signals to land on third-party managed storage solutions (e.g. AWS Cloudwatch, Google Cloud Logging, Splunk). The proposed addon is an optional RHACM component that is installed and configured by MCO. It provides a unified installation approach of required dependencies (e.g. operator subscriptions) and resources (custom resources, configuration, secrets) on the managed clusters to collect and forward logs and traces. The addon's name is MultiCluster-Observability-Addon (short MCOA).
+This enhancement proposal seeks to bring an unified approach to collect and forward logs and traces from a fleet of OCP clusters based on the RHACM addon facility (See Open Cluster Management (OCM) [addon framework](ocm-addon-framework)) by enabling these signals to land on third-party managed storage solutions (e.g. AWS Cloudwatch, Google Cloud Logging, Splunk). The proposed addon is an optional RHACM component that is installed and configured by MCO. It provides a unified installation approach of the required dependencies (e.g. operator subscriptions) and resources (custom resources, configuration, secrets) on the managed clusters to collect and forward logs and traces. The addon's name is MultiCluster-Observability-Addon (short MCOA).
 
 ## Motivation
 
-The main goal here is to simplify and unify the installation of logs and traces collection and forwarding on a RHACM managed fleet of OCP clusters. The core function of the addon is to install required operators (i.e. [Red Hat OpenShift Logging](ocp-cluster-logging-operator) and [Red Hat Build of OpenTelemetry](opentelemetry-operator)), configure required custom
+The main goal here is to simplify and unify the installation of logs and traces collection and forwarding on a RHACM managed fleet of OCP clusters. The core function of the addon is to install required operators (i.e. [Red Hat OpenShift Logging](ocp-cluster-logging-operator) and/or [Red Hat Build of OpenTelemetry](opentelemetry-operator)), configure the respective custom
 resources (i.e. `ClusterLogForwarder`, `OpenTelemetryCollector`) and reconcile per-cluster-related authentication resources (i.e. `Secrets`). This enables fleet-wide control of logs and traces collection and forwarding.
 
 ### User Stories
@@ -85,21 +85,19 @@ The workflow described in this proposal enables fleet-wide collection and forwar
 2. The fleet administrator creates a `ClusterLogForwarder` stanza in the `open-cluster-management-observability` namespace that describes the list of log forwarding outputs. This stanza will eventually be deployed on all the managed clusters.
 3. The fleet administrator creates a `OpenTelemetryCollector` stanza in the `open-cluster-management-observability` namespace that describes the list of trace receivers, processors, connectors and exporters. This stanza will eventually be deployed on all the managed clusters.
 4. For each managed cluster the **fleet administrator** or the **addon-manager** component provide on the managed cluster namespace additional configuration resources:
-  1. The **fleet administrator** creates for each `Secret` referenced in the `ClusterLogForwarder` and/or `OpenTelemetryCollector` stanzas a `Secret` resource in each managed cluster namespace on the hub. (**Optional:** The **fleet administrator** can also create shared Secret's in `open-cluster-management-observability` namespace to be shared across all managed clusters).
-  2. The **addon-manager** component will created based on the `ClusterManagementAddon` placements a `ManagedClusterAddon` resource. The `ManagedClusterAddon` specifies in turn the resources (CLF + OTELCol) that should be used by MCOA.
-  3. For both CLF and OTELCol everytime a `Secret` is referenced, MCOA will look for a `Secret` with the refenced name in the namespace of the managed cluster. If no secret is found it will instead look for it in the namespace of the resource (CLF/OTELCol).
-5. The MCOA will then render a `ManifestWorks` resource per cluster that consists of a rendered manifest list (i.e. `Subscription`, `ClusterLogForwarder`, `OpenTelemetryCollector`, `Secret`...).
+  1. The **addon-manager** component will create based on the `ClusterManagementAddon` placements a `ManagedClusterAddon` resource. The `ManagedClusterAddon` specifies in the config stanzas (`ClusterLogForwarder` and/or `OpenTelemetryCollector`) that should be used by MCOA.
+  2. The **fleet administrator** creates a `Secret` on the managed cluster namespace for each secret referenced on the config stanzas (`ClusterLogForwarder` and/or `OpenTelemetryCollector`). (**Optional:** The **fleet administrator** can also create shared Secret's in `open-cluster-management-observability` namespace to be shared across all managed clusters).
+  3. For both CLF and OTELCol everytime a `Secret` is referenced, MCOA will look for a `Secret` with the refenced name in the namespace of the managed cluster. If no secret is found, it will instead look for it in the namespace of the config stanza (CLF/OTELCol).
+5. MCOA will then render a `ManifestWorks` resource per managed cluster that consists of a rendered manifest list (i.e. `Subscription`, `ClusterLogForwarder`, `OpenTelemetryCollector`, `Secret`...).
 6. The WorkAgentController on each managed cluster will apply each individual manifest from the `ManifestWorks` locally.
 
 #### Variation and form factor considerations [optional]
 
-
-The workflow above describes the default configuration for MCOA, however, it will also support deploying for both logs and traces multiple collectors. This is described in more detail in the [ACM-DDR-025: Multi-cluster Observability Addon](https://docs.google.com/document/d/1Yha0IvwmTOzc3HMqG0gj9edRjlPIzIAwvotIFqCBJ9E/edit#heading=h.pcdmckal8d53) document.
+The workflow above describes the default configuration for MCOA, however, it will also support deploying for both logs and traces multiple collectors. This is described in more detail in the [ACM-DDR-025: Multi-cluster Observability Addon](mcoa-adr) document.
 
 ### API Extensions
 
-
-With the introduction of MCOA we will extend the `MultiClusterObservability` resource with a new set of fields under an optional field called `capabilities`. The capabilities is the user's expression on which of the supported observability data collection and storage methods is desired to be used across the fleet. More detail in [ACM-DDR-025: Multi-cluster Observability Addon](https://docs.google.com/document/d/1Yha0IvwmTOzc3HMqG0gj9edRjlPIzIAwvotIFqCBJ9E/edit#heading=h.pcdmckal8d53) document.
+With the introduction of MCOA we will extend the `MultiClusterObservability` resource with a new set of fields under an optional field called `capabilities`. The capabilities is the user's expression on which of the supported observability data collection and storage methods is desired to be used across the fleet. More detail in [ACM-DDR-025: Multi-cluster Observability Addon](mcoa-adr) document.
 
 ### Implementation Details/Notes/Constraints [optional]
 
@@ -110,8 +108,8 @@ The MCOA implementation sources three different set of manifests accompanying th
 
 #### General configuration and fleet-wide stanzas
 
-To support the above workflow MCOA requires along the addon registration and installation five key resources:
-- The `MultiClusterObservability` CR where the user should enable the `capabilites` that he desires. 
+To support the above workflow MCOA requires along the addon registration and installation five key resources, of these 5 only the last 2 are required to be created by the user:
+- The `MultiClusterObservability` CR where the user should enable the `capabilites` that he desires.
 - A `ClusterManagementAddOn` resource that describes not only which resources can be used to configure the addon but also the install strategy that the addon-manager should follow.
 - An `AddonDeploymentConfig` resource that configures MCOA, this resource is not directly configured by users but is instead configured by MCO using the new `capabilities` field.
 - A `ClusterLogForwarder` resource that describes the log outputs per log type to be used for log collection and forwarding on all managed clusters.
@@ -311,7 +309,6 @@ stringData:
   'ca-bundle.crt': "Certificate Authority certificate"
 ```
 
-
 In turn the addon will compile a `ManifestWork` for the managed cluster `spoke` as follows and pass it over it's WorkAgentController:
 
 ```yaml
@@ -354,7 +351,7 @@ spec:
     - apiVersion: logging.openshift.io/v1
       kind: ClusterLogForwarder
       metadata:
-        name: instance
+        name: mcoa-instance
         namespace: openshift-logging
       spec:
         outputs:
@@ -560,7 +557,7 @@ N/A
 
 The [addon-framework](ocm-addon-framework) is still lacking some features that will fully enable the behaviours described in this proposal namelly: 
 - [x] Support for reconcile on changes to resources not directly referenced in the `ManagedClusterAddon`. Currently we have a workaround with a side controller that watches for these resources.
-- [ ] Support for multiple resources of the same kind in the `ManagedClusterAddOn` resource (Jira issues [ACM-11509](https://issues.redhat.com/browse/ACM-11509)). MCOA needs this otherwise we will not be able to support deploying multiple instances for the same resource.
+- [ ] Support for multiple resources of the same kind in the `ManagedClusterAddOn` resource (Jira issues [ACM-11509](https://issues.redhat.com/browse/ACM-11509)). MCOA needs this otherwise we will not be able to support deploying multiple instances for the same collector.
 
 ### Test Plan
 
@@ -572,9 +569,9 @@ TBD
 
 #### Dev Preview
 
-- [ ] Installation of the ClusterLogForwarder and OpenTelemetryCollector CRs.
-- [ ] Status reporting
-- [ ] Add upstream support for addon-framework to handle multiple same-GVK config resources
+- [ ] [Installation of the ClusterLogForwarder and OpenTelemetryCollector CRs.](https://issues.redhat.com/browse/LOG-5627)
+- [ ] [Status reporting](https://issues.redhat.com/browse/LOG-4997)
+- [ ] [Add upstream support for addon-framework to handle multiple same-GVK config resources](https://issues.redhat.com/browse/LOG-5626)
 - [x] [Add support for configuration through capabilities](https://github.com/rhobs/multicluster-observability-addon/pull/42)
 - [x] [Support for all the authentication methods supported](https://github.com/rhobs/multicluster-observability-addon/pull/42) by ClusterLogForwarder and Red Hat Build of OpenTelemetry (i.e. static auth, mTLS auth, etc).
 - [x] [Support for Per-ClusterSet ClusterLogForwarder and OpenTelemetryCollector.](https://github.com/rhobs/multicluster-observability-addon/pull/48) 
@@ -609,6 +606,7 @@ TBD
 - Missing Stanza: if a ManagedClusterAddon references a stanza that doesn't exist this will block the reconciliation loop as the addon will not be able to generate a `ManifestWorks` 
 - Missing Secrets: if an output uses a secret provided by the user if that secret is missing then this will block the reconciliation loop;
 - Missing Placement: if a placement is specifed in the `ClusterManagementAddon` but doesn't exist this will block the installation of the addon on the fleet;
+- Incorrect order of placements: the order in which placements appear in `ClusterManagementAddon` is important as it will determine for a given cluster that belongs to multiple placements which one will be applied to it.
 
 #### Support Procedures
 
@@ -638,15 +636,12 @@ The spike for this alternative can be found here: https://gitlab.cee.redhat.com/
 
 For the untrained eye the RHACM MCO operator looks like the natural place to add multi-cluster logging capabilities. It has a hybrid architecture being a Kubernetes operator (i.e managing the MultiClusterObservability CRD) and an addon (i.e. provisions observability agents/policies to clustersets). However, MCO nowadays has to many responsabilities which not only makes it hard to maintain but also hard to extend to further signals without a tremendous engineering effort.
 
-
 ## Infrastructure Needed [optional]
 
 None
 
 [ocm-addon-framework]:https://github.com/open-cluster-management-io/addon-framework
 [ocp-cluster-logging-operator]:https://github.com/openshift/cluster-logging-operator
-[ocp-clusterlogforwarder-outputsecretspec]:https://github.com/openshift/cluster-logging-operator/blob/627b0c7f8c993f89250756d9601d1a632b024c94/apis/logging/v1/cluster_log_forwarder_types.go#L226-L265
-[ocp-clusterlogforward-outputtypespec]:https://github.com/openshift/cluster-logging-operator/blob/627b0c7f8c993f89250756d9601d1a632b024c94/apis/logging/v1/output_types.go#L21-L40
-[opentelemetry-collector-auth]:https://opentelemetry.io/docs/collector/configuration/#authentication
 [opentelemetry-operator]:https://github.com/open-telemetry/opentelemetry-operator
 [rhacm-multi-cluster-observability]:https://github.com/stolostron/multicluster-observability-operator
+[mcoa-adr]:https://docs.google.com/document/d/1Yha0IvwmTOzc3HMqG0gj9edRjlPIzIAwvotIFqCBJ9E

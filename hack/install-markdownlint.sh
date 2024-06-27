@@ -11,8 +11,8 @@ if grep -q 'Red Hat Enterprise Linux' /etc/redhat-release; then
     yum -y install nodejs
 else
     # Fedora has a module we can use
-    dnf -y install nodejs
     dnf -y module enable nodejs:16
+    dnf -y install nodejs
 fi
 
 npm install -g markdownlint@v0.25.1 markdownlint-cli2@v0.4.0
