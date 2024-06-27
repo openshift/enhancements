@@ -30,50 +30,47 @@ see-also:
 
 ## Summary
 
-Enable the automated backups of etcd from day 1 without provided config from the user.
+To enable automated etcd backups of an Openshift cluster from day one after installation, 
+without provided configuration from the user.
 
 ## Motivation
-The [current automated backup of etcd](https://docs.openshift.com/container-platform/4.15/backup_and_restore/control_plane_backup_and_restore/backing-up-etcd.html#creating-automated-etcd-backups_backup-etcd) of an OpenShift
+
+The current [automated backup of etcd](https://docs.openshift.com/container-platform/4.15/backup_and_restore/control_plane_backup_and_restore/backing-up-etcd.html#creating-automated-etcd-backups_backup-etcd) of an OpenShift
 cluster relies on user provided configurations. 
 
-To improve the customers experience, this work proposes taking etcd backup using default config from day one, without additional configuration from the user.
-
+To improve the user's experience, this work proposes taking etcd backup using default config from day one, without additional configuration from the user.
 
 ### Goals
-- Backups should be taken without configuration after cluster installation from day 1.
-- Backups are saved to a default PersistentVolume, that could be overridden by user.
-- Backups are taken according to a default schedule, that could be overridden by user.
-- Backups are taken according to a default retention policy, that could be overridden by user.
 
+* Backups should be taken without configuration after cluster installation from day 1.
+* Backups are saved to a default location on each master node's disk using `hostPath` volume.
+* Backups are taken according to a default schedule.
+* Backups are being maintained according to a default retention policy.
 
 ### Non-Goals
-- Save cluster backups to cloud storage e.g S3.
+
+* Save cluster backups to remote cloud storage (e.g. S3 Bucket).
   - This could be a future enhancement or extension to the API.
-- Automate cluster restoration.
-- Provide automated backups for non-self hosted architectures like Hypershift.
-
-### User Stories
-- As a cluster administrator I want cluster backup to be taken without configuration.
-- As a cluster administrator I want to schedule recurring cluster backups so that I have a recent cluster state to recover from in the event of quorum loss (i.e. losing a majority of control-plane nodes).
-- As a cluster administrator I want to have failure to take cluster backups for more than a configurable period to be reported to me via critical alerts.
-
+  - Having backups in an independent storage from OCP cluster is crucial for Disaster Recovery scenarios.
+* Automate cluster restoration.
+* Provide automated backups for non-self hosted architectures like Hypershift.
 
 ## Proposal
-- Provide a default etcd backup configuration as a `EtcdBackup` CR.
-- Provide a default reliable storage mechanism to save the backup data on.
-- Provide a separate feature gate for the automated backup with default config (under discussion).
 
+To enable automated etcd backups of an Openshift cluster from Day 1, without user supplied configuration, this work proposes a default etcd backup option.
 
-### Workflow Description
-- The user will enable the AutomatedBackupNoConfig feature gate (under discussion).
-- A `EtcdBackup` CR is being installed on the cluster.
-- In a default config scenario, the use should not add any config.
-- A PVC and PV are being created to save the backup data reliably.
+The default backup option utilizes a sidecar container within each etcd pod. The container is responsible for maintaining backups within a `hostPath` volume on each master node's disk.
 
+This approach guarantees have backups across all master nodes which is vital in disaster recovery scenarios.
+
+### User Stories
+
+* As a cluster administrator, I would like OCP cluster backup to be taken without configuration from day one.
+* As a cluster administrator, I would like to schedule recurring OCP cluster backups so that I have a recent cluster state to recover from in the event of quorum loss (i.e. losing a majority of control-plane nodes).
 
 ### API Extensions
-- No API changes are required. 
-- See https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups.md#api-extensions
+
+No [API](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups.md#api-extensions) changes are required.
 
 ### Topology Considerations
 TBD
@@ -83,106 +80,85 @@ TBD
 TBD
 #### Single-node Deployments or MicroShift
 TBD
-
-### Implementation Details/Notes/Constraints [optional]
-- Need to agree on a default schedule.
-  - We can add default value annotation to current `Etcdbackup Spec`.
-- Need to agree on a default retention policy.
-  - We can add default value annotation to current `Etcdbackup Spec`.
-
-Example of default config
-
-```Go
-type EtcdBackupSpec struct {
-
-        // +kubebuilder:default:=0 */2 * * *
-	Schedule string `json:"schedule"`
-
-        // +kubebuilder:default:=daily
-	TimeZone string `json:"timeZone"`
-
-        // +kubebuilder:default:=RetentionNumber
-	RetentionPolicy RetentionPolicy `json:"retentionPolicy"`
-
-	// This field will be populated programmatically according to the infrastructure type.
-	// see discussion below
-	// +optional
-	PVCName string `json:"pvcName"`
-}
-```
-
-- For `PVCName`, we can populate it programmatically according to the underlying infra. See [Design Details](#design-details).
-
-### Risks and Mitigations
-
-When the backups are configured to be saved to a `local` type PV, the backups are all saved to a single master node where the PV is provisioned on the local disk.
-
-In the event of the node becoming inaccessible or unscheduled, the recurring backups would not be scheduled. The periodic backup config would have to be recreated or updated with a different PVC that allows for a new PV to be provisioned on a node that is healthy.
-
-If we were to use `localVolume`, we need to find a solution for balancing the backups across the master nodes, some ideas could be
-
-- create a PV for each master node using `localVolume` and the backup controller from CEO should take care of balancing the backups across the `available` and `healthy` volumes.
-- the controller should keep the most recent backup on a healthy node available for restoration.
-- the controller should skip an unhealthy master node from taking a backup
-
-
-### Drawbacks
+### Workflow Description
+TBD
 
 ## Design Details
 
-- Add default values to current `Etcdbackup Spec` using annotation.
-- Maintain the reconciliation logic with Cluster-etcd-operator.
+A sidecar container is being deployed within each etcd pod in Openshift cluster in order to take backups according to default configuration using `config.openshift.io/v1alpha1 Backup`.
 
-### Initial Storage Design proposal
-- Several options exist for the default `PVCName`.
-  - Relying on `dynamic provisioning` is sufficient, however not an option for `SNO` or `BM` clusters.
-  - Utilising `local storage operator` is a proper solution, however installing a whole operator is too much overhead.
-  - The most viable solution to cover all OCP variants is to use `local volume`.
-    Please find below this solution's Pros & Cons.
-    - Pros
-      - The PV will be bound to a specific master node.
-      - The Backup Pod will be scheduled always to this master node since it uses a PVC bound to this PV.
-      - Using an SSD is possible, since local volume allows mounting it into a Pod.
-      - Having the Backup Pod scheduling deterministic is vital, since the retention policy needs the recent backup in place to work.
-    - Cons
-      - If the master node where the PV is mounted became unhealthy/unavailable/unreachable etc.
-      - The backups are no longer accessible, also taking new backups is no longer possible.
-      - Ideally, the backups should be taken on a round-robin fashion on each master node to avoid overwhelming a specific etcd member more than others.
-      - Also spreading the backups among all etcd cluster members provide guarantees for disaster recovery in case of losing two members at the same time.
-      - However, using the `local volume` option over all the master nodes will be complicated and error prune.
-      
+To distinguish default _no-config_ backups from user configured counterparts, a `config.openshift.io/v1alpha1 Backup` CR's name must be `default`.
 
-### Final Storage Design proposal
-Best `Storage` solution is using `hybrid` approach, based on the OCP variant infrastructure.
+Initially, the sidecar container within etcd pods is not running (i.e. disabled). However, creating a `Backup` CR with `name=default` enables the container.
 
-Based on the `infrastructure` resource type, we can create the storage programmatically according to the underlying infra.
+Once enabled, the backups are being taken on each master node according to the provided `schedule` within the CR. Moreover, the backups are being maintained according to the supplied retention policy. 
 
-#### Cloud based OCP
+The default CR's configuration could be overridden by the user according to their preference.
 
-    Pros
-    - Utilising `Dynamic provisioning` is best option on cloud based OCP.
-    - Using the default `StorageClass` on the `PVC` manifest will provision a `PV`.
-    - The backups on the `PV` will be always available even if the master node is unavailable.
-    
-    Cons
-    -  There is no possibility to spread the backups over all the master nodes, since the `PV` is accessible within one and only one availability zone. 
+The backups are being stored within a `hostPath` volume. The volume is a directory within each master node's file system.
 
-
-#### Single-node and Bare metal OCP
-    Only possible option is to use `local volume`. 
+Before deciding upon this approach, several approaches that have been investigated. See [Alternatives](#Alternatives).
 
 ### Open Questions
-How to use remote storage for backups on `BM` and `SNO`. 
+
+Currently, the no-config backup sidecar container exits upon error. Since the container is being deployed within the etcd Pod, the whole Pod will never be `Running` as long as the container is failing.
+Once the container fails, it will be automatically restarted according to exponential backoff strategy. This scenario leads to `CrashLoopBackOff` and the etcd Pod will never be `Running`. 
+
+As the no-config backup sidecar is being deployed alongside each etcd member, consequently an error within this container leads to unavailable etcd cluster. Hence, failing the container upon error is not a viable option.
+Also disabling the container from the etcd pod upon error is not recommended, unless requested by the user. As discussed above, enabling and disabling the sidecar container leads to deploying a new version of the static pods.
+This scenario leads to a duration of cluster unavailability. 
+
+As shown above, it is necessary to report the no-config backup sidecar failure without failing the container. Below are possible resolution scenarios. 
+
+- Log the error upon failure
+  - A log parser could be used in order to detect the error, without failing the container.
+  
+- Update Cluster-etcd-Operator StatusConditions
+  - Reporting the condition and degrading the operator could be a solution. 
+
+- Use a Prometheus gauge in order to report the container situation. 
+
+### Implementation Details/Notes/Constraints
+
+The _no-config_ backups builds atop of the existing [automated backup of etcd](https://docs.openshift.com/container-platform/4.15/backup_and_restore/control_plane_backup_and_restore/backing-up-etcd.html#creating-automated-etcd-backups_backup-etcd).
+
+The `PeriodicBackupController` within **cluster-etcd-operator** checks for `Backup` CR with `name=default` within every sync. Upon applying a `Backup` CR with `name=default`, the _no-config_ backup sidecar container is being enabled within each etcd pod in Openshift cluster.
+The `Backup` configurations such as `scheudle`, `timezone` and `retention policy`, are being supplied to the _no-config_ container as flags. 
+According to user's preference, the default configuration could be modified by updating the CR.
+
+The backups are being stored on the local disk of each master node independently, using `hostPath` volume. This replication is required for disaster recovery scenarios where more than one of the master nodes has been lost.
+
+
+A `Backup` CR with default configuration below.
+
+```yaml
+apiVersion: config.openshift.io/v1alpha1
+kind: Backup
+metadata:
+  name: default
+spec:
+  etcd:
+    schedule: "*/5 * * * *"
+    timeZone: "UTC"
+    retentionPolicy:
+      retentionType: RetentionNumber
+      retentionNumber:
+        maxNumberOfBackups: 3
+```
+
+
+
+
+### Risks and Mitigations
 
 ## Test Plan
 
 An e2e test will be added to practice the scenario as follows 
 
 - Enable AutomatedBackupNoConfig FeatureGate.
-- Verify that a `Etcdbackup` CR has been installed.
-- Verify that a PV, PVC has been created.
-- Verify that a backup has been taken.
-- Verify that the backups are valid according to the retention policy.
+- Verify that a `Backup` CR has been installed.
+- Verify that backups have been taken successfully.
+- Verify that backups are being maintained according to the retention policy.
 
 ## Graduation Criteria
 TBD
@@ -214,29 +190,81 @@ TBD
 ## Implementation History
 TBD
 
+### Drawbacks
+
 ## Alternatives
-### hostPath
 
-Utilising `hostPath` volumes as a storage solution for the backups.
+Before deciding the _no-config_ sidecar container as described above, several alternatives have been investigated. They are being enumerated below.
 
-`hostPath` mounts a path from the node's file system as a volume into the pod.
+The storage solution to use would have the following characteristics
+- Backups should be taken on a round-robin fashion on each master node to avoid overwhelming a specific etcd member more than others.
+- Spreading the backups among all etcd cluster members provide guarantees for disaster recovery in case of losing two members at the same time.
+- One fits all storage solution, to be used across all Openshift variants including Bare metal and Single Node Openshift.
 
-It supports all OCP variants, including `SNO` and `BM`.  
+Below is each storage solution, with its pros and cons.
 
-However, I am strongly against using it for the following reasons
+### Dynamic provisioning using CSI
 
-      - `hostPath` could have security impact as it exposes the node's filesystem.
-      - No scheduling guarantees for the pod using `hostpath` as is the case with `localVolume`. The pod could be scheduled on a different node from where the hostPath volume exist.
-      - On the other hand, using `localVolume` and the node affinity within the PV manifest forces the backup pod to be scheduled on a specific node, where the volume is attached.
-      - `localVolume` allows using a separate disk as PV, unlike `hostPath` which mounts a folder from the node's FS.
-      - `localVolume` is handled by the PV controller and the scheduler in different manner, in fact it was created to resolve issues with `hostPath`
+As Openshift cluster that are based on cloud infrastructure offers dynamic storage provisioning capabilities based on CSI, allocating persistent storage for the etcd backups is trivial.
 
+Depending on the storage capabilities offered by the cloud provider, the allocated persistent volume could be attached to any of the master nodes and the backups can be used by any etcd member on any of the master nodes for restoration.
 
-### Side Car container
- - Another approach is to use a sidecar container within each etcd pod. This sidecar container can create the backup and save it to a backup.
+* Pros
+  - Utilising CSI storage is ideal as it is well tested and allocating storage required defining a `PVC` manifest only.
+  - Some storage solutions based on CSI allows a `PV` to be attached to multiple nodes. This is ideal for both taking backup and restoration from various master nodes, in case one of the nodes is unreachable.
+  - It allows recovery even on disaster scenarios, where no master node is accessible, since the storage is allocated on the provider side.
+* Cons
+  - CSI is not an option for OCP `BM` or `SNO`.
+  - Some cloud providers allocate storage to be accessible only within the same availability zone. Since Openshift cluster allocate each master node on a different zone for high availability purposes, the backup will not be accessible if the master node where the backup was taken is no longer accessible.
 
- - This approach although trivial, is easier to maintain, specially to push backups to remote storage.
+### Local Storage
 
+Relying on local storage works for all Openshift variants (i.e. cloud based, SNO and BM). There are three possible approaches using local storage, each is detailed below.
+
+#### Local Storage Operator
+
+Utilising `local storage operator` is a proper solution for all Openshift variants. However, installing a whole operator is too much overhead.
+
+#### Local volumes
+
+A `localVolume` mounts a path from the node's file system tree or a separate disk as a volume into a Pod.
+
+Utilising a `local StorageClass` with no provisioner, guarantees a behaviour similar to dynamic provisioning.
+Upon creating a `PVC` with the `local StorageClass`, a `PV` will be allocated using `localVolume` and bound to the `PVC`.
+Since the `PV` is actually a path on the node's file system, the etcd backup will be always available regardless of the Pod's status, as long as the node itself is still accessible.
+using `localVolume` and the node affinity within the `PV` manifest forces the backup pod to be scheduled on a specific node, where the volume is attached.
+Had the Pod been replaced, the new Pod is guaranteed to be scheduled on the same node, where the backup exists.
+This deterministic scheduling behaviour is a property of `localVolume`, which is not the case with `hostPath` volumes.
+`localVolume` is handled by the PV controller and the scheduler in different manner, in fact it was created to resolve issues with `hostPath`
+
+* Pros
+  - It supports all Openshift variants, including `SNO` and `BM`.
+  - The Backup Pod will be scheduled always to this master node where the backup data exists.
+  - Using a separate disk for backups (e.g. SSD) is possible, since local volume allows mounting it into a Pod.
+  - Having the deterministic Pod scheduling is vital, since the restoration needs the recent backup in place to work.
+* Cons
+  - If the master node where the `PV` is mounted became unhealthy/unavailable/unreachable, then the backups are no longer accessible, also taking new backups is no longer possible.
+
+#### Host Path volumes
+
+A `hostPath` volume mounts a path from the node's file system as a volume into a Pod.
+
+* Pros
+  - It supports all Openshift variants, including `SNO` and `BM`.
+* Cons
+  - `hostPath` could have security impact as it exposes the node's filesystem.
+  - No scheduling guarantees for the pod using `hostpath` as is the case with `localVolume`. The pod could be scheduled on a different node from where the hostPath volume exist.
+
+### Hybrid approach
+
+A hybrid solution is possible, in which dynamic provisioning is being used in cloud based Openshift, while utilising local storage for BM and SNO.
+Relying on `infrastructure` resource type, we can create the storage programmatically according to the underlying infrastructure and Openshift variant.
+
+### StatefulSet approach
+
+A `StatefulSet` could be deployed among all master nodes, where each backup pod has its own `PV`. This approach has the pros of spreading the backups among all master nodes.
+The complexity come from the fact that the backups are being triggered by a `CronJob` which spawn a `Job` to take the actual backup, by deploying a Pod.
+Since StatefulSet manages its own Pods, it is not possible to schedule backups by a `CronJob`. However, it is possible to generate event by the `CronJob` which is being watched by the StatefulSet. Then the backups are being taken and controlled mainly by it.
 
 ## Infrastructure Needed
 TBD
