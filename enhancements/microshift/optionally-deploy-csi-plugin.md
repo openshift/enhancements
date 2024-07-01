@@ -39,7 +39,7 @@ of storage space devices where MicroShift is deployed.
 
 ## Motivation
 
-Not all users may persistent storage provider or volume snapshot capabilities for their MicroShift deployments and
+Not all users may want a persistent storage provider or volume snapshot capabilities for their MicroShift deployments and
 should be enabled to choose whether to deploy the driver and / or snapshotter. This will afford resource-conscious users
 the opportunity to better tune their MicroShift deployment to their hardware requirements.
 
