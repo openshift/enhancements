@@ -20,7 +20,7 @@ last-updated: 2024-04-26
 status: provisional
 ---
 
-# CRD Based CMO
+# CRD ClusterMonitoring
 
 ## Release Signoff Checklist
 
@@ -45,32 +45,12 @@ status: provisional
 * End users get a much faster feedback loop. No more applying the config and scanning logs if things don't look right. The API server will give immediate feedback
 * Organizational users (such as ACM) can manage a single resource and observe its status
 
-
 ### Goals
 
 - Replace configmaps with CRD
 - Smooth transition for users
 
 ## Proposal
-
-## Design Details
-
-To initiate the process, let's establish a feature gate that will serve as the entry point for implementing a CRD configuration approach. This strategy enables us to make incremental advancements without the immediate burden of achieving complete feature equivalence with the config map. We can commence with a the basics and progressively incorporate additional functionalities as they develop.
-
-One proposal for a minimal DoD was:
-    - Feature gate in openshift/api
-    - Api types moved to openshift/api
-    - CRD Initial dev https://github.com/openshift/api/pull/1929
-        Add controller-gen logic to makefile
-        Add API to api/config/v1
-        Add Generated CRD: config/v1/zz_generated.crd-manifests/0000_10_config-operator_01_clustermonitoring.crd.yaml
-        Add example CustomResource: config/examples/clustermonitoringoperator.yaml
-    - Client codegen 
-    - Reconcile logic: https://github.com/openshift/cluster-monitoring-operator/pull/2350
-    - Add decoupling Confimgap / CustomResource:
-        Controller logic is strongly dependant of *manifests.Config struct.
-        
-
 
 ### Overview
 
@@ -111,6 +91,24 @@ One proposal for a minimal DoD was:
 
 - How the user could adopt CRD instead of configmap.
 
+## Design Details
+
+To initiate the process, let's establish a feature gate that will serve as the entry point for implementing a CRD configuration approach. This strategy enables us to make incremental advancements without the immediate burden of achieving complete feature equivalence with the config map. We can commence with a the basics and progressively incorporate additional functionalities as they develop.
+
+One proposal for a minimal DoD was:
+    - Feature gate in openshift/api
+    - Api types moved to openshift/api
+    - CRD Initial dev https://github.com/openshift/api/pull/1929
+        Add controller-gen logic to makefile
+        Add API to api/config/v1
+        Add Generated CRD: config/v1/zz_generated.crd-manifests/0000_10_config-operator_01_clustermonitoring.crd.yaml
+        Add example CustomResource: config/examples/clustermonitoringoperator.yaml
+    - Client codegen 
+    - Reconcile logic: https://github.com/openshift/cluster-monitoring-operator/pull/2350
+    - Add decoupling Confimgap / CustomResource:
+        Controller logic is strongly dependant of *manifests.Config struct.
+        
+
 ### Example configuration
 
 
@@ -138,6 +136,8 @@ data:
               storage: 20Gi
 
 ```
+
+### CRD
 
 ```
 apiVersion: clustermonitoring.config.openshift.io
