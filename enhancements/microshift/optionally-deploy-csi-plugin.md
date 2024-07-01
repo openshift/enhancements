@@ -5,8 +5,8 @@ authors:
 reviewers:
   - "@pacevedom: MicroShift team-lead"
   - "@jerpeter1, Edge Enablement Staff Engineer"
-  - "@jakobmoellerdev Edge Enablement LVMO SME"
-  - "@suleymanakbas91,  Edge Enablement LVMO SME"
+  - "@jakobmoellerdev Edge Enablement LVMS Engineer"
+  - "@suleymanakbas91,  Edge Enablement LVMS Engineer"
 approvers:
   - "@jerpeter1, Edge Enablement Staff Engineer"
 api-approvers:
@@ -27,21 +27,21 @@ MicroShift is a small form-factor, single-node OpenShift targeting IoT and Edge 
 tight resource constraints, unpredictable network connectivity, and single-tenant workloads. See
 [kubernetes-for-devices-edge.md](./kubernetes-for-device-edge.md) for more detail.
 
-Out of the box, MicroShift includes the LVMS CSI driver and CSI snapshotter. The LVM Operator is not itself packaged
-with the platform, in adherence with the project's [guiding principles](./kubernetes-for-device-edge.md#goals). See the
+Out of the box, MicroShift includes the LVMS CSI driver and CSI snapshotter. The LVM Operator is not included with the
+platform, in adherence with the project's [guiding principles](./kubernetes-for-device-edge.md#goals). See the
 [MicroShift Default CSI Plugin](microshift-default-csi-plugin.md) proposal for a more in-depth explanation of the
 storage provider and reasons for its integration into MicroShift. Configuration of the driver is exposed via a config
 file at /etc/microshift/lvmd.yaml. The manifests required to deploy and configure the driver and snapshotter are baked
-into the MicroShift binary during compilation and are deployed during runtime. This means that even if a user wanted to
-disable the driver and/or snapshotter, they would be deployed again when the service restarts. Additionally, the LVMS an
-CSI containers required to run LVMS are always packaged with the product and thus will always consume a certain amount
-of storage space devices where MicroShift is deployed.
+into the MicroShift binary during compilation and are deployed during runtime. As it is now, even if a user wanted to
+disable the driver and/or snapshotter, MicroShift would deploy them again when the service restarts. Additionally, the
+LVMS and CSI images are always packaged together with MicroShift and thus always consume a certain amount of storage
+space on the MicroShift host.
 
 ## Motivation
 
-Not all users may want a persistent storage provider or volume snapshot capabilities for their MicroShift deployments and
-should be enabled to choose whether to deploy the driver and / or snapshotter. This will afford resource-conscious users
-the opportunity to better tune their MicroShift deployment to their hardware requirements.
+Not all users may want dynamic persistent storage or volume snapshotting for their MicroShift deployments and should be
+enabled to choose whether to deploy the driver and / or snapshotter. This will afford resource-conscious users the
+opportunity to better tune their MicroShift deployment to their hardware requirements.
 
 ### User Stories
 
@@ -68,10 +68,14 @@ the opportunity to better tune their MicroShift deployment to their hardware req
 ## Proposal
 
 Extract away deployment of the LVMS CSI driver and LVMS CSI snapshot controller from MicroShift logic and provide the
-components as separate, optional rpms. Users should be able to install these rpm simultaneously with core MicroShift
-rpms. It should be possible to install the CSI components to a cluster that was initially deployed without them.
-This should not be a reversible process: uninstalling the rpms should not delete CSI components or cluster APIs from the
-cluster. Doing so endangers users' data and could lead to orphaning of LVM volumes.
+components as separate, optional rpms. The new rpms will be named `microshift-lvms` and `microshift-lvms-snapshotting`.
+`microshift-lvms-snapshotting` will have a dependency on `microshift-lvms` because it cannot be run effectively as a
+standalone component. Users should be able to install these rpms simultaneously with core MicroShift rpms. It should
+also be possible to install LVMS and CSI components to a cluster that was initially deployed without them. This should
+not be a reversible process: uninstalling the rpms should not delete CSI components or cluster APIs from the cluster.
+Doing so endangers users' data and could lead to orphaning of LVM volumes. Instead, uninstalling the rpms will only
+ensure that LVMS and Snapshotting are not deployed on MicroShift startup/restart. It will be the user's responsibility
+to ensure there are not LVMS PVs in the cluster before deleting the LVMS and Snapshotting API instances.
 
 ### Workflow Description
 
@@ -119,6 +123,24 @@ cluster. Doing so endangers users' data and could lead to orphaning of LVM volum
    1. LVMS CSI manifests
    2. LVMS Snapshot manifests
 
+**Uninstallation**
+
+1. User has deployed a cluster with LVMS and CSI Snapshotting installed.
+2. User has run pods on the cluster with LVMS PVs.
+3. User decides to LVMS and snapshotting are no longer needed.
+4. User checks that there are no LVMS PVs, PVCs, or Snapshots in the cluster. If there are, it is the user's 
+   responsibility to prevent unintentional data loss or LVM volume orphaning before proceeding.
+5. User uninstalls microshift-lvms and microshift-lvms-snapshotting rpms.
+6. User deletes the relevant cluster API resources
+    ```shell
+    $ oc delete -n kube-system deployment.apps/csi-snapshot-controller deployment.apps/csi-snapshot-webhook   
+    $ oc delete -n openshift-storage daemonset.apps/topolvm-node
+    $ oc delete -n openshift-storage deployment.apps/topolvm-controller
+    $ oc delete -n openshift-storage configmaps/lvmd
+    $ oc delete oc get storageclasses.storage.k8s.io/topolvm-provisioner
+    ```
+7. The cluster processes the deletions and the process is complete
+
 ### API Extensions
 
 - None
@@ -144,7 +166,7 @@ The changes proposed here only affect MicroShift.
     are now) and the digests will be written to their respective `release-$ARCH.json` files.
 
 - **Mainline Code Changes:**
-  - MicroShift source code will no longer manage LVMS or CSI manifest deployment or its configuration. Therefore the 
+  - MicroShift source code will no longer manage LVMS or CSI manifest deployment or its configuration. The 
     microshift service manager which handles these components will be removed entirely. The following files will be 
     deleted:
     - `microshift/pkg/components/csi-snapshot-controller.go`
@@ -154,13 +176,33 @@ The changes proposed here only affect MicroShift.
   - Additionally, certain functions related to managing LVMS will be deleted:
     - `microshift/pkg/components/render_test.go:startCSIPlugin()`
     - `microshift/pkg/components/render_test.go:startCSISnapshotterController()`
+  - MicroShift also contains logic to determine if LVM is installed and attempt a best-guess at which volume group, 
+    if any, should be set in the LVMD config. This code will need to be removed and implemented as:
+    - Specifying LVM as an RPM dependency of `microshift-lvms`.
+    - A `microshift-lvms` rpm post-install script that determines what volume group, if any, should be specified.
+
+- **RPM Spec**
+  - New RPM specs will be written for `microshift-lvms` and `microshift-lvms-snapshotting` packages. These have the 
+    following characteristics:
+    - `microshift-lvms-snapshotting` will depend on `microshift-lvms`.
+    - `microshift-lvms` will depend on `lvm2` to ensure host compatibility
+    - `microshift-lvms` will encapsulate LVMS and CSI driver container images and manifests. A post-install script 
+      will attempt a best-guess at a default volume-group by reimplementing the go log in microshift as bash or 
+      python. Not being able to identify a suitable volume-group is not a fatal error, and a warning will be logged 
+      during install. The user will be responsible for properly configuring the lvmd file.
+    - `microshift-lvms-snapshotting` is effectively a wrapper around CSI snapshotting images and manifests. It does 
+      not encapsulate LVMS images or configurations.
+  - It is critical that user-defined LVMD configurations be preserved during upgrades, downgrades, and reinstalls. RPM 
+    post-install logic will be not stomp on existing lvmd configurations. Overwriting the lvmd config poses a 
+    significant threat of orphaning LVM volumes if MicroShift were to change the volume-groups used by lvmd.
 
 ### Risks and Mitigations
 
+- N/A
 
 ### Drawbacks
 
-**TBD**
+- N/A
 
 ## Test Plan
 
@@ -190,20 +232,25 @@ process and thus will require only minimal changes to existing tests.
 
 ## Upgrade / Downgrade Strategy
 
-**TBD**
+LVMS and CSI operate on existing Kubernetes APIs to track the state of cluster storage. It is safe to upgrade or 
+downgrade the runtime components without losing accountability or otherwise endangering provisioned storage.
 
 ## Version Skew Strategy
 
-**TBD**
+Risk of version skew is mitigated because the LVMS and CSI components are built from the same release image as the 
+rest of MicroShift's components. It is safe to upgrade and downgrade LVMS and/or CSI within the same major version 
+of MicroShift, just as it is on OCP.
 
 ## Operational Aspects of API Extensions
 
-**TBD**
+- N/A
 
 ## Support Procedures
 
-**TBD**
+- N/A
 
 ## Alternatives
 
-**TBD**
+Use the MicroShift or LVMD config to determine deployment of LVMS and/or snapshotting. It does not satisfy the goal of
+optionalizing the installation of the components. Instead, this solution would simply enable/disable the components.
+Thus, LVMS and CSI components would have to be installed on the host even if they were never to be used.
