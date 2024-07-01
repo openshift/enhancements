@@ -82,21 +82,23 @@ cluster. Doing so endangers users' data and could lead to orphaning of LVM volum
 **_Installation with CSI Driver and Snapshotting_**
 
 1. User determines there is a requirement for persistent storage and volume snapshotting.
-2. User specifies an ostree blueprint which include the following sections:
-    1. Packages: microshift, microshift-lvms, microshift-lvms-snapshotting
+2. User specifies an ostree blueprint which includes the following sections:
+    1. Packages: microshift, microshift-greenboot, microshift-networking, microshift-selinux, microshift-lvms, 
+       microshift-lvms-snapshotting
     2. File (Optional): lvmd.yaml
 3. User compiles an ostree commit from the blueprint
 4. User deploys the ostree commit to host
 5. MicroShift host boots
 6. MicroShift starts
-7. MicroShift deploys LVMS CSI manifests
-8. (Concurrently with 7) MicroShift deploys LVMS Snapshot manifests 
+7. MicroShift deploys:
+   1. LVMS CSI manifests
+   2. LVMS Snapshot manifests
 
 **_Installation without CSI Driver and Snapshotting_**
 
 1. User determines there is not a requirement for persistent storage and volume snapshotting.
-2. User specifies an ostree blueprint which include the following sections:
-    1. Packages: microshift
+2. User specifies an ostree blueprint which includes the following sections:
+    1. Packages: microshift, microshift-greenboot, microshift-networking, microshift-selinux
 3. User compiles an ostree commit from the blueprint
 4. User deploys the ostree commit to host
 5. MicroShift host boots
@@ -104,16 +106,18 @@ cluster. Doing so endangers users' data and could lead to orphaning of LVM volum
 
 **_Day-1|2 Installation_**
 
-1. User determines there is not a requirement for persistent storage and volume snapshotting.
-2. User specifies an ostree blueprint which include the following sections:
+1. User has previous installed MicroShift on a device.
+2. User later determines there is a requirement for persistent storage and volume snapshotting.
+3. User specifies an ostree blueprint which includes the following sections:
     1. Packages:  microshift-lvms, microshift-lvms-snapshotting
     2. File (Optional): lvmd.yaml
-3. User compiles an ostree commit from the blueprint
-4. User deploys the ostree commit to host
-5. MicroShift host reboots
-6. MicroShift starts
-7. MicroShift deploys LVMS CSI manifests
-8. (Concurrently with 7) MicroShift deploys LVMS Snapshot manifests
+4. User compiles an ostree commit from the blueprint
+5. User deploys the ostree commit to host
+6. MicroShift host reboots
+7. MicroShift starts
+8. MicroShift deploys:
+   1. LVMS CSI manifests
+   2. LVMS Snapshot manifests
 
 ### API Extensions
 
@@ -123,15 +127,36 @@ cluster. Doing so endangers users' data and could lead to orphaning of LVM volum
 
 #### Single-node Deployments or MicroShift
 
-**TBD**
+The changes proposed here only affect MicroShift.
 
 ### Implementation Details/Notes/Constraints
 
-**TBD**
+- **Rebase Changes:** 
+  - LVMS and the snapshotting manifests will be moved from `microshift/assets/components/lvms` and 
+  `microshift/assets/components/csi-snapshot-controller` to `microshift/assets/optional/lvms` and 
+  `microshift/assets/optional/csi-snapshot-controller`. These paths will be updated in the 
+    `microshift/scripts/auto-rebase/lvms_assets.yaml` to reflect the new paths.
+  - LVMS image digests will be moved from `microshift/assets/release/release-$ARCH.json` to 
+    `microshift/assets/optional/lvms/release-$ARCH.json`.
+  - CSI Snapshotter image digests will be moved from `microshift/assets/release/release-$ARCH.json` to 
+      `microshift/assets/optional/csi-snapshot-controller/release-$ARCH.json`.
+  - During rebasing, the image digests for LVMS and CSI Snapshotter will be parsed from the LVMS bundle (like they 
+    are now) and the digests will be written to their respective `release-$ARCH.json` files.
+
+- **Mainline Code Changes:**
+  - MicroShift source code will no longer manage LVMS or CSI manifest deployment or its configuration. Therefore the 
+    microshift service manager which handles these components will be removed entirely. The following files will be 
+    deleted:
+    - `microshift/pkg/components/csi-snapshot-controller.go`
+    - `microshift/pkg/components/storage.go`
+    - `microshift/pkg/components/render_test.go`, which only tests LVMS parameter rendering
+    - `microshift/pkg/assets/storage.go`
+  - Additionally, certain functions related to managing LVMS will be deleted:
+    - `microshift/pkg/components/render_test.go:startCSIPlugin()`
+    - `microshift/pkg/components/render_test.go:startCSISnapshotterController()`
 
 ### Risks and Mitigations
 
-**TBD**
 
 ### Drawbacks
 
@@ -139,11 +164,10 @@ cluster. Doing so endangers users' data and could lead to orphaning of LVM volum
 
 ## Test Plan
 
-**TBD**
+There are already tests for RPM and Ostree install processes. This proposal only slightly alters the installation 
+process and thus will require only minimal changes to existing tests.
 
 ## Graduation Criteria
-
-**TBD**
 
 ### Dev Preview -> Tech Preview
 
