@@ -538,7 +538,7 @@ Please note the changes to `ocp-build-data`should be merged almost same time as 
 Once migration is complete, we should perform following post migration steps to ensure that we are not left over with legacy stuff:
 
 1. Mark existing `openshift/<vendor>-<driver>-operator` repository as deprecated.
-2. Ensure that we have test manifest available in `test/e2e2` directory.
+2. Ensure that we have test manifest available in `test/e2e` directory.
 3. Make changes into `release` repository so as it longer relies on anything from `legacy` directory. See - https://github.com/openshift/release/pull/49655 for example.
 4. Remove code from `vendor/legacy` in `csi-operator` repository. 
 
