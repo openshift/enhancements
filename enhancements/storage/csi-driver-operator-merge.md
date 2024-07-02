@@ -488,7 +488,7 @@ git subtree push --prefix legacy/azure-disk-csi-driver-operator https://github.c
 
 ### Add Dockerfiles for building images from new location
 
-Place a `Dockerfile.<operator>` and `Dockerfile.<operator>.test` at top of csi-operator tree and make sure that you are able to build an image of the operator from csi-operator repository.
+Place a `Dockerfile.<operator>` at top of csi-operator tree and make sure that you are able to build an image of the operator from csi-operator repository.
 
 ### Update openshift/release to build image from new location
 Make a PR to openshift/release repository to build the operator from csi-operator. For example - https://github.com/openshift/release/pull/46233.
@@ -513,6 +513,8 @@ azure-disk-csi-driver-operator=<the scratch build> \
 
 oc adm release extract --command openshift-install quay.io/jsafrane/scratch:release1
 ```
+
+This step is only applicable for CVO based operators and not OLM based operators. For OLM based operator - either an image can be built locally and deployed using your personal index image or you can ask ART team for a scratch image when you open `ocp-build-data` PR and proceed to include that image in your personal index image.
 
 ### Co-ordinating merges in ocp-build-data and release repository
 
