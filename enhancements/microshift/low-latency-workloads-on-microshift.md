@@ -273,7 +273,12 @@ New `microshift-baseline` tuned profile will be created and will include existin
 
 `/etc/tuned/microshift-baseline-variables.conf` will be used by users to provide custom values for settings such as:
 - isolated CPU set
-- hugepage count (both 2M and 1G)
+- hugepage size and count
+  > Warning: Due to bug in tuned, it is impossible to set up both 2M and 1G hugepages using
+  > kernel arguments on ostree system (see https://issues.redhat.com/browse/RHEL-45836).
+  >
+  > Therefore `microshift-baseline` will "allow" only for single size of hugepages.
+  > Users are welcomed though to introduce non-kernel-args ways of setting up hugepages in their profiles.
 - additional kernel arguments
 
 ```ini
@@ -285,8 +290,8 @@ include=cpu-partitioning
 include=/etc/tuned/microshift-baseline-variables.conf
 
 [bootloader]
-cmdline_microshift=+default_hugepagesz=${hugepagesDefaultSize} hugepagesz=2M hugepages=${hugepages2M} hugepagesz=1G hugepages=${hugepages1G}
-cmdline_additionalArgs=+${additionalArgs}
+cmdline_microshift_hp=+hugepagesz=${hugepages_size} hugepages=${hugepages}
+cmdline_additional_args=+${additional_args}
 ```
 
 ```ini
@@ -311,17 +316,14 @@ isolated_cores=${f:calc_isolated_cores:1}
 # no_balance_cores=5-10
 
 ### microshift-baseline variables
-# Default hugepages size
-hugepagesDefaultSize = 2M
+# Size of the hugepages
+hugepages_size = 0
 
-# Amount of 2M hugepages
-hugepages2M = 128
-
-# Amount of 1G hugepages
-hugepages1G = 0
+# Amount of the hugepages
+hugepages = 0
 
 # Additional kernel arguments
-additionalArgs = ""
+additional_args =
 ```
 
 #### `microshift-tuned.service` configuration
