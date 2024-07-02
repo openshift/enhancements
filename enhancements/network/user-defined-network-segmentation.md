@@ -3,6 +3,7 @@ title: user-defined-network-segmentation
 authors:
   - "@trozet"
   - "@qinqon"
+  - "@ormergi"
 reviewers:
   - "@tssurya"
   - "@danwinship"
@@ -74,6 +75,8 @@ tenant to isolate traffic.
 * As an administrator, I want to be able to provision networks to my tenants to ensure their networks and applications
   are natively isolated from other tenants.
 * As a user, I want to be able to request a unique, primary network for my namespace without having to get administrator
+  permission.
+* As a user, I want to be able to request new secondary networks for my namespace, without having to get administrator
   permission.
 * As a user, I want user-defined primary networks to be able to have similar functionality as the cluster default network,
   regardless of being on a layer 2 or layer 3 type network. Features like Egress IP, Egress QoS, Kubernetes services,
@@ -379,11 +382,106 @@ any user-defined primary network.
 
 ### API Extensions
 
-The main API extension here will be a namespace scoped network CRD as well a cluster scoped network CRD. These CRDs
-will be registered by Cluster Network Operator (CNO). See the [CRDs for Managing Networks](#crds-for-managing-networks)
-section for more information on how the CRD will work. There will be a finalizer on the CRDs, so that upon deletion
-OVN-Kubernetes can validate that there are no pods still using this network. If there are pods still attached to this
-network, the network will not be removed.
+The main API extension here will be a namespace scoped network CRD as well a cluster scoped network CRD. 
+These CRDs will be registered by Cluster Network Operator (CNO). 
+
+#### CRDs
+
+Following the [CRDs for Managing Networks](#crds-for-managing-networks), two CRDs shall be introduced: 
+- Namespace scoped CRD - represent user request for creating namespace scoped OVN network.
+  - Shall be defined with `namespace` scope.
+- Cluster scoped CRD - represent user request for creating cluster scoped OVN network, enables cross-namespace networking.
+  - Shall be defined with `cluster` scope
+
+There will be a finalizer on the CRDs, so that upon deletion OVN-Kubernetes can validate that there are no pods still using this network.
+If there are pods still attached to this network, the network will not be removed.
+
+##### spec
+
+The CRDs spec defines as follows:
+
+| Field name     | Description                                                                                                                                                                                                                                                                                                                                                                                        | optional |
+|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------|
+| Topology       | The topological configuration for the network. Must be one of `layer2` or `layer3`.                                                                                                                                                                                                                                                                                                                | No       |
+| Role           | Select the network role in the pod, either `primary` or `secondary`.                                                                                                                                                                                                                                                                                                                               | No       |
+| MTU            | The maximum transmission unit (MTU).<br/>The default is 1400.                                                                                                                                                                                                                                                          | Yes      |
+| Subnets        | The subnet to use for the network across the cluster.<br/>E.g. 10.100.200.0/24.<br/>IPv6 (2001:DBB::/64) and dual-stack (192.168.100.0/24,2001:DBB::/64) subnets are supported.<br/>When omitted, the logical switch implementing the network only provides layer 2 communication, and users must configure IP addresses.<br/>Port security only prevents MAC spoofing if the subnets are omitted. | Yes      |
+| ExcludeSubnets | List of CIDRs and IP addresses.<br/>IP addresses are removed from the assignable IP address pool and are never passed to the pods.                                                                                                                                                                                                                                                                 | Yes      |
+
+The cluster scoped CRD should have the following additional field:
+
+| Field name | Description                                                                                           | optional |
+|------------|-------------------------------------------------------------------------------------------------------|----------|
+| Selector   | Key-value list of labels used as a selector for which namespace the network should be available for.  | No       |
+
+Since `localnet` topology for primary networks is non-goal, the CRDs controller should reject such requests.
+
+##### status
+The CRD status should reflect the NAD state through conditions.
+For example, when the NAD its created the condition should be placed with status `True`.
+
+For cluster scoped networks, the condition should be true once all desired namespaces are provisioned with the corresponding NAD.
+
+
+
+Granting permissions for users to create OVN networks in namespaces they are allowed should be manged using the RBAC mechanism.
+
+##### Example - Namespace scoped network
+```yaml
+kind: OVNNetwork
+metadata:
+  name: db-network
+  namespace: demo
+spec:
+  topology: layer2
+  role: primary
+  mtu: 9000
+  subnets: ["10.0.0.0/24"]
+  excludeSubnets: ["10.0.0.100"]
+```
+After creation OVN-K finalizer should be added:
+```yaml
+kind: OVNNetwork
+metadata:
+  name: db-network
+  namespace: demo
+  finalizers:
+  - connected-network.k8s.ovn.org
+spec:
+  topology: layer2
+  role: primary
+  mtu: 9000
+  subnets: ["10.0.0.0/24"]
+  excludeSubnets: ["10.0.0.100"]
+status:
+  conditions:
+  - type: "NetworkAttachmentDefinitionReady"
+    status: "True"
+```
+
+##### Example - Cluster scoped network
+```yaml
+kind: ClusterOVNNetwork
+metadata:
+  name: db-network
+  finalizers:
+  - connected-network.k8s.ovn.org
+spec:
+  topology: layer2
+  role: primary
+  selector:
+  - kubernetes.io/metadata.name: "mynamespace"
+  - kubernetes.io/metadata.name: "theirnamespace"
+  mtu: 9000
+  subnets: ["10.0.0.0/24"]
+  excludeSubnets: ["10.0.0.100"]
+status:
+  conditions:
+  - type: "NetworkAttachmentDefinitionReady"
+    status: "False"
+    reason: "NetworkAttachmentDefinitionNotExist"
+    message: "Not all desired namespaces provisioned with NetworkAttachmentDefinition: ['theirnamespace', 'namespace not exist']"
+```
 
 ### Workflow Description
 
@@ -413,6 +511,98 @@ guarantee uniqueness and eliminates the ability to falsify access.
 After creating the CRD, check the status to ensure OVN-Kubernetes has accepted this network to serve the namespaces
 selected. Now tenants may go ahead and be provisioned their namespace.
 
+#### NetworkAttachmentDefinition rendering
+
+The NAD should be created with owner-reference to the CRD, using the owner-reference mechanism should prevent deletion of the NAD before the corresponding CRD instance is deleted.
+Avoiding a state where the CRD instance exist but no corresponding NAD is.
+In addition, the owner-reference make teardown seamless, when the CRD instance is deleted, the cluster garbage collected will dispose the corresponding NAD.
+
+The underlying OVN network name, specified by the CNI conf `name` field, should be unique.
+Having the network name unique and non-configurable, mitigates the risk where a malicious entity with access to namespace "A" workloads could tap into network on namespace "B" by guessing its name.
+
+Creating namespace scoped CRD instance should trigger creation of a corresponding NAD at the namespace the CRD instance reside.
+Following the above [example](#example---namespace-scoped-network) above, the following NAD should be created:
+```yaml
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: db-network
+  namespace: demo
+  ownerReferences:
+    - apiVersion: k8s.ovn.org/v1alpha1
+      blockOwnerDeletion: true
+      kind: OVNNetwork
+      name: db-network
+      uid: f45efb13-9511-48c1-95d7-44ee17c949f4
+spec:
+  config: >    
+      '{
+          "cniVersion":"0.3.1",
+          "excludeSubnets":"10.0.0.100/24",
+          "mtu":1500,   
+          "name":"8301b3c4-ff07-4c6d-9786-232e02b87794",
+          "netAttachDefName":"demo/poc-db-network",
+          "subnets":"10.0.0.0/24",
+          "topology":"layer2",
+          "type":"ovn-k8s-cni-overlay",
+          "primaryNetwork": "true"
+      }'
+```
+
+Creating cluster scoped CRD instance should trigger creation of the corresponding NAD at each namespace specified by `spec.selector`.
+Following the above [example](#example---cluster-scoped-network) above, the following NADs should be created:
+```yaml
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: db-network
+  namespace: mynamespace 
+  ownerReferences:
+    - apiVersion: k8s.ovn.org/v1alpha1
+      blockOwnerDeletion: true
+      kind: ClusterOVNNetwork
+      name: db-network
+      uid: f45efb13-9511-48c1-95d7-44ee17c949f4
+spec:
+  config: >    
+      '{
+          "cniVersion":"0.3.1",
+          "excludeSubnets":"10.0.0.100/24",
+          "mtu":1500,   
+          "name":"ef1df435-ef21-4850-a4a2-5fd8a8a8f991",
+          "netAttachDefName":"mynamespace/db-network",
+          "subnets":"10.0.0.0/24",
+          "topology":"layer2",
+          "type":"ovn-k8s-cni-overlay",
+          "primaryNetwork": true
+      }'
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: db-network
+  namespace: theirnamespace
+  ownerReferences:
+  - apiVersion: k8s.ovn.org/v1alpha1
+    blockOwnerDeletion: true
+    kind: ClusterOVNNetwork
+    name: db-network
+    uid: f45efb13-9511-48c1-95d7-44ee17c949f4
+spec:
+  config: >
+    '{
+        "cniVersion":"0.3.1",
+        "excludeSubnets":"10.0.0.100/24",
+        "mtu":1500,   
+        "name":"ef1df435-ef21-4850-a4a2-5fd8a8a8f991",   <--- same name as in other namespaces
+        "netAttachDefName":"theirnamespace/db-network",
+        "subnets":"10.0.0.0/24",
+        "topology":"layer2",
+        "type":"ovn-k8s-cni-overlay",
+        "primaryNetwork": true
+    }'
+```
+
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
@@ -437,6 +627,14 @@ OVN-Kubernetes.
 The biggest risk with this feature is hitting scale limitations. With many namespaces and networks, the number of
 internal OVN objects will multiply, as well as internal kernel devices, rules, VRFs. There will need to be a large-scale
 effort to determine how many networks we can comfortably support. 
+
+Following the introduction of a CRD for non-admin users create OVN network, there is a risk a non-admin users could 
+cause node / OVN resources starvation due to creating too many OVN networks.
+To mitigates it, CRDs controller could monitor how many OVN network exists and reject new ones in case a given limit is exceeded.
+
+Alternatively, OVN-K resources should be exposed as node resource (using the device-plugin API).
+Once a node resource is exposed, it will enable using the [resource-quota API](https://kubernetes.io/docs/concepts/policy/resource-quotas/#resource-quota-for-extended-resources) 
+and put boundaries on how many networks could exist.
 
 There is also a risk of breaking secondary projects that integrate with OVN-Kubernetes, such as Metal LB or Submariner.
 
@@ -932,6 +1130,9 @@ only enabling session stickiness via client IP.
 * Scale testing to determine limits and impact of multiple user-defined networks. This is not only limited to OVN, but
   also includes OVN-Kubernetes’ design where we spawn a new network controller for every new network created.
 * Integration testing with other features like IPSec to ensure compatibility.
+* E2E tests verify the expected NAD is generated according to CRDs spec.
+* E2E tests verify workloads on different namespaces connected to namespace scoped OVN network with the same name cannot communicate.
+* E2E tests verify workloads on different namespaces connected to cluster-scope OVN network can communicate.
 
 ## Graduation Criteria
 
