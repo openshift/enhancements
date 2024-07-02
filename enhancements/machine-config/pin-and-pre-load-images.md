@@ -31,7 +31,7 @@ superseded-by: []
 
 ## Summary
 
-Provide an mechanism to pin and pre-load container images.
+Provide a mechanism to pin and pre-load container images.
 
 ## Motivation
 
@@ -50,16 +50,16 @@ otherwise fail.
 #### Pre-load and pin upgrade images
 
 As the administrator of a cluster that has a low bandwidth and/or unreliable
-connection to an image registry server I want to pin and pre-load all the
-images required for the upgrade in advance, so that when I decide to actually
+connection to an image registry server, I want to pin and pre-load all the
+images required for the upgrade in advance so that when I decide to actually
 perform the upgrade there will be no need to contact that slow and/or
-unreliable registry server and the upgrade will successfully complete in a
+unreliable registry server and the upgrade will complete in a
 predictable time.
 
 #### Pre-load and pin application images
 
 As the administrator of a cluster that has a low bandwidth and/or unreliable
-connection to an image registry server I want to pin and pre-load the images
+connection to an image registry server, I want to pin and pre-load the images
 required by my application in advance, so that when I decide to actually deploy
 it there will be no need to contact that slow and/or unreliable registry server
 and my application will successfully deploy in a predictable time.
@@ -81,210 +81,325 @@ parts of https://github.com/openshift/enhancements/pull/1432.
 ### Workflow Description
 
 1. The administrator of a cluster uses the new `PinnedImageSet` custom resource
-to request that a set of container images are pinned and pre-loaded:
+to request that a set of container images be pinned and pre-loaded to a defined
+_machine-config-pool_:
 
     ```yaml
     apiVersion: machineconfiguration.openshift.io/v1alpha1
     kind: PinnedImageSet
     metadata:
       name: my-pinned-images
+    labels:
+      machineconfiguration.openshift.io/role: "worker"
     spec:
       nodeSelector:
         matchLabels:
           node-role.kubernetes.io/control-plane: ""
       pinnedImages:
-      - quay.io/openshift-release-dev/ocp-release@sha256:...
-      - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
-      - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
+      - name: "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:..."
+      - name: "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:..."
       ...
     ```
 
-1. A new `PinnedImageSetController` sub-controller of the
-_machine-config-controller_ ensures that all the images are pinned and
-pulled in all the nodes that match the node selector.
+1. `MachineConfigPoolSpec` will add an optional field taking a reference to a `PinnedImageSet`.
+  
+  ```yaml
+  apiVersion: machineconfiguration.openshift.io/v1
+  kind: MachineConfigPool
+  spec:
+    pinnedImageSets:
+    - name: "my-pinned-images"
+  ```
+
+1. The _machine-config-daemon_ will add a new controller `PinnedImageSetManager` to
+ensure storage, manage image prefetch logic, `CRI-O` configuration updates and
+status reporting through the _machine-config-pool_ and `MachineConfigNode`.
+
+1. The _machine-config-controller_ will add a new controller
+`PinnedImageSetController` which will watch for changes on the
+_machine-config-pool_ and `PinnedImageSet` resources. On change based on the
+labels defined the controller will update the
+`MachineConfigPoolSpec.PinnedImageSets` field for the corresponding pool.
 
 ### API Extensions
 
 A new `PinnedImageSet` custom resource definition will be added to the
 `machineconfiguration.openshift.io` API group.
 
-The new custom resource definition is described in detail in
-https://github.com/openshift/api/pull/1609.
+```go
+  type PinnedImageSetSpec struct {
+          // [docs]
+          // +kubebuilder:validation:Required
+          // +kubebuilder:validation:MinItems=1
+          // +kubebuilder:validation:MaxItems=500
+          // +listType=map
+          // +listMapKey=name
+	        PinnedImages []PinnedImageRef `json:"pinnedImages"`
+  }
+
+ type PinnedImageRef struct {
+          // [docs]
+          // +kubebuilder:validation:Required
+          // +kubebuilder:validation:MinLength=1
+          // +kubebuilder:validation:MaxLength=447
+          // +kubebuilder:validation:XValidation:rule=`self.split('@').size() == 2 && self.split('@')[1].matches('^sha256:[a-f0-9]{64}$')`,message="the OCI Image reference must end with a valid '@sha256:<digest>' suffix, where '<digest>' is 64 characters long"
+          // +kubebuilder:validation:XValidation:rule=`self.split('@')[0].matches('^([a-zA-Z0-9-]+\\.)+[a-zA-Z0-9-]+(:[0-9]{2,5})?/([a-zA-Z0-9-_]{0,61}/)?[a-zA-Z0-9-_.]*?$')`,message="the OCI Image name should follow the host[:port][/namespace]/name format, resembling a valid URL without the scheme"
+          Name string `json:"name"`
+}
+```
+
+`MachineConfigPoolSpec` will add a list of `PinnedImageSets` .
+
+```go
+        // [docs]
+        // +openshift:enable:FeatureGate=PinnedImages
+        // +optional
+        // +listType=map
+        // +listMapKey=name
+        // +kubebuilder:validation:MaxItems=100
+        PinnedImageSets []PinnedImageSetRef `json:"pinnedImageSets,omitempty"`
+     
+    type PinnedImageSetRef struct {
+        // [docs]
+        // +openshift:enable:FeatureGate=PinnedImages
+        // +kubebuilder:validation:MinLength=1
+        // +kubebuilder:validation:MaxLength=253
+        // +kubebuilder:validation:Pattern=`^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])(\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9]))*$`
+        // +kubebuilder:validation:Required
+	      Name string `json:"name"`
+    }
+```
+
+`MachineConfigPoolStatus` will add `PoolSynchronizersStatus` which provides the
+_machine-config-pool_ a mechanism to aggregate node-level configurations deployed
+at the pool-level which are not `MachineConfig` based.
+
+```go
+        // [docs] 
+        // +openshift:enable:FeatureGate=PinnedImages
+        // +listType=map
+        // +listMapKey=poolSynchronizerType
+        // +optional
+	      PoolSynchronizersStatus []PoolSynchronizerStatus `json:"poolSynchronizersStatus,omitempty"`
+
+        // +kubebuilder:validation:XValidation:rule="self.machineCount >= self.updatedMachineCount", message="machineCount must be greater than or equal to updatedMachineCount"
+        // +kubebuilder:validation:XValidation:rule="self.machineCount >= self.availableMachineCount", message="machineCount must be greater than or equal to availableMachineCount"
+        // +kubebuilder:validation:XValidation:rule="self.machineCount >= self.unavailableMachineCount", message="machineCount must be greater than or equal to unavailableMachineCount"
+        // +kubebuilder:validation:XValidation:rule="self.machineCount >= self.readyMachineCount", message="machineCount must be greater than or equal to readyMachineCount"
+        // +kubebuilder:validation:XValidation:rule="self.availableMachineCount >= self.readyMachineCount", message="availableMachineCount must be greater than or equal to readyMachineCount"
+        type PoolSynchronizerStatus struct {
+                // poolSynchronizerType describes the type of the pool synchronizer.]
+                // +kubebuilder:validation:Required
+                PoolSynchronizerType PoolSynchronizerType `json:"poolSynchronizerType"`
+                // machineCount is the number of machines that are managed by the node synchronizer.
+                // +kubebuilder:validation:Required
+                // +kubebuilder:validation:Minimum=0
+                MachineCount int64 `json:"machineCount"`
+                // updatedMachineCount is the number of machines that have been updated by the node synchronizer.
+                // +kubebuilder:validation:Required
+                // +kubebuilder:validation:Minimum=0
+                UpdatedMachineCount int64 `json:"updatedMachineCount"`
+                // readyMachineCount is the number of machines managed by the node synchronizer that are in a ready state.
+                // +kubebuilder:validation:Required
+                // +kubebuilder:validation:Minimum=0
+                ReadyMachineCount int64 `json:"readyMachineCount"`
+                // availableMachineCount is the number of machines managed by the node synchronizer which are available.
+                // +kubebuilder:validation:Required
+                // +kubebuilder:validation:Minimum=0
+                AvailableMachineCount int64 `json:"availableMachineCount"`
+                // unavailableMachineCount is the number of machines managed by the node synchronizer but are unavailable.
+                // +kubebuilder:validation:Required
+                // +kubebuilder:validation:Minimum=0
+                UnavailableMachineCount int64 `json:"unavailableMachineCount"`
+                // +kubebuilder:validation:XValidation:rule="self >= oldSelf || (self == 0 && oldSelf > 0)", message="observedGeneration must not move backwards except to zero"
+                // observedGeneration is the last generation change that has been applied.
+                // +kubebuilder:validation:Minimum=0
+                // +optional
+                ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+```
+
+`MachineConfigNodeStatus` will add  `PinnedImageSets` allowing for detailed
+reporting on the node-level status of each `PinnedImageSet` being reconciled for
+this `Node`.
+
+```go 
+      type MachineConfigNodeStatus struct {
+        [...]
+        	// +listType=map
+	        // +listMapKey=name
+	        // +kubebuilder:validation:MaxItems=100
+         	// +optional
+	        PinnedImageSets []MachineConfigNodeStatusPinnedImageSet `json:"pinnedImageSets,omitempty"`
+      }
+
+      // +kubebuilder:validation:XValidation:rule="has(self.desiredGeneration) && has(self.currentGeneration) ? self.desiredGeneration >= self.currentGeneration : true",message="desired generation must be greater than or equal to the current generation"
+      // +kubebuilder:validation:XValidation:rule="has(self.lastFailedGeneration) && has(self.desiredGeneration) ? self.desiredGeneration >= self.lastFailedGeneration : true",message="desired generation must be greater than last failed generation"
+      // +kubebuilder:validation:XValidation:rule="has(self.lastFailedGeneration) ? has(self.desiredGeneration): true",message="desired generation must be defined if last failed generation is defined"
+      type MachineConfigNodeStatusPinnedImageSet struct {
+          // name is the name of the pinned image set.
+          // Must be a lowercase RFC-1123 hostname (https://tools.ietf.org/html/rfc1123)
+          // It may consist of only alphanumeric characters, hyphens (-) and periods (.)
+          // and must be at most 253 characters in length.
+          // +kubebuilder:validation:MaxLength:=253
+          // +kubebuilder:validation:Pattern=`^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])(\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9]))*$`
+          // +kubebuilder:validation:Required
+          Name string `json:"name"`
+          // currentGeneration is the generation of the pinned image set that has most recently been successfully pulled and pinned on this node.
+          // +optional
+          CurrentGeneration int32 `json:"currentGeneration,omitempty"`
+          // desiredGeneration version is the generation of the pinned image set that is targeted to be pulled and pinned on this node.
+          // +kubebuilder:validation:Minimum=0
+          // +optional
+          DesiredGeneration int32 `json:"desiredGeneration,omitempty"`
+          // lastFailedGeneration is the generation of the most recent pinned image set that failed to be pulled and pinned on this node.
+          // +kubebuilder:validation:Minimum=0
+          // +optional
+          LastFailedGeneration int32 `json:"lastFailedGeneration,omitempty"`
+          // lastFailedGenerationErrors is a list of errors why the lastFailed generation failed to be pulled and pinned.
+          // +kubebuilder:validation:MaxItems=10
+          // +optional
+          LastFailedGenerationErrors []string `json:"lastFailedGenerationErrors,omitempty"`
+      }
+```
+
+The `MachineConfigNode` enum `StateProgress` will add two enumerators.
+
+```go
+const (
+      // MachineConfigNodePinnedImageSetsProgressing describes a machine currently progressing to the desired pinned image sets
+      MachineConfigNodePinnedImageSetsProgressing StateProgress = "PinnedImageSetsProgressing"
+      // MachineConfigNodePinnedImageSetsDegraded describes a machine that has failed to progress to the desired pinned image sets
+      MachineConfigNodePinnedImageSetsDegraded StateProgress = "PinnedImageSetsDegraded"
+)
+```
+
 
 ### Implementation Details/Notes/Constraints
 
-Starting with version 4.14 of OpenShift CRI-O will have the capability to pin
+Starting with version 4.16 of OpenShift `CRI-O` will have the capability to pin
 certain images (see [this](https://github.com/cri-o/cri-o/pull/6862) pull
 request for details). That capability will be used to pin all the images
 required for the upgrade, so that they aren't garbage collected by kubelet and
 CRI-O.
 
-In addition when the CRI-O service is upgraded and restarted it removes all the
-images. This used to be done by the `crio-wipe` service, but is now done
-internally by CRI-O. It can be avoided setting the `version_file_persist`
-configuration parameter to "", but that would affect all images, not just the
-pinned ones. This behavior needs to be changed in CRI-O so that pinned images
-aren't removed, regardless of the value of `version_file_persist`.
+The changes to `pinned_images` `CRI-O` configuration observed in the
+`PinnedImageSet` will be persisted to a static config file
+`/etc/crio/crio.conf.d/50-pinned-images` by the `PinnedImageSetManager`.
 
-The changes to pin the images will be done in a file inside the
-`/etc/crio/crio.conf.d` directory. To avoid potential conflicts with files
-manually created by the administrator the name of this file will be the name of
-the `PinnedImageSet` custom resource concatenated with the UUID assigned by the
-API server. For example, if the custom resource is this:
-
-```yaml
-apiVersion: machineconfiguration.openshift.io/v1alpha1
-kind: PinnedImageSet
-metadata:
-  name: my-pinned-images
-  uuid: 550a1d88-2976-4447-9fc7-b65e457a7f42
-spec:
-  pinnedImages:
-  - quay.io/openshift-release-dev/ocp-release@sha256:...
-  - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
-  - quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...
-  ...
-```
-
-Then the complete path will be this:
-
-```txt
-/etc/crio/crio.conf.d/my-pinned-images-550a1d88-2976-4447-9fc7-b65e457a7f42.conf
-```
-
-The content of the file will the `pinned_images` parameter containing the list
-of images:
+The content of the `CRI-O` config file will define the `pinned_images` key containing the list
+of images to pin:
 
 ```toml
 pinned_images=[
-  "quay.io/openshift-release-dev/ocp-release@sha256:...",
   "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...",
   "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...",
   ...
 ]
 ```
 
-In addition to the list of images to be pinned, the `PinnedImageSet` custom
-resource will also contain a node selector. This is intended to support
-different sets of images for different kinds of nodes. For example, to pin
-different images for control plane and worker nodes the user could create two
-`PinnedImageSet` custom resources:
+The `PinnedImageSet` resource is closely linked with the _machine-config-pool_, and each
+Custom Resource (CR) is automatically associated with a pool at the
+`MachineConfigPoolSpec` level. This design is advantageous because it enables
+controllers or administrators to assign specific sets of images to different
+pools. By default, a cluster has two types of pools: master and worker. However,
+users can create [custom pools](https://github.com/openshift/machine-config-operator/blob/master/docs/custom-pools.md)
+for more precise control.
 
-```yaml
-# For control plane nodes:
-apiVersion: machineconfiguration.openshift.io/v1alpha1
-kind: PinnedImageSet
-metadata:
-  name: my-control-plane-pinned-images
-spec:
-  nodeSelector:
-    matchLabels:
-      node-role.kubernetes.io/control-plane: ""
-  pinnedImages:
-  ...
+Having this pool-level granularity is convenient for upgrades as there are
+images that are needed only by the worker nodes and which would not be present
+on a master node and vice-versa.
 
----
+The _machine-config-daemon_ will be enhanced with a new feature called
+`PinnedImageSetManager`, which follows a similar logical flow to the existing
+`certificate_writer`. This new feature will obtain its configuration directly
+from the PinnedImageSet custom resource independent of `MachineConfig`. It is
+advantageous to not use `MachineConfig` in this use case because the
+configuration and image prefetching can happen across all the nodes in the pool
+in parallel instead of a rolling update. The new controller will be watching
+both `PinnedImageSet` and _machine-config-pool_ and `Node` resources. When
+synchronizing, the `PinnedImageSetManager` will:
 
-# For worker nodes:
-apiVersion: machineconfiguration.openshift.io/v1alpha1
-kind: PinnedImageSet
-metadata:
-  name: my-worker-pinned-images
-spec:
-  nodeSelector:
-    matchLabels:
-      node-role.kubernetes.io/worker: ""
-  pinnedImages:
-  ...
-```
+1. Create a `Context` with a timeout of 2 minutes. This ensures that the
+controller provides timely feedback on progress status. The controller will
+perform the below tasks on each sync and after the 2-minute timeout, it will
+drain the `PinnedImageSet` worker pool and requeue. Caching plays an important part
+in this flow to ensure that work done is not repeated.
 
-This is specially convenient for pinning images for upgrades: there are many
-images that are needed only by the control plane nodes and there is no need to
-have them consuming disk space in worker nodes.
+1. Calculate a list of all the `MachineConfigPools` that the `Node` is a member of and loop
+through each. Then on the pool-level create a list of `PinnedImageSets`
+defined in the `MachineConfigPoolSpec` and begin to loop through each
+`PinnedImageSet` in serial.
 
-When no node selector is specified the images will be pinned in all the nodes
-of the cluster.
+1. Ensure that the `Node` is `Ready=true` and `NodeDiskPressure=false`.
 
-The _machine-config-controller_ will grow a new `PinnedImageSetController` sub
-controller that will watch the `PinnedImageSet` custom resources. When one of
-those is created, updated or deleted the controller will start a daemon set that
-will do the following in each node of the cluster:
+1. Check that there is enough disk space available on the `Node` to pull the
+images. This is done by calculating the size of the image blobs using the
+`podman manifest inspect` command and caching the results.
 
-1. Verify that there is enough disk space available in the machine to pull the
-   images.
+1. Obtain auth for each image in the set and cache it.
 
-1. Create, modify or delete the CRI-O pinning configuration file.
+1. Schedule the images in the `PinnedImageSet` to the worker pool which handles pulling each image.
 
-1. Reload the CRI-O configuration, with the equivalent of `systemctl reload crio`.
+1. The worker will use the `CRI` client to ensure the image does not exist in
+the local container storage. If this is true we attempt to pull the image. If
+any image in the set is not able to be pulled an error will be returned. These
+errors will be logged and added to the message of  `PinnedImageSetsDegraded`
+condition of `MachineConfigNodeStatus`. It is the job of the admin to review the
+_machine-config-daemon_ logs to understand the reason the image can not be
+pulled and resolve the failure. Reasons can include but are not limited to
+invalid auth, networking, image no longer exists in the registry, and typos.
 
-    Note that currently CRI-O doesn't recalculate the set of pinned images on
-    reload, support for that will need to be added.
+1. Once all images are pulled we create a unique list of all images in all the sets.
 
-1. Use the CRI-O gRPC API to run the equivalent of `crictl pull` for each of the
-images.
+1. Ensure that all the images still exist and nothing was removed during the
+reconciliation process and the `Node` is `Ready=true` and
+`NodeDiskPressure=false`. 
 
-This needs to be a daemon set running in each node of the cluster because it
-needs to create configuration files on the node, and use the CRI-O gRPC API,
-which is only accessible via `localhost`.
+1. Write the `CRI-O` config to disk if no images exist remove the config.
 
-This logic could be part of a new daemon set, specific for this, or else part of
-the _machine-config-daemon_.
+1. Reload the `CRI-O` configuration, with the equivalent of `systemctl reload crio`.
 
-In order to verify that there is enough disk space we will first check which of
-the images in the `PinnedImageSet` have not yet been downloaded, using CRI-O
-gRPC API. For those that haven't been download we will then fetch from the
-registry server the size of the blobs of the layers (only the size, not the
-actual data).
+1. Update `MachineConfigPoolStatus` and `MachineConfigNodeStatus` to reflect success.
+
+#### Notes
 
 Calculating the exact total size of the layers once uncompressed and written to
-disk is difficult without deep knowledge of the underplaying containers storage
+disk is difficult without deep knowledge of the underlying container storage
 library. Instead of that we will assume that the disk space required is twice
 the size of the blobs of the layers. That is an heuristic that works well for
 complete OpenShift releases: blobs take 16 GiB and when they are written to disk
 they take 32 GiB.
 
-If the calculate disk space exceeds the available disk space then the
-`PinnedImageSet` will be marked as failed and the process will not move forward.
-For example:
-
-```yaml
-status:
-  conditions:
-  - type: Ready
-    status: "False"
-  - type: Failed
-    status: "True"
-    message: |
-      Pulling the images in `node12` requires at least 16 GiB of disk
-      space, but there are only 10 GiB available
-```
+If at anytime in the image pull process, the image pull workers return an error
+equivalent to syscall.ENOSPC or "no space on device" the error will result in
+`Degraded=true` status condition for the _machine-config-pool_ with the error in
+the `Message`. This is the only time that this controller will set the
+`MachineConfigPoolStatus` Conditions to `Degraded=true`.
 
 Note that even with this check it will still be possible (but less likely) to
-have failures to pull images due to disk space: the heuristic could be wrong,
+have failures due to disk space: the heuristic could be wrong,
 and there may be other components pulling images or consuming disk space in
 some other way. Those failures will be detected and reported in the status of
-the `PinnedImageSet` when CRI-O fails to pull the image.
+the _machine-config-pool_ when CRI-O fails to pull the image.
 
-The steps above will happen in all the nodes of the cluster. The daemon set
-will be provided with enough information to ensure that each pod applies only
-the changes required for the node where it runs, according to the node
-selectors in the `PinnedImageSet` custom resources.
+##### Status Reporting Details
 
-When all the images have been successfully pinned and pulled in all the matching
-nodes the `PinnedImageSetController` will set the `Ready` condition to `True`:
-
-```yaml
-status:
-  conditions:
-  - type: Ready
-    status: "True"
-  - type: Failed
-    status: "False"
-```
-
-If something fails the `Failed` condition will be set to `True`, and the
-details of the error will be in the message. For example if `node12` fails to
-pull an image:
+A critical component for `PinnedImageSets` is to provide node-level reporting on
+the progress of the `PinnedImageSetManager` reconciling `PinnedImageSets`. To
+achieve this the implementation relies on reporting node-level status to
+`MachineConfigNode`. When a `PinnedImageSet` is synced we will update
+`MachineConfigNodePinnedImageSetsProgressing=true`. Any error returned during
+reconciliation will result in `MachineConfigNodePinnedImageSetsDegraded=true`
+and reflect accordingly in the counts for
+`MachineConfigNodeStatusPinnedImageSet` on the node-level and
+`PoolSynchronizersStatus` on the `MachineConfigPool` level. When a
+PinnedImageSet is reconciled `MachineConfigNodePinnedImageSetsProgressing=false`
+is set and `PoolSynchronizerStatus.MachineCount` will =
+`PoolSynchronizerStatus.UpdatedMachineCount` and the `Generation` of the
+`PinnedImageSet` should show in the MachineConfigPoolStatus as
+`MachineConfigNodeStatusPinnedImageSet.CurrentGeneration` =
+`MachineConfigNodeStatusPinnedImageSet.DesiredGeneration`.
 
 ```yaml
 status:
@@ -333,22 +448,26 @@ pre-loading all the images required for an upgrade can consume more 32 GiB.
 This is a risk because disk exhaustion can affect other workloads and the
 control plane. There is already a mechanism to mitigate that: the kubelet
 garbage collection. To ensure disk space issues are reported and that garbage
-collection doesn't interfere we will introduced new mechanisms:
+collection doesn't interfere we will introduce new mechanisms:
 
-1. Disk space will be checked before trying to pre-load images, and if there are
-issues they will be reported explicitly via the status of the `PinnedImageSet`
-status.
+1. There is a possibility that storage may become fully exhausted by unforeseen
+factors while images are being downloaded. Therefore, the configuration for
+`pinned_images` in `CRI-O` and the subsequent reloading of the `CRI-O` service are
+executed as the final steps, and only after all images have been successfully
+pulled. This approach ensures that, in an emergency situation where space needs
+to be freed up, the kubelet can remove these images to clear storage space.
 
 1. If disk space is exhausted while pulling the images, then the issue will be
-reported via the status of the `PinnedImageSet` as well. Typically these issues
-are reported as failures to pull images in the status of pods, but in this case
-there are no pods pulling the images. CRI-O will still report these issues in
-the log (if there is space for that), like for any other image pull.
+reported via the `PinnedImageSetManager` by setting the _machine-config-pool_ to
+`Degraded=true`. Typically these issues are reported as failures to pull images
+in the status of pods, but in this case there are no pods pulling the images.
+`CRI-O` will still report these issues in the log (if there is space for that),
+like for any other image pull.
 
 1. If disk exhaustion happens after the images have been pulled, then we will
 ensure that the kubelet garbage collector doesn't select these images. That
-will be handled by the image pinning support in CRI-O: even if kubelet asks
-CRI-O to delete a pinned image CRI-O will not delete it.
+will be handled by the image pinning support in `CRI-O`: even if kubelet asks
+`CRI-O` to delete a pinned image `CRI-O` will not delete it.
 
 1. The recovery steps in the documentation will be amended to ensure that these
 images aren't deleted to recover disk space.
@@ -369,19 +488,17 @@ We add a CI test that verifies that images are correctly pinned and pre-loaded.
 
 ### Graduation Criteria
 
-The feature will ideally be introduced as `Dev Preview` in OpenShift 4.X,
-moved to `Tech Preview` in 4.X+1 and declared `GA` in 4.X+2.
+The feature will ideally be introduced as `Tech Preview` in OpenShift 4.16 and declared `GA` in TBD.
 
-#### Dev Preview -> Tech Preview
-
-- Availability of the CI test.
-
-- Obtain positive feedback from at least one customer.
 
 #### Tech Preview -> GA
 
 - User facing documentation created in
 [https://github.com/openshift/openshift-docs](openshift-docs).
+
+- MachineConfigNode is promoted to v1.
+
+- PinnedImageSet is promoted to v1.
 
 #### Removing a deprecated feature
 
@@ -394,8 +511,8 @@ don't require any special handling because the custom resource is optional:
 there will be no such custom resource in the upgraded cluster.
 
 Downgrades to versions that don't support the `PinnedImageSet` custom resource
-don't require any changes. The existing pinned images will be ignored in the
-downgraded cluster, and will eventually be garbage collected.
+don't require any changes. The existing pinned images will need to be potentially
+manually unpinned.
 
 ### Version Skew Strategy
 
@@ -406,8 +523,8 @@ Not applicable.
 #### Failure Modes
 
 Image pulling may fail due to lack of disk space or other reasons. This will be
-reported via the conditions in the `PinnedImageSet` custom resource. See the
-risks and mitigations section for details.
+reported via the conditions in the `MachineConfigNode` custom resource. See the
+risks and mitigation section for details.
 
 #### Support Procedures
 
