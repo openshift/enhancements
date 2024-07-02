@@ -528,7 +528,7 @@ So in previous section we merely copied existing code from operator’s own repo
 
 But once your operator has been changed to conform to new code in csi-operator repo, You need to perform following additional steps:
 
-1. Make sure that `Dockerfile.<operator>` at top of the `csi-operator` tree refers to new location of code and not older `legacy/<operator>` location.See example of existing Dockerfiles.
+1. Make sure that `Dockerfile.<operator>` at top of the `csi-operator` tree refers to new location of code and not older `legacy/<operator>` location. See example of existing Dockerfiles.
 2. After your changes to `csi-operator` are merged, you should remove the old location from cachito - https://github.com/openshift-eng/ocp-build-data/pull/4219
 
 Please note the changes to `ocp-build-data`should be merged almost same time as changes into `csi-operator`'s Dockerfile are merged, otherwise we risk builds from breaking.
