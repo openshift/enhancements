@@ -569,14 +569,92 @@ the operator will be able to handle both the ini config and the yaml config.
 #### Cluster Storage Operator
 
 The Cluster Storage Operator (CSO) is in charge of multiple components.  The
-important parts being the vSphere CSI Driver Operator and the vSphere CSI
-drivers.  For the CSO itself, we are just going to update it to know about the
-new changes to the infrastructure CRD.  Additionally, it will need to update the
-permissions / roles of the vSphere CSI Driver Operator.
+important parts being the vSphere Problem Detector, vSphere CSI Driver Operator 
+and the vSphere CSI drivers.  For the CSO itself, we are just going to update it 
+to know about the new changes to the infrastructure CRD.  Additionally, it will 
+need to update the permissions / roles of the vSphere CSI Driver Operator.
 
 #### vSphere CSI Driver Operator
 
+The vSphere CSI Driver operator has a lot of enhancements done for multi vCenter
+support.  These include:
+- Added feature gate for multi vCenter
+- Moved password from env variables for image to the CSI config file
+- Enhanced CSI config file to define each vCenter with user/pass
+- Updated check to include a connection for each vCenter
+- Created new wrapper config object to contain legacy config values when detected
 
+The important enhancements to discuss revolve around the change to config for csi 
+driver, using upstream config and improvement to all the checks.  The first topic
+of interest is the change to CSI config.  
+
+Today we are putting only one vCenter into the csi driver INI file.
+We are enhancing the process of generating that to now use a template that will 
+insert multiple vCenters.  While we are now adding each vCenter into this config 
+file, we are also going to be moving the username and password into the INI file 
+as well.  The env variables only really works for single vCenter, but does not 
+work for multiple.  Upstream has the ability to set all these values in the INI 
+config and so we are migrating to putting these there.
+
+For this to follow the security pattern of user/pass being in secrets and not
+config maps, we need to make sure that the csi driver INI config is moved from
+the configmap location it is currently using into a secret.  There was a separate
+PR that already exists that is in the process of doing this, so we will piggy-back
+off that PR to get this behavior in place.
+
+An example of the INI file w/ user and password configured:
+
+```ini
+# Labels with topology values are added dynamically via operator
+[Global]
+cluster-id = ngirard-multi-bcw8t
+
+# Populate VCenters (multi) after here
+[VirtualCenter "vcs8e-vc.ocp2.dev.cluster.com"]
+insecure-flag           = true
+datacenters             = IBMCloud
+migration-datastore-url = ds:///vmfs/volumes/vsan:523ea352e875627d-b090c96b526bb79c/
+password                = password
+user                    = user
+
+[VirtualCenter "vcenter.ci.ibmc.devcluster.openshift.com"]
+insecure-flag           = true
+datacenters             = cidatacenter
+migration-datastore-url = ds:///vmfs/volumes/vsan:523ea352e875627d-b090c96b526bb79c/
+password                = password2
+user                    = user2
+
+[Labels]
+topology-categories = openshift-zone,openshift-region
+```
+
+Next the operator was enhanced to be able to support using the upstream vSphere 
+YAML cloud provider config format.  There is some logic that uses our old legacy 
+style config.  To preserve this, we created a wrapper config object that attempts
+to load the cloud provider config as either INI or YAML.  If its INI, we will 
+also store the INI data into the `LegacyConfig` field so we can access it in 
+certain situations.
+
+```go
+// VSphereConfig contains configuration for cloud provider.  It wraps the legacy version and the newer upstream version
+// with yaml support
+type VSphereConfig struct {
+	Config       *vsphere.Config
+	LegacyConfig *legacy.VSphereConfig
+}
+```
+
+The operator has also been enhanced in all of the checks that are performed.  
+Currently each check assumed everything was against one vCenter.  We need to 
+enhance this logic to contain connections to each vCenter.  For example, we
+perform checks against each VM to verify hardware version.  Before, all VMs
+would be in the same vCenter.  Now, each node we have, we have to check for the
+VMs existence in the correct vCenter to prevent false negatives.
+
+To solve the multi vCenter check dilemma, we are enhancing each check to make sure
+we take into account this.  We'll create a connection to each vCenter now and
+share these across all the checks.  These connections will be stored in the 
+CheckContext and can be used by any check.
 
 #### vSphere CSI Driver
 
@@ -589,64 +667,67 @@ There is already a card for updating the version of the driver to the latest
 version in the backlog of the cluster storage team.  These changes will be 
 tracked separately of this enhancement.
 
+#### vSphere Problem Detector
+
+
+
 ### Multiple vCenters Configured as Day 2
 
+NOTE: This sectionis place holder for future design / work.
+
+- vSphere updates
+  - Create folders, resourcepools, etc need for FD definition
+- Update vsphere-creds with new vCenter user and pass
 - Update cloud provider config
-  - Convert ini to yaml
-  - Updating YAML if coming from install that only had 1 vCenter at install with YAML support.
+  - INI
+    - Convert ini to yaml
+    - Add new vCenter config
+  - YAML
+    - Updating YAML if coming from install that only had 1 vCenter at install with YAML support.
+    - Add new vCenter config
 - Update infrastructure (cluster) to contain Failure Domains
   - Infrastructure already has defined failure domains
+    - Add new failure domain for new vCenter. 
   - Infrastructure has generated single failure domain
+    - Update "generated-failure-domain" to contain actual tags created for the current config.
+    - Add new failure domain for the new vCenter.
   - Infrastructure is legacy with no failure domains
+    - Create ProviderSpec if not present in infrastructure definition
+    - Create failure domain for current config
+    - Create failure domain for new vCenter
 
 ### Workflow Description
 
-Explain how the user will use the feature. Be detailed and explicit.
-Describe all of the actors, their roles, and the APIs or interfaces
-involved. Define a starting state and then list the steps that the
-user would need to go through to trigger the feature described in the
-enhancement. Optionally add a
-[mermaid](https://github.com/mermaid-js/mermaid#readme) sequence
-diagram.
+#### Installation (IPI)
 
-Use sub-sections to explain variations, such as for error handling,
-failure recovery, or alternative outcomes.
+1. vSphere administrator configures vCenters with all required tagging for zonal support
+2. OpenShift administrator configures `install-config.yaml` with multiple failure domains and up to three vCenters.
+3. OpenShift administrator initiates an installation with `openshift-install create cluster`.
 
-For example:
+#### Day 2 Configuration (IPI)
 
-**cluster creator** is a human user responsible for deploying a
-cluster.
-
-**application administrator** is a human user responsible for
-deploying an application in a cluster.
-
-1. The cluster creator sits down at their keyboard...
-2. ...
-3. The cluster creator sees that their cluster is ready to receive
-   applications, and gives the application administrator their
-   credentials.
-
-See
-https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md#high-level-end-to-end-workflow
-and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples.
+1. vSphere administrator configure new vCenter
+ - Create cluster folder for new FD / vCenter to match name of 
+ - Upload template
+ - Create resource pool
+ - Creates zonal tags and applies them
+2. OpenShift administrator updates vsphere-creds secret to contain user/pass entry for new vCenter
+3. OpenShift administrator updates the cloud.conf
+  - If current cloud config is ini, the administrator will need to convert to yaml and then just add new vcenter.
+  - If current cloud config is yaml, the administrator will need to add new failure domains for new vCenter.
+4. OpenShift administrator updates masters to get Masters (if going from 1 FD to multi FD)
+  - Add labels for region/zone to masters
+  - Recreate masters and assign to failure domain 
+5. Create MachineSet for each new failure domain in the new vCenter for compute nodes
 
 ### API Extensions
 
-API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
+This feature does not create any new CRDs; however, it does enhance the following:
+- infrastructures.config.openshift.io
 
-- Name the API extensions this enhancement adds or modifies.
-- Does this enhancement modify the behaviour of existing resources, especially those owned
-  by other parties than the authoring team (including upstream resources), and, if yes, how?
-  Please add those other parties as reviewers to the enhancement.
+This CRD was enhanced to allow up to 3 vCenters to now be defined in the vcenters section of the vsphere platform spec.
 
-  Examples:
-  - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
-  - Restricts the label format for objects to X.
-  - Defaults field Y on object kind Z.
-
-Fill in the operational impact of these API Extensions in the "Operational Aspects
-of API Extensions" section.
+See https://github.com/openshift/api/pull/1842 for more information on the API changes.
 
 ### Topology Considerations
 
@@ -655,11 +736,7 @@ of API Extensions" section.
 Are there any unique considerations for making this change work with
 Hypershift?
 
-See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282
-
-How does it affect any of the components running in the
-management cluster? How does it affect any components running split
-between the management cluster and guest cluster?
+None
 
 #### Standalone Clusters
 
@@ -667,13 +744,7 @@ Is the change relevant for standalone clusters?
 
 #### Single-node Deployments or MicroShift
 
-How does this proposal affect the resource consumption of a
-single-node OpenShift deployment (SNO), CPU and memory?
-
-How does this proposal affect MicroShift? For example, if the proposal
-adds configuration options through API resources, should any of those
-behaviors also be exposed to MicroShift admins through the
-configuration file for MicroShift?
+This proposal targets multi node clusters that are spanning across more than one vCenter.
 
 ### Implementation Details/Notes/Constraints
 
