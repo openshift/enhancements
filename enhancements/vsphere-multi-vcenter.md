@@ -669,11 +669,33 @@ tracked separately of this enhancement.
 
 #### vSphere Problem Detector
 
+The vSphere Problem Detector (VPD) will also be updated to handle multiple vCenters
+similar to the vSphere CSI Driver Operator.
+- Enhance to support new YAML cloud provider config
+- Update checks to access multiple vCenters
+- Create new checker to verify infrastructure config and cloud provider config.
 
+As you can see, the changes for VPD follow what was done for vSphere CSI Driver 
+Operator. We are enhancing the operator to use a wrapper config to be able to support
+loading INI and YAML based configs.  This is important for backwards compatability.
+
+All checks have been updated to allow for verifying what vCenter needs to be accessed
+for the various checks.  This can be a bit confusing for the operator as the OCP
+administrator configures the cluster to have a second vCenter.  For clean installs
+with multiple vCenters, the config will be correct out-of-the-box; however, for
+when Day 2 option is persued, the administrator is more likely to make mistake
+updating the cloud provider config or the infrastructure config.  
+
+This leads us to the new checker being added to help the administrator detect when
+such a config mistake may have occurred.  The new check will validate the configs
+in infrastructure and the cloud config to make sure both are configured for the
+same vCenters.  It also makes sure that all failure domains are referencing valid
+vCenters that should be defined in the vCenter section of the infrastructure cluster
+resource.
 
 ### Multiple vCenters Configured as Day 2
 
-NOTE: This sectionis place holder for future design / work.
+NOTE: This section is placeholder for future design / work.
 
 - vSphere updates
   - Create folders, resourcepools, etc need for FD definition
@@ -740,7 +762,7 @@ None
 
 #### Standalone Clusters
 
-Is the change relevant for standalone clusters?
+These changes will affect Standalone clusters running on vSphere.
 
 #### Single-node Deployments or MicroShift
 
@@ -748,91 +770,19 @@ This proposal targets multi node clusters that are spanning across more than one
 
 ### Implementation Details/Notes/Constraints
 
-What are some important details that didn't come across above in the
-**Proposal**? Go in to as much detail as necessary here. This might be
-a good place to talk about core concepts and how they relate. While it is useful
-to go into the details of the code changes required, it is not necessary to show
-how the code will be rewritten in the enhancement.
-
 ### Risks and Mitigations
-
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
-
-How will security be reviewed and by whom?
-
-How will UX be reviewed and by whom?
-
-Consider including folks that also work outside your immediate sub-project.
 
 ### Drawbacks
 
-The idea is to find the best form of an argument why this enhancement should
-_not_ be implemented.
-
-What trade-offs (technical/efficiency cost, user experience, flexibility,
-supportability, etc) must be made in order to implement this? What are the reasons
-we might not want to undertake this proposal, and how do we overcome them?
-
-Does this proposal implement a behavior that's new/unique/novel? Is it poorly
-aligned with existing user expectations?  Will it be a significant maintenance
-burden?  Is it likely to be superceded by something else in the near future?
-
 ## Open Questions [optional]
 
-This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance,
- > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this?
+None yet
 
 ## Test Plan
 
-**Note:** *Section not required until targeted at a release.*
-
-Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
-- What additional testing is necessary to support managed OpenShift service-based offerings?
-
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
-
-All code is expected to have adequate tests (eventually with coverage
-expectations).
+TBD
 
 ## Graduation Criteria
-
-**Note:** *Section not required until targeted at a release.*
-
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-
-- Maturity levels
-  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
-- [Deprecation policy][deprecation-policy]
-
-Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
-or by redefining what graduation means.
-
-In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
-
-[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
-[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
-
-**If this is a user facing change requiring new or updated documentation in [openshift-docs](https://github.com/openshift/openshift-docs/),
-please be sure to include in the graduation criteria.**
-
-**Examples**: These are generalized examples to consider, in addition
-to the aforementioned [maturity levels][maturity-levels].
 
 ### Dev Preview -> Tech Preview
 
@@ -858,158 +808,30 @@ end to end tests.**
 
 ### Removing a deprecated feature
 
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
+This feature is not deprecating any features.  This is adding new features.  The
+only thing we are using that may get deprecated in the future is our legacy
+vSphere cloud provider INI config.  Upstream has already deprecated this to a
+degree, and we are behind on using the newer YAML standard.  This feature will
+be moving us to the latest standard.
 
 ## Upgrade / Downgrade Strategy
 
-If applicable, how will the component be upgraded and downgraded? Make sure this
-is in the test plan.
-
-Consider the following in developing an upgrade/downgrade strategy for this
-enhancement:
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to keep previous behavior?
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to make use of the enhancement?
-
-Upgrade expectations:
-- Each component should remain available for user requests and
-  workloads during upgrades. Ensure the components leverage best practices in handling [voluntary
-  disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to
-  this should be identified and discussed here.
-- Micro version upgrades - users should be able to skip forward versions within a
-  minor release stream without being required to pass through intermediate
-  versions - i.e. `x.y.N->x.y.N+2` should work without requiring `x.y.N->x.y.N+1`
-  as an intermediate step.
-- Minor version upgrades - you only need to support `x.N->x.N+1` upgrade
-  steps. So, for example, it is acceptable to require a user running 4.3 to
-  upgrade to 4.5 with a `4.3->4.4` step followed by a `4.4->4.5` step.
-- While an upgrade is in progress, new component versions should
-  continue to operate correctly in concert with older component
-  versions (aka "version skew"). For example, if a node is down, and
-  an operator is rolling out a daemonset, the old and new daemonset
-  pods must continue to work correctly even while the cluster remains
-  in this partially upgraded state for some time.
-
-Downgrade expectations:
-- If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
-  misbehaving, it should be possible for the user to rollback to `N`. It is
-  acceptable to require some documented manual steps in order to fully restore
-  the downgraded cluster to its previous state. Examples of acceptable steps
-  include:
-  - Deleting any CVO-managed resources added by the new version. The
-    CVO does not currently delete resources that no longer exist in
-    the target version.
+Currently, upgrade scenario will enable the ability to use multiple vCenters.  The
+cluster, if being configured after the upgrade to leverage multiple vCenters, happens
+to fail, the user will be able to undo their config changes and apply the previous
+configs.  It is ideal for the customer to take backups of the custom resources 
+before starting the reconfiguration process (Day 2).
 
 ## Version Skew Strategy
 
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
-
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
-
 ## Operational Aspects of API Extensions
-
-Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
-admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
-especially how they impact the OCP system architecture and operational aspects.
-
-- For conversion/admission webhooks and aggregated apiservers: what are the SLIs (Service Level
-  Indicators) an administrator or support can use to determine the health of the API extensions
-
-  Examples (metrics, alerts, operator conditions)
-  - authentication-operator condition `APIServerDegraded=False`
-  - authentication-operator condition `APIServerAvailable=True`
-  - openshift-authentication/oauth-apiserver deployment and pods health
-
-- What impact do these API extensions have on existing SLIs (e.g. scalability, API throughput,
-  API availability)
-
-  Examples:
-  - Adds 1s to every pod update in the system, slowing down pod scheduling by 5s on average.
-  - Fails creation of ConfigMap in the system when the webhook is not available.
-  - Adds a dependency on the SDN service network for all resources, risking API availability in case
-    of SDN issues.
-  - Expected use-cases require less than 1000 instances of the CRD, not impacting
-    general API throughput.
-
-- How is the impact on existing SLIs to be measured and when (e.g. every release by QE, or
-  automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
-  this enhancement)
-
-- Describe the possible failure modes of the API extensions.
-- Describe how a failure or behaviour of the extension will impact the overall cluster health
-  (e.g. which kube-controller-manager functionality will stop working), especially regarding
-  stability, availability, performance and security.
-- Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
-  and add them as reviewers to this enhancement.
 
 ## Support Procedures
 
-Describe how to
-- detect the failure modes in a support situation, describe possible symptoms (events, metrics,
-  alerts, which log output in which component)
-
-  Examples:
-  - If the webhook is not running, kube-apiserver logs will show errors like "failed to call admission webhook xyz".
-  - Operator X will degrade with message "Failed to launch webhook server" and reason "WehhookServerFailed".
-  - The metric `webhook_admission_duration_seconds("openpolicyagent-admission", "mutating", "put", "false")`
-    will show >1s latency and alert `WebhookAdmissionLatencyHigh` will fire.
-
-- disable the API extension (e.g. remove MutatingWebhookConfiguration `xyz`, remove APIService `foo`)
-
-  - What consequences does it have on the cluster health?
-
-    Examples:
-    - Garbage collection in kube-controller-manager will stop working.
-    - Quota will be wrongly computed.
-    - Disabling/removing the CRD is not possible without removing the CR instances. Customer will lose data.
-      Disabling the conversion webhook will break garbage collection.
-
-  - What consequences does it have on existing, running workloads?
-
-    Examples:
-    - New namespaces won't get the finalizer "xyz" and hence might leak resource X
-      when deleted.
-    - SDN pod-to-pod routing will stop updating, potentially breaking pod-to-pod
-      communication after some minutes.
-
-  - What consequences does it have for newly created workloads?
-
-    Examples:
-    - New pods in namespace with Istio support will not get sidecars injected, breaking
-      their networking.
-
-- Does functionality fail gracefully and will work resume when re-enabled without risking
-  consistency?
-
-  Examples:
-  - The mutating admission webhook "xyz" has FailPolicy=Ignore and hence
-    will not block the creation or updates on objects when it fails. When the
-    webhook comes back online, there is a controller reconciling all objects, applying
-    labels that were not applied during admission webhook downtime.
-  - Namespaces deletion will not delete all objects in etcd, leading to zombie
-    objects when another namespace with the same name is created.
-
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used
-to highlight and record other possible approaches to delivering the
-value proposed by an enhancement, including especially information
-about why the alternative was not selected.
 
 ## Infrastructure Needed [optional]
-
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
 
 ## Neil's Notes
 
