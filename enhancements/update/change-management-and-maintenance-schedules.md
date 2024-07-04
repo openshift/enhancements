@@ -486,7 +486,8 @@ The impact of hierarchy should always be made clear in the change management sta
 #### Assisted Strategy - MachineConfigPool
 Minimally, this strategy will be supported by MachineConfigPool. If and when the strategy is supported by other
 change management capable resources, the configuration schema for the policy may differ as the details of
-what constitutes and informs change varies between resources. 
+what constitutes and informs change varies between resources (e.g. `renderedConfigsBefore` informs the assisted
+strategy configuration for a MachineConfigPool, but may be meaningless for other resources). 
 
 This strategy is motivated by the desire to support the separation of control-plane and worker-node updates both
 conceptually for users and in real technical terms. One way to do this for users who do not benefit from the
@@ -498,23 +499,27 @@ like `maxUnavailable` in each MachineConfigPool).
 Clearly, if this was the only mode of updating worker-nodes, we could never successfully disentangle the
 concepts of control-plane vs worker-node updates in Standalone environments since one implies the other.
 
-In short (details will follow in the implementation section), the assisted strategy allows users to specify the
-exact rendered [`desiredConfig` the MachineConfigPool](https://github.com/openshift/machine-config-operator/blob/5112d4f8e562a2b072106f0336aeab451341d7dc/docs/MachineConfigDaemon.md#coordinating-updates) should be advertising to the MachineConfigDaemon on
-nodes it is associated with. Like the `MaintenanceSchedule` strategy, it also respects the `pausedUntil`
-field.
+In short (details will follow in the implementation section), the assisted strategy allows users to 
+constrain which rendered machineconfig [`desiredConfig` the MachineConfigPool](https://github.com/openshift/machine-config-operator/blob/0f53196f6480481d3f5a04e217a143a56d4db79e/docs/MachineConfig.md#final-rendered-machineconfig-object) 
+should be advertised to the MachineConfigDaemon on nodes it is associated with. Like the `MaintenanceSchedule` 
+strategy, it also respects the `pausedUntil` field.
+
+When using this strategy, estimated time related metrics are set to 0 (e.g. eta and remaining).
 
 #### Manual Strategy - MachineConfigPool
 Minimally, this strategy will be supported by MachineConfigPool. If and when the strategy is supported by other
 change management capable resources, the configuration schema for the policy may differ as the details of
 what constitutes and informs change varies between resources. 
 
-Like the Assisted strategy, this strategy is implemented to support the conceptual and technical separation
+Like the assisted strategy, this strategy is implemented to support the conceptual and technical separation
 of control-plane and worker-nodes. The MachineConfigPool Manual strategy allows users to explicitly specify
 their `desiredConfig` to be used for ignition of new and rebooting nodes. While the Manual strategy is enabled,
 the MachineConfigOperator will not trigger the MachineConfigDaemon to drain or reboot nodes automatically.
 
-Because the Manual strategy initiates changes on its own behalf, `pausedUntil` has no effect. From a metrics
+Because the Manual strategy never initiates changes on its own behalf, `pausedUntil` has no effect. From a metrics
 perspective, this strategy reports as paused indefinitely.
+
+When using this strategy, estimated time related metrics are set to 0 (e.g. eta and remaining).
 
 ### Workflow Description
 
@@ -688,17 +693,16 @@ perspective, this strategy reports as paused indefinitely.
 1. The cluster lifecycle administrator sends a company-wide notice about the period during which service may be disrupted.
 1. The user determines the most recent rendered worker configuration. They configure the `manual` change
    management policy to use that exact configuration as the `desiredConfig`. 
-1. The MCO is thus being asked to ignite any new node or rebooted node with the desired configuration, but it
-   is **not** being permitted to apply that configuration to existing nodes because change management, in effect,
-   is paused indefinitely by the manual strategy.
-1. The MCO metric for the MCP indicating the number of seconds remaining until changes can be initiated is `-1` - indicating
-   that there is presently no time in the future where it will initiate material changes. The operations team
-   has an alert configured if this value `!= -1`.
+1. The MCC is thus being asked to ignite any new node or rebooted node with the desired configuration, but it
+   is **not** being permitted to initiate that configuration change on existing nodes because change management, in effect,
+   is paused indefinitely by the manual strategy. A new annotation `applyOnReboot` will be set on 
+   nodes selected by the MachineConfigPool. The flag indicates to the MCD will that it should only 
+   apply the configuration before a node is rebooted (vs initiating its own drain / reboot).
 1. The MCO metric for the MCP indicating that changes are pending is set because not all nodes are running
    the most recently rendered configuration. This is irrespective of the `desiredConfig` in the `manual` 
-   policy. Abstractly, it means, if change management were disabled, whether changes would be initiated.
-1. The cluster lifecycle administrator manually drains and reboots nodes in the cluster. As they come back online,
-   the MachineConfigServer offers them the desiredConfig requested by the manual policy.
+   policy. Conceptually, it means, if change management were disabled, whether changes would be initiated.
+1. The cluster lifecycle administrator manually drains and reboots nodes in the cluster.  
+   Before the node reboots, it takes the opportunity to pivot to the `desiredConfig`. 
 1. After updating all nodes, the cluster lifecycle administrator does not need make any additional 
    configuration changes. They can leave the `changeManagement` stanza in their MCP as-is.
    
@@ -707,24 +711,21 @@ perspective, this strategy reports as paused indefinitely.
 1. There are no reoccurring windows of time when the cluster lifecycle administrator can tolerate downtime.
    Instead, updates are negotiated and planned far in advance. 
 1. The cluster workloads are not HA and unplanned drains are considered a business risk.
-1. To prevent surprises, the cluster lifecycle administrator sets the Assisted strategy on the worker MCP.
+1. To prevent surprises, the cluster lifecycle administrator sets the assisted strategy on the worker MCP.
 1. In the `assisted` strategy change management policy, the lifecycle administrator configures `pausedUntil: "true"`
    and the most recently rendered worker configuration in the policy's `renderedConfigsBefore: <current datetime>`.
 1. The MCO is being asked to ignite any new node or any rebooted node with the latest rendered configuration
-   before the present datetime. However, because of `pausedUntil: "true"`, it is also being asked not to 
+   before the specified datetime. However, because of `pausedUntil: "true"`, it is also being asked not to 
    automatically initiate that material change for existing nodes.
-1. The MCO metric for the MCP indicating the number of seconds remaining until changes can be initiated is `-1` - indicating
-   that there is presently no time in the future where it will initiate material changes. The operations team
-   has an alert configured if this value `!= -1`.
 1. The MCO metric for the MCP indicating that changes are pending is set because not all nodes are running
    the most recent, rendered configuration. This is irrespective of the `renderedConfigsBefore` in the `assisted` 
-   configuration. Abstractly, it means, if change management were disabled, whether changes would be initiated.
+   configuration. Conceptually, it means, if change management were disabled, whether changes would be initiated.
 1. When the lifecycle administrator is ready to permit disruption, they set `pausedUntil: "false"`.
-1. The MCO sets the number of seconds until changes are permitted to `0`.
 1. The MCO begins to initiate worker node updates. This rollout abides by documented OpenShift constraints
    such as the MachineConfigPool `maxUnavailable` setting.
 1. Though new rendered configurations may be created, the assisted strategy will not act until the assisted policy
    is updated to permit a more recent creation date.
+
    
 ### API Extensions
 
@@ -938,9 +939,9 @@ Labels:
 - system=<control-plane|worker-nodes>
 
 Value: 
-- `-2`: Error determining the time at which changes can be initiated (e.g. cannot check with ClusterVersion / change management hierarchy).
-- `-1`: Material changes are paused indefinitely. 
-- `0`: Any pending changes can be initiated now (e.g. change management is disabled or inside machine schedule window).
+- `-2`: Error determining the time at which changes can be initiated (e.g. cannot check with ClusterVersion / change management hierarchy). 
+- `-1`: Material changes are paused indefinitely.  
+- `0`: Material changes can be initiated now (e.g. change management is disabled or inside machine schedule window). Alternatively, time is not relevant to the strategy (e.g. assisted strategy).
 - `> 0`: The number seconds remaining until changes can be initiated OR 1000*24*60*60 (1000 days) if no permissive window can be found within the next 1000 days (this ensures a brute force check of intersecting datetimes with hierarchy RRULEs is a valid method of calculating intersection). 
 
 `change_management_permissive_remaining`
@@ -952,7 +953,7 @@ Labels:
 Value: 
 - `-2`: Error determining the time at which current permissive window will close.
 - `-1`: Material changes are permitted indefinitely (e.g. `strategy: disabled`). 
-- `0`: Material changes are not presently permitted (i.e. the cluster is outside of a permissive window).
+- `0`: Material changes are not presently permitted (i.e. the cluster is outside of a permissive window). Alternatively, time is not relevant to the strategy (e.g. assisted strategy).
 - `> 0`: The number seconds remaining in the current permissive change window (or the equivalent of 1000 days if end of window cannot be computed). 
 
 `change_management_last_change`
@@ -964,7 +965,7 @@ Labels:
 Value: 
 - `-1`: Datetime unknown. 
 - `0`: Material changes are currently permitted.
-- `> 0`: The number of seconds which have elapsed since the material changes were last permitted.
+- `> 0`: The number of seconds which have elapsed since the material changes were last permitted or initiated (for non-time based strategies).
 
 `change_management_strategy_enabled`
 Labels:
@@ -1048,7 +1049,7 @@ until it occurs. Obviously, this calculation must be repeated:
 #### Service Delivery Option Sanitization
 It is obvious that the range of flexible options provided by change management configurations offers
 can create risks for inexperienced cluster lifecycle administrators. For example, setting a 
-standalone cluster to use the Assisted strategy and failing to trigger worker-node updates will
+standalone cluster to use the assisted strategy and failing to trigger worker-node updates will
 leave unpatched CVEs on worker-nodes much longer than necessary. It will also eventually lead to
 the need to resolve version skew (Upgradeable=False will be reported by the API cluster operator).
 
