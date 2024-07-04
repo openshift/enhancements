@@ -358,6 +358,7 @@ risks and disruption when rolling out changes to their environments.
 4. Exposing maintenance schedule controls from the oc CLI. This may be a future goal but is not required by this enhancement.
 5. Providing strict promises around the exact timing of upgrade processes. Maintenance schedules will be honored to a reasonable extent (e.g. upgrade actions will only be initiated during a window), but long-running operations may exceed the configured end of a maintenance schedule.
 6. Implementing logic to defend against impractical maintenance schedules (e.g. if a customer configures a 1-second maintenance schedule every year). Service Delivery may want to implement such logic to ensure upgrade progress can be made.
+7. Automatically initiating updates to `ClusterVersion`. This will still occur through external actors/orchestration. Maintenance schedules simply give the assurance that changes to `ClusterVersion` will not result in material changes until permitted by the defined maintenance schedules.
 
 ## Proposal
 
@@ -430,7 +431,7 @@ should be updated to proxy that status information to the end users.
 Cluster wide change management information will be made available through cluster metrics. Each resource
 containing the stanza must expose the following metrics:
 - Whether any change management strategy is enabled.
-- Which change management strategy is enabled. This can be used not notify SRE when a cluster begins using a non-standard strategy (e.g. during emergency corrective action).
+- Which change management strategy is enabled. This can be used to notify SRE when a cluster begins using a non-standard strategy (e.g. during emergency corrective action).
 - The number of seconds until the next known permitted change window. See `change_management_next_change_eta` metric. This might be used to notify an SRE team of an approaching permissive window.
 - The number of seconds until the current change window closes. See `change_management_permissive_remaining` metric.
 - The last datetime at which changes were permitted (can be nil). See `change_management_last_change` metric (which represents this as seconds instead of a datetime). This could be used to notify an SRE team if a cluster has not had the opportunity to update for a non-compliant period.
@@ -479,7 +480,8 @@ material changes will be paused.
 This strategy indicates that no change management strategy is being enforced by the resource. It always implies that
 the enforcement state at the resource level is unpaused / permissive. This does not always
 mean that material changes are permitted due to change management hierarchies. For example, a MachineConfigPool
-with `strategy: Disabled` would still be subject to a `strategy: MaintenanceStrategy` in the ClusterVersion resource.
+with `strategy: Disabled` would still be subject to a `strategy: MaintenanceSchedule` in the ClusterVersion resource.
+The impact of hierarchy should always be made clear in the change management status of the MachineConfigPool.
 
 #### Assisted Strategy - MachineConfigPool
 Minimally, this strategy will be supported by MachineConfigPool. If and when the strategy is supported by other
@@ -1083,7 +1085,7 @@ code paths prove challenging.
 
 ## Open Questions [optional]
 
-1. Can the HyperShift Operator expose a metric expose a metric for when changes are pending for a subset of worker nodes on the cluster if it can only interact via CAPI resources?
+1. Can the HyperShift Operator expose a metric for when changes are pending for a subset of worker nodes on the cluster if it can only interact via CAPI resources?
 2. Can the MCO interrogate the ClusterVersion change management configuration in order to calculate overlapping permissive intervals in the future?
 
 ## Test Plan
