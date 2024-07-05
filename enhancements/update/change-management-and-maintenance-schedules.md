@@ -622,7 +622,8 @@ When using this strategy, estimated time related metrics are set to 0 (e.g. eta 
 21. In the subsequent days, the cluster is scaled up to handle additional workload. The new nodes receive
     the most recent, desired configuration.    
 22. On the first Saturday of the next month, the MCO resumes its work. In order to ensure that forward progress is
-    made for all nodes, the MCO will update nodes that have the oldest current configuration first. This ensures
+    made for all nodes, the MCO will update nodes in order of oldest rendered configuration to newest rendered configuration
+    (among those nodes that do not already have the desired configuration). This ensures
     that even if the desired configuration has changed multiple times while maintenance was not permitted,
     no nodes are starved of updates. Consider the alternative where (a) worker-node updates required > 24h,
     (b) updates to nodes are performed alphabetically, and (c) MachineConfigs are frequently being changed
@@ -695,8 +696,15 @@ When using this strategy, estimated time related metrics are set to 0 (e.g. eta 
    management policy to use that exact configuration as the `desiredConfig`. 
 1. The MCC is thus being asked to ignite any new node or rebooted node with the desired configuration, but it
    is **not** being permitted to initiate that configuration change on existing nodes because change management, in effect,
-   is paused indefinitely by the manual strategy. A new annotation `applyOnReboot` will be set on 
-   nodes selected by the MachineConfigPool. The flag indicates to the MCD will that it should only 
+   is paused indefinitely by the manual strategy. 
+   Note that this differs from the MCO's current rollout strategy where new nodes are ignited with an older
+   configuration until the new configuration has been used on an existing node. The rationale in this change
+   applies only the manual strategy. The administrator has chosen and advanced strategy and should have a
+   deterministic set of steps to follow. (a) make the change in the MCP. (b) reboot all extant nodes. If
+   new nodes were entering the system with old configurations, the list of nodes the administrator needed
+   to action could be increasing after they query the list of extant nodes.
+1. A new annotation `applyOnReboot` will be set on 
+   nodes selected by the MachineConfigPool. The flag indicates to the MCD that it should only 
    apply the configuration before a node is rebooted (vs initiating its own drain / reboot).
 1. The MCO metric for the MCP indicating that changes are pending is set because not all nodes are running
    the most recently rendered configuration. This is irrespective of the `desiredConfig` in the `manual` 
@@ -714,15 +722,17 @@ When using this strategy, estimated time related metrics are set to 0 (e.g. eta 
 1. To prevent surprises, the cluster lifecycle administrator sets the assisted strategy on the worker MCP.
 1. In the `assisted` strategy change management policy, the lifecycle administrator configures `pausedUntil: "true"`
    and the most recently rendered worker configuration in the policy's `renderedConfigsBefore: <current datetime>`.
-1. The MCO is being asked to ignite any new node or any rebooted node with the latest rendered configuration
-   before the specified datetime. However, because of `pausedUntil: "true"`, it is also being asked not to 
-   automatically initiate that material change for existing nodes.
+1. Conceptually, this is like a paused MCP today, however, it is paused waiting to apply a machine configuration
+   that may not be latest rendered configuration. The MCO should not prune any `MachineConfig` referenced by
+   this strategy.
 1. The MCO metric for the MCP indicating that changes are pending is set because not all nodes are running
    the most recent, rendered configuration. This is irrespective of the `renderedConfigsBefore` in the `assisted` 
    configuration. Conceptually, it means, if change management were disabled, whether changes would be initiated.
 1. When the lifecycle administrator is ready to permit disruption, they set `pausedUntil: "false"`.
 1. The MCO begins to initiate worker node updates. This rollout abides by documented OpenShift constraints
-   such as the MachineConfigPool `maxUnavailable` setting.
+   such as the MachineConfigPool `maxUnavailable` setting. It also abides by currently rollout rules (i.e.
+   new nodes igniting will receive an older configuration until at least one node has the configuration
+   selected by `renderedConfigsBefore`).
 1. Though new rendered configurations may be created, the assisted strategy will not act until the assisted policy
    is updated to permit a more recent creation date.
 
@@ -759,9 +769,12 @@ In the Standalone topology, the ClusterVersion and MachineConfigPool resources a
 
 #### Single-node Deployments or MicroShift
 
-The ClusterVersion operator will honor the change management field just as in a standalone profile. If those profiles
-have a MachineConfigPool, material changes the node could be controlled with a change management policy
-in that resource.
+These toplogies do not have worker nodes. Only the ClusterVersion change management policy will be relevant.
+There is no logical distinction between user workloads and control-plane workloads in this case. A control-plane
+update will drain user workloads and will cause workload disruption.
+
+Though disruption is inevitable, the maintenance schedule feature provides value in these toplogies by
+ensuring that disruption happens on a specified schedule.
 
 #### OCM Managed Profiles
 OpenShift Cluster Manager (OCM) should expose a user interface allowing users to manage their change management policy.
