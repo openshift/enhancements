@@ -7,6 +7,8 @@ reviewers:
 approvers: 
   - @sdodson
   - @jharrington22
+  - @joelspeed
+  - @yuqi-zhang
 api-approvers:
   - TBD    
 creation-date: 2024-02-29
@@ -23,7 +25,7 @@ tracking-link:
 Implement high level APIs for change management which allow
 standalone and Hosted Control Plane (HCP) clusters a measure of configurable control
 over when control-plane or worker-node configuration rollouts are initiated. 
-As a primary mode of configuring change management, implement an option
+As a primary mode of configuring change management, implement a strategy
 called Maintenance Schedules which define reoccurring windows of time (and specifically
 excluded times) in which potentially disruptive changes in configuration can be initiated. 
 
@@ -32,14 +34,8 @@ pending state until such time as they are permitted by the configuration.
 
 Change management enforcement _does not_ guarantee that all initiated
 material changes are completed by the close of a permitted change window (e.g. a worker-node
-may still be draining or rebooting) at the close of a maintenance schedule, 
+may still be draining or rebooting) at the close of a scheduled permissive window, 
 but it does prevent _additional_ material changes from being initiated. 
-
-Change management enforcement _does not_ attempt to define or control the detailed state of the
-system. It only pertains to whether controllers which support change management 
-will attempt to initiate material change themselves. For example, if changes are paused in the middle
-of a cluster update and a node is manually rebooted, change management does not define
-whether the node will rejoin the cluster with the new or old version. 
 
 A "material change" may vary by cluster profile and subsystem. For example, a 
 control-plane update (all components and control-plane nodes updated) is implemented as
@@ -70,9 +66,9 @@ Tools for generating RRULES:
 - Complex: https://exontrol.com/exicalendar.jsp?config=/js#calendar
 
 **Change Management Terminology**
-This document uses unique terms to describe the key aspects of change management. 
+This document uses specialized terms to describe the key aspects of change management. 
 It is worth internalizing the meaning of these terms before reviewing sections of the document.
-- "Material Change". A longer definition is provided in the Summary, but in short, any configuration
+- "Material Change". A longer definition is provided in the Summary, but, in short, any configuration
   change a platform operator wishes to apply which would necessitate the reboot or replacement of one 
   or more nodes is considered a material change. For example, updating the control-plane version is 
   a material change as it requires rebooting master nodes. 
@@ -86,17 +82,15 @@ It is worth internalizing the meaning of these terms before reviewing sections o
   "Disabled" supersedes "Paused". In other words, if change management is disabled, it does not matter
   if a configured strategy would be enforcing a change pause or not -- because that disabled strategy
   is not being considered.
-- "Permissive". When change management is disabled xor enabled & unpaused, the cluster is described to be in
-  a permissive window. This is another way to say that material changes can be applied. When change
-  management is enabled & paused, material changes will be left in a pending state and the cluster
-  is not in a permissive window.
-- "Strategy". There are multiple change management strategies proposed. Each informs a different behavior
-  for a controller to pause and unpause changes. "Disabled" is a special strategy that means change management
-  is indefinitely disabled -- meaning material changes can be freely applied. This will be the default
-  strategy for OpenShift for the foreseeable future in order to provide consistent behavior with past versions.
-- "Maintenance Schedule" is one type of change management strategy. When enabled, based on a recurrence
-  rule (RRULE) and exclusion periods, a controller will pause or unpause changes according to the 
-  current datetime.
+- "Permissive". When change management is disabled xor (enabled & unpaused), change management is providing
+  a permissive window. This is another way to say that material changes can be applied. 
+- "Restrictive". The opposite of permissive. When change management is (enabled & paused). Material changes 
+  to associated resources will not be initiated.
+- "Strategy". There are different change management strategies proposed. Each informs a different behavior
+  for a controller to pause and unpause changes. 
+- "Maintenance Schedule" is one change management strategy. When enabled, based on a recurrence
+  rule ([RRULE](https://icalendar.org/RFC-Specifications/iCalendar-RFC-5545/)) and exclusion periods, 
+  a change management policy will be permissive according to the current datetime.
 
 ## Motivation
 This enhancement is designed to improve user experience during the OpenShift 
@@ -119,7 +113,7 @@ decomposition of the existing, fully self-managed, Standalone update process int
 distinct phases as understood and controlled by the end-user: 
 (1) control-plane update and (2) worker-node updates.
 
-To some extent, Maintenance Schedules (a key supported option for change management) 
+To some extent, Maintenance Schedules (a key strategy supported for change management) 
 are a solution to a problem that will be created by this separation: there is a perception that it would also
 double the operational burden for users updating a cluster (i.e. they have
 two phases to initiate and monitor instead of just one). In short, implementing the
@@ -136,7 +130,7 @@ to only update during specific, low utilization, periods.
 
 Since separating the node update phases is such an important driver for
 Maintenance Schedules, their motivations are heavily intertwined. The remainder of this 
-section, therefore, delves into the motivation for this separation. 
+section, therefore, delves deeply into the motivation for this separation. 
 
 #### The Case for Control-Plane and Worker-Node Separation
 From an overall platform perspective, we believe it is important to drive a distinction
@@ -215,13 +209,13 @@ the cluster can be initiated, provide value irrespective of this strategic direc
 controlling exactly when changes are applied to critical systems is universally appreciated in enterprise 
 software. 
 
-Since these are such well established principles, I will summarize the motivation as helping
-OpenShift meet industry standard expectations with respect to limiting potentially disruptive change 
+Since these are such well established principles, the motivation can be summarized as helping
+OpenShift meet industry standard expectations with respect to limiting potentially disruptive changes 
 outside well planned time windows. 
 
 It could be argued that rigorous and time sensitive management of OpenShift API resources 
 (e.g. ClusterVersion, MachineConfigPool, HostedCluster, NodePool, etc.) could prevent
-unplanned material changes, but Change Management / Maintenance Schedules introduce higher level, platform native, and more 
+unplanned material changes, but Change Management / Maintenance Schedules introduce higher level, platform native, and 
 intuitive guard rails. For example, consider the common pattern of a gitops configured OpenShift cluster.
 If a user wants to introduce a change to a MachineConfig, it is simple to merge a change to the
 resource without appreciating the fact that it will trigger a rolling reboot of nodes in the cluster.
@@ -245,7 +239,7 @@ that potentially disruptive changes are limited to well known time windows.
 #### Reducing Service Delivery Operational Tooling
 Service Delivery, operating Red Hat's Managed OpenShift offerings (OpenShift Dedicated (OSD), 
 Red Hat OpenShift on AWS (ROSA) and Azure Red Hat OpenShift (ARO) ) is keenly aware of
-the issues motivating the Change Management / Maintenance Schedule concept. This is evidenced by their design
+the challenges motivating the Change Management / Maintenance Schedule concept. This is evidenced by their design
 and implementation of tooling to fill the gaps in the platform the preceding sections
 suggest exist.
 
@@ -341,185 +335,303 @@ risks and disruption when rolling out changes to their environments.
 
 ### Goals
 
-1. Indirectly support the strategic separation of control-plane and worker-node update phases for Standalone clusters by supplying a change control mechanism that will allow both control-plane and worker-node updates to proceed at predictable times without doubling operational overhead.
-2. Directly support the strategic separation of control-plane and worker-node update phases by implementing a "manual" change management strategy where users who value the full control of the separation can manually actuate changes to them independently.
-3. Empower OpenShift cluster lifecycle administrators with tools that simplify implementing industry standard notions of maintenance windows.
-4. Provide Service Delivery a platform native feature which will reduce the amount of custom tooling necessary to provide maintenance windows for customers.
-5. Deliver a consistent change management experience across all platforms and profiles (e.g. Standalone, ROSA, HCP).
-6. Enable SRE to, when appropriate, make configuration changes on a customer cluster and have that change actually take effect only when permitted by the customer's change management preferences.
-7. Do not subvert expectations of customers well served by the existing fully self-managed cluster update.
-8. Ensure the architectural space for enabling different change management strategies in the future. 
-
+1. Indirectly support the strategic separation of control-plane and worker-node update phases for Standalone clusters by 
+   supplying a change control mechanism that will allow both control-plane and worker-node updates to proceed at predictable 
+   times without doubling operational overhead.
+1. Empower OpenShift cluster lifecycle administrators with tools that simplify implementing industry standard notions 
+   of maintenance windows.
+1. Provide Service Delivery a platform native feature which will reduce the amount of custom tooling necessary to 
+   provide maintenance windows for customers.
+1. Deliver a consistent change management experience across all platforms and profiles (e.g. Standalone, ROSA, HCP).
+1. Enable SRE to, when appropriate, make configuration changes on a customer cluster and have that change actually 
+   take effect only when permitted by the customer's change management preferences.
+1. Do not subvert expectations of customers well served by the existing fully self-managed cluster update.
+1. Ensure the architectural space for enabling different change management strategies in the future.
+1. Directly support the strategic separation of control-plane and worker-node update phases by empowering cluster 
+   lifecycle administrators with change management strategies that provide them fine-grained control over exactly
+   when and how worker-nodes are updated to a desired configuration even if no regular maintenance schedule is possible.
+   
 ### Non-Goals
 
-1. Allowing control-plane upgrades to be paused midway through an update. Control-plane updates are relatively rapid and pausing will introduce unnecessary complexity and risk. 
-2. Requiring the use of maintenance schedules for OpenShift upgrades (the changes should be compatible with various upgrade methodologies – including being manually triggered).
-3. Allowing Standalone worker-nodes to upgrade to a different payload version than the control-plane (this is supported in HCP, but is not a goal for standalone).
-4. Exposing maintenance schedule controls from the oc CLI. This may be a future goal but is not required by this enhancement.
-5. Providing strict promises around the exact timing of upgrade processes. Maintenance schedules will be honored to a reasonable extent (e.g. upgrade actions will only be initiated during a window), but long-running operations may exceed the configured end of a maintenance schedule.
-6. Implementing logic to defend against impractical maintenance schedules (e.g. if a customer configures a 1-second maintenance schedule every year). Service Delivery may want to implement such logic to ensure upgrade progress can be made.
-7. Automatically initiating updates to `ClusterVersion`. This will still occur through external actors/orchestration. Maintenance schedules simply give the assurance that changes to `ClusterVersion` will not result in material changes until permitted by the defined maintenance schedules.
+1. Allowing control-plane upgrades to be paused midway through an update. Control-plane updates are relatively rapid 
+   and pausing will introduce unnecessary complexity and risk. 
+1. Requiring the use of maintenance schedules for OpenShift upgrades (the changes should be compatible with various 
+   upgrade methodologies – including being manually triggered).
+1. Allowing Standalone worker-nodes to upgrade to a different payload version than the control-plane 
+   (this is supported in HCP, but is not a goal for standalone).
+1. Exposing maintenance schedule controls from the oc CLI. This may be a future goal but is not required by this enhancement.
+1. Providing strict promises around the exact timing of upgrade processes. Maintenance schedules will be honored to a 
+   reasonable extent (e.g. upgrade actions will only be initiated during a window), but long-running operations may 
+   exceed the configured end of a maintenance schedule.
+1. Implementing logic to defend against impractical maintenance schedules (e.g. if a customer configures a 1-second 
+   maintenance schedule every year). Service Delivery may want to implement such logic to ensure upgrade progress can 
+   be made.
+1. Automatically initiating updates to `ClusterVersion`. This will still occur through external actors/orchestration. 
+   Maintenance schedules simply give the assurance that changes to `ClusterVersion` will not result in material changes 
+   until permitted by the defined maintenance schedules.
 
 ## Proposal
 
 ### Change Management Overview
-Add a `changeManagement` stanza to several resources in the OpenShift ecosystem:
-- HCP's `HostedCluster`. Honored by HyperShift Operator and supported by underlying CAPI primitives.
-- HCP's `NodePool`. Honored by HyperShift Operator and supported by underlying CAPI primitives.
+Establish a new namespaced Custom Resource Definition (CRD) called `ChangeManagementPolicy` which allows cluster lifecycle
+administrators to capture their requirements for when resource(s) associated with the policy can initiate material 
+changes on the cluster.
+
+Add a `changeManagement` stanza to several existing resources in the OpenShift ecosystem which can reference
+the new `ChangeManagementPolicy` resource to restrict when and how their associated controllers can initiate
+material changes to a cluster.
+- HCP's `HostedCluster`. Honored by HyperShift Operator and supported by underlying CAPI providers.
+- HCP's `NodePool`. Honored by HyperShift Operator and supported by underlying CAPI providers.
 - Standalone's `ClusterVersion`. Honored by Cluster Version Operator.
 - Standalone's `MachineConfigPool`. Honored by Machine Config Operator.
 
-The implementation of `changeManagement` will vary by profile
-and resource, however, they will share a core schema and provide a reasonably consistent user
-experience across profiles. 
+Changes that are not allowed to be initiated due to a change management policy will be 
+called "pending". Controllers responsible for initiating pending changes will await a permissive window 
+according to each resource's relevant `changeManagement` configuration.
 
-The schema will provide options for controlling exactly when changes to API resources on the 
-cluster can initiate material changes to the cluster. Changes that are not allowed to be
-initiated due to a change management control will be called "pending". Subsystems responsible
-for initiating pending changes will await a permitted window according to the change's
-relevant `changeManagement` configuration(s).
+In additional to "policies", different resource kinds may offer additional knobs in their `changeManagement`
+stanzas to provide cluster lifecycle administrators additional control over the exact nature of 
+the changes desired by the resource's associated controller. For example, in `MachineConfigPool`'s 
+`changeManagement` stanza, a cluster lifecycle administrator will be able to (optionally) specify the 
+exact rendered configuration the controller should be working towards (during the next permissive window) vs
+the traditional OpenShift model where the "latest" rendered configuration is always the destination. 
 
-### Change Management Strategies
-Each resource supporting change management will add the `changeManagement` stanza and support a minimal set of change management strategies.
-Each strategy may require an additional configuration element within the stanza. For example:
+### ChangeManagementPolicy Resource
+
 ```yaml
+kind: ChangeManagementPolicy
+metdata:
+  # ChangeManagementPolicies are namespaced resources. They will normally reside in the 
+  # namespace associated with the controller initiating material changes. 
+  # For example, in Standalone namespace/openshift-machine-config for the MCO and 
+  # namespace/openshift-cluster-version for the CVO. 
+  # For HCP, the ChangeManagementPolicies for will reside in the same namespace as the 
+  # HostedCluster resource.
+  # This namespace can be overridden in resources being constrained by a ChangeManagementPolicy
+  # but RBAC for the resource's controller must permit reading the object from the non-default 
+  # namespace.
+  namespace: openshift-machine-config
+  name: example-policy
+
 spec:
-  changeManagement:
-    strategy: "MaintenanceSchedule"
-    pausedUntil: "false"
-    disabledUntil: "false"
-    config:
-       maintenanceSchedule:
-         ..options to configure a detailed policy for the maintenance schedule..
+  # Supported strategy overview:
+  # Permissive:
+  #   Always permissive - allows material changes.
+  # Restrictive:
+  #   Always restrictive - pauses material changes.
+  # MaintenanceSchedule: 
+  #   An RRULE and other fields will be used to specify reoccurring permissive windows
+  #   as well as any special exclusion periods.
+  strategy: Permissive|Restrictive|MaintenanceSchedule
+
+  # Difference strategies expose a configuration
+  # stanza that further informs their behavior.
+  maintenanceSchedule:    
+    permit:
+      ...
+  
+# A new ChangeManagementPolicy controller will update the status field so that
+# other controllers, attempting to abide by change management, can easily 
+# determine whether they can initiate material changes.
+status:
+  # Seconds remaining until changes permitted. 0 means changes
+  # are currently permitted.
+  # nil IF pausedUntil: true  OR  not "Ready".
+  nextPermissiveETA: 0
+
+  # Number of seconds remaining in the current permissive window.
+  # 0 if outside of a permissive window.
+  # nil if changes are permitted indefinitely or policy not "Ready".
+  permissiveRemaining: 3600
+
+  # nil if within a permissive window or policy not "Ready".
+  lastPermissiveDate: <datetime>
+
+  conditions:
+  # If a ChangeManagementPolicy has not calculated yet, it will not
+  # have Ready=True.
+  # "reason" and "message" should be set if not ready.
+  - type: Ready
+    status: "True"
+  # Indicates whether the policy is in a permissive mode.
+  # Must be False while not "Ready".
+  # Message must provide detailed reason when False.
+  - type: ChangesPaused
+    status: "True"
+    message: "Details on why..."
 ```
 
-All change management implementations must support `Disabled` and `MaintenanceSchedule`. Abstracting 
-change management into strategies allows for simplified future expansion or deprecation of strategies. 
-Tactically, `strategy: Disabled` provides a convenient syntax for bypassing any configured 
-change management policy without permanently deleting its configuration.
-
-For example, if SRE needs to apply emergency corrective action on a cluster with a `MaintenanceSchedule` change
-management strategy configured, they can simply set `strategy: Disabled` without having to delete the existing
-`maintenanceSchedule` stanza which configures the previous strategy. Once the correct action has been completed,
-SRE simply restores `strategy: MaintenanceSchedule` and the previous configuration begins to be enforced.
-
-Configurations for multiple management strategies can be recorded in the `config` stanza, but
-only one strategy can be active at a given time.
-
-Each strategy will support a policy for pausing or unpausing (permitting) material changes from being initiated. 
-This will be referred to as the strategy's enforcement state (or just "state"). The enforcement state for a
-strategy can be either "paused" or "unpaused" (a.k.a. "permissive"). The `Disabled` strategy enforcement state 
-is always permissive -- allowing material changes to be initiated (see [Change Management
-Hierarchy](#change-management-hierarchy) for caveats).
-
-All change management strategies, except `Disabled`, are subject to the following `changeManagement` fields:
-- `changeManagement.disabledUntil: "<bool|date>"`: When `disabledUntil: "true"` or `disabledUntil: "<future-date>"`, the interpreted strategy for 
-  change management in the resource is `Disabled`. Setting a future date in `disabledUntil` offers a less invasive (i.e. no important configuration needs to be changed) method to 
-  disable change management constraints (e.g. if it is critical to roll out a fix) and a method that
-  does not need to be reverted (i.e. it will naturally expire after the specified date and the configured
-  change management strategy will re-activate).
-- `changeManagement.pausedUntil: "<bool|date>"`: Unless the effective active strategy is Disabled, `pausedUntil: "true"` or `pausedUntil: "<future-date>"`, change management must 
-  pause material changes.
-
-### Change Management Status
-Change Management information will also be reflected in resource status. Each resource 
-which contains the stanza in its `spec` will expose its current impact in its `status`. 
-Common user interfaces for aggregating and displaying progress of these underlying resources
-should be updated to proxy that status information to the end users.
-
-### Change Management Metrics
-Cluster wide change management information will be made available through cluster metrics. Each resource
-containing the stanza must expose the following metrics:
-- Whether any change management strategy is enabled.
-- Which change management strategy is enabled. This can be used to notify SRE when a cluster begins using a non-standard strategy (e.g. during emergency corrective action).
-- The number of seconds until the next known permitted change window. See `change_management_next_change_eta` metric. This might be used to notify an SRE team of an approaching permissive window.
-- The number of seconds until the current change window closes. See `change_management_permissive_remaining` metric.
-- The last datetime at which changes were permitted (can be nil). See `change_management_last_change` metric (which represents this as seconds instead of a datetime). This could be used to notify an SRE team if a cluster has not had the opportunity to update for a non-compliant period.
-- If changes are pending due to change management controls. When combined with other metrics (`change_management_next_change_eta`, `change_management_permissive_remaining`), this can be used to notify SRE when an upcoming permissive window is going to initiate changes and whether changes are still pending as a permissive window closes.
-
-
-### Change Management Hierarchy
-Material changes to worker-nodes are constrained by change management policies in their associated resource AND 
-at the control-plane resource. For example, in a standalone profile, if a MachineConfigPool's change management
-configuration apparently permits material changes from being initiated at a given moment, that is only the case 
-if ClusterVersion is **also** permitting changes from being initiated at that time.
-
-The design choice is informed by a thought experiment: As a cluster lifecycle administrator for a Standalone cluster,
-who wants to achieve the simple goal of ensuring no material changes take place outside a well-defined 
-maintenance schedule, do you want to have to the challenge of keeping every MachineConfigPool's 
-`changeManagement` stanza in perfect synchronization with the ClusterVersion's? What if a new MCP is created 
-without your knowledge?
- 
-The hierarchical approach allows a single master change management policy to be in place across 
-both the control-plane and worker-nodes. 
-
-Conversely, material changes CAN take place on the control-plane when permitted by its associated 
-change management policy even while material changes are not being permitted by worker-nodes 
-policies.
-
-It is thus occasionally necessary to distinguish a resource's **configured** vs **effective** change management
-state. There are two states: "paused" and "unpaused" (a.k.a. permissive; meaning that material changes be initiated). 
-For a control-plane resource, the configured and effective enforcement states are always the same. For worker-node
-resources, the configured strategy may be disabled, but the effective enforcement state can be "paused" due to 
-an active strategy in the control-plane resource being in the "paused" state.
-
-| control-plane state     | worker-node state         | worker-node effective state | results                                                                                                                                                                                            |
-|-------------------------|---------------------------|-----------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| unpaused                | unpaused                  | unpaused                    | Traditional, fully self-managed change rollouts. Material changes can be initiated immediately upon configuration change. |
-| paused (any strategy)   | **unpaused**              | **paused**                  | Changes to both the control-plane and worker-nodes are constrained by the control-plane strategy. |
-| unpaused                | paused (any strategy)     | paused                      | Material changes can be initiated immediately on the control-plane. Material changes on worker-nodes are subject to the worker-node policy. |
-| paused (any strategy)   | paused (any strategy)     | paused                      | Material changes to the control-plane are subject to change control strategy for the control-plane. Material changes to the worker-nodes are subject to **both** the control-plane and worker-node strategies - if either precludes material change initiation, changes are left pending. |
+### Change Management Strategies
 
 #### Maintenance Schedule Strategy
-The maintenance schedule strategy is supported by all resources which support change management. The strategy
-is configured by specifying an RRULE identifying permissive datetimes during which material changes can be
+The strategy is configured by specifying an RRULE identifying permissive datetimes during which material changes can be
 initiated. The cluster lifecycle administrator can also exclude specific date ranges, during which 
-material changes will be paused.
+the policy will request material changes to be paused.
 
-#### Disabled Strategy
-This strategy indicates that no change management strategy is being enforced by the resource. It always implies that
-the enforcement state at the resource level is unpaused / permissive. This does not always
-mean that material changes are permitted due to change management hierarchies. For example, a MachineConfigPool
-with `strategy: Disabled` would still be subject to a `strategy: MaintenanceSchedule` in the ClusterVersion resource.
-The impact of hierarchy should always be made clear in the change management status of the MachineConfigPool.
+#### Restrictive Strategy
+A policy using the restrictive strategy will always request material changes to be paused. This strategy is useful
+when a cluster lifecycle administrator wants tight control over when material changes are initiated on the cluster
+but cannot provide a maintenance schedule (e.g. viable windows are too unpredictable).
 
-#### Assisted Strategy - MachineConfigPool
-Minimally, this strategy will be supported by MachineConfigPool. If and when the strategy is supported by other
-change management capable resources, the configuration schema for the policy may differ as the details of
-what constitutes and informs change varies between resources (e.g. `renderedConfigsBefore` informs the assisted
-strategy configuration for a MachineConfigPool, but may be meaningless for other resources). 
+#### Permissive Strategy
+A policy using the permissive strategy will always suggest a permissive window. A cluster lifecycle administrator
+may want to toggle a `ChangeManagementPolicy` from the `Restrictive` to `Permissive` strategy, and back again,
+as a means to implementing their own change management window mechanism.
 
-This strategy is motivated by the desire to support the separation of control-plane and worker-node updates both
-conceptually for users and in real technical terms. One way to do this for users who do not benefit from the
-`MaintenanceSchedule` strategy is to ask them to initiate, pause, and resume the rollout of material
-changes to their worker nodes. Contrast this with the fully self-managed state today, where worker-nodes
-(normally) begin to be updated automatically and directly after the control-plane update (subject to constraints
-like `maxUnavailable` in each MachineConfigPool).
+### Resources Supporting Change Management
 
-Clearly, if this was the only mode of updating worker-nodes, we could never successfully disentangle the
-concepts of control-plane vs worker-node updates in Standalone environments since one implies the other.
+Resources which support a reference to a `ChangeManagementPolicy` are said to support change management.
+Resources which support change management will implement a `spec.changeManagement` stanza. These stanzas
+must support AT LEAST the following fields:
 
-In short (details will follow in the implementation section), the assisted strategy allows users to 
-constrain which rendered machineconfig [`desiredConfig` the MachineConfigPool](https://github.com/openshift/machine-config-operator/blob/0f53196f6480481d3f5a04e217a143a56d4db79e/docs/MachineConfig.md#final-rendered-machineconfig-object) 
-should be advertised to the MachineConfigDaemon on nodes it is associated with. Like the `MaintenanceSchedule` 
-strategy, it also respects the `pausedUntil` field.
+#### ChangeManagement Stanzas
+```yaml
+kind: ClusterVersion|MachineConfigPool|HostedCluster|NodePool
+spec:
+  changeManagement:
+    # If set to "true" or a future date (represented as string), the effective change 
+    # management strategy is Disabled and the window is permissive. 
+    # Date must be RFC3339.
+    # When disabled with this field, all other values of changeManagement are ignored.
+    # This field is modeled on HCP's existing HostedCluster.spec.pausedUntil which uses a string. 
+    disabledUntil: <datetime|bool>str
+    
+    # If set to "true" or a future date (represented as string), the strategy will be
+    # paused (not permissive) unless overridden by disabledUntil. If paused with this 
+    # setting, it overrides the "policy" stanza.
+    # Date must be RFC3339. 
+    # This field is modeled on HCP's existing HostedCluster.spec.pausedUntil which uses a string. 
+    pausedUntil: <datetime|bool>str  
+    
+    # If not overridden with disabledUntil / pausedUntil, a reference to the ChangeManagementPolicy
+    # to determine whether material changes can be initiated.
+    policy:
+      # Namespace is optional. If not specified, the controller assumes the namespace in
+      # which the controller is running.
+      namespace: openshift-machine-config
+      # The name of the ChangeManagementPolicy.
+      name: example-policy
+```
 
-When using this strategy, estimated time related metrics are set to 0 (e.g. eta and remaining).
+At a given moment, a `changeManagement` stanza indicates to a controller responsible for a resource
+whether changes should be paused (i.e. it is a restrictive window where material changes should not
+be initiated) or unpaused (i.e. it is a permissive window where material changes can be initiated).  
+- `changeManagement.disabledUntil: "<bool|date>"`: When `disabledUntil: "true"` or `disabledUntil: "<future-date>"`, 
+  the controller completely disables change management and all changes are permitted. `disabledUntil` overrides
+  both `pausedUntil` and `policy` when it suggests change management should be disabled. 
+- `changeManagement.pausedUntil: "<bool|date>"`: When `pausedUntil: "true"` or `pausedUntil: "<future-date>"`, 
+  changes must be paused and the controller must stop initiating material changes. `pausedUntil` overrides
+  `policy` when it suggests changes should be paused.
+- `changeManagement.policy`: An optional reference to a `ChangeManagementPolicy` object. If neither `disabledUntil`
+  or `pausedUntil` overrides it, the permissive or restrictive state suggested by the policy object will 
+  inform the controller whether material changes can be initiated.
 
-#### Manual Strategy - MachineConfigPool
-Minimally, this strategy will be supported by MachineConfigPool. If and when the strategy is supported by other
-change management capable resources, the configuration schema for the policy may differ as the details of
-what constitutes and informs change varies between resources. 
+While fields like `disabledUntil` or `pausedUntil` may seem to add unnecessarily complexity, they provide
+simple to use knobs for SRE and cluster lifecycle administrators to confidently undertake sensitive actions. 
+For example, 
+- If SRE needs to apply emergency corrective action on a cluster with a `MaintenanceSchedule` change
+  management strategy configured, they can simply set `disabledUntil: <tomorrow>` without having to 
+  change object references OR worry about follow-up corrective actions to restore a previous policy.
+- If the cluster lifecycle administrator needs to urgently stop a problematic update, they can set
+  `pausedUntil: true` until issues are fully understood. In a scenario impacting business critical 
+  applications, compare the complexity of this operation with that of trying to fiddle with policy
+  dates.
 
-Like the assisted strategy, this strategy is implemented to support the conceptual and technical separation
-of control-plane and worker-nodes. The MachineConfigPool Manual strategy allows users to explicitly specify
-their `desiredConfig` to be used for ignition of new and rebooting nodes. While the Manual strategy is enabled,
-the MachineConfigOperator will not trigger the MachineConfigDaemon to drain or reboot nodes automatically.
+#### Change Management Status & Conditions
+Each resource which exposes `spec.changeManagement` must also expose change management status information
+to explain its current impact. Common user interfaces for aggregating and displaying progress of these underlying 
+resources (e.g. OpenShift web console) must be updated to proxy that status information to end users.
 
-Because the Manual strategy never initiates changes on its own behalf, `pausedUntil` has no effect. From a metrics
-perspective, this strategy reports as paused indefinitely.
+You may note that several of the fields in `status.changeManagement` can be derived directly from `ChangeManagementPolicy.status`
+(unless overridden by `spec.changeManagement.pausedUntil` or `spec.changeManagement.disabledUntil`). This simplifies
+the work of each controller which supports change management - they simply need to observe `ChanageManagementPolicy.status`
+and the `ChanageManagmentPolicy` controller does the heavy lifting of interpreting policy (e.g. interpreting RRULEs).
 
-When using this strategy, estimated time related metrics are set to 0 (e.g. eta and remaining).
+```yaml
+kind: ClusterVersion|MachineConfigPool|HostedCluster|NodePool
+spec:
+  ...
+status:
+  changeManagement:
+    # Seconds remaining until changes permitted. 0 means changes
+    # are currently permitted.
+    # nil IF pausedUntil: true or policy not "Ready".
+    nextPermissiveETA: 0
+  
+    # Number of seconds remaining in the current permissive window.
+    # 0 if outside of a permissive window.
+    # nil if changes are permitted indefinitely or policy not "Ready".
+    permissiveRemaining: 3600
+    
+    message: "human readable summary"
+    
+    # Last recorded permissive window by THIS MCP (this may be different from a recently
+    # configured ChangeManagementPolicy's lastPermissiveDate).
+    lastPermissiveDate: <datetime>
+  conditions:
+  - type: ChangesPaused
+    status: "True"
+    message: "Details on why..."
+  - type: ChangesPending
+    status: "True"  
+    message: "Details on what..."
+```
+
+#### Change Management Metrics
+Change management information will be made available through cluster metrics. Each resource
+containing the `spec.changeManagement` stanza must expose the following metrics:
+- Whether any change management strategy is enabled.
+- Which change management strategy is enabled. This can be used to notify SRE when a cluster begins using a 
+  non-standard strategy (e.g. during emergency corrective action).
+- The number of seconds until the next known permitted change window. See `change_management_next_change_eta` metric. 
+  This might be used to notify an SRE team of an approaching permissive window.
+- The number of seconds until the current change window closes. See `change_management_permissive_remaining` metric.
+- The last datetime at which changes were permitted (can be nil). See `change_management_last_change` metric (which 
+  represents this as seconds instead of a datetime). This could be used to notify an SRE team if a cluster has not 
+  had the opportunity to update for a non-compliant period.
+- If changes are pending due to change management controls. When combined with other 
+  metrics (`change_management_next_change_eta`, `change_management_permissive_remaining`), this can be used to 
+  notify SRE when an upcoming permissive window is going to initiate changes and whether changes are still 
+  pending as a permissive window closes.
+
+### Enhanced MachineConfigPool Control
+The MachineConfigOperator (MCO), like any other operator, works toward eventual consistency of the system state
+with state of configured resources. This behavior offers a simple user experience wherein an administrator
+can make a change to a `MachineConfig` and the MCO take over rolling out that change. It will
+1. Aggregate selected `MachineConfig` objects into a new "rendered" `MachineConfig` object.
+1. Work through updating nodes to use the "latest" rendered `MachineConfig` associated with them. 
+
+However, in business critical clusters, progress towards the "latest" rendered `MachineConfig` offers less control
+than may be desired for some use cases. To address this, the `MachineConfigPool` resource will be extended
+to include an option to declare which rendered `MachineConfig` the MachineConfigOperator should make
+progress toward instead of the "latest".
+
+```yaml
+kind: MachineConfigPool
+spec:
+  machineConfig:
+    # An administrator can identify the exact rendered MachineConfig
+    # the MCO should progress towards for this MCP.
+    name: <rendered machine configuration name>
+    
+    # Validation defines when MCO will allow the use of a new
+    # configuration. Default means a node must successfully use the
+    # configuration before new nodes are ignited with the
+    # desiredConfiguration.
+    # None means no validation is necessary (new nodes will
+    # immediately ignite with the configuration).
+    validation: Default
+```
+
+### Projected ClusterVersion in HCP
+A [Cluster Instance Admin](https://hypershift-docs.netlify.app/reference/concepts-and-personas/#personas) using a 
+hosted cluster cannot directly update their cluster. When they query `ClusterVersion` on their cluster, they only
+see a "projected" value. If they edit the projected value, it does not affect change on the cluster.
+
+In order to update the hosted cluster, changes must be made to its associated HCP resources on the management cluster.
+Since this proposal subjects those resources to change management control, this information must also be projected
+into the `ClusterVersion` (including change management status information) of hosted clusters so that a Cluster 
+Instance Admin can understand when material changes to their cluster will take place.
 
 ### Workflow Description
 
@@ -529,22 +641,22 @@ When using this strategy, estimated time related metrics are set to 0 (e.g. eta 
 1. To comply with their company policy, the service consumer configures a maintenance schedule through OCM. 
 1. Their first preference, no updates at all, is rejected by OCM policy, and they are referred to service 
    delivery documentation explaining minimum requirements. 
-1. The user specifies a policy which permits changes to be initiated any time Saturday UTC on the control-plane.
-1. To limit perceived risk, they try to specify a separate policy permitting worker-nodes updates only on the **first** Sunday of each month.
-1. OCM rejects the configuration because, due to change management hierarchy, worker-node maintenance schedules can only be a proper subset of control-plane maintenance schedules.
-1. The user changes their preference to a policy permitting worker-nodes updates only on the **first** Saturday of each month.
+1. The user specifies a policy which permits control-plane changes to be initiated any time Saturday UTC on the control-plane.
+1. To limit overall workload disruption, the user changes their worker-node policy to permit updates only on the **first** Saturday of each month.
 1. OCM accepts the configuration.
 1. OCM configures the HCP (HostedCluster/NodePool) resources via the Service Delivery Hive deployment to contain a `changeManagement` stanza 
-   and an active/configured `MaintenanceSchedule` strategy.
-1. Hive updates the associated HCP resources.
-1. Company workloads are added to the new cluster and the cluster provides value.
+   referring to newly created `ChanageManagementPolicy` objects using the `MaintenanceSchedule` strategy.
+1. Hive creates/updates the associated HCP resources.
+1. Company workloads are added to the new cluster and the cluster provides business value.
 1. To leverage a new feature in OpenShift, the service consumer plans to update the minor version of the platform.
 1. Via OCM, the service consumer requests the minor version update. They can do this at any time with confidence that the maintenance 
    schedule will be honored. They do so on Wednesday.
 1. OCM (through various layers) updates the target release payload in the HCP HostedCluster and NodePool.
-1. The HyperShift Operator detects the desired changes but recognizes that the `changeManagement` stanza 
-    precludes the updates from being initiated.
-1. Curious, the service consumer checks the projects ClusterVersion within the HostedCluster and reviews its `status` stanza. It shows that changes are pending and the time of the next window in which changes can be initiated.  
+1. The HyperShift Operator detects the desired changes but recognizes that the `changeManagement` stanzas 
+    of each resource precludes updates from being initiated.
+1. Curious, the service consumer checks the projected ClusterVersion within the HostedCluster and reviews 
+   its `status` stanza. It shows that changes are pending and the time of the next window in which changes 
+   can be initiated.  
 1. Separate metrics specific to change management indicate that changes are pending for both resources.
 1. The non-Red Hat operations team has alerts setup to fire when changes are pending and the number of 
     seconds before the next permitted window is less than 2 days away.
@@ -560,68 +672,63 @@ When using this strategy, estimated time related metrics are set to 0 (e.g. eta 
 1. Interpreting the new exclusion, the metric for time remaining until a permitted window increases to count down to the following month's first Saturday.
 1. A month passes and the pending cause the configured alerts to fire again.
 1. The operations team is comfortable with the forthcoming changes.
-1. The first Saturday of the month 00:00 UTC arrives. The HyperShift operator initiates the worker-node updates based on the pending changes in the cluster NodePool.
+1. The first Saturday of the month 00:00 UTC arrives. The HyperShift operator initiates the worker-node updates based 
+   on the pending changes in the cluster NodePool.
 1. The HCP cluster has a large number of worker nodes and draining and rebooting them is time-consuming. 
-1. At 23:59 UTC Saturday night, 80% of worker-nodes have been updated. Since the maintenance schedule still permits the initiation of material changes, another worker-node begins to be updated.
-1. The update of this worker-node continues, but at 00:00 UTC Sunday, no further material changes are permitted by the change management policy and the worker-node update process is effectively paused.
-1. Because not all worker-nodes have been updated, changes are still reported as pending via metrics for NodePool.  **TODO: Review with HyperShift. Pausing progress should be possible, but a metric indicating changes still pending may not since they interact only through CAPI.**
+1. At 23:59 UTC Saturday night, 80% of worker-nodes have been updated. Since the maintenance schedule still permits 
+   the initiation of material changes, another worker-node begins to be updated.
+1. The update of this worker-node continues, but at 00:00 UTC Sunday, no further material changes are permitted by 
+   the change management policy and the worker-node update process is effectively paused.
+1. Because not all worker-nodes have been updated, changes are still reported as pending via metrics for 
+   NodePool.  
 1. The HCP cluster runs with worker-nodes at mixed versions throughout the month. The N-1 skew between the old kubelet versions and control-plane is supported.
-1. **TODO: Review with Service Delivery. If the user requested another minor bump to their control-plane, how does OCM prevent unsupported version skew today?**
-1. On the next first Saturday, the worker-nodes updates are completed.
+1. On the next first Saturday of the month, the worker-nodes updates are completed.
 
 #### OCM Standalone Standard Change Management Scenario
 
 1. User interactions with OCM to configure a maintenance schedule are identical to [OCM HCP Standard Change Management Scenario](#ocm-hcp-standard-change-management-scenario).
    This scenario differs after OCM accepts the maintenance schedule configuration. Control-plane updates are permitted to be initiated to any Saturday UTC.
    Worker-nodes must wait until the first Saturday of the month.
-2. OCM (through various layers) configures the ClusterVersion and worker MachineConfigPool(s) (MCP) for the cluster with appropriate `changeManagement` stanzas.
-3. Company workloads are added to the new cluster and the cluster provides value.
-4. To leverage a new feature in OpenShift, the service consumer plans to update the minor version of the platform.
-5. Via OCM, the service consumer requests the minor version update. They can do this at any time with confidence that the maintenance 
+1. OCM (through various layers) creates ChangeManagementPolicies and configures the ClusterVersion and 
+   worker MachineConfigPool(s) (MCP) for the cluster with appropriate `changeManagement` stanzas.
+1. Company workloads are added to the new cluster and the cluster provides business value.
+1. To leverage a new feature in OpenShift, the service consumer plans to update the minor version of the platform.
+1. Via OCM, the service consumer requests the minor version update. They can do this at any time with confidence that the maintenance 
    schedule will be honored. They do so on Wednesday.
-6. OCM (through various layers) updates the ClusterVersion resource on the cluster indicating the new release payload in `desiredUpdate`.
-7. The Cluster Version Operator (CVO) detects that its `changeManagement` stanza does not permit the initiation of the change.
-8. The CVO sets a metric indicating that changes are pending for ClusterVersion. Irrespective of pending changes, the CVO also exposes a 
+1. OCM (through various layers) updates the ClusterVersion resource on the cluster indicating the new release payload in `desiredUpdate`.
+1. The Cluster Version Operator (CVO) detects that its `changeManagement` stanza does not permit the initiation of the change.
+1. The CVO sets a metric indicating that changes are pending for ClusterVersion. Irrespective of pending changes, the CVO also exposes a 
    metric indicating the number of seconds until the next window in which material changes can be initiated.
-9. Since MachineConfigs likely do not match in the desired update and the current manifests (RHCOS changes occur 100% of the time for non-hotfix updates), 
-   the CVO also sets a metric indicating that MachineConfig changes are pending. This is an assumption, but the price of being wrong
-   on rare occasions is very low (pending changes will be reported, but disappear shortly after a permissive window begins).
-   This is done because the MachineConfigOperator (MCO) cannot anticipate the coming manifest changes and cannot,
-   therefore, reflect expected changes to the worker-node MCPs. Anticipating this change ahead of time is necessary for an operations
-   team to be able to set an alert with the semantics (worker-node-update changes are pending & time remaining until changes are permitted < 2d).
-   The MCO will expose its own metric for changes pending when manifests are updated. But this metric will only indicate when 
-   there are machines in the pool that have not achieved the desired configuration. An operations team trying to implement the 2d 
-   early warning for worker-nodes must use OR on these metrics to determine whether changes are actually pending.
-10. The MCO, irrespective of pending changes, exposes a metric for each MCP to indicate the number of seconds remaining until it is
+1. The MCO, irrespective of pending changes, exposes a metric for each MCP to indicate the number of seconds remaining until it is
     permitted to initiate changes to nodes in that MCP.
-11. A privileged user on the cluster notices different options available for `changeManagement` in the ClusterVersion and MachineConfigPool
-    resources. They try to set them but are prevented by a validating admission controller. If they wish
+1. A privileged user on the cluster notices different options available for `changeManagement` in the ClusterVersion and MachineConfigPool
+    resources. They try to set them but are prevented by an SRE validating admission controller. If they wish
     to change the settings, they must update them through OCM.
-12. The privileged user does an `oc describe ...` on the resources. They can see that material changes are pending in ClusterVersion for 
+1. The privileged user does an `oc describe ...` on the resources. They can see that material changes are pending in ClusterVersion for 
     the control-plane and for worker machine config. They can also see the date and time that the next material change will be permitted.
     The MCP will not show a pending change at this time, but will show the next time at which material changes will be permitted.
-13. The next Saturday is _not_ the first Saturday of the month. The CVO detects that material changes are permitted at 00:00 UTC and
+1. The next Saturday is _not_ the first Saturday of the month. The CVO detects that material changes are permitted at 00:00 UTC and
     begins to apply manifests. This effectively initiates the control-plane update process, which is considered a single
     material change to the cluster.
-14. The control-plane update succeeds. The CVO, having reconciled its state, unsets metrics suggesting changes are pending.
-15. As part of updating cluster manifests, MachineConfigs have been modified. The MachineConfigOperator (MCO) re-renders a
-    configuration for worker-nodes. However, because the MCP maintenance schedule precludes initiating material changes,
-    it will not begin to update Machines with that desired configuration.
-16. The MCO will set a metric indicating that desired changes are pending. 
-17. `oc get -o=yaml/describe` will both provide status information indicating that changes are pending for the MCP and
+1. The control-plane update succeeds. The CVO, having reconciled its state, unsets metrics suggesting changes are pending.
+1. As part of updating cluster manifests, MachineConfigs have been modified. The MachineConfigOperator (MCO) re-renders a
+    configuration for worker-nodes. However, because the MCP `chanageManagement` stanza precludes initiating material changes,
+    it will not yet begin to update Machines with that desired configuration.
+1. The MCO will set a metric indicating that desired changes are pending. 
+1. `oc get -o=yaml/describe` will both provide status information indicating that changes are pending for the MCP and
     the time at which the next material changes can be initiated according to the maintenance schedule.
-18. On the first Saturday of the next month, 00:00 UTC, the MCO determines that material changes are permitted.
+1. On the first Saturday of the next month, 00:00 UTC, the MCO determines that material changes are permitted.
     Based on limits like maxUnavailable, the MCO begins to annotate nodes with the desiredConfiguration. The 
     MachineConfigDaemon takes over from there, draining, and rebooting nodes into the updated release.
-19. There are a large number of nodes in the cluster and this process continues for more than 24 hours. On Saturday
+1. There are a large number of nodes in the cluster and this process continues for more than 24 hours. On Saturday
     23:59, the MCO applies a round of desired configurations annotations to Nodes. At 00:00 on Sunday, it detects
     that material changes can no longer be initiated, and pauses its activity. Node updates that have already
     been initiated continue beyond the maintenance schedule window.
-20. Since not all nodes have been updated, the MCO continues to expose a metric informing the system of
+1. Since not all nodes have been updated, the MCO continues to expose a metric informing the system of
     pending changes.
-21. In the subsequent days, the cluster is scaled up to handle additional workload. The new nodes receive
+1. In the subsequent days, the cluster is scaled up to handle additional workload. The new nodes receive
     the most recent, desired configuration.    
-22. On the first Saturday of the next month, the MCO resumes its work. In order to ensure that forward progress is
+1. On the first Saturday of the next month, the MCO resumes its work. In order to ensure that forward progress is
     made for all nodes, the MCO will update nodes in order of oldest rendered configuration to newest rendered configuration
     (among those nodes that do not already have the desired configuration). This ensures
     that even if the desired configuration has changed multiple times while maintenance was not permitted,
@@ -630,22 +737,26 @@ When using this strategy, estimated time related metrics are set to 0 (e.g. eta 
     during times when maintenance is not permitted. This strategy could leave nodes sorting last 
     lexicographically no opportunity to receive updates. This scenario would eventually leave those nodes
     more prone to version skew issues.
-23. During this window of time, all node updates are initiated, and they complete successfully. 
+1. During this window of time, all node updates are initiated, and they complete successfully. 
 
 #### Service Delivery Emergency Patch
 1. SRE determines that a significant new CVE threatens the fleet.
-1. A new OpenShift release in each z-stream fixes the problem.
+1. A new OpenShift release in each z-stream fixes the problem. Only the control-plane needs to be updated
+   to remediate the CVE.
 1. SRE plans to override customer maintenance schedules in order to rapidly remediate the problem across the fleet.
-1. The new OpenShift release(s) are configured across the fleet. Clusters with permissive maintenance 
-   schedules begin to apply the changes immediately.
-1. Clusters with change management policies precluding updates are SRE's next focus.
-1. During each region's evening hours, to limit disruption, SRE changes the `changeManagement` strategy 
-   field across relevant resources to `Disabled`. Changes that were previously pending are now
-   permitted to be initiated. 
-1. Cluster operators who have alerts configured to fire when there is no change management policy in place 
+1. The new OpenShift release(s) are configured across the fleet. Clusters with permissive change management 
+   policies begin to apply the changes immediately.
+1. Clusters with `ClusterVersion` change management policies precluding updates are SRE's next focus.
+1. During each region's evening hours, to limit disruption, SRE changes the `ClusterVersion.spec.changeManagement.disabledUntil` field 
+   to the current datetime+24h. Changes that were previously pending are now permitted to be initiated for 
+   24 hours since any configured change management policy is disabled for that period of time.
+1. Clusters which have alerts configured to fire when there is no change management policy in place 
    will do so.
-1. As clusters are successfully remediated, SRE restores the `MaintenanceSchedule` strategy for its resources.
-   
+1. SRE continues to monitor the rollout but does not need to remove `changeManagement.disabledUntil` since it will
+   automatically deactivate in 24 hours.
+1. Clusters with change management policies setup for their worker-nodes are not updated automatically after the
+   control-plane update. MCPs will report pending changes, but the MachineConfigOperator will await a 
+   permissive window for each MCP to apply the potentially disruptive update.
 
 #### Service Delivery Immediate Remediation
 1. A customer raises a ticket for a problem that is eventually determined to be caused by a worker-node system configuration.
@@ -654,10 +765,10 @@ When using this strategy, estimated time related metrics are set to 0 (e.g. eta 
    configured maintenance schedule permits the material change from being initiated by the MachineConfigOperator
    or (b) having SRE override the maintenance schedule and permitting its immediate application.   
 1. The customer chooses immediate application. 
-1. SRE applies a change to the relevant control-plane AND worker-node resource's `changeManagement` stanza
-   (both must be changed because of the change management hierarchy), setting `disabledUntil` to
-   a time 48 hours in the future. The configured change management schedule is ignored for 48 hours as the system 
-   initiates all necessary node changes.
+1. SRE applies a change to the relevant worker-node resource's `changeManagement` stanza, setting `disabledUntil` to
+   a time 48 hours in the future. The configured change management policy is ignored for 48 hours as the system 
+   initiates all necessary node changes to worker-nodes.
+1. If unrelated changes were pending for the control-plane, they will remain pending throughout this process.
 
 #### Service Delivery Deferred Remediation
 1. A customer raises a ticket for a problem that is eventually determined to be caused by a worker-node system configuration.
@@ -672,71 +783,79 @@ When using this strategy, estimated time related metrics are set to 0 (e.g. eta 
 #### On-prem Standalone GitOps Change Management Scenario
 1. An on-prem cluster is fully managed by gitops. As changes are committed to git, those changes are applied to cluster resources.
 1. Configurable stanzas of the ClusterVersion and MachineConfigPool(s) resources are checked into git.
-1. The cluster lifecycle administrator configures `changeManagement` in both the ClusterVersion and worker MachineConfigPool
-   in git. The MaintenanceSchedule strategy is chosen. The policy permits control-plane and worker-node updates only after
-   19:00 Eastern US.
+1. The cluster lifecycle administrator configures `spec.changeManagement` in both the ClusterVersion and worker MachineConfigPool
+   in git. A policy using the MaintenanceSchedule strategy is chosen. The policy permits control-plane and worker-node updates only after
+   19:00 UTC.
 1. During the working day, users may contribute and merge changes to MachineConfigs or even the `desiredUpdate` of the
-   ClusterVersion. These resources will be updated in a timeline manner via GitOps.
+   ClusterVersion. These resources will be updated on the cluster in a timely manner via GitOps.
 1. Despite the resource changes, neither the CVO nor MCO will begin to initiate the material changes on the cluster.
-1. Privileged users who may be curious as to the discrepancy between git and the cluster state can use `oc get -o=yaml/describe`
+1. Privileged users, who may be curious as to the discrepancy between git and the cluster state, can use `oc get -o=yaml/describe`
    on the resources. They observe that changes are pending and the time at which changes will be initiated.
-1. At 19:00 Eastern, the pending changes begin to be initiated. This rollout abides by documented OpenShift constraints
+1. At 19:00 UTC, the pending changes begin to be initiated. This rollout abides by documented OpenShift constraints
    such as the MachineConfigPool `maxUnavailable` setting.
    
-#### On-prem Standalone Manual Strategy Scenario
+#### On-prem Standalone Manual Change Rollout Scenario
 1. A small, business critical cluster is being run on-prem.
 1. There are no reoccurring windows of time when the cluster lifecycle administrator can tolerate downtime.
    Instead, updates are negotiated and planned far in advance. 
-1. The cluster workloads are not HA and unplanned drains are considered a business risk.
-1. To prevent surprises, the cluster lifecycle administrator sets the Manual strategy on the worker MCP.
+1. The cluster workloads are not HA and unplanned drains are a business risk.
+1. To prevent surprises, the cluster lifecycle administrator worker-node MCP to refer to a `ChanageManagementPolicy`
+   using the `Restrictive` strategy (which never permits changes to be initiated).
 1. Given the sensitivity of the operation, the lifecycle administrator wants to manually drain and reboot
    nodes to accomplish the update.
 1. The cluster lifecycle administrator sends a company-wide notice about the period during which service may be disrupted.
-1. The user determines the most recent rendered worker configuration. They configure the `manual` change
-   management policy to use that exact configuration as the `desiredConfig`. 
-1. The MCC is thus being asked to ignite any new node or rebooted node with the desired configuration, but it
-   is **not** being permitted to initiate that configuration change on existing nodes because change management, in effect,
-   is paused indefinitely by the manual strategy. 
-   Note that this differs from the MCO's current rollout strategy where new nodes are ignited with an older
-   configuration until the new configuration has been used on an existing node. The rationale in this change
-   applies only the manual strategy. The administrator has chosen and advanced strategy and should have a
-   deterministic set of steps to follow. (a) make the change in the MCP. (b) reboot all extant nodes. If
-   new nodes were entering the system with old configurations, the list of nodes the administrator needed
-   to action could be increasing after they query the list of extant nodes.
-1. A new annotation `applyOnReboot` will be set on 
-   nodes selected by the MachineConfigPool. The flag indicates to the MCD that it should only 
-   apply the configuration before a node is rebooted (vs initiating its own drain / reboot).
+1. The user determines the most recent rendered worker `MachineConfig`. 
+1. They configure the `MachineConfigPool.spec.machineConfig.name` field to specific that exact configuration as the
+   target configuration. They also set `MachineConfigPool.spec.machineConfig.validation` to `None`.
+   By bypassing normal validation, the MCO is being asked to ignite any new node with the specified `MachineConfig`
+   even without first ensuring an existing node can use the configuration. At the same time, the `Restrictive`
+   change management policy that is in place is telling the MCO that is it not permitted to initiate
+   changes on existing nodes.
 1. The MCO metric for the MCP indicating that changes are pending is set because not all nodes are running
-   the most recently rendered configuration. This is irrespective of the `desiredConfig` in the `manual` 
-   policy. Conceptually, it means, if change management were disabled, whether changes would be initiated.
-1. The cluster lifecycle administrator manually drains and reboots nodes in the cluster.  
+   the most recently rendered configuration. Conceptually, it means, if change management were disabled, 
+   whether changes would be initiated.
+1. The cluster lifecycle administrator scales in a new node. It receives the specified configuration. They
+   validate the node's functionality.
+1. Satisfied with the new machine configuration, the cluster lifecycle administrator begins manually draining
+   and rebooting existing nodes on the cluster.
    Before the node reboots, it takes the opportunity to pivot to the `desiredConfig`. 
 1. After updating all nodes, the cluster lifecycle administrator does not need make any additional 
    configuration changes. They can leave the `changeManagement` stanza in their MCP as-is.
    
-#### On-prem Standalone Assisted Strategy Scenario
+#### On-prem Standalone Assisted Rollout Scenario
 1. A large, business critical cluster is being run on-prem.
 1. There are no reoccurring windows of time when the cluster lifecycle administrator can tolerate downtime.
    Instead, updates are negotiated and planned far in advance. 
-1. The cluster workloads are not HA and unplanned drains are considered a business risk.
-1. To prevent surprises, the cluster lifecycle administrator sets the assisted strategy on the worker MCP.
-1. In the `assisted` strategy change management policy, the lifecycle administrator configures `pausedUntil: "true"`
-   and the most recently rendered worker configuration in the policy's `renderedConfigsBefore: <current datetime>`.
-1. Conceptually, this is like a paused MCP today, however, it is paused waiting to apply a machine configuration
-   that may not be latest rendered configuration. The MCO should not prune any `MachineConfig` referenced by
-   this strategy.
+1. The cluster workloads are not HA and unplanned drains are a business risk.
+1. To prevent surprises, the cluster lifecycle administrator sets `changeManagement` on the worker MCP
+   to refer to a `ChangeManagementPolicy` using the `Restictive` strategy.
+1. Various cluster updates have been applied to the control-plane, but the cluster lifecycle administrator
+   has not updated worker-nodes.
 1. The MCO metric for the MCP indicating that changes are pending is set because not all nodes are running
-   the most recent, rendered configuration. This is irrespective of the `renderedConfigsBefore` in the `assisted` 
-   configuration. Conceptually, it means, if change management were disabled, whether changes would be initiated.
-1. When the lifecycle administrator is ready to permit disruption, they set `pausedUntil: "false"`.
-1. The MCO begins to initiate worker node updates. This rollout abides by documented OpenShift constraints
+   the desired `MachineConfig`.
+1. The cluster lifecycle administrator wants to choose the exact `MachineConfig` to apply as well as the exact 
+   times during which material changes will be made to worker-nodes. However, they do not want to manually 
+   reboot nodes. To have the MCO assist them in the rollout of the change, they set
+   `MachineConfigPool.spec.machineConfig.name=<selected rendered MachineConfig>` and
+   `MachineConfigPool.spec.changeManagement.disabledUntil=<tomorrow>` 
+   to allow the MCO to begin initiating material changes and make progress towards the specified configuration.
+   The MCO will not prune any `MachineConfig` referenced by an MCP's `machineConfig` stanza. 
+1. The MCO begins to initiate worker-node updates. This rollout abides by documented OpenShift constraints
    such as the MachineConfigPool `maxUnavailable` setting. It also abides by currently rollout rules (i.e.
-   new nodes igniting will receive an older configuration until at least one node has the configuration
-   selected by `renderedConfigsBefore`).
-1. Though new rendered configurations may be created, the assisted strategy will not act until the assisted policy
-   is updated to permit a more recent creation date.
+   new nodes igniting will receive an older configuration until at least one node has successfully applied 
+   the latest rendered `MachineConfig`).
+1. Though new rendered configurations may be created during this process (e.g. another control-plane update
+   is applied while the worker-nodes are making progress), the MCO will ignore them since it is being asked
+   to apply `MachineConfigPool.spec.machineConfig.name` as the desired configuration.
 
-   
+There are other paths through which a similar outcome could be achieved.
+- Without creating a `ChangeManagementPolicy` object. The cluster lifecycle administrator could 
+  leave `MachineConfigPool.spec.changeManagement.pausedUntil=True` to achieve the same net result 
+  as a `Restrictive` policy object.
+- By toggling the strategy configured in a `ChangeManagementPolicy` referenced by their MCPs
+  from `strategy: Restrictive` to `strategy: Permissive` and back again after their worker-nodes are
+  updated.
+  
 ### API Extensions
 
 API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
@@ -759,13 +878,13 @@ of API Extensions" section.
 
 #### Hypershift / Hosted Control Planes
 
-In the HCP topology, the HostedCluster and NodePool resources are enhanced to support the change management strategies
-`MaintenanceSchedule` and `Disabled`. 
+In the HCP topology, the `HostedCluster` and `NodePool` resources are enhanced to support the `spec.changeManagement`
+stanza. 
 
 #### Standalone Clusters
 
-In the Standalone topology, the ClusterVersion and MachineConfigPool resources are enhanced to support the change management strategies
-`MaintenanceSchedule` and `Disabled`. The MachineConfigPool also supports the `Manual` and `Assisted` strategies. 
+In the Standalone topology, the ClusterVersion and MachineConfigPool resources are enhanced to support the 
+`spec.changeManagement` stanza.
 
 #### Single-node Deployments or MicroShift
 
@@ -774,84 +893,67 @@ There is no logical distinction between user workloads and control-plane workloa
 update will drain user workloads and will cause workload disruption.
 
 Though disruption is inevitable, the maintenance schedule feature provides value in these toplogies by
-ensuring that disruption happens on a specified schedule.
+giving the cluster lifecycle administrator high level controls on exactly when it occurs.
 
 #### OCM Managed Profiles
 OpenShift Cluster Manager (OCM) should expose a user interface allowing users to manage their change management policy.
-Standard Fleet clusters will expose the option to configure the MaintenanceSchedule strategy - including
-only permit and exclude times.
+Standard Fleet clusters will expose the option to configure the control-plane and worker-node `ChangeManagementPolicy`
+objects with the `MaintenanceSchedule` strategy - including permit and exclude times.
 
-- Service Delivery will reserve the right to disable this strategy for emergency corrective actions.
-- Service Delivery should constrain permit & exclude configurations based on their internal policies. For example, customers may be forced to enable permissive windows which amount to at least 6 hours a month.
+- Service Delivery will reserve the right to disable this policy for emergency corrective actions.
+- Service Delivery should constrain permit & exclude configurations based on their internal policies. 
+  For example, customers may be forced to enable permissive windows which amount to at least 6 hours a month.
 
 ### Implementation Details/Notes/Constraints
 
 #### ChangeManagement Stanza
-The change management stanza will be introduced into ClusterVersion and MachineConfigPool (for standalone profiles)
-and HostedCluster and NodePool (for HCP profiles). The structure of the stanza is:
-
-```yaml
-spec:
-  changeManagement:
-    # The active strategy for change management (unless disabled by disabledUntil).
-    strategy: <strategy-name|Disabled|null>
-    
-    # If set to "true" or a future date (represented as string), the effective change 
-    # management strategy is Disabled. Date must be RFC3339. 
-    disabledUntil: <bool|date|null>
-    
-    # If set to "true" or a future date (represented as string), all strategies other 
-    # than Disabled are paused. Date must be RFC3339. 
-    pausedUntil: <bool|date|null>    
-    
-    # If a strategy needs additional configuration information, it can read a 
-    # key bearing its name in the config stanza.
-    config:
-       <strategy-name>:
-         ...configuration policy for the strategy...
-```
+The `spec.changeManagement` stanza will be introduced into ClusterVersion and MachineConfigPool (for standalone profiles)
+and HostedCluster and NodePool (for HCP profiles).
 
 #### MaintenanceSchedule Strategy Configuration
 
-```yaml
-spec:
-  changeManagement:
-    strategy: MaintenanceSchedule
-    config:
-       maintenanceSchedule:
-        # Specifies a reoccurring permissive window. 
-        permit:  
-          # RRULEs (https://www.rfc-editor.org/rfc/rfc5545#section-3.3.10) are commonly used 
-          # for calendar management metadata. Only a subset of the RFC is supported.
-          # See "RRULE Constraints" section for details.
-          # If unset, all dates are permitted and only exclude constrains permissive windows.
-          recurrence: <rrule|null>
-          # Given the identification of a date by an RRULE, at what time (always UTC) can the 
-          # permissive window begin. "00:00" if unset.
-          startTime: <time-of-day|null>
-          # Given the identification of a date by an RRULE, after what offset from the startTime should
-          # the permissive window close. This can create permissive windows within days that are not
-          # identified in the RRULE. For example, recurrence="FREQ=Weekly;BYDAY=Sa;",
-          # startTime="20:00", duration="8h" would permit material change initiation starting
-          # each Saturday at 8pm and continuing through Sunday 4am (all times are UTC). The default
-          # duration is 24:00-startTime (i.e. to the end of the day).
-          duration: <duration|null>
-          
-        
-        # Excluded date ranges override RRULE selections.
-        exclude:
-        # Dates should be specified in YYYY-MM-DD. Each date is excluded from 00:00 UTC for 24 hours.
-        - fromDate: <date>
-          # Non-inclusive until. If null, until defaults to the day after from (meaning a single day exclusion).
-          untilDate: <date|null>
-          # Provide additional detail for status when the cluster is within an exclusion period.
-          reason: Optional human readable which will be included in status description.
+When a `ChangeManagementPolicy` is defined to use the `MaintenanceSchedule` strategy,
+a `maintenanceSchedule` stanza should also be provided to configure the strategy
+(if it is not, the policy is functionally identical to `Restrictive`).
 
+```yaml
+kind: ChanageManagementPolicy
+spec:
+  strategy: MaintenanceSchedule
+ 
+  maintenanceSchedule:
+    # Specifies a reoccurring permissive window. 
+    permit:  
+      # RRULEs (https://www.rfc-editor.org/rfc/rfc5545#section-3.3.10) are commonly used 
+      # for calendar management metadata. Only a subset of the RFC is supported.
+      # See "RRULE Constraints" section for details.
+      # If unset, all dates are permitted and only exclude constrains permissive windows.
+      recurrence: <rrule|null>
+      # Given the identification of a date by an RRULE, at what time (always UTC) can the 
+      # permissive window begin. "00:00" if unset.
+      startTime: <time-of-day|null>
+      # Given the identification of a date by an RRULE, after what offset from the startTime should
+      # the permissive window close. This can create permissive windows within days that are not
+      # identified in the RRULE. For example, recurrence="FREQ=Weekly;BYDAY=Sa;",
+      # startTime="20:00", duration="8h" would permit material change initiation starting
+      # each Saturday at 8pm and continuing through Sunday 4am (all times are UTC). The default
+      # duration is 24:00-startTime (i.e. to the end of the day).
+      duration: <duration|null>
+      
+    
+    # Excluded date ranges override RRULE selections.
+    exclude:
+    # Dates should be specified in YYYY-MM-DD. Each date is excluded from 00:00 UTC for 24 hours.
+    - fromDate: <date>
+      # Non-inclusive until. If null, until defaults to the day after from (meaning a single day exclusion).
+      untilDate: <date|null>
+      # Provide additional detail for status when the cluster is within an exclusion period.
+      reason: Optional human readable which will be included in status description.
 ```
 
-Permitted times (i.e. times at which the strategy enforcement state can be permissive) are specified using a 
+Permissive windows are specified using a 
 subset of the [RRULE RFC5545](https://www.rfc-editor.org/rfc/rfc5545#section-3.3.10) and, optionally, a
-starting and ending time of day. https://freetools.textmagic.com/rrule-generator is a helpful tool to
+starting time and duration. https://freetools.textmagic.com/rrule-generator is a helpful tool to
 review the basic semantics RRULE is capable of expressing. https://exontrol.com/exicalendar.jsp?config=/js#calendar
 offers more complex expressions.
 
@@ -875,56 +977,60 @@ A valid RRULE for change management:
 - cannot specify a permissive window more than 2 years away.
 
 **Overview of Interactions**
-The MaintenanceSchedule strategy, along with `changeManagement.pausedUntil` allows a cluster lifecycle administrator to express 
+The MaintenanceSchedule strategy, along with `<resource>.spec.changeManagement.pausedUntil` allows a cluster lifecycle administrator to express 
 one of the following:
 
 | pausedUntil    | permit | exclude | Enforcement State (Note that **effective** state must also take into account hierarchy)                                                                                                                                                                                  |
 |----------------|--------|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `null`/`false` | `null` | `null`  | Permissive indefinitely           |
-| `true`         | *      | *       | Paused indefinitely |
-| `null`/`false` | set    | `null`  | Permissive during reoccurring windows time. Paused at all other times.                                                                                                                  |
-| `null`/`false` | set    | set     | Permissive during reoccurring windows time modulo excluded date ranges during which it is paused. Paused at all other times.                                                                                                                                                                                                         |
-| `null`/`false` | `null` | set     | Permissive except during excluded dates during which it is paused.                                                                                                                             |
+| `nil` | `null` | `null`  | Restrictive indefinitely           |
+| `nil` | set    | `null`  | Permissive during reoccurring windows time. Paused at all other times.                                                                                                                  |
+| `nil` | set    | set     | Permissive during reoccurring windows time modulo excluded date ranges during which it is paused. Paused at all other times.                                                                                                                                                                                                         |
+| `nil` | `null` | set     | Permissive except during excluded dates during which it is paused.                                                                                                                             |
 | date           | *      | *       | Honor permit and exclude values, but only after the specified date. For example, permit: `null` and exclude: `null` implies the strategy is indefinitely permissive after the specified date. |
+| `true`         | *      | *       | Paused/restrictive indefinitely |
 
 
-#### MachineConfigPool Assisted Strategy Configuration
+#### CLI Assisted Rollout Scenarios
+Once this proposal has been implemented, it is expected that `oc` will be enhanced to permit users to 
+trigger assisted rollouts scenarios for worker-nodes (i.e. where they control the timing of a rollout
+completely but progress is made using MCO automation). 
 
-```yaml
-spec:
-  changeManagement:
-    strategy: Assisted
-    config:
-      assisted:
-        permit:
-          # The assisted strategy will allow the MCO to process any rendered configuration
-          # that was created before the specified datetime. 
-          renderedConfigsBefore: <datetime>
-          # When AllowSettings, rendered configurations after the preceding before date
-          # can be applied if and only if they do not contain changes to osImageURL.
-          policy: "AllowSettings|AllowNone"
-```
-
-The primary user of this strategy is `oc` with tentatively planned enhancements to include verbs 
-like:
+`oc adm update` will be enhanced with `worker-node` subverbs to initiate and pause MCO work. 
 ```sh
 $ oc adm update worker-nodes start ...
-$ oc adm update worker-nodes pause ...
+$ oc adm update worker-nodes pause/resume ...
 $ oc adm update worker-nodes rollback ...
 ```
 
-These verbs can leverage the assisted strategy and `pausedUntil` to allow the manual initiation of worker-nodes
-updates after a control-plane update. 
-
-#### MachineConfigPool Manual Strategy Configuration
+These verbs can leverage `MachineConfigPool.spec.changeManagement` to achieve their goals. 
+For example, if the MCP is as follows:
 
 ```yaml
+kind: MachineConfigPool
+spec:
+  machineConfig:
+    name: <desired rendered MachineConfig>
+    validation: Default
+```
+
+- `worker-nodes start` can set a target `spec.machineConfig.name` to initiate progress toward a new update's
+  recently rendered `MachineConfig`. 
+- `worker-nodes pause/resume` can toggle `spec.changeManagement.pausedUntil=true/false`.
+- `worker-nodes rollback` can restore a previous `spec.machineConfig.name` is backed up in an MCP annotation.
+
+#### Manual Rollout Scenario
+
+Cluster lifecycle administrators desired yet more control can initiate node updates & drains themselves.
+
+```yaml
+kind: MachineConfigPool
 spec:
   changeManagement:
-    strategy: Manual
-    config:
-      manual:
-        desiredConfig: <rendered-configuration-name>
+    pausedUntil: true
+  
+  machineConfig:
+    name: <desired rendered MachineConfig>
+    validation: None
 ```
 
 The manual strategy requests no automated initiation of updates. New and rebooting
@@ -943,7 +1049,6 @@ Value:
 - `0`: no material changes are pending.
 - `1`: changes are pending but being initiated.
 - `2`: changes are pending and blocked based on this resource's change management policy.
-- `3`: changes are pending and blocked based on another resource in the change management hierarchy.
 
 `change_management_next_change_eta`
 Labels:
@@ -954,8 +1059,9 @@ Labels:
 Value: 
 - `-2`: Error determining the time at which changes can be initiated (e.g. cannot check with ClusterVersion / change management hierarchy). 
 - `-1`: Material changes are paused indefinitely.  
-- `0`: Material changes can be initiated now (e.g. change management is disabled or inside machine schedule window). Alternatively, time is not relevant to the strategy (e.g. assisted strategy).
-- `> 0`: The number seconds remaining until changes can be initiated OR 1000*24*60*60 (1000 days) if no permissive window can be found within the next 1000 days (this ensures a brute force check of intersecting datetimes with hierarchy RRULEs is a valid method of calculating intersection). 
+- `0`: Material changes can be initiated now (e.g. change management is disabled or inside machine schedule window). 
+  Alternatively, time is not relevant to the strategy (e.g. restrictive).
+- `> 0`: The number seconds remaining until changes can be initiated.
 
 `change_management_permissive_remaining`
 Labels:
@@ -965,9 +1071,10 @@ Labels:
 
 Value: 
 - `-2`: Error determining the time at which current permissive window will close.
-- `-1`: Material changes are permitted indefinitely (e.g. `strategy: disabled`). 
-- `0`: Material changes are not presently permitted (i.e. the cluster is outside of a permissive window). Alternatively, time is not relevant to the strategy (e.g. assisted strategy).
-- `> 0`: The number seconds remaining in the current permissive change window (or the equivalent of 1000 days if end of window cannot be computed). 
+- `-1`: Material changes are permitted indefinitely (e.g. `strategy: Permissive`). 
+- `0`: Material changes are not presently permitted (i.e. the cluster is outside of a permissive window). 
+  Alternatively, time is not relevant to the strategy (e.g. restrictive strategy).
+- `> 0`: The number seconds remaining in the current permissive change window. 
 
 `change_management_last_change`
 Labels:
@@ -978,38 +1085,18 @@ Labels:
 Value: 
 - `-1`: Datetime unknown. 
 - `0`: Material changes are currently permitted.
-- `> 0`: The number of seconds which have elapsed since the material changes were last permitted or initiated (for non-time based strategies).
+- `> 0`: The number of seconds which have elapsed since the material changes were last permitted or initiated.
 
 `change_management_strategy_enabled`
 Labels:
 - kind=ClusterVersion|MachineConfigPool|HostedCluster|NodePool
 - object=<object-name>
 - system=<control-plane|worker-nodes>
-- strategy=MaintenanceSchedule|Manual|Assisted
+- strategy=MaintenanceSchedule|Permissive|Restrictive
 
 Value: 
-- `0`: Change management for this resource is not subject to this enabled strategy (**does** consider hierarchy based disable).
-- `1`: Change management for this resource is directly subject to this enabled strategy.
-- `2`: Change management for this resource is indirectly subject to this enabled strategy (i.e. only via control-plane override hierarchy).
-- `3`: Change management for this resource is directly and indirectly subject to this enabled strategy.
-
-#### Change Management Status
-Each resource which exposes a `.spec.changeManagement` stanza must also expose `.status.changeManagement` . 
-
-```yaml
-status:
-  changeManagement:
-    # Always show control-plane level strategy. Disabled if disabledUntil is "true".
-    clusterStrategy: <Disabled|MaintenanceSchedule>
-    # If this a worker-node related resource (e.g. MCP), show local strategy. Disabled if disabledUntil is "true".
-    workerNodeStrategy: <Disabled|MaintenanceSchedule|Manual|Assisted>
-    # Show effective state.
-    effectiveState: <Changes Paused|Changes Permitted>
-    description: "Human readable message explaining how strategies & configuration are resulting in the effective state."
-    # The start of the next permissive window, taking into account the hierarchy. "N/A" for indefinite pause.
-    permitChangesETA: <datetime>
-    changesPending: <Yes|No>
-```
+- `0`: Change management for this resource is not subject to this enabled strategy.
+- `1`: Change management for this resource is subject to this enabled strategy.
 
 #### Change Management Bypass Annotation
 In some situations, it may be necessary for a MachineConfig to be applied regardless of the active change
@@ -1023,46 +1110,15 @@ the remainder of the control-plane update will be treated as a single material c
 ### Special Handling
 
 #### Change Management on Master MachineConfigPool
-In order to allow control-plane updates as a single material change, the MCO will only honor change the management configuration for the 
+In order to allow control-plane updates as a single material change, the MCO will only honor change management configuration for the 
 master MachineConfigPool if user generated MachineConfigs are the cause for a pending change. To accomplish this, 
 at least one MachineConfig updated by the CVO will have the `machineconfiguration.openshift.io/bypass-change-management` annotation
 indicating that changes in the MachineConfig must be acted upon irrespective of the master MCP change management policy. 
 
-#### Limiting Overlapping Window Search / Permissive Window Calculation
-An operator implementing change management for a worker-node related resource must honor the change management hierarchy when
-calculating when the next permissive window will occur (called elsewhere in the document, ETA). This is not
-straightforward to compute when both the control-plane and worker-nodes have independent MaintenanceSchedule 
-configurations.
-
-We can, however, simplify the process by reducing the number of days in the future the algorithm must search for
-coinciding permissive windows. 1000 days is a proposed cut-off.
-
-To calculate coinciding windows then, the implementation can use [rrule-go](https://github.com/teambition/rrule-go) 
-to iteratively find permissive windows at the cluster / control-plane level. These can be added to an 
-[interval-tree](https://github.com/rdleal/intervalst) . As dates are added, rrule calculations for the worker-nodes
-can be performed. The interval-tree should be able to efficiently determine whether there is an
-intersection between the permissive intervals it has stored for the control-plane and the time range tested for the 
-worker-nodes.
-
-Since it is possible there is no overlap, limits must be placed on this search. Once dates >1000 days from
-the present moment are being tested, the operator can behave as if the next window will occur in
-1000 days (prevents infinite search for overlap).
-
-This outcome does not need to be recomputed unless the operator restarts Or one of the RRULE involved
-is modified.
-
-If an overlap _is_ found, no additional intervals need to be added to the tree and it can be discarded.
-The operator can store the start & end datetimes for the overlap and count down the seconds remaining 
-until it occurs. Obviously, this calculation must be repeated:
-1. If either MaintenanceSchedule configuration is updated.
-1. The operator is restarted.
-1. At the end of a permissive window, in order to determine the next permissive window.
-
-
 #### Service Delivery Option Sanitization
 It is obvious that the range of flexible options provided by change management configurations offers
 can create risks for inexperienced cluster lifecycle administrators. For example, setting a 
-standalone cluster to use the assisted strategy and failing to trigger worker-node updates will
+standalone cluster to use the restrictive strategy and failing to trigger worker-node updates will
 leave unpatched CVEs on worker-nodes much longer than necessary. It will also eventually lead to
 the need to resolve version skew (Upgradeable=False will be reported by the API cluster operator).
 
@@ -1084,23 +1140,26 @@ schedule. In other words, it can be applied immediately, even outside a permissi
 
 ### Risks and Mitigations
 
-- Given the range of operators which must implement support for change management, inconsistent behavior or reporting may make it difficult for users to navigate different profiles.
+- Given the range of operators which must implement support for change management, inconsistent behavior or reporting 
+  may make it difficult for users to navigate different profiles.
   - Mitigation: A shared library should be created and vendored for RRULE/exclude/next window calculations/metrics.
-- Users familiar with the fully self-managed nature of OpenShift are confused by the lack of material changes be initiated when change management constraints are active.
-   - Mitigation: The introduction of change management will not change the behavior of existing clusters. Users must make a configuration change.
+- Users familiar with the fully self-managed nature of OpenShift are confused by the lack of material changes be 
+  initiated when change management constraints are active.
+   - Mitigation: The introduction of change management will not change the behavior of existing clusters. 
+     Users must make a configuration change.
 - Users may put themselves at risk of CVEs by being too conservative with worker-node updates.
-- Users leveraging change management may be more likely to reach unsupported kubelet skew configurations vs fully self-managed cluster management.
+- Users leveraging change management may be more likely to reach unsupported kubelet skew configurations 
+  vs fully self-managed cluster management.
 
 ### Drawbacks
 
 The scope of the enhancement - cutting across several operators requires multiple, careful implementations. The enhancement
 also touches code paths that have been refined for years which assume a fully self-managed cluster approach. Upsetting these
-code paths prove challenging. 
+code paths may prove challenging. 
 
 ## Open Questions [optional]
 
 1. Can the HyperShift Operator expose a metric for when changes are pending for a subset of worker nodes on the cluster if it can only interact via CAPI resources?
-2. Can the MCO interrogate the ClusterVersion change management configuration in order to calculate overlapping permissive intervals in the future?
 
 ## Test Plan
 
@@ -1178,7 +1237,7 @@ Operators implementing change management for their resources will not face any
 new _internal_ version skew complexities due to this enhancement, but change management 
 does increase the odds of prolonged and larger differential kubelet version skew.
 
-For example, particularly given the Manual or Assisted change management strategy, it 
+For example, particularly given long-lived Restrictive strategies, it 
 becomes easier for a cluster lifecycle administrator to forget to update worker-nodes
 along with updates to the control-plane. 
 
@@ -1250,38 +1309,26 @@ without causing further disruption. This is not a moment when you want to be fig
 a date string, calculating timezones, or copying around cluster configuration so that you can restore
 it after you stop the bleeding.
 
-### Implement change control, but do not implement the Manual and/or Assisted strategy for MachineConfigPool
+### Implement change management, but only support a MaintenanceSchedule
 Major enterprise users of our software do not update on a predictable, recurring window of time. Updates
 require laborious certification processes and testing. Maintenance schedules will not serve these customers
 well. However, these customers may still benefit significantly from the change management concept --
 unexpected / disruptive worker node drains and reboots have bitten even experienced OpenShift operators
 (e.g. a new MachineConfig being contributed via gitops).
 
-These strategies inform decision-making through metrics and provide facilities for fine-grained control 
+Alternative strategies inform decision-making through metrics and provide facilities for fine-grained control 
 over exactly when material change is rolled out to a cluster. 
 
-The Assisted strategy is also specifically designed to provide a foundation for 
+The "assisted" rollout scenario described in this proposal is also specifically designed to provide a foundation for 
 the forthcoming `oc adm update worker-nodes` verbs. After separating the control-plane and
 worker-node update phases, these verbs are intended to provide cluster lifecycle administrators the 
 ability to easily start, pause, cancel, and even rollback worker-node changes.
 
 Making accommodations for these strategies should be a subset of the overall implementation
 of the MaintenanceSchedule strategy and they will enable a foundation for a range of 
-different persons not served by MaintenanceSchedule.
+different personas not served by MaintenanceSchedule.
 
 ### Use CRON instead of RRULE
 The CRON specification is typically used to describe when something should start and 
 does not imply when things should end. CRON also cannot, in a standard way,
 express common semantics like "The first Saturday of every month."
-
-### Use a separate CRD instead of updating ClusterVersion, MCP, ...
-In this alternative, we introduce a CRD separate from ClusterVersion, MCP, HostedCluster, and NodePool. For example
-an independent `UpdatePolicy` CRD where administrator preferences can be captured. This approach [was explored](https://github.com/jupierce/oc-update-design-ideas/commit/a6364ee2f2c1ebf84ed6d50bc277f9736bf793bd). 
-Ultimately, it felt less intuitive across profiles. Consider a CRD called `UpdatePolicy` that tries to be a central config.
-
-1. Is it namespaced? If it is, that feels odd for an object that that should control the cluster. If it is not namespaced, the policy feels misplaced for HCP HostedCluster resources which live in a namespace.
-1. Where does someone check the status of the policy (e.g. when the next update is going to be possible on a given MCP?). If it is the UpdatePolicy object, you have multiple independent controllers controlling the status, which is an antipattern. If the UpdatePolicy controls multiple different MCPs differently, how do they independently report their status'? It also introduces the problem of having to look at multiple places (MCP and UpdatePolicy to understand what may be happening.
-1. As you pack policies for control-plane, MCPs, HCP primitives into an expressive UpdatePolicy, the schema options varied from too complex, to error prone, to overly abstract, to overly limiting.
-1. If you split the policy object up to simplify it, e.g. one for each MCP, you have the problem of associating it to the right MCP unambiguously. Planting the policy in the MCP itself solves this problem.
-
-In summary, it is possible, but the working group didn't believe the alternative was as elegant or user friendly as housing the policies directly in the resources they control.
