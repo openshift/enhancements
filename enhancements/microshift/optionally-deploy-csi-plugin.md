@@ -54,14 +54,12 @@ opportunity to better tune their MicroShift deployment to their hardware require
 - Provide the LVMS CSI driver and LVMS CSI snapshot controller as optional components of MicroShift
 - Reuse the optional-installation pattern implemented by MicroShift for the [Multus CNI
   Plugin](./multus-cni-for-microshift.md).
-- Enable installing the LVMS CSI driver and LVMS CSI snapshot controller to a cluster that was previously deployed
-  without the components.
+- Do not alter the LVMS-on-MicroShift user experience 
 
 ### Non-Goals
 
 - Generalizing this design to install any other CSI driver.
-- Uninstalling the CSI driver or snapshotter rpms will not uninstall the cluster level components. This is a data safety
-  concern that should be handled by the user.
+- Users should not expect that uninstalling the RPMs will affect running containers
 - Support installing CSI snapshotter, but not the CSI driver. The snapshotter depends on the CSI driver; it cannot
   run as a standalone component.
 
@@ -89,14 +87,14 @@ to ensure there are not LVMS PVs in the cluster before deleting the LVMS and Sna
 2. User specifies an ostree blueprint which includes the following sections:
     1. Packages: microshift, microshift-greenboot, microshift-networking, microshift-selinux, microshift-lvms, 
        microshift-lvms-snapshotting
-    2. File (Optional): lvmd.yaml
+    2. File (Optional, User Defined): lvmd.yaml
 3. User compiles an ostree commit from the blueprint
 4. User deploys the ostree commit to host
 5. MicroShift host boots
 6. MicroShift starts
 7. MicroShift deploys:
-   1. LVMS CSI manifests
-   2. LVMS Snapshot manifests
+   1. LVMS Snapshot manifests
+   2. LVMS CSI manifests
 
 **_Installation without CSI Driver and Snapshotting_**
 
@@ -114,16 +112,16 @@ to ensure there are not LVMS PVs in the cluster before deleting the LVMS and Sna
 2. User later determines there is a requirement for persistent storage and volume snapshotting.
 3. User specifies an ostree blueprint which includes the following sections:
     1. Packages:  microshift-lvms, microshift-lvms-snapshotting
-    2. File (Optional): lvmd.yaml
+    2. File (Optional, User Defined): lvmd.yaml
 4. User compiles an ostree commit from the blueprint
 5. User deploys the ostree commit to host
 6. MicroShift host reboots
 7. MicroShift starts
 8. MicroShift deploys:
-   1. LVMS CSI manifests
-   2. LVMS Snapshot manifests
+    1. LVMS Snapshot manifests
+    2. LVMS CSI manifests
 
-**Uninstallation**
+**_Uninstallation_**
 
 1. User has deployed a cluster with LVMS and CSI Snapshotting installed.
 2. User has run pods on the cluster with LVMS PVs.
@@ -196,6 +194,23 @@ The changes proposed here only affect MicroShift.
     post-install logic will be not stomp on existing lvmd configurations. Overwriting the lvmd config poses a 
     significant threat of orphaning LVM volumes if MicroShift were to change the volume-groups used by lvmd.
 
+- **Dynamic Configuration Defaults**
+  - For LVMS to start, it must have a configuration file. Thus, in order to support running out of the box and 
+    after upgrades, a default configuration should be provided when the user does not create one. This is handled by 
+    MicroShift right now in
+[mainline code](https://github.com/openshift/microshift/blob/main/pkg/config/lvmd/lvmd.go). This logic must also ensure
+    that user-defined configurations are not overwritten after upgrading, which could break the system and require user
+    intervention.
+  - The dynamic portion of the default config is the default LVM volume group. Defaulting logic will be executed by a 
+    post-install section of the RPM spec. It will decide if a default config is necessary, and if so, which volume 
+    group to use:
+    1. If a configuration file exists, skip creating a default config file and continue rpm installation.
+    2. Else, if there are 0 volume groups, halt installation and report the error to the user.
+    3. Else, if there is 1 and only 1 volume group, set it as the default VG in the LVMS `deviceClass`.
+    4. Else, if there are more than 1 volume groups, check if one named `microshift` exists.
+       1. If it does exist, set it as the default VG in the LVMS `deviceClass`.
+       2. Else, halt installation and report the error to the user.
+
 ### Risks and Mitigations
 
 - N/A
@@ -211,23 +226,13 @@ process and thus will require only minimal changes to existing tests.
 
 ## Graduation Criteria
 
-### Dev Preview -> Tech Preview
+### GA
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
 - Sufficient test coverage
-- Gather feedback from users rather than just developers
-- Enumerate service level indicators (SLIs), expose SLIs as metrics
-- Write symptoms-based alerts for the component(s)
-
-### Tech Preview -> GA
-
-- More testing (upgrade, downgrade, scale)
-- End-to-end tests
 - Sufficient time for feedback
 - Available by default
-- Document SLOs for the component
-- Conduct load testing
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Upgrade / Downgrade Strategy
@@ -243,7 +248,42 @@ of MicroShift, just as it is on OCP.
 
 ## Operational Aspects of API Extensions
 
-- N/A
+<!--
+Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
+admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
+especially how they impact the OCP system architecture and operational aspects.
+
+- For conversion/admission webhooks and aggregated apiservers: what are the SLIs (Service Level
+  Indicators) an administrator or support can use to determine the health of the API extensions
+
+  Examples (metrics, alerts, operator conditions)
+  - authentication-operator condition `APIServerDegraded=False`
+  - authentication-operator condition `APIServerAvailable=True`
+  - openshift-authentication/oauth-apiserver deployment and pods health
+
+- What impact do these API extensions have on existing SLIs (e.g. scalability, API throughput,
+  API availability)
+
+  Examples:
+  - Adds 1s to every pod update in the system, slowing down pod scheduling by 5s on average.
+  - Fails creation of ConfigMap in the system when the webhook is not available.
+  - Adds a dependency on the SDN service network for all resources, risking API availability in case
+    of SDN issues.
+  - Expected use-cases require less than 1000 instances of the CRD, not impacting
+    general API throughput.
+
+- How is the impact on existing SLIs to be measured and when (e.g. every release by QE, or
+  automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
+  this enhancement)
+
+- Describe the possible failure modes of the API extensions.
+- Describe how a failure or behaviour of the extension will impact the overall cluster health
+  (e.g. which kube-controller-manager functionality will stop working), especially regarding
+  stability, availability, performance and security.
+- Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
+  and add them as reviewers to this enhancement.
+-->
+
 
 ## Support Procedures
 
