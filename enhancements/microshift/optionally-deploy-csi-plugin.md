@@ -104,7 +104,7 @@ to ensure there are not LVMS PVs in the cluster before deleting the LVMS and Sna
 3. User compiles an ostree commit from the blueprint
 4. User deploys the ostree commit to host
 5. MicroShift host boots
-6. MicroShift starts
+6. MicroShift starts without storage support
 
 **_Day-1|2 Installation_**
 
