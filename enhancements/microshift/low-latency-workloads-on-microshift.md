@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - "@jerpeter1"
 creation-date: 2024-06-12
-last-updated: 2024-06-12
+last-updated: 2024-07-09
 tracking-link:
   - https://issues.redhat.com/browse/USHIFT-2981
 ---
@@ -66,9 +66,9 @@ parts need to be put in place:
 - CRI-O configuration + Kubernetes' RuntimeClass
 - Kubelet configuration (CPU, Memory, and Topology Managers and other)
 - `microshift-tuned.service` to activate user selected TuneD profile on boot and reboot the host
-  if the kernel args are changed.
+  if the profile was updated.
 
-New `microshift-low-latency` RPM will be created that will contain tuned profile, CRI-O configs, and mentioned systemd daemon.
+New `microshift-low-latency` RPM will be created that will contain new artifacts mentioned above.
 We'll leverage existing know how of Performance and Scalability team expertise and look at
 Node Tuning Operator capabilities.
 
@@ -100,7 +100,7 @@ Workflow consists of two parts:
    - User supplies additional configs using blueprint:
      - `/etc/tuned/microshift-baseline-variables.conf` to configure tuned profile
      - `/etc/microshift/config.yaml` to configure Kubelet
-     - `/etc/microshift/microshift-tuned.yaml` to configure `microshift-tuned.service`
+     - `/etc/microshift/tuned.yaml` to configure `microshift-tuned.service`
 1. User builds the blueprint
 1. User deploys the commit / installs the system.
 1. System boots
@@ -139,9 +139,8 @@ name = "KERNEL-rt"
 path = "/etc/tuned/microshift-baseline-variables.conf"
 data = """
 isolated_cores=1-2
-hugepagesDefaultSize = 2M
-hugepages2M = 128
-hugepages1G = 0
+hugepages_size = 2M
+hugepages = 128
 additionalArgs = ""
 """
 
@@ -149,12 +148,14 @@ additionalArgs = ""
 path = "/etc/microshift/config.yaml"
 data = """
 kubelet:
+  ...
   cpuManagerPolicy: static
   memoryManagerPolicy: Static
+  ...
 """
 
 [[customizations.files]]
-path = "/etc/microshift/microshift-tuned.yaml"
+path = "/etc/microshift/tuned.yaml"
 data = """
 reboot_after_apply: True
 profile: microshift-baseline
@@ -172,8 +173,8 @@ profile: microshift-baseline
      - `/etc/tuned/microshift-baseline-variables.conf`
      - `/etc/microshift/config.yaml` to configure Kubelet
      - `/etc/microshift/microshift-tuned.yaml` to configure `microshift-tuned.service`
-1. User builds the blueprint
-1. User deploys the commit / installs the system.
+1. User builds the Containerfile
+1. User deploys the bootc image / installs the system.
 1. System boots - rest is just like in OSTree flow
 
 Example Containerfile:
@@ -184,9 +185,9 @@ FROM registry.redhat.io/rhel9/rhel-bootc:9.4
 # ... MicroShift installation ...
 
 RUN dnf install kernel-rt microshift-tuned
-COPY microshift-baseline-variables.conf /etc/tuned/microshift-low-latency-variables.conf
+COPY microshift-baseline-variables.conf /etc/tuned/microshift-baseline-variables.conf
 COPY microshift-config.yaml             /etc/microshift/config.yaml
-COPY microshift-tuned.yaml              /etc/microshift/microshift-tuned.yaml
+COPY microshift-tuned.yaml              /etc/microshift/tuned.yaml
 
 RUN systemctl enable microshift-tuned.service
 ```
@@ -203,9 +204,9 @@ RUN systemctl enable microshift-tuned.service
    - Host boots again, everything for low latency is in place,
    - User starts/enables `microshift.service`
 1. Production environment
-   - User creates `/etc/microshift/microshift-tuned.yaml` to configure `microshift-tuned.service`
-   - User enables `microshift.service`
-   - User enables and starts `microshift-tuned.service` which activates the TuneD profile and optionally reboot the host.:
+   - User creates `/etc/microshift/tuned.yaml` to configure `microshift-tuned.service`
+   - User enables, but not starts `microshift.service`
+   - User enables and starts `microshift-tuned.service` which activates the TuneD profile and optionally reboots the host.:
      See "microshift-tuned service" section below for more information.
    - Host is rebooted: MicroShift starts because it was enabled
    - Host doesn't need reboot:
@@ -266,6 +267,19 @@ New `microshift-baseline` tuned profile will be created and will include existin
   > Therefore `microshift-baseline` will "allow" only for single size of hugepages.
   > Users are welcomed though to introduce non-kernel-args ways of setting up hugepages in their profiles.
 - additional kernel arguments
+- CPU set to offline
+
+Any other tunables are responsibility of the user. For example, if they want to control hugepages per NUMA node,
+they need to create a tuned profile that will include:
+```ini
+[sysfs]
+/sys/devices/system/node/node${NUMA_NODE}/hugepages/hugepages-${HUGEPAGES_SIZE}kB/nr_hugepages=5
+```
+
+Probably best resource on TuneD is [RHEL documentation](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/customizing-tuned-profiles_monitoring-and-managing-system-status-and-performance).
+
+
+##### Expected microshift-baseline tuned profile
 
 ```ini
 [main]
@@ -310,6 +324,10 @@ hugepages = 0
 
 # Additional kernel arguments
 additional_args =
+
+# CPU set to be offlined
+# WARNING: Should not overlap with `isolated_cores`
+offline_cpu_set =
 ```
 
 #### microshift-tuned service
@@ -449,9 +467,10 @@ It may happen that some users need to use TuneD plugins that are not handled by 
 In such case we may investigate if it's something generic enough to include, or we can instruct them
 to create new profile that would include `microshift-baseline` profile.
 
-Systemd daemon we'll provide to enable TuneD profile should have a strict requirement before it
-reboots the node, so it doesn't put it into a boot loop.
-This pattern of reboot after booting affects the number of "effective" greenboot retries,
+To mitigate risk of entering boot loop by continuosly applying and rebooting the node, microshift-tuned
+daemon will compare checksums of previously applied version of the profile with current, and reboot the host
+only if user allows it in the config file.
+This pattern of reboot on first boot after installing/upgrading the system affects the number of "effective" greenboot retries,
 so customers might need to account for that by increasing the number of retries.
 
 
@@ -464,8 +483,9 @@ but it must be noted that NTO is going beyond low latency.
 
 ## Open Questions [optional]
 
-- Verify if osbuild blueprint can override a file from RPM 
-  (variables.conf needs to exist for tuned profile, so it's nice to have some fallback)?
+- ~~Verify if osbuild blueprint can override a file from RPM~~
+  ~~(variables.conf needs to exist for tuned profile, so it's nice to have some fallback)?~~
+  > Yes, it can.
 - ~~NTO runs tuned in non-daemon one shot mode using systemd unit.~~
   ~~Should we try doing the same or we want the tuned daemon to run continuously?~~
   > Let's stick to default RHEL behaviour. MicroShift doesn't own the OS.
@@ -475,7 +495,8 @@ but it must be noted that NTO is going beyond low latency.
 - NTO took an approach to duplicate many of the setting from included profiles - should we do the same?
   > Comment: Probably no need to do that. `cpu-partitioning` profile is not changed very often,
   > so the risk of breakage is low, but if they change something, we should get that automatically, right?
-- Should we also provide NTO's systemd units for offlining CPUs, setting hugepages per NUMA node, clearing IRQ balance, setting RPS masks?
+- Should we also provide NTO's systemd units for ~~offlining CPUs,~~ setting hugepages per NUMA node, ~~clearing IRQ balance~~, setting RPS masks?
+  > We're including offlining CPUs. And `cpu-partitioning` is giving user-provided list of isolated CPUs to `[irqbalance] banned_cpus`.
 
 ## Test Plan
 
