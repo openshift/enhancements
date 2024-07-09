@@ -94,8 +94,6 @@ Workflow consists of two parts:
 ##### OSTree
 
 1. User creates an osbuild blueprint:
-   - (optional) User configures `[customizations.kernel]` in the blueprint if the values are known
-     beforehand. This could prevent from necessary reboot after applying tuned profile.
    - (optional) User adds `kernel-rt` package to the blueprint
    - User adds `microshift-low-latency.rpm` to the blueprint
    - User enables `microshift-tuned.service`
