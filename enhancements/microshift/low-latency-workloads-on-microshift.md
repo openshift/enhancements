@@ -106,14 +106,8 @@ Workflow consists of two parts:
 1. User builds the blueprint
 1. User deploys the commit / installs the system.
 1. System boots
-1. `microshift-tuned.service` starts (after `tuned.service`, before `microshift.service`):
-   - Compares active profile with requested profile
-   - If requested profile is already active:
-     - Compare checksum of requested profile with cached checksum.
-     - If checksums are the same - exit.
-   - Apply requested profile
-   - Calculate checksum of the profile and the variables file and save it
-   - If `reboot_after_apply` is True, then reboot the host
+1. `microshift-tuned.service` runs (after `tuned.service`, before `microshift.service`) and optionally reboots the system.
+   See "microshift-tuned service" section below for more information.
 1. Host boots again, everything for low latency is in place,
    `microshift.service` can continue start up.
 
@@ -213,14 +207,8 @@ RUN systemctl enable microshift-tuned.service
 1. Production environment
    - User creates `/etc/microshift/microshift-tuned.yaml` to configure `microshift-tuned.service`
    - User enables `microshift.service`
-   - User enables and starts `microshift-tuned.service` which:
-     - Compares active profile with requested profile
-     - If requested profile is already active:
-       - Compare checksum of requested profile with cached checksum.
-       - If checksums are the same - exit.
-     - Apply requested profile
-     - Calculate checksum of the profile and the variables file and save it
-     - If `reboot_after_apply` is True, then reboot the host
+   - User enables and starts `microshift-tuned.service` which activates the TuneD profile and optionally reboot the host.:
+     See "microshift-tuned service" section below for more information.
    - Host is rebooted: MicroShift starts because it was enabled
    - Host doesn't need reboot:
      - User starts `microshift.service`
@@ -232,7 +220,7 @@ RUN systemctl enable microshift-tuned.service
 - Setting Pod's memory limit and memory request to the same value, and
   setting CPU limit and CPU request to the same value to ensure Pod has guaranteed QoS class.
 - Use annotations to get desired behavior
-  (unless link to a documentation is present, these annotations only take two values: enabled and disabled):
+  (unless link to a documentation is present, these annotations only take two values: `enabled` and `disabled`):
   - `cpu-load-balancing.crio.io: "disable"` - disable CPU load balancing for Pod 
     (only use with CPU Manager `static` policy and for Guaranteed QoS Pods using whole CPUs)
   - `cpu-quota.crio.io: "disable"` - disable Completely Fair Scheduler (CFS)
@@ -326,15 +314,48 @@ hugepages = 0
 additional_args =
 ```
 
-#### `microshift-tuned.service` configuration
+#### microshift-tuned service
 
-Config file to specify which profile to re-apply each boot and if host should be rebooted if
-the kargs before and after applying profile are mismatched.
+`microshift-tuned.service` will be responsible for activating TuneD profile specified by user in the config.
+User will also need to specify if host should be rebooted after activating the profile.
 
 ```yaml
 profile: microshift-baseline
 reboot_after_apply: True
 ```
+
+Rationale for creating microshift-tuned.service:
+1. Automatic apply of a TuneD profile and reboot if requested - helps with unattended install of a fleet of devices.
+2. TuneD does not reboot the system in case of profile change. TuneD daemon will reapply the profile,
+   but there were changes to kernel arguments, they will be inactive until host is rebooted which would a manual operation.
+
+To address 1. microshift-tuned will, on each start, apply specified by user TuneD profile and reboot the host if user commanded so (`reboot_after_apply`).
+To address 2. microshift-tuned will calculate checksum of content of TuneD profile and checksum of variables file referrenced in the profile.
+These checksums will be persisted on disk and used on next start of the microshift-tuned to decide
+if the profile changed and should be re-applied, optionally followed with reboot.
+
+`microshift-tuned.service`'s workflow is as follows:
+- Compares active profile (according to TuneD) with requested profile (in the config file)
+- If requested profile is already active:
+  - Compare checksum of requested profile with cached checksum.
+  - If checksums are the same - exit.
+- Apply requested profile
+- Calculate checksum of the profile and the variables file and save it
+- If `reboot_after_apply` is True, then reboot the host
+
+In case of errors:
+- Checksum cache cannot be loaded
+  - Checksum cache is loaded when active and desired profiles are the same.
+  - If checksum cannot be loaded, it means that profile was activated outside `microshift-tuned.service`
+  - Checksum should be calculated and stored in the cache
+  - microshift-tuned.service exits with success
+  - Why not reapply the profile and reboot? Maybe the cache is not there, because it could not be written. If on missing cache we would potentially reboot, this could mean a boot loop.
+- If any operation fails not reaching the `tuned-adm profile $PROFILE`, then the currently active profile will stay active.
+- If `tuned-adm profile $PROFILE` fails, it is very likely that the active profile is unloaded and new profile is not active resulting in no active profile.
+  - This can be further investigated by interacting with TuneD, e.g.
+    - `sudo tuned-adm active` to get active profile
+    - Inspecting `/var/log/tuned/tuned.log` for errors
+
 
 #### CRI-O configuration
 
