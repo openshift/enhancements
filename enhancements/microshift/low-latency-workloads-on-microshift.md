@@ -461,12 +461,6 @@ Approach described in this enhancement does not provide much of the NTO's functi
 due to the "static" nature of RPMs and packaged files (compared to NTO's dynamic templating),
 but it must be noted that NTO is going beyond low latency.
 
-One of the NTO's strengths is that it can create systemd units for runtime configuration
-(such as offlining CPUs, setting hugepages per NUMA node, clearing IRQ balance banned CPUs,
-setting RPS masks). Such dynamic actions are beyond capabilities of static files shipped via RPM.
-If such features are required by users, we could ship such systemd units and they could be no-op
-unless they're turned on in MicroShift's config. However, it is unknown to author of the enhancement
-if these are integral part of the low latency.
 
 ## Open Questions [optional]
 
