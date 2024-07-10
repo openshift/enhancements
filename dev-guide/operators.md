@@ -55,12 +55,12 @@ the CVO manages all of the COs (in this way ClusterOperators are also operands).
 
 ## What is an OpenShift release image?
 To get a list of the components and their images that comprise an OpenShift release image, grab a
-release from the [openshift release page](https://openshift-release.svc.ci.openshift.org/) and run:
+release from the [openshift release page](https://amd64.ocp.releases.ci.openshift.org/) and run:
 ```console
-$ oc adm release info registry.svc.ci.openshift.org/ocp/release:version
+$ oc adm release info registry.ci.openshift.org/ocp/release:version
 ```
 
-If the above command fails, you may need to authenticate against `registry.svc.ci.openshift.org`.
+If the above command fails, you may need to authenticate against `registry.ci.openshift.org`.
 If you are an OpenShift developer, see [authenticating against ci registry](#authenticating-against-ci-registry)
 You'll notice that currently the release payload is just shy of 100 images.
 
@@ -232,7 +232,7 @@ or remove the overrides section you added in `clusterversion/version`.
 ### OPTION B - LAUNCH A CLUSTER WITH YOUR CHANGES
 #### Build a new release image that has your test components built in
 For this example I'll start with the release image
-`registry.svc.ci.openshift.org/ocp/release:4.2`
+`registry.ci.openshift.org/ocp/release:4.2`
 and test a change to the `github.com/openshift/openshift-apiserver` repository.
 
 1. Build the image and push it to a registry (use any containers cli, quay.io, docker.io)
@@ -246,15 +246,15 @@ $ buildah push quay.io/yourname/openshift-apiserver:test
 2. Assemble a release payload with your test image and push it to a registry
 Get the name of the image (`openshift-apiserver`) you want to substitute:
 ```console
-$ oc adm release info registry.svc.ci.openshift.org/ocp/release:4.2
+$ oc adm release info registry.ci.openshift.org/ocp/release:4.2
 ```
-If the above command fails, you may need to authenticate against `registry.svc.ci.openshift.org`.
+If the above command fails, you may need to authenticate against `registry.ci.openshift.org`.
 If you are an OpenShift developer, see [authenticating against ci registry](#authenticating-against-ci-registry)
 
 This command will assemble a release payload incorporating your test image _and_ will push it to the quay.io repository.
 Be sure to set this repository in quay.io as `public`.
 ```console
-$ oc adm release new --from-release registry.svc.ci.openshift.org/ocp/release:4.2 \
+$ oc adm release new --from-release registry.ci.openshift.org/ocp/release:4.2 \
   openshift-apiserver=quay.io/yourname/openshift-apiserver:test \
   --to-image quay.io/yourname/release:test
 ```
@@ -301,19 +301,13 @@ plus operator image build for such operators.
 (Internal Red Hat registries for developer testing)
 
 ### registry.ci.openshift.org
-- Login at https://oauth-openshift.apps.ci.l2s4.p1.openshiftapps.com/oauth/token/request with your github account. This may require you to have access to the internal "OpenShift" Github organization so if you have access issues, double-check that you have access to that org and try requesting it if you don't have it.
+- Login at https://oauth-openshift.apps.ci.l2s4.p1.openshiftapps.com/oauth/token/request with your Kerberos ID at Red Hat SSO.
 - Once logged in, an API token will be displayed. Please copy it.
 - Then login to a `registry.json` file like this
 
 ```bash
-$ podman login --authfile registry.json -u ${GITHUB_USER} -p ${TOKEN}
+$ podman login --authfile registry.json -u ${KERBEROS_ID} -p ${TOKEN}
 ```
-
-### registry.svc.ci.openshift.org
-Add the necessary credentials to your local `~/.docker/config.json` (or equivalent file) like so:
-- visit `https://api.ci.openshift.org`, `upper right corner '?'` dropdown to `Command Line Tools`
-- copy the given `oc login https://api.ci.openshift.org --token=<hidden>`, paste in your terminal
-- then run `oc registry login` to add your credentials to your local config file _usually ~/.docker/config.json_
 
 ## Authenticating against quay registry
 Add the necessary credentials to your local `~/.docker/config.json` (or equivalent file) like so:
