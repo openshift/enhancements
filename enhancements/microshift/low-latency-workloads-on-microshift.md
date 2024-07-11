@@ -219,7 +219,7 @@ RUN systemctl enable microshift-tuned.service
 - Setting Pod's memory limit and memory request to the same value, and
   setting CPU limit and CPU request to the same value to ensure Pod has guaranteed QoS class.
 - Use annotations to get desired behavior
-  (unless link to a documentation is present, these annotations only take two values: `enabled` and `disabled`):
+  (unless link to a documentation is present, these annotations only take two values: `enable` and `disable`):
   - `cpu-load-balancing.crio.io: "disable"` - disable CPU load balancing for Pod 
     (only use with CPU Manager `static` policy and for Guaranteed QoS Pods using whole CPUs)
   - `cpu-quota.crio.io: "disable"` - disable Completely Fair Scheduler (CFS)
