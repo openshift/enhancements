@@ -111,6 +111,7 @@ As a Product Manager:
   - we will scrap this effort for integration and look for alternative solutions if the integration is not possible with reasonable effort.
 - There is a risk that KubeSAN will break easily as its a really young project
   - we will not GA the solution until we have a clear understanding of the stability of the KubeSAN project. The solution will stay in TechPreview until then.
+  - we will use community health as a gatekeeper for GA. We will need solid upstream support for the project and that is only possible through a community.
 
 ## Proposal
 
@@ -303,6 +304,28 @@ The status reporting will include:
   - Ensure that any significant events (such as failovers, recoveries, and maintenance actions) are logged and reported.
 
 
+#### Design Details for Rollback Routines
+
+In case of a failure during the provisioning of shared storage, the operator should be able to roll back the changes and clean up the shared VGs without data loss. At the same time, existing PVCs and PVs should be unaffected by the rollback as much as possible.
+
+Luckily, due to the CSI design, the PVCs and PVs are not directly affected by the driver for operation, meaning that once the mount procedure has been completed,
+no further action is required from the driver to keep the PVCs and PVs operational. This means that the rollback can be done without affecting the PVCs and PVs.
+
+However, if for any reason the shared VGs need to be cleaned up, the operator should be able to do so without affecting the existing PVCs and PVs. This can be achieved by the following steps:
+
+1. **Rollback Procedure**:
+   - The operator can remove the shared VGs from the LVMCluster CR to ensure that they are not recreated. This is fundamentally the same as removing a deviceClass
+     from the CR currently via TopoLVM, however the daemonset running on the node may bail out due to potential data loss incurred via force removal.
+     In this case, the manual rollback can be performed.
+  - The operator can then delete the KubeSAN CSI driver deployment to prevent any further provisioning of shared storage.
+2. **Manual Rollback Procedure with a broken shared volume group**:
+  - The node administrator can manually delete the shared VGs using the `vgremove` command on each node. In case of lock contention due to the failure state,
+    it is possible to forcefully circumvent the lock by using the `--force` and ` --ignorelockingfailure` flag on the `vgremove` command.
+    This allows nodes that no longer achieve quorum through sanlock to recover. It is possible to do this for every node and to restart a procedure from scratch.
+  - The operator can then delete the shared VGs from the LVMCluster CR to ensure that they are not recreated.
+  - The operator can then delete the KubeSAN CSI driver deployment to prevent any further provisioning of shared storage.
+
+
 ### Drawbacks
 
 - Increased complexity in managing both node-local and shared storage.
@@ -371,6 +394,8 @@ LVMS can be installed on standalone clusters, but the shared storage provisionin
   - Positive feedback from initial users.
   - Full documentation, including troubleshooting guides and best practices.
   - Full LVMS Support Lifecycle
+  - Healthy community around the KubeSAN project, upstream contributions are seamless similar to TopoLVM
+  - We have a contribution model in place for the KubeSAN project, and the project is in a healthy state with regular releases and active maintainers.
 
 ### Removing a deprecated feature
 
@@ -385,9 +410,9 @@ N/A
   - New deviceClasses with the shared policy should be able to be added to existing LVMClusters without affecting existing deviceClasses.
 
 - **Downgrade**:
-  - Allow safe downgrades by maintaining backward compatibility. Downgrading from a kubesan enabled version to a purely topolvm enabled version should be a no-break operation for the topolvm part. For the kubesan part, the operator should ensure that the shared VGs can be cleaned up manually
+  - Allow safe downgrades by maintaining backward compatibility. Downgrading from a kubesan enabled version to a purely topolvm enabled version should be a no-break operation for the topolvm part. For the kubesan part, the operator should ensure that the shared VGs can be cleaned up manually in case of failure.
   - Provide rollback mechanisms and detailed instructions to revert to previous versions. Ensure that downgrades do not result in data loss or service interruptions.
-    The operator should ensure that the shared VGs can be cleaned up manually.
+    The operator should ensure that the shared VGs can be cleaned up manually. (more details on rollback routines are in the design details section)
   - Ensure that downgrades do not result in data loss or service interruptions. The operator should ensure that the shared VGs can be cleaned up without data loss on other device classes.
 
 ## Version Skew Strategy
