@@ -140,6 +140,14 @@ storage:
 
 ### Topology Considerations
 
+#### Hypershift / Hosted Control Planes
+
+- N/A
+
+#### Standalone Clusters
+
+- N/A
+
 #### Single-node Deployments or MicroShift
 
 The changes proposed here only affect MicroShift.
@@ -166,6 +174,14 @@ outcomes. Unit tests will be written as necessary.
 
 ## Graduation Criteria
 
+### Dev Preview -> Tech Preview
+
+- N/A
+
+### Tech Preview -> GA
+
+- N/A
+
 ### GA
 
 - Ability to utilize the enhancement end to end
@@ -174,6 +190,11 @@ outcomes. Unit tests will be written as necessary.
 - Sufficient time for feedback
 - Available by default
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+
+### Removing a deprecated feature
+
+- Announce deprecation and support policy of the existing feature
+- Deprecate the feature
 
 ## Upgrade / Downgrade Strategy
 
