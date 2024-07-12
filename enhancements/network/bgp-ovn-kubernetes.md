@@ -41,8 +41,8 @@ external, physical network of the cluster which a user administers will be calle
 ### Importing Routes from the Provider Network
 
 Today in OpenShift there is no API for a user to be able to configure routes into OVN. In order for a user to change how
-cluster traffic is routed egress into the cluster, the user leverages local gateway mode, which forces egress traffic to
-hop through the Linux host networking stack. There a user can configure routes inside the host via NM State. This
+egress traffic is routed, the user leverages local gateway mode. This mode forces traffic to hop through the Linux
+networking stack, and there a user can configure routes inside of the host via NM State to control egress routing. This
 manual configuration would need to be performed and maintained across nodes and VRFs within each node.
 
 Additionally, if a user chooses to not manage routes within the host for local gateway mode, or the user chooses shared
@@ -76,7 +76,11 @@ and thus reducing the overhead and byte size of each packet. This allows for gre
 ### Multi-homing, Link Redundancy, Fast Convergence
 
 BGP can use multi-homing with ECMP routing in order to provide layer 3 failover. When a link goes down, BGP can reroute
-via a different path. This functionality can be coupled with BFD in order to provide fast failover.
+via a different path. This functionality can be coupled with BFD in order to provide fast failover. A typical use case
+is in a spine and leaf topology, where a node has multiple NICs for redundancy that connect to different BGP routers in
+topology. In this case if a link goes down to one BGP peer or the BGP peer fails, BFD can detect the outage on the order
+of milliseconds to hundreds of milliseconds and quickly assist BGP in purging the routes to that failed peer. This then
+causes fast failover and route convergence to the alternate peer.
 
 ### User Stories
 
@@ -87,8 +91,8 @@ via a different path. This functionality can be coupled with BFD in order to pro
    advertise egress routes for the Kubernetes pod traffic in either gateway mode.
  * As a user where maximum throughput is a priority, I want to reduce packet overhead by not having to encapsulate
    traffic with Geneve.
- * As a baremetal or egress IP user, I do not want to have to restrict my nodes to the same layer 2 segment and prefer
-   to use a pure routing implementation to handle advertising virtual IP (VIP) movement across nodes.
+ * As an egress IP user, I do not want to have to restrict my nodes to the same layer 2 segment and prefer
+   to use a pure routing implementation to handle advertising egress IP movement across nodes.
 
 ### Goals
 
@@ -119,15 +123,19 @@ advertises VPN routes via BGP sessions over said VRFs.
 ## Proposal
 
 OVN-Kubernetes will leverage other projects that already exist to enable BGP in Linux. FRR will be used as the BGP
-speaker and already has EVPN support for native Linux constructs like Linux bridges, VRF devices, VXLAN tunnels, etc.
-FRR may need some code contributions to allow it to integrate with OVN and Open vSwitch. For FRR configuration, the
+speaker, as well as provide support for other protocols like BFD. For FRR configuration, the
 MetalLB project has already started an API to be able to configure FRR: 
 [https://github.com/metallb/frr-k8s](https://github.com/metallb/frr-k8s). While some of the configuration support for
 FRR may be directly exposed by FRR-K8S API, it may also be the case that some intermediary CRD provided by
 OVN-Kubernetes is required to integrate OVN-Kubernetes networking concepts into FRR.
 
 Functionally, FRR will handle advertising and importing routes and configuring those inside a Linux VRF. OVN-Kubernetes
-will be responsible for listening on netlink and configuring OVN-Kubernetes logical routers with routes learned by FRR.
+will be responsible for listening on netlink and configuring logical routers in OVN with routes learned
+by FRR. OVN-Kubernetes will manage FRR configuration through the FRR-K8S API in order to advertise routes outside of the
+node onto the provider network.
+
+There should be no changes required in FRR. FRR-K8S may need extended APIs to cover the OVN-Kubernetes use cases
+proposed in this enhancement. OVN will require no changes.
 
 ### Workflow Description
 
@@ -197,6 +205,18 @@ or more nodes as route reflectors (https://issues.redhat.com/browse/CNF-10719). 
 to connect to the route reflectors and do not have to maintain a full mesh with all other nodes in the cluster. Therefore,
 support for iBGP in this enhancement will be restricted to full mesh only.
 
+#### BFD
+
+Bi-directional Forwarding Detection (BFD) is used to detect link outages within milliseconds. This technology can be
+associated with routing in order to signal to a router that a peer has lost connection faster than the routing protocol
+can detect it. This assists with purging routes that are no longer viable, and recalculating optimal paths in the
+Routing Information Base (RIB).
+
+In OVN, BFD is supported today with the Multiple External Gateways (MEG) feature. However, there is no support for
+OVN to communicate with the FRR stack. Therefore for BFD support with BGP, FRR BFD daemon will be used in order to
+detect BFD link failures. It will then signal to FRR that the peer is down, and FRR will remove the routes routes from
+its RIB. Upon noticing this via netlink, OVN-Kubernetes will then remove those routes from OVN as well.
+
 #### FRR-K8S Integration
 
 As previously mentioned frr-k8s will be used in order to deploy and manage FRR configuration. Support will be added
@@ -227,17 +247,50 @@ will happen irrespective of gateway mode, as some features in local gateway mode
 The OpenShift API will be modified in order to allow CNO to deploy FRR and FRR-K8S CRDs:
 
 ```golang
+type AdvancedRoutingConfig struct {
+    // +kubebuilder:validation:Enum="";FRR,Disabled
+    // +optional
+    Provider string`json:"provider,omitempty"`
+}
+
 // NetworkSpec is the top-level network configuration object.
 type NetworkSpec struct {
     // ...
-    // deployFRR specifies whether or not the Free Range Routing (FRR) stack
-    // along with FRR-K8S API should be deployed by the operator.
+    // advancedRouting specifies whether or not advanced routing features
+	// should be deployed on the cluster. Currently the only acceptable value
+	// other than Disabled is FRR, which will deploy the Free Range Routing (FRR) stack
+    // along with FRR-K8S API.
     // FRR is required for enabling for using any OpenShift features that require dynamic
     // routing. This includes BGP support for OVN-Kubernetes and MetalLB.
     // +optional
-    DeployFRR *bool `json:"deployFRR,omitempty"`
+    // +kubebuilder:default={"provider": "Disabled"}
+    // +default={"provider": "Disabled"}
+    AdvancedRouting *AdvancedRoutingConfig `json:"advancedRouting,omitempty"`
+}
+
+// ovnKubernetesConfig contains the configuration parameters for networks
+// using the ovn-kubernetes network project
+type OVNKubernetesConfig struct {
+    // routeAdvertisements determines the capability of advertising cluster
+    // network routes with BGP. This capability is configured through the
+    // ovn-kubernetes RouteAdvertisements CRD. Requires global network
+    // AdvancedRouting to be enabled. Allowed values are "Enabled", "Disabled"
+    // and ommited. When omitted, this means the user has no opinion and the
+    // platform is left to choose reasonable defaults. These defaults are
+    // subject to change over time. The current default is "Disabled".
+    // +openshift:enable:FeatureGate=BGP
+    // +kubebuilder:validation:Enum="";Enabled;Disabled
+    // +optional
+    RouteAdvertisements string `json:"routeAdvertisements,omitempty"`
 }
 ```
+
+In the above API changes, AdvancedRouting is used in order to signal to CNO to deploy FRR and FRR-K8S, while the RouteAdvertisements
+API will enable the route advertisement feature within OVN-Kubernetes. AdvancedRouting may be used without enabling RouteAdvertisements, such
+as for MetalLb functionality. However, when enabling RouteAdvertisements it is required to enable FRR as the AdvancedRouting provider.
+
+Note, at this time there is no support for a nodeSelector to choose which nodes to deploy AdvancedRouting to. In the future this may change,
+but for now when enabling a provider, it will be enabled on all nodes.
 
 ##### Route Advertisements
 
@@ -269,20 +322,24 @@ A networkSelector may select more than one network, including user-defined netwo
 will be checked by OVN-Kubernetes to determine if there is any overlap of the IP subnets. If so, an error status will be
 reported to the CRD and no BGP configuration will be done by OVN-Kubernetes.
 
+Multiple CRs may not select the same network. If this happens OVN-Kubernetes will report an error to the
+RouteAdvertisements CR and will refuse to apply the config.
+
 The CRD will support enabling advertisements for pod subnet and egress IPs. Note, MetalLB still handles advertising
 LoadBalancer IP so there is no conflict of responsibilities here. When the pod network is set to be advertised, there is
 no longer a need to SNAT pod IPs for this network to the node IP. Therefore, when pod network advertisements are enabled,
 the traffic from these pods will no longer be SNAT'ed on egress.
 
-The "targetVRF" key is used to determine which VRF the routes should be advertised in. The default value is "auto", in
-which case OVN-Kubernetes will advertise routes in the VRF that corresponds to the selected network. Alternatively, the
-user may specify the name of the VRF, which would cause routes to be leaked for this network onto that VRF. One use case
-for this would be when a user wants to define a network with a specific IP addressing scheme, and then wants to advertise
-the pod IPs into the provider BGP network without VPN. By specifying the targetVRF as "default", routes will be leaked
-into the default VRF. Note that by using route leaking with a user-defined network, the network is no longer fully
+The "targetVRF" key is used to determine which VRF the routes should be advertised in. The default value is "default", in
+which case routes will be leaked into the default VRF. One use case for this would be when a user wants to define a
+network with a specific IP addressing scheme, and then wants to advertise the pod IPs into the provider BGP network without
+VPN. Note that by using route leaking with a user-defined network, the network is no longer fully
 isolated, as now any other networks also leaked or attached to that VRF may reach this user-defined network. If a user
 attempts to leak routes into a targetVRF for a user-defined network whose IP subnet would collide with another,
-OVN-Kubernetes will report an error to the RouteAdvertisement status.
+OVN-Kubernetes will report an error to the RouteAdvertisement status. Alternatively, a user may specify the value "auto",
+which in which case OVN-Kubernetes will advertise routes in the VRF that corresponds to the selected network. Any other
+values other than "auto" or "default" will result in an error. There is no support at this time for routing leaking into
+any other VRF.
 
 The frrConfigurationSelector is used in order to determine which FRRConfiguration CR to use for building the OVN-Kubernetes
 driven FRRConfiguration. OVN-Kubernetes needs to leverage a pre-existing FRRConfiguration to be able to find required
@@ -295,10 +352,10 @@ Changes will be made to the network CRD(s) in order to specify the method of tra
 field, “transport” will be added with values “geneve” or “none” (default geneve). The transport option in the CRD may be
 used to toggle between using Geneve encapsulation (the default today) or using no encapsulation. With no encapsulation,
 east/west packets are routed directly on the underlay using routing learned via BGP. This is supported for Layer 3
-networks only. Enabling a transport of “none” for Layer 2 networks will have no effect. Enabling a transport of “none”
-without selecting all nodes for RouteAdvertisements will also break east/west traffic between those nodes, as there will
-not be routes propagated into the BGP network for unselected nodes. Users should expect disruption when the transport of
-a network is changed.
+networks only. Enabling a transport of “none” for Layer 2 networks will result in an error status in the network CR.
+Enabling a transport of “none” without selecting all nodes for RouteAdvertisements will also break east/west traffic
+between those nodes, as there will not be routes propagated into the BGP network for unselected nodes. Users should
+expect disruption when the transport of a network is changed.
 
 #### BGP Configuration
 
@@ -680,9 +737,25 @@ N/A
 
 ## Upgrade / Downgrade Strategy
 
-This feature should have no impact on upgrades. BGP configuration may be configured or removed at any time and previous
-routing behavior within the OVN fabric should be restored. For limiting outage on upgrade of FRR-K8S, we may need to use
-BGP features like graceful restart.
+This feature should have no impact on upgrades for OVN-Kubernetes networking. BGP configuration may be configured or removed at any time and previous
+routing behavior within the OVN fabric should be restored. However, there is a significant impact on upgrades for MetalLB.
+MetalLB Operator is a day 2 add on. During upgrade the order is:
+
+1. API upgrades.
+2. Day 2 operators upgrade.
+3. CNO upgrades.
+
+During this upgrade any users of MetalLB will be impacted. As the new version of MetalLB rolls out, it is no longer in charge
+of running FRR or FRR-K8S. This is now CNO's responsibility. Therefore there could be a gap of time between 2 and 3 where MetalLB
+is no longer functioning. Note, today MetalLB upgrade is not without outage. There is no support pre-4.17 for BGP graceful
+restart, which means there is always an outage in the dataplane when MetalLB upgrades. However, in order to minimize the impact
+of the upgrade with the changes mentioned in this enhancement, modifications will be made to MetalLB.
+
+When MetalLB operator upgrades it will look for the current version of CNO. It will wait to rollout its new daemonset for
+MetalLB until CNO has upgraded to its 4.17 version. At this time it will start rolling out new versions of MetalLB that will
+not contain FRR. Meanwhile CNO will be launching FRR on all nodes at once. This minimizes the amount of downtime during the
+4.16->4.17 upgrade. Post 4.17 upgrades will not have this problem and to limit additional outage, users should enable BGP
+graceful restart.
 
 ## Version Skew Strategy
 
