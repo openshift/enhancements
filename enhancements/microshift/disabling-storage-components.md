@@ -71,7 +71,7 @@ does not have a requirement for persistent storage.
 
 ### Workflow Description
 
-**_Installation with CSI Driver and Snapshotting (Default)_**
+**_Installation with LVMS and Snapshotting (Default)_**
 
 1. User installs MicroShift. A MicroShift and LVMD config are not provided.
 2. MicroShift starts and detects no config and falls back to default MicroShift configuration (LVMS and CSI on by default).
@@ -81,7 +81,7 @@ LVMS and CSI installation is skipped and install continues. (This it the current
 installation is skipped and install continues.
 5. If all checks pass, LVMS and CSI are deployed.
 
-**_Installation without CSI Driver and Snapshotting_**
+**_Installation without LVMS and Snapshotting_**
 
 1. User installs MicroShift.
 2. User specifies a MicroShift config sets fields to disable LVMS and CSI Snapshots.
@@ -108,13 +108,14 @@ uninstalling.
 1. User has already deployed a cluster with LVMS and CSI Snapshotting installed.
 2. User has deployed cluster workloads with persistent storage.
 3. User decides that LVMS and snapshotting are no longer needed.
-4. User takes actions to back up, wipe, or otherwise ensure data will not be irretrievable.
-5. User stops workloads with mounted storage volumes.
-6. User deletes VolumeSnapshots and waits for deletion of VolumeSnapshotContent objects to verify. The deletion process
+4. User edits `/etc/microshift/config.yaml`, setting `.storage.driver: none`. 
+5. User takes actions to back up, wipe, or otherwise ensure data will not be irretrievable.
+6. User stops workloads with mounted storage volumes.
+7. User deletes VolumeSnapshots and waits for deletion of VolumeSnapshotContent objects to verify. The deletion process
 cannot happen after the CSI Snapshotter is deleted.
-7. User delete PersistentVolumeClaims and waits for deletion of PersistentVolumes. The deletion process
+8. User delete PersistentVolumeClaims and waits for deletion of PersistentVolumes. The deletion process
 cannot happen after LVMS is deleted.
-8. User deletes the relevant LVMS and Snapshotter cluster API resources:
+9. User deletes the relevant LVMS and Snapshotter cluster API resources:
     ```shell
     $ oc delete -n kube-system deployment.apps/csi-snapshot-controller deployment.apps/csi-snapshot-webhook
     $ oc delete -n openshift-storage daemonset.apps/topolvm-node
@@ -122,20 +123,24 @@ cannot happen after LVMS is deleted.
     $ oc delete -n openshift-storage configmaps/lvmd
     $ oc delete storageclasses.storage.k8s.io/topolvm-provisioner
     ```
-9. Component deletion completes. On restart, MicroShift will not deploy LVMS or the snapshotter.
+10. Component deletion completes. On restart, MicroShift will not deploy LVMS or the snapshotter.
 
 ### API Extensions
 
 - MicroShift config will be extended from the root with a field called `storage`, which will have 2 subfields.
   - `.storage.driver`: **ENUM**, type is preferable to leave room for future supported drivers
     - One of ["None|none", "lvms"]
-    - Default, nil, empty: ["lvms"]
-  - `.storage.csi-snapshot:` **BOOL** 
+    - An empty value or null field defaults to deploying LVMS. This is because the driver is already. 
+  - `.storage.with-csi-components:` **Array**. Empty array or null value defaults to not deploying additional CSI 
+  components.
+    - Excepted values are: ['csi-snapshot-controller']
+    - Even though it's the most common csi components, the csi-driver should not be part of this list because it is
+required, and usually deployed, by the storage provider.
 
 ```yaml
 storage:
   driver: ENUM
-  csi-snapshot: BOOL
+  with-csi-components: ARRAY
 ```
 
 ### Topology Considerations
