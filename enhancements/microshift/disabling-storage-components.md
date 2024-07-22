@@ -46,8 +46,8 @@ Users should be provided a clean UX for this feature and not be forced to learn 
 
 There are variety of reasons a user may not want to deploy LVMS. Firstly, MicroShift is designed to run on hosts with as
 little as 2Gb of memory. Users operating on such small form factors are going to be resource conscious and seek to limit
-unnecessary consumption as much as possible. At idle, the LVMS and CSI components consume roughly 250Mb of memory, about
-8% of a 2Gb system. Providing a user-facing API to disable LVMS or CSI snapshotting is therefore a must for MicroShift.
+unnecessary consumption as much as possible. At idle, the LVMS and CSI components consume roughly 50Mi of memory. 
+Providing a user-facing API to disable LVMS or CSI snapshotting is therefore a must for MicroShift.
 
 ### User Stories
 
