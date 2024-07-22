@@ -109,7 +109,7 @@ uninstalling.
 2. User has deployed cluster workloads with persistent storage.
 3. User decides that LVMS and snapshotting are no longer needed.
 4. User edits `/etc/microshift/config.yaml`, setting `.storage.driver: none`. 
-5. User takes actions to back up, wipe, or otherwise ensure data will not be irretrievable.
+5. User takes steps to back up, and then erase, or otherwise ensure that data cannot be recovered.
 6. User stops workloads with mounted storage volumes.
 7. User deletes VolumeSnapshots and waits for deletion of VolumeSnapshotContent objects to verify. The deletion process
 cannot happen after the CSI Snapshotter is deleted.
@@ -130,7 +130,11 @@ cannot happen after LVMS is deleted.
 - MicroShift config will be extended from the root with a field called `storage`, which will have 2 subfields.
   - `.storage.driver`: **ENUM**, type is preferable to leave room for future supported drivers
     - One of ["None|none", "lvms"]
-    - An empty value or null field defaults to deploying LVMS. This is because the driver is already. 
+    - An empty value or null field defaults to deploying LVMS. This preserves MicroShift's default installation workflow
+      as it currently is, which in turn ensures API compatibility for clusters that are upgraded from 4.16. If the
+      null/empty values defaulted to disabling LVMS, the effect would not be seen on the cluster until an LVMS or CSI
+      component were deleted and the cluster is restarted. This creates a kind of hidden behavior that the user may not
+      be aware of or want.
   - `.storage.with-csi-components:` **Array**. Empty array or null value defaults to not deploying additional CSI 
   components.
     - Excepted values are: ['csi-snapshot-controller']
