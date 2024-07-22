@@ -224,9 +224,8 @@ LVMS does not interact with the MicroShift config API, so it will not be affecte
 
 ## Operational Aspects of API Extensions
 
-With only LVMS deployed, the cluster overhead is increased by roughly 150Mb and 0.1% CPU. Deployment of the
-csi-snapshotter consumes an additional 50Mb and >0.1% CPU. These are taken at system idle and represent the lowest
-likely resource consumption.
+With LVMS and the CSI components deployed, the cluster overhead is increased by roughly 50Mb and 0.1% CPU. Though
+comparatively small by OCP standards, 50Mb of memory is a non-trivial amount on far-edge devices.
 
 ## Support Procedures
 
