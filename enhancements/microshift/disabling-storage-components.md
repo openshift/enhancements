@@ -54,7 +54,7 @@ unnecessary consumption as much as possible. At idle, the LVMS and CSI component
 - A user is operating MicroShift on a small-form factor machine with cluster workloads that require persistent storage
   but do not require volume snapshotting.
 - A user is operating MicroShift on a small-form factor machine, is reducing resource consumption wherever possible, and
-does not have a requirement for persistent storage.
+does not have a requirement for persistent cluster-workload storage.
 
 ### Goals
 
@@ -111,6 +111,9 @@ uninstalling.
 4. User edits `/etc/microshift/config.yaml`, setting `.storage.driver: none`. 
 5. User takes steps to back up, and then erase, or otherwise ensure that data cannot be recovered.
 6. User stops workloads with mounted storage volumes.
+   1. (Optional) If workloads can be run without persistent storage and the user wishes to do so: User 
+      recreates the workload manifest(s) and specifies another provider, an emptyDir or hostpath volume, or no 
+      storage at all.
 7. User deletes VolumeSnapshots and waits for deletion of VolumeSnapshotContent objects to verify. The deletion process
 cannot happen after the CSI Snapshotter is deleted.
 8. User delete PersistentVolumeClaims and waits for deletion of PersistentVolumes. The deletion process
