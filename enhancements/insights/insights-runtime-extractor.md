@@ -9,13 +9,14 @@ approvers:
 api-approvers:
   - TBD (not relevant as this RFE does not impact API?)
 creation-date: 2024-03-04
-last-updated: 2024-03-04
+last-updated: 2024-07-23
 status: implementable
 tracking-link: 
-  - TBD
+  - https://issues.redhat.com/browse/OBSDA-850
 see-also:
   - "https://issues.redhat.com/browse/CCXDEV-11505"
   - "https://issues.redhat.com/browse/CCX-138"
+  - "https://issues.redhat.com/browse/CCXDEV-12963"
 ---
 
 # Gather Workload Runtime Info From Containers
