@@ -140,7 +140,7 @@ cannot happen after LVMS is deleted.
       be aware of or want.
   - `.storage.with-csi-components:` **Array**. Empty array or null value defaults to not deploying additional CSI 
   components.
-    - Excepted values are: ['csi-snapshot-controller']
+    - Expected values are: ['csi-snapshot-controller']
     - Even though it's the most common csi components, the csi-driver should not be part of this list because it is
 required, and usually deployed, by the storage provider.
 
