@@ -14,7 +14,7 @@ approvers:
 api-approvers:
   - "@deads2k"
 creation-date: 2024-03-06
-last-updated: 2024-07-01
+last-updated: 2024-08-16
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/NE-705
 see-also:
@@ -384,6 +384,20 @@ The Ingress Mutable Publishing Scope design sets `status.endpointPublishingStrat
 equal to `spec.endpointPublishingStrategy.loadBalancer.scope`, which may not always reflect the actual scope of the
 load balancer. This proposal for `Subnets` ensures `status.endpointPublishingStrategy` reflects the _actual_ value
 (in our case, the value of `service.beta.kubernetes.io/aws-load-balancer-subnets` on the Service).
+
+#### Changing Subnets with a Load Balancer Type Change
+
+Because subnets are tied to the load balancer type (`spec.endpointPublishingStrategy.loadBalancer.providerParameters.aws.type`),
+changing the load balancer type will cause a `Progressing=True` condition if
+`spec.endpointPublishingStrategy.loadBalancer.providerParameters.aws.classicLoadBalancer.subnets` and
+`spec.endpointPublishingStrategy.loadBalancer.providerParameters.aws.networkLoadBalancer.subnets` specify different
+subnets. In this case, the Ingress Operator will effectuate the new load balancer type update as usual, but the incoming
+subnet change still won't effectuate automatically. The cluster admin will still need to follow the instructions in the
+`Progressing` condition by either:
+
+1. Reverting the incoming change by ensuring the subnets for the new load balancer type match the subnets for the
+   previous load balancer type (if the same subnets for the new load balancer type are desired)
+2. Deleting the service (if different subnets for the new load balancer type are desired).
 
 ### Workflow Description
 
