@@ -4,6 +4,7 @@ authors:
   - "@jmesnil"
 reviewers:
   - "@tremes"
+  - "@iNecas"
 approvers:
   - "@mrunalp"
 api-approvers:
