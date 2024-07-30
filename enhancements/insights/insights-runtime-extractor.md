@@ -456,7 +456,7 @@ Any code running under such a high level of privilege is an attractive target fo
 
 ##### Reducing Attack Surface Area through Modular Process Design
 
-Splitting the inspection logic into multiple plugins/modules not only allows for extensibility but also provides for the ability to partition critical privilege requiring code from code which requires only point in time access to a specific container. Following this approach, privileged actions can be limited to a thin coordinator process, with the bulk of logic executed as a forked downgraded process limited to the same access afforded the inspected container target. Additionally, limiting the lifespan of the downgraded logic’s process to a per-container execution basis mitigates potential attacks where a rogue container corrupts the inspection logic to modify or gain access to a second victim container. 
+Splitting the inspection logic into multiple plugins/modules not only allows for extensibility but also provides for the ability to partition critical privilege requiring code from code which requires only point in time access to a specific container. Following this approach, privileged actions can be limited to a thin coordinator process in the `extractor` component, with the bulk of logic executed as a forked downgraded process limited to the same access afforded the inspected container target. Additionally, limiting the lifespan of the downgraded logic’s process to a per-container execution basis mitigates potential attacks where a rogue container corrupts the inspection logic to modify or gain access to a second victim container. 
 
 ##### Thin Privileged Coordinator Process
 
@@ -466,11 +466,15 @@ As such, three key key rules should be followed in the design and implementation
 
 1. __Dynamic loading of arbitrary executable code should never be supported or allowed by the coordinator process.__ This precludes scripting language runtimes (such as python and JS) as well as bytecode interpreting languages such as Java, .Net, and WASM. It also precludes usage of dlopen(), or libraries with dynamic loading capabilities: the process must be statically compiled. 
 1. __Dependencies in the coordinator should be kept to only the provided language SDK, and Linux system contracts__, even at the expense of some code duplication
-1. __Coordinator code should be limited to what is strictly required__ to execute in a privileged manner. All non-privilege requiring code should be externalized into the logic of other processes.
+1. __Coordinator code should be limited to what is strictly required__ to execute in a privileged manner. All non-privilege requiring code should be externalized into the logic of other processes (in the fingerprints executables or the `exporter` component).
 
 ##### Defensive Input and Memory Guarding
 
-While keeping the bulk of analysis logic out of the coordinator process reduces risk, there is still the potential for a deprivileged insights-runtime-extractor component to influence the coordinator as a corrupted relay through its required communication channel. As an example, a corrupted container could lead a insights-runtime-extractor process to write a carefully crafted payload which triggers a buffer overflow and potentially arbitrary code execution in the coordinator. Therefore the coordinator process should take particular care in the handling of all input, assuming potentially hostile data. Additionally, the coordinator process should take advantage of technologies and techniques that mitigate memory corruption defects. As an example, Rust’s memory access model provides strong guarantees of memory safety, and limits state mutability to the smaller set of intended write code paths. Usage of a defensive language like Rust over a traditional memory unsafe language like C would mitigate risk further by providing a second line of defense, as well as preventing a number of common issues frequently leveraged in exploits. 
+While keeping the bulk of analysis logic out of the coordinator process reduces risk, there is still the potential for a deprivileged insights-runtime-extractor component to influence the coordinator as a corrupted relay through its required communication channel. As an example, a corrupted container could lead a fingeprint to write a carefully crafted payload aiming to trigger a buffer overflow and potentially arbitrary code execution in the coordinator.
+
+To mitigate this risk, the `extractor` component (that runs with high privileges) will limit its output to writing data on a shared volume and will not read back any data from fingerprints execution.
+
+The `exporter` component (that runs with no privileges) handles reading the input from the fingerprints execution from the shared volume.
 
 #### Privacy Risk & Mitigation
 
