@@ -38,14 +38,14 @@ without provided configuration from the user.
 The current [automated backup of etcd](https://docs.openshift.com/container-platform/4.15/backup_and_restore/control_plane_backup_and_restore/backing-up-etcd.html#creating-automated-etcd-backups_backup-etcd) of an OpenShift
 cluster relies on user provided configurations. 
 
-To improve the customers experience, this work proposes taking etcd backup using default config from day one, without additional configuration from the user.
+To improve the customer's experience, this work proposes taking etcd backup using default config from day one, without additional configuration from the user.
 
 ### Goals
 
 * Backups should be taken without configuration after cluster installation from day 1.
-* Backups are saved to a default PersistentVolume, that could be overridden by user.
-* Backups are taken according to a default schedule, that could be overridden by user.
-* Backups are taken according to a default retention policy, that could be overridden by user.
+* Backups are saved to a default location on master's node disk using `hostPath` volume.
+* Backups are taken according to a default schedule.
+* Backups are taken according to a default retention policy.
 
 ### Non-Goals
 
@@ -57,14 +57,12 @@ To improve the customers experience, this work proposes taking etcd backup using
 
 ## Proposal
 
-To enable automated etcd backups of an Openshift cluster, a default etcd backup option to be introduced. 
-Using a `SideCar` container within each etcd pod, backups could be taken with no config from user.
+To enable automated etcd backups of an Openshift cluster, a default backup option is to be taking sing a `SideCar` container within each etcd pod, with no configuration from user.
 
 ### User Stories
 
 * As a cluster administrator I would like OCP cluster backup to be taken without configuration.
 * As a cluster administrator I would like to schedule recurring OCP cluster backups so that I have a recent cluster state to recover from in the event of quorum loss (i.e. losing a majority of control-plane nodes).
-* As a cluster administrator I would like to have alerts upon failure to take OCP cluster backup.
 
 ### API Extensions
 
@@ -83,46 +81,62 @@ TBD
 
 ## Design Details
 
-A `SideCar` container within each etcd pod in Openshift cluster is being added in order to take backups without any provided configuration from user's perspective.
+A `SideCar` container is being added within each etcd pod in Openshift cluster in order to take backups without any provided configuration from user's perspective.
 
-In order to alleviate the overhead on etcd server, the side container takes the backup by simply copying the snapshot file.
-This approach is being used by `microshift`, and it has minimal overhead as it is a simple file system copy operation.
-Since the `SideCar` is being deployed alongside each etcd cluster member, it is possible to keep backups across all master nodes.
+As the `SideCar` is being deployed alongside each etcd cluster member, it is possible to keep backups across all master nodes.
 
-On the other hand, the backups may **not** be up-to-date since the snapshot might be lagging behind the `WAL`. Therefore, it is recommended to use this approach alongside the Automated Backup enabled using the `EtcdBackup` CR.
-Since this work will be enabled with no configuration, it is possible to use define a default values for the `Scheule`, `Retention` independently.
-
-Since cluster backups must be stored on a persistent storage, and each storage solution has pros and cons, several approaches that have been investigated. See [Alternatives](#Alternatives)
+Since this work will be enabled with no configuration, it is possible to use define a default values for the `Schedule`, `Retention` independently.
 
 This work utilizes `hostPath` approach, since the `SideCar` container has access to the etcd pod's file system.
 
+Before deciding upon this approach, several approaches that have been investigated. See [Alternatives](#Alternatives).
+
 ### Open Questions
 
-This enhancement adds on previous work [automated backup of etcd](https://docs.openshift.com/container-platform/4.15/backup_and_restore/control_plane_backup_and_restore/backing-up-etcd.html#creating-automated-etcd-backups_backup-etcd).
-Therefore, it is vital to use the same feature gate for both approaches. The following issues need to be clarified before implementation
-
 * How to distinguish between `NoConfig` backups and configs that are triggered using `EtcdBackup` CR.
+  * The `NoConfig` backups relies on `EtcdBackup` CR with `default` name.
+  * The cluster-etcd-operator reacts to the `default` CR by deploying the backup sidecar containers alongside each etcd member. 
+
+
 * Upon enabling the `AutomatedBackup` feature gate, which approach should be used and according to what criteria.
+  * As the `Noconfig` backups is orthogonal to the [automated backup of etcd](https://docs.openshift.com/container-platform/4.15/backup_and_restore/control_plane_backup_and_restore/backing-up-etcd.html#creating-automated-etcd-backups_backup-etcd), it has been decided to use the same feature gate.
+  
+
 * How should the current backup controller distinguish between both approaches.
-* How to disable the `NoConfig` behaviour, if a user want to. 
-  * re-deploy the etcd deployment without the `backupnoconfig` sidecar upon `automatedbackup` CRD installation.
-  * add annotation that disables the sidecar upon `automatedbackup` CRD installation. 
+  * The `NoConfig` backups relies on `EtcdBackup` CR with `default` name.
+  
+
+* How to disable the `NoConfig` behaviour, if a user want to.
+  * This has not been decided or implemented yet. 
 
 ### Implementation Details/Notes/Constraints
 
-Need to agree on a default schedule and retention policy to be used by the NoConfig independently of any `EtcdBackup` CR.
+The `NoConfig` backups builds atop of the existing [automated backup of etcd](https://docs.openshift.com/container-platform/4.15/backup_and_restore/control_plane_backup_and_restore/backing-up-etcd.html#creating-automated-etcd-backups_backup-etcd).
+
+
+The `PeriodicBackupController` within `cluster-etcd-operator` checks for `EtcdBackup` CR with `default` name. Once found, a sidecar container is deployed within each etcd pod in Openshift cluster.
+The container runs a backup server with the default schedule as defined in default `EtcdBackup` CR. 
+
+The backups are being stored on the local disk of each master node independently, using `hostPath` volume. This replication is required for disaster recovery scenarios where more than one of the master nodes has been lost.
+
+
+A default `EtcdBackup` CR is used for the `NoConfig` backups. A default schedule of daily at midnight has been chosen. See below
+
+```yaml
+apiVersion: config.openshift.io/v1alpha1
+kind: Backup
+metadata:
+  name: default
+spec:
+  etcd:
+    schedule: "0 0 * * *"
+    timeZone: "UTC"
+```
+
+
+
 
 ### Risks and Mitigations
-
-When the backups are configured to be saved to a `local` type `PV`, the backups are all saved to a single master node where the `PV` is provisioned on the local disk.
-
-In the event of the node becoming inaccessible or unscheduled, the recurring backups would not be scheduled. The periodic backup config would have to be recreated or updated with a different `PVC` that allows for a new `PV` to be provisioned on a node that is healthy.
-
-If we were to use `localVolume`, we need to find a solution for balancing the backups across the master nodes, some ideas could be
-
-- create a PV for each master node using `localVolume` and the backup controller from CEO should take care of balancing the backups across the `available` and `healthy` volumes.
-- the controller should keep the most recent backup on a healthy node available for restoration.
-- the controller should skip an unhealthy master node from taking a backup
 
 ## Test Plan
 
@@ -130,7 +144,6 @@ An e2e test will be added to practice the scenario as follows
 
 - Enable AutomatedBackupNoConfig FeatureGate.
 - Verify that a `Etcdbackup` CR has been installed.
-- Verify that a `PV`, `PVC` has been created.
 - Verify that a backup has been taken.
 - Verify that the backups are valid according to the retention policy.
 
