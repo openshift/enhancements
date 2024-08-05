@@ -64,20 +64,19 @@ within an Openshift pod without being in a privileged namespace.
 
 ## Proposal
 
-There are two pieces to this proposal:
+There are three pieces to this proposal:
 - Extend SCC to be aware of the `hostUsers` field:
     - Add a new field `UserNamespaceLevel` to SCC, which will be `AllowHostLevel` by default
     - Add a new SCC to the default list: `restricted-v3`
-        - This SCC will be identical to `restricted-v2`, but have `UserNamespaceLevel` set to `RequirePodNamespace`
-    - Add a new SCC to the default list: `nonroot-v3`
-        - This SCC will be identical to `nonroot-v2`, but have `UserNamespaceLevel` set to `RequirePodNamespace`
+        - This SCC will be identical to `restricted-v2`, but have `UserNamespaceLevel` set to `RequirePodLevel`
     - Add a new SCC to the default list: nested-container. It will have:
         - SELinux context set to `MustRunAs.Type: container_engine_t`
         - `RunAsUserStrategy: RunAsAny`
-        - `UserNamespaceLevel`: `RequirePodNamespace`
+        - `UserNamespaceLevel`: `RequirePodLevel`
         - And otherwise mirror the `restricted-v2` profile
 - Add the features `UserNamespacesSupport`, `UserNamespacesPodSecurityStandards` and `ProcMountType` to the list that qualify a cluster as `TechPreviewNoUpgrade`
     - While `UserNamespacesSupport` is beta in upstream Kubernetes 1.30, it is off by default.
+- For GA of this feature, add a feature in the openshift-apiserver that denies kubelets from getting certs if they are too old.
 
 ### Workflow Description
 
@@ -90,7 +89,7 @@ There are two pieces to this proposal:
 
 ### API Extensions
 
-- Add `UserNamespaceLevel` to SCC. This relies on approval from the apiserver team.
+- Add `UserNamespaceLevel` to SCC. This relies on approval from the auth team.
 
 ### Topology Considerations
 
@@ -245,17 +244,6 @@ the same as the one inside the container.
 Note: upstream Kubernetes deemed `runAsUser` to be a safe field to use for pods with `hostUsers: false`. However, the philosophy
 of SCC utilizes defense-in-depth. `restricted-v3` will be the most restrictive policy.
 
-##### nonroot-v3
-
-This SCC profile will be similar to `nonroot-v2`, except it will set `UserNamespaceLevel` to `RequirePodLevel`, thus forcing pods to be in a
-user namespace, and set the fields `runAsUser`/`runAsGroup`/`fsGroup` to `runAsAny` (in this way, it's similar to `anyuid` SCC, but without `allowPrivilegeEscalation` set to `true`).
-
-Note: a user can actually request `runAsUser: 0` in this profile, despite its name being `nonroot`. This is because root inside
-the container is not root on the host, and because `anyuid` SCC allows privilege escalation, which we deemed out of scope for this SCC.
-
-From a pod ability perspective, the goal of `nonroot-v3` is to give a better security profile as `restricted-v2`, but with more possible use cases. On the host, the container user will be
-mapped to a high UID, but inside the container it can have any UID.
-
 ##### nested-container
 
 The intention of this SCC is to allow a user to run `podman` or other container engine inside of an Openshift pod.
@@ -311,6 +299,33 @@ to be writable to configure sysctls)
 The goal is to graduate this feature in 4.18, meaning `UserNamespacesPodSecurityStandards` and `ProcMountType` will be enabled by default, and will not mark
 a cluster as TechPreviewNoUpgrade.
 
+#### MinimalKubeletVersion in the apiserver
+
+An additional piece is needed for ensuring every node that is in a cluster with `UserNamespacesSupport` enabled actually runs those pods with user namespaces.
+Unfortunately, we cannot rely on homogenous feature gates protecting us in this case. For instance, an admin may pause a worker pool while an upgrade happens, but those workers
+can still be scheduled to. The MCO should not be enabling feature gates alpha feature gates for older kubelets, even if the `featuregate` Openshift object enables them [1].
+
+Since there can be a version skew between the kubelet and the kube-apiserver, and the feature gates are not assumed to be homogeneous, then it cannot be assumed that every
+kubelet in the cluster will be new enough to support UserNamespaces.
+
+While this would not be an issue if the featuregates are enabled on kubelet nodes after 4.15, we cannot assume the feature gate will be enabled.
+
+Thus, we need a method for the kube-apiserver to know for certain a node joining the cluster has a Kubelet that will also have the same featuregates set.
+A way to do this that also could set a precedent for Openshift to have the apiserver be more concious about kubelet version would be an openshift-apiserver
+extension that refuses to let a kubelet join a cluster or get leases if it is not new enough.
+
+For such a feature, there could be an extension to the NodeConfig object called `minimumKubeletVersion`. This field would be set on the cluster level. Practically, the
+openshift-apiserver could then query the `Node.Status.NodeSystemInfo.KubeletVersion` and verify it is above the `minimumKubeletVersion`.
+
+It is also possible this feature should be paired with a corresponding kubelet field `minimumKubeletVersion`, where it exits is it is too old. This will prevent the kubelet from
+running before it seeks to get credentials from the kube-apiserver, but also adds additional code overhead and backporting, plus given this feature would be added in z-streams, it's not
+possible to rely on.
+
+For this feature, there should be extensive documentation on what to do if this condition triggers. For instance, there could be situations where that would make a node completely
+unrecoverable, and we should ensure customers can reclaim their nodes and ensure they are new enough.
+
+1: I actually can't find any reference to this, but this is the way it *should* work, and thus we will rely on this.
+
 ### Risks and Mitigations
 
 - Allowing user namespaces does open Openshift users to theoretical kernel vulnerabilities
@@ -327,6 +342,8 @@ a cluster as TechPreviewNoUpgrade.
 ## Test Plan
 
 - e2e tests for a user namespaced pod, especially with different volume types to verify kernel idmapped mount support
+    - Also verify that the pod is actually in a user namespace
+- upgrade tests where some worker pools are paused and the apiserver has the feature enabled, to verify kubelets won't create `hostUsers: false` pods if not confined by a user namespace
 - long-term: e2e tests for running podman in a pod, so we have an established test path for users to know what works and what doesn't.
 
 ## Graduation Criteria
@@ -353,43 +370,40 @@ N/A
 
 ## Upgrade / Downgrade Strategy
 
-- To begin with, this feature will be gated by TechPreviewNoUpgrade, so it will not be able to upgrade
-- The behavior of the apiserver being downgraded is in part dependent on whether the feature gate `UserNamespacesPodSecurityStandards` is still enabled
-    - The `container-in-pod`, `restricted-v3` and `nonroot-v3` SCCs will still persist, but the `UserNamespaceLevel` field will be stripped without the `UserNamespacesPodSecurityStandards` field.
-      This will potentially allow someone who had access to `nonroot-v3` but not `nonroot-v2` to specify the user in the container, or `container-in-pod` generally.
-      This would be a security issue, and thus if the apiserver is downgraded, the new SCCs should be deleted as well.
-    - If `UserNamespacesPodSecurityStandards` is still enabled, then each of these SCCs will work as originally intended, with the exception that the pods will fail to create because the kernel
-      in 4.16/1.29 does not support idmapped mounts.
-- A downgrade of the kubelet down to 1.28 should continue to work
-    - Support for idmapped mounting was added in 1.28, so pods with volumes that have the `hostUsers` field specified will fail.
-    - Since this feature is being added in 4.17, the version skew supported goes down to 4.14, meaning it must stay in TechPreview for 4.17
+This feature will be gated by TechPreviewNoUpgrade for 4.17, so it will not be able to upgrade. However, for GA, some considerations need to be made for Upgrade/Downgrade.
+
+Specifically, both of these relate to how a cluster would be effected by the SCCs being created on the cluster, but the feature gate not being enabled (and thus `UserNamespaceLevel`
+is not being enforced).
+
+- `restricted-v3` SCC will be allowed for all users by default.
+    - Since it is identical to `restricted-v2` with the exception of `UserNamespaceLevel`, `UserNamespaceLevel` being filtered out because an apiserver doesn't recognize it anymore
+      (because the feature is no longer enabled) will allow it to be treated just like `restricted-v2` safely.
+- `nested-container` SCC will not be enabled for users by default.
+    - However, a namespace admin may enable it for a namespace, and then the cluster admin may trigger a downgrade, which would cause the issue spelled out above, but worse.
+    - Since the SCC allows users access to `runAsUser: RunAsAny`, the `nested-container` SCC may be enabled on a namespace that gives higher privileges than anticipated without `UserNamespaceLevel: RequirePodLevel`
+    - Thus, there should be documentation about 4.18 warning admins to check whether any pods are given access to `nested-container` SCC before downgrading.
+        - A script will be provided, to comb through the pods and notify if there are pods that have the labels signifying they're using the `nested-container` SCC.
+        - If there are such pods, these pods should be audited and potentially removed before downgrading.
+
+Downgrade of the kubelet will be handled by the section below.
 
 In the future, this feature will have the TechPreviewNoUpgrade flag removed, at which point all supported Kubelets and apiservers will
-be aware of the feature gate and attempt to create a pod with a user namespace. The only special upgrade/downgrade considerations are
-for the SCC changes, which users will loose access to if the cluster downgrades.
+be aware of the feature gate and attempt to create a pod with a user namespace.
 
 ## Version Skew Strategy
 
 In Kubernetes and Openshift, a version skew of n-3 between the kubelet and apiserver is supported. The key consideration in version skew:
 if the kube-apiserver believes the cluster supports user namespaces, will every supported kubelet create a pod with a user namespace?
 
-There is risk if this does not happen, as we intend on having the apiserver relax validation for a pod that it believes is confined by a user namespace,
-when in reality it is not, thus leading to security vulnerability.
+Unfortunately, as described in the `MinimalKubeletVersion in the apiserver` section, this cannot be relied upon because we cannot ensure the kubelet
+will have the feature gate enabled. An operative part of this feature is relaxing validation done on kube-apiservers for pods with a user namespace,
+but if the apiserver cannot trust the kubelet to fail to create a pod if the feature isn't enabled, it cannot trust the kubelet with relaxed validation.
 
-Support for user namespaces were intitally added in 1.27 without idmapped mount support. However, it used a different feature gate
-`UserNamespacesStatelessPodsSupport`. As such, 4.14 kubelet does not create an pod with a user namespace when `UserNamespacesSupport` feature
-is added. Thus, the skew from 4.17->4.14 is not supported, and the feature must stay in tech preview.
+The `MinimalKubeletVersion` feature is to fix this problem. If all apiservers support this field upon GA, then a cluster admin can set the field and ensure
+their kubelets are new enough to certainly support user namespaces. This frees the apiserver to relax validation and GA these SCC fields.
 
-However, note `UserNamespacesSupport` feature gate isn't the risky feature. Instead, `UserNamespacesPodSecurityStandards` is risky, as there
-the apiserver believes a pod is in a user namespace, but it is not.
-
-As for the future possibility of GA'ing as early as 4.18, the similar conversation happens. In this case, 4.15 has support for the `UserNamespacesSupport`
-feature gate, and kubelet will create a user namespace for the pod. Further, support was added in CRI-O to deny a pod that was created with ID mapped mounts,
-but the kernel doesn't support IDmapped mounts in 4.15/1.28. The kernel won't support them until 4.16 (when RHCOS is released based on RHEL 9.4).
-
-Thus, we are safe to GA as early as 4.18, as CRI-O will fail to create a container in 4.15 that doesn't have idmapped mount support.
-Even pods that have no volumes do need to have mounts done, and since the RHEL 9.2 kernel doesn't support the idmapped mount options,
-all user namespaced pods will fail on 4.15 and below.
+This feature is not required for TechPreview, but is required for GA if we do not want to wait until 1.33/4.20 to GA this feature (the point where the oldest
+supported kubelet has this feature in beta).
 
 ## Operational Aspects of API Extensions
 
@@ -432,6 +446,8 @@ There should be no issues to pods without `hostUsers: false`.
     - It was determined this was not needed, as the earliest this feature could go GA, all supported kubelets support the feature gate.
       Even though it's not supported by the nodes themselves, there will not be any vulnerabilities opened from an apiserver thinking a pod has user
       namespaces when corresponding kubelet/CRI-O doesn't actually create the pod with them.
+- Add `nonroot-v3` SCC which would force `hostUsers: false` and allow `RunAsAny` for `runAsUser`
+    - This was omitted to simplify kubelet/apiserver skew situations and may be readdressed in the future.
 
 ## Infrastructure Needed [optional]
 
