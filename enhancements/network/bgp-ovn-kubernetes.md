@@ -214,8 +214,9 @@ Routing Information Base (RIB).
 
 In OVN, BFD is supported today with the Multiple External Gateways (MEG) feature. However, there is no support for
 OVN to communicate with the FRR stack. Therefore for BFD support with BGP, FRR BFD daemon will be used in order to
-detect BFD link failures. It will then signal to FRR that the peer is down, and FRR will remove the routes routes from
-its RIB. Upon noticing this via netlink, OVN-Kubernetes will then remove those routes from OVN as well.
+detect BFD link failures. It will then signal to FRR that the peer is down, and FRR will remove the routes from
+its RIB. Upon noticing this via netlink, OVN-Kubernetes will then remove those routes from OVN as well. Additionally,
+the external peer will remove its routes that were advertised by this OVNK/FRR-K8s node.
 
 #### FRR-K8S Integration
 
@@ -247,41 +248,73 @@ will happen irrespective of gateway mode, as some features in local gateway mode
 The OpenShift API will be modified in order to allow CNO to deploy FRR and FRR-K8S CRDs:
 
 ```golang
-type AdvancedRoutingConfig struct {
-    // +kubebuilder:validation:Enum="";FRR,Disabled
-    // +optional
-    Provider string`json:"provider,omitempty"`
+// RoutingCapabilitiesProvider is a component providing routing capabilities.
+// +kubebuilder:validation:Enum=FRR
+type RoutingCapabilitiesProvider string
+
+const (
+    // RoutingCapabilitiesProviderFRR determines FRR is providing advanced
+    // routing capabilities.
+    RoutingCapabilitiesProviderFRR RoutingCapabilitiesProvider = "FRR"
+)
+
+// AdditionalRoutingCapabilities describes components and relevant configuration providing
+// advanced routing capabilities.
+type AdditionalRoutingCapabilities struct {
+    // providers is a set of enabled components that provide additional routing
+    // capabilities. Entries on this list must be unique. The  only valid value
+    // is currrently "FRR" which provides FRR routing capabilities through the
+    // deployment of FRR.
+    // +listType=atomic
+    // +kubebuilder:validation:Required
+    // +kubebuilder:validation:MinItems=1
+    // +kubebuilder:validation:MaxItems=1
+    // +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))"
+    Providers []RoutingCapabilitiesProvider `json:"providers"`
 }
 
 // NetworkSpec is the top-level network configuration object.
 type NetworkSpec struct {
     // ...
-    // advancedRouting specifies whether or not advanced routing features
-	// should be deployed on the cluster. Currently the only acceptable value
-	// other than Disabled is FRR, which will deploy the Free Range Routing (FRR) stack
-    // along with FRR-K8S API.
-    // FRR is required for enabling for using any OpenShift features that require dynamic
-    // routing. This includes BGP support for OVN-Kubernetes and MetalLB.
+    // additionalRoutingCapabilities describes components and relevant
+    // configuration providing additional routing capabilities. When set, it
+    // enables such components and the usage of the routing capabilities they
+    // provide for the machine network. Upstream operators, like MetalLB
+    // operator, requiring these capabilities may rely on, or automatically set
+    // this attribute. Network plugins may leverage advanced routing
+    // capabilities acquired through the enablement of these components but may
+    // require specific configuration on their side to do so; refer to their
+    // respective documentation and configuration options.
+    // +openshift:enable:FeatureGate=AdditionalRoutingCapabilities
     // +optional
-    // +kubebuilder:default={"provider": "Disabled"}
-    // +default={"provider": "Disabled"}
-    AdvancedRouting *AdvancedRoutingConfig `json:"advancedRouting,omitempty"`
+    AdditionalRoutingCapabilities *AdditionalRoutingCapabilities `json:"additionalRoutingCapabilities,omitempty"`
 }
+
+// +kubebuilder:validation:Enum:="";"Enabled";"Disabled"
+type RouteAdvertisementsEnablement string
+
+var (
+    // RouteAdvertisementsEnabled enables route advertisements for ovn-kubernetes
+    RouteAdvertisementsEnabled RouteAdvertisementsEnablement = "Enabled"
+    // RouteAdvertisementsDisabled disables route advertisements for ovn-kubernetes
+    RouteAdvertisementsDisabled RouteAdvertisementsEnablement = "Disabled"
+)
 
 // ovnKubernetesConfig contains the configuration parameters for networks
 // using the ovn-kubernetes network project
 type OVNKubernetesConfig struct {
-    // routeAdvertisements determines the capability of advertising cluster
-    // network routes with BGP. This capability is configured through the
-    // ovn-kubernetes RouteAdvertisements CRD. Requires global network
-    // AdvancedRouting to be enabled. Allowed values are "Enabled", "Disabled"
-    // and ommited. When omitted, this means the user has no opinion and the
-    // platform is left to choose reasonable defaults. These defaults are
-    // subject to change over time. The current default is "Disabled".
-    // +openshift:enable:FeatureGate=BGP
-    // +kubebuilder:validation:Enum="";Enabled;Disabled
+    // routeAdvertisements determines if the functionality to advertise cluster
+    // network routes through a dynamic routing protocol, such as BGP, is
+    // enabled or not. This functionality is configured through the
+    // ovn-kubernetes RouteAdvertisements CRD. Requires the 'FRR' routing
+    // capability provider to be enabled as an additional routing capability.
+    // Allowed values are "Enabled", "Disabled" and ommited. When omitted, this
+    // means the user has no opinion and the platform is left to choose
+    // reasonable defaults. These defaults are subject to change over time. The
+    // current default is "Disabled".
+    // +openshift:enable:FeatureGate=RouteAdvertisements
     // +optional
-    RouteAdvertisements string `json:"routeAdvertisements,omitempty"`
+    RouteAdvertisements RouteAdvertisementsEnablement `json:"routeAdvertisements,omitempty"`
 }
 ```
 
