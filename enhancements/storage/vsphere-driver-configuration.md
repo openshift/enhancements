@@ -149,11 +149,11 @@ TBD - depends on chosen solution.
 
 ### Graduation Criteria
 
-| OpenShift | Maturity     |
-|-----------|--------------|
-| 4.16      | Tech Preview |
-| 4.17      | GA           |
+| OpenShift | Maturity |
+|-----------|----------|
+| 4.16      | GA       |
 
+Note: Feature did not go through the usual graduation process, there was no Tech Preview phase.
 
 #### Dev Preview -> Tech Preview
 
