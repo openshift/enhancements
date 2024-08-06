@@ -36,7 +36,7 @@ tools, so that I can utilize the increased security of my software supply chain.
 
 ### Goals
 
-- ClusterImagePolicy is defined as cluster scoped CRD. ImagePolicy is defined as namespaced CRD.  
+- ClusterImagePolicy is defined as cluster scoped CRD. ImagePolicy is defined as namespaced CRD.
 - The user can create an ImagePolicy instance specifying the images/repositories to be verified and their policy. The MCO will write the configuration for signature verification. Once this is done, CRI-O can verify the images/repositories.
 - MCO container runtime config controller watches ImagePolicy instance in different kubernetes namespaces and merges the instances for each namespace into a single [containers-policy.json](https://github.com/containers/image/blob/main/docs/containers-policy.json.5.md) in a predefined `/path/to/policies/<NAMESPACE>.json`.
 - MCO container runtime config controller watches ClusterImagePolicy instance and merges the instances into a single [/etc/containers/policy.json](https://github.com/containers/image/blob/main/docs/containers-policy.json.5.md).
@@ -45,7 +45,7 @@ tools, so that I can utilize the increased security of my software supply chain.
 ### Non-Goals
 
 - Configuring policies for the images in the OCP payload is not within the scope of this enhancement.
-- Providing a tool to mirror the signatures is out of the scope of this enhancement. In order to verify the signature, the disconnected users need to mirror signatures together with the application images. 
+- Providing a tool to mirror the signatures is out of the scope of this enhancement. In order to verify the signature, the disconnected users need to mirror signatures together with the application images.
 - Grant the application administrator the ability to weaken cluster-scoped policies, to avoid expanding the set of administrators capable of increasing cluster exposure to vulnerable images.
 - Grant the application administrator the ability to tighten cluster-scoped policies. This could be useful in the future, but we are deferring it to limit the amount of work needed for an initial implementation.
 
@@ -56,21 +56,21 @@ tools, so that I can utilize the increased security of my software supply chain.
 **cluster administrator** Signature Verification Configuration Workflow:
 1. The cluster administrator requests the addition of signature verification configurations at the cluster scope.
 2. The cluster administrator writes the verification certification to the ClusterImagePolicy YAML file and creates a ClusterImagePolicy CR using `oc create -f imagepolicy.yaml`.
-3. The cluster administrator can retrieve the merged cluster-scoped policies by checking `/etc/containers/policy.json` within the `99-<pool>-generated-registries` machine-config. 
-4. The cluster administrator has the option to delete the signature verification configuration by removing its ClusterImagePolicy instances. 
+3. The cluster administrator can retrieve the merged cluster-scoped policies by checking `/etc/containers/policy.json` within the `99-<pool>-generated-registries` machine-config.
+4. The cluster administrator has the option to delete the signature verification configuration by removing its ClusterImagePolicy instances.
 
 **application administrator** Signature Verification Configuration Workflow:
 1. The application administrator requests the addition of signature verification configurations at the namespace scope.
 2. The application administrator writes the verification certification to the ImagePolicy YAML file and creates a ImagePolicy CR using `oc create -f imagepolicy.yaml`.
-Please note that the application administrator cannot override cluster-scoped policies, as they are treated with higher priority. The [Implementation Details](#Update-container-runtime-config-controller-to-watch-ClusterImagePolicy-and-ImagePolicy) explains the conflict resolution rules. 
-3. The application administrator can retrieve the cluster override and merged policies by checking `<NAMESPACE>.json` within the `99-<pool>-generated-registries` machine-config. 
+Please note that the application administrator cannot override cluster-scoped policies, as they are treated with higher priority. The [Implementation Details](#Update-container-runtime-config-controller-to-watch-ClusterImagePolicy-and-ImagePolicy) explains the conflict resolution rules.
+3. The application administrator can retrieve the cluster override and merged policies by checking `<NAMESPACE>.json` within the `99-<pool>-generated-registries` machine-config.
 4. The application administrator has the option to remove the signature verification configuration by deleting its ImagePolicy instances.
 
 ### API Extensions
 
 #### Type definitions
 
-Type definitions of ImagePolicy. ClusterImagePolicy is expected to have a similar structure to ImagePolicy. 
+Type definitions of ImagePolicy. ClusterImagePolicy is expected to have a similar structure to ImagePolicy.
 
 ```go
 // +genclient
@@ -159,6 +159,7 @@ type PolicyType string
 const (
 	PublicKeyRootOfTrust         PolicyType = "PublicKey"
 	FulcioCAWithRekorRootOfTrust PolicyType = "FulcioCAWithRekor"
+	BYOPKIRootOfTrust            PolicyType = "BYOPKI"
 )
 
 // PublicKey defines the root of trust based on a sigstore public key.
@@ -190,6 +191,54 @@ type FulcioCAWithRekor struct {
 	// fulcioSubject specifies OIDC issuer and the email of the Fulcio authentication configuration.
 	// +kubebuilder:validation:Required
 	FulcioSubject PolicyFulcioSubject `json:"fulcioSubject,omitempty"`
+}
+
+// BYOPKI defines the root of trust based on Root CA(s) and corresponding intermediate certificates.
+type BYOPKI struct {
+	// CertificateChainData contains one or several intermediate certificates followed by the root CA certificate
+	// in the PEM format.
+	// which may contain one or several intermediate certificates followed by the root CA certificate.
+	// certificateChainData cannot be set if caRootsData or caIntermediatesData are set.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == '' || (self.CertificateAuthorityRootsData == '' && self.CertificateAuthorityIntermediatesData == '')", message="certificateChainData cannot be set if caRootsData or caIntermediatesData are set"
+	CertificateChainData []byte `json:"certificateChainData,omitempty"`
+
+	// CertificateAuthorityRootsData contains a certificate bundle PEM file containing one or more CA roots
+	// in the PEM format.
+	// caRootsData cannot be set if certificateChainData is set.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == '' || self.CertificateChainData == ''", message="CertificateAuthorityRoots cannot be set if CertificateChain is set"
+	CertificateAuthorityRootsData []byte `json:"caRootsData,omitempty"`
+
+	// CertificateAuthorityIntermediatesData contains a certificate bundle PEM file containing one or more intermediate certificates
+	// in the PEM format.
+	// caIntermediatesData cannot be set if certificateChainData is set.
+	// caIntermediatesData requires CertificateAuthorityRoots to be set.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == '' || self.CertificateChainData == ''", message="caIntermediatesData cannot be set if certificateChainData is set"
+	// +kubebuilder:validation:XValidation:rule="self == '' || self.CertificateAuthorityRootsData != ''", message="caIntermediatesData requires caRootsData to be set"
+	CertificateAuthorityIntermediatesData []byte `json:"caIntermediatesData,omitempty"`
+
+	// CertificateIdentity must be set if any of the other fields are set.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="(self.CertificateChainData == '' && self.CertificateAuthorityRootsData == '' && self.caIntermediatesData == '') || self != ''", message="certificateIdentity must be set if any of certificateChainData, caRootsData, or caIntermediatesData are set"
+	// +kubebuilder:validation:XValidation:rule="self.Email != '' || self.Hostname != '' || self.IPAddress != ''", message="At least one of Email, Hostname, or IPAddress must be set in certificateIdentity"
+	CertificateIdentity CertificateIdentityEntity `json:"certificateIdentity,omitempty"`
+}
+
+// CertificateIdentityEntity defines the identity type associated with the certificate identity
+type CertificateIdentityEntity struct {
+	// Email address associated with the certificate identity.
+	// +optional
+	Email string `json:"email,omitempty"`
+
+	// Hostname associated with the certificate identity.
+	// +optional
+	Hostname string `json:"hostname,omitempty"`
+
+	// IP address associated with the certificate identity.
+	// +optional
+	IPAddress string `json:"ipaddress,omitempty"`
 }
 
 // PolicyFulcioSubject defines the OIDC issuer and the email of the Fulcio authentication configuration.
@@ -284,7 +333,7 @@ type ImagePolicyStatus struct {
 
 Enhance the MCO container runtime config controller to manage ClusterImagePolicy and ImagePolicy CRs, and update the signature verification configurations:
 - Retrieves all the ClusterImagePolicy and ImagePolicy instances on the cluster.
-- Pre-validation: 
+- Pre-validation:
   - Ensure that there are no scopes under the OCP image payload. If any are found, add an info-level log message to the machine config controller about the error encountered while adding an OCP image payload. Update the `status` of the CR to indicate that the policy will not be applied.
   - Check for conflicts between cluster scope and namespace scope policies. If the namespaced ImagePolicy scope is equal to or nests inside an existing cluster-scoped ClusterImagePolicy CR, do not deploy the namespaced policy.
   Update the `status` of both CRs and the machine config controller logs to indicate that the ClusterImagePolicy will be applied, while the non-global ImagePolicy will not be applied.
@@ -303,13 +352,13 @@ Enhance the MCO container runtime config controller to manage ClusterImagePolicy
     default-docker:
       use-sigstore-attachments: true
     ```
-- Merge rule for ClusterImagePolicy and ImagePolicy CRs: 
+- Merge rule for ClusterImagePolicy and ImagePolicy CRs:
   - when the syncHandler processing an image scope within a ClusterImagePolicy CR
     - the scope exists in an existing ClusterImagePolicy CR:
     append the policy to existing cluster policy; the policy will be written to `/etc/containers/policy.json` and each `\<NAMESPACE\>.json` if that namespace has an ImagePolicy CR that can be successfully rolled out.
     - if the scope is either equal to or a broader scope than one already present in an ImagePolicy CR: do not roll out the non-global policy in `<NAMESPACE>.json`. The policy for the cluster will be written to `/etc/containers/policy.json` and `<NAMESPACE>.json`;
     update the `status` of both CRs and machine config controller logs to indicate that the policy for cluster has been applied, while the non-global namespace policy is ignored.
-    - if none of the above cases apply: the policy will be written to `/etc/containers/policy.json` and each `\<NAMESPACE\>.json` if that namespace has an ImagePolicy CR that can be successfully rolled out.   
+    - if none of the above cases apply: the policy will be written to `/etc/containers/policy.json` and each `\<NAMESPACE\>.json` if that namespace has an ImagePolicy CR that can be successfully rolled out.
   - when the syncHandler processing an image scope within an ImagePolicy CR
     - if the policy scope is equal to or nests inside an existing ClusterImagePolicy CR: do not roll out the non-global policy in `\<NAMESPACE\>.json`. the policy for the cluster will be written to `/etc/containers/policy.json` and `\<NAMESPACE\>.json`;
     update the `status` of both CRs and machine config controller logs to indicate that the policy for the cluster has been applied, while the non-global namespace policy is ignored.
@@ -334,7 +383,7 @@ Enhance the MCO container runtime config controller to manage ClusterImagePolicy
 Example of ClusterImagePolicy and ImagePolicy.
 
 ```yaml
-kind: ClusterImagePolicy 
+kind: ClusterImagePolicy
 metadata:
   name: mypolicy-0
 spec:
@@ -357,7 +406,7 @@ spec:
 ```
 
 ```yaml
-kind: ClusterImagePolicy 
+kind: ClusterImagePolicy
 metadata:
   name: mypolicy-1
 spec:
@@ -384,7 +433,7 @@ metadata:
   namespace: testnamespace
 spec:
   scopes:
-  - test0.com	# for test0.com, cluster policy will overwrite this policy 
+  - test0.com	# for test0.com, cluster policy will overwrite this policy
   - test2.com
   policy:
     rootoftrust:
@@ -392,6 +441,60 @@ spec:
       publicKey:
         keydata: dGVzdC1rZXktZGF0YQ==
 ```
+```yaml
+kind: ImagePolicy  # BYOPKI with certificate chain
+metadata:
+  name: byopkipolicy
+  namespace: testnamespace
+spec:
+  scopes:
+  - test0.com	# for test0.com, cluster policy will overwrite this policy
+  - test2.com
+  policy:
+    rootoftrust:
+      policyType: BYOPKI
+      byopki:
+        certificateChain: dGVzdC1rZXktZGF0YQ==
+        certificateIdentity:
+           email: test-user@test-domain.com  # Strictly match against the type (email) and corresponding value, no wildcards support.
+```
+```yaml
+kind: ImagePolicy
+metadata:
+  name: byopkipolicy # BYOPKI with Root CA
+  namespace: testnamespace
+spec:
+  scopes:
+  - test0.com	# for test0.com, cluster policy will overwrite this policy
+  - test2.com
+  policy:
+    rootoftrust:
+      policyType: BYOPKI
+      byopki:
+        caRootsData: dGVzdC1rZXktZGF0YQ==
+        certificateIdentity:
+           email: test-user@test-domain.com
+```
+```yaml
+kind: ImagePolicy
+metadata:
+  name: byopkipolicy   # BYOPKI with Root CA and Intermediate CA
+  namespace: testnamespace
+spec:
+  scopes:
+  - test0.com	# for test0.com, cluster policy will overwrite this policy
+  - test2.com
+  policy:
+    rootoftrust:
+      policyType: BYOPKI
+      byopki:
+        caRootsData: dGVzdC1rZXktZGF0YQ==
+        caIntermediatesData: dGVzdC1rZXktZGF0YL==
+        certificateIdentity:
+           email: test-user@test-domain.com
+```
+
+
 
 Feedback from the container runtime config controller:
 
@@ -462,7 +565,7 @@ Apply the above CRs, if no Image CRs changes the policy.json. The below `/etc/co
 }
 ```
 
-The merged cluster override policy and namespaced policy in the below `/path/to/policies/testnamespace.json`  will be rolled out. 
+The merged cluster override policy and namespaced policy in the below `/path/to/policies/testnamespace.json`  will be rolled out.
 
 ```json
 {
@@ -550,8 +653,8 @@ Mitigation: The [Implementation Details](#Update-container-runtime-config-contro
 
 MCO container runtime config controller can add unit tests and e2e tests.
 - unit test: verify the policies from ClusterImagePolicy and ImagePolicy instances merged correctly and the controller writes correct format policy.json
-- e2e test: 
-  - verify the MCO writes configuration to the correct location. 
+- e2e test:
+  - verify the MCO writes configuration to the correct location.
   - test demonstrating that an unsigned image in violation of the policy is rejected
 
 
@@ -593,8 +696,8 @@ Upgrade expectations:
 - In order to use ClusterImagePolicy and ImagePolicy, an existing cluster will have to make an upgrade to the version that the `ClusterImagePolicy` and `ImagePolicy` CRDs are available.
 - If the existing cluster manages `/etc/containers/policy.json` via the MachineConfig, the configuration will continue to work if no new `ClusterImagePolicy` or `ImagePolicy` resources created during the upgrade. If `ImagePolicy` resources created and resulting `/path/to/policies/<NAMESPACE>.json` exists, CRI-O will use the config from `/path/to/policies/<NAMESPACE>.json`.
 
-Downgrade expectations: 
-- Not applicable. 
+Downgrade expectations:
+- Not applicable.
   If `N` does not support ClusterImagePolicy and ImagePolicy CRD, `N+1`supports ClusterImagePolicy and ImagePolicy. It is not expected that the CRDs related to the failure `N->N+1`. New resources should not be created during `N->N+1`.
 
 
@@ -611,7 +714,7 @@ The implementation of `ClusterImagePolicy` and `ImagePolicy` is synchronized wit
 - MCO rolling out configuration file failure reported by MCO
 - If the signature validation fails, then CRI-O will report that in the same way as for any other pull failure. Further enhancements to the kubelet, CRI and CRI-O error handling can be achieved in future Kubernetes releases.
 
-The above errors should not impact the overall cluster health since configuring policies for the images in the OCP payload is prohibited. 
+The above errors should not impact the overall cluster health since configuring policies for the images in the OCP payload is prohibited.
 The OCP Node team is likely to be called upon in case of escalation with one of the failure modes.
 
 #### Support Procedures
