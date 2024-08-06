@@ -67,7 +67,7 @@ environment variable to those operands (if the operands need cloud access).
 
 ### Workflow Description
 
-* HostedCluster control plane operator will set AZURE_MSI_AUTHENTICATION on deployment of image registry, ingress, cloud network config, and storage operators
+* HostedCluster control plane operator will set AZURE_MSI_AUTHENTICATION on deployment of image registry, ingress, cluster network operator (which will pass the value to cloud network config), and storage operators
 * When each operator is configuring the Azure authentication type, if the AZURE_MSI_AUTHENTICATION is set, the operator will ignore any other Azure cloud configuration and use MSI
 
 ### API Extensions
