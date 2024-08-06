@@ -115,14 +115,18 @@ these alerts if they are not actionable.
   * Think of `summary` as the first line of a commit message, or an email
     subject line.  It should be brief but informative.  The `description` is the
     longer, more detailed explanation of the alert.
-* Alerts SHOULD include a `namespace` label indicating the source of the alert.
+* Alerts SHOULD include a `namespace` label indicating the "source" of the alert.
   * Many alerts will include this by virtue of the fact that their PromQL
-    expressions result in a namespace label.  Others may require a static
-    namespace label — see for example, the [KubeCPUOvercommit][1] alert.
-* All critical alerts MUST include a `runbook_url` annotation.
+    expressions result in a namespace label.
+  * Alerts reporting issues about components which are cluster-scoped or
+    span multiple namespaces may require a static namespace label — see for
+    example, the [Watchdog][1] alert. In this case, the namespace usually
+    maps to the namespace of the `PrometheusRule` object.
+* All critical alerts MUST include a `runbook_url` annotation. Warning alerts MAY include a `runbook_url` annotation.
   * Runbook style documentation for resolving critical alerts is required.
-    These runbooks are reviewed by OpenShift SREs and currently live in the
-    [openshift/runbooks][2] repository.
+    These runbooks are reviewed jointly by the OpenShift developers and the
+    managed OpenShift SREs and currently live in the [openshift/runbooks][2]
+    repository.
 
 ### Critical Alerts
 
