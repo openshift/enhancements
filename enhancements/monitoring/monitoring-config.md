@@ -32,23 +32,23 @@ status: provisional
 
 ## Summary
 
-* Currently, the monitoring stack is configured using a configmaps. In OpenShift though the best practice is to configure operators using custom resources.
+* Currently, the OCP monitoring stacks are configured using ConfigMaps (1 for platform monitoring and 1 for user-defined monitoring). In OpenShift though the best practice is to configure operators using custom resources.
 
 
 ## Motivation
 
-* The specification is well known and to a degree self-documenting
-* The APIServer will validate user resources based on our specifications, so users get immediate feedback on errors instead of having to check if their config was applied and check logs.
-* Many users expect to interact with operators through a CRD
-* Compatible with GitOps workflows. 
+* The specification is well known and to a degree self-documenting.
+* The Kubernetes API Server validate custom resources based on their API specification, so users get immediate feedback on errors instead of checking the ClusterOperator object and the cluster monitoring operator's logs. Custom expression language (CEL) even allows to write complex validation logic, including cross-field tests.
+* Many users expect to interact with operators through a CRD.
+* Custom resources play better with GitOps workflows. 
 * We can add [cross]validation rules to CRD fields to avoid misconfigurations
 * End users get a much faster feedback loop. No more applying the config and scanning logs if things don't look right. The API server will give immediate feedback
-* Organizational users (such as ACM) can manage a single resource and observe its status
+* CRDs supports multiple actors managing the same resource which is a key property for the Observability service of Advanced Cluster Management.
 
 ### Goals
 
-- Replace configmaps with CRD
-- Smooth transition for users
+- Replace the existing ConfigMaps with CRDs.
+- Automated and friction-less upgrade for users.
 
 ## Proposal
 
