@@ -28,9 +28,9 @@ This document proposes a mechanism to gather runtime info from containers to get
 
 The Insights operator periodically gathers cluster data and sends it to Red Hat. The data about workloads consists of the image ID and the entrypoint. 
 
-In many cases, the image ID and its layers do not provide any meaningful information about the actual application or application language/platform/framework...  
+In many cases, the image ID and its layers do not provide any meaningful information about the actual application or application language/platform/framework.
 To get this level of information, we can gather additional data on the running containers.   
-By inspecting running containers, the Insights Operator can enrich the gathered data and capture the kind of workload that is running on OpenShift. This information can be used by Red Hat to target  OpenShift investments at the most popular workloads, inform decisions around long-life offerings for application platforms and frameworks, identify growth opportunities in emerging workloads, and measure the success of our strategic initiatives in AI and Middleware.
+By inspecting running containers, the Insights Operator can enrich the gathered data and capture the kind of workload that is running on OpenShift. This information can be used by Red Hat to target OpenShift investments at the most popular workloads, inform decisions around long-life offerings for application platforms and frameworks, identify growth opportunities in emerging workloads, and measure the success of our strategic initiatives in AI and Middleware.
 
 For example, inspecting the container allows to gather additional data such as:
 
@@ -66,7 +66,7 @@ to help shape the future of our product offerings.
 
 * As a RHEL product manager, I can follow trends in the use of other Linux containers to inform my product roadmap.
 
-* As an OpenShift product marketing manager, I want to be able to produce content that shows users use OpenShift as a  platform for all types of workloads.
+* As an OpenShift product marketing manager, I want to be able to produce content that shows users use OpenShift as a platform for all types of workloads.
     
 
 ### Goals
@@ -75,7 +75,7 @@ The goal of this proposal is to inspect running containers and pop a few key pie
 
 ### Non-Goals
 
-* It is not a goal of this proposal to scan container for security purposes
+* It is not a goal of this proposal to scan containers for security purposes
 * It is not a goal of this proposal to get runtime information specific to a given customer or application
 * It is not a goal of this proposal to capture personal sensitive information
 
@@ -264,9 +264,9 @@ The insights-runtime-extractor functionality is provided by an image that must b
 
 #### Variation and form factor considerations [optional]
 
-This enhancement to the Insight Operator is not impacting the Control Plane of OpenShift and should be available regardless of the  form of OpenShift (Standalone OCP,  Microshift, Hypershift).
+This enhancement to the Insight Operator is not impacting the Control Plane of OpenShift and should be available regardless of the form of OpenShift (Standalone OCP,  Microshift, Hypershift).
 
-This enhancement only gather runtime info from Linux worker nodes and will not touch Windows worker nodes. The DaemonSet will be configured to only be deployed on Linux worker nodes (having the label `beta.kubernetes.io/os=linux`).
+This enhancement only gathers runtime information from Linux worker nodes and will not touch Windows worker nodes. The DaemonSet will be configured to only be deployed on Linux worker nodes (having the label `beta.kubernetes.io/os=linux`).
 
 ### API Extensions
 
@@ -338,7 +338,7 @@ The Insights Operator communicates with the insights-runtime-extractor pods depl
 
 Inspecting a container is achieved by running on the same worker node that the inspected container and looking at the host process table. The insights-runtime-extractor enters the container’s process namespaces to extract meaningful information about the runtime stack.
 
-The extraction of data from the running container is achieved by executing “fingerprint” executables in the process `mnt` namespace to find the relevant information by reading specific files (e.g. the `Os` and `OsVersion` values are read from the `/etc/os-release` file if it is present). These fingerprints executables are self-contained executables
+The extraction of data from the running container is achieved by executing “fingerprint” executables in the process `mnt` namespace to find the relevant information by reading specific files (e.g. the `Os` and `OsVersion` values are read from the `/etc/os-release` file if it is present). These fingerprints executables are self-contained executables.
 
 This cannot be achieved by a program running in the OpenShift Insights Operator deployment.
 This requires an additional resource for the operator, which is a DaemonSet that would deploy a “insights-runtime-extractor” image on all the cluster worker nodes.
@@ -346,7 +346,7 @@ This requires an additional resource for the operator, which is a DaemonSet that
 The insights-runtime-extractor image requires high privileges to run (access the worker node’s host table, enter process namespaces, etc.) and needs to be configured with a specific security context constraint.
 
 To minimize the code path running with high privileges, the insights-runtime-extractor is split into 2 components:
-* an "extractor" running in a privileged container. It runs a simple TCP server that, when  it is trigged, will extract the runtime information and store them in a shared volume. The TCP server is bould to the loopback address so that it can only be contacted by clients running inside the same pod.
+* an "extractor" running in a privileged container. It runs a simple TCP server that, when it is trigged, will extract the runtime information and store them in a shared volume. The TCP server is bould to the loopback address so that it can only be contacted by clients running inside the same pod.
 * an "exporter" running in an unprivileged container. Its role is to trigger the extractor, read the raw content of the extraction from a shared volume, bundle it in a JSON payload and reply to the Insights Operator `GET /gather_runtime_info` request.
 
 
@@ -427,7 +427,7 @@ In order to minimize any security risks, its code will be audited for security a
 The `extractor` image contains:
 
 * The TCP server to trigger runtime info extraction (written in Rust)
-  * Access to this server is constrained by liseting only to the loopback address. Only clients in the same pod will be able to connect to it.
+  * Access to this server is constrained by listening only to the loopback address. Only clients in the same pod will be able to connect to it.
 *  The `crictl` tool to find the running containers and their root PID
 * “Fingerprints” which are self-contained executables that run in the container’s process namespaces to identify what the container is running.
 
