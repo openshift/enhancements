@@ -246,8 +246,6 @@ What are the risks of this proposal and how do we mitigate. Think broadly. For
 example, consider both security and how this will impact the larger OKD
 ecosystem.
 
-How will security be reviewed and by whom?
-
 How will UX be reviewed and by whom?
 
 Consider including folks that also work outside your immediate sub-project.
@@ -286,13 +284,14 @@ Consider the following:
 - Will end users need to make any security considerations when enabling this feature?
 - What is the scope of the required RBAC?
   - Are cluster wider permissions required?
-  - Should RBAC be limited to only the namespace(s) where the feature is enabled?
-  - Should RBAC be limited to just the node(s) where the feature is enabled?
+  - How will RBAC be limited to only the namespaces required for the feature? Can we enumerate the namespaces?
+  - For node level daemons, how will the permissions be scoped to act on specific nodes? Is there a need to act on multiple nodes?
   - Are we adding new permissions or escalation paths from Nodes to the Cluster level?
 
 Principles to consider:
 - The permissions you grant should be well scoped and follow the principle of least privilege. Do not use wildcard permissions.
-- If the feature operates at the host level, the host root user should not be able to escalate to the cluster level. The feature may only modify resources directly related to the node it operates on.
+- If the feature operates at the host level, the host root user should not be able to escalate to the cluster level. The feature may only modify resources directly related to the node it operates on. i.e. a token on node/A should not be able to read/write information about node/B. See https://github.com/kubernetes/kubernetes#124711 for an example of how to do this.
+- If a bad actor gains access to your credentials, this should be no worse than them having escaped to the host level and having access to kubelet's credentials.
 
 Consider the above principles as mandatory. These should be considered as part of your E2E test plan. How will you ensure that the principles are upheld?
 
