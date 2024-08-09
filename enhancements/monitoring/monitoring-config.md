@@ -41,8 +41,6 @@ status: provisional
 * The Kubernetes API Server validate custom resources based on their API specification, so users get immediate feedback on errors instead of checking the ClusterOperator object and the cluster monitoring operator's logs. Custom expression language (CEL) even allows to write complex validation logic, including cross-field tests.
 * Many users expect to interact with operators through a CRD.
 * Custom resources play better with GitOps workflows. 
-* We can add [cross]validation rules to CRD fields to avoid misconfigurations
-* End users get a much faster feedback loop. No more applying the config and scanning logs if things don't look right. The API server will give immediate feedback
 * CRDs supports multiple actors managing the same resource which is a key property for the Observability service of Advanced Cluster Management.
 
 ### Goals
@@ -54,12 +52,25 @@ status: provisional
 
 ### Overview
 
+Currently in CMO a config map provides a way to inject configuration data into pods. There are two configmaps for the different stacks:
+
+    cluster-monitoring-configmap: Default platform monitoring components. A set of platform monitoring components are installed in the openshift-monitoring project by default during an OpenShift Container Platform installation. This provides monitoring for core cluster components including Kubernetes services. The default monitoring stack also enables remote health monitoring for clusters.
+
+    user-workload-monitoring-config: Components for monitoring user-defined projects. After optionally enabling monitoring for user-defined projects, additional monitoring components are installed in the openshift-user-workload-monitoring project. This provides monitoring for user-defined projects. These components are illustrated in the User section in the following diagram.
+
+
+Two distinct CRDs are necessary because they are managed by different personas with specific roles and responsibilities:
+
+    - UWM admins: manage the configuration of the UWM components (edit permissions on the openshift-user-workload-monitoring/user-workload-monitoring-config configmap).
+    - Cluster admins: manage the configuration of the Platform monitoring components.
+
+In managed OpenShift clusters like OSD/ROSA, two separate CRDs are necessary because platform SREs manage the cluster's platform monitoring stack, while customers manage the user-defined monitoring stack. This separation ensures that each group maintains control over their specific monitoring configurations, reducing conflicts and enhancing system management.
+
+[More info](https://github.com/openshift/enhancements/blob/master/enhancements/monitoring/multi-tenant-alerting.md)
+
+
 - Replace confimgaps with CRD:
-  cluster-monitoring-configmap
-  user-workload-monitoring-config
-
-  pkg/manifests/config.go
-
+  
 ```
   type Config struct {
 	Images                               *Images `json:"-"`
@@ -71,15 +82,35 @@ status: provisional
 }
 ```
 
+We will strive to maintain the previous structure as much as possible while adapting it to OpenShift API conventions. 
+
+
+```
+type ClusterMonitoringConfiguration struct {
+	AlertmanagerMainConfig *AlertmanagerMainConfig `json:"alertmanagerMain,omitempty"`
+	UserWorkloadEnabled *bool `json:"enableUserWorkload,omitempty"`
+	HTTPConfig *HTTPConfig `json:"http,omitempty"`
+	K8sPrometheusAdapter *K8sPrometheusAdapter `json:"k8sPrometheusAdapter,omitempty"`
+	MetricsServerConfig *MetricsServerConfig `json:"metricsServer,omitempty"`
+	KubeStateMetricsConfig *KubeStateMetricsConfig `json:"kubeStateMetrics,omitempty"`
+	PrometheusK8sConfig *PrometheusK8sConfig `json:"prometheusK8s,omitempty"`
+	PrometheusOperatorConfig *PrometheusOperatorConfig `json:"prometheusOperator,omitempty"`
+	PrometheusOperatorAdmissionWebhookConfig *PrometheusOperatorAdmissionWebhookConfig `json:"prometheusOperatorAdmissionWebhook,omitempty"`
+	OpenShiftMetricsConfig *OpenShiftStateMetricsConfig `json:"openshiftStateMetrics,omitempty"`
+	TelemeterClientConfig *TelemeterClientConfig `json:"telemeterClient,omitempty"`
+	ThanosQuerierConfig *ThanosQuerierConfig `json:"thanosQuerier,omitempty"`
+	NodeExporterConfig NodeExporterConfig `json:"nodeExporter,omitempty"`
+	MonitoringPluginConfig *MonitoringPluginConfig `json:"monitoringPlugin,omitempty"`
+}
+```
+
+
+Each component within the ConfigMap will be migrated to the OpenShift API in separate PRs. This approach allows for a thorough review, improvement, and modification of each ConfigMap component to ensure it aligns with OpenShift API standards. As part of this process, types will be modified, outdated elements will be removed and names and configurations will be refined.
+
+
 ### Migration path
 
-- Feature gate. 
-- Move each component to openshift/api/config
-- Create two CRD's:
-  * ClusterMonitoringConfiguration
-  * UserWorkloadConfiguration
-  The reason for having two different CRDs is to address the needs of two distinct roles who manage them. In managed OpenShift clusters (OSD/ROSA), the platform SREs are responsible for the cluster (platform) monitoring stack, while the platform users (e.g., customers) handle the user-defined monitoring stack.º
-- Review/improve/modify every configmap component to create a compliant openshif/api type. Fix erros, clean old things, improve names and config.
+
 - Switch mecanishm
 - Both ConfigMap and CRD will coexist for a while until the transition is complete.
 - CRD and ConfigMap will be merged into a single structure, this structure will config CMO
@@ -89,7 +120,7 @@ status: provisional
 - The end user will be able to choose to use ConfigMap or CRD at any time, keeping in mind that the fields in the CRD will gradually expand.
 
 
-### Issues
+### Open questions
 
 - Merge CRD and configmap could be error prone and will need extra test
 - Change of types and names and how handle it when there are CRD and configmap
