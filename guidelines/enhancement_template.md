@@ -282,15 +282,16 @@ What credentials will the new component be using if it needs to talk to either t
 Consider the following:
 - Which service accounts will be affected by the change, what permissions will the feature code need?
 - Will end users need to make any security considerations when enabling this feature?
+- Are any special considerations needed for your credentials when being rotated, or when a cluster is hibernated?
 - What is the scope of the required RBAC?
   - Are cluster wider permissions required?
   - How will RBAC be limited to only the namespaces required for the feature? Can we enumerate the namespaces?
   - For node level daemons, how will the permissions be scoped to act on specific nodes? Is there a need to act on multiple nodes?
-  - Are we adding new permissions or escalation paths from Nodes to the Cluster level?
+  - Are we adding new permissions or escalation paths from Nodes to the Cluster level? i.e. a token on node/A should not be able to read/write information about node/B.
 
 Principles to consider:
 - The permissions you grant should be well scoped and follow the principle of least privilege. Do not use wildcard permissions.
-- If the feature operates at the host level, the host root user should not be able to escalate to the cluster level. The feature may only modify resources directly related to the node it operates on. i.e. a token on node/A should not be able to read/write information about node/B. See https://github.com/kubernetes/kubernetes#124711 for an example of how to do this.
+- If the feature operates at the host level, the host root user should not be able to escalate to the cluster level. The feature may only modify resources directly related to the node it operates on. See https://github.com/kubernetes/kubernetes#124711 for an example of how to do this.
 - If a bad actor gains access to your credentials, this should be no worse than them having escaped to the host level and having access to kubelet's credentials.
 
 Consider the above principles as mandatory. These should be considered as part of your E2E test plan. How will you ensure that the principles are upheld?
