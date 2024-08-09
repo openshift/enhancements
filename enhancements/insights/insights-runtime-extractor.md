@@ -51,7 +51,7 @@ Currently, the Insights operator tries to identify what workload is used on Open
 We do, for example, not know if a python container is using AI libraries.
 Another issue is that we can only identify containers using known base containers (like OpenJDK), but we do not know what type of workload is more popular (Spring Boot, Quarkus, WildFly, EAP, etc.).
 
-The Insights operator can also not tell if a container is using a non-Red Hat provided base containers like Ubuntu or Debian. Knowing this data means that BU and product leadership can use this data to prioritize future work and realign investment.
+The Insights operator can also not tell what is the operating system and its version used by the user's workloads. Knowing this data means that BU and product leadership can use this data to prioritize future work and realign investment.
 
 The proof of concept for this has been demonstrated to Red Hat leeadership, who agree that this is important data for us to know in order 
 to help shape the future of our product offerings.
@@ -60,7 +60,7 @@ to help shape the future of our product offerings.
 
 * As a middleware product manager, I can observe the trends of a product version over time to estimate the expected value of any customer requested extended life offering.
 
-* As a product manager in the AI space, I can measure the application platforms/frameworks/languages used in clusters or namespaces running OpenShift AI to understand what users are coding applications in.
+* As a product manager in the AI space, I can measure the application platforms/frameworks/languages used in clusters or namespaces running OpenShift AI to understand what users are coding applications in so we could offer up-to-date images with those libraries and think how about how to support those better.
 
 * As a middleware product manager, I can track the number of applications built using Quarkus to understand our return on investment from an OpenShift workload perspective.
 
@@ -71,7 +71,7 @@ to help shape the future of our product offerings.
 
 ### Goals
 
-The goal of this proposal is to inspect running containers and pop a few key pieces of data to identify the workload that they are running. This data will enrich and complement the information already gathered by the Insights Operator to get a more accurate representation of workloads running on OpenShift.
+The goal of this proposal is to inspect running containers and surface a few key pieces of data to identify the workload that they are running. This data will enrich and complement the information already gathered by the Insights Operator to get a more accurate representation of workloads running on OpenShift.
 
 ### Non-Goals
 
@@ -413,12 +413,10 @@ IRE->>EXP: Return the path of the timestamp dir
 IRE-xEXP: Close the TCP connection
 ```
 
-
-
 #### insights-runtime-extractor Constraints
 
 The insights-runtime-extractor `extractor` is sensitive software that requires high privileges to function.
-It needs to run as privileged and access the host table of Worker Nodes to read their `/proc` tables and run as root to be able to enter in process namespaces.
+It needs to run as privileged and in the host PID namespace of Worker Nodes to read their `/proc` tables. It must also run as root to be able to enter in process namespaces.
 
 A specific `SecurityContextConstraints` should be added to the `openshift-insights` to deploy the insights-runtime-extractor with the required permissions.
 
@@ -431,9 +429,6 @@ The `extractor` image contains:
 *  The `crictl` tool to find the running containers and their root PID
 * “Fingerprints” which are self-contained executables that run in the container’s process namespaces to identify what the container is running.
 
-
-
-
 The `exporter` component runs an unprivileged HTTP server. When it receives a `GET /gather-runtime-info`, it triggers an extraction by connecting to the `extractor` that replies
 with a path to a dir on the shared volume. The exporter then collects the raw data from that directory, bundle them in a JSON payload sent as the HTTP response.
 Connections to the `exporter` HTTP server will be fronted by `kube-rbac-proxy` so that only the Insights Operator is allowed to query it.
@@ -442,7 +437,7 @@ The `exporter` image would contain:
 
 * The HTTP server (written in Go)
 
-Due to the self-contained nature of these executables, the 2 images that compose the insights-runtime-extractor are built from `scratch` (and not from an existing base image).
+Due to the self-contained nature of these executables, the 2 images that compose the insights-runtime-extractor are built from a minimal FIPS-compliant base image.
 
 ### Risks and Mitigations
 
@@ -481,7 +476,6 @@ The `exporter` component (that runs with no privileges) handles reading the inpu
 As runtime information is extracted from the user containers, it is technically possible to get access to sensitive information that should not be exposed to Red Hat.
 The fingerprints that are executing in the container namespaces must be able to sanitize the extracted information and discard them if they deviate from the expected output.
 
-
 To make sure customer confidentiality is preserved, any new collected data is hashed before they are sent to Red Hat backends. Mechanisms are already in place so that access to the unobfuscated data in Red Hat is granted on a needs-to-know basis.
 
 #### Performance Risk & Mitigation
@@ -498,6 +492,10 @@ Since a fingerprint executable runs under a downgraded privilege model, with a l
 
 Inspecting containers must not disrupt the containers that are inspected and have an impact on their quality of service.
 The insights-runtime-extractor is running with its own memory and CPU requirements and does not consume resources from the inspected container.
+
+If the worker node is near limits, a burst of activity from the insights runtime extractor could lead to node instability. To prevent this,
+the insights runtime extractor will extract runtime information from processes one at a time and will not parallelize these tasks.
+Increasing the gathering time is a trade-off to prevent node instability.
 
 ###### Risk of misbehaving code execution
 
@@ -527,15 +525,17 @@ in the Insights operator but that does not give a limit on the number of contain
 
 The additional runtime info added to the gathered data will be exposed to the user though the archives generated by the Insights operator. As the values of the field are hashed, the user will not be able to determine their corresponding content.
 
-Exposing these data to the user with a clean user interface (eg within console.redhat.com) is out of scope of this proposal.
+Exposing these data to the user with a clean user interface (eg within console.redhat.com) is out of scope of this proposal. In the future, the extracted runtime data could be used to provide a cluster-wide view of the running pods to help our users understand how their clusters are utilized.
 
 ### Drawbacks
 
-If implemented, Red Hat will document the addition of this new collection. We  introduce the risk that some number of customers who would have or are sending telemetry data via the Insights operator will choose to turn it off because they are uncomfortable sharing this additional data. 
+If implemented, Red Hat will document the addition of this new collection. We  introduce the risk that some number of customers who would have or are sending telemetry data via the Insights operator will choose to turn it off because they are uncomfortable sharing this additional data.
+In that proposal, there is no option to turn off the collection of the runtime information so an user would have to completely turn off the Insights operator collection.
+If that proves problematic, an individual flag to turn off runtime collection could be added to the Insights Operator configuration before this feature becomes GA.
 
 Any compliance or certification program that prevents to "call back" Red Hat backends will not report the data (as is already the case).
 
-The insights-runtime-extractor needs to be continually updated to detect new workloads  that Red Hat wants information about. 
+The insights-runtime-extractor needs to be continually updated to detect new workloads that Red Hat wants information about.
 This can be done iteratively and will require an updated reference to the insights-runtime-extractor image in the Insights Operator to take into account the additional detections.
 
 As the insights-runtime-extractor is sanitizing the data extracted from the containers, it is not able to retrieve "raw" data (such as processes' name and command line) which limits its ability to detect emerging trends. The insights-runtime-extractor must provide fingerprints executables for workloads that Red Hat wants to monitor.
@@ -575,9 +575,10 @@ The `TechPreviewNoUpgrade` feature gate requirement is removed. The behavior def
 
 Other than that we would like to:
 
-*  More testing (including end-to-end testing)
-*  Sufficient time for feedback
-*  Conduct load testing
+* More testing (including end-to-end testing)
+* Sufficient time for feedback
+* Conduct load testing
+* FIPS-compliant container images for the `insights-runtime-extractor` component
 * User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/blob/main/support/remote_health_monitoring/using-insights-operator.adoc) if needed
 
 ### Removing a deprecated feature
@@ -630,6 +631,10 @@ Red Hat has complementary products that are able to gather runtime information (
 This proposal is complementary to these products as it would be able to collect similar data but with a wider installation base not tied to using Red Hat products (or running on a RHEL stack).
 
 The products are mentioned in the section not as alternatives but to give a comprehensive evaluation of the proposal and how it ties with parallel features in other Red Hat products.
+
+An alternative for the proposed implementation of the `insights-runtime-extractor` is to use [eBPF](https://ebpf.io) to extract the runtime info whenever a new container is started.
+
+Discussion with the [Red Hat Advanced Cluster Security for Kubernetes](https://www.redhat.com/en/technologies/cloud-computing/openshift/advanced-cluster-security-kubernetes) team clarified that their ACS Collector does not have the required capability at that time. It should be possible to add the capability and make the ACS collector a standalone library that could be reused for the purpose of this RFE in the future. This would be an implementation detail change in the `insights-runtime-extractor` component without impact on its integration in the OpenShift Insights operator.
 
 ## Infrastructure Needed
 
