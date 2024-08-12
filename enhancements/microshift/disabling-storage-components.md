@@ -84,7 +84,7 @@ installation is skipped and install continues.
 **_Installation without LVMS and Snapshotting_**
 
 1. User installs MicroShift.
-2. User specifies a MicroShift config sets fields to disable LVMS and CSI Snapshots.
+2. User specifies a MicroShift config with fields to disable LVMS and CSI Snapshots.
 3. MicroShift starts and detects the provided config.
 4. LVMS and CSI snapshot components are not deployed.
 
@@ -132,22 +132,23 @@ cannot happen after LVMS is deleted.
 
 - MicroShift config will be extended from the root with a field called `storage`, which will have 2 subfields.
   - `.storage.driver`: **ENUM**, type is preferable to leave room for future supported drivers
-    - One of ["None|none", "lvms"]
+    - One of ["none", "lvms"]
     - An empty value or null field defaults to deploying LVMS. This preserves MicroShift's default installation workflow
       as it currently is, which in turn ensures API compatibility for clusters that are upgraded from 4.16. If the
       null/empty values defaulted to disabling LVMS, the effect would not be seen on the cluster until an LVMS or CSI
       component were deleted and the cluster is restarted. This creates a kind of hidden behavior that the user may not
       be aware of or want.
-  - `.storage.with-csi-components:` **Array**. Empty array or null value defaults to not deploying additional CSI 
+  - `.storage.optionalCsiComponents:` **Array**. Empty array defaults to deploying additional CSI 
   components.
-    - Expected values are: ['csi-snapshot-controller']
+    - Expected values are: ['csi-snapshot-controller', 'csi-snapshot-webhook'] OR 'none'. 'none' is mutually exclusive
+    with all other values.
     - Even though it's the most common csi components, the csi-driver should not be part of this list because it is
-required, and usually deployed, by the storage provider.
+    required, and usually deployed, by the storage provider.
 
 ```yaml
 storage:
   driver: ENUM
-  with-csi-components: ARRAY
+  optionalCsiComponents: ARRAY
 ```
 
 ### Topology Considerations
