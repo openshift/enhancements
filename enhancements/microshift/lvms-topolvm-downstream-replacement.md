@@ -11,7 +11,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - None
 creation-date: 2024-03-25
-last-updated: 2024-03-25
+last-updated: 2024-08-13
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/OCPEDGE-919
 replaces: []
@@ -99,9 +99,10 @@ storage driver in MicroShift and OpenShift we have to support for lvm2 support.
 6. MicroShift removes the old TopoLVM deployment without removing the CRDs.
    All existing storageClasses and deviceClasses are still present.
 7. MicroShift installs LVMS with a LVMCluster CustomResource.
-   * The LVMCluster is configured with `.spec.configurationPolicy=ExternalConfiguration`
+   * The LVMCluster is configured without deviceClasses (an empty spec)
      which will trigger a deployment of the driver which can use the existing
-     deviceClasses and storageClasses.
+     deviceClasses and storageClasses. (the deployment will target all schedulable nodes in the cluster due to 
+     the abscence of deviceClasses, for MicroShift this will be the single node it advertises in the APIServer)
    * If LVMS does not detect a lvmd.yaml file (at runtime), it will error out,
      as an external configuration is now mandatory for correct configuration.
      Note that if the lvmd.yaml file is not present when starting MicroShift, we should
