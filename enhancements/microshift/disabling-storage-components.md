@@ -140,7 +140,7 @@ cannot happen after LVMS is deleted.
       be aware of or want.
   - `.storage.optionalCsiComponents:` **Array**. Empty array defaults to deploying additional CSI 
   components.
-    - Expected values are: ['csi-snapshot-controller', 'csi-snapshot-webhook'] OR 'none'. 'none' is mutually exclusive
+    - Expected values are: ['csi-snapshot-controller', 'csi-snapshot-webhook'] OR ['none']. 'none' is mutually exclusive
     with all other values.
     - Even though it's the most common csi components, the csi-driver should not be part of this list because it is
     required, and usually deployed, by the storage provider.
