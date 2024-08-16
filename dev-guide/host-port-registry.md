@@ -82,8 +82,6 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9099      | cluster-version operator                        | HTTPS    | yes                | updates       |       | metrics                                                                                                          |
 | 9100      | node-exporter                                   |          | no                 | monitoring    |       | metrics                                                                                                          |
 | 9101      | openshift-sdn kube-rbac-proxy                   | HTTPS    |                    | sdn           |       | metrics, openshift-sdn only                                                                                      |
-| 9101      | kube-proxy                                      |          |                    | sdn           |       | metrics, third-party network plugins only, deprecated                                                            |
-| 9102      | ovn-kubernetes master kube-rbac-proxy           | HTTPS    | yes                | sdn           |       | metrics, ovn-kubernetes only                                                                                     |
 | 9102      | kube-proxy                                      |          |                    | sdn           | 4.7   | metrics, third-party network plugins only                                                                        |
 | 9103      | ovn-kubernetes node kube-rbac-proxy             | HTTPS    | no                 | sdn           |       | metrics                                                                                                          |
 | 9105      | ovn-kubernetes node kube-rbac-proxy-ovn-metrics | HTTPS    | no                 | sdn           | 4.10  | metrics                                                                                                          |
@@ -124,7 +122,6 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 10251     | kube-scheduler                                  |          | yes                | apiserver     |       | healthz                                                                                                          |
 | 10255     | kube-proxy                                      |          |                    | sdn           | 4.7   | healthz, third-party network plugins only                                                                        |
 | 10256     | openshift-sdn                                   |          |                    | sdn           |       | healthz, openshift-sdn only                                                                                      |
-| 10256     | kube-proxy                                      |          |                    | sdn           |       | healthz, third-party network plugins only, deprecated                                                            |
 | 10257     | kube-controller-manager                         |          | yes                | apiserver     |       | metrics, healthz                                                                                                 |
 | 10258     | cloud-controller-manager                        |          | yes                | cluster infra | 4.9   | metrics, healthz                                                                                                 |
 | 10259     | kube-scheduler                                  |          | yes                | apiserver     |       | metrics                                                                                                          |
@@ -166,7 +163,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 11443 | kube-scheduler                                        |          |                    | workloads     |       | recovery-controller                       |
 | 29100 | openshift-sdn                                         | HTTP     | yes                | sdn           | 4.10  | metrics                                   |
 | 29101 | openshift-sdn                                         | HTTP     | no                 | sdn           |       | metrics                                   |
-| 29102 | ovn-kubernetes                                        | HTTP     | yes                | sdn           |       | metrics, ovn-kubernetes only              |
+| 29102 | kube-proxy                                            | HTTP     | no                 | sdn           |       | metrics, third-party network plugins only |
 | 29103 | ovn-kubernetes                                        | HTTP     | no                 | sdn           |       | metrics, ovn-kubernetes only              |
 | 29105 | ovn-kubernetes                                        | HTTP     | no                 | sdn           | 4.10  | metrics, ovn-kubernetes only              |
 | 29108 | ovn-kubernetes                                        | HTTP     | yes                | sdn           | 4.14  | metrics, ovn-kubernetes only              |
