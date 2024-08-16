@@ -178,10 +178,10 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 If a feature is completely removed, (not just deprecated), then any now-free
 ports should be noted here, along with the version in which they were removed.
 
-| Port  | Process   | Protocol | Control-plane only | Owning Team | Since | Notes |
-|-------|-----------|----------|--------------------|-------------|-------|-------|
-| 3306  | mariadb   || yes | metal | 4.4 | 4.11 | baremetal ironic DB |
-| 8089  | ironic-conductor || yes | metal | 4.4 | 4.11 | baremetal provisioning |
+| Port  | Process                    | Control-plane only | Owning Team | Added | Removed | Notes                                            |
+|-------|----------------------------|--------------------|-------------|-------|---------|--------------------------------------------------|
+| 3306  | mariadb                    | yes                | metal       | 4.4   | 4.11    | baremetal ironic DB                              |
+| 8089  | ironic-conductor           | yes                | metal       | 4.4   | 4.11    | baremetal provisioning                           |
 
 ## Future
 
