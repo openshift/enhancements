@@ -81,7 +81,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9001      | machine-config-daemon oauth proxy               |          |                    | node          |       | metrics                                                                                                          |
 | 9099      | cluster-version operator                        | HTTPS    | yes                | updates       |       | metrics                                                                                                          |
 | 9100      | node-exporter                                   |          | no                 | monitoring    |       | metrics                                                                                                          |
-| 9102      | kube-proxy                                      |          |                    | sdn           | 4.7   | metrics, third-party network plugins only                                                                        |
+| 9102      | kube-proxy                                      | HTTPS    | no                 | sdn           | 4.7   | metrics, third-party network plugins only                                                                        |
 | 9103      | ovn-kubernetes node kube-rbac-proxy             | HTTPS    | no                 | sdn           |       | metrics                                                                                                          |
 | 9105      | ovn-kubernetes node kube-rbac-proxy-ovn-metrics | HTTPS    | no                 | sdn           | 4.10  | metrics                                                                                                          |
 | 9107      | ovn-kubernetes node                             |          |                    | sdn           | 4.12  | egressip-node-healthcheck-port, sdn interface only                                                               |
@@ -97,8 +97,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 9200-9219 | various CSI drivers                             |          |                    | storage       | 4.8   | metrics                                                                                                          |
 | 9257      | cluster-cloud-controller-manager-operator       |          |                    | cluster infra | 4.15  | metrics, control plane only                                                                                      |
 | 9258      | cluster-cloud-controller-manager-operator       |          |                    | cluster infra | 4.9   | metrics, control plane only                                                                                      |
-| 9300      | kube-proxy                                      |          |                    | sdn           | 4.12  | metrics, ingress node firewall                                                                                   |
-| 9301      | kube-proxy                                      |          |                    | sdn           | 4.12  | metrics, ingress node firewall                                                                                   |
+| 9300      | ingress node firewall manager                   |          |                    | sdn           | 4.12  | metrics, ingress node firewall                                                                                   |
+| 9301      | ingress node firewall manager                   |          |                    | sdn           | 4.12  | metrics, ingress node firewall                                                                                   |
 | 9400      | network observability ebpf agent                |          |                    | sdn           | 4.12  | metrics, network observability                                                                                   |
 | 9401      | network observability flow collector            |          |                    | sdn           | 4.12  | metrics, network observability                                                                                   |
 | 9444      | haproxy                                         |          |                    | sdn           | 4.7   | on-prem internal loadbalancer, healthcheck port                                                                  |
@@ -118,7 +118,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 10010     | crio                                            |          |                    | node          |       | stream port                                                                                                      |
 | 10250     | kubelet                                         |          |                    | node          |       | kubelet api                                                                                                      |
 | 10251     | kube-scheduler                                  |          | yes                | apiserver     |       | healthz                                                                                                          |
-| 10255     | kube-proxy                                      |          |                    | sdn           | 4.7   | healthz, third-party network plugins only                                                                        |
+| 10255     | kube-proxy                                      | HTTP     | no                 | sdn           |       | healthz, third-party network plugins only                                                                        |
+| 10256     | ovn-kubernetes ovnkube-node                     | HTTP     | no                 | sdn           |       | healthz                                                                                                           |
 | 10257     | kube-controller-manager                         |          | yes                | apiserver     |       | metrics, healthz                                                                                                 |
 | 10258     | cloud-controller-manager                        |          | yes                | cluster infra | 4.9   | metrics, healthz                                                                                                 |
 | 10259     | kube-scheduler                                  |          | yes                | apiserver     |       | metrics                                                                                                          |
@@ -136,10 +137,10 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 
 | Port | Process                              | Protocol | Control-plane only | Owning Team | Since | Notes                                                                     |
 |------|--------------------------------------|----------|--------------------|-------------|-------|---------------------------------------------------------------------------|
-| 500  | ovn-kubernetes IPsec                 |          |                    | sdn         | 4.7   |                                                                           |
-| 4500 | ovn-kubernetes IPsec                 |          |                    | sdn         | 4.7   |                                                                           |
-| 4789 | ovn-kubernetes VXLAN                 |          |                    | sdn         | 4.3   | when using Windows hybrid networking                                      |
-| 6081 | ovn-kubernetes geneve                |          |                    | sdn         | 4.3   |                                                                           |
+| 500  | ovn-kubernetes                       | IPsec    | no                 | sdn         | 4.7   |                                                                           |
+| 4500 | ovn-kubernetes                       | IPsec    | no                 | sdn         | 4.7   |                                                                           |
+| 4789 | ovn-kubernetes                       | VXLAN    | no                 | sdn         | 4.3   | when using Windows hybrid networking                                      |
+| 6081 | ovn-kubernetes                       | Geneve   | no                 | sdn         | 4.3   |                                                                           |
 | 9122 | metallb                              |          |                    | sdn         | 4.9   | leader election protocol                                                  |
 
 ## Localhost-only
