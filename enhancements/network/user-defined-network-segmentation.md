@@ -155,7 +155,7 @@ show the IP assigned in the cluster default network.
 In OVN-Kubernetes secondary networks are defined using Network Attachment Definitions (NADs). For more information on
 how these are configured, refer to:
 
-[https://github.com/ovn-org/ovn-kubernetes/blob/master/docs/features/multi-homing.md](https://github.com/ovn-org/ovn-kubernetes/blob/master/docs/features/multi-homing.md)
+[https://github.com/ovn-org/ovn-kubernetes/blob/master/docs/features/multiple-networks/multi-homing.md](https://github.com/ovn-org/ovn-kubernetes/blob/master/docs/features/multiple-networks/multi-homing.md)
 
 The proposal here is to leverage this existing mechanism to create the network. A new field, “primaryNetwork” is
 introduced to the NAD spec which indicates that this network should be used for the pod's primary network. Additionally,
