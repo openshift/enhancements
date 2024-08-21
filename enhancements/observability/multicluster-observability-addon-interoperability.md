@@ -99,13 +99,12 @@ configured in MCO and MCOA.
 
 1. Configure OTLP endpoint in MCO (`MultiClusterObservability`) CR.
 2. The MCOA configures an additional OTLP exporter in the OpenTelemetry collector. The 
-   exporter is in the pipeline that receives all supported telemtery signals.
+   exporter is in the pipeline that receives all supported telemetry signals.
 3. (optional) Filtering (e.g. for PII) can be configured in 
    `OpenTelemetryCollector` CR manged by MCOA by [transformprocessor](https://github.
    com/open-telemetry/opentelemetry-collector-contrib/blob/main/processor/transformprocessor/README.md).
 4. (optional) Routing can be configured in `OpenTelemetryCollector` CR managed by MCOA by
    [routingprocessor](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/routingprocessor).
-
 
 ### API Extensions
 
@@ -115,12 +114,12 @@ None - no new APIs for CRDs are introduced.
 
 #### General configuration and fleet-wide stanzas
 
-To support above workflow MCOA deploys additional collector which forwards collected 
+To support above workflow MCOA deploys an additional collector which forwards collected 
 data to 3rd party OTLP endpoint.
 
 - An `OpenTelemetryCollector` resource that enables receivers for supported telemetry 
   signals. The individual telemetry stacks will forward data to these endpoints. 
-   The collector enables OTLP exporter for and forwarding to 3rd party vendor.
+   The collector enables OTLP exporter for forwarding the data to the 3rd party vendor.
 
 #### Hypershift [optional]
 
@@ -128,9 +127,7 @@ N/A
 
 ### Drawbacks
 
-- MCOA configuration through the MultiClusterObservability: the MCO CR nowadays has an already extensive set of configuration fields, when designing the MCOA configuration, we will need to take extra caution as to not make this CR more complex and hard to navigate;
-- MCOA manifest sync: with MCOA being deployed by MCO we will need to set up a procedure to maintain the MCOA manifests that live in the MCO repo up to date.
-- CRD conflicts: MCOA will leverage the CRDs from other operators we will have to ensure that we will not be running into situations where two operators are managing the same CRD
+N/A
 
 ## Design Details
 
