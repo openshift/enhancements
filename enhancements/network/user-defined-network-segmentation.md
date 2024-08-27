@@ -752,13 +752,13 @@ When finished, reflect in the status all namespaces where NAD creation failed to
    - If no NAD exist, return.
    - In case a NAD exist, ensure no pod specifying the network.
      - In case no pod specifying the network, remove the finalizer, allowing the cluster garbage collector dispose the NAD object.
-     - Otherwise, reflect in the status the network is being deleted because its in use.
+     - Otherwise, reflect in the status of the network that it cannot be deleted because its in use.
 
 4. On cluster-scope CRD deletion:
-  - For each namespace specified in the spec:
-   - In case a NAD exist, ensure no pod specifying the network.
-   - In case no pod specifying the network, remove the finalizer, allowing the cluster garbage collector dispose the NAD object.
-   - Otherwise, reflect in the status the network is cannot be deleted because its in use.
+   - For each namespace specified in the spec:
+     - In case a NAD exist, ensure no pod specifying the network.
+     - In case no pod specifying the network, remove the finalizer, allowing the cluster garbage collector dispose the NAD object.
+     - Otherwise, reflect in the status of the network that it cannot be deleted because its in use.
 
 > Note:
 > NAD considered foreign when
@@ -891,7 +891,7 @@ In addition, the following scenarios should be validated:
     In case primary-network already exist, the request CR status should reflect network is not ready because primary network
     already exist at the target namespace.
  
-- In a scenario primary network created following CR request, and a primary NAD is created at the same target namespace,
+- In a scenario primary network created following CR request, and a primary NAD already exist at the same target namespace,
   the CR status should reflect there's a conflicting primary NAD. 
 
 - When CRD instance is deleted, ensure the network is not in use before continuing with deletion process (e.g.: remove finalizer).
