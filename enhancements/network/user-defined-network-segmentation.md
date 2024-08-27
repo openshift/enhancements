@@ -721,7 +721,7 @@ this state in the CR status network is not ready.
 
 In scenario of cluster-scope CRD request, the controller should do best effort to create the desired NAD in each
 specified namespace.
-In case on or more NAD creation fails (e.g.: due to namespace not exist), the controller should continue to the 
+In case one or more NAD creation fails (e.g.: due to namespace not exist), the controller should continue to the 
 next namespace.
 When finished, reflect in the status all namespaces where NAD creation failed to create.
 
