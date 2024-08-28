@@ -72,12 +72,10 @@ to prohibit that later.
 
 ## Proposal
 
-### Existing design details
-
-New `experimentalPropagateUserTags` field added to `.platform.aws` of install config to indicate that the user tags should be applied to AWS
+New `propagateUserTags` field added to `.platform.aws` of install config to indicate that the user tags should be applied to AWS
 resources created by in-cluster operators.
 
-If `experimentalPropagateUserTags` is true, install validation will fail if there is any tag that starts with `kubernetes.io` or `openshift.io`.
+If `propagateUserTags` is true, install validation will fail if there is any tag that starts with `kubernetes.io` or `openshift.io`.
 
 Add a new field `resourceTags` to `.status.aws` of the `infrastructure.config.openshift.io` type. Tags included in the
 `resourceTags` field will be applied to new resources created for the cluster. The `resourceTags` field will be populated by the installer only if the `experimentalPropagateUserTags` field is true.
@@ -92,11 +90,6 @@ userTags that are specified in the infrastructure resource will merge with userT
 The userTags field is intended to be set at install time and is considered immutable. Components that respect this field must only ever add tags that they retrieve from this field to cloud resources, they must never remove tags from the existing underlying cloud resource even if the tags are removed from this field(despite it being immutable).
 
 If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. However, if tags are removed from userTags, the tag will not be removed from the AWS resource.
-
-### Updated design details
-
-A new field `propagateUserTags` is added in GA release version. The `experimentalPropagateUserTags` field will be deprecated. In future release versions, `experimentalPropagateUserTags` will be removed.
-When both fields are set, `experimentalPropagateUserTags` takes precedence.
 
 ### User Stories
 
@@ -119,12 +112,6 @@ apiVersion: apiextensions.k8s.io/v1
           properties:
             platform:
               aws:
-                experimentalPropagateUserTags:
-                description: ExperimentalPropagateUserTags is an experimental
-                            flag that directs in-cluster operators to include the specified
-                            user tags in the tags of the AWS resources that the operators
-                            create. The field is deprecated.
-                type: boolean
                 propagateUserTags:
                 description: PropagateUserTags is a flag that directs in-cluster operators to include the specified
                             user tags in the tags of the AWS resources that the operators create.
@@ -157,7 +144,6 @@ This enhancement updates `experimentalPropagateUserTags` field.
 On upgrade:
 
 - The new status field won't be populated since it is only populated by the installer and that can't have happened if the cluster was installed from a prior version. Components that consume the new field should take no action since they will see no additional tags.
-- The `experimentalPropagateUserTags` field will be deprecated in the GA release version to support updates to existing usages in scripts or configs and will be removed in the version after the GA release version.
 
 On downgrade:
 
