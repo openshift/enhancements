@@ -75,6 +75,13 @@ This is a proposal to:
   - by encouraging and directing community contributors to send patches and bug fixes directly to the upstream OpenShift codebase
   - create documentation and share knowledge about OKD  
 
+### OKD branding
+
+The branding for OKD differs from OpenShift, and it is crucial to display the appropriate login page and documentation links.
+When building specific components that rely on the OKD variant of code for the correct branding, Dockerfiles must use the `TAGS`
+variable and set the value to `scos` when building CentOS Stream-based images and `fcos` when building Fedora CoreOS-based images.
+By default, this value is set to `ocp` and is overridden through the CI configuration for building these images.
+
 ### Graduation Criteria
 
 - [x] [OKD repository](https://github.com/openshift/okd/) exists for community issue and bug triage, and development tracking.
