@@ -91,7 +91,7 @@ To compartmentalize the solution, the proposal will be split in three different
 topics:
 - [Extending networking from the pod interface to the VM](#extending-networking-from-the-pod-interface-to-the-VM)
 - [Persisting VM IP addresses during the migration](#persisting-vm-ip-addresses-during-the-migration)
-- Allow user to configure the VM's interface desired IP address
+- [Allow user to configure the VM's interface desired IP address](#allow-user-to-configure-the-vms-interface-desired-ip-address)
 
 Before that, let's ensure the proper context is in place.
 
@@ -169,6 +169,42 @@ All the other
 [work required in OVN-Kubernetes](https://github.com/trozet/enhancements/blob/941f5c6391830d5e4a94e65d742acbcaf9b8eda9/enhancements/network/user-defined-network-segmentation.md#pod-egress)
 to support live-migration was already implemented as part of the epic
 implementing UDN.
+
+### Allow user to configure the VMs interface desired IP address
+
+We will also rely on the `IPAMClaim` CRD to provide the VM owner a way to
+specify the IP addresses for the UDN interface of their VMs. This way, we
+do not require to update the KubeVirt API, which is something we have faced
+extreme resistance in the past.
+
+Keep in mind that up to now the IPAMClaims would be created by KubeVirt
+directly; we need to allow the VM user to create them, specifying in its `spec`
+the desired IP addresses for the VM, and when creating the VM, point it to the
+respective `IPAMClaim` using an annotation (on the VM).
+
+KubeVirt (or a component on behalf of it) will see the annotation on the VM,
+and will proceed to the `IPAMClaim` owner reference, and template the launcher
+pod accordingly - with the annotation mentioned in the
+[Persisting VM IP addresses during the migration](#persisting-vm-ip-addresses-during-the-migration)
+section.
+
+Once OVN-Kubernetes reconciles the pod which will host the VM, it will first
+validate the request - i.e. are the requested IPs in the configured ranges of
+the UDN network ? If not, the `IPAMClaim` condition will be set accordingly,
+and allocating the OVN annotation for the pod will fail. The network controller
+will keep attempting to reconcile the pod using exponential backoff until it
+possibly succeeds - in the case the user updates the
+`IPAMClaim.Spec.IPRequests` attribute.
+
+If the IPs being requested are in the configured subnet range of the network,
+the OVN-Kuberntes network controller proceeds to allocate the requested IP
+addresses; it might fail in case the requested IP addresses are already
+allocated in the network. If so, the pod will crashloop, and the `IPAMClaim`
+conditions updated to reflect this.
+
+In the case it succeeds, the `IPAMClaim` conditions are updated w/ a success
+condition, and its `IPAMCLaim.Status.IPs` updated accordingly (as happens today)
+for secondary networks.
 
 ### Workflow Description
 
