@@ -87,17 +87,57 @@ TODO
 
 ## Proposal
 
-This section should explain what the proposal actually is. Enumerate
-*all* of the proposed changes at a *high level*, including all of the
-components that need to be modified and how they will be
-different. Include the reason for each choice in the design and
-implementation that is proposed here.
+To compartmentalize the solution, the proposal will be split in three different
+topics:
+- [Extending networking from the pod interface to the VM](#extending-networking-from-the-pod-interface-to-the-VM)
+- Persisting VM IP addresses during the migration
+- Allow user to configure the VM's interface desired IP address
 
-To keep this section succinct, document the details like API field
-changes, new images, and other implementation details in the
-**Implementation Details** section and record the reasons for not
-choosing alternatives in the **Alternatives** section at the end of
-the document.
+Before that, let's ensure the proper context is in place.
+
+### Basic UDN context
+
+As indicated in the
+[user defined network segmentation proposal](https://github.com/openshift/enhancements/blob/master/enhancements/network/user-defined-network-segmentation.md#proposal),
+the pods featuring a primary user defined network will feature two interfaces:
+- an attachment to the cluster default network
+- an attachment to the primary user defined network
+
+Later on, in the
+[services section](https://github.com/openshift/enhancements/blob/master/enhancements/network/user-defined-network-segmentation.md#services-1),
+it is explained that all traffic will be send over the primary UDN interface.
+
+### Basic virtualization context
+
+In KubeVirt / OpenShift Virtualization, the VM runs inside a pod (named
+virt-launcher). Thus, given OVN-Kubernetes configures the pod interfaces (and
+is responsible for configuring networking up to the pod interface), we still
+need to extend connectivity from the pod interface into the VM.
+
+During live-migration - once it is is scheduled - and the destination
+node is chosen, a new pod is scheduled in the target node (let's call this pod
+the *destination* pod). Once this pod is ready, the *source* pod transfers the
+state of the live VM to the *destination* pod via a connection proxied by the
+virt-handlers (the KubeVirt agents running on each node) to the *destination*
+pod.
+
+### Extending networking from the pod interface to the VM
+
+KubeVirt uses a concept called bind mechanisms to extend networking to the VM;
+we plan on using the
+[passt](https://passt.top/passt/about/#passt-plug-a-simple-socket-transport)
+binding for this, which maps the layer2 network interface in the guest to
+native layer4 sockets (TCP/UDP/ICMP) on the host where the guest runs.
+To improve the user experience, the VM will have a single interface in it.
+
+Passt relies on a user space program running on the pod namespace that maps
+traffic from the guest to the respective socket in the host; it currently is
+**not** migrated to the destination pod during migration, which causes the
+established TCP connections to be severed when the VM is migrated.
+
+This requires an enhancement on passt.
+
+TODO: link the ticket to get an enhancement
 
 ### Workflow Description
 
