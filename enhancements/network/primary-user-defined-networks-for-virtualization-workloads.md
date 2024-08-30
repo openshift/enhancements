@@ -74,7 +74,12 @@ on their LoadBalancer to route traffic to my applications.
 
 ### Goals
 
-TODO
+- The IP addresses on the VM must be the same before / after live-migration
+- Live-migration without breaking the established TCP connections
+- Provide a configurable way for the user to define the IP addresses on a VM's
+interface.
+- Native IPv6 integration
+- Integration with service meshes, and OpenShift observability solutions
 
 ### Non-Goals
 
