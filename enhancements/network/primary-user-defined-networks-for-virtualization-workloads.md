@@ -239,21 +239,62 @@ and https://github.com/openshift/enhancements/blob/master/enhancements/agent-ins
 
 ### API Extensions
 
-API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
+We will need to extend the `IPAMClaim` CRD to support three new things:
+- allow the user to specify which IP addresses they want to use for their UDNs
+- allow OVN-Kubernetes to report back success / errors on the `IPAMClaim`
+- optional: allow OVN-Kubernetes to report which pod is currently holding the
+claim
 
-- Name the API extensions this enhancement adds or modifies.
-- Does this enhancement modify the behaviour of existing resources, especially those owned
-  by other parties than the authoring team (including upstream resources), and, if yes, how?
-  Please add those other parties as reviewers to the enhancement.
+The first two items are required, and the latter is an improvement, intended to
+make the solution more transparent / secure. This way, OVN-Kubernetes would
+reject reconciling a claim currently held by another pod (unless this pod
+belongs to the same VM - i.e. migration use case). We will check the owner
+reference of the `IPAMClaim` versus the owner reference of the pod to assure
+this scenario (thus ensuring OVN-Kubernetes doesn't need to understand what a
+VM is to do so).
 
-  Examples:
-  - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
-  - Restricts the label format for objects to X.
-  - Defaults field Y on object kind Z.
+The proposed updated CRD would look like:
+```go
+// IPAMClaim is the Schema for the IPAMClaim API
+type IPAMClaim struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-Fill in the operational impact of these API Extensions in the "Operational Aspects
-of API Extensions" section.
+	Spec   IPAMClaimSpec   `json:"spec,omitempty"`
+	Status IPAMClaimStatus `json:"status,omitempty"`
+}
+
+type IPAMClaimSpec struct {
+	// The network name for which this persistent allocation was created
+	Network string `json:"network"`
+	// The pod interface name for which this allocation was created
+	Interface string `json:"interface"` // *new* attribute
+	// The IP requested by the user
+	// +optional
+	IPRequest []net.IP `json:"ipRequest,omitempty"`
+}
+
+// IPAMClaimStatus contains the observed status of the IPAMClaim.
+type IPAMClaimStatus struct {
+	// The list of IP addresses (v4, v6) that were allocated for the pod interface
+	IPs []string `json:"ips"`
+	// The name of the pod holding the IPAMClaim
+	OwnerPod string `json:"ownerPod"`                            // *new* attribute
+	// Conditions contains details for one aspect of the current state of this API Resource
+	Conditions []metav1.Condition `json:"conditions,omitempty"`  // *new* attribute
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type IPAMClaimList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []IPAMClaim `json:"items"`
+}
+```
+
+This CRD is owned by the k8snetworkplumbingwg; updating it requires quorum from
+the community.
 
 ### Topology Considerations
 
