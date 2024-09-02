@@ -583,10 +583,24 @@ Describe how to
 
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used
-to highlight and record other possible approaches to delivering the
-value proposed by an enhancement, including especially information
-about why the alternative was not selected.
+We could adapt the existing (in-tree) bridge binding to bind to the UDN
+interface, and use it instead of passt. This would mimic the approach taken
+both for secondary layer2 and localnet networks (which use
+[persistent IPs](https://github.com/openshift/enhancements/pull/1456)) and
+also HyperShift (which relies on
+[point to point routing](https://github.com/openshift/enhancements/blob/master/enhancements/network/ovn-hypershift-live-migration.md#topology)).
+Doing so would solve the TCP connection reset issue we currently face on passt.
+
+There are some drawbacks to bridge binding though, namely:
+- would currently only work for IPv4. We would need to advertise routes either
+from OVN-Kubernetes, or from within the pod (which would require CAP_NET_ADMIN,
+which we do **not** want to reintroduce).
+- integrating with pod network ecosystem (service mesh, metrics, etc) difficult
+or impossible.
+
+Given these limitations we are currently focusing on passt. It could be an
+option assuming not having IPv6 support, nor integrating with service meshes or
+metrics is a possibility.
 
 ## Infrastructure Needed [optional]
 
