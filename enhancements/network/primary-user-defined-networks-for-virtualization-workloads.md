@@ -333,15 +333,20 @@ how the code will be rewritten in the enhancement.
 
 ### Risks and Mitigations
 
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
+Some packets will definitely be dropped during live-migration of the VM; while
+we want to have the migration as seamless as possible, just preserving the
+5 tuple of the existing connections is far from optimal.
 
-How will security be reviewed and by whom?
+If the tests show that the traffic disruption takes too long, we should
+prioritize the
+[seamless live-migration epic](https://issues.redhat.com/browse/CNV-27147)
+which makes use of the multi requested-chassis OVN feature, in which a single
+logical switch port can be bound to multiple chassis (and have traffic
+forwarded to them).
 
-How will UX be reviewed and by whom?
-
-Consider including folks that also work outside your immediate sub-project.
+We have requested the core OVN team to ensure this feature is in fact usable on
+InterConnect clusters (which OpenShift is). This request is tracked in this FDP
+[issue](https://issues.redhat.com/browse/FDP-770).
 
 ### Drawbacks
 
