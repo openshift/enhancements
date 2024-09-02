@@ -370,19 +370,15 @@ to implement the design.  For instance,
 
 ## Test Plan
 
-**Note:** *Section not required until targeted at a release.*
-
-Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
-- What additional testing is necessary to support managed OpenShift service-based offerings?
-
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
-
-All code is expected to have adequate tests (eventually with coverage
-expectations).
+- E2E upstream and downstream jobs covering supported features across multiple
+networks.
+- E2E tests ensuring VM live-migration preserving established TCP connections. 
+- E2E tests covering reachability to external networks (VM egress over UDN
+networks for Layer2 topologies). 
+- E2E tests covering a VM exposed as a `LoadBalancer` service is reachable from
+the outside world. 
+- Scale testing to determine limits and impact of multiple user-defined
+networks.
 
 ## Graduation Criteria
 
