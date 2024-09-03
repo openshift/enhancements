@@ -300,28 +300,33 @@ the community.
 
 #### Hypershift / Hosted Control Planes
 
-Are there any unique considerations for making this change work with
-Hypershift?
+The management cluster should have no reason to use multiple networks, unless
+it for security reasons it makes sense to use native network isolation over
+network policy.
 
-See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282
-
-How does it affect any of the components running in the
-management cluster? How does it affect any components running split
-between the management cluster and guest cluster?
+It makes more sense that multiple primary networks will be used in the hosted
+cluster in order to provide tenants with better isolation from each other,
+without the need for network policy.
+There should be no hypershift platform-specific considerations with this
+feature.
 
 #### Standalone Clusters
 
-Is the change relevant for standalone clusters?
+Full support.
 
 #### Single-node Deployments or MicroShift
 
-How does this proposal affect the resource consumption of a
-single-node OpenShift deployment (SNO), CPU and memory?
+OpenShift Virtualization is not supported on `MicroShift` clusters, hence,
+we do not plan to integrate with UDN on these type of clusters right now.
 
-How does this proposal affect MicroShift? For example, if the proposal
-adds configuration options through API resources, should any of those
-behaviors also be exposed to MicroShift admins through the
-configuration file for MicroShift?
+It is tracked in this [jira issue](https://issues.redhat.com/browse/RFE-5289).
+
+Still, the passt integration is known for imposing some additional overhead
+which might not be suited for MicroShift. This could be mitigated by using
+bridge binding instead, which is more conservative in its resource consumption.
+
+OpenShift Virtualization is supported on single-node Openshift though; this
+integration should be fully supported in this deployment type.
 
 ### Implementation Details/Notes/Constraints
 
