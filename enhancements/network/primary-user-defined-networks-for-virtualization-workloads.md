@@ -208,34 +208,126 @@ for secondary networks.
 
 ### Workflow Description
 
-Explain how the user will use the feature. Be detailed and explicit.
-Describe all of the actors, their roles, and the APIs or interfaces
-involved. Define a starting state and then list the steps that the
-user would need to go through to trigger the feature described in the
-enhancement. Optionally add a
-[mermaid](https://github.com/mermaid-js/mermaid#readme) sequence
-diagram.
+#### Pre-requirements - configure the primary UDN for a namespace
+The user will need to perform the usual steps to configure a primary UDN for
+their namespace - that is, to provision a `UserDefinedNetwork` of layer2
+topology. While the user could use a `network-attachment-definition` CRD for
+this step, we are assuming (and recommending) the usage of the
+`UserDefinedNetwork` CRD - because we like statically typed things. You should
+too. You can find an example below with the minimal required data.
 
-Use sub-sections to explain variations, such as for error handling,
-failure recovery, or alternative outcomes.
+```yaml
+apiVersion: k8s.ovn.org/v1
+kind: UserDefinedNetwork
+metadata:
+  name: safe-ground
+  namespace: tenantblue
+spec:
+  topology: Layer2
+  layer2:
+    role: Primary
+    subnets:
+    - 192.168.0.0/16
+    ipamLifecycle: Persistent
+```
 
-For example:
+Keep in mind that the *user* mentioned above would **need** be an admin in case
+of a cluster-wide network - i.e. a network spanning multiple namespaces.
 
-**cluster creator** is a human user responsible for deploying a
-cluster.
+#### Provisioning a VM object
+The user (VM owner) would then provision a VM in the cluster. You can find
+below an example of a VM:
+```yaml
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: vm-a
+  namespace: tenantblue
+spec:
+  running: true
+  template:
+    spec:
+      domain:
+        devices:
+          disks:
+          - disk:
+              bus: virtio
+            name: containerdisk
+          - disk:
+              bus: virtio
+            name: cloudinitdisk
+          interfaces:
+          - name: passtnet
+            binding:
+              name: passt
+          rng: {}
+        resources:
+          requests:
+            memory: 2048M
+      networks:
+      - name: passtnet
+        pod: {}
+      terminationGracePeriodSeconds: 0
+      volumes:
+      - containerDisk:
+          image: quay.io/kubevirt/fedora-with-test-tooling-container-disk:v1.3.1
+        name: containerdisk
+      - cloudInitNoCloud:
+          networkData: |
+            version: 2
+            ethernets:
+              eth0:
+                dhcp4: true
+        name: cloudinitdisk
+```
 
-**application administrator** is a human user responsible for
-deploying an application in a cluster.
+Provisioning the VM in the system will be "watched" by two components; KubeVirt
+`virt-controller` and KubeVirt `ipam-extensions`. These components will then:
+- virt-controller: template the pod where the VM `vm-a` will run
+- ipam-extensions: if the `vm-a` VM has a request for the `Pod` network, this
+component will look for a primary UDN for that namespace; if one is found, and
+it allows for persistent IP addresses, the `ipam-extensions` will create an
+- `IPAMClaim` for it, whose name is `<vm name>.udn`.
 
-1. The cluster creator sits down at their keyboard...
-2. ...
-3. The cluster creator sees that their cluster is ready to receive
-   applications, and gives the application administrator their
-   credentials.
+The last thing we need to do, is to instruct to OVN-Kubernetes which
+`IPAMClaim` to use for its primary UDN interface; we rely on a mutating webhook
+for that which add an annotation to the KubeVirt VM pod indicating the name of
+the `IPAMClaim`. This process is explained in detail in
+[Persisting VM IP addresses during the migration](#persisting-vm-ip-addresses-during-the-migration).
 
-See
-https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md#high-level-end-to-end-workflow
-and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples.
+This process is pictured in the sequence diagram below.
+
+```mermaid
+sequenceDiagram
+  actor user as user
+  participant api-server as api-server
+  participant KubeVirt as KubeVirt
+  participant kubevirt-ipam-extensions as kubevirt-ipam-extensions
+  participant OVN-Kubernetes as OVN-Kubernetes
+
+  user ->>+ api-server: createVM(name=vm-1, ...)
+  api-server -->>- user: OK
+  api-server -)+ KubeVirt: reconcile VM
+  api-server -)+ kubevirt-ipam-extensions: reconcile VM
+  KubeVirt ->>+ api-server: templatePodForVM()
+  api-server -->> KubeVirt: OK
+  KubeVirt -->>- api-server: OK
+  rect rgb(0, 255, 150)
+    Note over kubevirt-ipam-extensions: mutation webhook
+    api-server ->> kubevirt-ipam-extensions: POD
+    kubevirt-ipam-extensions ->> api-server: annotatePod(ipamClaimName)
+    api-server -->>- kubevirt-ipam-extensions: OK
+  end
+  rect rgb(0, 255, 255)
+    Note over kubevirt-ipam-extensions: VM / VMI controller
+    kubevirt-ipam-extensions ->> api-server: createIPAMClaim(ipamClaimName=vm-1.udn)
+    api-server -->> kubevirt-ipam-extensions: OK
+    kubevirt-ipam-extensions -->>- api-server: OK
+  end
+  api-server -) OVN-Kubernetes: reconcile POD
+
+  OVN-Kubernetes -->> api-server: OK
+```
 
 ### API Extensions
 
