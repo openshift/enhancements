@@ -139,6 +139,12 @@ This requires an enhancement on passt.
 
 TODO: link the ticket to get an enhancement
 
+This is the long-term plan for extending networking from the pod interface to
+the VM; assuming preserving the established TCP connections is an absolute must
+we could instead go for the [bridge binding alternative](#binding-mechanism) in
+4.18, and migrate to a version of passt that preserves the TCP connections in a
+future release / Z-stream.
+
 ### Persisting VM IP addresses during the migration
 
 OpenShift already features the ability of providing persistent IP addresses
@@ -587,6 +593,8 @@ Describe how to
 
 ## Alternatives
 
+### Binding mechanism
+
 We could adapt the existing (in-tree) bridge binding to bind to the UDN
 interface, and use it instead of passt. This would mimic the approach taken
 both for secondary layer2 and localnet networks (which use
@@ -594,6 +602,14 @@ both for secondary layer2 and localnet networks (which use
 also HyperShift (which relies on
 [point to point routing](https://github.com/openshift/enhancements/blob/master/enhancements/network/ovn-hypershift-live-migration.md#topology)).
 Doing so would solve the TCP connection reset issue we currently face on passt.
+
+If we implemented
+[this feature request](https://issues.redhat.com/browse/CNV-32573) in
+OVN-Kubernetes we have an extremely simple in-tree binding that would be
+responsible for layer2 connectivity: OVN-Kubernetes would provision DHCP flows
+for the VMs in the logical switches implementing the flat layer2 networks. To
+integrate with network policies pod / namespace selectors we would need to have
+a way for the pod to report the IPs effectively "owned" by the VM.
 
 There are some drawbacks to bridge binding though, namely:
 - would currently only work for IPv4. We would need to advertise routes either
@@ -605,3 +621,9 @@ or impossible.
 Given these limitations we are currently focusing on passt. It could be an
 option assuming not having IPv6 support, nor integrating with service meshes or
 metrics is a possibility.
+
+**Note:** we could mitigate the first drawback (not having IPv6) support if we
+extended the DHCP flow behavior to DHCPv6 and sent RAs from the GW routers for
+primary UDN networks. This would require more work in the SDN side of the
+integration. This would leave service mesh / ACS / metric integration as the
+drawback of this option.
