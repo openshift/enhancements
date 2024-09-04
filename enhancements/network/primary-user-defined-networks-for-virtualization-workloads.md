@@ -24,12 +24,15 @@ see-also:
 
 ## Summary
 
-Live-migration is the bread and butter of any virtualization solution.
-OpenShift Virtualization does not currently support live-migration over the
-OpenShift default cluster network, for a variety of reasons. The scope of this
-enhancement is to define how to use the existent
+Traditional virtualization users have some expectations on what a
+virtualization platform should provide. Live-migration, and IP address
+persistence across reboots are paramount features for any virtualization
+solution, and OpenShift Virtualization does not currently support any of them
+over the OpenShift default cluster network, for a variety of reasons. The scope
+of this enhancement is to define how to use the existent
 [primary UDN feature](https://github.com/openshift/enhancements/pull/1623/) to
-enable virtualization workloads to migrate over the primary network.
+enable virtualization workloads to migrate over the primary network, and to
+persist the IP address across reboots or virtual machine shutdowns.
 
 ## Motivation
 
@@ -42,7 +45,7 @@ To streamline the migration experience of users coming from these traditional
 virtualization platforms into OpenShift Virtualization we need to match the
 user's expectations in terms of feature set, and user experience. Thus, we need
 to provide them with isolated primary networks, that meet the live-migration
-requirements.
+and IP persistence requirements.
 
 Other type is users just want to have a more managed experience - they do not
 want to have to manage their networks, e.g. deploying DHCP servers, DNS, and
@@ -61,6 +64,8 @@ to use the primary network to which the VM is connected for north/south, while
 still being able to connect to KAPI and consume Kubernetes DNS.
 - As a VM owner, I want the VM to have the same IP address before/after live
 migrating.
+- As a VM owner, I want the VM to have the same IP address before/after restart
+or shutdown.
 - As a VM owner, I want to be able to specify the IP address for the interface
 of my VM.
 - As an owner of a VM that is connected only to the primary network, I want to 
@@ -74,7 +79,8 @@ on their LoadBalancer to route traffic to my applications.
 
 ### Goals
 
-- The IP addresses on the VM must be the same before / after live-migration
+- The IP addresses on the VM must be the same before / after live-migration and
+VM restart / shutdown
 - Live-migration without breaking the established TCP connections
 - Provide a configurable way for the user to define the IP addresses on a VM's
 interface.
