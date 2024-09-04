@@ -151,20 +151,19 @@ OpenShift already features the ability of providing persistent IP addresses
 for layer2 **secondary** networks. It relies on the
 [IPAMClaim CRD](https://github.com/k8snetworkplumbingwg/ipamclaims/blob/48c5a915da3b67f464a4e52fa50dbb3ef3547dcd/pkg/crd/ipamclaims/v1alpha1/types.go#L23)
 to "tie" the allocation of the IP address to the VM.
-In short, KubeVirt (or a component on behalf
-of KubeVirt) creates an `IPAMClaim` resource for each interface in the VM the
-user wants to be persistent, and KubeVirt instructs the CNI plugin of which
-claim to use to persist the IP for the VM using an attribute defined in the
-k8snetworkplumbingwg network-selection-elements (the
+In short, OpenShift Virtualization creates an `IPAMClaim` resource for each
+interface in the VM the user wants to be persistent, and KubeVirt instructs
+the CNI plugin of which claim to use to persist the IP for the VM using an
+attribute defined in the k8snetworkplumbingwg network-selection-elements (the
 `k8s.v1.cni.cncf.io/networks` annotation). This protocol is described in depth
 in
 [the persistent IPs for virt workloads enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/network/persistent-ips-sdn-secondary-networks.md#creating-a-virtual-machine).
 
 We want to re-use this mechanism to implement persistent IPs for UDN networks;
-meaning KubeVirt (or a component on behalf of it) will create the `IPAMClaim`
-and will instruct OVN-Kubernetes of which claim to use. Since for primary UDNs
-we do **not** define the network-selection-elements, we need to use a new
-annotation to pass this information along.
+meaning OpenShift Virtualization will create the `IPAMClaim` and will instruct
+OVN-Kubernetes of which claim to use. Since for primary UDNs we do **not**
+define the network-selection-elements, we need to use a new annotation to pass
+this information along.
 
 The proposed annotation value is `k8s.ovn.org/ovn-udn-ipamclaim-reference`.
 
@@ -188,9 +187,9 @@ directly; we need to allow the VM user to create them, specifying in its `spec`
 the desired IP addresses for the VM, and when creating the VM, point it to the
 respective `IPAMClaim` using an annotation (on the VM).
 
-KubeVirt (or a component on behalf of it) will see the annotation on the VM,
-and will proceed to the `IPAMClaim` owner reference, and template the launcher
-pod accordingly - with the annotation mentioned in the
+OpenShift Virtualization will see the annotation on the VM, and will proceed to
+the `IPAMClaim` owner reference, and template the launcher pod accordingly -
+with the annotation mentioned in the
 [Persisting VM IP addresses during the migration](#persisting-vm-ip-addresses-during-the-migration)
 section.
 
