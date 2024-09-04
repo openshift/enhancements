@@ -47,7 +47,7 @@ user's expectations in terms of feature set, and user experience. Thus, we need
 to provide them with isolated primary networks, that meet the live-migration
 and IP persistence requirements.
 
-Other type is users just want to have a more managed experience - they do not
+Other type of users just want to have a more managed experience - they do not
 want to have to manage their networks, e.g. deploying DHCP servers, DNS, and
 so forth. They are hoping to have a streamlined experience, where they define
 a (set of) subnets for their layer2 network, and the SDN itself is responsible
@@ -58,7 +58,7 @@ application they are interested in exposing from the outside world.
 ### User Stories
 
 - As the owner of an application running inside my VM, I want to have east/west
-communication without NAT to other VMs and/or pods.
+communication without NAT to other VMs and/or pods within the same network.
 - As a developer who defined a custom primary network in their project, I want
 to use the primary network to which the VM is connected for north/south, while
 still being able to connect to KAPI and consume Kubernetes DNS.
@@ -136,10 +136,10 @@ binding for this, which maps the layer2 network interface in the guest to
 native layer4 sockets (TCP/UDP/ICMP) on the host where the guest runs.
 To improve the user experience, the VM will have a single interface in it.
 
-Passt relies on a user space program running on the pod namespace that maps
-traffic from the guest to the respective socket in the host; it currently is
-**not** migrated to the destination pod during migration, which causes the
-established TCP connections to be severed when the VM is migrated.
+Passt is a user space program running on the pod network namespace that maps
+traffic from the guest to the respective sockets in the host; it currently is
+**not** migrated to the destination pod during VM live-migration, which causes
+the established TCP connections to be severed when the VM is migrated.
 
 This requires an enhancement on passt.
 
@@ -154,11 +154,11 @@ future release / Z-stream.
 ### Persisting VM IP addresses during the migration
 
 OpenShift already features the ability of providing persistent IP addresses
-for layer2 **secondary** networks. It relies on the
+for layer2 **secondary** user defined networks. It relies on the
 [IPAMClaim CRD](https://github.com/k8snetworkplumbingwg/ipamclaims/blob/48c5a915da3b67f464a4e52fa50dbb3ef3547dcd/pkg/crd/ipamclaims/v1alpha1/types.go#L23)
 to "tie" the allocation of the IP address to the VM.
 In short, OpenShift Virtualization creates an `IPAMClaim` resource for each
-interface in the VM the user wants to be persistent, and KubeVirt instructs
+interface in the VM the user wants to be persistent, and then instructs
 the CNI plugin of which claim to use to persist the IP for the VM using an
 attribute defined in the k8snetworkplumbingwg network-selection-elements (the
 `k8s.v1.cni.cncf.io/networks` annotation). This protocol is described in depth
@@ -298,7 +298,7 @@ Provisioning the VM in the system will be "watched" by two components; KubeVirt
 - ipam-extensions: if the `vm-a` VM has a request for the `Pod` network, this
 component will look for a primary UDN for that namespace; if one is found, and
 it allows for persistent IP addresses, the `ipam-extensions` will create an
-- `IPAMClaim` for it, whose name is `<vm name>.udn`.
+- `IPAMClaim` for it, whose name is `<vm name>.<logical network name>`.
 
 The last thing we need to do, is to instruct to OVN-Kubernetes which
 `IPAMClaim` to use for its primary UDN interface; we rely on a mutating webhook
@@ -331,7 +331,7 @@ sequenceDiagram
   end
   rect rgb(0, 255, 255)
     Note over kubevirt-ipam-extensions: VM / VMI controller
-    kubevirt-ipam-extensions ->> api-server: createIPAMClaim(ipamClaimName=vm-1.udn)
+    kubevirt-ipam-extensions ->> api-server: createIPAMClaim(ipamClaimName=vm-1.passnet)
     api-server -->> kubevirt-ipam-extensions: OK
     kubevirt-ipam-extensions -->>- api-server: OK
   end
@@ -565,7 +565,7 @@ option assuming not having IPv6 support, nor integrating with service meshes or
 metrics is a possibility.
 
 **Note:** we could mitigate the first drawback (not having IPv6) support if we
-extended the DHCP flow behavior to DHCPv6 and sent RAs from the GW routers for
+extended the DHCP OVN flow behavior to DHCPv6 and sent RAs from the GW routers for
 primary UDN networks. This would require more work in the SDN side of the
 integration. This would leave service mesh / ACS / metric integration as the
 drawback of this option.
