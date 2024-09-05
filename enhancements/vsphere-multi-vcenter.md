@@ -77,7 +77,7 @@ from the proposal.
   vCenter.  
 
 - Updating the cloud provider config from ini to yaml will be supported.
-  Rational: Existing clusters wish to take advantage of migrating loads to a new
+  Rationale: Existing clusters wish to take advantage of migrating loads to a new
   vCenter.  In order for this to happen, we must be able to allow customers to
   update their existing cloud provider config to contain all relevant information
   for the new vCenter.
