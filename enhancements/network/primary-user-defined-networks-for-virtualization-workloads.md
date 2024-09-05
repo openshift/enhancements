@@ -183,39 +183,23 @@ implementing UDN.
 
 ### Allow user to configure the VMs interface desired IP address
 
-We will also rely on the `IPAMClaim` CRD to provide the VM owner a way to
-specify the IP addresses for the UDN interface of their VMs. This way, we
-do not require to update the KubeVirt API, which is something we have faced
-extreme resistance in the past.
+To allow the user to specify the IP address for the workload we plan on adding
+an attribute to the KubeVirt API
+[interface](https://kubevirt.io/api-reference/main/definitions.html#_v1_interface)
+named `ipAddress`. This approach suits the product, and meets the user's
+expectations because the user can configure the MAC address for an interface in
+that same `Interface` resource.
 
-Keep in mind that up to now the IPAMClaims would be created by KubeVirt
-directly; we need to allow the VM user to create them, specifying in its `spec`
-the desired IP addresses for the VM, and when creating the VM, point it to the
-respective `IPAMClaim` using an annotation (on the VM).
+Regarding the implementation, OpenShift Virtualization would extend what it
+does for the MAC address: define it in the k8snetworkplumbingwg de-facto
+standard as an IP request, and the OVN-Kubernetes CNI would attempt to honor
+it.
 
-OpenShift Virtualization will see the annotation on the VM, and will proceed to
-the `IPAMClaim` owner reference, and template the launcher pod accordingly -
-with the annotation mentioned in the
-[Persisting VM IP addresses during the migration](#persisting-vm-ip-addresses-during-the-migration)
-section.
-
-Once OVN-Kubernetes reconciles the pod which will host the VM, it will first
-validate the request - i.e. are the requested IPs in the configured ranges of
-the UDN network ? If not, the `IPAMClaim` condition will be set accordingly,
-and allocating the OVN annotation for the pod will fail. The network controller
-will keep attempting to reconcile the pod using exponential backoff until it
-possibly succeeds - in the case the user updates the
-`IPAMClaim.Spec.IPRequests` attribute.
-
-If the IPs being requested are in the configured subnet range of the network,
-the OVN-Kuberntes network controller proceeds to allocate the requested IP
-addresses; it might fail in case the requested IP addresses are already
-allocated in the network. If so, the pod will crashloop, and the `IPAMClaim`
-conditions updated to reflect this.
-
-In the case it succeeds, the `IPAMClaim` conditions are updated w/ a success
-condition, and its `IPAMCLaim.Status.IPs` updated accordingly (as happens today)
-for secondary networks.
+This is by far the simplest solution to implement; another alternative is
+described in the [alternatives section](#vm-interface-ip-address-configuration).
+This other alternative has the advantage of not requiring a KubeVirt API update
+but adds a lot more work in OVN-Kubernetes, and requires updating the de-facto
+standard.
 
 ### Workflow Description
 
@@ -569,3 +553,41 @@ extended the DHCP OVN flow behavior to DHCPv6 and sent RAs from the GW routers f
 primary UDN networks. This would require more work in the SDN side of the
 integration. This would leave service mesh / ACS / metric integration as the
 drawback of this option.
+
+### VM interface IP address configuration
+
+We will also rely on the `IPAMClaim` CRD to provide the VM owner a way to
+specify the IP addresses for the UDN interface of their VMs. This way, we
+do not require to update the KubeVirt API, which is something we have faced
+extreme resistance in the past.
+
+Keep in mind that up to now the IPAMClaims would be created by OpenShift
+Virtualization directly; we need to allow the VM user to create them,
+specifying in its `spec` the desired IP addresses for the VM, and when creating
+the VM, point it to the respective `IPAMClaim` using an annotation - or label -
+(on the VM). Using a label would allow a controller to monitor which workloads
+are attached to an `IPAMClaim`.
+
+OpenShift Virtualization will see the annotation on the VM, and will proceed to
+the `IPAMClaim` owner reference, and template the launcher pod accordingly -
+with the annotation mentioned in the
+[Persisting VM IP addresses during the migration](#persisting-vm-ip-addresses-during-the-migration)
+section.
+
+Once OVN-Kubernetes reconciles the pod which will host the VM, it will first
+validate the request - i.e. are the requested IPs in the configured ranges of
+the UDN network ? If not, the `IPAMClaim` condition will be set accordingly,
+and allocating the OVN annotation for the pod will fail. The network controller
+will keep attempting to reconcile the pod using exponential backoff until it
+possibly succeeds - in the case the user updates the
+`IPAMClaim.Spec.IPRequests` attribute.
+
+If the IPs being requested are in the configured subnet range of the network,
+the OVN-Kuberntes network controller proceeds to allocate the requested IP
+addresses; it might fail in case the requested IP addresses are already
+allocated in the network. If so, the pod will crashloop, and the `IPAMClaim`
+conditions updated to reflect this.
+
+In the case it succeeds, the `IPAMClaim` conditions are updated w/ a success
+condition, and its `IPAMCLaim.Status.IPs` updated accordingly (as happens today)
+for secondary networks.
