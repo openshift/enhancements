@@ -69,7 +69,7 @@ from the proposal.
 
 - OCP clusters will be enhanced to leverage new yaml cloud provider config for
   vSphere.
-  Rational: The ini configuration has been deprecated and the newer yaml format
+  Rationale: The ini configuration has been deprecated and the newer yaml format
   supports multiple vCenters.
 
 - When updating infrastructure after initial installation, the cluster should be
