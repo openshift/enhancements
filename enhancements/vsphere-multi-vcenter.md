@@ -63,7 +63,7 @@ from the proposal.
 ```
 
 - During installation, all nodes are created in all defined vCenters.
-  Rational: multiple vCenters is another twist on failure domains.  A new vCenter 
+  Rationale: multiple vCenters is another twist on failure domains.  A new vCenter 
   will appear as a new failure domain to the OCP cluster.  Control plane and 
   compute nodes must be able to be assigned to any FD.
 
