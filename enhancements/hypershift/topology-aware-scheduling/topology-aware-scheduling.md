@@ -15,7 +15,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2024-08-29
-last-updated: 2024-08-29
+last-updated: 2024-09-19
 tracking-link: 
   - https://issues.redhat.com/browse/CNF-11154
 see-also:
@@ -96,6 +96,8 @@ It’s suggested that when HCCO renders KubeletConfig, it adds a ConfigMap that 
 on the desired hosted clusters, so that NROP could access it and read the information it’s needed.
 The ConfigMap contains a NodePool label so NROP knows which group of nodes is associated with the given KubeletConfig.
 
+More details in the [implementation section](#implementation-detailsnotesconstraints)
+
 ![Architecture Layout](architecture_layout.jpg)
 
 ### Handle Node Grouping
@@ -144,7 +146,69 @@ This proposal aims for Hypershift / Hosted Control Planes alone.
 
 ### Implementation Details/Notes/Constraints
 
-* N/A
+#### Expose KubeletConfig to Hosted-Clusters
+
+At first, when a user associates a KubeletConfig's ConfigMap to the NodePool,
+the NodePool controller mirrors the ConfigMap to the control-plane namespace.
+Similar to: https://github.com/openshift/hypershift/pull/4150
+The KubeletConfig's ConfigMap NamespacedName convention, created by the NodePool controller is:
+`<control-plane-namespace>/<name+node-pool>`
+* `control-plane-namespace` = name of the control-plane namespace
+* `name` = name of the ConfigMap as provided by the user in the hosted-cluster namespace.
+* `node-pool` = name of the NodePool on which the ConfigMap was referenced.
+
+To make sure the final name is valid,
+it's given to the https://github.com/openshift/hypershift/blob/ffa435f71e1a037174e29d31a2b80d569c940d57/support/util/route.go#L39 
+function so that 
+```
+finalName := ShortenName(name, NodePoolName)
+```
+In addition, the NodePool controller creates the KubeletConfig ConfigMap with the following labels:
+* `hypershift.openshift.io/kubeletconfig-config` : `""`
+* `hypershift.openshift.io/nodePool` : `NodePool` API name where the KubeletConfig has referenced
+
+Then, HCCO picks it up from the control-plane namespace, 
+by listing ConfigMaps with the labels above, and copies it to the hosted-cluster.
+
+The KubeletConfig's ConfigMap NamespacedName convention, created by HCCO is:
+`openshift-config-managed/<name>`
+* `openshift-config-managed` = name of the namespace where all the configs managed by OCP reside.
+* `name` = name of the ConfigMap as provided by the NodePool controller in the control-plane namespace.
+
+Any changes to the KubeletConfig's ConfigMap on the hosted cluster will be blocked by the  
+[hypershift validating admission policy](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/)
+IOW only HCCO can change the KubeletConfig's ConfigMap and no external tampering is allowed.
+
+When the KubeletConfig ConfigMap is deleted by the user (removed from the NodePool spec), 
+the NodePool controller deletes the ConfigMap from the control-plane namespace.
+HCCO will watch for changes in ConfigMaps under the CP NS:
+```
+p := predicate.NewPredicateFuncs(func(o client.Object) bool {
+		cm := o.(*corev1.ConfigMap)
+		if _, ok := cm.Labels[nodepool.KubeletConfigConfigMapLabel]; ok {
+			return true
+		}
+		return false
+	})
+	if err := c.Watch(source.Kind[client.Object](opts.CPCluster.GetCache(), &corev1.ConfigMap{}, eventHandler(), p)); err != nil {
+		return fmt.Errorf("failed to watch ConfigMap: %w", err)
+	}
+```
+so the deletion of the ConfigMaps triggers the reconciliation loop of HCCO.
+HCCO compares the KubeletConfig ConfigMaps on the CP NS against the KubeletConfig ConfigMaps on the
+hosted cluster, and deletes the ones exist on the hosted cluster but are no longer on the CP NS. 
+
+It is possible to have multiple KubeletConfig's ConfigMap (one per each NodePool) under the same hosted cluster.
+The names are always different because they are derived from the name provided by the user. 
+
+The NodePool controller performs a validation to make sure no more than a single KubeletConfig's ConfigMap 
+is referenced for the NodePool, throws an error otherwise, and reflects it under the `nodepool.status.condition`.
+
+A user intervention is required to remove the additional KubeletConfig to make the operator functional again.
+
+There is also a case that a generated KubeletConfig is already associated with the NodePool.
+For example, NTO generates a KubeletConfig when it is given a PerformanceProfile.
+The NodePool controller treats such generated KubeletConfig as equal as a user provided one.
 
 ### Risks and Mitigations
 
