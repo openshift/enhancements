@@ -4,7 +4,6 @@ authors:
   - "@maiqueb"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - "@trozet"   # the integration with the SDN side
-  - "@jcaamano" # the integration with the SDN side / focusing on the persistent IPs part
   - "@EdDev"    # the integration with the KubeVirt / CNV side
   - "@qinqon"   # everything
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
@@ -12,7 +11,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers:
   - "@dougbtv"
 creation-date: 2024-08-30
-last-updated: 2024-08-30
+last-updated: 2024-09-09
 tracking-link:
   - https://issues.redhat.com/browse/CNV-46779
 see-also:
