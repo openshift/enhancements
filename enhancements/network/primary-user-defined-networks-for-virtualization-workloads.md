@@ -184,6 +184,10 @@ All the other
 to support live-migration was already implemented as part of the epic
 implementing UDN.
 
+We evaluate an alternative for this in the
+[Using multus default network annotation](#using-multus-default-network-annotation)
+section.
+
 ### Allow user to configure the VMs interface desired IP address
 
 To allow the user to specify the IP address for the workload we plan on adding
@@ -602,3 +606,72 @@ requesting whose IPs in its `IPAMClaim.Spec.IPRequests` attribute. While this
 would free the user from having to create the `IPAMClaim` object, the API for
 it would be a bit clunky, since we'd have to rely on a comma separated list of
 IPs as the annotation value to support multiple IPs for an interface.
+
+### Using multus default network annotation
+We could use the
+[multus default network annotation](https://github.com/k8snetworkplumbingwg/multus-cni/blob/master/docs/configuration.md#specify-default-cluster-network-in-pod-annotations)
+to customize the primary UDN network; the user would need to define the
+network-selection-element on the pod, pointing it would need at the `IPAMClaim`
+object, as done for secondary networks. This alternative would have the
+advantage of not requiring a new annotation to be defined to communicate the
+`IPAMClaim` name between OpenShift Virtualization and OVN-Kubernetes.
+Furthermore,This option could potentially open the door for further
+customization of the primary UDN interface - like specifying the SR-IOV device
+to be used.
+
+While this would be a native way to integrate with the rest of the persistent
+IPs feature, it would be a clumsy flow for primary UDNs, since the user would
+be expected to use network selection elements to configure the primary UDN.
+Furthermore, we currently not allow primary UDNs to be attached via network
+selection elements. We would need to break this convention.
+
+In this alternative, we would use the following annotations:
+```yaml
+annotations:
+  k8s.v1.cni.cncf.io/networks: '[
+      {
+        "name":"ovn-kubernetes",                  # relates to a NAD with the default cluster network
+        "namespace":"blue-ns",
+        "ipam-claim-reference": "as-we-have.now"  # customizes the primary UDN attachment
+      }
+    ]'
+  v1.multus-cni.io/default-network: "ovn-kubernetes"
+```
+
+Customizing the primary UDN this way is a bit clunky since it requires the user
+to point to (via the `name` attribute) the default network, while specifying
+attributes for the primary UDN attachment. It can be argued though that we do
+something similar when reporting the primary UDN information via the
+`network-status` annotation - which would look like:
+```yaml
+annotations:
+  k8s.v1.cni.cncf.io/network-status: '
+        [
+  {
+    "name": "ovn-kubernetes",
+    "interface": "ovn-udn1",
+    "ips": [
+      "10.128.0.4"
+    ],
+    "mac": "0a:58:0a:80:00:04",
+    "default": true,
+    "dns": {}
+  },
+  {
+    "name": "ovn-kubernetes",
+    "interface": "eth0",
+    "ips": [
+      "10.244.1.9"
+    ],
+    "mac": "0a:58:0a:f4:01:09",
+    "dns": {}
+  }
+]
+'
+```
+
+While it is *similar* I think it is not so bad, since it reports two distinct
+elements in an array which can be identified by the interface name.
+
+It would also require the default-network configuration to be duplicated (from
+the typical `/etc/cni/net.d/10-ovn-kubernetes.conf`) to a NAD.
