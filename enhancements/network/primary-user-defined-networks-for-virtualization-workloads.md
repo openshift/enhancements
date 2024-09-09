@@ -591,3 +591,11 @@ conditions updated to reflect this.
 In the case it succeeds, the `IPAMClaim` conditions are updated w/ a success
 condition, and its `IPAMCLaim.Status.IPs` updated accordingly (as happens today)
 for secondary networks.
+
+A variation of this option would be if the user annotated the VM directly with
+the IPs they want to have available on the primary UDN interface - this way,
+OpenShift Virtualization would create the `IPAMClaim` on behalf of the user,
+requesting whose IPs in its `IPAMClaim.Spec.IPRequests` attribute. While this
+would free the user from having to create the `IPAMClaim` object, the API for
+it would be a bit clunky, since we'd have to rely on a comma separated list of
+IPs as the annotation value to support multiple IPs for an interface.
