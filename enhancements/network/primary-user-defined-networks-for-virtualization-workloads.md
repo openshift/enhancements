@@ -171,7 +171,7 @@ OVN-Kubernetes of which claim to use. Since for primary UDNs we do **not**
 define the network-selection-elements, we need to use a new annotation to pass
 this information along.
 
-The proposed annotation value is `k8s.ovn.org/ovn-udn-ipamclaim-reference`.
+The proposed annotation value is `k8s.ovn.org/primary-udn-ipamclaim`.
 
 These persistent IPs will be cleaned up by the Kubernetes garbage collector
 once the VM to which they belong is removed.
