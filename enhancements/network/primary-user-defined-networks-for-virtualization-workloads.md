@@ -428,6 +428,8 @@ N/A
 
 ### Risks and Mitigations
 
+#### Seamless live-migration risk
+
 Some packets will definitely be dropped during live-migration of the VM; while
 we want to have the migration as seamless as possible, just preserving the
 5 tuple of the existing connections is far from optimal.
@@ -442,6 +444,16 @@ forwarded to them).
 We have requested the core OVN team to ensure this feature is in fact usable on
 InterConnect clusters (which OpenShift is). This request is tracked in this FDP
 [issue](https://issues.redhat.com/browse/FDP-770).
+
+#### Allow user to configure the VMs interface desired IP address risk
+
+The proposed alternative for
+[allowing the user to specify the VM interface's IP](#allow-user-to-configure-the-vms-interface-desired-ip-address)
+requires a KubeVirt API update - and KubeVirt's feature freeze is just around
+the corner, on October 22nd.
+
+If we fail to get the code that updates the API by this date, we will have to
+pivot to the other alternative, even if it is less desired overall.
 
 ### Drawbacks
 
