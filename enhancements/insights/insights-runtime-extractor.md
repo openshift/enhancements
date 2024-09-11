@@ -132,7 +132,7 @@ type RuntimeComponent struct {
 
 These new data elements are all optional (as they may not be relevant depending on the type of workloads) and are hashed (and truncated) to preserve shoulder-surfing anonymity (the hashing algorithm is [the same one that is currently used by the gatherer](https://github.com/openshift/insights-operator/blob/30b161f98eb185bb357ac84f8aca58e369d34bcd/pkg/gatherers/workloads/workloads_info.go#L336)).
 
-Someone with access to the date and who knows what they are looking for ("How many containers are running Go 1.21.3?") will be able to unobscure the data.
+Someone with access to the data and who knows what they are looking for ("How many containers are running Go 1.21.3?") will be able to unobscure the data.
 
 ### Runtime Info Description
 
@@ -153,7 +153,7 @@ The additional data are:
   * __`Kind`__ - Identifier of the kind of runtime
     * Derived value (set by the insights-runtime-extractor component)
     * Optional (if detected by the insights-runtime-extractor component)
-    * Value is a hash of the detected runtime kind: `Java, Golang, Node.js, GraalVM` (exhaustive list based on the capabilities of the container scanner)
+    * Value is a hash of the detected runtime kind: `Java, Golang, Node.js, GraalVM` (exhaustive list based on the capabilities of the insights-runtime-extractor)
   * __`KindVersion`__ - Version of the kind of runtime.
     * Raw value (depending on the value of runtime-kind, the version is read from different files in the container)
     * Optional - based on the existence of various files in the containers (`$JAVA_HOME/release` for Java, the ELF header of the executable for Golang, the output of `node —version` for Node.js)
@@ -162,11 +162,11 @@ The additional data are:
     * Raw value (based on the existence of various files in the containers, eg  `$JAVA_HOME/release` for Java)
     * Optional
     * Value is a hash of the detected implementers: `Red Hat, inc., Oracle Corporation, Eclipse Adoptium` (list not exhaustive)
-* Runtime Information - The container scanner can selectively identify runtime libraries/frameworks that run in the containers. They are represented with the `RuntimeComponent` type that has the fields:
+* Runtime Information - The insights-runtime-extractor can selectively identify runtime libraries/frameworks that run in the containers. They are represented with the `RuntimeComponent` type that has the fields:
   * __`Name`__ - Name of the runtime used to run the application in the container
     * Derived value (set by the insights-runtime-extractor component)
-    * Optional - based on the capabilities of the container scanner to detect such runtimes
-    * Value is a hash of the detected runtimes `Quarkus, Spring Boot, Apache Tomcat, WildFly, JBoss EAP` (list based on the capabilities of the container scanner, might be enhanced with additional development)
+    * Optional - based on the capabilities of the insights-runtime-extractor to detect such runtimes
+    * Value is a hash of the detected runtimes `Quarkus, Spring Boot, Apache Tomcat, WildFly, JBoss EAP` (list based on the capabilities of the insights-runtime-extractor, might be enhanced with additional development)
   * __`Version`__ - The version of the runtime used to run the application
     * Raw values (read from files in the containers)
     * Optional - based on the capabilities of the insights-runtime-extractor component to detect the runtime and the availability of its version from files in the container
@@ -253,7 +253,7 @@ The DaemonSet for the insights-runtime-extractor is deployed when the Insights O
 From the operator perspective, the insights-runtime-extractor is a black box, and its requirements are:
 
 * Determine the Pod name of each insights-runtime-extractor’s Pod (as the insights-runtime-extractor is deployed as a DaemonSet, there is a single pod instance on each worker node) and map it to its worker node.
-  * There is no service exposing the insights-runtime-extractor and its pods are accessed directly throug their DNS records.
+  * There is no service exposing the insights-runtime-extractor and its pods are accessed directly throug their IP addresses.
 * When the operator starts gathering workload information, query the `HTTP GET /gather-runtime-info` request on each insights-runtime-extractor pod. The HTTP response will return a JSON payload in the standard output that represents a tree of `namespace/pod-name/container-id/runtime-info`.
 * As the operator iterates over the containers in the cluster, check if there is a runtime-info entry for the `namespace/pod-name/container-id` and add it to the existing `workloadContainerShape` (after hashing all the values)
 
@@ -288,7 +288,7 @@ when the Insights Operator gathers workload data that will affect the only worke
 
 ### Implementation Details/Notes/Constraints [optional]
 
-#### Container Scanner API
+#### Insights Runtime Extractor API
 
 The Insights Operator communicates with the insights-runtime-extractor pods deployed by its DaemonSet with a simple HTTP server that has the following API:
 
@@ -343,7 +343,7 @@ This requires an additional resource for the operator, which is a DaemonSet that
 The insights-runtime-extractor image requires high privileges to run (access the worker node’s host table, enter process namespaces, etc.) and needs to be configured with a specific security context constraint.
 
 To minimize the code path running with high privileges, the insights-runtime-extractor is split into 2 components:
-* an "extractor" running in a privileged container. It runs a simple TCP server that, when it is trigged, will extract the runtime information and store them in a shared volume. The TCP server is bould to the loopback address so that it can only be contacted by clients running inside the same pod.
+* an "extractor" running in a privileged container. It runs a simple TCP server that, when it is trigged, will extract the runtime information and store them in a shared volume. The TCP server is bound to the loopback address so that it can only be contacted by clients running inside the same pod.
 * an "exporter" running in an unprivileged container. Its role is to trigger the extractor, read the raw content of the extraction from a shared volume, bundle it in a JSON payload and reply to the Insights Operator `GET /gather_runtime_info` request.
 
 
@@ -458,7 +458,7 @@ Splitting the inspection logic into multiple plugins/modules not only allows for
 
 The risk of a workable exploit can be greatly reduced by minimizing the amount of total potential code, including the number and size of third-party dependencies. This comes from two key factors: First, the reduced complexity of the system limits the number of potential attack points, and secondly, the smaller total code set improves the speed and effectiveness of both human and automated code auditing.
 
-As such, three key key rules should be followed in the design and implementation of the coordinator process
+As such, three key rules should be followed in the design and implementation of the coordinator process
 
 1. __Dynamic loading of arbitrary executable code should never be supported or allowed by the coordinator process.__ This precludes scripting language runtimes (such as python and JS) as well as bytecode interpreting languages such as Java, .Net, and WASM. It also precludes usage of dlopen(), or libraries with dynamic loading capabilities: the process must be statically compiled. 
 1. __Dependencies in the coordinator should be kept to only the provided language SDK, and Linux system contracts__, even at the expense of some code duplication
@@ -606,11 +606,6 @@ However, it will consume a certain amount of CPU and memory on each worker node 
 These consumptions must be bounded to avoid disrupting the user workload.
 
 Inspecting containers will also increase the time to collect insights by the operator. The workload gatherer is performed every 12 hours and its execution will depend on the number of containers that are inspected.
-
----
-**TBD** Provide measures of resource consumption (memory and CPU)
-
----
 
 ## Support Procedures
 
