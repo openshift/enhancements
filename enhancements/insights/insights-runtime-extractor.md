@@ -53,9 +53,6 @@ Another issue is that we can only identify containers using known base container
 
 The Insights operator can also not tell what is the operating system and its version used by the user's workloads. Knowing this data means that BU and product leadership can use this data to prioritize future work and realign investment.
 
-The proof of concept for this has been demonstrated to Red Hat leeadership, who agree that this is important data for us to know in order 
-to help shape the future of our product offerings.
-
 ### User Stories
 
 * As a middleware product manager, I can observe the trends of a product version over time to estimate the expected value of any customer requested extended life offering.
@@ -392,7 +389,7 @@ Note over IRE: TCP server is bound to the loopback address
 Note over V: Volume shared between the extractor<br>and the exporter containers
 EXP->>IRE: Open a new TCP connection
 IRE->>V: create a /data/out-${timestamp} dir to collect all fingerprints output
-IRE->>IRE: call /crictl ps to list all containers runnnin on the worker node<br>and get their pod name and namespaces
+IRE->>IRE: call /crictl ps to list all containers runnning on the worker node<br>and get their pod name and namespaces
 loop For each running container
     IRE->>IRE: Call /crictl inspect to get the root PID of the container
     IRE->>IRE: Get process info from /proc (name, cmd-line, env)
@@ -416,7 +413,11 @@ IRE-xEXP: Close the TCP connection
 #### insights-runtime-extractor Constraints
 
 The insights-runtime-extractor `extractor` is sensitive software that requires high privileges to function.
-It needs to run as privileged and in the host PID namespace of Worker Nodes to read their `/proc` tables. It must also run as root to be able to enter in process namespaces.
+It needs to run as privileged and in the host PID namespace of Worker Nodes to read their `/proc` tables. It must also run as root to be able to enter in the `mnt` and `pid` namespaces of the process.
+
+> **Note**
+> The extractor does not enter the `cgroups` namespace of the process so it does not count toward its container limits.
+
 
 A specific `SecurityContextConstraints` should be added to the `openshift-insights` to deploy the insights-runtime-extractor with the required permissions.
 
