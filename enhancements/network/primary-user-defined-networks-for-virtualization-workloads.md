@@ -56,7 +56,7 @@ application they are interested in exposing from the outside world.
 
 ### User Stories
 
-- As the owner of an application running inside my VM, I want to have east/west
+- As a VM owner (which runs applications inside it), I want to have east/west
 communication without NAT to other VMs and/or pods within the same network.
 - As a developer who defined a custom primary network in their project, I want
 to use the primary network to which the VM is connected for north/south, while
@@ -69,7 +69,7 @@ or shutdown.
 of my VM.
 - As an owner of a VM that is connected only to the primary network, I want to 
 fetch resources from outside networks (internet).
-- As a developer migrating my VMs to OCP, I do not want to change my
+- As a VM owner migrating my VMs to OCP+V, I do not want to change my
 application to support multiple NICs.
 - As a VM owner, I want to expose my selected applications over the network to
 users outside the cluster.
