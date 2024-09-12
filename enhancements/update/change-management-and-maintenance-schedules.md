@@ -373,9 +373,12 @@ risks and disruption when rolling out changes to their environments.
 ## Proposal
 
 ### Change Management Overview
-Establish a new namespaced Custom Resource Definition (CRD) called `ChangeManagementPolicy` which allows cluster lifecycle
+Establish a new, namespaced Custom Resource Definition (CRD) called `ChangeManagementPolicy` which allows cluster lifecycle
 administrators to capture their requirements for when resource(s) associated with the policy can initiate material 
-changes on the cluster.
+changes on the cluster. The new resource is namespaced because it will be used in both Standalone and Hosted Control
+Plane (HCP) environments. In HCP, `HostedCluster` (representing hosted control-plane information) and 
+`NodePool` (representing worker-node information) CRDs are namespaced on the management cluster. It is natural then,
+for these namespaced resources to refer to a `ChangeManagementPolicy` in the same namespace.
 
 Add a `changeManagement` stanza to several existing resources in the OpenShift ecosystem which can reference
 the new `ChangeManagementPolicy` resource to restrict when and how their associated controllers can initiate
@@ -403,14 +406,14 @@ kind: ChangeManagementPolicy
 metdata:
   # ChangeManagementPolicies are namespaced resources. They will normally reside in the 
   # namespace associated with the controller initiating material changes. 
-  # For example, in Standalone namespace/openshift-machine-config for the MCO and 
+  # For example, in Standalone namespace/openshift-machine-config-operator for the MCO and 
   # namespace/openshift-cluster-version for the CVO. 
   # For HCP, the ChangeManagementPolicies for will reside in the same namespace as the 
   # HostedCluster resource.
   # This namespace can be overridden in resources being constrained by a ChangeManagementPolicy
   # but RBAC for the resource's controller must permit reading the object from the non-default 
   # namespace.
-  namespace: openshift-machine-config
+  namespace: openshift-machine-config-operator
   name: example-policy
 
 spec:
@@ -508,7 +511,7 @@ spec:
     policy:
       # Namespace is optional. If not specified, the controller assumes the namespace in
       # which the controller is running.
-      namespace: openshift-machine-config
+      namespace: openshift-machine-config-operator
       # The name of the ChangeManagementPolicy.
       name: example-policy
 ```
@@ -1099,13 +1102,20 @@ Value:
 - `1`: Change management for this resource is subject to this enabled strategy.
 
 #### Change Management Bypass Annotation
-In some situations, it may be necessary for a MachineConfig to be applied regardless of the active change
+In some situations, it may be desirable for a MachineConfig to be applied regardless of the active change
 management policy for a MachineConfigPool. In such cases, `machineconfiguration.openshift.io/bypass-change-management`
 can be set to any non-empty string. The MCO will progress until MCPs which select annotated
 MachineConfigs have all machines running with a desiredConfig containing that MachineConfig's current state.
 
 This annotation will be present on `00-master` to ensure that, once the CVO updates the MachineConfig,
 the remainder of the control-plane update will be treated as a single material change.
+
+Rolling out critical machine config changes for worker nodes also is made easier with this annotation. 
+Instead of, for example, trying to predict a `disabledUntil` date, an SRE/operations team can use this 
+annotation to specify their goal with precision. Compare this with `disabledUntil`, which 
+(a) an operations team would generally overestimate in order to ensure that updates complete and 
+(b) may cause subsequent, non-critical, machine configuration changes to cause further workload disruption
+(node reboots) that are unwarranted.
 
 ### Special Handling
 
