@@ -20,8 +20,9 @@ This improvement comes with a new responsibility for our management team:
 identified regressions must be accepted by engineering leadership (currently Steve Cuppett) and BU leadership (currently Tushar Katarki).
 
 After written approval in the Jira bug representing the regression, the component team would reduce the acceptable reliability
-for a particular capability in OCP. as [openshift/sippy#1436](https://github.com/openshift/sippy/pull/1436) demonstrates.
-Once merged, this change will allow installations on SDNs to go from 100% reliable to 50% reliable.
+for a particular capability in OCP. as [openshift/sippy#1991](https://github.com/openshift/sippy/pull/1991) demonstrates.
+Once merged, this change will allow `operator conditions network`, with the specified set of variants, to go from 100% reliable to 66% reliable for the 4.17 release.
+It will, however, maintain the 4.16 100% baseline when 4.17 is the basis.
 The format clearly exposes
 1. What is changing
 2. What the previous reliability was
