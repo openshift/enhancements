@@ -35,10 +35,18 @@ persist the IP address across reboots or virtual machine shutdowns.
 
 ## Motivation
 
-Virtualization users are commonly used to having layer2 networks, and to having
-their tenant networks isolated from other tenants. This is something that
-opposes the Kubernetes networking model, in which all pods can reach other pods,
-and security is provided by implementing Network Policy.
+OpenShift virtualization users usually rely on secondary networks to
+interconnect their workloads; still, that is sometimes not enough: the user
+might want to use the "batteries" included with the default network (DNS, for
+instance), and secondary networks are simply not a possibility in cloud
+environments for use cases requiring cluster egress. For these scenarios,
+relying on the VM primary network (e.g. the cluster default network) is
+required.
+
+Traditional virtualization users are used to having layer2 networks, and to
+having their tenant networks isolated from other tenants. This is something
+that opposes the Kubernetes networking model, in which all pods can reach other
+pods, and security is provided by implementing Network Policy.
 
 To streamline the migration experience of users coming from these traditional
 virtualization platforms into OpenShift Virtualization we need to match the
