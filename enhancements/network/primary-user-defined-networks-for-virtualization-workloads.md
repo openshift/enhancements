@@ -136,30 +136,12 @@ pod.
 
 ### Extending networking from the pod interface to the VM
 
-KubeVirt uses a concept called bind mechanisms to extend networking to the VM;
-we plan on using the
-[passt](https://passt.top/passt/about/#passt-plug-a-simple-socket-transport)
-binding for this, which maps the layer2 network interface in the guest to
-native layer4 sockets (TCP/UDP/ICMP) on the host where the guest runs.
-To improve the user experience, the VM will have a single interface in it.
+KubeVirt uses a concept called bind mechanisms to extend networking from the
+pod interface to the VM.
 
-Passt is a user space program running on the pod network namespace that maps
-traffic from the guest to the respective sockets in the host; it currently is
-**not** migrated to the destination pod during VM live-migration, which causes
-the established TCP connections to be severed when the VM is migrated.
-
-This requires an enhancement on passt.
-
-TODO: link the ticket to get an enhancement
-
-This is the long-term plan for extending networking from the pod interface to
-the VM; assuming preserving the established TCP connections is an absolute must
-we could instead go for the [bridge binding alternative](#binding-mechanism) in
-4.18, and migrate to a version of passt that preserves the TCP connections in a
-future release / Z-stream.
-
-This problem is discussed in more detail / more options are presented in the
-following
+The requirements and challenges we currently face for choosing a binding
+mechanism that fulfills our objectives are presented and discussed in more
+detail in the following
 [KubeVirt document](https://docs.google.com/document/d/1JofGe_anOrb2SWBoGskSrl7bvIQ8D0TYeZa9FzDGI3g).
 
 ### Persisting VM IP addresses during the migration
