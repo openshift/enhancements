@@ -144,6 +144,23 @@ mechanism that fulfills our objectives are presented and discussed in more
 detail in the following
 [KubeVirt document](https://docs.google.com/document/d/1JofGe_anOrb2SWBoGskSrl7bvIQ8D0TYeZa9FzDGI3g).
 
+Assuming we choose (given the current constraints) an alternative that supports
+live-migration of VMs, like bridge or macvtap, we would be left without IPv6
+support. Even if OpenShift Virtualization **never** supported single-stack
+IPv6, this is far from optimal.
+
+We could address this gap in the SDN part of the solution, by having
+OVN-Kubernetes install DHCPv6 and RA flows for VM workloads attached to
+networks with IPv6 subnets (single / dual stack). This is tracked in this
+[user-story](https://issues.redhat.com/browse/SDN-5270).
+
+The same could be done for IPv4, thus highly simplifying the binding side of
+the equation: it would just focus on L2; the VMs would learn their IPs
+dynamically via DHCP / DHCPv6 / RAs.
+
+This would require the guest to support DHCP / DHCPv6 / RAs, and to be
+configured accordingly.
+
 ### Persisting VM IP addresses during the migration
 
 OpenShift already features the ability of providing persistent IP addresses
@@ -407,7 +424,26 @@ integration should be fully supported in this deployment type.
 
 ### Implementation Details/Notes/Constraints
 
-N/A
+#### Advertise LSP addresses via DHCP[v6] and prefix via RAs (for IPv6)
+
+For both IP families we will need to advertise the following information:
+- IP address
+- default GW
+- static routes
+- MTU
+- DNS
+- hostname
+
+For IPv4, the information indicated above will be configured via DHCPv4
+options.
+
+For IPv6 (dual-stack, since OpenShift Virt is currently *not* supported in
+single-stack) we plan to rely on stateful DHCPv6 configuration, in which the
+IP, DNS, and hostname are configured via DHCPv6, and the gateway, static routes
+and MTU are configured via RA messages.
+
+More information can be found in the
+[following table](https://docs.google.com/document/d/1_58GF558rwJNGQUdTv2rTjT60RjJrFjDFv3_3ben7rA/edit).
 
 ### Risks and Mitigations
 
