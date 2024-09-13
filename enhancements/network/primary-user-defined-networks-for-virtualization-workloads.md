@@ -471,6 +471,11 @@ There will be no dev or tech preview for this feature.
 
 Targeting GA in OCP version `4.17.Z`.
 
+This is safe for users that expect only stabilization updates since the feature
+must be enabled per namespace - i.e. users interested exclusively in
+stabilization updates should **not** configure primary UDNs in any of their
+namespaces.
+
 ### Removing a deprecated feature
 
 N/A
