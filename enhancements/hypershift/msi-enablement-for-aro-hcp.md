@@ -49,7 +49,7 @@ running on the data plane/guest cluster side use workload identity authenticatio
 
 ### Goals
 
-* Agreement from ingress, image registry, network, and storage representatives on a standard approach to authenticate with MSI for ARO HCP
+* Agreement from ingress, image registry, network, and storage representatives on a standard approach to authenticate with MSI for ARO HCP.
 
 ### Non-Goals
 
@@ -57,18 +57,18 @@ running on the data plane/guest cluster side use workload identity authenticatio
 
 ## Proposal
 
-We propose setting an environment variable, AZURE_MSI_AUTHENTICATION, upon deployment of image registry, ingress, cloud 
+We propose setting an environment variable, ARO_HCP_MI_CLIENT_ID, upon deployment of image registry, ingress, cloud 
 network config, and storage operators in the control plane of an ARO HCP cluster. This variable will be checked by each 
 operator; if set, it will override the default authentication mechanism, using a managed identity to authenticate with 
-Azure cloud services instead.
+Azure cloud services instead. ARO_HCP_MI_CLIENT_ID will contain the client ID to create the new managed identity.
 
 For operators with operands that they manage in the control plane, the operator would be responsible for propagating the 
 environment variable to those operands (if the operands need cloud access).
 
 ### Workflow Description
 
-* HostedCluster control plane operator will set AZURE_MSI_AUTHENTICATION on deployment of image registry, ingress, cluster network operator (which will pass the value to cloud network config), and storage operators
-* When each operator is configuring the Azure authentication type, if the AZURE_MSI_AUTHENTICATION is set, the operator will ignore any other Azure cloud configuration and use MSI
+* HostedCluster control plane operator will set ARO_HCP_MI_CLIENT_ID on deployment of image registry, ingress, cluster network operator (which will pass the value to cloud network config), and storage operators
+* When each operator is configuring the Azure authentication type, if the ARO_HCP_MI_CLIENT_ID is set, the operator will ignore any other Azure cloud configuration and use Managed Identity with the client ID being set to the value in ARO_HCP_MI_CLIENT_ID
 
 ### API Extensions
 

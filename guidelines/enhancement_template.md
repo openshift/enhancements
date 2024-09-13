@@ -17,7 +17,7 @@ see-also:
 replaces:
   - "/enhancements/that-less-than-great-idea.md"
 superseded-by:
-  - "/enhancements/our-past-effort.md"
+  - "https://github.com/openshift/enhancements/pull/1694"
 ---
 
 To get started with this template:
