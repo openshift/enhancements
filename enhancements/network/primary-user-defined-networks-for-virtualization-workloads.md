@@ -127,7 +127,7 @@ virt-launcher). Thus, given OVN-Kubernetes configures the pod interfaces (and
 is responsible for configuring networking up to the pod interface), we still
 need to extend connectivity from the pod interface into the VM.
 
-During live-migration - once it is is scheduled - and the destination
+During live-migration - once it is scheduled - and the destination
 node is chosen, a new pod is scheduled in the target node (let's call this pod
 the *destination* pod). Once this pod is ready, the *source* pod transfers the
 state of the live VM to the *destination* pod via a connection proxied by the
@@ -245,9 +245,6 @@ spec:
           - disk:
               bus: virtio
             name: containerdisk
-          - disk:
-              bus: virtio
-            name: cloudinitdisk
           interfaces:
           - name: passtnet
             binding:
@@ -264,14 +261,10 @@ spec:
       - containerDisk:
           image: quay.io/kubevirt/fedora-with-test-tooling-container-disk:v1.3.1
         name: containerdisk
-      - cloudInitNoCloud:
-          networkData: |
-            version: 2
-            ethernets:
-              eth0:
-                dhcp4: true
-        name: cloudinitdisk
 ```
+
+**NOTE:** the VM has some requirements that must be met; it must support
+DHCP / DHCPv6 / RAs (depending on the desired IP family configuration)
 
 Provisioning the VM in the system will be "watched" by two components; KubeVirt
 `virt-controller` and KubeVirt `ipam-extensions`. These components will then:
