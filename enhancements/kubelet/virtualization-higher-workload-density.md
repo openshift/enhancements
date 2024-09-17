@@ -397,6 +397,16 @@ Generic needs
 - Conduct load testing
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
+#### Swap GA for CNV users only
+In addition, swap is intended to become GA only for CNV users.
+
+This will be achieved in the following way:
+- The system will figure out if CNV is enabled by checking if the `hyperconvergeds.hco.kubevirt.io`
+object and the `openshift-cnv` namespace exist.
+- If CNV is enabled, do not emit an alert.
+- Otherwise, emit an alert that says this cluster has swap enabled and it is not supported.
+- Guard against non CNV users setting `LimitedSwap` in the KubeletConfig via MCO validation logic.
+
 ### Removing a deprecated feature
 
 - Announce deprecation and support policy of the existing feature
