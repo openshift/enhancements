@@ -146,9 +146,9 @@ User must have a disk partition labeled as IMAGE_STORE.
 We will have a script called `split-filesystem.sh`.
 
 This bash script will mount the filesystem using `IMAGE_STORE` label.
-The script will check if the selinux labels are correct for `/var/lib/images`.
-If the labels are correct, we will create a file called `.relabel_complete`.
-If the labels are incorrect, folder will be relabled.
+The script will check if .relabel_complete exists.
+If the file exists, we are done.
+If the file does not exist, we will relabel `/var/lib/images`.
 
 This script will be injected as a systemd file and referenced in a unit file similarly to how we do this for the kubelet auto sizing feature.
 
@@ -220,6 +220,12 @@ TBD
 In tech preview, we will automate many of the steps to mitigate problems.
 
 ### Drawbacks
+
+Day 2 addition of disks in Openshift does not have the best user experience.
+
+Adding a disk requires applying MachineConfigs which would trigger a reboot of the node.
+
+It is not currently possible (as of Dev preview) to add disks on creation of the node.
 
 ## Test Plan
 
