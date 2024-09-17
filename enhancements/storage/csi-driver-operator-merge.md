@@ -471,6 +471,12 @@ Same as today.
 
 ## Process of moving operators to csi-operator monorepo
 
+> **Warning**
+>
+> This guide is a historical document. Refer to [the doc in the `csi-operator` repo][migration-doc] for an up-to-date guide.
+>
+> [migration-doc]: https://github.com/openshift/csi-operator/blob/master/doc/migrating-operators.md
+
 We have come with following flow for moving operators from their own repository into csi-operator mono repo.
 
 ### Avoid .gitignore related footguns
