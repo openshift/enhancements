@@ -14,6 +14,7 @@ tracking-link:
   - "https://issues.redhat.com/browse/OCPSTRAT-615"
   - "https://issues.redhat.com/browse/OCPSTRAT-1592"
 see-also:
+  - "https://github.com/openshift/enhancements/pull/1657"
 replaces:
 superseded-by:
 ---
@@ -39,6 +40,8 @@ Custormers request the ability to add disks for day 0 and day 1 operations. Some
 
 All of these features are possible to support through a combination of machine configs and machine API changes.
 However, the support varies across the use cases and there is a need to define a general API for disk support so we can have a common experience across different methods.
+
+### Workflow Description
 
 ### Goals
 
@@ -95,6 +98,20 @@ As a user, I would like that my container logs are stored on a separate filesyst
 
 ### Implementation Details/Notes/Constraints
 
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+This proposal does not affect HyperShift.
+HyperShift does not leverage Machine API.
+
+#### Standalone Clusters
+
+
+#### Single-node Deployments or MicroShift
+
+Single Node and MicroShift do not leverage Machine API.
+
 ### Risks and Mitigations
 
 N/A
@@ -103,39 +120,40 @@ N/A
 
 ### Open Questions
 
-### Test Plan
+## Test Plan
 
-### Graduation Criteria
+## Graduation Criteria
 
-#### Dev Preview -> Tech Preview
-
-N/A
-
-#### Tech Preview -> GA
+### Dev Preview -> Tech Preview
 
 N/A
 
-#### Removing a deprecated feature
+### Tech Preview -> GA
+
+N/A
+
+### Removing a deprecated feature
 
 No features will be removed as a part of this proposal.
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
-### Version Skew Strategy
+## Version Skew Strategy
 
 N/A
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 
 #### Failure Modes
 
-#### Support Procedures
+
+## Support Procedures
 
 ## Implementation History
 
 N/A
 
-## Drawbacks
+### Drawbacks
 
 N/A
 
