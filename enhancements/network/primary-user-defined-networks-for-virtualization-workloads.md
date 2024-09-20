@@ -205,7 +205,8 @@ an attribute to the KubeVirt API
 [interface](https://kubevirt.io/api-reference/main/definitions.html#_v1_interface)
 named `ipAddress`. This approach suits the product, and meets the user's
 expectations because the user can configure the MAC address for an interface in
-that same `Interface` resource.
+that same `Interface` resource. This approach can be seen as a static IP
+address assignment.
 
 Regarding the implementation, OpenShift Virtualization would extend what it
 does for the MAC address: define it in the k8snetworkplumbingwg de-facto
@@ -603,19 +604,21 @@ drawback of this option.
 ### VM interface IP address configuration
 
 We will also rely on the `IPAMClaim` CRD to provide the VM owner a way to
-specify the IP addresses for the UDN interface of their VMs. This way, we
-do not require to update the KubeVirt API, which is something we have faced
-extreme resistance in the past.
+specify the IP addresses for the UDN interface of their VMs. This approach can
+be seen as static lease allocation for the VM workload.
+
+By relying on the `IPAMClaim` CRD we would not require to update the KubeVirt
+API, which is something we have faced extreme resistance in the past.
 
 Keep in mind that up to now the IPAMClaims would be created by OpenShift
-Virtualization directly; we need to allow the VM user to create them,
-specifying in its `spec` the desired IP addresses for the VM, and when creating
-the VM, point it to the respective `IPAMClaim` using an annotation - or label -
-(on the VM). Using a label would allow a controller to monitor which workloads
-are attached to an `IPAMClaim`.
+Virtualization directly; we need to allow the migration platform (i.e. MTV) to
+create them, specifying in its `spec` the desired IP addresses for the VM, and
+when creating the VM, point it to the respective `IPAMClaim` using an
+annotation - or label - (on the VM). Using a label would allow a controller to
+monitor which workloads are attached to an `IPAMClaim`.
 
 OpenShift Virtualization will see the annotation on the VM, and will proceed to
-the `IPAMClaim` owner reference, and template the launcher pod accordingly -
+set the `IPAMClaim` owner reference, and template the launcher pod accordingly,
 with the annotation mentioned in the
 [Persisting VM IP addresses during the migration](#persisting-vm-ip-addresses-during-the-migration)
 section.
@@ -637,14 +640,6 @@ conditions updated to reflect this.
 In the case it succeeds, the `IPAMClaim` conditions are updated w/ a success
 condition, and its `IPAMCLaim.Status.IPs` updated accordingly (as happens today)
 for secondary networks.
-
-A variation of this option would be if the user annotated the VM directly with
-the IPs they want to have available on the primary UDN interface - this way,
-OpenShift Virtualization would create the `IPAMClaim` on behalf of the user,
-requesting whose IPs in its `IPAMClaim.Spec.IPRequests` attribute. While this
-would free the user from having to create the `IPAMClaim` object, the API for
-it would be a bit clunky, since we'd have to rely on a comma separated list of
-IPs as the annotation value to support multiple IPs for an interface.
 
 ### Using multus default network annotation
 We could use the
