@@ -107,7 +107,7 @@ To compartmentalize the solution, the proposal will be split in three different
 topics:
 - [Extending networking from the pod interface to the VM](#extending-networking-from-the-pod-interface-to-the-VM)
 - [Persisting VM IP addresses during the migration](#persisting-vm-ip-addresses-during-the-migration)
-- [Allow user to configure the VM's interface desired IP address](#allow-user-to-configure-the-vms-interface-desired-ip-address)
+- [Allow platform migration tool to configure the VMs interface desired IP](#allow-platform-migration-tool-to-configure-the-vms-interface-desired-ip)
 
 Before that, let's ensure the proper context is in place.
 
@@ -198,26 +198,50 @@ We evaluate an alternative for this in the
 [Using multus default network annotation](#using-multus-default-network-annotation)
 section.
 
-### Allow user to configure the VMs interface desired IP address
+### Allow platform migration tool to configure the VMs interface desired IP
 
-To allow the user to specify the IP address for the workload we plan on adding
-an attribute to the KubeVirt API
-[interface](https://kubevirt.io/api-reference/main/definitions.html#_v1_interface)
-named `ipAddress`. This approach suits the product, and meets the user's
-expectations because the user can configure the MAC address for an interface in
-that same `Interface` resource. This approach can be seen as a static IP
-address assignment.
+We will rely on the `IPAMClaim` CRD to provide the VM owner a way to specify
+the IP addresses for the UDN interface of their VMs. This approach can be seen
+as static lease allocation for the VM workload.
 
-Regarding the implementation, OpenShift Virtualization would extend what it
-does for the MAC address: define it in the k8snetworkplumbingwg de-facto
-standard as an IP request, and the OVN-Kubernetes CNI would attempt to honor
-it.
+By relying on the `IPAMClaim` CRD we would not require to update the KubeVirt
+API, which is something we have faced extreme resistance in the past.
 
-This is by far the simplest solution to implement; another alternative is
-described in the [alternatives section](#vm-interface-ip-address-configuration).
-This other alternative has the advantage of not requiring a KubeVirt API update
-but adds a lot more work in OVN-Kubernetes, and requires updating the de-facto
-standard.
+Keep in mind that up to now the IPAMClaims would be created by OpenShift
+Virtualization directly; we need to allow the migration platform (i.e. MTV) to
+create them, specifying in its `spec` the desired IP addresses for the VM, and
+when creating the VM, point it to the respective `IPAMClaim` using an
+annotation - or label - (on the VM). Using a label would allow a controller to
+monitor which workloads are attached to an `IPAMClaim`.
+
+OpenShift Virtualization will see the annotation on the VM, and will proceed to
+set the `IPAMClaim` owner reference, and template the launcher pod accordingly,
+with the annotation mentioned in the
+[Persisting VM IP addresses during the migration](#persisting-vm-ip-addresses-during-the-migration)
+section.
+
+Once OVN-Kubernetes reconciles the pod which will host the VM, it will first
+validate the request - i.e. are the requested IPs in the configured ranges of
+the UDN network ? If not, the `IPAMClaim` condition will be set accordingly,
+and allocating the OVN annotation for the pod will fail. The network controller
+will keep attempting to reconcile the pod using exponential backoff until it
+possibly succeeds - in the case the user updates the
+`IPAMClaim.Spec.IPRequests` attribute.
+
+If the IPs being requested are in the configured subnet range of the network,
+the OVN-Kuberntes network controller proceeds to allocate the requested IP
+addresses; it might fail in case the requested IP addresses are already
+allocated in the network. If so, the pod will crashloop, and the `IPAMClaim`
+conditions updated to reflect this.
+
+In the case it succeeds, the `IPAMClaim` conditions are updated w/ a success
+condition, and its `IPAMCLaim.Status.IPs` updated accordingly (as happens today)
+for secondary networks.
+
+We could instead rely on static IP assignment; this alternative is described in
+the [alternatives section](#vm-interface-static-ip-address-assignment). It
+appears to consist of a more convoluted flow, but overall, it would be less
+work in OVN-Kubernetes.
 
 ### Workflow Description
 
@@ -601,45 +625,26 @@ primary UDN networks. This would require more work in the SDN side of the
 integration. This would leave service mesh / ACS / metric integration as the
 drawback of this option.
 
-### VM interface IP address configuration
+### VM interface static IP address assignment
 
-We will also rely on the `IPAMClaim` CRD to provide the VM owner a way to
-specify the IP addresses for the UDN interface of their VMs. This approach can
-be seen as static lease allocation for the VM workload.
+To allow the platform migration tool (MTV) to specify the IP address for the VM
+migrating from another virtualization platform into OpenShift Virtualization we
+would also rely on the `IPAMClaim` new API - e.g. the `spec.IPRequests`
+attribute.
 
-By relying on the `IPAMClaim` CRD we would not require to update the KubeVirt
-API, which is something we have faced extreme resistance in the past.
+MTV would create the `IPAMClaim` - requesting the IPs for the VM in
+`IPAMClaim.Spec.IPRequests`, and then point the VM to this claim via a label (or
+annotation). OpenShift Virtualization (when reconciling the VM) would then see
+the VM has a request for a persistent IP allocation, and template the launcher
+pod accordingly - i.e. customizing the IP addresses for the attachment in the
+multus-default-network annotation.
 
-Keep in mind that up to now the IPAMClaims would be created by OpenShift
-Virtualization directly; we need to allow the migration platform (i.e. MTV) to
-create them, specifying in its `spec` the desired IP addresses for the VM, and
-when creating the VM, point it to the respective `IPAMClaim` using an
-annotation - or label - (on the VM). Using a label would allow a controller to
-monitor which workloads are attached to an `IPAMClaim`.
-
-OpenShift Virtualization will see the annotation on the VM, and will proceed to
-set the `IPAMClaim` owner reference, and template the launcher pod accordingly,
-with the annotation mentioned in the
-[Persisting VM IP addresses during the migration](#persisting-vm-ip-addresses-during-the-migration)
-section.
-
-Once OVN-Kubernetes reconciles the pod which will host the VM, it will first
-validate the request - i.e. are the requested IPs in the configured ranges of
-the UDN network ? If not, the `IPAMClaim` condition will be set accordingly,
-and allocating the OVN annotation for the pod will fail. The network controller
-will keep attempting to reconcile the pod using exponential backoff until it
-possibly succeeds - in the case the user updates the
-`IPAMClaim.Spec.IPRequests` attribute.
-
-If the IPs being requested are in the configured subnet range of the network,
-the OVN-Kuberntes network controller proceeds to allocate the requested IP
-addresses; it might fail in case the requested IP addresses are already
-allocated in the network. If so, the pod will crashloop, and the `IPAMClaim`
-conditions updated to reflect this.
-
-In the case it succeeds, the `IPAMClaim` conditions are updated w/ a success
-condition, and its `IPAMCLaim.Status.IPs` updated accordingly (as happens today)
-for secondary networks.
+This approach depends on us choosing to go with the multus default-network
+annotation design option for
+[persisting VM IP addresses during the migration](#persisting-vm-ip-addresses-during-the-migration);
+it also requires OVN-Kubernetes to accept specifying IP addresses via the
+network-selection-elements for networks with a subnet - something which is not
+allowed today.
 
 ### Using multus default network annotation
 We could use the
