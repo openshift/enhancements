@@ -104,7 +104,6 @@ spec:
       - KubeletSeparateDiskGC
 ```
 
-
 #### Storage Configuration
 
 One could use a butane config as follows:
@@ -139,22 +138,7 @@ Applying storage.yaml will apply this machine config to your workers.
 
 #### Prequisites for Filesystem
 
-User must have a disk partition labeled as IMAGE_STORE.
-
-#### Script
-
-We will have a script called `split-filesystem.sh`.
-
-This bash script will mount the filesystem using `IMAGE_STORE` label.
-The script will check if .relabel_complete exists.
-If the file exists, we are done.
-If the file does not exist, we will relabel `/var/lib/images`.
-
-This script will be injected as a systemd file and referenced in a unit file similarly to how we do this for the kubelet auto sizing feature.
-
-One can look at [kubelet-auto-sizing script](https://github.com/openshift/machine-config-operator/blob/master/templates/common/_base/files/kubelet-auto-sizing.yaml) for an example of the script and [kubelet-auto-sizing unit](https://github.com/openshift/machine-config-operator/blob/master/templates/common/_base/units/kubelet-auto-node-size.service.yaml) for an example of the unit file.
-
-We will run this script after the `crio.service`.
+User must have a disk attached to the node and `imageroot` path is mounted on this disk.
 
 #### Remove all old images
 
@@ -178,24 +162,6 @@ In tech preview, we will add feature gates in openshift/api.
 
 Details will be filled out more for tech preview once dev preview has been released.
 
-#### API Changes
-
-These API changes will be done in the tech preview stage.
-
-```golang
-type ContainerRuntimeConfiguration struct {
-  ...
-	// +optional
-	SplitFilesystem bool `json:"splitFilesystem,omitempty"`
-
-}
-```
-
-API is defined [here](https://github.com/openshift/api/blob/0d46442e8df17a87cfcf6666ab19b28e88620b59/machineconfiguration/v1/types.go#L812).
-
-This feature will write the updated container storage file.
-
-This will also trigger labeling of /var/lib/images.
 
 ### GA
 
@@ -207,13 +173,8 @@ TBD
 
 - Installer does not support creating openshift clusters with multiple disk.
 
-- Do we need a drop in configuration for container storage?
-  - https://github.com/containers/storage/pull/1885
-
 - How does one delete all images and containers once the container runtime config is changed?
   - crictl on all images and containers on each node?
-
-- Day 2 operations for adding disks to openshift
 
 ### Risks and Mitigations
 
@@ -237,7 +198,6 @@ We could follow a similar idea.
 
 ### Dev Preview Criteria
 
-- Systemd bash script and unit file added
 - Manual steps for enabling via MachineConfigs
 - Blog post walking through this feature.
 
