@@ -73,8 +73,9 @@ still being able to connect to KAPI and consume Kubernetes DNS.
 migrating.
 - As a VM owner, I want the VM to have the same IP address before/after restart
 or shutdown.
-- As a VM owner, I want to be able to specify the IP address for the interface
-of my VM.
+- As the owner of a VM migrating from a traditional virtualization platform
+into OpenShift Virtualization, I want the VM to have the same IP address it had
+on the source virtualization platform.
 - As an owner of a VM that is connected only to the primary network, I want to 
 fetch resources from outside networks (internet).
 - As a VM owner migrating my VMs to OCP+V, I do not want to change my
@@ -86,17 +87,19 @@ on their LoadBalancer to route traffic to my applications.
 
 ### Goals
 
-- The IP addresses on the VM must be the same before / after live-migration and
-VM restart / shutdown
+- When configured by the admin, the IP addresses on the VM must be the same
+before / after live-migration and VM restart / shutdown
 - Live-migration without breaking the established TCP connections
-- Provide a configurable way for the user to define the IP addresses on a VM's
-interface.
+- When requested by the admin, preserve the IP address of VMs migrating into
+OpenShift Virtualization from other virtualization platforms
 - Native IPv6 integration
 - Integration with service meshes, and OpenShift observability solutions
 
 ### Non-Goals
 
-TODO
+- Provide a configurable way for the user to define the IP addresses on a VM's
+interface. This might become a goal for future releases though - the use case
+is not clear at the moment
 
 ## Proposal
 
