@@ -36,20 +36,19 @@ OpenShift is traditionally a single-disk system, meaning the OpenShift installer
 
 ## Motivation
 
-Custormers request the ability to add disks for day 0 and day 1 operations. Some of the common areas include designed disk for etcd, dedicated disk for swap partitions, container runtime filesystem, and a separate filesystem for container images.
+Customers request the ability to add disks to their OpenShift clusters. Some of the common areas include designed disk for etcd, dedicated disk for swap partitions, container runtime filesystem, and a separate filesystem for container images.
 
 All of these features are possible to support through a combination of machine configs and machine API changes.
 However, the support varies across the use cases and there is a need to define a general API for disk support so we can have a common experience across different methods.
 
-### Workflow Description
-
 ### Goals
 
-TBD
+- Define a common interface for infrastructure platforms to implement to use additional disks for a defined set of specific uses
+- Implement common behaviour to safely use the above disks when they have been presented by the infrastructure platform
 
 ### Non-Goals
 
-- Adding disk support in CAPI providers where it is not supported upstream
+- Adding generic support for mounting arbitrary additional disks
 
 ## Proposal
 
@@ -93,6 +92,71 @@ As a user, I would like that my container logs are stored on a separate filesyst
 [OCPSTRAT-188](https://issues.redhat.com/browse/OCPSTRAT-188) is one feature request for this.
 
 [RFE-2734](https://issues.redhat.com/browse/RFE-2734) is another ask for separating logs.
+
+### Workflow Description
+
+At a high level, customers would create a machine and specify the disk layout on node creation. For day 0 operations, this would mean that they are creating the cluster with this disk layout. For day 1 operations, we mean that the machine is created on an existing cluster.
+
+The main workflow in this case would be a customer requests the creation of a machine with the targeted disk layout. Once the disk is created, Machine Config Operation is able to setup the disk for the application.
+
+In the next section, we will walk through the workflows for each user story.
+
+#### ETCD Workflow
+
+@matt please help fill this out.
+
+#### Container Runtime Workflow
+
+CRI-O contains a location where images/containers are stored. The location is set to `/var/lib/containers/storage`. 
+By default, this is stored in the same partition as `/var`.
+Customers would like to add a disk to an openshift node and store images/containers on this disk.
+
+In order to do this, there are some gotchas for setting up your filesystem. 
+The main one is that the filesystem must have the correct selinux labels.
+In order to achieve this, we must be able to detect that the customer is changing filesystem.
+MCO relabels `/var/lib/containers/storage` to satisfy this rules so changing the location requires reapplying that logic. 
+
+The following steps could satisfy this request:
+
+- Customer requests a machine with a filesystem for container runtimes
+- The filesystem is labeled with `CONTAINER_RUNTIME`
+- MCO will detect that a machine has a `CONTAINER_RUNTIME` label.
+  - Given the label, the filesystem is labeled to satisfy selinux rules
+
+#### Image Store Workflow
+
+A new feature would allow for separating containers and images to separate filesystems.
+Due to a technical limitation in Kubernetes, we want to keep containers on the same filesystem as kubelet.
+But we want to be store images on a separate disk.
+
+The following steps could satisfy this request:
+- Customer requests a machine with a filesystem for images
+- The filesystem is labeled with `IMAGES`
+- MCO will detect that the machine has a `IMAGES` label.
+- Given the label, MCO will prepare the node for this.
+  - Container storage should set `IMAGESTORE`
+  - selinux relabeling
+
+#### Container Logs Workflow
+
+Upstream work is required for this to track storage metrics if logs are separated to a separate disk.
+But the workflow is still worth going through for this feature.
+Log location can be controlled via a KubeletConfig.
+
+The following steps could satisfy this request:
+- Customer requests a machine with a filesystem for logs
+- The filesystem is labeled with `CONTAINER_LOGS`
+- MCO detects that the machine has a `CONTAINER_LOGS` label.
+- Given this label, KubeletConfig is changed for the container logs.
+- Kubelet is restarted
+
+#### Swap Workflow
+
+The following steps could satisfy this request:
+- Customer requests a machine with a filesystem for swap.
+- The filesystem is labeled with `SWAP`.
+- MCO detects that the machine has a `SWAP` label.
+- Given this label, Swap is set up on the filesystem.
 
 ### API Extensions
 
