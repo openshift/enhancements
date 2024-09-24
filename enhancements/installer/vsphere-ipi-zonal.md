@@ -417,21 +417,21 @@ type VSpherePlatformTopology struct {
 // This configuration within vCenter creates the required association between a failure domain, virtual machines
 // and ESXi hosts to create a vm-host based zone.
 type VSphereFailureDomainAffinity struct {
-	// VMGroupName is the name of the vm-host group of type virtual machine within vCenter for this failure domain.
+	// vmGroup is the name of the vm-host group of type virtual machine within vCenter for this failure domain.
 	// This field is required when the VSphereFailureDomain ZoneType is HostGroup
 	// +openshift:validation:featureGate=VSphereHostVMGroupZonal
 	// +kubebuilder:validation:MaxLength=80
 	// +optional
 	VMGroup string `json:"vmGroup,omitempty"`
 
-	// HostGroup is the name of the vm-host group of type host within vCenter for this failure domain.
+	// hostGroup is the name of the vm-host group of type host within vCenter for this failure domain.
 	// This field is required when the VSphereFailureDomain ZoneType is HostGroup
 	// +openshift:validation:featureGate=VSphereHostVMGroupZonal
 	// +kubebuilder:validation:MaxLength=80
 	// +optional
 	HostGroup string `json:"hostGroup,omitempty"`
 
-	// VMHostRule is the name of the affinity vm-host rule within vCenter for this failure domain.
+	// vmHostRule is the name of the affinity vm-host rule within vCenter for this failure domain.
 	// This field is required when the VSphereFailureDomain ZoneType is HostGroup
 	// +openshift:validation:featureGate=VSphereHostVMGroupZonal
 	// +kubebuilder:validation:MaxLength=80
