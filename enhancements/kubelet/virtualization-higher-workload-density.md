@@ -62,10 +62,6 @@ memory utilization per node, in order to reduce the cost per virtual machine.
 
 ### Goals
 
-#### Timeline
-
-* GA higher workload density in OpenShift Virtualization in 2024
-
 #### Functionality
 
 * Fit more virtual machines onto a node once higher workload density
@@ -124,23 +120,29 @@ Kube swap.
 
 #### Timeline & Phases
 
-Because [Kubernetes SWAP] is currently in Beta only expect to GA with
-Kube 1.32 (OpenShift 4.19, approx mid 2025) this proposal is taking a
-two phased approach in order to meet the timeline requirements.
+| Phase                                             | Target |
+|---------------------------------------------------|--------|
+| Phase 1 - Out-Of-Tree SWAP with WASP              | 2024   |
+| Phase 2 - Kubernetes SWAP for CNV-only with WASP  | 2025   |
+| Phase 3 - Kubernetes SWAP for all Openshift users | TBD    |
+
+Because [Kubernetes SWAP] is currently in Beta and is only expected to GA with
+Kubernetes 1.32 (OpenShift 4.19, approx mid 2025) this proposal is taking a
+three phased approach in order to meet the timeline requirements.
 
 * **Phase 1** - OpenShift Virtualization will provide an out-of-tree
   solution to enable higher workload density.
-* **Phase 2** - OpenShift Virtualization will transition to
-  [Kubernetes SWAP] (in-tree) whenever this feature is generally
-  available in OpenShift itself.
+* **Phase 2** - OpenShift Virtualization will transition to [Kubernetes SWAP] (in-tree).
+  OpenShift will allow using SWAP only for CNV users, that is,
+  whenever OpenShift Virtualization is installed on the cluster.
+  In this phase, WASP would still be used as an auxiliary tool, e.g.
+  for swap-based evictions. 
+* **Phase 3** - OpenShift will GA SWAP for every user, even if OpenShift Virtualization
+  is not installed on the cluster.
+  In addition, WASP will be dropped in favor of GAed Kubernetes mechanisms.
 
-This enhnacement is focusing on Phase 1 and the transition to Phase 2.
-Phase 2 is covered by the upstream [Kubernetes SWAP] enhnacements.
-
-#### Phase 1 - Out-Of-Tree SWAP with WASP
-
-[WASP Agent] is a component which is providing an [OCI hook] to enable
-SWAP for selected containers hosting virtual machines.
+This enhancement is focusing on Phase 1 and the transition to Phase 2.
+Phase 2 is covered by the upstream [Kubernetes SWAP] enhancements.
 
 ### Workflow Description
 
