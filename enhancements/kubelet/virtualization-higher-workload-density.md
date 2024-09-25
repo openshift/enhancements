@@ -26,7 +26,7 @@ status: implementable
 
 Fit more workloads onto a given node - achieve a higher workload
 density - by overcommitting it's memory resources. Due to timeline
-needs a two-phased approach is considered.
+needs a multi-phased approach is considered.
 
 ## Motivation
 
@@ -67,9 +67,6 @@ memory utilization per node, in order to reduce the cost per virtual machine.
 * Fit more virtual machines onto a node once higher workload density
   is enabled
 * Integrate well with [KSM] and [FPR]
-* **Technology Preview** - Enable higher density at all, limited
-  support for stressed clusters
-* **General Availability** - Improve handling of stressed clusters
 
 #### Usability
 
@@ -108,7 +105,7 @@ We expect to mitigate the following situations
 
 #### Scope
 
-Memory over-committment, and as such swapping, will be initially limited to
+Memory over-commitment, and as such swapping, will be initially limited to
 virtual machines running in the burstable QoS class.
 Virtual machines in the guaranteed QoS classes are not getting over
 committed due to alignment with upstream Kubernetes. Virtual machines
@@ -163,7 +160,7 @@ virtual machine in a cluster.
       kubelet configuration via a `KubeletConfig` CR, in order to ensure
       that the kubelet will start once swap has been rolled out.
    a. The cluster admin is calculating the amount of swap space to
-      provision based on the amount of physical ram and overcommittment
+      provision based on the amount of physical ram and overcommitment
       ratio
    b. The cluster admin is creating a `MachineConfig` for provisioning
       swap on worker nodes
@@ -177,13 +174,15 @@ virtual machine in a cluster.
 
 The cluster is now set up for higher workload density.
 
+In phase 3, deploying the WASP agent will not be needed.
+
 #### Workflow: Leveraging higher workload density
 
 1. The VM Owner is creating a regular virtual machine and is launching it.
 
 ### API Extensions
 
-Phase 1 does not require any Kubernetes, OpenShift, or OpenShift
+This proposal does not require any Kubernetes, OpenShift, or OpenShift
 Virtualization API changes.
 
 ### Topology Considerations
@@ -195,7 +194,7 @@ not provide the `MachineConfig` APIs.
 
 #### Standalone Clusters
 
-Standalone regular, and compact clusters are the primary use-cases for
+Standalone, regular and compact clusters are the primary use-cases for
 swap.
 
 #### Single-node Deployments or MicroShift
@@ -228,8 +227,16 @@ The design is driven by the following guiding principles:
 An OCI Hook to enable swap by setting the containers cgroup
 `memory.swap.max=max`.
 
-* **Technology Preview** - Limited to virt launcher pods
-* **General Availability** - Limited to burstable QoS class pods
+* **Technology Preview**
+  * Limited to virt launcher pods.
+  * Uses `UnlimitedSwap`.
+* **General Availability**
+  * Limited to burstable QoS class pods.
+  * Uses `LimitedSwap`.
+  * Limited to non-high-priority pods.
+
+For more info, refer to the upstream documentation on how to calculate
+[limited swap](https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/2400-node-swap#steps-to-calculate-swap-limit).
 
 ###### Provisioning swap
 
@@ -272,14 +279,16 @@ This is, because by default, no other slice is configured to have
 
 ###### Critical workload protection
 
-Even critical pod workloads are run in burstable QoS class pods, thus
-at **General Availability** time they will be eligible to swap.
+Even critical pod workloads are run in burstable QoS class pods.
 However, swapping can lead to increased latencies and response times.
 For example, if a critical pod is depending on `LivenessProbe`s, then
 these checks can start to fail, once the pod is starting to swap.
 
 This is undesirable and can put a node or a cluster (i.e. if a critical
 Operator is affected) at risk.
+
+Therefore, at **General Availability** time they will not be eligible to swap.
+This is aligned with the upstream behavior.
 
 In order to prevent this problem, swap will be selectively disabled
 for pod using the two well-known [critical `priorityClass`es]:
@@ -299,23 +308,21 @@ Dealing with memory pressure on a node is differentiating the TP fom GA.
   * Pro
     * Simple to achieve.
   * Con
-    * A lot of memory pressure has ot be present in order to trigger
+    * A lot of memory pressure has to be present in order to trigger
       soft eviction.
+    * Once `memory.high` is reached, the whole `kubepods.slice` is throttled
+      and cannot allocate memory, which might lead to applications crashing.
 
-* **General Availability** - Memory based soft and hard eviction is going to
-  be disabled, in favor of enabling swap based hard evictions, based on new
+* **General Availability** - Memory-based soft eviction is going to
+  be disabled, in favor of enabling swap-based hard evictions, based on new
   swap traffic and swap utilization eviction metrics.
 
   * Pro
-    * Simple mental model. With memory only, memory eviction is used.
-      With swap, swap eviction is used.
+    * Eviction on the basis of swap pressure, not only memory pressure.
     * [LLN] applies, because all pods share the nodes memory
   * Con
-    * If there are no burstable QoS pods on a node, then no swapping
-      can take place, and no swap related signal will be triggered.
-      Only way to remove pressure is cgroup level OOM.
-      This is considered to be an edge case and highly unlikely.
-      Prometheus alerts for this edge case will be added.
+    * Swap-based evictions are made through a 3rd party container, which means
+      it has to be done through an API-initiated eviction.
 
 ###### Node memory reduction
 
@@ -340,14 +347,14 @@ The mechanisms are:
 
 ##### Differences between Technology Preview vs GA
 
-|                              | TP            | GA                 |
-|------------------------------|---------------|--------------------|
-| SWAP Provisioning            | MachineConfig | MachineConfig      |
-| SWAP Eligibility             | VM pods       | burstable QoS pods |
-| Node service protection      | Yes           | Yes                |
-| I/O saturation protection    | Yes           | Yes                |
-| Critical workload protection | No            | Yes                |
-| Memory pressure handling     | Memory based  | Swap based         |
+|                              | TP            | GA                  |
+|------------------------------|---------------|---------------------|
+| SWAP Provisioning            | MachineConfig | MachineConfig       |
+| SWAP Eligibility             | VM pods       | burstable QoS pods  |
+| Node service protection      | Yes           | Yes                 |
+| I/O saturation protection    | Yes           | Yes                 |
+| Critical workload protection | No            | Yes                 |
+| Memory pressure handling     | Memory based  | Memory & Swap based |
 
 ### Risks and Mitigations
 
@@ -359,7 +366,16 @@ The mechanisms are:
 
 #### Phase 2
 
-Handled by upstream Kubernetes.
+Swap is handled by upstream Kubernetes.
+
+| Risk                                                      | Mitigation                                        |
+|-----------------------------------------------------------|---------------------------------------------------|
+| Swap-based evictions are based on API-initiated evictions | Also rely on kubelet-level memory-based evictions |
+
+#### Phase 3
+
+Upstream Kubernetes handles both swap and evictions.
+Swap provision handled by OpenShift.
 
 ### Drawbacks
 
