@@ -946,6 +946,20 @@ the guest needs to be added to this vm-host group of type virtual machine.
 For each `FailureDomain` an ova import will need to occur.
 If there is only a single zone then a single import will be required.
 
+
+##### vm-host zonal specifics
+
+The vCenter vm-host group of type host is required for each zone prior to installation. Each `FailureDomain` has
+a `hostGroup` field that is required when `zoneType` is `HostGroup`. The vCenter vm-host group will contain
+the list of ESXi hosts that are associated to that zone. 
+
+Tags will continue to also be required prior to installation. The tag category openshift-region
+will be associated with a tag created and applied to the vCenter cluster object. The tag category openshift-zone
+will be associated with a tag create and applied to each ESXi host in the zone, which is also defined by the vm-host group (type host).
+
+The installer will create a vm-host group of type virtual machine per failure domain. 
+It will also create a vm-host group rule per failure domain.
+
 ### User Stories
 
 - https://issues.redhat.com/browse/RFE-845
