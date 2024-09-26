@@ -13,7 +13,7 @@ api-approvers:
   - "@JoelSpeed"
   - "@deads2k"
 creation-date: 2021-09-21
-last-updated: 2024-09-23
+last-updated: 2024-09-26
 status: implementable
 see-also:
   - "/enhancements/"
@@ -454,14 +454,9 @@ with just manifest creation.
 ### installer
 #### Platform Spec
 
-The platform spec needs to be modified to support vSphere topology and zonal deployment. 
-This platform spec design is based on the changes suggested in openshift/api, Cluster API for vSphere
+The platform spec needs support vSphere topology and zonal deployment. 
+This platform spec design is based on the changes api, Cluster API for vSphere
 and out-of-tree CCM.
-
-We are adding multiple additional parameters to the Platform struct:
-
-- `VCenters`
-- `FailureDomains`
 
 `VCenters` will contain the connections and configuration for each vCenter
 that is required for the out-of-tree CCM. 
@@ -471,13 +466,11 @@ that is required for the out-of-tree CCM.
 including `Datacenter`, `ComputeCluster`, `Hosts`, `Networks`, `Datastore` and 
 optionally `ResourcePool`, `Folder`, `Template`, and `TagIDs`.
 
-The vm-host group zonal will add a new additional field of `hostGroup`
-which needs to pre-exist prior to installation.
+The vm-host group zonal will add a field of `hostGroup` which needs to pre-exist prior to installation.
 
-The existing platform spec vcenter parameters will be deprecated
+The existing platform spec vcenter parameters are deprecated
 but not removed or remove support for using those parameters. The deprecated
 platform spec though will not gain the new features that failure domains provides.
-
 
 ```golang
 package vsphere
@@ -841,9 +834,7 @@ To implement host zonal in vSphere the virtual machines need to be added to a vm
 CAPV gives this capability by creating `VSphereFailureDomains` and `VSphereDeploymentZones`
 
 ```golang
-
 for _, failureDomain := range installConfig.Config.VSphere.FailureDomains {
-
 	if failureDomain.ZoneType == vsphere.HostGroupFailureDomain {
 		dz := &capv.VSphereDeploymentZone{
 			TypeMeta: metav1.TypeMeta{},
@@ -937,20 +928,18 @@ There are too many options to support this configuration.
 Deploying a topology with failure domains will only be supported via
 the `install-config.yaml`
 
-#### Installer Cluster API and vSphere provider 
+#### The use of Cluster API and the vSphere provider in the Installer
 
-The installer uses capi and the capv provider to provision the bootstrap and control plane nodes for vSphere.
+The installer uses CAPI and the CAPV provider to provision the bootstrap and control plane nodes for vSphere.
 Terraform is no longer used for vSphere installation.
 
 #### Machine and MachineSet
 
-The control plane
-[Machines](https://github.com/openshift/installer/blob/b0b96468893db2240e82ba2aa0935679c8c49201/pkg/asset/machines/vsphere/machines.go#L19-L64)
-will need to be modified to create a Machine per `FailureDomain`.
+The control plane machines are now created with CAPI/CAPV and a capv machine is used for deployment.
+No modification is required to the machine object to support vm-host zonal.
 
-For each `FailureDomain` an additional `MachineSet` for
-the compute nodes will need to be created based on the `MachinePool`
-`zones` configuration.
+The compute workspace will add a single field `vmGroup` to indicate that 
+the guest needs to be added to this vm-host group of type virtual machine.
 
 ##### OVA import
 
@@ -969,7 +958,7 @@ If there is only a single zone then a single import will be required.
 
 ## Design Details
 
-Scenario #1 - Datacenter-based region, cluster-based zone
+### Scenario #1 - Datacenter-based region, cluster-based zone
 
 ```yaml
 platform:                                                                                                                                                                          
@@ -1005,7 +994,7 @@ platform:
         datastore: /cidatacenter/datastore/vsanDatastore
 ```
 
-Scenario #2 - Cluster-based region, Host-based zone
+### Scenario #2 - Cluster-based region, Host-based zone
 
 ```yaml
 platform:                                                                                                                                                                          
