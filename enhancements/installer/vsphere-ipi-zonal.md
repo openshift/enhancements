@@ -145,8 +145,16 @@ type VSpherePlatformFailureDomainSpec struct {
 	// +kubebuilder:validation:MaxLength=14
 	// +kubebuilder:validation:Optional
 	// +openshift:validation:FeatureGateAwareEnum:featureGate=VSphereHostVMGroupZonal,enum=HostGroup;ComputeCluster
-	// +optional
-	ZoneType string `json:"zoneType,omitempty"`
+	// +unionDiscriminator
+	ZoneType VSphereFailureDomainType `json:"zoneType,omitempty"` 
+    
+	// zoneAffinity holds the VMGroup and the HostGroup names in vCenter corresponds to
+	// a vm-host group of type Virtual Machine and Host respectively. Is also
+	// contains the VMHostRule which is an affinity vm-host rule in vCenter.
+	// +openshift:validation:featureGate=VSphereHostVMGroupZonal
+	// +kubebuilder:validation:Optional
+	// +unionMember,optional
+	HostGroupZone *VSphereHostGroupZone `json:"hostGroupZone,omitempty"`
 
 	// server is the fully-qualified domain name or the IP address of the vCenter server.
 	// +kubebuilder:validation:Required
@@ -160,6 +168,31 @@ type VSpherePlatformFailureDomainSpec struct {
 	// +kubebuilder:validation:Required
 	Topology VSpherePlatformTopology `json:"topology"`
 }
+
+// VSphereHostGroupZone contains the vCenter cluster vm-host group (virtual machine and host types)
+// and the vm-host affinity rule that together creates a affinity configuration for vm-host based zonal.
+// This configuration within vCenter creates the required association between a failure domain, virtual machines
+// and ESXi hosts to create a vm-host based zone.
+type VSphereHostGroupZone struct
+	// vmGroup is the name of the vm-host group of type virtual machine within vCenter for this failure domain.
+	// This field is required when the VSphereFailureDomain ZoneType is HostGroup
+	// +openshift:validation:featureGate=VSphereHostVMGroupZonal
+	// +kubebuilder:validation:MaxLength=80
+	VMGroup string `json:"vmGroup,omitempty"`
+
+	// hostGroup is the name of the vm-host group of type host within vCenter for this failure domain.
+	// This field is required when the VSphereFailureDomain ZoneType is HostGroup
+	// +openshift:validation:featureGate=VSphereHostVMGroupZonal
+	// +kubebuilder:validation:MaxLength=80
+	HostGroup string `json:"hostGroup,omitempty"`
+
+	// vmHostRule is the name of the affinity vm-host rule within vCenter for this failure domain.
+	// This field is required when the VSphereFailureDomain ZoneType is HostGroup
+	// +openshift:validation:featureGate=VSphereHostVMGroupZonal
+	// +kubebuilder:validation:MaxLength=80
+	VMHostRule string `json:"vmHostRule,omitempty"`
+}
+
 
 // VSpherePlatformTopology holds the required and optional vCenter objects - datacenter,
 // computeCluster, networks, datastore and resourcePool - to provision virtual machines.
@@ -235,41 +268,6 @@ type VSpherePlatformTopology struct {
 	// +kubebuilder:validation:Pattern=`^/.*?/vm/.*?`
 	// +optional
 	Template string `json:"template,omitempty"`
-
-	// affinity holds the VMGroup and the HostGroup names in vCenter corresponds to
-	// a vm-host group of type Virtual Machine and Host respectively. Is also
-	// contains the VMHostRule which is an affinity vm-host rule in vCenter.
-	// +openshift:validation:featureGate=VSphereHostVMGroupZonal
-	// +kubebuilder:validation:Optional
-	// +optional
-	Affinity VSphereFailureDomainAffinity `json:"affinity,omitempty"`
-}
-
-// VSphereFailureDomainAffinity contains the vCenter cluster vm-host group (virtual machine and host types)
-// and the vm-host affinity rule that together creates a affinity configuration for vm-host based zonal.
-// This configuration within vCenter creates the required association between a failure domain, virtual machines
-// and ESXi hosts to create a vm-host based zone.
-type VSphereFailureDomainAffinity struct {
-	// vmGroup is the name of the vm-host group of type virtual machine within vCenter for this failure domain.
-	// This field is required when the VSphereFailureDomain ZoneType is HostGroup
-	// +openshift:validation:featureGate=VSphereHostVMGroupZonal
-	// +kubebuilder:validation:MaxLength=80
-	// +optional
-	VMGroup string `json:"vmGroup,omitempty"`
-
-	// hostGroup is the name of the vm-host group of type host within vCenter for this failure domain.
-	// This field is required when the VSphereFailureDomain ZoneType is HostGroup
-	// +openshift:validation:featureGate=VSphereHostVMGroupZonal
-	// +kubebuilder:validation:MaxLength=80
-	// +optional
-	HostGroup string `json:"hostGroup,omitempty"`
-
-	// vmHostRule is the name of the affinity vm-host rule within vCenter for this failure domain.
-	// This field is required when the VSphereFailureDomain ZoneType is HostGroup
-	// +openshift:validation:featureGate=VSphereHostVMGroupZonal
-	// +kubebuilder:validation:MaxLength=80
-	// +optional
-	VMHostRule string `json:"vmHostRule,omitempty"`
 }
 
 // VSpherePlatformVCenterSpec stores the vCenter connection fields.
