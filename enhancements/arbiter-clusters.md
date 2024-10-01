@@ -59,6 +59,8 @@ the 3 nodes for ETCD quorum.
 
 - Provide a new arbiter node role type that achieves HA but does not act as a
   full master node.
+- HA for a 2+1 arbiter node should match the HA guarantees of a 3 Node Cluster
+  deployment.
 - Support installing OpenShift with 2 master nodes and 1 arbiter node.
 - The arbiter node hardware requirements will be lower than regular nodes in
   both cost and performance. Customers can use devices on the market from OEMs
