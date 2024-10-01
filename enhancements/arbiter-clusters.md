@@ -5,13 +5,13 @@ authors:
 reviewers:
   - "@tjungblu"
   - "@patrickdillon"
-  - "@williamcaban"
+  - "@racedo"
   - "@deads2k"
   - "@jerpeter1"
 approvers:
   - "@tjungblu"
   - "@patrickdillon"
-  - "@williamcaban"
+  - "@racedo"
   - "@jerpeter1"
   - "@deads2k"
 api-approvers:
@@ -51,22 +51,29 @@ the 3 nodes for ETCD quorum.
   OpenShift deployments on purpose built hardware for a 2 + 1 configuration.
 - As an OpenShift cluster admin I want non-critical applications deployed to my
   2 + 1 arbiter node cluster to not be scheduled to run on the arbiter node.
+- As an OpenShift cluster admin I want to be able to allow deployments with
+  proper tolerations or explicitly defined node in the `spec` to be able to be
+  scheduled on the arbiter node.
 
 ### Goals
 
-- Provide a new node arbiter role type that supports HA but is not a full master
-- Support installing OpenShift with 2 regular nodes and 1 arbiter node.
-- The arbiter node hardware requirement will be lower than regular nodes.
+- Provide a new arbiter node role type that achieves HA but does not act as a
+  full master node.
+- Support installing OpenShift with 2 master nodes and 1 arbiter node.
+- The arbiter node hardware requirements will be lower than regular nodes in
+  both cost and performance. Customers can use devices on the market from OEMs
+  like Dell that supply an all in one unit with 2 compute and 1 lower powered
+  compute for this deployment scenario.
+- Moving from 2 + 1 to a conventional 3 node cluster
 
 ### Non-Goals
 
 The below goals are not intended to be worked on now, but might be expansion
 ideas for future features.
 
-- Running the arbiter node offsite
-- Running the arbiter node as a VM local to the cluster
-- Having a single arbiter supporting multiple clusters
-- Moving from 2 + 1 to conventional 3 node cluster
+- Running the arbiter node offsite.
+- Running a virtualized arbiter node on the same cluster.
+- Having a single arbiter supporting multiple clusters.
 
 ## Proposal
 
@@ -78,22 +85,23 @@ components that help maintain an HA cluster, but other platform pods should not
 be scheduled on the arbiter node. The arbiter node will be tainted to make sure
 that only deployments that tolerate that taint are scheduled on the arbiter.
 
-Things that we are proposing of changing.
+Functionality that we are proposing to change:
 
-- Adding a new topology to the [OCP/API Control Plane
-  Topology](https://github.com/openshift/api/blob/69df64132c911e9eb0176e9697f451c13457e294/config/v1/types_infrastructure.go#L103)
-  - This type of change should have an authoritative flag that indicates layout
-    of the control plane, this information would be valuable for operator
-    developers so no inference is required.
+- Update MCO MachinePool Validation Webhook to support `master/arbiter`
+  configuration.
+  - Currently MCO blocks custom machine pools that are paired with the `master`
+    role, we will need to update this to explicitly support the `arbiter` role
+    only. This will allow the arbiter to inherit the same machine configs as the
+    `master`.
 - We will add support to the OCP installer to provide a way of setting up the
-  initial manifests and the ControlPlaneTopology field.
-  - We will need to support a path for customers to indicate the desire for a 2
-    - 1 arbiter install configuration.
+  initial manifests, taints, and node roles.
+  - We will need to support a path for customers to indicate the desire for a
+    2+1 arbiter install configuration.
   - This will also be used to apply the taint to the machineset manifest.
-- Alter CEO to be aware of the arbiter node role type and allow it to treat it
-  as if it were a master node.
+- Alter Cluster ETCD Operator (CEO) to be aware of the arbiter node role type
+  and allow it to treat it as if it were a master node.
   - We will need CEO to create an ETCD member on the arbiter node to allow
-    quarom to happen
+    quarum to happen
 - Update the tolerations of any critical or desired component that should be
   running on the arbiter node.
 
@@ -101,36 +109,32 @@ Things that we are proposing of changing.
 
 #### For Cloud Installs
 
-1. User sits down at the computer.
-2. The user creates an `install-config.yaml` like normal.
-3. The user defines the `install-config.controlPlane` field with `3` replicas.
-4. The user then enters the new field `install-config.controlPlane.arbiterNode`
+1. The user creates an `install-config.yaml`.
+2. The user defines the `install-config.controlPlane` field with `3` replicas.
+3. The user then enters the new field `install-config.controlPlane.arbiterNode`
    and sets it to `true`
-5. The user generates the manifests with this install config via the
+4. The user generates the manifests with this install config via the
    `openshift-install create manifests`
-6. With the flag `arbiterNode` in the install config, the installer adds the
-   `ControlPlaneTopology: ArbiterHighlyAvailable` to the infrastructure config
-   object.
-7. The installer creates a new `arbiter` MachineSet with a replica of 1 and
+5. The installer creates a new `arbiter` MachineSet with a replica of 1 and
    reduces the default control plane replicas to `2`
-8. The installer applies the new node role and taint to the arbiter MachineSet
-9. The user can make any alterations to the node machine type to use less
+6. With the flag `arbiterNode` in the install config, the installer adds the
+   `node-role.kubernetes.io/arbiter: ""` to the machine object.
+7. The installer applies the taint to the arbiter MachineSet
+8. The user can make any alterations to the node machine type to use less
    powerful machines.
-10. The user then begins the install via `openshift-install create cluster`
+9. The user then begins the install via `openshift-install create cluster`
 
 #### For Baremetal Installs
 
-1. User sits down at the computer.
-2. The user creates an `install-config.yaml` like normal.
-3. The user defines the `install-config.controlPlane` field with `3` replicas.
-4. The user then enters the new field `install-config.controlPlane.arbiterNode`
+1. The user creates an `install-config.yaml` like normal.
+2. The user defines the `install-config.controlPlane` field with `3` replicas.
+3. The user then enters the new field `install-config.controlPlane.arbiterNode`
    and sets it to `true`
-5. The user then enters the machine information for `platform.baremetal` and
+4. The user then enters the machine information for `platform.baremetal` and
    identifies one of the nodes as a role `arbiter`
-6. With the flag `arbiterNode` in the install config, the installer adds the
-   `ControlPlaneTopology: ArbiterHighlyAvailable` to the infrastructure config
-   object.
-7. The user then begins the install via `openshift-install create cluster`
+5. With the flag `arbiterNode` in the install config, the installer adds the
+   `node-role.kubernetes.io/arbiter: ""` to the machine object.
+6. The user then begins the install via `openshift-install create cluster`
 
 #### During Install
 
@@ -143,8 +147,8 @@ Things that we are proposing of changing.
 
 ### API Extensions
 
-The `config.infrastructure.controlPlaneTopology` enum will be extended to
-include `ArbiterHighlyAvailable`
+The `installConfig` will include a `install-config.controlPlane.arbiterNode`
+bool flag to denote arbiter infra structure.
 
 ### Topology Considerations
 
@@ -188,14 +192,17 @@ updates.
 
 Another risk we run is customers using an arbiter node with improper disk speeds
 below that recommended for etcd, since etcd is sensitive to latency between
-members, we should provide proper guidance so that the arbiter node doesn't
-become a bottleneck for etcd.
+members, we should provide proper guidance so that the arbiter node must meet
+minimum requirements for ETCD to function properly. ([ETCD
+Recommendations](https://docs.openshift.com/container-platform/4.16/scalability_and_performance/recommended-performance-scale-practices/recommended-etcd-practices.html))
 
 ### Drawbacks
 
 A few drawbacks we have is that we will be creating a new variant of OpenShift
 that implements a new unique way of doing HA for kubernetes. This does mean an
-increase in the test matrix and all together a different type of tests since
+increase in the test matrix and all together a different type of tests since the
+addition of an arbiter node will require different validation scenarios for
+failover.
 
 ## Open Questions [optional]
 
@@ -205,22 +212,16 @@ increase in the test matrix and all together a different type of tests since
 
 ## Test Plan
 
-WIP
-
-- Running e2e test would be preferred but might prove to be tricky due to the
-  asymmetry in the control plane
-- We need a strategy for validating install and test failures
+- We will create a CI lane to validate install and fail over scenarios such as
+  loosing a master or swaping out an arbiter node.
+- CI lane for e2e conformance testing, tests that explicitly test 3 node masters
+  will need to be altered to accommodate the different topology.
 
 ## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
 
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-- Enumerate service level indicators (SLIs), expose SLIs as metrics
-- Write symptoms-based alerts for the component(s)
+N/A
 
 ### Tech Preview -> GA
 
@@ -261,8 +262,8 @@ WIP
 We originally had tried using the pre-existing features in OCP, such as setting
 a node as NoSchedule to avoid customer workloads going on the arbiter node.
 While this whole worked as expected, the problem we faced is that the desire is
-to use a very lower powered and cheap device as the arbiter, this method would
-still run a lot of the overhead on the arbiter node.
+to use a device that is lower power and is cheaper as the arbiter. This method
+would still run most of the OCP overhead on the arbiter node.
 
 ## Infrastructure Needed [optional]
 
