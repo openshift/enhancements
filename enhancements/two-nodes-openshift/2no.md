@@ -70,68 +70,71 @@ MCO - Machine Config Operator. This operator manages updates to systemd, cri-o/k
 
 ABI - Agent-Based Installer.
 
-ZTP - Zero-Touch Provisioning.
-
-
 ## Summary
 
-The Two Nodes OpenShift (2NO) initiative aims to provide a container management solution with a minimal footprint suitable for customers with numerous geographically dispersed locations. 
-Traditional three-node setups represent significant infrastructure costs, making them cost-prohibitive at retail and telco scale. This proposal outlines how we can implement a two-node OpenShift cluster while retaining the ability to survive a node failure.
+Leverage traditional high-availability concepts and technologies to provide a container management solution suitable for customers with numerous geographically dispersed locations that has a minimal footprint but remains resilient to single node-level failures.
 
 ## Motivation
 
-Customers with tens-of-thousands of geographically dispersed locations seek a container management solution that retains some level of resilience but does not come with a traditional three-node footprint. Even "cheap" third nodes represent a significant cost at this scale.
-The benefits of the cloud-native approach to developing and deploying applications are increasingly being adopted in edge computing. As the distance between a site and the central management hub grows, the number of servers at the site tends to shrink. The most distant sites often have physical space for only one or two servers.
-We are seeing an emerging pattern where some infrastructure providers and application owners desire a consistent deployment approach for their workloads across these disparate environments. They also require that the edge sites operate independently from the central management hub. Users who have adopted Kubernetes at their central management sites wish to extend this independence to remote sites through the deployment of independent Kubernetes clusters.
-For example, in the telecommunications industry, particularly within 5G Radio Access Networks (RAN), there is a growing trend toward cloud-native implementations of the 5G Distributed Unit (DU) component. This component, due to latency constraints, must be deployed close to the radio antenna, sometimes on a single server at remote locations like the base of a cell tower or in a datacenter-like environment serving multiple base stations.
-A hypothetical DU might require 20 dedicated cores, 24 GiB of RAM consumed as huge pages, multiple SR-IOV NICs carrying several Gbps of traffic each, and specialized accelerator devices. The node hosting this workload must run a real-time kernel, be carefully tuned to meet low-latency requirements, and support features like Precision Timing Protocol (PTP). Crucially, the "cloud" hosting this workload must be autonomous, capable of continuing to operate with its existing configuration and running workloads even when centralized management functionality is unavailable.
-Given these factors, a two-node deployment of OpenShift offers a consistent, reliable solution that meets the needs of customers across all their sites, from central management hubs to the most remote edge locations.
+Customers with hundreds, or even tens-of-thousands, of geographically dispersed locations are asking for a container management solution that retains some level of resilience to node level failures, but does not come with a traditional three-node footprint and/or price tag.
 
+The need for some level of fault tolerance prevents the applicability of Single Node OpenShift (SNO), and a converged 3-node cluster is cost prohibitive at the scale of retail and telcos - even when the third node is a "cheap" one that doesn't run workloads.
+
+The benefits of the cloud-native approach to developing and deploying applications are increasingly being adopted in edge computing.
+This requires our solution provide a management experience consistent with "normal" OpenShift deployments, and be compatible with the full ecosystem of Red Hat and partner workloads designed for OpenShift.
 
 ### User Stories
 
+
 * As a large enterprise with multiple remote sites, I want a cost-effective OpenShift cluster solution so that I can manage containers without the overhead of a third node.
-* As a support engineer, I want an automated method for handling the failure of a single node so that I can quickly restore service and maintain system integrity.
-* As an infrastructure administrator, I want to ensure seamless failover for virtual machines (VMs) so that in the event of a node failure, the VMs are automatically migrated to a healthy node with minimal downtime and no data loss.
-* As a network operator, I want my Cloud-Native Network Functions (CNFs) to be orchestrated consistently using OpenShift, regardless of whether they are in datacenters, or at the far edge where physical space is limited.
+* As a support engineer, I want a safe and automated method for handling the failure of a single node so that the downtime of workloads is minimized.
 
 ### Goals
 
-* Implement a highly available two-node OpenShift cluster.
-* Ensure cluster stability and operational efficiency.
-* Provide clear methods for node failure management and recovery.
-* Identify and integrate with a technology or partner that can provide storage in a two-node environment.
+* Provide a transparent installation experience that starts with exactly 2 blank physical nodes, and ends with a fault-tolerant two node cluster
+* Provide an OpenShift cluster experience that is identical to that of a 3-node hyperconverged cluster, but with 2 nodes
+* Prevent both data corruption and divergent datasets in etcd
+* Prevent the possibility of fencing loops, wherein each node powers cycles it's peer after booting
+* Recover the API server in less than 60s, as measured from the surviving node's detection of a failure
+* Minimize any differences to the primary OpenShift platforms
+* Avoid any decisions that would prevent upgrade/downgrade paths between two-node and traditional architectures
 
 ### Non-Goals
 
-* Reliance on traditional third-node or SNO setups.
-* Make sure we don't prevent upgrade/downgrade paths between two-node and traditional architectures
-* Adding worker nodes
+* Workload resilience - see related enhancement [link] 
+* Resilient storage - see follow-up enhancement
 * Support for platforms other than bare metal including automated ci testing
 * Support for other topologies (eg. hypershift)
-* Failover time: if the leading node goes down, the remaining nodes takes over and gains operational state (writable) in less than 60s
-* support full recovery of the workload when the node comes back online after restoration - total time under 15 minutes
-
+* Adding worker nodes
 
 ## Proposal
 
+Use the RHEL-HA stack (Corosync, and Pacemaker), which has been used to delivered supported 2-node cluster experiences for multiple decades, to manage cri-o, kubelet, and the etcd daemon.
+We will take advantage of RHEL-HA's native support for systemd and re-use the standard cri-o and kublet units, as well as create a new Open Cluster Framework (OCF) script for etcd.
 
-To achieve a two-node OpenShift cluster, we are leveraging traditional high-availability concepts and technologies. The proposed solution includes:
+Use RedFish compatible Baseboard Management Controllers (BMCs) as our primary mechanism to power off (fencing) unreachable peers to ensuring that they can do no harm.
 
-1. Leverage of the Full RHEL-HA Stack:
-   * Run the RHEL-HA stack “under to kubelet” (directly on the hardware, not as an OpenShift workload)
-   * Corosync for super fast failure detection, membership calculations, which in turn will trigger Pacemaker to apply Fencing based on Corosync quorum/membership information.
-   * Pacemaker for integrating membership and quorum information, driving fencing, and managing if/when kubelet and etcd can be started
-   * Pacemaker models kubelet and cri-o as a clone (much like a ReplicaSet) and etcd as a “promotable clone” (think a construct designed for leader/follower style services).  Together with fencing and quorum, this ensures that an isolated node that reboots is inert and can do no harm.
-   * Pacemaker is [configured](//TODO mshitrit add link) to manage etcd/cri-o/kubelet, it will start/stop/restart those services using a script or an executable.
-   * Pacemaker does not understand what it is managing, and expects an executable or script that knows how to start/stop/monitor (and optionally promote/demote) the service.
-     1. Likely we would need to create one for etcd
-     2. For kubelet and cri-o we can likely use the existing systemd unit file
-2. Failure Scenarios:
-   * Implement detailed handling procedures for cold boots, network failures, node failures, kubelet failures, and etcd failures using the RHEL-HA stack.
-    [see examples](#failure-handling)
-3. Fencing Methods:
-   * We plan to use Baseboard Management Controller (BMC) as our primary fencing method, the premise of using BMC for fencing is that a node that is powered off, or was previously powered off and configured to be inert until quorum forms, is not in a position to cause corruption or diverging datasets.  Sending power-off (or reboot) commands to the peer’s BMC achieves this goal.
+The delivery of RHEL-HA components will either be:
+
+* as an MCO Layer (targeting GA in 4.19),
+* as an extension (supported today), or
+* included, but inactive, in the base image
+
+Configuration of the RHEL-HA components will be via one or more MachineConfigs, and will require RedFish details from the installer.
+
+
+Upon a peer failure, the RHEL-HA components on the surivor will fence the peer and restart etcd as a new cluster of one.
+
+Upon a network failure, the RHEL-HA components ensure that exactly one node will survive, fence it's peer, and restart etcd as a new cluster of one.
+
+Upon rebooting, the RHEL-HA components ensure that a node remains inert (not running cri-o, kubelet, or etcd) until it sees it's peer.
+If the peer is likely to remain offline for an extended period of time, admin confirmation is required to allow the node to start OpenShift.
+
+When starting etcd, the OCF script will use the cluster ID and version counter to determine whether the existing data directory can be reused, or must be erased before joining an active peer.
+
+OpenShift upgrades are not supported in a degraded state, and will only proceed when both peers are online.
+
+MachineConfig updates are not applied in a degraded state, and will only proceed when both peers are online.
 
 
 ### Workflow Description
