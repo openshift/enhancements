@@ -109,7 +109,7 @@ environment.
 Enable stand-alone OpenShift clusters to be viable out-of-the-box in
 environments that A) lack a suitable external DNS and/or load balancer
 solution, and B) are not one of the platform types that already provide those
-services in-cluster (`baremetal`, `openstack`, an `ovirt`).
+services in-cluster (`baremetal`, `openstack`, `vsphere`, and `ovirt`).
 
 Allow users to opt-in for in-cluster DNS and load balancer services with
 platform types `none` and `external`.
