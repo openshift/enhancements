@@ -246,8 +246,6 @@ What are the risks of this proposal and how do we mitigate. Think broadly. For
 example, consider both security and how this will impact the larger OKD
 ecosystem.
 
-How will security be reviewed and by whom?
-
 How will UX be reviewed and by whom?
 
 Consider including folks that also work outside your immediate sub-project.
@@ -271,6 +269,42 @@ This is where to call out areas of the design that require closure before decidi
 to implement the design.  For instance,
  > 1. This requires exposing previously private resources which contain sensitive
   information.  Can we do this?
+
+## Security
+
+This section should cover the security impact of the change, if any. For example,
+does it introduce new privileges or capabilities? Does it expose new risks?
+
+### Credentials and RBAC
+
+What credentials will the new component be using if it needs to talk to either the control plane or other components? What RBAC needs to be applied?
+
+Consider the following:
+- Which service accounts will be affected by the change, what permissions will the feature code need?
+- Will end users need to make any security considerations when enabling this feature?
+- Are any special considerations needed for your credentials when being rotated, or when a cluster is hibernated?
+- What is the scope of the required RBAC?
+  - Are cluster wider permissions required?
+  - How will RBAC be limited to only the namespaces required for the feature? Can we enumerate the namespaces?
+  - For node level daemons, how will the permissions be scoped to act on specific nodes? Is there a need to act on multiple nodes?
+  - Are we adding new permissions or escalation paths from Nodes to the Cluster level? i.e. a token on node/A should not be able to read/write information about node/B.
+
+Principles to consider:
+- The permissions you grant should be well scoped and follow the principle of least privilege. Do not use wildcard permissions.
+- If the feature operates at the host level, the host root user should not be able to escalate to the cluster level. The feature may only modify resources directly related to the node it operates on. See https://github.com/kubernetes/kubernetes#124711 for an example of how to do this.
+- If a bad actor gains access to your credentials, this should be no worse than them having escaped to the host level and having access to kubelet's credentials.
+
+Consider the above principles as mandatory. These should be considered as part of your E2E test plan. How will you ensure that the principles are upheld?
+
+### Security Context
+
+What security context will the new component run with? What is the impact of the security context on the security posture of the cluster?
+Most operators run with a restricted SCC, but some may need more privileges, which should be called out here.
+
+Consider the [Security Context Conststraints](https://docs.openshift.com/container-platform/latest/authentication/managing-security-context-constraints.html#security-context-constraints-about_configuring-internal-oauth) and the related privileges that your new feature may need to leverage:
+- Will the feature require privileged containers?
+- Will the feature require host access? Host network or host volumes?
+- Does the feature require a non-restricted SCC?
 
 ## Test Plan
 
