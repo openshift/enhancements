@@ -60,8 +60,7 @@ N/A
 
 We propose updating the Azure API authentication methods in image registry, ingress, cloud network config, and storage 
 operators to use the using Azure SDK for Go's generic function [NewDefaultAzureCredential](https://github.com/Azure/azure-sdk-for-go/blob/4ebe2fa68c8f9f0a0737d4569810525b4ac45834/sdk/azidentity/default_azure_credential.go#L63).
-This function walks through creating a valid Azure credential chain used to authenticate with Azure API based on what
-environment variables are set up.
+This function walks through a chain of Azure authentication types, using environment variables, Instance Metadata Service (IMDS), or a file on the local filesystem to authenticate with the Azure API.  
 
 HyperShift would pass the following environment variables - AZURE_CLIENT_ID, AZURE_TENANT_ID, and 
 AZURE_CLIENT_CERTIFICATE_PATH - to its deployments of image registry, ingress, cloud network config, and storage 
