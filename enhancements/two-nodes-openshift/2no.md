@@ -39,7 +39,7 @@ tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1514
 ---
 
-# Two Nodes Openshift (2NO)
+# Two Nodes Openshift (2NO) - Control Plane Availability
 
 ## Terms
 
@@ -85,19 +85,19 @@ This requires our solution provide a management experience consistent with "norm
 
 ### User Stories
 
-
 * As a large enterprise with multiple remote sites, I want a cost-effective OpenShift cluster solution so that I can manage containers without the overhead of a third node.
 * As a support engineer, I want a safe and automated method for handling the failure of a single node so that the downtime of workloads is minimized.
 
 ### Goals
 
+* Provide a two-node control plane for physical hardware that is resilient to a node-level failure for either node
 * Provide a transparent installation experience that starts with exactly 2 blank physical nodes, and ends with a fault-tolerant two node cluster
-* Provide an OpenShift cluster experience that is identical to that of a 3-node hyperconverged cluster, but with 2 nodes
 * Prevent both data corruption and divergent datasets in etcd
-* Prevent the possibility of fencing loops, wherein each node powers cycles it's peer after booting
-* Recover the API server in less than 60s, as measured from the surviving node's detection of a failure
+* Maintain the existing level of availability. Eg. by avoiding fencing loops, wherein each node powers cycles it's peer after booting, reducing the cluster's availability.
+* Recover the API server in less than 120s, as measured from the surviving node's detection of a failure
 * Minimize any differences to the primary OpenShift platforms
 * Avoid any decisions that would prevent upgrade/downgrade paths between two-node and traditional architectures
+* Provide an OpenShift cluster experience that is identical to that of a 3-node hyperconverged cluster, but with 2 nodes
 
 ### Non-Goals
 
@@ -112,7 +112,7 @@ This requires our solution provide a management experience consistent with "norm
 Use the RHEL-HA stack (Corosync, and Pacemaker), which has been used to delivered supported 2-node cluster experiences for multiple decades, to manage cri-o, kubelet, and the etcd daemon.
 We will take advantage of RHEL-HA's native support for systemd and re-use the standard cri-o and kublet units, as well as create a new Open Cluster Framework (OCF) script for etcd.
 
-Use RedFish compatible Baseboard Management Controllers (BMCs) as our primary mechanism to power off (fencing) unreachable peers to ensuring that they can do no harm.
+Use RedFish compatible Baseboard Management Controllers (BMCs) as our primary mechanism to power off (fence) unreachable peers and ensure that they can do no harm while the remaining node continues.
 
 The delivery of RHEL-HA components will either be:
 
@@ -122,10 +122,9 @@ The delivery of RHEL-HA components will either be:
 
 Configuration of the RHEL-HA components will be via one or more MachineConfigs, and will require RedFish details from the installer.
 
+Upon a peer failure, the RHEL-HA components on the surivor will fence the peer and use the OCF script to restart etcd as a new cluster of one.
 
-Upon a peer failure, the RHEL-HA components on the surivor will fence the peer and restart etcd as a new cluster of one.
-
-Upon a network failure, the RHEL-HA components ensure that exactly one node will survive, fence it's peer, and restart etcd as a new cluster of one.
+Upon a network failure, the RHEL-HA components ensure that exactly one node will survive, fence it's peer, and use the OCF script to restart etcd as a new cluster of one.
 
 Upon rebooting, the RHEL-HA components ensure that a node remains inert (not running cri-o, kubelet, or etcd) until it sees it's peer.
 If the peer is likely to remain offline for an extended period of time, admin confirmation is required to allow the node to start OpenShift.
@@ -149,7 +148,32 @@ MachineConfig updates are not applied in a degraded state, and will only proceed
 * Receives cluster credentials.
 * Deploys applications within the two-node cluster environment.
 
-#### Failure Handling:
+
+### API Extensions
+
+No new CRDs, or changes to existing CRDs, are expected at this time.
+
+### Topology Considerations
+
+2NO represents a new topology, and is not appropriate for use with HyperShift, SNO, or MicroShift
+
+#### Standalone Clusters
+
+Is the change relevant for standalone clusters?
+TODO: Exactly what is the definition of a standalone cluster?  Disconnected?  Physical hardware?
+
+
+### Implementation Details/Notes/Constraints
+
+While the target installation requires exactly 2 nodes, this will be achieved by building support in the core installer for a "bootstrap plus 2 nodes" flow, and then using Assisted Installer's ability to bootstrap-in-place to remove the requirement for a bootstrap node.
+
+Initially the creation of an etcd cluster will be driven in the same way as other platforms.
+Once the cluster has two members, the etcd daemon will be removed from the static pod and become controlled by RHEL-HA.
+At this point, the Cluster Etcd Operator (CEO) will be made aware of this change so that some membership management functionality that is now handled by RHEL-HA can be disabled.
+The exact mechanism for this communication has yet to be determined.
+
+
+#### Failure Scenario Timelines:
 
 1. Cold Boot
    1. One node (Node1) boots
@@ -221,185 +245,26 @@ MachineConfig updates are not applied in a degraded state, and will only proceed
    4. Start failure defaults to leaving the service offline
 
 
-### API Extensions
-
-API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
-
-- Name the API extensions this enhancement adds or modifies.
-- Does this enhancement modify the behaviour of existing resources, especially those owned
-  by other parties than the authoring team (including upstream resources), and, if yes, how?
-  Please add those other parties as reviewers to the enhancement.
-
-  Examples:
-  - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
-  - Restricts the label format for objects to X.
-  - Defaults field Y on object kind Z.
-
-Fill in the operational impact of these API Extensions in the "Operational Aspects
-of API Extensions" section.
-
-### Topology Considerations
-
-2NO represents a new topology, and is not appropriate for use with HyperShift, SNO, or MicroShift
-
-#### Hypershift / Hosted Control Planes
-
-Are there any unique considerations for making this change work with
-Hypershift?
-
-See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282
-
-How does it affect any of the components running in the
-management cluster? How does it affect any components running split
-between the management cluster and guest cluster?
-
-#### Standalone Clusters
-
-Is the change relevant for standalone clusters?
-
-#### Single-node Deployments or MicroShift
-
-How does this proposal affect the resource consumption of a
-single-node OpenShift deployment (SNO), CPU and memory?
-
-How does this proposal affect MicroShift? For example, if the proposal
-adds configuration options through API resources, should any of those
-behaviors also be exposed to MicroShift admins through the
-configuration file for MicroShift?
-
-### Implementation Details/Notes/Constraints
-
-#### Installation flow
-1. We’ll set up Pacemaker and Corosync on RHCOS using MCO layering.
-   * [TBD extend more]
-2. Install an “SNO like” first node using a second bootstrapped node.
-   * This is somewhat similar what is done in SNO CI in AWS (up until the part the bootstrapped node is removed) and is possible because CEO can distinguish the bootstrapped node as a special use case, thus enabling its removal without breaking the etcd quorum for the remaining node.
-   We should be safe after [MGMT-13586](https://issues.redhat.com/browse/MGMT-13586) which makes the installer wait for the bootstrap etcd member to be removed first before shutting it down.
-3. After the bootstrapped node is removed add it to the cluster as a “regular” node.
-4. Switch CEO to “2NO” mode (where it does not manage etcd) and remove the etcd static pods
-   * [TBD localized/global switch]
-   * This is done because we want to allow simpler maintenance and keeping  some of CEO functionality (defragmentation, cert rotation ect…)
-5. Configure Pacemaker/Corosync to manage etcd/kubelet/cri-o
-6. [TBD storage]
-
-#### Fencing / quorum management
-Fencing quorum is managed by corosync and etcd  will be managed by Pacemaker which will force the etcd quorum.
-
-Here is a node failure example demonstrating that:
-1. Corosync on the survivor (Node1)
-2. Etcd loses internal quorum (E-quorum) and goes read-only
-3. Node1 retains “corosync quorum” (C-quorum) and initiates fencing of Node2
-4. Once fencing is successful Pacemaker will use a fence/resource agent (TBD) which will reschedule the workload from the fenced node
-5. Pacemaker on Node1 forces E-quorum (etcd promotion event)
-6. Cluster continues with no redundancy
-7. … time passes …
-8. Node2 has a persistent failure that prevents communication with Node1
-   * Node2 does not have C-quorum (requires forming a membership with it’s peer)
-   * Node2 does not start etcd or kubelet, remains inert waiting for Node1
-9. Persistent failure on Node2 is repaired
-10. Corosync membership containing both nodes forms
-11. Pacemaker “starts” etcd on Node2 as a follower of Node1
-12. Pacemaker “promotes” etcd on Node2 as full replica of Node1
-13. Pacemaker starts kubelet
-14. Cluster continues with 1+1 redundancy
-
-[Here](#failure-handling) is a  more extensive list of failure scenarios.
-
-#### CEO Enhancement
-1. Requires a new infrastructure type in OpenShift APIs
-2. Make sure that even though CEO will not manage etcd, it will still retain other relevant capabilities (defragmentation, certificate rotation, backup/restore etc...).
-3. Some functionality to “know” when to switch to “2NO mode”
-
 ### Risks and Mitigations
 
-#### Risks:
+Risk: If etcd were to be made active on both peers during a network split, divergent datasets would be created
+Mitigation: RHEL-HA requires fencing of a presumed dead peer before restarting etcd as a cluster of one
+Mitigation: Peers remain inert (unable to fence peers, or start cri-o, kubelet, or etcd) after rebooting until they can contact their peer
 
-1. In the event of a node failure, Pacemaker on the survivor will fence the other node and cause etcd to recover quorum. However this will not automatically recover affected workloads. [mitigation](#scheduling-workload-on-fenced-nodes)
-2. We plan to configure Pacemaker to manage etcd and give it quorum (for example after the remaining node fence its peer in a failed node use case)  [mitigation](#pacemaker-controlling-key-elements)
-   1. How do we plan Pacemaker to give the etcd quorum and which consideration should be taken ?
-   2. How does Pacemaker giving etcd quorum affect other etcd stakeholders (etcd pod, etcd operator, etc…)  ?
-3. Having etcd/kubelet/cri-o managed by Pacemaker is a major change, it should be particularly considered in the installation process. Having a different process that manages those key services may cause timing issues, race conditions and potentially break some assumptions relevant to cluster installations. How does bootstrapping Pacemaker to manage etcd/kubelet/cri-o affects different installers processes (i.e assistant installer , agent base installer, etc) ? [mitigation](#unique-bootstrapping-affecting-installation-process)
-   1. **CEO (Cluster Etcd Operator)/Pacemaker Conflict:**
-      Since we plan to use Pacemaker to manage etcd, we need to make sure we prevent the current management done by the CEO.
-   2. **Bootstrap Problem:** when only 2 nodes are used for the installation process  one of them serves as a bootstrap node so once this node isn’t part of the cluster etcd will lose quorum.
-   3. **Setting 2NO resources:** how do we plan to get specific 2NO resources (pacemaker, corosync, etc…) on the node ?
-4. Some Lifecycle events may reboot the node as part of the normal process (applying a disk image, updating ssh auth keys, configuration changes etc…). In a 2NO setup each node expects its peer to be up and will try to power fence it in case it isn’t  because of that, reboot events may trigger unnecessary fencing with unexpected consequences. [mitigation](#non-failure-node-reboots)
+Risk: Multiple entities (RHEL-HA, CEO) attempting to manage etcd membership would cause an internal split-brain
+Mitigation: The CEO will run in a mode that does manage not etcd membership
 
+Risk: Rebooting the surviving peer would require human intervention before the cluster starts, increasing downtime and creating an admin burden at remote sites
+Mitigation: Lifecycle events, such as upgrades and applying new MachineConfigs, are not permitted in a single-node degraded state
+Mitigation: Usage of the MCO Admin Defined Node Disruption [feature](https://github.com/openshift/enhancements/pull/1525) will futher reduce the need for reboots.
+Mitigation: The node will be reachable via SSH and the confirmation can be scripted
+Mitigation: It may be possible to identify scenarios where, for a known hardware topology, it is safe to allow the node to proceed automatically.
 
-#### Mitigations:
- 
-##### Scheduling workload on fenced nodes
-   1. **[Preferred Mitigation]** Pacemaker will utilize **resource/fence agents** to do the following:
-      1. Before Pacemaker starts fencing of the faulty node it would place a “No Execute” taint on that node. This taint will prevent any new workload from running on the fenced node.
-      2. After fencing is successful, Pacemaker will place an “Out Of Service” taint on the faulty node, which will trigger the removal of that workload and rescheduling on the it’s healthy peer node.
-      3. Once the unhealthy node regains health and joins the cluster Pacemaker will remove both of these taints.
-   
-      <br>**Other alternatives**
-   2. After Pacemaker has successfully fenced the faulty node it can mark the fenced node thus allowing a different operator to manage the rescheduling of the workload.
-   3. Integrate NHC & a remediation agent ? (if so, NHC needs to be coordinated with Pacemaker in order to make sure we don’t needlessly fence the node multiple times )
+Risk: We may not succeed in identifying all the reasons a node will reboot
+Mitigation: ... testing? ...
 
-##### Pacemaker controlling key elements
-   1. Consult with relevant area experts (etcd, cri-o , kubelet etc…)
-   2. Verify solution with extensive testing
-
-##### Unique bootstrapping affecting installation process
-
-   1. **CEO (Cluster Etcd Operator)/Pacemaker Conflict:**
-   
-      1. **[Preferred Mitigation]** Add a “disable” or a “2NO” feature to CEO
-         1. Requires a new infrastructure type in OpenShift APIs
-         2. 2NO installation needs to work with CEO up to the point where corosync wants to take over
-         3. We need a signal to CEO when it should relinquish its control to corosync - new field in the cluster/etcd CRD?
-         4. How can we replicate the functionality of CEO that is tied to static pods? e.g. Certificate rotation, backup/restore, apiserver<>etcd endpoint controller
-         5. Do we want this as a localized switch (i.e for example as a flag in etcd CRD) or as a global option that might serve other 2NO stakeholders as well ?
-      
-         **Note**: CEO alternatively could also remove ONLY the etcd container from its static pod definition
-        
-          <br>**Other alternatives**    
-      2. Scale down CEO Deployment replica after bootstrapping. The downside is that we need to figure out how to get etcd upgrades, as they will be blocked.
-      3. Add a “disable CEO” feature to CVO (Downside is that other CEO functionalities will be needed to be managed)
-
-   2. **Bootstrap Problem:** Potential approaches to solve this:
-   
-      1. **[Preferred Mitigation]** Install an “SNO like” first node using a second bootstrapped node. <br>This is somewhat similar what is done in SNO CI in AWS (up until the part the bootstrapped node is removed) and is possible because CEO can distinguish the bootstrapped node as a special use case, thus enabling its removal without breaking the etcd quorum for the remaining node.
-    We should be safe after [MGMT-13586](https://issues.redhat.com/browse/MGMT-13586) which makes the installer wait for the bootstrap etcd member to be removed first before shutting it down.
-        
-         <br>**Other alternatives**
-      2. As part of the installation process configure corosync/pacemaker to manage etcd so that we can make sure having the bootstrap node does not cause etcd to lose quorum (or least that etcd can still regain it with only one node)
-      3. It’s also worth mentioning that we’ve discussed a more simple option of using 3 nodes and taking one down, however this option is rejected because we can’t assume that a customer that wants a 2NO would have a third available node.
-      
-   3. **Setting 2NO resources:** Potential approaches to solve this:
-      
-      1. **[Preferred Mitigation]** Using MCO (Machine Config Operator) to layer RHCOS with 2NO resources, however this is done out of the scope of the installer so we need to verify that there aren’t any issues with that.
-
-         <br>**Other alternatives**
-      2. It is also worth noting that we’ve considered modifying the RHCOS to contain 2NO resources (currently there is [another initiative](https://issues.redhat.com/browse/OCPSTRAT-1628) to do so) - At the moment this option is less preferable because it would couple 2NO to RHCOS frequent release cycle as well as add the 2NO resources in other OCP components which do not require it.
-      3. RHEL extensions
-##### Non failure node reboots
-   1. Apply MCO Admin Defined Node Disruption [feature](https://github.com/openshift/enhancements/pull/1525) which allows os updates without node reboot.
-   2. Potentially it’s a graceful reboot in which case Pacemaker will get a notification and can handle the reboot.
-   3. Some delay mechanism ?
-   4. Handle those specific use cases for a different behavior for a 2NO cluster ?
-   5. Other alternatives ?
-
-General mitigation which apply to most of the risks are
-* Early feedback from relevant experts
-* Thorough testing of failure scenarios.
-* Clear documentation and support procedures.
-
-
-#### Appendix - Disabling CEO:
-Features that the CEO currently takes care of:
-* Static pod management during bootstrap, installation and runtime
-* etcd Member addition/removal on lifecycle events of the node/machine (“vertical scaling”)
-* Defragmentation
-* Certificate creation and rotation
-* Active etcd endpoint export for apiserver (etcd-endpoints configmap in openshift-config namespace)
-* Installation of the Backup/Restore scripts
-
-Source as of 4.15: [CEO <> CEE](https://docs.google.com/presentation/d/1U_IyNGHCAZFAZXyzAs5XybR8qT91QaQ2wr3W9w9pSaw/edit#slide=id.g184d8fd7fc3_1_99)
-
+Risk: This new platform will have a unique installation flow
+Mitigation: ... CI ...
 
 
 
