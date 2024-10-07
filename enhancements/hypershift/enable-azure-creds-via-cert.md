@@ -68,6 +68,11 @@ AZURE_CLIENT_CERTIFICATE_PATH - to its deployments of image registry, ingress, c
 operators (azure-file and azure-disk) on the hosted control plane. Each of these components would then pass these  
 variables along to NewDefaultAzureCredential.
 
+For each component, we should also set this environment variable to true, AZURE_CLIENT_SEND_CERTIFICATE_CHAIN. This 
+enables a Microsoft internal feature called SNI (Subject Name and Issuer authentication). It essentially allows one to 
+authenticate without pinning a certificate to a service principal if the certificate passed is issued & trusted by a 
+specific CA. 
+
 Unfortunately, the SDK today does not support hot-reloading the credential. While Microsoft works on getting that into 
 the SDK, we could either use a library to create a generator for the credential and allow reloading in-process, or use 
 the common OpenShift fsnotify +os.Exit() to restart the pod on config change.
