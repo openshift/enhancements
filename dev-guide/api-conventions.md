@@ -303,7 +303,7 @@ type MyPlatformConfig struct {
   // +unionDiscriminator
   // +kubebuilder:validation:Enum:="AWS";"Azure";"GCP"
   // +kubebuilder:validation:Required
-  PlatformType string `json:"platformType,omitempty"`
+  PlatformType string `json:"platformType"`
 
   // AWS is the AWS configuration.
   // All structures within the union must be optional and pointers.
