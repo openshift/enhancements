@@ -120,6 +120,8 @@ Upon a peer failure, the RHEL-HA components on the surivor will fence the peer a
 
 Upon a network failure, the RHEL-HA components ensure that exactly one node will survive, fence it's peer, and use the OCF script to restart etcd as a new cluster of one.
 
+In both cases, the control-plane will be unresponsive until etcd has been restarted.
+
 Upon rebooting, the RHEL-HA components ensure that a node remains inert (not running cri-o, kubelet, or etcd) until it sees it's peer.
 If the peer is likely to remain offline for an extended period of time, admin confirmation is required to allow the node to start OpenShift.
 
@@ -202,7 +204,7 @@ Tools for extracting support information (must-gather tarballs) will be updated 
    1. Corosync on both nodes detects separation
    2. Etcd loses internal quorum (E-quorum) and goes read-only
    3. Both sides retain C-quorum and initiate fencing of the other side.
-      There is a different delay (configured as part of Pacemaker) between the two nodes for executing the fencing operation to avoid both fencing operations to succeed in parallel and thus shutting down the system completely.
+      There is a different delay (configured as part of Pacemaker, usually in the order of 10s of seconds) between the two nodes for executing the fencing operation to avoid both fencing operations to succeed in parallel and thus shutting down the system completely.
    4. One side wins, pre-configured as Node1
    5. Pacemaker on Node1 forces E-quorum (etcd promotion event)
    6. Cluster continues with no redundancy
