@@ -66,7 +66,7 @@ E-quorum: quorum as determined by etcd members and algorithms
 
 Split-brain - a scenario where a set of peers are separated into groups smaller than the quorum threshold AND peers decide to host services already running by other groups.  Typically results in data loss or corruption unless state is stored outside of the cluster.   
 
-MCO - Machine Config Operator. This operator manages updates to systemd, cri-o/kubelet, kernel, NetworkManager, etc. It also offers a new MachineConfig CRD that can write configuration files onto the host.
+MCO - Machine Config Operator. This operator manages updates to systemd, cri-o/kubelet, kernel, NetworkManager, etc. It also offers a new `MachineConfig` capability that can write configuration files onto the host.
 
 ABI - Agent-Based Installer.
 
@@ -140,7 +140,7 @@ Everything else about cluster creation will be an opaque implementation detail n
 
 #### Day 2 Proceedures
 
-As per a standard 3-node control plane, OpenShift upgrades and MachineConfig changes can not be applied when the cluster is in a degraded state.
+As per a standard 3-node control plane, OpenShift upgrades and `MachineConfig` changes can not be applied when the cluster is in a degraded state.
 Such operations will only proceed when both peers are online and healthy.
 
 The experience of managing a 2-node control plane should be largely indistinguishable from that of a 3-node one.
@@ -179,7 +179,7 @@ The delivery of RHEL-HA components will be opaque to the user and either come:
 * as an extension (supported today), or
 * included, but inactive, in the base image
 
-Configuration of the RHEL-HA components will be via one or more MachineConfigs, and will require RedFish details to have been collected by the installer.
+Configuration of the RHEL-HA components will be via one or more `MachineConfig`s, and will require RedFish details to have been collected by the installer.
 Sensible defaults will be chosen where possible, and user customization only where absolutely necessary.
 
 Tools for extracting support information (must-gather tarballs) will be updated to gather relevant logs for triaging issues.
@@ -259,24 +259,24 @@ Tools for extracting support information (must-gather tarballs) will be updated 
 
 ### Risks and Mitigations
 
-Risk: If etcd were to be made active on both peers during a network split, divergent datasets would be created
-Mitigation: RHEL-HA requires fencing of a presumed dead peer before restarting etcd as a cluster of one
-Mitigation: Peers remain inert (unable to fence peers, or start cri-o, kubelet, or etcd) after rebooting until they can contact their peer
+1. Risk: If etcd were to be made active on both peers during a network split, divergent datasets would be created
+   1. Mitigation: RHEL-HA requires fencing of a presumed dead peer before restarting etcd as a cluster of one
+   1. Mitigation: Peers remain inert (unable to fence peers, or start cri-o, kubelet, or etcd) after rebooting until they can contact their peer
 
-Risk: Multiple entities (RHEL-HA, CEO) attempting to manage etcd membership would cause an internal split-brain
-Mitigation: The CEO will run in a mode that does manage not etcd membership
+1. Risk: Multiple entities (RHEL-HA, CEO) attempting to manage etcd membership would cause an internal split-brain
+   1. Mitigation: The CEO will run in a mode that does manage not etcd membership
 
-Risk: Rebooting the surviving peer would require human intervention before the cluster starts, increasing downtime and creating an admin burden at remote sites
-Mitigation: Lifecycle events, such as upgrades and applying new MachineConfigs, are not permitted in a single-node degraded state
-Mitigation: Usage of the MCO Admin Defined Node Disruption [feature](https://github.com/openshift/enhancements/pull/1525) will futher reduce the need for reboots.
-Mitigation: The node will be reachable via SSH and the confirmation can be scripted
-Mitigation: It may be possible to identify scenarios where, for a known hardware topology, it is safe to allow the node to proceed automatically.
+1. Risk: Rebooting the surviving peer would require human intervention before the cluster starts, increasing downtime and creating an admin burden at remote sites
+   1. Mitigation: Lifecycle events, such as upgrades and applying new `MachineConfig`s, are not permitted in a single-node degraded state
+   1. Mitigation: Usage of the MCO Admin Defined Node Disruption [feature](https://github.com/openshift/enhancements/pull/1525) will futher reduce the need for reboots.
+   1. Mitigation: The node will be reachable via SSH and the confirmation can be scripted
+   1. Mitigation: It may be possible to identify scenarios where, for a known hardware topology, it is safe to allow the node to proceed automatically.
 
-Risk: We may not succeed in identifying all the reasons a node will reboot
-Mitigation: ... testing? ...
+1. Risk: We may not succeed in identifying all the reasons a node will reboot
+   1. Mitigation: ... testing? ...
 
-Risk: This new platform will have a unique installation flow
-Mitigation: ... CI ...
+1. Risk: This new platform will have a unique installation flow
+   1. Mitigation: ... CI ...
 
 
 
@@ -289,11 +289,6 @@ The existence of 1, 2, and 3+ node control-plane sizes will likely generate cust
 Satisfying this demand would come with significant technical and support overhead.
 
 ## Open Questions [optional]
-
-This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance,
- > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this?
 
 1. How to best deliver RHEL-HA components to the nodes is currently under discussion with the MCO team.
    The answer may change as in-progress MCO features mature.
