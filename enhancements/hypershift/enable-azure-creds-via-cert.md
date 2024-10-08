@@ -63,9 +63,19 @@ operators to use the using Azure SDK for Go's generic function [NewDefaultAzureC
 This function walks through a chain of Azure authentication types, using environment variables, Instance Metadata Service (IMDS), or a file on the local filesystem to authenticate with the Azure API.  
 
 HyperShift would pass the following environment variables - AZURE_CLIENT_ID, AZURE_TENANT_ID, and 
-AZURE_CLIENT_CERTIFICATE_PATH - to its deployments of image registry, ingress, cloud network config, and storage 
-operators (azure-file and azure-disk) on the hosted control plane. Each of these components would then pass these  
-variables along to NewDefaultAzureCredential.
+AZURE_CLIENT_CERTIFICATE_PATH - to its deployments of image registry and ingress on the hosted control plane. Each of 
+these components would then pass these variables along to NewDefaultAzureCredential.
+
+For storage operators (azure-file and azure-disk) on the hosted control plane, we will need pass along extra variables 
+so we can mount the cert in a volume on the azure-file and azure-disk controller pod - AZURE_CLIENT_ID_FOR_FILE,
+AZURE_CLIENT_CERTIFICATE_PATH_FOR_FILE, ARO_HCP_SECRET_PROVIDER_CLASS_FOR_FILE, AZURE_CLIENT_ID_FOR_DISK,
+AZURE_CLIENT_CERTIFICATE_PATH_FOR_DISK, ARO_HCP_SECRET_PROVIDER_CLASS_FOR_DISK, and AZURE_TENANT_ID. 
+
+For cloud-network-config-controller, HyperShift will pass AZURE_CLIENT_ID, AZURE_TENANT_ID, 
+AZURE_CLIENT_CERTIFICATE_PATH, and ARO_HCP_SECRET_PROVIDER_CLASS to cluster-network-operator. cluster-network-operator 
+will include AZURE_CLIENT_ID, AZURE_TENANT_ID, and AZURE_CLIENT_CERTIFICATE_PATH as environment variables to the 
+deployment of cloud-network-config-controller and mount the ARO_HCP_SECRET_PROVIDER_CLASS as a volume attribute in a 
+volume in the same deployment.
 
 For each component, we should also set this environment variable to true, AZURE_CLIENT_SEND_CERTIFICATE_CHAIN. This 
 enables a Microsoft internal feature called SNI (Subject Name and Issuer authentication). It essentially allows one to 
