@@ -113,6 +113,8 @@ This requires our solution provide a management experience consistent with "norm
 Use the RHEL-HA stack (Corosync, and Pacemaker), which has been used to delivered supported 2-node cluster experiences for multiple decades, to manage cri-o, kubelet, and the etcd daemon.
 etcd will run as as a voting member on both nodes.
 We will take advantage of RHEL-HA's native support for systemd and re-use the standard cri-o and kublet units, as well as create a new Open Cluster Framework (OCF) script for etcd.
+The existing startup order of cri-o, then kubelet, then etcd will be preserved.
+The `etcdctl`, `etcd-metrics`, and `etcd-readyz` containers will remain part of the static pod.
 
 Use RedFish compatible Baseboard Management Controllers (BMCs) as our primary mechanism to power off (fence) unreachable peers and ensure that they can do no harm while the remaining node continues.
 
@@ -184,6 +186,10 @@ The delivery of RHEL-HA components will be opaque to the user and either come:
 Configuration of the RHEL-HA components will be via one or more `MachineConfig`s, and will require RedFish details to have been collected by the installer.
 Sensible defaults will be chosen where possible, and user customization only where absolutely necessary.
 
+The entity (likely a one-shot systemd job as part of a `MachineConfig`) that configures RHEL-HA will also configure a fencing priority.
+This is usually done based on the sort-order a piece of shared info (such as IP or node name).
+The priority takes the form of a delay, usually in the order of 10s of seconds, and is used to prevent parallel fencing operations during a primary-network outage where each side powers off the other - resulting in a total cluster outage.
+
 Tools for extracting support information (must-gather tarballs) will be updated to gather relevant logs for triaging issues.
 
 #### Failure Scenario Timelines:
@@ -204,7 +210,7 @@ Tools for extracting support information (must-gather tarballs) will be updated 
    1. Corosync on both nodes detects separation
    2. Etcd loses internal quorum (E-quorum) and goes read-only
    3. Both sides retain C-quorum and initiate fencing of the other side.
-      There is a different delay (configured as part of Pacemaker, usually in the order of 10s of seconds) between the two nodes for executing the fencing operation to avoid both fencing operations to succeed in parallel and thus shutting down the system completely.
+      RHEL-HA's fencing priority avoids parallel fencing operations and thus the total shutdown of the system.
    4. One side wins, pre-configured as Node1
    5. Pacemaker on Node1 forces E-quorum (etcd promotion event)
    6. Cluster continues with no redundancy
