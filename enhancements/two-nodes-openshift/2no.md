@@ -101,8 +101,8 @@ This requires our solution provide a management experience consistent with "norm
 
 ### Non-Goals
 
-* Workload resilience - see related enhancement [link] 
-* Resilient storage - see follow-up enhancement
+* Workload resilience - see related [Pre-DRAFT enhancement](https://docs.google.com/document/d/1TDU_4I4LP6Z9_HugeC-kaQ297YvqVJQhBs06lRIC9m8/edit)
+* Resilient storage - see future enhancement
 * Support for platforms other than bare metal including automated ci testing
 * Support for other topologies (eg. hypershift)
 * Adding worker nodes
