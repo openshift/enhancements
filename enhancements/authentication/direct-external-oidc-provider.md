@@ -58,6 +58,8 @@ Currently, any component that needs to obtain tokens or authenticate users does 
 
 OCP provides means of dynamic OAuth2 client registration, which means that other components using the OAuth2 server might also exist; however these cases are not within the scope of this proposal.
 
+Note that the kube-apiserver already supports direct external OIDC providers; this proposal describes the mechanisms that need to be implemented in order to enable the configuration of an external OIDC provider for the kube-apiserver in an OCP cluster.
+
 To enable configuration changes for each of the core components, the Authentication CRD has been extended with a new API that allows the specification of the details of the external OIDC provider to use. For `oc` in particular, this specification must be carried out via relevant command-line options.
 
 Additionally, when an external OIDC provider is configured, any components and resources that are related to the built-in OAuth server must be removed (and recreated when the built-in OAuth server is configured anew). These components and resources are managed by the cluster-kube-apiserver-operator and the cluster-authentication-operator.
@@ -75,7 +77,7 @@ Apart from the provider URL, which is always required, the configuration details
 - the provider's certificate authority bundle
 - any relevant extra scopes
 
-#### Authentication CR
+#### Authentication Resource
 
 The cluster's Authentication CR (`authentication.config/cluster`) must be modified and updated with the configuration of the external OIDC provider in the `OIDCProviders` field.
 
@@ -131,28 +133,27 @@ This enhancement proposal applies to standalone OCP.
 
 ### Implementation Details/Notes/Constraints
 
-Cluster admins should be able to switch authentication configuration between integrated OAuth and external OIDC by changing the authentication CR accordingly. Depending on the transition, different sequences of events take place in the cluster until authentication configuration is completed. The following sections describe what happens within each relevant component.
+#### Configuring the kube-apiserver
 
-TODO: actually it's possible that kas-o won't need to cleanup/recreate oauth-metadata and the webhook because they're already set up to follow whatever is in the cluster auth CR; must investigate
+The kube-apiserver already supports using a direct external OIDC provider; it can be configured to use external OIDC using a [_structured authentication config file_](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#using-authentication-configuration) or a set of specific command-line arguments (`--oidc-*` flags; see [here](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#using-authentication-configuration) for more details). This enhancement uses the structured authentication configuration file approach, as this has several advantages, notably API validation and dynamic authenticator reload when file changes are detected.
 
-#### From Integrated OAuth to External OIDC
+The following diagram summarizes what happens in the cluster when a new OIDC provider is configured in the Authentication Resource.
 
-1. A cluster admin updates auth CR with the external OIDC provider config
-2. KAS-o watches the auth CR, picks up the config change and validates the external OIDC configuration
-3. KAS-o configures the respective OIDC flags of the KAS static pods and creates the OIDC CA file (if applicable)
-4. Rollout of KAS pods (TBD: revisions vs live file reload)
-5. Once rollout is completed, KAS-o reports OIDC status as available in the Status field of the authentication CR
-6. KAS-o removes/deactivates all OAuth specific resources/components as necessary
-7. CAO removes/deactivates all OAuth specific resources/components as necessary (TBD: oauth-metadata & webhook token authenticator removal)
+![Authentication Configuration Workflow](./external-oidc-config.png)
 
-#### From External OIDC to Integrated OAuth
+Configuration starts when an admin modifies the Authentication Resource (auth CR) and specifies the OIDC provider's configuration via the respective API. As shown in the diagram above, the following steps take place:
 
-1. A cluster admin updates auth CR with the integrated OAuth config
-2. CAO watches the auth CR, picks up the config change and validates the integrated OAuth configuration
-3. CAO brings up the OAuth stack
-4. KAS-o configures the WebhookTokenAuthenticator and OAuth metadata (TODO: how does the KAS-o know when to configure these?)
-5. KAS-o removes the OIDC configuration from the KAS pods flags
-6. Rollout of KAS pods (TBD: revisions vs live file reload)
+1. The External OIDC Controller inside the cluster-authentication-operator (CAO) tracks the auth CR and receives an event when it is modified
+2. The controller generates a structured authentication configuration (`apiserver.config.k8s.io/AuthenticationConfiguration`) object based on the contents of the auth CR, validates the configuration and serializes it into JSON, storing it within a ConfigMap (`auth-config`) inside the `openshift-config` namespace
+3. The OIDC config observer inside the kube-apiserver-operator (KAS-o) detects an OIDC configuration in the auth CR
+4. The config observer syncs the `auth-config` ConfigMap from `openshift-config` into `openshift-kube-apiserver`, and sets up the `--authentication-config` CLI arg of the kube-apiserver (KAS) to point to a static file on each KAS node; this config change triggers a rollout
+5. The revision controller of the KAS-o syncs the `auth-config` ConfigMap from within `openshift-kube-apiserver` into a static file on each KAS node; since this is a revisioned ConfigMap, any change will also trigger a rollout
+
+During step 4, the respective config observers for the `WebhookTokenAuthenticator` and `AuthMetadata` must also detect the OIDC configuration and remove their respective CLI args and resources (more details in the next section). Since all config observers run in the same loop of the config observation controller, the resulting configuration will include the results of all three controllers.
+
+Once the next rollout is completed, the KAS pods will use the structured authentication configuration via the static file generated with the process described above. Any further changes to that file will trigger a dynamic reload of the authenticator within the KAS, without the need of a new revision rollout.
+
+After a successful rollout and hence configuration of OIDC for the KAS pods, the CAO must proceed and clean up any controllers and resources that are related to the OAuth stack, effectively disabling it (see next sections for more details).
 
 #### cluster-kube-apiserver-operator
 
@@ -161,12 +162,9 @@ The cluster-kube-apiserver-operator (KAS-o) relies on the authentication configu
 - the `WebhookTokenAuthenticator` config observer observes the `webhookTokenAuthenticator` field of the Authentication CR and if `kubeConfig` secret reference is set it uses the contents of this secret as a webhook token authenticator for the API server; it also takes care of synchronizing this secret to the `openshift-kube-apiserver` namespace
 - the `AuthMetadata` config observer sets the `OauthMetadataFile` field of the CR with the path for a ConfigMap referenced by the authentication config
 
-The operator must watch the Authentication CR for changes, and when it detects an external OIDC provider configuration, it must make the following changes, in order to update its configuration to use the external provider:
+The operator must watch the Authentication CR for changes, and when it detects an external OIDC provider configuration, the `WebhookTokenAuthenticator` and `AuthMetadata` observers must be stopped or deactivated, as they are not relevant in the case of the external OIDC provider
 
-- the `WebhookTokenAuthenticator` and `AuthMetadata` observers must be stopped or deactivated, as they are not relevant in the case of the external OIDC provider
-- the kube-apiserver must be configured to talk directly to the external OIDC provider
-
-Note that the operator must first validate the new provider configuration before proceeding with the deactivation of the built-in OAuth stack. Also, in case the authentication configuration gets changed back to the built-in OAuth server, the operator must revert these changes and bring the kube-apiserver and relevant resources back to the original state of affairs.
+In case the authentication configuration gets changed back to the built-in OAuth server, the operator must revert these changes and bring the kube-apiserver and relevant resources back to the original state of affairs.
 
 #### cluster-authentication-operator
 
@@ -174,7 +172,7 @@ When the built-in OAuth server is used for authentication (the default and origi
 
 In case an external OIDC provider is configured for authentication, then these controllers and resources are neither useful nor relevant. Therefore, the operator must watch the Authentication CR, and when it detects a valid external OIDC provider configuration, it must turn its controllers into a state where they remove the state/resources they otherwise push to the cluster. The operator will not be monitoring the oauth-server and oauth-apiserver any longer, however it must monitor the external OIDC provider for reachability and health, and advertise the result in its status; it must either adapt the functionality of its monitoring controllers or use a new controller for that.
 
-Note that the operator must first validate the new provider configuration before proceeding with the deactivation of the built-in OAuth stack. Also, in case the authentication configuration gets changed back to the built-in OAuth server, the operator must revert these changes and bring its operands and relevant resources back to the original state of affairs.
+Note that the operator must first make sure that the rollout of the new provider configuration has been completed successfully before proceeding with the deactivation of the built-in OAuth stack. Also, in case the authentication configuration gets changed back to the built-in OAuth server, the operator must revert these changes and bring its operands and relevant resources back to the original state of affairs.
 
 #### console-operator
 
@@ -195,14 +193,6 @@ In order to use `oc` with an external OIDC provider, the tool has been [extended
 
 In case something goes wrong with the external provider, authentication might stop working. In such cases, cluster admins will still be able to access the cluster using a `kubeconfig` file with client certificates for an admin user. It is the responsibility of the cluster admins to make sure that such users exist; deleting all admin users might result in losing access to the cluster should any issues with the external provider arise.
 
-#### Other implementation considerations
-
-There is a number of critical points that must be considered during implementation, namely:
-
-- kube-apiserver roll-out mechanism: revisions vs. instant rollout using live file reloads
-- definition of components (e.g. controllers) that will detect the OIDC auth type within the kube-apiserver-operator and the cluster-authentication-operator in order to trigger the necessary changes based on the auth CR
-- definition of a set of conditions (possibly via the auth CR Status fields) that must be met before the kube-apiserver-operator and the cluster-authentication-operator proceed to deactivate the built-in oauth stack and its APIs/resources/components
-
 ### Risks and Mitigations
 
 Enabling an external OIDC provider to an OCP cluster will result in the oauth-apiserver being removed from the system; this inherently means that the two API Services it is serving (`v1.oauth.openshift.io`, `v1.user.openshift.io`) will be gone from the cluster, and therefore any related data will be lost. It is the user's responsibility to create backups of any required data.
@@ -215,45 +205,23 @@ As mentioned above, configuring an external OIDC provider will effectively deact
 
 ## Open Questions
 
-### Rollout strategy
-
-We must decide whether the updated KAS configuration will be rolled out via revisions or live config file reloading within the KAS pods.
-
 ### console-operator
 
 - Does the console-operator need to wait for the KAS-o to report that OIDC is configured and available before proceeding with its reconfiguration? It currently only watches for auth type to be OIDC before reconfiguring. This might affect hypershift, as there is no KAS-o.
 
-### OAuth metadata & WebhookTokenAuthenticator cleanup
+### Structured authentication configuration ConfigMap as a revisioned resource
 
-Within the KAS-o, there is a [config observer](https://github.com/openshift/cluster-kube-apiserver-operator/blob/9fb047aaed45a81bf817233dde0ca09c8d38e257/pkg/operator/configobservation/auth/auth_metadata.go#L25) for the authentication CR which configures the value of `authConfig.oauthMetadataFile` of the `config` CM of the KAS, based on the `spec.oauthMetadata` or `status.integratedOAuthMetadata` values (the former takes precedence). If both are empty, the oauth-metadata configmap will be deleted.
+Using a revisioned resource for the structured authentication configuration ConfigMap allows us to sync its contents as a static file on the KAS nodes. However, this results in a new revision rollout of the pods with each change to that ConfigMap, which means that we won't be able to leverage the dynamic reload of the auth file into the KAS. Even at the first time we configure this, this shouldn't be a problem as the rollout will anyway happen for enabling the `--authentication-config` KAS CLI arg.
 
-A similar [config observer](https://github.com/openshift/cluster-kube-apiserver-operator/blob/9fb047aaed45a81bf817233dde0ca09c8d38e257/pkg/operator/configobservation/auth/webhook_authenticator.go#L34) exists for the WebhookTokenAuthenticator as well, but this section discusses OAuth metadata only for simplicity; respective steps apply for the WebhookTokenAuthenticator as well.
+Is there a way to sync the ConfigMap into a static file, but avoid a new rollout?
 
-We can leverage this mechanism as-is for cleanup when configuring external OIDC. This could be done as follows:
+### Config observers
 
-1. admin configures the authentication CR for OIDC
-2. this means that the `spec.oauthMetadata` field will be set to empty; however `status.integratedOAuthMetadata` will still have a value
-3. KAS-o config observer picks up the auth type change, configures KAS pods for OIDC, triggers a rollout
-4. once rollout is successful, CAO picks up the change to OIDC, removes oauth-specific resources, including `status.integratedOAuthMetadata`
-5. KAS-o oauth-metadata config observer picks up the change in `status.integratedOAuthMetadata` and since `spec.oauthMetadata` is also unset, removes the oauth-metadata configmap; this results in a new config, which triggers a new rollout
+Can we make sure that given a specific auth type in the auth CR, the three config observers (OAuth metadata, WebhookTokenAuthenticator, External OIDC) produce overall a valid config? This way there will be a single rollout needed to enable OIDC and disable oauth in one go.
 
-Pros/Cons:
+### Deactivation of the OAuth stack
 
-- Pros: does not remove anything oauth related before OIDC configuration is in place
-- Cons: triggers a second rollout
-
-Alternatively, we can make adaptations to this mechanism to avoid a second rollout:
-
-1. admin configures the authentication CR for OIDC
-2. the oauth-metadata observer detects auth type OIDC, ignores `spec.oauthMetadata` and `status.integratedOAuthMetadata`, and deletes the oauth-metadata configmap (as if both fields would be empty)
-3. KAS-o config observer picks up the auth type change, configures KAS pods for OIDC, triggers a rollout
-4. once rollout is successful, CAO picks up the change to OIDC, removes oauth-specific resources, including `status.integratedOAuthMetadata`
-5. KAS-o oauth-metadata config observer will not pick up any change after CAO removes any OAuth specific fields, as type will remain OIDC, therefore step 2 will have already taken care of oauth-metadata
-
-Pros/Cons:
-
-- Pros: does not trigger a second rollout
-- Cons: removes oauth-metadata before OIDC has been fully configured on the KAS pods
+When an external OIDC provider is configured, the CAO must take down the oauth stack. When should the CAO do this process? Whenever it detects auth type OIDC, or should it wait for the KAS rollout for OIDC to be successful? How should this be detected?
 
 ## Test Plan
 
