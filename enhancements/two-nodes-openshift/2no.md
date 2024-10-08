@@ -96,7 +96,7 @@ This requires our solution provide a management experience consistent with "norm
 * Maintain the existing level of availability. Eg. by avoiding fencing loops, wherein each node powers cycles it's peer after booting, reducing the cluster's availability.
 * Recover the API server in less than 120s, as measured from the surviving node's detection of a failure
 * Minimize any differences to the primary OpenShift platforms
-* Avoid any decisions that would prevent upgrade/downgrade paths between two-node and traditional architectures
+* Avoid any decisions that would prevent future implementation and support for upgrade/downgrade paths between two-node and traditional architectures 
 * Provide an OpenShift cluster experience that is identical to that of a 3-node hyperconverged cluster, but with 2 nodes
 
 ### Non-Goals
@@ -106,21 +106,15 @@ This requires our solution provide a management experience consistent with "norm
 * Support for platforms other than bare metal including automated ci testing
 * Support for other topologies (eg. hypershift)
 * Adding worker nodes
+* Creation RHEL-HA events and metrics for consumption by the OpenShift monitoring stack (Deferred to post-MVP)
 
 ## Proposal
 
 Use the RHEL-HA stack (Corosync, and Pacemaker), which has been used to delivered supported 2-node cluster experiences for multiple decades, to manage cri-o, kubelet, and the etcd daemon.
+etcd will run as as a voting member on both nodes.
 We will take advantage of RHEL-HA's native support for systemd and re-use the standard cri-o and kublet units, as well as create a new Open Cluster Framework (OCF) script for etcd.
 
 Use RedFish compatible Baseboard Management Controllers (BMCs) as our primary mechanism to power off (fence) unreachable peers and ensure that they can do no harm while the remaining node continues.
-
-The delivery of RHEL-HA components will either be:
-
-* as an MCO Layer (targeting GA in 4.19),
-* as an extension (supported today), or
-* included, but inactive, in the base image
-
-Configuration of the RHEL-HA components will be via one or more MachineConfigs, and will require RedFish details from the installer.
 
 Upon a peer failure, the RHEL-HA components on the surivor will fence the peer and use the OCF script to restart etcd as a new cluster of one.
 
@@ -129,29 +123,38 @@ Upon a network failure, the RHEL-HA components ensure that exactly one node will
 Upon rebooting, the RHEL-HA components ensure that a node remains inert (not running cri-o, kubelet, or etcd) until it sees it's peer.
 If the peer is likely to remain offline for an extended period of time, admin confirmation is required to allow the node to start OpenShift.
 
-When starting etcd, the OCF script will use the cluster ID and version counter to determine whether the existing data directory can be reused, or must be erased before joining an active peer.
-
-OpenShift upgrades are not supported in a degraded state, and will only proceed when both peers are online.
-
-MachineConfig updates are not applied in a degraded state, and will only proceed when both peers are online.
-
+When starting etcd, the OCF script will use etcd's cluster ID and version counter to determine whether the existing data directory can be reused, or must be erased before joining an active peer.
 
 ### Workflow Description
 
-#### Cluster Creator Role:
-* The Cluster Creator will automatically install the 2NO (by using an installer), installation process will include the following steps:  
-  * Deploys a two-node OpenShift cluster
-  * Configures cluster membership and quorum using Corosync.
-  * Sets up Pacemaker for resource management and fencing.
+#### Cluster Creation
 
-#### Application Administrator Role:
-* Receives cluster credentials.
-* Deploys applications within the two-node cluster environment.
+Creation of a two node control plane will be possible via the core installer (with an additional bootstrap node), and via the Assisted Installer (without an additional bootstrap node).
 
+In the case of the core OpenShift installer, the user-facing proceedure is unchanged from a standard "IPI" installation, other than the configuration of 2 nodes instead of 3.
+Internally, the RedFish details for each node will need to make their way into the RHEL-HA configuration, but this is information already required for bare-metal hosts.
+
+In the case of the Assisted Installer, the user-facing proceedure follows the standard flow except for the configuration of 2 nodes instead of 3, and the collection of RedFish details for each node which are needed for the RHEL-HA configuration.
+
+Everything else about cluster creation will be an opaque implementation detail not exposed to the user. 
+
+#### Day 2 Proceedures
+
+As per a standard 3-node control plane, OpenShift upgrades and MachineConfig changes can not be applied when the cluster is in a degraded state.
+Such operations will only proceed when both peers are online and healthy.
+
+The experience of managing a 2-node control plane should be largely indistinguishable from that of a 3-node one.
 
 ### API Extensions
 
-No new CRDs, or changes to existing CRDs, are expected at this time.
+Initially the creation of an etcd cluster will be driven in the same way as other platforms.
+Once the cluster has two members, the etcd daemon will be removed from the static pod definition and recreated as a resource controlled by RHEL-HA.
+At this point, the Cluster Etcd Operator (CEO) will be made aware of this change so that some membership management functionality that is now handled by RHEL-HA can be disabled.
+This will be achieved by having the same entity that drives the configuration of RHEL-HA use the OpenShift API to update a field on the Infrastructure CR - which can only succeed if the control-plane is healthy.
+
+To enable this flow, we propose the addition of a `externallyManagedEtcd` field to the `BareMetalPlatformSpec` which defaults to False.
+This will limit the scope of CEO changes to that specific platform, and well as allow the use of a tightly scoped credential to make the change.
+An alternative being to grant write access to all `ConfigMaps` in the `openshift-config` namespace.
 
 ### Topology Considerations
 
@@ -162,16 +165,24 @@ No new CRDs, or changes to existing CRDs, are expected at this time.
 Is the change relevant for standalone clusters?
 TODO: Exactly what is the definition of a standalone cluster?  Disconnected?  Physical hardware?
 
-
 ### Implementation Details/Notes/Constraints
 
 While the target installation requires exactly 2 nodes, this will be achieved by building support in the core installer for a "bootstrap plus 2 nodes" flow, and then using Assisted Installer's ability to bootstrap-in-place to remove the requirement for a bootstrap node.
 
-Initially the creation of an etcd cluster will be driven in the same way as other platforms.
-Once the cluster has two members, the etcd daemon will be removed from the static pod and become controlled by RHEL-HA.
-At this point, the Cluster Etcd Operator (CEO) will be made aware of this change so that some membership management functionality that is now handled by RHEL-HA can be disabled.
-The exact mechanism for this communication has yet to be determined.
+A mechanism is needed for other components to understand that this is a 2no architecture in which etcd is externally managed and RHEL-HA is in use.
+The proposed `externallyManagedEtcd` field for `BareMetalPlatformSpec` in combination with the node count may be sufficient.
+Alternatively we may wish to make this explicit by creating a new feature gate.
 
+The delivery of RHEL-HA components will be opaque to the user and either come:
+
+* as an MCO Layer (this feature is targeting GA in 4.19),
+* as an extension (supported today), or
+* included, but inactive, in the base image
+
+Configuration of the RHEL-HA components will be via one or more MachineConfigs, and will require RedFish details to have been collected by the installer.
+Sensible defaults will be chosen where possible, and user customization only where absolutely necessary.
+
+Tools for extracting support information (must-gather tarballs) will be updated to gather relevant logs for triaging issues.
 
 #### Failure Scenario Timelines:
 
@@ -190,7 +201,8 @@ The exact mechanism for this communication has yet to be determined.
 2. Network Failure
    1. Corosync on both nodes detects separation
    2. Etcd loses internal quorum (E-quorum) and goes read-only
-   3. Both sides retain C-quorum and initiate fencing of the other side. There is a different delay between the two nodes for executing the fencing operation to avoid both fencing operations to succeed in parallel and thus shutting down the system completely.
+   3. Both sides retain C-quorum and initiate fencing of the other side.
+      There is a different delay (configured as part of Pacemaker) between the two nodes for executing the fencing operation to avoid both fencing operations to succeed in parallel and thus shutting down the system completely.
    4. One side wins, pre-configured as Node1
    5. Pacemaker on Node1 forces E-quorum (etcd promotion event)
    6. Cluster continues with no redundancy
@@ -271,16 +283,10 @@ Mitigation: ... CI ...
 
 ### Drawbacks
 
-The idea is to find the best form of an argument why this enhancement should
-_not_ be implemented.
+The two-node architecture represents yet another distinct install type for users to choose from.
 
-What trade-offs (technical/efficiency cost, user experience, flexibility,
-supportability, etc) must be made in order to implement this? What are the reasons
-we might not want to undertake this proposal, and how do we overcome them?
-
-Does this proposal implement a behavior that's new/unique/novel? Is it poorly
-aligned with existing user expectations?  Will it be a significant maintenance
-burden?  Is it likely to be superceded by something else in the near future?
+The existence of 1, 2, and 3+ node control-plane sizes will likely generate customer demand to move between them as their needs change.
+Satisfying this demand would come with significant technical and support overhead.
 
 ## Open Questions [optional]
 
@@ -288,6 +294,12 @@ This is where to call out areas of the design that require closure before decidi
 to implement the design.  For instance,
  > 1. This requires exposing previously private resources which contain sensitive
   information.  Can we do this?
+
+1. How to best deliver RHEL-HA components to the nodes is currently under discussion with the MCO team.
+   The answer may change as in-progress MCO features mature.
+1. Are there any normal lifecycle events that would be interpreted by a peer as a failure, and where the resulting "recovery" would create unnecessary downtime?
+   How can these be avoided?
+
 
 ## Test Plan
 
