@@ -259,16 +259,14 @@ how the code will be rewritten in the enhancement.
 
 ### Risks and Mitigations
 
-Significant features delivered over the next three years have a hard
-dependency on the next major *host OS version*. While we don't anticipate that,
-it is not easy to forecast the next three years of features. Additionally,
-RHEL9 is entering the phase of its lifecycle where new features cannot be
-assumed. Therefore 
+Core OpenShift Features delivered over the next three years have a hard
+dependency on the newer major *host OS version*.
  -- Some OpenShift features may need to be limited to use on RHEL10 nodes.
  While the labeling of nodes with the ID and VERSION_ID is meant to help here
- this will often require a higher level "scheduler" to ensure that workloads
- which are dependent on an underlying OS feature end up on nodes which match
- the requirements.
+ this will often require a higher level "scheduler" that not only targets
+ nodes labeled with the desired labels but tailors the workload, for instance
+ CNV qemu pods may operate with different configuration or container image 
+ based on host OS version.
  -- Or, some features may be deferred for significant period of time until
  RHEL10 is the older of the two supported OSes.
  -- Or, some features will need to be backported to RHEL9.
@@ -290,8 +288,15 @@ inform future decisions here.
 
 ### Drawbacks
 
-Supporting two major OS versions doubles many engineering and testing
-requirements.
+Supporting two major OS versions
+- doubles our delivery pipeline requirements,
+- effectively unions CVE exposure -- for instance a glibc vulnerability in both
+versions is not addressed in a given OpenShift release until it's fixed in
+both OS versions
+- introduces potential for different workload behavior despite container
+compatibility matrices
+- introduces complexity for most privileged containers
+- may defer the move to more modern host OSes
 
 ## Open Questions [optional]
 
@@ -303,24 +308,17 @@ Even container storage needs to be considered for clearing, has the underlying
 filesystem tuning changed significantly between RHEL8 and RHEL10 warranting a
 reformat or potentially conversion to a new filesystem?
 
-
-
 What if anything does image mode change or complicate here? Can we assume by
 the time we potentially migrate a host from RHEL9 to RHEL10 that can be done
 via bootc?
 
 ## Test Plan
 
-When we introduce dual streams and assuming we stick to *our* workloads not
-being able to target specific host OSes we should randomize the OS stream
-selected for both ControlPlane and Compute at installation time but also
-annotate CI jobs so that those two facts are recorded so that we can compare
-results within or against streams.
-
-Potentially limit ourselves to complete dual testing in one release only? 4.19
-grows rhel10 duplicate jobs but upon achieving GA readiness for rhel10 hosts
-we collapse back to a single set of jobs which either randomly select host OS
-or ensure one of each?
+OpenShift TRT team has recommended that we approach CI in a similar manner to
+how it was performed when both OpenShiftSDN and OVNKubernetes were supported
+SDN controllers. That means splitting jobs roughly evenly between the two OS
+versions on each platform. Additionally, assuming we move forward with support
+for mixed clusters we would need to add some number of mixed OS test jobs.
 
 ## Graduation Criteria
 
@@ -460,13 +458,33 @@ Describe how to
 
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used
-to highlight and record other possible approaches to delivering the
-value proposed by an enhancement, including especially information
-about why the alternative was not selected.
+### Lifecycle Extensions
+Repeat the forced major OS version update as happened between 4.12 and 4.13
+but couple that with extending the lifecycle of the last OCP version to
+support RHEL9 (4.18 or 4.20) to match RHEL9 End Of Maintenance date. In
+order to avoid asking RHEL for lifecycle extensions on 9.y versions this
+version of OCP would be required to eventually rebase RHCOS and container
+images to 9.10. The downside here is that we cut off RHEL9 constrained
+hardware from OpenShift features which aren't dependent on host OS version.
+
+### New OpenShift Major Version
+4.y continues on with RHEL9 at least as long as proposed in the dual stream
+proposal while 5.y introduces RHEL10. This would expand the delivery
+requirements at least as much as dual stream, and carry most of the
+implementation costs and risks. Would preclude mixed vintage hardware whenever
+the old and new hardware have non overlapping certified OS versions. It would
+however have a clearer story around feature enablement wherever host major OS
+version is a factor.
+
+### Blended/Abbreviated Dual Streams
+Defer introduction of RHEL10 until necessary for hardware enablement, which is
+assumed to be no later than 10.2. Limit the overlap in RHEL9 and RHEL10 support
+to a period for which we're willing to accept lowest common denominator feature
+enablement then extend the last of the dual stream versions to match RHEL9 life
+cycle.  ie: 4.19-4.21 on 9.6, 4.22-4.24 on 9.8/10.2, 4.25-4.27 on 10.4, with
+the life of 4.24 being extended to match RHEL9 EoM.
 
 ## Infrastructure Needed [optional]
 
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
+We expect to expand testing infrastructure needed by approximately 10-20%.
 
