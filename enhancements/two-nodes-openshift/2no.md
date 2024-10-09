@@ -118,9 +118,9 @@ The `etcdctl`, `etcd-metrics`, and `etcd-readyz` containers will remain part of 
 
 Use RedFish compatible Baseboard Management Controllers (BMCs) as our primary mechanism to power off (fence) unreachable peers and ensure that they can do no harm while the remaining node continues.
 
-Upon a peer failure, the RHEL-HA components on the surivor will fence the peer and use the OCF script to restart etcd as a new cluster of one.
+Upon a peer failure, the RHEL-HA components on the surivor will fence the peer and use the OCF script to restart etcd as a new cluster-of-one.
 
-Upon a network failure, the RHEL-HA components ensure that exactly one node will survive, fence it's peer, and use the OCF script to restart etcd as a new cluster of one.
+Upon a network failure, the RHEL-HA components ensure that exactly one node will survive, fence it's peer, and use the OCF script to restart etcd as a new cluster-of-one.
 
 In both cases, the control-plane will be unresponsive until etcd has been restarted.
 
@@ -148,6 +148,12 @@ As per a standard 3-node control plane, OpenShift upgrades and `MachineConfig` c
 Such operations will only proceed when both peers are online and healthy.
 
 The experience of managing a 2-node control plane should be largely indistinguishable from that of a 3-node one.
+The primary exception is (re)booting one of the peers while the other is offline, and expected to remain so.
+
+As in a 3-node control-plane cluster, starting only one node is not expected to result in a functioning cluster.
+Should the admin wish for the control-plane to start, the admin will need to execute a supplied confirmation command on the active cluster node. 
+This command will grant quorum to the RHEL-HA components, authorizing it to fence it's peer and start etcd in as a cluster-of-one read/write mode.
+Confirmation can be given at any point and optionally make use of SSH to facilitate initiation by an external script.
 
 ### API Extensions
 
@@ -268,7 +274,7 @@ Tools for extracting support information (must-gather tarballs) will be updated 
 ### Risks and Mitigations
 
 1. Risk: If etcd were to be made active on both peers during a network split, divergent datasets would be created
-   1. Mitigation: RHEL-HA requires fencing of a presumed dead peer before restarting etcd as a cluster of one
+   1. Mitigation: RHEL-HA requires fencing of a presumed dead peer before restarting etcd as a cluster-of-one
    1. Mitigation: Peers remain inert (unable to fence peers, or start cri-o, kubelet, or etcd) after rebooting until they can contact their peer
 
 1. Risk: Multiple entities (RHEL-HA, CEO) attempting to manage etcd membership would cause an internal split-brain
