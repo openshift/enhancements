@@ -312,6 +312,13 @@ What if anything does image mode change or complicate here? Can we assume by
 the time we potentially migrate a host from RHEL9 to RHEL10 that can be done
 via bootc?
 
+Do OLM Operators get to choose which OSes they support or not?
+I don't think they should be able to. Most unprivileged workloads will not
+know or care due to the container compatibility matrix. Privileged workloads
+that interact directly with the host OS should support both and part of the
+goal here will be clearly articulating that going forward it's mandatory to
+support the two latest major OS versions.
+
 ## Test Plan
 
 OpenShift TRT team has recommended that we approach CI in a similar manner to
