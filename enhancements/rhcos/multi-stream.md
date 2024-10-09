@@ -236,7 +236,12 @@ OS is reinstalled across versions specifically NOT preserving any data / config?
 
 #### Single-node Deployments or MicroShift
 
-Re-install? TBD
+Single Node - Reinstall and redeploy workloads seems like the best approach
+
+Microshift - The OS is managed independently from OpenShift, host binaries
+would be shipped for both OSes, and tightly coupled containers such as SDN
+would use existing patterns to embed binaries for both OSes and execute the
+desired version.
 
 #### Compact Clusters
 
