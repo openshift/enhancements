@@ -286,6 +286,10 @@ Tools for extracting support information (must-gather tarballs) will be updated 
    1. Mitigation: The node will be reachable via SSH and the confirmation can be scripted
    1. Mitigation: It may be possible to identify scenarios where, for a known hardware topology, it is safe to allow the node to proceed automatically.
 
+1. Risk: “Something changed, lets reboot” is somewhat baked into OCP’s DNA and has the potential to be problematic when nodes are actively watching for their peer to disappear, and have an obligation to promptly act on that disappearance by power cycling them.
+   1. Mitigation: Identify causes of reboots, and either avoid them or ensure they are not treated as failures.
+   This may require an additional enhancement.
+
 1. Risk: We may not succeed in identifying all the reasons a node will reboot
    1. Mitigation: ... testing? ...
 
