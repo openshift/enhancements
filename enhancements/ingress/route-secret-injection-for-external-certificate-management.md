@@ -2,6 +2,7 @@
 title: route-secret-injection-for-external-certificate-management
 authors:
   - '@thejasn'
+  - '@chiragkyal'
 reviewers:
   - '@Miciah'
   - '@alebedev87'
@@ -14,9 +15,11 @@ approvers:
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - '@joelspeed'
 creation-date: 2022-12-13
-last-updated: 2024-05-14
+last-updated: 2024-10-10
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - https://issues.redhat.com/browse/CM-815
+  - https://issues.redhat.com/browse/CFE-815
+  - https://issues.redhat.com/browse/CFE-811
+  - https://issues.redhat.com/browse/OCPBUGS-34373
 ---
 
 # Route Secret Injection For External Certificate Management
@@ -49,22 +52,22 @@ certificate data via a secret reference.
 ### User Stories
 
 - As an end user of Route API, I want to be able to provide a tls secret reference on
-  OpenShift Routes so that I can integrate with third-party certificate management solution
+  OpenShift Routes so that I can integrate with third-party certificate management solution.
 
 - As an OpenShift cluster administrator, I want to use third-party solutions like cert-manager
   for certificate management of user workloads on OpenShift so that no manual process is
   required to renew expired certificates.
 
-- As an Openshift engineer, I want to update the router so that it is able read
+- As an OpenShift engineer, I want to update the router so that it is able read
   secrets directly if all the preconditions have been met by the router serviceaccount.
 
-  - The router serviceaccount must have permission to read this secret particular secret.
+  - The router serviceaccount must have permission to read this particular secret.
   - The role and rolebinding to provide this access must be provided by the user.
 
 - As an OpenShift engineer, I want to update the route validation in openshift/library-go
   in order to validate the updated Route API.
 
-  - Both Openshift and Microshift run the openshift/library-go validations as part of admission plugin
+  - Both OpenShift and Microshift run the openshift/library-go validations as part of admission plugin.
 
 - As an OpenShift engineer, I want to be able to update Route API so that I can integrate
   OpenShift Routes with third-party certificate management solutions like cert-manager.
@@ -98,7 +101,7 @@ The following workflow describes the integration with third party
 certificate management solutions like cert-manager with the certificate
 reference field described under [API Extensions](#api-extensions).
 
-- The end user must have generated the serving certificate generated
+- The end user must have generated the serving certificate
   as a prerequisite using third-party systems like cert-manager.
 - In cert-manager's case, the [Certificate](https://cert-manager.io/docs/usage/certificate/#creating-certificate-resources)
   CR must be created in the same namespace where the Route is going to be created.
@@ -181,32 +184,34 @@ The router will read the secret referenced in `.spec.tls.externalCertificate` an
 the certificate inside to configure HAProxy if the secret is present and if the
 following pre-conditions are met:
 
-- Validations done by API server as part of [ValidateRoute()](https://github.com/openshift/openshift-apiserver/blob/aac3dd5bf0547e928103a0f718ca104b1bb13930/pkg/route/apis/route/validation/validation.go#L21),
 
-  - The router serviceaccount must have permission to read this secret.
+- Validations done by API server as part of [AllocateHost()](https://github.com/openshift/openshift-apiserver/blob/bd2a35e58172010c658f4d8f4dff8f9f0eac187d/pkg/route/apiserver/registry/route/strategy.go#L75)
+
+  -  Any user that is creating a route which has a non-empty `.spec.tls.externalCertificate`, will need  `create` permission on the `routes/custom-host` sub-resource.
+     -  [certSet](https://github.com/openshift/library-go/blob/f03310f6a5328b76d1a268695120cdf5326dfdb3/pkg/route/hostassignment/assignment.go#L34) will be `true` if `.spec.tls.externalCertificate` is specified.
+     -  This pre-check aligns with existing implementation of `.spec.tls.certificate` field.
+
+- Validations done by API server as part of [ValidateRoute()](https://github.com/openshift/openshift-apiserver/blob/aac3dd5bf0547e928103a0f718ca104b1bb13930/pkg/route/apis/route/validation/validation.go#L21)
+
+  - The router serviceaccount must have permission to get/list/watch this secret.
     - The role and rolebinding to provide this access must be provided by the user.
+  - The secret should be in the same namespace as that of the route.
+  - The secret should be of type `kubernetes.io/tls`.
   - CEL validations and openshfit/library-go will enforce that both `.spec.tls.certificate` and `.spec.tls.externalCertificate`
-    are not specified on the route at the same time. Since CEL validations are not run on Openshift API server, the same
+    are not specified on the route at the same time. Since CEL validations are not run on OpenShift API server, the same
     validation will be done as part of `ValidateRoute()`.
 
-- New validation added to the API server as `ValidateHostExternalCertificate()`
-
-  - Any route that is updated or created which has a non-empty `.spec.tls.externalCertificate`,
-    will need additional permission checks done as changing the certificate also affects
-    `.spec.host` or `.spec.subdomain`. Meaning any user that is updating the certificate must also
-    have `create` and `update` permission on the `custom-host` sub-resource.
-  - Any user that does not have both of these permissions will not be allowed to update/create routes
-    that use `.spec.tls.externalCertificate`.
-  - This validation function will be invoked before `ValidateHostUpdate()`.
-  - Refer to [Drawbacks](#drawbacks) for additional details.
 
 - Validations done by API server as part of [ValidateHostUpdate()](https://github.com/openshift/openshift-apiserver/blob/bd2a35e58172010c658f4d8f4dff8f9f0eac187d/pkg/route/apiserver/registry/route/strategy.go#L96)
 
-  - If the old route or the new route uses `.spec.tls.externalCertificate` this validation will always
-    have the precondition [certificateChangeRequiresAuth()](https://github.com/openshift/library-go/blob/d8d3f3f8a9e4a82c110a89a13229ce1412a88e4a/pkg/route/hostassignment/assignment.go#L123C29-L123C29) return `true` since we cannot definitively
-    verify if the content of the secret that is referenced has been modified. Since the previous validation
-    func (`ValidateHostExternalCertificate()`) would have already validation user permissions, we can
-    safely make this assumption.
+  - If the new route uses `.spec.tls.externalCertificate`,  this validation will always
+    have the precondition [certificateChangeRequiresAuth()](https://github.com/openshift/library-go/blob/d8d3f3f8a9e4a82c110a89a13229ce1412a88e4a/pkg/route/hostassignment/assignment.go#L123C29-L123C29) return `true`, 
+    as we cannot definitively verify if the content of the referenced secret has been modified.
+    Even if the secret name remains unchanged, we must assume that the secret content (certificate info) is changed, necessitating authorization.
+  - Updating TLS certificate is contingent on the user having either `create` or `update` permission on the `routes/custom-host` sub-resource. 
+  Removal of the TLS certificate is allowed without these permissions check. This statement aligns with the existing validation of the `.spec.tls.certificate` field and is also mentioned in [openshift/origin#18177 add update verb to routes/custom-host for admin role](https://github.com/openshift/origin/pull/18177#issuecomment-360660024).
+  - Refer to [Permission requirements on routes/custom-host](#permission-requirements-on-routescustom-host) and [Drawbacks](#exception-in-validations-between-api-server-and-the-router) for additional details.
+
 
 - Validations done by the router as part of [ExtendedValidateRoute()](https://github.com/openshift/router/blob/c407ebbc5d8d85daea2ef2d1ba539444a06f4d25/pkg/router/routeapihelpers/validation.go#L158) (contents of secret),
 
@@ -272,14 +277,15 @@ The above variations need to be documented for the end user as part of OpenShift
 
 #### Exception in Validations between API server and the router
 
-The new `ValidationHostExternalCertificate()` is intentionally done only on the API server
+The `routes/custom-host` permission check is intentionally done only on the API server
 and not the router as well, this will result in not having this validation for events that
 are generated by the secret monitor directly to the route controller in the router. So if
-a user who has the `create` and `update` permission on `custom-host` creates a route
+a user who has necessary permissions on `custom-host` creates a route
 that sets `.spec.tls.externalCertificate` the validation on the API server will pass and
 the route is successfully created. Post creation of the route if the permissions for `custom-host`
-are revoked and the user edits the contents of the secret, the route would still be
-able successfully reload the certificate on the route.
+are revoked and the user edits the contents of the secret, the router would still be
+able successfully reload the certificate on the route, which means the user without having 
+permission on `custom-host` could update the secret for the external certificate later on.
 
 ## Design Details
 
@@ -296,9 +302,42 @@ able successfully reload the certificate on the route.
   > The ingress-to-route behaviour will remain as is i.e. it will not make use of
   > the newly introduced field.
 
-- What should be the behaviour of `ValidationHostUpdate()` when using `externalCertificate`?
-  > Addressed by introducing `ValidationHostExternalCertificate()` and which will execute
-  > prior to the `ValidationHostUpdate()` function.
+### Permission requirements on `routes/custom-host`
+- `create` is required to set `.spec.tls.externalCertificate` on route creation. 
+  [AllocateHost()](https://github.com/openshift/openshift-apiserver/blob/bd2a35e58172010c658f4d8f4dff8f9f0eac187d/pkg/route/apiserver/registry/route/strategy.go#L75) enforces this check.
+- Either `create` or `update` is required on route update with non-empty `.spec.tls.externalCertificate`. 
+  [ValidateHostUpdate](https://github.com/openshift/openshift-apiserver/blob/bd2a35e58172010c658f4d8f4dff8f9f0eac187d/pkg/route/apiserver/registry/route/strategy.go#L96) enforces this check.
+
+  - Few examples:
+
+    - Adding `.spec.tls.externalCertificate` to a route when no certificate was present.
+
+    - Adding `.spec.tls.externalCertificate` to a route when TLS configuration was nil.
+
+    - Switching from `.spec.tls.certificate/key` to `.spec.tls.externalCertificate`.
+
+    - Changing the secret name referenced by `.spec.tls.externalCertificate`.
+  
+    - **Even keeping the secret name unchanged, requires permission check. Since the state of the external secret cannot be verified.**
+      - **_NOTE_** :  This restriction potentially blocks all updates to a route that specifies `.spec.tls.externalCertificate` if the user does not have the "custom-host" permission. Even updating an unrelated field or adding an annotation will be blocked.
+
+- No permission is required to remove `.spec.tls.externalCertificate` from route.
+
+  - Few examples:
+
+    - Removing externalCertificate and setting the route to use no certificate.
+
+    - Removing externalCertificate and setting the route to use a nil TLS configuration.
+
+- Namespace level admin and editor by default get `create` through [bootstrappolicy](https://github.com/openshift/openshift-apiserver/blob/6b5184128103eaad64d7b00f0d1de9b7c3597112/pkg/bootstrappolicy/policy.go#L343-L388). 
+  Only `cluster-admin` gets `update` by default.
+
+- Refer following links for `routes/custom-host` permission history:
+  - https://github.com/openshift/origin/pull/13905
+  - https://github.com/openshift/origin/pull/18177#issuecomment-360660024
+  - https://github.com/openshift/origin/pull/18312
+
+
 
 ### Test Plan
 
