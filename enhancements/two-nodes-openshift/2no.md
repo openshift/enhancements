@@ -61,8 +61,8 @@ Fence Agent - Fence agents were developed as device "drivers" which are able to 
 <br>[more context here](https://github.com/ClusterLabs/fence-agents/)
 
 Quorum - having the minimum number of members required for decision-making. The most common threshold is 1 plus half the total number of members, though more complicated algorithms predicated on fencing are also possible.
-C-quorum: quorum as determined by Corosync members and algorithms
-E-quorum: quorum as determined by etcd members and algorithms
+ * C-quorum: quorum as determined by Corosync members and algorithms
+ * E-quorum: quorum as determined by etcd members and algorithms
 
 Split-brain - a scenario where a set of peers are separated into groups smaller than the quorum threshold AND peers decide to host services already running by other groups.  Typically results in data loss or corruption unless state is stored outside of the cluster.   
 
