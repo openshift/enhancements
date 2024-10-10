@@ -52,21 +52,15 @@ Pacemaker - a Red Hat led [open-source project](https://clusterlabs.org/pacemake
 Resource Agent - A resource agent is an executable that manages a cluster resource. No formal definition of a cluster resource exists, other than "anything a cluster manages is a resource." Cluster resources can be as diverse as IP addresses, file systems, database services, and entire virtual machines - to name just a few examples.
 <br>[more context here](https://github.com/ClusterLabs/resource-agents/blob/main/doc/dev-guides/ra-dev-guide.asc)
 
-Fencing - the process of “somehow” isolating or powering off malfunctioning or unresponsive nodes to prevent them from causing further harm or interference with the rest of the cluster.
-
-Fence Agent - Fence agents were developed as device "drivers" which are able to prevent computers from destroying data on shared storage. Their aim is to isolate a corrupted computer, using one of three methods:
-* Power - A computer that is switched off cannot corrupt data, but it is important to not do a "soft-reboot" as we won't know if this is possible. This also works for virtual machines when the fence device is a hypervisor.
-* Network - Switches can prevent routing to a given computer, so even if a computer is powered on it won't be able to harm the data.
-* Configuration - Fibre-channel switches or SCSI devices allow us to limit who can write to managed disks.
-<br>[more context here](https://github.com/ClusterLabs/fence-agents/)
+Fencing - the process of “somehow” isolating or powering off malfunctioning or unresponsive nodes to prevent them from causing further harm, such as data corruption or the creation of divergent datasets.  
 
 Quorum - having the minimum number of members required for decision-making. The most common threshold is 1 plus half the total number of members, though more complicated algorithms predicated on fencing are also possible.
  * C-quorum: quorum as determined by Corosync members and algorithms
  * E-quorum: quorum as determined by etcd members and algorithms
 
-Split-brain - a scenario where a set of peers are separated into groups smaller than the quorum threshold AND peers decide to host services already running by other groups.  Typically results in data loss or corruption unless state is stored outside of the cluster.   
+Split-brain - a scenario where a set of peers are separated into groups smaller than the quorum threshold AND peers decide to host services already running by other groups.  Typically results in data loss or corruption.   
 
-MCO - Machine Config Operator. This operator manages updates to systemd, cri-o/kubelet, kernel, NetworkManager, etc. It also offers a new `MachineConfig` capability that can write configuration files onto the host.
+MCO - Machine Config Operator. This operator manages updates to node's systemd, cri-o/kubelet, kernel, NetworkManager, etc., and can write custom files to it, configurable by MachineConfig custom resources.
 
 ABI - Agent-Based Installer.
 
@@ -81,7 +75,7 @@ Customers with hundreds, or even tens-of-thousands, of geographically dispersed 
 The need for some level of fault tolerance prevents the applicability of Single Node OpenShift (SNO), and a converged 3-node cluster is cost prohibitive at the scale of retail and telcos - even when the third node is a "cheap" one that doesn't run workloads.
 
 The benefits of the cloud-native approach to developing and deploying applications are increasingly being adopted in edge computing.
-This requires our solution provide a management experience consistent with "normal" OpenShift deployments, and be compatible with the full ecosystem of Red Hat and partner workloads designed for OpenShift.
+This requires our solution to provide a management experience consistent with "normal" OpenShift deployments, and be compatible with the full ecosystem of Red Hat and partner workloads designed for OpenShift.
 
 ### User Stories
 
@@ -116,13 +110,13 @@ We will take advantage of RHEL-HA's native support for systemd and re-use the st
 The existing startup order of cri-o, then kubelet, then etcd will be preserved.
 The `etcdctl`, `etcd-metrics`, and `etcd-readyz` containers will remain part of the static pod.
 
-Use RedFish compatible Baseboard Management Controllers (BMCs) as our primary mechanism to power off (fence) unreachable peers and ensure that they can do no harm while the remaining node continues.
+Use RedFish compatible Baseboard Management Controllers (BMCs) as our primary mechanism to power off (fence) an unreachable peer and ensure that it can do no harm while the remaining node continues.
 
 Upon a peer failure, the RHEL-HA components on the surivor will fence the peer and use the OCF script to restart etcd as a new cluster-of-one.
 
 Upon a network failure, the RHEL-HA components ensure that exactly one node will survive, fence it's peer, and use the OCF script to restart etcd as a new cluster-of-one.
 
-In both cases, the control-plane will be unresponsive until etcd has been restarted.
+In both cases, the control-plane's dependance on etcd will cause it to respond with errors until etcd has been restarted.
 
 Upon rebooting, the RHEL-HA components ensure that a node remains inert (not running cri-o, kubelet, or etcd) until it sees it's peer.
 If the peer is likely to remain offline for an extended period of time, admin confirmation is required to allow the node to start OpenShift.
@@ -160,7 +154,7 @@ Confirmation can be given at any point and optionally make use of SSH to facilit
 Initially the creation of an etcd cluster will be driven in the same way as other platforms.
 Once the cluster has two members, the etcd daemon will be removed from the static pod definition and recreated as a resource controlled by RHEL-HA.
 At this point, the Cluster Etcd Operator (CEO) will be made aware of this change so that some membership management functionality that is now handled by RHEL-HA can be disabled.
-This will be achieved by having the same entity that drives the configuration of RHEL-HA use the OpenShift API to update a field on the Infrastructure CR - which can only succeed if the control-plane is healthy.
+This will be achieved by having the same entity that drives the configuration of RHEL-HA use the OpenShift API to update a field in the `BareMetalPlatformSpec` part of the Infrastructure CR - which can only succeed if the control-plane is healthy.
 
 To enable this flow, we propose the addition of a `externallyManagedEtcd` field to the `BareMetalPlatformSpec` which defaults to False.
 This will limit the scope of CEO changes to that specific platform, and well as allow the use of a tightly scoped credential to make the change.
