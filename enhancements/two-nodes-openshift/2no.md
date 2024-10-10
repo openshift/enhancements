@@ -86,11 +86,11 @@ This requires our solution provide a management experience consistent with "norm
 ### User Stories
 
 * As a large enterprise with multiple remote sites, I want a cost-effective OpenShift cluster solution so that I can manage containers without the overhead of a third node.
-* As a support engineer, I want a safe and automated method for handling the failure of a single node so that the downtime of workloads is minimized.
+* As a support engineer, I want a safe and automated method for handling the failure of a single node so that the downtime of the control-plane is minimized.
 
 ### Goals
 
-* Provide a two-node control plane for physical hardware that is resilient to a node-level failure for either node
+* Provide a two-node control-plane for physical hardware that is resilient to a node-level failure for either node
 * Provide a transparent installation experience that starts with exactly 2 blank physical nodes, and ends with a fault-tolerant two node cluster
 * Prevent both data corruption and divergent datasets in etcd
 * Maintain the existing level of availability. Eg. by avoiding fencing loops, wherein each node powers cycles it's peer after booting, reducing the cluster's availability.
@@ -133,7 +133,7 @@ When starting etcd, the OCF script will use etcd's cluster ID and version counte
 
 #### Cluster Creation
 
-Creation of a two node control plane will be possible via the core installer (with an additional bootstrap node), and via the Assisted Installer (without an additional bootstrap node).
+Creation of a two node control-plane will be possible via the core installer (with an additional bootstrap node), and via the Assisted Installer (without an additional bootstrap node).
 
 In the case of the core OpenShift installer, the user-facing proceedure is unchanged from a standard "IPI" installation, other than the configuration of 2 nodes instead of 3.
 Internally, the RedFish details for each node will need to make their way into the RHEL-HA configuration, but this is information already required for bare-metal hosts.
@@ -144,10 +144,10 @@ Everything else about cluster creation will be an opaque implementation detail n
 
 #### Day 2 Proceedures
 
-As per a standard 3-node control plane, OpenShift upgrades and `MachineConfig` changes can not be applied when the cluster is in a degraded state.
+As per a standard 3-node control-plane, OpenShift upgrades and `MachineConfig` changes can not be applied when the cluster is in a degraded state.
 Such operations will only proceed when both peers are online and healthy.
 
-The experience of managing a 2-node control plane should be largely indistinguishable from that of a 3-node one.
+The experience of managing a 2-node control-plane should be largely indistinguishable from that of a 3-node one.
 The primary exception is (re)booting one of the peers while the other is offline, and expected to remain so.
 
 As in a 3-node control-plane cluster, starting only one node is not expected to result in a functioning cluster.
@@ -401,7 +401,7 @@ What are the guarantees? Make sure this is in the test plan.
 Consider the following in developing a version skew strategy for this
 enhancement:
 - During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
+- Does this enhancement involve coordinating behavior in the control-plane and
   in the kubelet? How does an n-2 kubelet without this feature available behave
   when this feature is used?
 - Will any other components on the node change? For example, changes to CSI, CRI
@@ -496,7 +496,7 @@ Describe how to
 
 
 * 2 SNO + KCP
-[KCP](https://github.com/kcp-dev/kcp/) allows you to manage multiple clusters from a single control plane, reducing the complexity of managing each cluster independently.
+[KCP](https://github.com/kcp-dev/kcp/) allows you to manage multiple clusters from a single control-plane, reducing the complexity of managing each cluster independently.
 With kcp, you can manage the two single-node clusters, each single-node OpenShift cluster can continue to operate independently even if the central kcp management plane becomes unavailable.
 The main advantage of this approach is that it doesn’t require inventing a new Openshift flavor and we don’t need to create a new installation flow to accommodate it.
 Disadvantages:
