@@ -49,9 +49,6 @@ Corosync - a Red Hat led [open-source project](https://corosync.github.io/corosy
 
 Pacemaker - a Red Hat led [open-source project](https://clusterlabs.org/pacemaker/doc/) that works in conjunction with Corosync to provide general purpose fault tolerance and automatic failover for critical services and applications.
 
-Resource Agent - A resource agent is an executable that manages a cluster resource. No formal definition of a cluster resource exists, other than "anything a cluster manages is a resource." Cluster resources can be as diverse as IP addresses, file systems, database services, and entire virtual machines - to name just a few examples.
-<br>[more context here](https://github.com/ClusterLabs/resource-agents/blob/main/doc/dev-guides/ra-dev-guide.asc)
-
 Fencing - the process of “somehow” isolating or powering off malfunctioning or unresponsive nodes to prevent them from causing further harm, such as data corruption or the creation of divergent datasets.  
 
 Quorum - having the minimum number of members required for decision-making. The most common threshold is 1 plus half the total number of members, though more complicated algorithms predicated on fencing are also possible.
@@ -189,6 +186,14 @@ Sensible defaults will be chosen where possible, and user customization only whe
 The entity (likely a one-shot systemd job as part of a `MachineConfig`) that configures RHEL-HA will also configure a fencing priority.
 This is usually done based on the sort-order a piece of shared info (such as IP or node name).
 The priority takes the form of a delay, usually in the order of 10s of seconds, and is used to prevent parallel fencing operations during a primary-network outage where each side powers off the other - resulting in a total cluster outage.
+
+RHEL-HA has no real understanding of the resources (IP addresses, file systems, databases, even virtual machines) it manages.
+It relies on resource agents to understand how to check the state of a resource, as well as start and stop them to achieve the desired target state.
+How a given agent uses these actions, and associated states, to model the resource is opaque to the cluster and depends on the needs of the underlying resource.
+
+Agents must conform to one of a variety of standards, including systemd, SYS-V, and OCF.
+The latter being the most powerful, adding the concept of promotion, and demotion.
+More information on creating OCF agents can be found in the upstream [developer guide](https://github.com/ClusterLabs/resource-agents/blob/main/doc/dev-guides/ra-dev-guide.asc).
 
 Tools for extracting support information (must-gather tarballs) will be updated to gather relevant logs for triaging issues.
 
