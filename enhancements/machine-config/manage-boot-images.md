@@ -27,7 +27,7 @@ superseded-by:
 
 ## Summary
 
-This is a proposal to manage bootimages via the `Machine Config Operator`(MCO), leveraging some of the [pre-work](https://github.com/openshift/installer/pull/4760) done as a result of the discussion in [#201](https://github.com/openshift/enhancements/pull/201). This feature will only target standalone OCP installs. It will also be user opt-in and is planned to be released behind a feature gate.
+This is a proposal to manage bootimages via the `Machine Config Operator`(MCO), leveraging some of the [pre-work](https://github.com/openshift/installer/pull/4760) done as a result of the discussion in [#201](https://github.com/openshift/enhancements/pull/201). This feature will only target standalone OCP installs. This is now released as an opt-in feature and will be rolled out on a per-platform basis (see projected roadmap). This will eventually be on by default, and the MCO will enforce an accepted skew and require non-platform managed bootimage updates to be acknowledged by the cluster admin.
 
 For `MachineSet` managed clusters, the end goal is to create an automated mechanism that can:
 - update the boot images references in `MachineSets` to the latest in the payload image
@@ -49,6 +49,8 @@ There has been [a previous effort](https://github.com/openshift/machine-config-o
 
 In certain long lived clusters, the MCS TLS cert contained within the above Ignition configuration may be out of date. Example issue [here](https://issues.redhat.com/browse/OCPBUGS-1817). While this has been partly solved [MCO-642](https://issues.redhat.com/browse/MCO-642) (which allows the user to manually rotate the cert) it would be very beneficial for the MCO to actively manage this TLS cert and take this concern away from the user.
 
+This is also a soft pre-requisite for both dual-stream RHEL support in OpenShift, and on-cluster layered builds. RPM-OSTree presently does a deploy-from-self to get a new-enough rpm-ostree to deploy image-based RHEL CoreOS systems, and we would like to avoid doing this for bootc if possible. We would also like to prevent RHEL8->RHEL10 direct updates once that is available for OpenShift.
+
 ### User Stories
 
 * As an Openshift engineer, having nodes boot up on an unsupported OCP version is a security liability. By having nodes boot on the latest OCP supported boot image for a given OCP release, there will be less of a skew with the release payload image. This helps me avoid tracking incompatibilities across OCP release versions and shore up technical debt(see issues linked above). 
@@ -59,7 +61,7 @@ In certain long lived clusters, the MCS TLS cert contained within the above Igni
 
 The MCO will take over management of the boot image references and the stub Ignition configuration. The installer is still responsible for creating the `MachineSet` at cluster bring-up, but once cluster installation is complete the MCO will ensure that boot images are in sync with the latest payload. From the user standpoint, this should cause less compatibility issues as nodes will no longer need to pivot to a different version of RHCOS during node scaleup.
 
-This should not interfere with existing workflows such as Hive and ArgoCD. As this is an opt-in mechanism, the cluster admin will be protected against such scenarios of accidental "reconciliation" and for additional safety, the MSBIC will also ensure that machinesets that have a valid OwnerReference will be excluded from boot image updates.
+This should not interfere with existing workflows such as Hive and ArgoCD. As this is an opt-in mechanism, the cluster admin will be protected against such scenarios of accidental "reconciliation" and for additional safety, the MSBIC will also ensure that machinesets that have a valid OwnerReference will be excluded from boot image updates. We will work with affected teams to transition them to the new workflow before we turn this feature on by default.
 
 ### Non-Goals
 
@@ -77,7 +79,7 @@ __Overview__
   - `ManagedBootImages` feature gate is active
   - The cluster and/or the machineset is opted-in to boot image updates. This is done at the operator level, via the `MachineConfiguration` API object.
   - The `machineset` does not have a valid owner reference. Having a valid owner reference typically indicates that the `MachineSet` is managed by another workflow, and that updates to it are likely going to cause thrashing. 
-  - The golden configmap is verified to be in sync with the current version of the MCO. The MCO will update("stamp") the golden configmap with version of the new MCO image after atleast 1 master node has succesfully completed an update to the new OCP image. This helps prevent `machinesets` being updated too soon at the end of a cluster upgrade, before the MCO itself has updated and has had a chance to roll out the new OCP image to the cluster. 
+  - The golden configmap is verified to be in sync with the current version of the MCO. The MCO will update("stamp") the golden configmap with version of the new MCO image after at least 1 master node has succesfully completed an update to the new OCP image. This helps prevent `machinesets` being updated too soon at the end of a cluster upgrade, before the MCO itself has updated and has had a chance to roll out the new OCP image to the cluster.
 
   If any of the above checks fail, the MSBIC will exit out of the sync.
 - Based on platform and architecture type, the MSBIC will check if the boot images referenced in the `providerSpec` field of the `MachineSet` is the same as the one in the ConfigMap. Each platform(gcp, aws...and so on) does this differently, so this part of the implementation will have to be special cased. The ConfigMap is considered to be the golden set of bootimage values, i.e. they will never go out of date. If it is not a match, the `providerSpec` field is cloned and updated with the new boot image reference.
@@ -115,22 +117,36 @@ Any form factor using the MCO and `MachineSets` will be impacted by this proposa
 
 ##### Supported platforms
 
-The initial release(phase 0) will support GCP. In future releases, we will add in support for remaining platforms as we gain confidence in the functionality and understand the specific needs of those platforms. For platforms that cannot be supported, we aim to atleast provide documentation to perform the boot image updates manually. Here is an exhaustive list of all the platforms:
+The initial release(phase 0) will support GCP. In future releases, we will add in support for remaining platforms as we gain confidence in the functionality and understand the specific needs of those platforms. For platforms that cannot be supported, we aim to at least provide documentation to perform the boot image updates manually. Here is an exhaustive list of all the platforms:
 
-- gcp
 - aws
 - azure
-- alibabacloud
-- nutanix
-- powervs
-- openstack
-- vsphere
 - baremetal
-- libvirt
-- ovirt
+- gcp
 - ibmcloud
+- nutanix
+- openstack
+- powervs
+- vsphere
 
 This work will be tracked in [MCO-793](https://issues.redhat.com/browse/MCO-793).
+
+##### Projected timeline
+
+This is a tentative timeline, subject to change (GA = General Availability, TP = Tech Preview, EF = Enforced).
+
+| Platform | TP      | GA      | EF      |
+| -------- | ------- | ------- | ------- |
+| gcp      | 4.16    |4.17     |4.19     |
+| aws      | 4.17    |4.18     |4.19     |
+| vsphere  | 4.19    |4.20     |4.21     |
+| baremetal|         |4.21     |4.22     |
+| openstack|         |4.21     |4.22     |
+| nutanix  |         |4.22     |4.23     |
+| ibmcloud |         |4.23     |4.24     |
+| non-managed  |         |4.20     |4.21    |
+
+*non-managed in this case indicates enforcement of user-initiated bootimage updates. See enforcement section below.
 
 ##### Cluster API backed machinesets
 
@@ -489,6 +505,28 @@ This is a solution aimed at reducing usage of outdated artifacts and should not 
 
 How will UX be reviewed and by whom? TBD 
 The UX element involved include the user opt-in and opt-out, which is currently up for debate. 
+
+### Enforcement of bootimage skew
+
+There should be some mechanism that will alert the user and fail if an unsupported bootimage is used. For example, the first boot pivot should fail if a RHEL8->RHEL10 pivot is attempted.
+
+#### Acceptable skew
+
+The release payload will describe the current skew policy. Generally speaking, we would like to keep the bootimage version aligned to the RHEL version we are shipping in the payload. For example, a 9.6 bootimage will be allowed until 9.8 is shipped via RHCOS. We would like to keep this customizeable, such that any major breaking changes outside of RHEL major/minor can still be enforced as a one-off.
+
+#### Enforcement options
+
+Some combination of the following mechanisms should be implemented to alert users, particularly non-machineset backed scaled environments. The options generally fall under proactive enforcement (require users to updated and acknowledge upon upgrading to a new version) vs. reactive enforcement (only fail when a non-compliant bootimage is being used to scale into the cluster).
+
+1. Add an Admin Ack for bootimages during the update to which bootimage updates will be enforced/turned on by default. Optionally, we could add additional acks in prior releases to prepare customers on a per-platform basis, once opt-in is available.
+2. Add a configmap to the cluster for non-machineset backed clusters, initially created by the MCO, to indicate the last user-updated bootimage. The user would need to update this configmap every few releases, when the RHEL minor on which the RHCOS container is built on changes (e.g. 9.6->9.8). The user may also delete this, which indicates that they will not require scaling nodes, and thereby opting out of bootimage updates and scaling functionality.
+3. Have the MCS reject new ignition requests if:
+    a. in a machineset-backed cluster, the user has not opted into bootimage management
+    b. in a non-machineset backed cluster, they have a non-updated configmap referenced above
+4. Add a service to be shipped via RHCOS/MCO templates, which will do a check on incoming OS container image vs currently booted RHCOS version. This runs on firstboot right after the MCD pulls the new image, and will prevent the node to rebase to the updated image if the drift is too far.
+
+
+RHEL major versions will no longer be cross-compatible. i.e. if you wish to have a RHEL10 machineconfigpool, you must use a RHEL10 bootimage.
 
 ### Drawbacks
 
