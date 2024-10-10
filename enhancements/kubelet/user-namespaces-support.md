@@ -14,7 +14,7 @@ api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggreg
 creation-date: 2024-06-17
 last-updated: 2024-07-31
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - https://issues.redhat.com/browse/OCPNODE-2000
+  - https://issues.redhat.com/browse/OCPNODE-2506
 see-also:
   - N/A
 replaces:
@@ -299,9 +299,9 @@ it's needed to allow podman to configure networking for the sub containers (as m
 to be writable to configure sysctls)
 
 The goal is to graduate this feature in 4.18, meaning `UserNamespacesPodSecurityStandards` and `ProcMountType` will be enabled by default, and will not mark
-a cluster as TechPreviewNoUpgrade. Doing so will require MinimalKubeletVersion (see below) to ensure all kubelets in the cluster respect the feature gates.
+a cluster as TechPreviewNoUpgrade. Doing so will require MinimumKubeletVersion (see below) to ensure all kubelets in the cluster respect the feature gates.
 
-#### MinimalKubeletVersion in the apiserver
+#### MinimumKubeletVersion in the apiserver
 
 An additional piece is needed for ensuring every node that is in a cluster with `UserNamespacesSupport` enabled actually runs those pods with user namespaces.
 Unfortunately, we cannot rely on homogenous feature gates protecting us in this case. For instance, an admin may pause a worker pool while an upgrade happens, but those workers
@@ -336,8 +336,44 @@ Thus, we need a method for the kube-apiserver to know for certain a node joining
 A way to do this that also could set a precedent for Openshift to have the apiserver be more conscious about kubelet version would be an openshift-apiserver
 extension that refuses to let a kubelet join a cluster or get leases if it is not new enough.
 
-For such a feature, there could be an extension to the NodeConfig object called `minimumKubeletVersion`. This field would be set on the cluster level. Practically, the
-openshift-apiserver could then query the `Node.Status.NodeSystemInfo.KubeletVersion` and verify it is above the `minimumKubeletVersion`.
+For such a feature, there could be an extension to the NodeConfig object called `minimumKubeletVersion`. This field would be set on the cluster level.
+
+1: I actually can't find any reference to this, but this is the way it *should* work, and thus we will rely on this.
+
+##### MinimumKubeletVersion API
+
+The API will be added to the NodeSpec object, which is a singleton cluster-wide:
+
+```
+type NodeSpec struct {
+	...
+	// MinimumKubeletVersion is the lowest version of a kubelet that can join the cluster
+	// +kubebuilder:validation:Pattern=`^([0-9]*\.[0-9]*\.[0-9]*$`
+	// +optional
+	MinimumKubeletVersion string `json:"minimumKubeletVersion,omitempty"`
+}
+```
+
+##### MinimumKubeletVerison authorization plugin
+
+The operative piece of this feature will be an authorization plugin patched into the kube-apiserver. It will be run against requests coming from
+kubelets, and if kubelet version reported through `Node.Status.NodeSystemInfo.KubeletVersion` is lower than `MinimumKubeletVersion` then the kube-apiserver
+will deny the kubelet from gaining access to any resources that aren't Node get/update and `subjectaccessreviews`. In other words, the kubelet can read it's node
+object and learn about what it has access to, but it's not allowed to gain access to any other API objects.
+
+This is a fairly harsh punishment for a node, as it means it's effectively lost and the cluster admin needs to manually intervene to remove it. There will also be
+some pieces to mitigate this pain for cluster admins.
+
+##### MinimumKubeletVersion admission plugin
+
+To protect nodes that are too old from being removed immediately, validation will be run on the MinimumKubeletVersion on admission to see if there are kubelets in the cluster
+that are running with a version lower than the configured version. If so, the creation will be rejected, and the admin notified that they must upgrade their nodes before applying it.
+
+##### MinimumKubeletVersion MCO awareness
+
+MCO will read the MinimumKubeletVersion and mark machines as degraded if the node is not at least MinimumKubeletVersion.
+
+##### Alternatives to MinimumKubeletVersion
 
 It is also possible this feature should be paired with a corresponding kubelet field `minimumKubeletVersion`, where it exits if it is too old. This will prevent the kubelet from
 running before it seeks to get credentials from the kube-apiserver, but also adds additional code overhead and backporting, plus given this feature would be added in z-streams, it's not
@@ -346,7 +382,8 @@ possible to rely on.
 For this feature, there should be extensive documentation on what to do if this condition triggers. For instance, there could be situations where that would make a node completely
 unrecoverable, and we should ensure customers can reclaim their nodes and ensure they are new enough.
 
-1: I actually can't find any reference to this, but this is the way it *should* work, and thus we will rely on this.
+Another possible alternative is a scheduling plugin that uses the presence of NodeRuntimeHandlerFeatures to check whether the node supports user namespaces. This is unfortunately an
+incomplete solution because daemonsets don't go through scheduling.
 
 ### Risks and Mitigations
 
@@ -387,7 +424,7 @@ unrecoverable, and we should ensure customers can reclaim their nodes and ensure
 - Document SLOs for the component
 - Conduct load testing
 - Documentation in 4.18 warning admins to check whether any pods are given access to `nested-container` SCC before downgrading.
-- MinimalKubeletVersion feature in the apiserver.
+- MinimumKubeletVersion feature in the apiserver.
 
 ### Post GA
 - Consider `restricted-v3` SCC for all workloads that formerly were pinned to `restricted-v2`
@@ -422,11 +459,11 @@ be aware of the feature gate and attempt to create a pod with a user namespace.
 In Kubernetes and Openshift, a version skew of n-3 between the kubelet and apiserver is supported. The key consideration in version skew:
 if the kube-apiserver believes the cluster supports user namespaces, will every supported kubelet create a pod with a user namespace?
 
-Unfortunately, as described in the `MinimalKubeletVersion in the apiserver` section, this cannot be relied upon because we cannot ensure the kubelet
+Unfortunately, as described in the `MinimumKubeletVersion in the apiserver` section, this cannot be relied upon because we cannot ensure the kubelet
 will have the feature gate enabled. An operative part of this feature is relaxing validation done on kube-apiservers for pods with a user namespace,
 but if the apiserver cannot trust the kubelet to fail to create a pod if the feature isn't enabled, it cannot trust the kubelet with relaxed validation.
 
-The `MinimalKubeletVersion` feature is to fix this problem. If all apiservers support this field upon GA, then a cluster admin can set the field and ensure
+The `MinimumKubeletVersion` feature is to fix this problem. If all apiservers support this field upon GA, then a cluster admin can set the field and ensure
 their kubelets are new enough to certainly support user namespaces. This frees the apiserver to relax validation and GA these SCC fields.
 
 This feature is not required for TechPreview, but is required for GA. The soonest we can GA this feature is 4.18.
