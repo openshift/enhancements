@@ -403,6 +403,30 @@ The biggest difference is that our configuration is one of our APIs.
 Configuration never goes away.
 Feature Gates can and do disappear by design.
 
+## Can you disable a Feature Gate that is enabled?
+This depends on what you mean by the question.
+
+If you're asking whether you can disable a Feature Gate on a cluster after enabling it, then the answer is no.
+You can enable a feature by patching the cluster feature gate, but you cannot disable it by patching the cluster feature gate.
+
+Very specifically
+If you mean a flow like:
+1. Cluster put into TechPreviewNoUpgrade.  This enables featuregate/Y.
+2. Cluster put into Default.  This disables featuregate/Y.
+
+No, we intentionally do not allow transition out of TechPreviewNoUpgrade or DevPreviewNoUpgrade.
+We prevent this using API validation that disallows these transitions.
+
+If you mean a flow like:
+1. 4.18 Default has featuregate/Y enabled by default.
+2. 4.19 Default has the featuregate/Y removed for some reason (this occasionally happens in kube).
+
+Yes.  This is the exception, not the rule, but it does happen on rare occasions.
+
+For downstream feature gates, the team listed as responsible for the feature gate will always know that this has happened.
+Every downstream feature gate state change will involve notification of the responsible team, that's part of why that
+information is required.
+
 # Alternatives not chosen
 Beyond using feature gates, there are other approaches to merge functionality:
 
