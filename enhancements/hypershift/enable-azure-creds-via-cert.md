@@ -17,7 +17,7 @@ api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggreg
 creation-date: 
   - "2024-10-07"
 last-updated:
-  - "2024-10-07"
+  - "2024-10-11"
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - "https://issues.redhat.com/browse/HOSTEDCP-1994"
 see-also:
@@ -67,9 +67,8 @@ AZURE_CLIENT_CERTIFICATE_PATH - to its deployments of image registry and ingress
 these components would then pass these variables along to NewDefaultAzureCredential.
 
 For storage operators (azure-file and azure-disk) on the hosted control plane, we will need pass along extra variables 
-so we can mount the cert in a volume on the azure-file and azure-disk controller pod - AZURE_CLIENT_ID_FOR_FILE,
-AZURE_CLIENT_CERTIFICATE_PATH_FOR_FILE, ARO_HCP_SECRET_PROVIDER_CLASS_FOR_FILE, AZURE_CLIENT_ID_FOR_DISK,
-AZURE_CLIENT_CERTIFICATE_PATH_FOR_DISK, ARO_HCP_SECRET_PROVIDER_CLASS_FOR_DISK, and AZURE_TENANT_ID. 
+so we can mount the cert in a volume on the azure-file and azure-disk controller pod - 
+ARO_HCP_SECRET_PROVIDER_CLASS_FOR_FILE and ARO_HCP_SECRET_PROVIDER_CLASS_FOR_DISK. 
 
 For cloud-network-config-controller, HyperShift will pass AZURE_CLIENT_ID, AZURE_TENANT_ID, 
 AZURE_CLIENT_CERTIFICATE_PATH, and ARO_HCP_SECRET_PROVIDER_CLASS to cluster-network-operator. cluster-network-operator 
