@@ -183,13 +183,8 @@ TODO: Exactly what is the definition of a standalone cluster?  Disconnected?  Ph
 
 While the target installation requires exactly 2 nodes, this will be achieved by building support in the core installer for a "bootstrap plus 2 nodes" flow, and then using Assisted Installer's ability to bootstrap-in-place to remove the requirement for a bootstrap node.
 
-TODO: Finalize component delivery based on MCO team guidance.
-
-The delivery of RHEL-HA components will be opaque to the user and either come:
-
-* as an MCO Layer (this feature is targeting GA in 4.19),
-* as an extension (supported today), or
-* included, but inactive, in the base image
+The delivery of RHEL-HA components will be opaque to the user and be delivered as an [MCO Extension](../rhcos/extensions.md) in the 4.18 and 4.19 timeframes.
+A switch to [MCO Layering](../ocp-coreos-layering/ocp-coreos-layering.md ) will be investigated once it is GA in a shipping version of OpenShift.
 
 Configuration of the RHEL-HA components will be via one or more `MachineConfig`s, and will require RedFish details to have been collected by the installer.
 Sensible defaults will be chosen where possible, and user customization only where absolutely necessary.
@@ -318,8 +313,6 @@ Satisfying this demand would come with significant technical and support overhea
 
 ## Open Questions [optional]
 
-1. How to best deliver RHEL-HA components to the nodes is currently under discussion with the MCO team.
-   The answer may change as in-progress MCO features mature.
 1. Are there any normal lifecycle events that would be interpreted by a peer as a failure, and where the resulting "recovery" would create unnecessary downtime?
    How can these be avoided?
 1. How to best indicate that this is a unique topology.
