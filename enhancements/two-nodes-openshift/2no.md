@@ -155,20 +155,21 @@ There are two related but ultimately orthogonal capabilities that may require AP
 
 #### Unique Topology
 
-A mechanism is needed for the installer and other components to understand that this is a 2 node control-plane topology which may require different handling.
+A mechanism is needed for components of the cluster to understand that this is a 2 node control-plane topology which may require different handling.
+We will define a new value for the `TopologyMode` enum: `DualReplicaTopologyMode`.
 
-TODO: pros and cons of creating a new PlatformType, vs. feature gate, vs adding a new field to `PlatformSpec` or `BareMetalPlatformSpec`
+However `TopologyMode` is not available at the point the Agent Based Installer (ABI) performs validation.
+We will therefore additionally define a new feature gate `DualReplicaTopology` that can be enabled in `install-config.yaml`, and which ABI can use to validate the proposed cluster - such as the proposed node count.
 
 #### CEO Trigger
 
 Initially the creation of an etcd cluster will be driven in the same way as other platforms.
 Once the cluster has two members, the etcd daemon will be removed from the static pod definition and recreated as a resource controlled by RHEL-HA.
 At this point, the Cluster Etcd Operator (CEO) will be made aware of this change so that some membership management functionality that is now handled by RHEL-HA can be disabled.
-This will be achieved by having the same entity that drives the configuration of RHEL-HA use the OpenShift API to update a field in the `BareMetalPlatformSpec` portion of the `Infrastructure` CR - which can only succeed if the control-plane is healthy.
+This will be achieved by having the same entity that drives the configuration of RHEL-HA use the OpenShift API to update a field in the CEO's `ConfigMap` - which can only succeed if the control-plane is healthy.
 
-To enable this flow, we propose the addition of a `externallyManagedEtcd` field to the `BareMetalPlatformSpec` which defaults to False.
-This will limit the scope of CEO behavioural changes to that specific platform, and well as allow the use of a tightly scoped credential to make the change.
-An alternative being to grant write access to all `ConfigMaps` in the `openshift-config` namespace.
+To enable this flow, we propose the addition of a `externallyManagedEtcd` field which defaults to `False`, and will only be respected if the `Infrastructure` CR's `TopologyMode` is `DualReplicaTopologyMode`.
+This will allow the use of a credential scoped to `ConfigMap`s in the `openshift-etcd-operator` namespace, to make the change.
 
 ### Topology Considerations
 
@@ -315,7 +316,6 @@ Satisfying this demand would come with significant technical and support overhea
 
 1. Are there any normal lifecycle events that would be interpreted by a peer as a failure, and where the resulting "recovery" would create unnecessary downtime?
    How can these be avoided?
-1. How to best indicate that this is a unique topology.
 1. The relevance of disconnected installation/functions to the proposal.
 
 
