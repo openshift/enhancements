@@ -198,7 +198,7 @@ RHEL-HA has no real understanding of the resources (IP addresses, file systems, 
 It relies on resource agents to understand how to check the state of a resource, as well as start and stop them to achieve the desired target state.
 How a given agent uses these actions, and associated states, to model the resource is opaque to the cluster and depends on the needs of the underlying resource.
 
-Agents must conform to one of a variety of standards, including systemd, SYS-V, and OCF.
+Resource agents must conform to one of a variety of standards, including systemd, SYS-V, and OCF.
 The latter being the most powerful, adding the concept of promotion, and demotion.
 More information on creating OCF agents can be found in the upstream [developer guide](https://github.com/ClusterLabs/resource-agents/blob/main/doc/dev-guides/ra-dev-guide.asc).
 
