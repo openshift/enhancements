@@ -15,24 +15,12 @@ reviewers:
   - "@eranco74"
   - "@yuqi-zhang"
   - "@gamado"
-  - "@razo7"
   - "@frajamomo"
   - "@clobrano"
-
 approvers:
-  - "@rwsu"
-  - "@fabbione"
-  - "@carbonin"
   - "@thomasjungblut"
-  - "@brandisher"
-  - "@DanielFroehlich"
-  - "@jerpeter1"
-  - "@slintes"
-  - "@beekhof"
-  - "@eranco74"
-  - "@yuqi-zhang"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - "@jerpeter1"
+  - "@deads2k"
 creation-date: 2024-09-05
 last-updated: 2024-09-22
 tracking-link:
@@ -129,7 +117,7 @@ Creation of a two node control-plane will be possible via the core installer (wi
 In the case of the core OpenShift installer, the user-facing proceedure is unchanged from a standard "IPI" installation, other than the configuration of 2 nodes instead of 3.
 Internally, the RedFish details for each node will need to make their way into the RHEL-HA configuration, but this is information already required for bare-metal hosts.
 
-In the case of the Assisted Installer, the user-facing proceedure follows the standard flow except for the configuration of 2 nodes instead of 3, and the collection of RedFish details for each node which are needed for the RHEL-HA configuration.
+In the case of the Assisted Installer, the user-facing proceedure follows the standard flow except for the configuration of 2 nodes instead of 3, and the collection of RedFish details (including passwords!) for each node which are needed for the RHEL-HA configuration.
 
 Everything else about cluster creation will be an opaque implementation detail not exposed to the user. 
 
