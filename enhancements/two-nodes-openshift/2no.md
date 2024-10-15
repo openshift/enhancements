@@ -156,7 +156,7 @@ Once the cluster has two members, the etcd daemon will be removed from the stati
 At this point, the Cluster Etcd Operator (CEO) will be made aware of this change so that some membership management functionality that is now handled by RHEL-HA can be disabled.
 This will be achieved by having the same entity that drives the configuration of RHEL-HA use the OpenShift API to update a field in the CEO's `ConfigMap` - which can only succeed if the control-plane is healthy.
 
-To enable this flow, we propose the addition of a `externallyManagedEtcd` field which defaults to `False`, and will only be respected if the `Infrastructure` CR's `TopologyMode` is `DualReplicaTopologyMode`.
+To enable this flow, we propose the addition of a `managedEtcdKind` field which defaults to `Cluster` but will be set to `External` during installation, and will only be respected if the `Infrastructure` CR's `TopologyMode` is `DualReplicaTopologyMode`.
 This will allow the use of a credential scoped to `ConfigMap`s in the `openshift-etcd-operator` namespace, to make the change.
 
 ### Topology Considerations
