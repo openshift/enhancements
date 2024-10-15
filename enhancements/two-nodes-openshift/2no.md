@@ -114,7 +114,7 @@ When starting etcd, the OCF script will use etcd's cluster ID and version counte
 
 Creation of a two node control-plane will be possible via the core installer (with an additional bootstrap node), and via the Assisted Installer (without an additional bootstrap node).
 
-In the case of the core OpenShift installer, the user-facing proceedure is unchanged from a standard "IPI" installation, other than the configuration of 2 nodes instead of 3.
+In the case of the core OpenShift installer, the user-facing procedure is unchanged from a standard "IPI" installation, other than the configuration of 2 nodes instead of 3.
 Internally, the RedFish details for each node will need to make their way into the RHEL-HA configuration, but this is information already required for bare-metal hosts.
 
 In the case of the Assisted Installer, the user-facing proceedure follows the standard flow except for the configuration of 2 nodes instead of 3, and the collection of RedFish details (including passwords!) for each node which are needed for the RHEL-HA configuration.
