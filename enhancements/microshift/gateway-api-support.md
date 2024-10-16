@@ -28,8 +28,8 @@ At the time of this writing MicroShift supports two types of ingresses:
 and [Kubernetes ingress](https://docs.redhat.com/en/documentation/red_hat_build_of_microshift/4.16/html/networking/microshift-configuring-routes#nw-ingress-creating-a-route-via-an-ingress_microshift-configuring-routes).
 In order to add more routing features a new project was born in upstream:
 [Gateway API](https://gateway-api.sigs.k8s.io/). This is an official kubernetes
-project focused on L4 and above routing, posed to be the next standard in
-ingress, load balancer and service mesh APIs.
+project focused on L7 routing (support for L4 is experimental), posed to be the
+next standard in ingress, load balancer and service mesh APIs.
 
 This enhancement proposes an implementation to support this new API as an
 optional component in MicroShift.
@@ -41,11 +41,11 @@ this functionality.
 
 ### User Stories
 * As a MicroShift admin, I want to add different Gateway resources to the
-  cluster so that I can create routes on them.
-* As a MicroShift admin, I want to add HTTP routes to specific Gateways so that
-  I can express routing capabilities using an upstream API.
-* As a MicroShift admin, I want to add GRPC routes to specific Gateways so that
-  I can express routing capabilities using an upstream API.
+  cluster for applications to create routes on them.
+* As a MicroShift application developer, I want to add HTTP routes to specific
+  Gateways so that I can express routing capabilities using an upstream API.
+* As a MicroShift application developer, I want to add GRPC routes to specific
+  Gateways so that I can express routing capabilities using an upstream API.
 
 ### Goals
 - Full support for core, non-experimental resources, including gateways, HTTP routes and GRPC routes.
