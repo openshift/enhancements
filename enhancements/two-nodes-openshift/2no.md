@@ -93,7 +93,7 @@ Use the RHEL-HA stack (Corosync, and Pacemaker), which has been used to delivere
 etcd will run as as a voting member on both nodes.
 We will take advantage of RHEL-HA's native support for systemd and re-use the standard cri-o and kublet units, as well as create a new Open Cluster Framework (OCF) script for etcd.
 The existing startup order of cri-o, then kubelet, then etcd will be preserved.
-The `etcdctl`, `etcd-metrics`, and `etcd-readyz` containers will remain part of the static pod.
+The `etcdctl`, `etcd-metrics`, and `etcd-readyz` containers will remain part of the static pod, the contents of which remains under the exclusive control of the Cluster Etcd Operator (CEO).
 
 Use RedFish compatible Baseboard Management Controllers (BMCs) as our primary mechanism to power off (fence) an unreachable peer and ensure that it can do no harm while the remaining node continues.
 
@@ -104,7 +104,8 @@ Upon a network failure, the RHEL-HA components ensure that exactly one node will
 In both cases, the control-plane's dependance on etcd will cause it to respond with errors until etcd has been restarted.
 
 Upon rebooting, the RHEL-HA components ensure that a node remains inert (not running cri-o, kubelet, or etcd) until it sees it's peer.
-If the peer is likely to remain offline for an extended period of time, admin confirmation is required to allow the node to start OpenShift.
+If the failed peer is likely to remain offline for an extended period of time, admin confirmation is required on the remaining node to allow it to start OpenShift.
+The functionality exists within RHEL-HA, but a wrapper will be provided to take care of the details.
 
 When starting etcd, the OCF script will use etcd's cluster ID and version counter to determine whether the existing data directory can be reused, or must be erased before joining an active peer.
 
@@ -112,12 +113,10 @@ When starting etcd, the OCF script will use etcd's cluster ID and version counte
 
 #### Cluster Creation
 
-Creation of a two node control-plane will be possible via the core installer (with an additional bootstrap node), and via the Assisted Installer (without an additional bootstrap node).
+User creation of a two node control-plane will be possible via the Assisted Installer.
 
-In the case of the core OpenShift installer, the user-facing procedure is unchanged from a standard "IPI" installation, other than the configuration of 2 nodes instead of 3.
-Internally, the RedFish details for each node will need to make their way into the RHEL-HA configuration, but this is information already required for bare-metal hosts.
-
-In the case of the Assisted Installer, the user-facing procedure follows the standard flow except for the configuration of 2 nodes instead of 3, and the collection of RedFish details (including passwords!) for each node which are needed for the RHEL-HA configuration.
+The procedure follows the standard flow except for the configuration of 2 nodes instead of 3, and the collection of RedFish details (including passwords!) for each node which are needed for the RHEL-HA configuration.
+If available via the SaaS offering (not confirmed, ZTP may be the target), the offering will need to ensure passwords are appropriately handled. 
 
 Everything else about cluster creation will be an opaque implementation detail not exposed to the user. 
 
@@ -144,7 +143,8 @@ There are two related but ultimately orthogonal capabilities that may require AP
 #### Unique Topology
 
 A mechanism is needed for components of the cluster to understand that this is a 2 node control-plane topology which may require different handling.
-We will define a new value for the `TopologyMode` enum: `DualReplicaTopologyMode`.
+We will define a new value for the `TopologyMode` enum: `DualReplica`.
+The enum is used for the `controlPlaneTopology` and `infrastructureTopology` fields, and the currently supported values are `HighlyAvailable`, `SingleReplica` and `External`.
 
 However `TopologyMode` is not available at the point the Agent Based Installer (ABI) performs validation.
 We will therefore additionally define a new feature gate `DualReplicaTopology` that can be enabled in `install-config.yaml`, and which ABI can use to validate the proposed cluster - such as the proposed node count.
