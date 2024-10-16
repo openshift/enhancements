@@ -531,10 +531,14 @@ failover.
 
 - We will create a CI lane to validate install and fail over scenarios such as
   loosing a master or swaping out an arbiter node.
+- Create complimentary lanes for serial/techpreview/no-capabilities.
+- Create a lane for or some method for validating layered products.
 - CI lane for e2e conformance testing, tests that explicitly test 3 node masters
   will need to be altered to accommodate the different topology.
 - We will add e2e tests to specifically test out the expectations in this type
   of deployment.
+  - Create tests to validate correct pods are running on the `arbiter`.
+  - Create tests to validate routing and disruptions are with in expectations.
 
 ## Graduation Criteria
 
