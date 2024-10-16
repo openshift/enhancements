@@ -25,9 +25,8 @@ superseded-by:
 ## Summary
 
 This enhancement describes the proposal to extend cert-manager-operator to deploy and manage the `istio-csr`
-solution. `OpenShift Service Mesh` facilitates the security of both intra-cluster and external service
-communications through mTLS. And istio-csr acts as an agent to obtain and renew certificates that
-facilitate mTLS from the `cert-manager`.
+controller. `OpenShift Service Mesh` facilitates the security of both intra-cluster and external service
+communications through mTLS. Istio-csr agent is responsible for receiving certificate signing requests for all members of the Service mesh, and signing them through cert-manager.
 
 ## Motivation
 
