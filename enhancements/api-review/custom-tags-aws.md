@@ -39,10 +39,10 @@ status: implementable
 This enhancement describes a proposal to allow an administrator of OpenShift to
 have the ability to apply user defined tags to many resources created by OpenShift in AWS.
 
-Note: this enhancement is slightly retroactive. Work has already begun on this. See
-- https://github.com/openshift/api/pull/864
-- https://github.com/openshift/cluster-ingress-operator/pull/578
-- https://github.com/openshift/api/pull/1064/
+Note: The work is carried out as part of 
+- https://issues.redhat.com/browse/RFE-1101
+- https://issues.redhat.com/browse/RFE-2012
+- https://issues.redhat.com/browse/RFE-3677
 
 ## Motivation
 
@@ -62,12 +62,13 @@ list of user-defined tags to the OpenShift Installer, and everything created by 
 bootstrapped components will apply those tags to all resources created in AWS, for the life of the cluster, and where supported by AWS.
 - Tags must be applied at creation time, in an atomic operation. It isn't acceptable to create an object and,
 after some period of time, apply the tags post-creation.
+- Tags can be updated day2 on teh AWS resources.
 
 ### Non-Goals
 
-- To reduce initial scope, tags are applied only at creation time and not reconciled. If an administrator manually
-changes the tags stored in the infrastructure resource, behavior is undefined. See below.
-- To reduce initial scope, we are not implementing this for clouds other than AWS. We will not take any actions
+- To reduce initial scope, in case of standalone OpenShift, tags are applied only at creation time and not reconciled. If an administrator manually
+changes the tags stored in the infrastructure resource, behavior is undefined. 
+- To reduce initial scope, for hosted control plane deployments, we are not implementing this for clouds other than AWS. We will not take any actions
 to prohibit that later.
 
 ## Proposal
@@ -89,13 +90,19 @@ userTags that are specified in the infrastructure resource will merge with userT
 
 The userTags field is intended to be set at install time and is considered immutable. Components that respect this field must only ever add tags that they retrieve from this field to cloud resources, they must never remove tags from the existing underlying cloud resource even if the tags are removed from this field(despite it being immutable).
 
+In case of hosted control plane deployments, the userTags field is updated with latest updates requested by user. The merge logic gives higher precedence to userTags when there is duplicate tag found on the AWS resource.
+
 If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. However, if tags are removed from userTags, the tag will not be removed from the AWS resource.
 
+For the resources created and managed by hosted control plane, cluster api provider for aws reconciles the user tags on AWS resources. The hosted control plane updates the `infrastructure.config.openshift.io` resource to reflect new tags in `resourceTags`. The OpenShift operators, both core and non-core (managed by RedHat), reconcile the respective AWS resources created and managed by them. 
+Given that, there is no universal controller to update all resources created by OpenShift, the day2 updates of tags is not supported for standalone OpenShift deployments.
 ### User Stories
 
-https://issues.redhat.com/browse/SDE-1146 - IAM users and roles can only operate on resources with specific tags
+1. https://issues.redhat.com/browse/SDE-1146 - IAM users and roles can only operate on resources with specific tags
 As a security-conscious ROSA customer, I want to restrict the permissions granted to Red Hat in my AWS account by using
 AWS resource tags.
+
+2. https://issues.redhat.com/browse/OCPSTRAT-787 - As a user of ROSA with HCP, I want to add and update tags on all AWS resources created by OpenShift, given that there is security limitation on direct access to update to AWS resources.
 
 ### API Extensions
 
@@ -537,4 +544,6 @@ As AWS considers empty string as a valid tag value, the behaviour becomes ambigu
 
 
 ## Infrastructure Needed [optional]
+
+
 
