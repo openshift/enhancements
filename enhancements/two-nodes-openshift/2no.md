@@ -308,7 +308,22 @@ Satisfying this demand would come with significant technical and support overhea
 
 1. Are there any normal lifecycle events that would be interpreted by a peer as a failure, and where the resulting "recovery" would create unnecessary downtime?
    How can these be avoided?
-1. The relevance of disconnected installation/functions to the proposal.
+2. Is there are requirement for disconnected cluster support in the initial release?
+3. Are there consequences of changing the parentage of processes running cri-o, kubelet, and etcd? (E.g. user process limits)
+4. In the test plan, which subset of layered products needs to be evaluated for the initial release (if any)?
+5. How are the BMC credentials getting from the install-config and onto the nodes?
+6. How does the cluster know it has achieved a ready state?
+   From the cluster's perspective, we know that CEO needs to have `managedEtcd: External` set, and all of the operators need to be available. However, there is a time delay between when that configuration is set by CEO and when etcd comes back up as health after it's restarted under the RHEL-HA components. Is a fixed wait enough to determine that we have successfully transitioned to the new topology? If not, how do we detect this?
+7. Are there any scenarios that would require signaling from the cluster to the RHEL-HA components to modify or change their behavior?
+8. Are there incompatibilities between the existing design and the function of the load balancer deployed through the BareMetalPlatform spec?
+9. If both nodes fail, which one should come back first?
+10. Which component is responsible for stopping etcd once CEO relinquishes control of it? When is it stopped?
+11. Which installers will be supported for the initial release?
+    The current discussions around the installer point us towards ABI for the initial release. There also seems to be interest in making this available for ZTP for managed clusters.
+12. Which platform specs will be available for this topology?
+    As discussed, we are currently targeting the BareMetalPlatform spec, but the load-balancing component needs to be evaluated for compatibility.
+13. What happens if something fails during the initial setup of the RHEL-HA stack? How will this be communicated back to the user?
+    For example, what happens if the setup job fails and etcd is left running? From the perspective of the user and the cluster, this would be identical to etcd being stopped and restarted under the control of the RHEL-HA components. Nothing about the cluster knows about the external entity that owns etcd.
 
 
 ## Test Plan
