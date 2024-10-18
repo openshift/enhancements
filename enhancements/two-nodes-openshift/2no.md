@@ -330,7 +330,39 @@ Satisfying this demand would come with significant technical and support overhea
 
 **Note:** *Section not required until targeted at a release.*
 
-See template for guidelines/instructions.
+### CI
+The initial release of 2NO should aim to build a regression baseline.
+
+| Type  | Name                          | Description                                                                 |
+| ----- | ----------------------------- | --------------------------------------------------------------------------- |
+| Job   | End-to-End tests (e2e)        | The standard test suite (openshift/conformance/parallel) for establishing a regression baseline between payloads. |
+| Job   | Upgrade between z-streams     | The standard test suite for evaluating upgrade behavior between payloads.   |
+| Job   | Upgrade between y-streams [^1] | The standard test suite for evaluating upgrade behavior between payloads.  |
+| Suite | 2NO Recovery                  | This is a new suite consisting of the tests listed below.                   |
+| Test  | Node failure [^2]              | A new 2NO test to detect if the cluster recovers if a node crashes.        |
+| Test  | Network failure [^2]           | A new 2NO test to detect if the cluster recovers if the network is disrupted such that a node is unavailable. |
+| Test  | Kubelet failure [^2]           | A new 2NO test to detect if the cluster recovers if kubelet fails.         |
+| Test  | Etcd failure [^2]              | A new 2NO test to detect if the cluster recovers if etcd fails.            |
+
+[^1]: This will be added after the initial release when more than one minor version of OpenShift is compatible with the
+topology.
+[^2]: These tests will be designed to make a component on the *other* node fail. This should prevent the test pod from
+being restarted mid-test.
+
+### QE
+This section outlines test scenarios for 2NO.
+
+| Scenario                      | Description                                                                         |
+| ----------------------------- | ----------------------------------------------------------------------------------- |
+| Payload install               | A basic evaluation that the cluster installs on supported hardware. Should be run for each supported installation method. |
+| Payload upgrade               | A basic evaluation that the cluster can upgrade between releases.                   |
+| Performance                   | Performance metrics are gathered and compared to SNO and Compact HA                 |
+| Scalability                   | Scalability metrics are gathered and compared to SNO and Compact HA                 |
+| Cold Boot                     | Verify that clusters can survive a cold boot event.                                 |
+| Both nodes crash              | Verify that clusters can survive an event where both nodes become unavailable.      |
+
+As noted above, there is an open question about how layered products should be treated in the test plan.
+Additionally, it would be good to have workload-specific testing once those are defined by the workload proposal.
 
 ## Graduation Criteria
 
