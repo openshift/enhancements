@@ -41,11 +41,15 @@ is the agent that simplifies the process of obtaining the certificates from the 
 ### User Stories
 
 - As an OpenShift user, I want to have an option to dynamically enable `istio-csr`, so that it can be used only
-  when required.
+  when required by creating the custom resource.
 - As an OpenShift user, I want to have an option to dynamically configure `istio-csr`, so that only the required
-  features can be enabled.
-- As an OpenShift user, I should be able to disable `istio-csr` when not required.
-- As an OpenShift user, I should be able to install `istio-csr` in the upgrade cluster.
+  features can be enabled by updating the custom resource.
+- As an OpenShift user, I should be able to disable `istio-csr` when not required by removing the custom resource,
+  and controller should cleanup all resources created for the `istio-csr` deployment.
+- As an OpenShift user, I should be able to install `istio-csr` in the upgrade cluster where istiod control plane
+  is active and should be able to update the certificate endpoint to `istio-csr` endpoint.
+- As an OpenShift user, I want to have an option to dynamically enable monitoring for the `istio-csr` project and
+  to use the OpenShift monitoring solution when required.
 
 ### Goals
 
@@ -150,6 +154,8 @@ type IstioCSRSpec struct {
 	// istioCSRConfig is for configuring the istio-csr agent behavior.
 	IstioCSRConfig *IstioCSRConfig `json:"istioCSRConfig,omitempty"`
 
+	// controllerConfig is for configuring the controller for setting up
+	// defaults to enable istio-csr agent.
 	ControllerConfig *ControllerConfig `json:"controllerConfig,omitempty"`
 }
 
@@ -366,6 +372,8 @@ type IstioConfig struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
+// ControllerConfig is for configuring the controller for setting up
+// defaults to enable istio-csr agent.
 type ControllerConfig struct {
 	// labels to apply to all resources created for istio-csr agent deployment.
 	Labels map[string]string `json:"labels,omitempty"`
@@ -387,14 +395,22 @@ type IssuerConfig struct {
 
 // IstioCSRStatus is the most recently observed status of the IstioCSR.
 type IstioCSRStatus struct {
+	// conditions holds information of the current state of the istio-csr agent deployment.
 	Conditions *metav1.Condition `json:"conditions,omitempty"`
 
+	// generatedIstioCSRConfig holds information about the clusterissuer/issuer created
+	// by the controller or user required by the istio-csr agent.
 	GeneratedIstioCSRConfig []IstioCSRConfig `json:"generatedIstioCSRConfig,omitempty"`
 
+	// istioCSRGRPCEndpoint is the service endpoint of istio-csr made available for user
+	// to configure the same in istiod config to enable istio to use istio-csr for
+	// certificate requests.
 	IstioCSRGRPCEndpoint string `json:"istioCSRGRPCEndpoint,omitempty"`
 
+	// serviceAccount created by the controller for the istio-csr agent.
 	ServiceAccount string `json:"serviceAccount,omitempty"`
 
+	// clusterRoleBinding created by the controller for the istio-csr agent.
 	ClusterRoleBinding string `json:"clusterRoleBinding,omitempty"`
 }
 ```
