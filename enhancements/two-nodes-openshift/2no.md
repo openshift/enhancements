@@ -2,6 +2,7 @@
 title: 2no
 authors:
   - "@mshitrit"
+  - "@jaypoulz"
 reviewers:
   - "@rwsu"
   - "@fabbione"
@@ -19,6 +20,7 @@ reviewers:
   - "@clobrano"
 approvers:
   - "@thomasjungblut"
+  - "@jerpeter1"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - "@deads2k"
 creation-date: 2024-09-05
@@ -31,11 +33,11 @@ tracking-link:
 
 ## Terms
 
-RHEL-HA - a general purpose clustering stack shipped by Red Hat (and others) primarily consisting of Corosync and Pacemaker.  Known to be in use by airports, financial exchanges, and defense organizations, as well as used on trains, satellites, and expeditions to Mars.
+RHEL-HA - a general-purpose clustering stack shipped by Red Hat (and others) primarily consisting of Corosync and Pacemaker.  Known to be in use by airports, financial exchanges, and defense organizations, as well as used on trains, satellites, and expeditions to Mars.
 
 Corosync - a Red Hat led [open-source project](https://corosync.github.io/corosync/) that provides a consistent view of cluster membership, reliable ordered messaging, and flexible quorum capabilities.  
 
-Pacemaker - a Red Hat led [open-source project](https://clusterlabs.org/pacemaker/doc/) that works in conjunction with Corosync to provide general purpose fault tolerance and automatic failover for critical services and applications.
+Pacemaker - a Red Hat led [open-source project](https://clusterlabs.org/pacemaker/doc/) that works in conjunction with Corosync to provide general-purpose fault tolerance and automatic failover for critical services and applications.
 
 Fencing - the process of “somehow” isolating or powering off malfunctioning or unresponsive nodes to prevent them from causing further harm, such as data corruption or the creation of divergent datasets.  
 
@@ -43,68 +45,70 @@ Quorum - having the minimum number of members required for decision-making. The 
  * C-quorum: quorum as determined by Corosync members and algorithms
  * E-quorum: quorum as determined by etcd members and algorithms
 
-Split-brain - a scenario where a set of peers are separated into groups smaller than the quorum threshold AND peers decide to host services already running by other groups.  Typically results in data loss or corruption.   
+Split-brain - a scenario where a set of peers are separated into groups smaller than the quorum threshold AND peers decide to host services already running in other groups.  Typically results in data loss or corruption.
 
-MCO - Machine Config Operator. This operator manages updates to node's systemd, cri-o/kubelet, kernel, NetworkManager, etc., and can write custom files to it, configurable by MachineConfig custom resources.
+MCO - Machine Config Operator. This operator manages updates to the node's systemd, cri-o/kubelet, kernel, NetworkManager, etc., and can write custom files to it, configurable by MachineConfig custom resources.
 
 ABI - Agent-Based Installer.
 
 ## Summary
 
-Leverage traditional high-availability concepts and technologies to provide a container management solution suitable for customers with numerous geographically dispersed locations that has a minimal footprint but remains resilient to single node-level failures.
+Leverage traditional high-availability concepts and technologies to provide a container management solution suitable that has a minimal footprint but remains resilient to single node-level failures suitable for customers with numerous geographically dispersed locations.
 
 ## Motivation
 
-Customers with hundreds, or even tens-of-thousands, of geographically dispersed locations are asking for a container management solution that retains some level of resilience to node level failures, but does not come with a traditional three-node footprint and/or price tag.
+Customers with hundreds, or even tens of thousands, of geographically dispersed locations are asking for a container management solution that retains some level of resilience to node-level failures but does not come with a traditional three-node footprint and/or price tag.
 
 The need for some level of fault tolerance prevents the applicability of Single Node OpenShift (SNO), and a converged 3-node cluster is cost prohibitive at the scale of retail and telcos - even when the third node is a "cheap" one that doesn't run workloads.
 
 The benefits of the cloud-native approach to developing and deploying applications are increasingly being adopted in edge computing.
-This requires our solution to provide a management experience consistent with "normal" OpenShift deployments, and be compatible with the full ecosystem of Red Hat and partner workloads designed for OpenShift.
+This requires our solution to provide a management experience consistent with "normal" OpenShift deployments and be compatible with the full ecosystem of Red Hat and partner workloads designed for OpenShift.
 
 ### User Stories
 
 * As a large enterprise with multiple remote sites, I want a cost-effective OpenShift cluster solution so that I can manage containers without the overhead of a third node.
 * As a support engineer, I want a safe and automated method for handling the failure of a single node so that the downtime of the control-plane is minimized.
+* As an enterprise running workloads on a minimal OpenShift footprint, I want to minimize time-to-recovery and data loss for my workloads when a node fails.
 
 ### Goals
 
 * Provide a two-node control-plane for physical hardware that is resilient to a node-level failure for either node
-* Provide a transparent installation experience that starts with exactly 2 blank physical nodes, and ends with a fault-tolerant two node cluster
+* Provide a transparent installation experience that starts with exactly 2 blank physical nodes, and ends with a fault-tolerant two-node cluster
 * Prevent both data corruption and divergent datasets in etcd
-* Maintain the existing level of availability. Eg. by avoiding fencing loops, wherein each node powers cycles it's peer after booting, reducing the cluster's availability.
-* Recover the API server in less than 120s, as measured from the surviving node's detection of a failure
-* Minimize any differences to the primary OpenShift platforms
+* Minimize recovery-caused unavailability. Eg. by avoiding fencing loops, wherein each node powers cycles its peer after booting, reducing the cluster's availability.
+* Recover the API server in less than 120s, as measured by the surviving node's detection of a failure
+* Minimize any differences to existing OpenShift topologies
 * Avoid any decisions that would prevent future implementation and support for upgrade/downgrade paths between two-node and traditional architectures 
-* Provide an OpenShift cluster experience that is identical to that of a 3-node hyperconverged cluster, but with 2 nodes
+* Provide an OpenShift cluster experience that is similar to that of a 3-node hyperconverged cluster but with 2 nodes
 
 ### Non-Goals
 
 * Workload resilience - see related [Pre-DRAFT enhancement](https://docs.google.com/document/d/1TDU_4I4LP6Z9_HugeC-kaQ297YvqVJQhBs06lRIC9m8/edit)
 * Resilient storage - see future enhancement
-* Support for platforms other than bare metal including automated ci testing
+* Support for platforms other than bare metal including automated CI testing
 * Support for other topologies (eg. hypershift)
 * Adding worker nodes
-* Creation RHEL-HA events and metrics for consumption by the OpenShift monitoring stack (Deferred to post-MVP)
+* Creation of RHEL-HA events and metrics for consumption by the OpenShift monitoring stack (Deferred to post-MVP)
+* Supporting upgrade/downgrade paths between two-node and other architectures (for initial release)
 
 ## Proposal
 
-Use the RHEL-HA stack (Corosync, and Pacemaker), which has been used to delivered supported 2-node cluster experiences for multiple decades, to manage cri-o, kubelet, and the etcd daemon.
+Use the RHEL-HA stack (Corosync, and Pacemaker), which has been used to deliver supported 2-node cluster experiences for multiple decades, to manage cri-o, kubelet, and the etcd daemon.
 etcd will run as as a voting member on both nodes.
-We will take advantage of RHEL-HA's native support for systemd and re-use the standard cri-o and kublet units, as well as create a new Open Cluster Framework (OCF) script for etcd.
+We will take advantage of RHEL-HA's native support for systemd and re-use the standard cri-o and kubelet units, as well as create a new Open Cluster Framework (OCF) script for etcd.
 The existing startup order of cri-o, then kubelet, then etcd will be preserved.
-The `etcdctl`, `etcd-metrics`, and `etcd-readyz` containers will remain part of the static pod, the contents of which remains under the exclusive control of the Cluster Etcd Operator (CEO).
+The `etcdctl`, `etcd-metrics`, and `etcd-readyz` containers will remain part of the static pod, the contents of which remain under the exclusive control of the Cluster Etcd Operator (CEO).
 
 Use RedFish compatible Baseboard Management Controllers (BMCs) as our primary mechanism to power off (fence) an unreachable peer and ensure that it can do no harm while the remaining node continues.
 
-Upon a peer failure, the RHEL-HA components on the surivor will fence the peer and use the OCF script to restart etcd as a new cluster-of-one.
+Upon a peer failure, the RHEL-HA components on the survivor will fence the peer and use the OCF script to restart etcd as a new cluster-of-one.
 
-Upon a network failure, the RHEL-HA components ensure that exactly one node will survive, fence it's peer, and use the OCF script to restart etcd as a new cluster-of-one.
+Upon a network failure, the RHEL-HA components ensure that exactly one node will survive, fence its peer, and use the OCF script to restart etcd as a new cluster-of-one.
 
-In both cases, the control-plane's dependance on etcd will cause it to respond with errors until etcd has been restarted.
+In both cases, the control-plane's dependence on etcd will cause it to respond with errors until etcd has been restarted.
 
-Upon rebooting, the RHEL-HA components ensure that a node remains inert (not running cri-o, kubelet, or etcd) until it sees it's peer.
-If the failed peer is likely to remain offline for an extended period of time, admin confirmation is required on the remaining node to allow it to start OpenShift.
+Upon rebooting, the RHEL-HA components ensure that a node remains inert (not running cri-o, kubelet, or etcd) until it sees its peer.
+If the failed peer is likely to remain offline for an extended period, admin confirmation is required on the remaining node to allow it to start OpenShift.
 The functionality exists within RHEL-HA, but a wrapper will be provided to take care of the details.
 
 When starting etcd, the OCF script will use etcd's cluster ID and version counter to determine whether the existing data directory can be reused, or must be erased before joining an active peer.
@@ -113,24 +117,24 @@ When starting etcd, the OCF script will use etcd's cluster ID and version counte
 
 #### Cluster Creation
 
-User creation of a two node control-plane will be possible via the Assisted Installer.
+User creation of a two-node control-plane will be possible via the Assisted Installer.
 
 The procedure follows the standard flow except for the configuration of 2 nodes instead of 3, and the collection of RedFish details (including passwords!) for each node which are needed for the RHEL-HA configuration.
 If available via the SaaS offering (not confirmed, ZTP may be the target), the offering will need to ensure passwords are appropriately handled. 
 
 Everything else about cluster creation will be an opaque implementation detail not exposed to the user. 
 
-#### Day 2 Proceedures
+#### Day 2 Procedures
 
 As per a standard 3-node control-plane, OpenShift upgrades and `MachineConfig` changes can not be applied when the cluster is in a degraded state.
 Such operations will only proceed when both peers are online and healthy.
 
 The experience of managing a 2-node control-plane should be largely indistinguishable from that of a 3-node one.
-The primary exception is (re)booting one of the peers while the other is offline, and expected to remain so.
+The primary exception is (re)booting one of the peers while the other is offline and expected to remain so.
 
 As in a 3-node control-plane cluster, starting only one node is not expected to result in a functioning cluster.
 Should the admin wish for the control-plane to start, the admin will need to execute a supplied confirmation command on the active cluster node. 
-This command will grant quorum to the RHEL-HA components, authorizing it to fence it's peer and start etcd in as a cluster-of-one read/write mode.
+This command will grant quorum to the RHEL-HA components, authorizing it to fence its peer and start etcd as a cluster-of-one in read/write mode.
 Confirmation can be given at any point and optionally make use of SSH to facilitate initiation by an external script.
 
 ### API Extensions
@@ -138,20 +142,20 @@ Confirmation can be given at any point and optionally make use of SSH to facilit
 There are two related but ultimately orthogonal capabilities that may require API extensions.
 
 1. Identify the cluster as having a unique topology
-2. Tell CEO when it is safe for it to disable certain membership related functionalities
+2. Tell CEO when it is safe for it to disable certain membership-related functionalities
 
 #### Unique Topology
 
-A mechanism is needed for components of the cluster to understand that this is a 2 node control-plane topology which may require different handling.
+A mechanism is needed for components of the cluster to understand that this is a 2-node control-plane topology which may require different handling.
 We will define a new value for the `TopologyMode` enum: `DualReplica`.
-The enum is used for the `controlPlaneTopology` and `infrastructureTopology` fields, and the currently supported values are `HighlyAvailable`, `SingleReplica` and `External`.
+The enum is used for the `controlPlaneTopology` and `infrastructureTopology` fields, and the currently supported values are `HighlyAvailable`, `SingleReplica`, and `External`.
 
 However `TopologyMode` is not available at the point the Agent Based Installer (ABI) performs validation.
 We will therefore additionally define a new feature gate `DualReplicaTopology` that can be enabled in `install-config.yaml`, and which ABI can use to validate the proposed cluster - such as the proposed node count.
 
 #### CEO Trigger
 
-Initially the creation of an etcd cluster will be driven in the same way as other platforms.
+Initially, the creation of an etcd cluster will be driven in the same way as other platforms.
 Once the cluster has two members, the etcd daemon will be removed from the static pod definition and recreated as a resource controlled by RHEL-HA.
 At this point, the Cluster Etcd Operator (CEO) will be made aware of this change so that some membership management functionality that is now handled by RHEL-HA can be disabled.
 This will be achieved by having the same entity that drives the configuration of RHEL-HA use the OpenShift API to update a field in the CEO's `ConfigMap` - which can only succeed if the control-plane is healthy.
@@ -161,7 +165,7 @@ This will allow the use of a credential scoped to `ConfigMap`s in the `openshift
 
 ### Topology Considerations
 
-2NO represents a new topology, and is not appropriate for use with HyperShift, SNO, or MicroShift
+2NO represents a new topology and is not appropriate for use with HyperShift, SNO, or MicroShift
 
 #### Standalone Clusters
 
@@ -170,16 +174,16 @@ TODO: Exactly what is the definition of a standalone cluster?  Disconnected?  Ph
 
 ### Implementation Details/Notes/Constraints
 
-While the target installation requires exactly 2 nodes, this will be achieved by building support in the core installer for a "bootstrap plus 2 nodes" flow, and then using Assisted Installer's ability to bootstrap-in-place to remove the requirement for a bootstrap node.
+While the target installation requires exactly 2 nodes, this will be achieved by building support in the core installer for a "bootstrap plus 2 nodes" flow and then using the Assisted Installer's ability to bootstrap-in-place to remove the requirement for a bootstrap node.
 
 The delivery of RHEL-HA components will be opaque to the user and be delivered as an [MCO Extension](../rhcos/extensions.md) in the 4.18 and 4.19 timeframes.
 A switch to [MCO Layering](../ocp-coreos-layering/ocp-coreos-layering.md ) will be investigated once it is GA in a shipping version of OpenShift.
 
-Configuration of the RHEL-HA components will be via one or more `MachineConfig`s, and will require RedFish details to have been collected by the installer.
-Sensible defaults will be chosen where possible, and user customization only where absolutely necessary.
+Configuration of the RHEL-HA components will be via one or more `MachineConfig`s and will require RedFish details to have been collected by the installer.
+Sensible defaults will be chosen where possible, and user customization only where necessary.
 
 The entity (likely a one-shot systemd job as part of a `MachineConfig`) that configures RHEL-HA will also configure a fencing priority.
-This is usually done based on the sort-order a piece of shared info (such as IP or node name).
+This is usually done based on the sort order of a piece of shared info (such as IP or node name).
 The priority takes the form of a delay, usually in the order of 10s of seconds, and is used to prevent parallel fencing operations during a primary-network outage where each side powers off the other - resulting in a total cluster outage.
 
 RHEL-HA has no real understanding of the resources (IP addresses, file systems, databases, even virtual machines) it manages.
@@ -187,7 +191,7 @@ It relies on resource agents to understand how to check the state of a resource,
 How a given agent uses these actions, and associated states, to model the resource is opaque to the cluster and depends on the needs of the underlying resource.
 
 Resource agents must conform to one of a variety of standards, including systemd, SYS-V, and OCF.
-The latter being the most powerful, adding the concept of promotion, and demotion.
+The latter is the most powerful, adding the concept of promotion, and demotion.
 More information on creating OCF agents can be found in the upstream [developer guide](https://github.com/ClusterLabs/resource-agents/blob/main/doc/dev-guides/ra-dev-guide.asc).
 
 Tools for extracting support information (must-gather tarballs) will be updated to gather relevant logs for triaging issues.
@@ -196,7 +200,7 @@ Tools for extracting support information (must-gather tarballs) will be updated 
 
 1. Cold Boot
    1. One node (Node1) boots
-   2. Node1 does have “corosync quorum” (C-quorum)  (requires forming a membership with it’s peer)
+   2. Node1 does have “corosync quorum” (C-quorum)  (requires forming a membership with its peer)
    3. Node1 does not start etcd or kubelet, remains inert waiting for Node2
    4. Peer (Node2) boots
    5. Corosync membership containing both nodes forms
@@ -216,12 +220,12 @@ Tools for extracting support information (must-gather tarballs) will be updated 
    6. Cluster continues with no redundancy
    7. … time passes …
    8. Node2 boots - persistent network failure
-      * Node2 does not have C-quorum (requires forming a membership with it’s peer)
+      * Node2 does not have C-quorum (requires forming a membership with its peer)
       * Node2 does not start etcd or kubelet, remains inert waiting for Node1
    9. Network is repaired
    10. Corosync membership containing both nodes forms
    11. Pacemaker “starts” etcd on Node2 as a follower of Node1
-   12. Pacemaker “promotes” etcd on Node2 as full replica of Node1
+   12. Pacemaker “promotes” etcd on Node2 as a full replica of Node1
    13. Pacemaker starts kubelet
    14. Cluster continues with 1+1 redundancy
 3. Node Failure
@@ -232,12 +236,12 @@ Tools for extracting support information (must-gather tarballs) will be updated 
    5. Cluster continues with no redundancy
    6. … time passes …
    7. Node2 has a persistent failure that prevents communication with Node1
-      * Node2 does not have C-quorum (requires forming a membership with it’s peer)
+      * Node2 does not have C-quorum (requires forming a membership with its peer)
       * Node2 does not start etcd or kubelet, remains inert waiting for Node1
    8. Persistent failure on Node2 is repaired
    9. Corosync membership containing both nodes forms
    10. Pacemaker “starts” etcd on Node2 as a follower of Node1
-   11. Pacemaker “promotes” etcd on Node2 as full replica of Node1
+   11. Pacemaker “promotes” etcd on Node2 as a full replica of Node1
    12. Pacemaker starts kubelet
    13. Cluster continues with 1+1 redundancy
 4. Two Failures
@@ -251,8 +255,8 @@ Tools for extracting support information (must-gather tarballs) will be updated 
    8. … time passes …
    9. Node1 Power restored
    10. Node1 boots but can not gain quorum before Node2 joins the cluster due to a risk of fencing loop
-       * Mitigation (Phase 1): manual intervention (possibly a script)  in case admin can guarantee Node2 is down, which will grant Node1 quorum and restore cluster limited (none HA) functionality.
-       * Mitigation (Phase 2): limited automatic intervention for some use cases: for example Node1 will gain quorum only if Node2 can be verified to be down by successfully querying its BMC status.
+       * Mitigation (Phase 1): manual intervention (possibly a script)  in case the admin can guarantee Node2 is down, which will grant Node1 quorum and restore cluster limited (none HA) functionality.
+       * Mitigation (Phase 2): limited automatic intervention for some use cases: for example, Node1 will gain quorum only if Node2 can be verified to be down by successfully querying its BMC status.
 5. Kubelet Failure
    1. Pacemaker’s monitoring detects the failure
    2. Pacemaker restarts kubelet
@@ -276,11 +280,11 @@ Tools for extracting support information (must-gather tarballs) will be updated 
 
 1. Risk: Rebooting the surviving peer would require human intervention before the cluster starts, increasing downtime and creating an admin burden at remote sites
    1. Mitigation: Lifecycle events, such as upgrades and applying new `MachineConfig`s, are not permitted in a single-node degraded state
-   1. Mitigation: Usage of the MCO Admin Defined Node Disruption [feature](https://github.com/openshift/enhancements/pull/1525) will futher reduce the need for reboots.
+   1. Mitigation: Usage of the MCO Admin Defined Node Disruption [feature](https://github.com/openshift/enhancements/pull/1525) will further reduce the need for reboots.
    1. Mitigation: The node will be reachable via SSH and the confirmation can be scripted
    1. Mitigation: It may be possible to identify scenarios where, for a known hardware topology, it is safe to allow the node to proceed automatically.
 
-1. Risk: “Something changed, lets reboot” is somewhat baked into OCP’s DNA and has the potential to be problematic when nodes are actively watching for their peer to disappear, and have an obligation to promptly act on that disappearance by power cycling them.
+1. Risk: “Something changed, let's reboot” is somewhat baked into OCP’s DNA and has the potential to be problematic when nodes are actively watching for their peer to disappear, and have an obligation to promptly act on that disappearance by power cycling them.
    1. Mitigation: Identify causes of reboots, and either avoid them or ensure they are not treated as failures.
    This may require an additional enhancement.
 
@@ -304,14 +308,61 @@ Satisfying this demand would come with significant technical and support overhea
 
 1. Are there any normal lifecycle events that would be interpreted by a peer as a failure, and where the resulting "recovery" would create unnecessary downtime?
    How can these be avoided?
-1. The relevance of disconnected installation/functions to the proposal.
+2. Is there are requirement for disconnected cluster support in the initial release?
+3. Are there consequences of changing the parentage of processes running cri-o, kubelet, and etcd? (E.g. user process limits)
+4. In the test plan, which subset of layered products needs to be evaluated for the initial release (if any)?
+5. How are the BMC credentials getting from the install-config and onto the nodes?
+6. How does the cluster know it has achieved a ready state?
+   From the cluster's perspective, we know that CEO needs to have `managedEtcd: External` set, and all of the operators need to be available. However, there is a time delay between when that configuration is set by CEO and when etcd comes back up as health after it's restarted under the RHEL-HA components. Is a fixed wait enough to determine that we have successfully transitioned to the new topology? If not, how do we detect this?
+7. Are there any scenarios that would require signaling from the cluster to the RHEL-HA components to modify or change their behavior?
+8. Are there incompatibilities between the existing design and the function of the load balancer deployed through the BareMetalPlatform spec?
+9. If both nodes fail, which one should come back first?
+10. Which component is responsible for stopping etcd once CEO relinquishes control of it? When is it stopped?
+11. Which installers will be supported for the initial release?
+    The current discussions around the installer point us towards ABI for the initial release. There also seems to be interest in making this available for ZTP for managed clusters.
+12. Which platform specs will be available for this topology?
+    As discussed, we are currently targeting the BareMetalPlatform spec, but the load-balancing component needs to be evaluated for compatibility.
+13. What happens if something fails during the initial setup of the RHEL-HA stack? How will this be communicated back to the user?
+    For example, what happens if the setup job fails and etcd is left running? From the perspective of the user and the cluster, this would be identical to etcd being stopped and restarted under the control of the RHEL-HA components. Nothing about the cluster knows about the external entity that owns etcd.
 
 
 ## Test Plan
 
 **Note:** *Section not required until targeted at a release.*
 
-See template for guidelines/instructions.
+### CI
+The initial release of 2NO should aim to build a regression baseline.
+
+| Type  | Name                          | Description                                                                 |
+| ----- | ----------------------------- | --------------------------------------------------------------------------- |
+| Job   | End-to-End tests (e2e)        | The standard test suite (openshift/conformance/parallel) for establishing a regression baseline between payloads. |
+| Job   | Upgrade between z-streams     | The standard test suite for evaluating upgrade behavior between payloads.   |
+| Job   | Upgrade between y-streams [^1] | The standard test suite for evaluating upgrade behavior between payloads.  |
+| Suite | 2NO Recovery                  | This is a new suite consisting of the tests listed below.                   |
+| Test  | Node failure [^2]              | A new 2NO test to detect if the cluster recovers if a node crashes.        |
+| Test  | Network failure [^2]           | A new 2NO test to detect if the cluster recovers if the network is disrupted such that a node is unavailable. |
+| Test  | Kubelet failure [^2]           | A new 2NO test to detect if the cluster recovers if kubelet fails.         |
+| Test  | Etcd failure [^2]              | A new 2NO test to detect if the cluster recovers if etcd fails.            |
+
+[^1]: This will be added after the initial release when more than one minor version of OpenShift is compatible with the
+topology.
+[^2]: These tests will be designed to make a component on the *other* node fail. This should prevent the test pod from
+being restarted mid-test.
+
+### QE
+This section outlines test scenarios for 2NO.
+
+| Scenario                      | Description                                                                         |
+| ----------------------------- | ----------------------------------------------------------------------------------- |
+| Payload install               | A basic evaluation that the cluster installs on supported hardware. Should be run for each supported installation method. |
+| Payload upgrade               | A basic evaluation that the cluster can upgrade between releases.                   |
+| Performance                   | Performance metrics are gathered and compared to SNO and Compact HA                 |
+| Scalability                   | Scalability metrics are gathered and compared to SNO and Compact HA                 |
+| Cold Boot                     | Verify that clusters can survive a cold boot event.                                 |
+| Both nodes crash              | Verify that clusters can survive an event where both nodes become unavailable.      |
+
+As noted above, there is an open question about how layered products should be treated in the test plan.
+Additionally, it would be good to have workload-specific testing once those are defined by the workload proposal.
 
 ## Graduation Criteria
 
@@ -321,7 +372,7 @@ See template for guidelines/instructions.
 
 ## Upgrade / Downgrade Strategy
 
-In-place upgrades and downgrades will not be supported for this first iteration, and will be addressed as a separate feature in another enhancement. Upgrades will initially only be achieved by redeploying the machine and its workload.
+In-place upgrades and downgrades will not be supported for this first iteration and will be addressed as a separate feature in another enhancement. Upgrades will initially only be achieved by redeploying the machine and its workload.
 
 ## Version Skew Strategy
 
@@ -332,16 +383,16 @@ Consider the following in developing a version skew strategy for this
 enhancement:
 - During an upgrade, we will always have skew among components, how will this impact your work?
 - Does this enhancement involve coordinating behavior in the control-plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
+  the kubelet? How does an n-2 kubelet without this feature available behave
   when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
+- Will any other components on the node change? For example, changes to CSI, CRI,
   or CNI may require updating that component before the kubelet.
 
 ## Operational Aspects of API Extensions
 
 See template for guidelines/instructions.
 
-- For conversion/admission webhooks and aggregated apiservers: what are the SLIs (Service Level
+- For conversion/admission webhooks and aggregated API servers: what are the SLIs (Service Level
   Indicators) an administrator or support can use to determine the health of the API extensions
 
   N/A
@@ -359,7 +410,7 @@ See template for guidelines/instructions.
 
 - Describe how a failure or behaviour of the extension will impact the overall cluster health
   (e.g. which kube-controller-manager functionality will stop working), especially regarding
-  stability, availability, performance and security.
+  stability, availability, performance, and security.
 - Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
   and add them as reviewers to this enhancement.
 
@@ -379,7 +430,7 @@ Describe how to
 
 ## Alternatives
 
-* MicroShift was considered as an alternative but it was ruled out because it does not support multi node has a very different experience then OpenShift which does not match the 2NO initiative which  is on getting the OpenShift experience on two nodes
+* MicroShift was considered as an alternative but it was ruled out because it does not support multi-node and has a very different experience than OpenShift which does not match the 2NO initiative which  is on getting the OpenShift experience on two nodes
 
 
 * 2 SNO + KCP
@@ -389,10 +440,10 @@ The main advantage of this approach is that it doesn’t require inventing a new
 Disadvantages:
 * Production readiness
 * KCP itself could become a single point of failure (need to configure pacemaker to manage KCP)
-* KCP adds an additional layer of complexity to the architecture
+* KCP adds additional complexity to the architecture
 
 
 ## Infrastructure Needed [optional]
 
 Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
+subproject, repos requested, GitHub details, and/or testing infrastructure.
