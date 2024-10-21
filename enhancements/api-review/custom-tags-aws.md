@@ -92,7 +92,7 @@ The userTags field is intended to be set at install time and is considered immut
 
 In case of hosted control plane deployments, the userTags field is updated with latest updates requested by user. The merge logic gives higher precedence to userTags when there is duplicate tag found on the AWS resource.
 
-If the userTags field is changed post-install, there is no guarantee about how an in-cluster operator will respond to the change. Some operators may reconcile the change and change tags on the AWS resource. Some operators may ignore the change. However, if tags are removed from userTags, the tag will not be removed from the AWS resource.
+If the userTags field is changed post-install, all AWS resources created and managed by in-cluster and RedHat supported operators will be reconciled. Non-redhat supported operators may reconcile the change and change tags on the AWS resource or may ignore the change. However, if tags are removed from userTags, the tag will not be removed from the AWS resource.
 
 For the resources created and managed by hosted control plane, cluster api provider for aws reconciles the user tags on AWS resources. The hosted control plane updates the `infrastructure.config.openshift.io` resource to reflect new tags in `resourceTags`. The OpenShift operators, both core and non-core (managed by RedHat), reconcile the respective AWS resources created and managed by them. 
 Given that, there is no universal controller to update all resources created by OpenShift, the day2 updates of tags is not supported for standalone OpenShift deployments.
