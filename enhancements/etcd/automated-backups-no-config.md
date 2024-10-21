@@ -7,6 +7,7 @@ reviewers:
   - "@dusk125"
   - "@hasbro17"
   - "@tjungblu"
+  - "@vrutkovs"
 approvers:
   - "@hasbro17"
 api-approvers:
@@ -164,6 +165,7 @@ No issue has been encountered during testing this approach.
 - What values could be used for default configurations, considering all OCP variants.
 - What is the minimum disk size needed in order to operate this feature without running out of disk space ?
 - How to handle an empty `schedule` ? 
+- How to mitigate losing backups upon control-plane scaling using `CPMSO` ? 
 
 ### Implementation Details/Notes/Constraints
 
