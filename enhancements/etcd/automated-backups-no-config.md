@@ -8,10 +8,7 @@ reviewers:
   - "@hasbro17"
   - "@tjungblu"
 approvers:
-  - "@JoelSpeed"
-  - "@dusk125"
   - "@hasbro17"
-  - "@tjungblu"
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2024-06-17
