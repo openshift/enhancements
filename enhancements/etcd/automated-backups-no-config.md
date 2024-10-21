@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2024-06-17
-last-updated: 2024-06-17
+last-updated: 2024-10-21
 tracking-link:
   - https://issues.redhat.com/browse/ETCD-609
 see-also:
