@@ -289,6 +289,9 @@ that model, the USC (providing cluster functionality) would typically be an _ope
 and we would need to invent a new cluster operator to manage it. Because CVO is
 directly involved in updates, such additional layer does not seem to have value.
 
+The Update Status Controller does not need HA deployment and it is sufficient
+for to run a single replica.
+
 Update Status Controller will be running a primary controller that will maintain
 the `UpdateStatus` resource. The resource has no `.spec` so the controller will
 just ensure the resource exists and its `status` content is up-to-date and correct.
@@ -303,6 +306,11 @@ Both will report their observations as status or health insights to the primary
 controller so it can update the `UpdateStatus` resource. These control loops will
 reuse existing cluster "analysis" code implemented in the client-side `oc adm upgrade status`
 prototype.
+
+To avoid inflating OpenShift payload images, USC will be delivered in the same
+image as CVO, so its code will live in openshift/cluster-version-operator 
+repository. The USC will be either a separate binary, or a subcommand of the
+CVO binary (CVO already has subcommands).
 
 ### Risks and Mitigations
 
@@ -349,6 +357,8 @@ the start and the client-based prototype was meant to be a temporary solution.
   API correctly reports the cluster as not updating. In update paths, the
   presence of the expected status insights will be monitored and their properties
   checked.
+- USC code will live in CVO repository which has CI jobs for TechPreview installs
+  and both update directions (into change and out of change).
 - The client `oc adm upgrade status` code that interprets the API to human-readable
   output will receive similar [integration example-based tests](https://github.com/openshift/oc/tree/master/pkg/cli/admin/upgrade/status/examples)
   like the client-based implementation has.
@@ -364,7 +374,7 @@ N/A - the `UpdateStatus` feature gate is already Tech Preview
 - API exists and is marked v1
 - USC is running in the cluster and maintains the `UpdateStatus` resource in standalone
 - Appropriate API support level is decided
-- UpdateStatus capability exists, is enabled by default but allows admins to opt-out through standard mechanisms
+- UpdateStatus capability exists, is enabled in Default but allows admins to opt-out through standard mechanisms (pinning a version capability set to one without it, or `None`)
 - Clean plan to achieve HyperShift support is in place
 - The `oc adm upgrade status` consumes the Status API by default and has at least feature parity with the client-based prototype
 - Meets TRT criteria: e2e tests exist in openshift/origin and a result data corpus proves the feature works and does not lower platform stability
