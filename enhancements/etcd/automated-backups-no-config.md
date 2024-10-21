@@ -30,24 +30,25 @@ see-also:
 
 ## Summary
 
-To enable automated backups of Etcd datastore and cluster resource of an Openshift cluster from day one after installation, 
+To enable automated backups of Etcd database and cluster resources of an Openshift cluster from day one after installation, 
 without provided configuration from the user.
 
 This document outlines the possible approaches that were investigated, discussed and tested, in addition to the final implemented approach.  
 
 ## Motivation
 
-The current method of Backup and Restore of an Openshift cluster is outlined in  [Automated Backups of etcd](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups.md). 
-This approach relies on user supplied configuration in the form of `config.openshift.io/v1alpha1 Backup` CR.
+The current method of **Backup** and **Restore** of an Openshift cluster is outlined in  [Automated Backups of etcd](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups.md). 
+This approach relies on user supplied configuration, in the form of `config.openshift.io/v1alpha1 Backup` CR.
 
-To improve the user's experience, this work proposes taking etcd backup using default config from day one, without additional configuration from the user.
+To improve the user's experience, this work proposes taking etcd backup using default configurations from day one, without user interference.
 
-Moreover, for recovery in disaster scenarios of an Openshift cluster, where more than one control-plane node is lost, this proposal attempts to store backups on all control-plane nodes.
+Moreover, for recovery in disaster scenarios, where more than one control-plane node is lost from an Openshift cluster, this proposal attempts to store backups on all control-plane nodes.
+Having backups of an Openshift cluster on all control-plane nodes, improves the recovery probability in disaster scenarios.
 
 ### User Stories
 
-* As a cluster administrator, I would like OCP cluster backup to be taken without configuration from day one, after installation.
-* As a cluster administrator, I would like to OCP cluster backups available on all master nodes, so that I have a recent cluster state to recover from in the event of quorum loss (i.e. losing a majority of control-plane nodes).
+* As a cluster administrator, I would like an OCP cluster backups to be taken without user's supplied configuration from day one, after installation.
+* As a cluster administrator, I would like to an OCP cluster backups available on all master nodes, so that I have a recent cluster state to recover from in the event of losing control-plane nodes.
 
 ### Goals
 
@@ -67,11 +68,11 @@ Moreover, for recovery in disaster scenarios of an Openshift cluster, where more
 ## Proposal
 
 This work utilizes the [API](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups.md#api-extensions) from current `CronJob` based implementation.
-Moreover, it uses the same [PeriodicBackupController](https://github.com/openshift/cluster-etcd-operator/blob/d7d43ee21aff6b178b2104228bba374977777a84/pkg/operator/periodicbackupcontroller/periodicbackupcontroller.go#L69) as this proposal builds upon it, and also under the same feature gate.
+Moreover, it uses the same [PeriodicBackupController](https://github.com/openshift/cluster-etcd-operator/blob/master/pkg/operator/periodicbackupcontroller/periodicbackupcontroller.go#L81) as this proposal builds upon it, and also under the same feature gate.
 The default configuration is created through `config.openshift.io/v1alpha1 Backup` CR, with name `default`, to distinguish it from other user supplied `Backup` CRs.
-Using a CR enables users to override the default backup configuration.
+Using a CR enable users to override the default backup configuration.
 
-By design, the **No-Config** backup approach works _orthogonal_ to the [Cron](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups) based method, and not a replacement.
+By design, the _**No-Config**_ backup approach works _orthogonal_ to the [Cron](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups) based method, and not a replacement.
 However, this method is designed to work on all variants of Openshift (e.g. Single-node and Bare-metal), as well as having backups on all control-plane nodes, for recovering from disaster scenarios.
 
 ### API Extensions
@@ -104,7 +105,7 @@ Ideally, the storage solution to use should have the following characteristics :
 - One fits all storage solution, to be used across all Openshift variants including Bare metal and Single Node Openshift.
 
 According to these requirement, only `hostPath` and `localVolume` storage could be utilized. 
-However, if the master node where the `PV` is mounted became unhealthy/unavailable/unreachable, then the backups are no longer accessible, also taking new backups is no longer possible.
+However, for `localVolume` storage, if the master node where the `PV` is mounted became unhealthy/unavailable/unreachable, then the backups are no longer accessible, also taking new backups is no longer possible.
 Hence, `hostPath` has been used as it is the only viable option that could be utilized on all Openshift variants. 
 
 ### Workload
@@ -113,7 +114,7 @@ In order to take backups for Etcd data store and cluster resources, a workload m
 Since Etcd data store of an Openshift cluster runs on `Pod` similar to other workload, several constructs such as `Deployment`, `DaemonSet`, `StatefulSet` and `SideCar` could be used.
 
 This section discusses two approaches (i.e. `SideCar` and `DaemonSet`), which are implemented and tested, explaining the Pros and Cons of each method.  
-Before deciding upon these approaches, several approaches have been investigated. See [Alternatives](#Alternatives).
+Before deciding upon these two methods, several other approaches have been investigated. See [Alternatives](#Alternatives).
 
 #### SideCar container within all Etcd-static-pod
 
@@ -127,41 +128,45 @@ The backups are being stored within a `hostPath` volume. The volume is a directo
 
 The approach has been implemented and tested. Below are the Pros and Cons found.
 
-**Pros**
+_**Pros**_
 
-As the container runs on the same pod as etcd, it requests backup through `localhost`. Backups are being stored on the `hostPath` volume, with is a Directory on the node's file system. This guarantees no network delays.
+As the container runs on the same pod as etcd, it requests backup through `localhost`, since the containers runs on the same pod. Backups are being stored on the `hostPath` volume, with is a Directory on the node's file system. This guarantees no network delays.
 
-**Pros**
+_**Cons**_
 
-Etcd pod is a static pod, and the availability of the etcd cluster is vital for cluster stability. As the etcd cluster is being managed by `Cluster-etcd-operator`, and a `Deployment` resource manages the _mirrored_ etcd pods, any changes in the pod manifest results into rolling out a new revision, which leads to a duration of etcd-cluster unavailability. Consequently, the `API-Server` can not process any write requests, and read requests are being handled; if any, from the `API-Server` cache.   
+Etcd pod is a static-pod, and the availability of the etcd cluster is vital for cluster stability. As the Etcd cluster is being managed by the `Cluster-etcd-operator`, and a `Deployment` resource manages the _mirrored_ etcd pods, any changes in the pod manifest results into rolling out a new revision, which leads to a duration of `etcd-cluster` unavailability, till the new revision is rolled out for all etcd pods. Consequently, the `API-Server` can not process any write requests, and read requests are being handled; if any, from the API-Server cache.   
 
-The backup sidecar container is being `disabled` by default. Upon creating a `Backup` CR on an Openshift cluster, the `PeriodicBackupController` reacts by enabling the container. This leads to a change in etcd static pod manifest, and a new revision is being rolled out. As explained above, such action causes cluster instability and `API-Server` unavailability.
+The backup sidecar container is being `disabled` by default. Upon creating a `Backup` CR on an Openshift cluster, the `PeriodicBackupController` reacts by enabling the container. This leads to a change in etcd static pod manifest, and a new revision is being rolled out. As explained above, such action causes etcd-cluster and API-Server unavailability.
 
-Additionally, any error within the backup sidecar, the container goes into `CrashLoopBackOff`, which leads to the whole `Pod` reports `NotReady` status. Consequently, the whole `Etcd-cluster` can not server requests, as well as `API-Server`.
+Additionally, any error within the backup sidecar, the container goes into `CrashLoopBackOff`, which leads to the whole `Pod` reports `NotReady` status. Consequently, the whole `Etcd-cluster` can not server requests, nor the `API-Server`.
 
 
 #### DaemonSet manages an Etcd-backup pod within every control-plane node.
 
-This approach has been initiated during reviews of the `Sidecar` method. A reviewer has recommended to separate the backup container from the static pod to mitigate the issues shown above.
-Initially a `Deployment` resource was suggested, before using a `DaemonSet`. The advantage of using DaemonSet over Deployment is to guarantee scheduling `Etcd-backup` pods on all `Control-plane` nodes, regardless of the number of nodes (e.g. 1, 3, 5) using `nodeSelector` capability.
-By setting the `nodeSelector` to the master node label (i.e. `node-role.kubernetes.io/master`), guarantees that an Etcd-backup pod will be scheduled on every control-plane node.
+This approach separates the `etcd-backup-server` deployment from the etcd static pods, to avoid affecting etcd-cluster and API-Server availability upon any error within the etcd-backup-server.
 
-This method has been implemented and tested. The same container used in the Sidecar approach has been utilised. However, the scheduling is being managed by a DaemonSet resource.
+The advantage of using `DaemonSet` over Deployment is to guarantee scheduling etcd-backup-server pods on all `Control-plane` nodes, regardless of the number of nodes (e.g. 1, 3, 5) using `nodeSelector` capability.
+By setting the `nodeSelector` to the master node label (i.e. `node-role.kubernetes.io/master`), etcd-backup-server's pods are guaranteed to scheduled on every control-plane node.
+
+This method has been implemented and tested. The same container used in the Sidecar approach has been utilised. However, the scheduling is being managed by a DaemonSet.
 Upon creating a `Backup` CR on an Openshift cluster, the `PeriodicBackupController` reacts by creating a DaemonSet resource, with the `etcd-backup-server` container and the configurations applied in the CR.
 During [testing](https://github.com/openshift/cluster-etcd-operator/pull/1354#issuecomment-2408661261), this method has shown a solid and stable deployment, where the Backup pods shown only `1` restart over a duration of `45` minutes. Moreover, the cause of the restart on all the Backup pods were due to `node` issue, not the backup container.
 
-**Pros**
+_**Pros**_
 
 As the Backup pods are being scheduled independently of the etcd pods, any error within the Backup pods does not influence cluster Openshift cluster availability.
 
 Moreover, as the Backup pods are being scheduled within every master nodes, the backups are being taken from every local etcd member on the same node. This avoids overwhelming a specific member with backup requests.
 
 Since a Backup pod exist on every master node, and a `hostPath` volume is being used to store the backups, it is guaranteed to have available backups on all master nodes, which is required for disaster recovery scenarios.
-**Cons**
+
+_**Cons**_
 
 No issue has been encountered during testing this approach.
 
 ### Open Questions
+
+Need to agree upon the default configurations to be used on the default `Backup` CR.
 
 ### Implementation Details/Notes/Constraints
 
