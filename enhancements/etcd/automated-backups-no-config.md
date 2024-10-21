@@ -3,19 +3,17 @@ title: automated-backups-no-config
 authors:
   - "@elbehery"
 reviewers:
-  - "@soltysh"
+  - "@JoelSpeed"
   - "@dusk125"
   - "@hasbro17"
   - "@tjungblu"
-  - "@williamcaban"
 approvers:
-  - "@soltysh"
+  - "@JoelSpeed"
   - "@dusk125"
   - "@hasbro17"
   - "@tjungblu"
-  - "@williamcaban"
 api-approvers:
-  - "@soltysh"
+  - "@JoelSpeed"
 creation-date: 2024-06-17
 last-updated: 2024-06-17
 tracking-link:
@@ -201,7 +199,7 @@ spec:
 
 An e2e test will be added to practice the scenario as follows 
 
-- Enable AutomatedBackupNoConfig FeatureGate.
+- Enable `AutomatedEtcdBackup` FeatureGate.
 - Verify that a `Backup` CR has been installed.
 - Verify that backups have been taken successfully.
 - Verify that backups are being maintained according to the retention policy.
