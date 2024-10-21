@@ -119,12 +119,16 @@ resources on running the new controller. The capability will be a part of the
 enabled by default, and admins need to opt-out at installation or update time.
 Like all capabilities, once enabled they cannot be disabled.
 
-The proposal corresponds to the Stage 1 of the implementation roadmap outlined
-in the [Update Health API Controller Proposal](https://docs.google.com/document/d/1aEIWkfhhaVSe-XlSXvmokymOe3X_969pRCJhfhPDwFQ/edit#heading=h.9g05u56hri6y).
-There is not a consensus on further stages of the implementation and this
-enhancement does not aim to achieve it. Any hypothetical modular system will be
-a much larger effort to implement and will benefit from API consumed by users,
-backed by the simple implementation in the USC.
+This proposal does not intend to capture the entire roadmap for a system reporting
+update health and status. There is a vision that the system where external,
+responsible components closer to their domain, produce update insights into the
+`UpdateStatus` API.  This enhancement proposal only corresponds to the Stage 1
+of the implementation roadmap outlined in the [Update Health API Controller Proposal](https://docs.google.com/document/d/1aEIWkfhhaVSe-XlSXvmokymOe3X_969pRCJhfhPDwFQ/edit#heading=h.9g05u56hri6y).
+There is not a consensus on further stages of the implementation outlined in that
+document and this enhancement does not aim to achieve it. Any hypothetical
+modular system will be a much larger effort to implement and its design will
+benefit from API consumed by users, backed by the proposed simple implementation
+in the USC.
 
 ### Workflow Description
 
@@ -193,6 +197,8 @@ The `openshift-cluster-version` namespace is suitable to contain the resource.
 No special considerations
 
 ### Implementation Details/Notes/Constraints
+
+Full API proposal: https://github.com/openshift/api/pull/2012
 
 #### `UpdateStatus` API Overview
 
@@ -330,6 +336,10 @@ the start and the client-based prototype was meant to be a temporary solution.
 ## Open Questions [optional]
 
 - When to deprecate and remove the client-based prototype?
+- What is the best architecture for the future system where USC only aggregates
+  and summarizes information (possibly provided in the form of Update Insights)
+  provided by external components that want to contribute update-related 
+  information.
 
 ## Test Plan
 
