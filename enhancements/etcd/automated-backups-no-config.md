@@ -161,7 +161,9 @@ No issue has been encountered during testing this approach.
 
 ### Open Questions
 
-Need to agree upon the default configurations to be used on the default `Backup` CR.
+- What values could be used for default configurations, considering all OCP variants.
+- What is the minimum disk size needed in order to operate this feature without running out of disk space ?
+- How to handle an empty `schedule` ? 
 
 ### Implementation Details/Notes/Constraints
 
