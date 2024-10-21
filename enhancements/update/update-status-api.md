@@ -385,18 +385,87 @@ N/A
 
 ## Upgrade / Downgrade Strategy
 
+The USC will be updated by the CVO very early in the update process, immediately
+after CVO updates itself. The initial update into a version that first has the
+feature enabled will simply result in the installation of the `UpdateStatus` CRD
+and deploying the USC, which will then create the `UpdateStatus` singleton CR
+and start to manage it. Further updates will redeploy USC, so the CR is briefly
+unmanaged, which practically should not cause problems. The API will still be
+available, just briefly contain possibly stale data.
 
 ## Version Skew Strategy
 
+There are two sources of skew:
 
+1. Updated USC needs to monitor resources of potentially old version CRDs managed
+   by old version controllers. This should not cause problems as CRDs are updated
+   early in the process. 
+2. `oc` needs to be able to process and display `UpdateStatus` resources for OCP
+   versions following the version skew policy. `oc adm upgrade status` of version
+   4.x must gracefully handle `UpdateStatus` resources from 4.x-1, 4.x and 4.x+1.
 
 ## Operational Aspects of API Extensions
 
+
+
+
+
 ## Support Procedures
 
+
+
+
+
 ## Alternatives
+
+### CLI
+
+We could continue improving the oc adm upgrade status CLI command we prototyped
+for 4.16, placing all analysis logic into the oc  client. This approach even has
+a significant advantage of being able to run the most recent code against older
+version clusters. The downside is that without a component continuously running
+in the cluster, the CLI invocation always only sees the current snapshot of the
+system state and is unable to implement some desirable features such as knowing
+when certain states started or stopped occurring. Additionally, the business
+case for the feature is to enable multiple UXes (oc, web console, OCM) to report
+the core platform status/health, so implementing advanced logic in one of the
+clients would not provide any benefit to the others.
+
+### OLM Operator
+
+USC could be an optional operator delivered via OLM together with the `UpdateStatus`
+CRD. This means nobody pays any complexity or operations costs unless they
+explicitly opt-in through installing the optional operator. Disadvantage of this
+approach is that the update is still a core functionality of the platform,
+realized by platform code through platform-managed resources. To be able to
+report platform update status/health, either the operator would need to contain
+all analysis logic (essentially locking the architecture into the state proposed
+here) but the platform would still need to be modified to expose necessary
+information.
+
+Explicit installation would likely hamper the feature adoption. Many admins
+would likely require the feature only after they encounter an issue during the
+update, without previously installing the operator.
+
+Lastly, maintaining such an optional operator would be quite difficult, because
+it would need to support multiple platform versions somehow. It is also unclear
+how we would treat form factors such as HyperShift.
+
+### CVO
+In standalone OCP, the CVO is the component that manages the overall process of
+updating a cluster, and it contains some form of status/health reporting through
+its ClusterOperator-like status `Progressing`/`Failing` conditions. CVO could be
+extended with the functionality proposed for the USC. This would be suboptimal
+for HyperShift where CVO does not manage updates. Additionally, CVO is a complex,
+hard to maintain component already (it is an old-school operator where individual
+controllers are implemented directly, without utilizing controller library code
+from library-go), and extending it with new functionality would only increase
+its complexity.
+
+### Cluster Health API instead of Update Status API
+
+TODO
 
 ## Infrastructure Needed [optional]
 
 N/A
-
