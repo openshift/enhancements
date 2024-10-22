@@ -48,15 +48,18 @@ this functionality.
   Gateways so that I can express routing capabilities using an upstream API.
 
 ### Goals
-- Full support for core, non-experimental resources, including gateways, HTTP routes and GRPC routes.
-- Full support for multiple Gateway instances.
-- Full support for north/south [use case](https://gateway-api.sigs.k8s.io/concepts/use-cases/#basic-northsouth-use-case).
+- Support usage of Gateway API Gateways, HTTP routes and GRPC routes.
+- Support north/south [use case](https://gateway-api.sigs.k8s.io/concepts/use-cases/#basic-northsouth-use-case).
 - Lightweight implementation, consuming as little resources as possible.
 
 ### Non-Goals
 - Automatically removing Gateway API from the cluster upon RPM uninstall
 - Provide support for experimental resources, such as those listed [here](https://gateway-api.sigs.k8s.io/concepts/api-overview/#route-resources).
 - Support different GatewayClasses with the same controller.
+- Support Service Mesh capabilities and use cases, even if OpenShift Service
+  Mesh is used as the backing implementation for Gateway API.
+- DNS entries for Gateway API [Gateway](https://gateway-api.sigs.k8s.io/api-types/gateway/)
+  Listeners.
 
 ## Proposal
 As the Gateway API is still in development and MicroShift already provides
@@ -71,10 +74,15 @@ OpenShift Service Mesh (OSSM) is the service mesh operator from OpenShift.
 Since version 3 (which is going to be Tech Preview at the time of this writing)
 it is based in the [sail operator](https://github.com/openshift-service-mesh/sail-operator/tree/main),
 and is released as an optional operator in the Red Hat operators catalog for
-OLM. This operator deploys all of Istio's manifests and is capable of handling
-Istio control plane deployments, Istio CNIs and other components. Istio has
-first class support for Gateway API resources and is already supported by Red
-Hat.
+OLM. This operator deploys all of Istio's and sail operator manifests and is
+capable of handling Istio control plane deployments, Istio CNIs and other
+components. As listed [here](https://gateway-api.sigs.k8s.io/implementations/#istio),
+Istio has support for the goals in this enhancement.
+
+MicroShift will also create the required resources for Gateway API to be ready
+to use right after start. These include a [GatewayClass](https://gateway-api.sigs.k8s.io/api-types/gatewayclass/)
+and an [Istio](https://github.com/openshift-service-mesh/sail-operator/blob/main/chart/crds/sailoperator.io_istios.yaml)
+resource to deploy a control plane.
 
 ### Workflow Description
 **User** is a human user responsible for setting up and managing Edge Devices.
@@ -82,34 +90,40 @@ Hat.
 
 #### Installation and usage on RHEL For Edge (ostree)
 > In this workflow, it doesn't matter if the device is already running R4E with existing MicroShift cluster.
-> Deployment of new commit requires reboot which will force recreation of the Pod networking after adding Multus.
+> Deployment of new commit requires reboot which will force creation of all new resources.
 
-1. User gathers all information about the networking environment of the edge device.
+1. User gathers all information about the networking needs of the edge device.
 1. User prepares ostree commit that contains:
    - MicroShift RPMs.
    - Gateway API for MicroShift RPM.
-   - Gateway CRs
-   - Application using mentioned Gateway CRs.
+   - Application using Gateway API resources (Gateway, HTTP/GRPC routes) CRs.
 1. User deploys the ostree commit onto the edge device.
 1. Edge device boots:
 1. (optional) Init procedures are configuring OS and networks.
 1. MicroShift starts.
-1. MicroShift applies Gateway API manifests.
-1. Istio controller becomes available.
-1. MicroShift applies Application's manifests that may include Gateways and routes.
-1. Gateway pods are created and OSSM inspects routes to accept them into each Gateway.
-1. Application's pods are running, they are reachable through the routes in the Gateway.
+1. MicroShift applies Gateway API manifests (including CRDs from Gateway API
+   and OSSM3, also including GatewayClass and Istio resources).
+1. Istiod controller becomes available.
+1. MicroShift applies Application's manifests that may include Gateway API
+   Gateways, HTTPRoutes, and/or GRPCRoutes.
+1. Gateway pods are created and OSSM inspects routes to accept them into each
+   Gateway.
+1. Application's pods are running, they are reachable through the routes in the
+   Gateway.
 
 #### Installation and usage on RHEL (rpm)
 ##### Adding to existing MicroShift cluster (or before first start)
-1. MicroShift already runs on the device. (This step may not be true if its before first start)
-1. User installs `microshift-gateway-api` RPM
+1. MicroShift already runs on the device. (This step may not be true if its
+   before first start).
+1. User installs `microshift-gateway-api` RPM.
 1. User restarts MicroShift service.
 1. MicroShift starts and deploys all Gateway API resources from `manifests.d`.
 1. Istio controller becomes available.
-1. User creates Gateway and routes (HTTP or GRPC) CRs
-1. When Gateway pods are created, routes are picked up and configured by the controller which is already running.
-1. Application's pods are running, they are reachable through the routes in the Gateway.
+1. User creates Gateway API Gateway and routes (HTTP or GRPC) CRs.
+1. When Gateway pods are created, routes are picked up and configured by the
+   controller which is already running.
+1. Application's pods are running, they are reachable through the routes in the
+   Gateway.
 
 ### API Extensions
 Most of the manifests are CRDs, and users are left only with creating Gateway,
@@ -131,17 +145,21 @@ Enhancement is solely intended for MicroShift.
 N/A
 
 #### Manifests
-Gateway API is just a set a CustomResourceDefinitions. In order to support it
-we need to install OSSM, which brings Istio with it and more CRDs. Aside from
-the required CRDs, the operator from OSSM and the associated resources for the
-istio control plane are also deployed automatically.
+Gateway API manifests are a set of CustomResourceDefinitions. These CRDs need
+a backing implementation and for that MicroShift needs to install OSSM, which
+brings Istio and Sail operator with it. Aside from the required CRDs, the
+operator from OSSM and the associated resources for the Istio control plane are
+also deployed automatically.
+OSSM installs all Istio CRDs, including those that are not used with Gateway
+API (definitions for sidecars, virtual services, proxies, etc. which are
+relevant to a Service Mesh). Note these are not used and do not have support
+in MicroShift.
 
 All these manifests are updated with a manual rebase procedure to extract them
 from an OSSM bundle.
 
 #### RPM package
-RPM spec to build `microshift-gateway-api` and
-`microshift-gateway-api-release-info` RPMs will be part of existing
+RPM spec to build `microshift-gateway-api` RPM as part of existing
 `microshift.spec` file.
 The RPM will include:
 - Manifests required to deploy OSSM on MicroShift without OLM.
@@ -249,7 +267,7 @@ status:
 
 If we have a Gateway `demo-gateway` using the above GatewayClass we should see it has been accepted and programmed by the gateway class:
 ```
-$ oc get gateway -n openshift-ingress demo-gateway -o yaml
+$ oc get gateway -n openshift-gateway-api demo-gateway -o yaml
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -258,7 +276,7 @@ metadata:
   creationTimestamp: "2024-10-14T07:48:16Z"
   generation: 1
   name: demo-gateway
-  namespace: openshift-ingress
+  namespace: openshift-gateway-api
   resourceVersion: "1697"
   uid: 13275eac-dced-4448-904f-27f78350adca
 spec:
@@ -283,7 +301,7 @@ status:
     status: "True"
     type: Accepted
   - lastTransitionTime: "2024-10-14T07:48:17Z"
-    message: Resource programmed, assigned to service(s) demo-gateway-openshift-gateway-api.openshift-ingress.svc.cluster.local:8080
+    message: Resource programmed, assigned to service(s) demo-gateway-openshift-gateway-api.openshift-gateway-api.svc.cluster.local:8080
     observedGeneration: 1
     reason: Programmed
     status: "True"
@@ -332,7 +350,7 @@ kind: HTTPRoute
 metadata:
   annotations:
     kubectl.kubernetes.io/last-applied-configuration: |
-      {"apiVersion":"gateway.networking.k8s.io/v1beta1","kind":"HTTPRoute","metadata":{"annotations":{},"name":"http","namespace":"default"},"spec":{"hostnames":["test.microshift-9"],"parentRefs":[{"name":"demo-gateway","namespace":"openshift-ingress"}],"rules":[{"backendRefs":[{"name":"hello-microshift","namespace":"default","port":8080}]}]}}
+      {"apiVersion":"gateway.networking.k8s.io/v1beta1","kind":"HTTPRoute","metadata":{"annotations":{},"name":"http","namespace":"default"},"spec":{"hostnames":["test.microshift-9"],"parentRefs":[{"name":"demo-gateway","namespace":"openshift-gateway-api"}],"rules":[{"backendRefs":[{"name":"hello-microshift","namespace":"default","port":8080}]}]}}
   creationTimestamp: "2024-10-14T07:49:45Z"
   generation: 1
   name: http
@@ -346,7 +364,7 @@ spec:
   - group: gateway.networking.k8s.io
     kind: Gateway
     name: demo-gateway
-    namespace: openshift-ingress
+    namespace: openshift-gateway-api
   rules:
   - backendRefs:
     - group: ""
@@ -379,13 +397,13 @@ status:
       group: gateway.networking.k8s.io
       kind: Gateway
       name: demo-gateway
-      namespace: openshift-ingress
+      namespace: openshift-gateway-api
 ```
 We can see the route is valid, the backend service is also resolved (meaning it exists), the controller name matches that of the GatewayClass and the parentRef is the gateway that picked up the route.
 
 The Gateway will also show a new attachedRoute now:
 ```
-$ oc get gateway demo-gateway -n openshift-ingress -o yaml | yq '.status.listeners'
+$ oc get gateway demo-gateway -n openshift-gateway-api -o yaml | yq '.status.listeners'
 - attachedRoutes: 1
   conditions:
     - lastTransitionTime: "2024-10-14T07:48:16Z"
