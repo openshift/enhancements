@@ -69,6 +69,7 @@ The default configuration is created through `config.openshift.io/v1alpha1 Backu
 Using a CR enable users to override the default backup configuration.
 
 By design, the _**No-Config**_ backup approach works _orthogonal_ to the [Cron](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups) based method, and not a replacement.
+Therefore, upon applying a `Backup` CR without `name=default`, the _Cron_ based implementation is saving backups on the provided PVC. Moreover, if the default `no-config` backups are being enabled (i.e. by applying a `Backup` CR with `name=default`), then backups are being saved on all master nodes at the default `hostPath`.    
 However, this method is designed to work on all variants of Openshift (e.g. Single-node and Bare-metal), as well as having backups on all control-plane nodes, for recovering from disaster scenarios.
 
 ### API Extensions
