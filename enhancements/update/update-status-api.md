@@ -406,9 +406,11 @@ There are two sources of skew:
 
 ## Operational Aspects of API Extensions
 
-
-
-
+The USC will be deployed as a single replica Deployment, running a binary shipped
+in the CVO image. This Deployment will be managed by the CVO itself as its operand.
+USC operational matters will be exposed via the `UpdateStatus` resource `.status`
+conditions. For the initial implementation, the `Available` condition will
+suffice.
 
 ## Support Procedures
 
