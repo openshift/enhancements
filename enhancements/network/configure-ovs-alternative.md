@@ -12,9 +12,10 @@ approvers:
 api-approvers:
   - None
 creation-date: 2023-06-29
-last-updated: 2024-04-04
+last-updated: 2024-10-21
 tracking-link:
   - https://issues.redhat.com/browse/OPNET-265
+  - https://issues.redhat.com/browse/OPNET-600
 see-also:
   - https://docs.google.com/document/d/1Zp1J2HbVvu-v4mHc9M594JLqt6UwdKoix8xkeSzVL98/edit?usp=sharing
   - enhancements/network/baremetal-ipi-network-configuration.md
@@ -61,6 +62,9 @@ There are a few problems with configure-ovs.sh:
 * As an OpenShift developer, I want to avoid further complications in the
   configure-ovs.sh script by providing a better way to do advanced bridge
   configuration.
+
+* As an OpenShift deployer using UPI, I want to configure the OVNKubernetes
+  bridge using arbitrary network configuration tools.
 
 ### Goals
 
@@ -254,6 +258,25 @@ actions:
   More details on this can be found in the enhancement:
   https://github.com/openshift/enhancements/pull/1525
 
+
+#### UPI
+
+In UPI clusters where the deployer has the ability to do arbitrary network
+configuration before deployment, there may be no need for NMState to be
+involved at deploy-time. Instead, the deployer can do the bridge
+configuration and then touch a file to indicate that configure-ovs should
+not run (the same thing the nmstate-configuration service would do in an
+IPI scenario).
+
+We likely need to move the flag file from /etc/nmstate/openshift/applied
+to some more generic location since NMState may not be involved in this
+new flow. Additionally, this file will become a user-facing interface,
+whereas previously it was only intended for internal use.
+
+We can also enable the nmstate-configuration service for UPI deployments
+so deployers can use the same syntax if they want. It won't be required for
+them to do custom br-ex configuration though.
+
 #### Variation [optional]
 
 We have settled on an approach and are not currently pursuing other options.
@@ -323,6 +346,12 @@ guidelines, and we must have clear instructions on what is required for br-ex.
 
 Note, however, that if an incorrect bridge configuration is applied NMState
 will usually catch that and roll back the changes.
+
+The UPI version of this feature that does not rely on NMState introduces a few
+more risks, specifically the fact that it will be harder to craft a correct
+day 2 NMState configuration without a day 1 version to start with. This is
+only a problem if they want to make day 2 changes though, and is also
+mitigated by the point above regarding roll backs of incorrect configurations.
 
 ### Drawbacks
 
