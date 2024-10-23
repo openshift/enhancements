@@ -59,22 +59,24 @@ N/A
 ## Proposal
 
 We propose updating the Azure API authentication methods in image registry, ingress, cloud network config, and storage 
-operators to use the using Azure SDK for Go's generic function [NewDefaultAzureCredential](https://github.com/Azure/azure-sdk-for-go/blob/4ebe2fa68c8f9f0a0737d4569810525b4ac45834/sdk/azidentity/default_azure_credential.go#L63).
-This function walks through a chain of Azure authentication types, using environment variables, Instance Metadata Service (IMDS), or a file on the local filesystem to authenticate with the Azure API.  
+operators to use client certificate authentication.
 
-HyperShift would pass the following environment variables - AZURE_CLIENT_ID, AZURE_TENANT_ID, and 
-AZURE_CLIENT_CERTIFICATE_PATH - to its deployments of image registry and ingress on the hosted control plane. Each of 
-these components would then pass these variables along to NewDefaultAzureCredential.
+For ingress and image registry, HyperShift would pass the following environment variables - ARO_HCP_MI_CLIENT_ID, 
+ARO_HCP_TENANT_ID, and ARO_HCP_CLIENT_CERTIFICATE_PATH - to its deployments of image registry and ingress on the hosted 
+control plane. Each of these components would then pass these variables along to azure for client certificate 
+authentication. HyperShift will modify its deployment of these operators to include the Secrets Store CSI driver, which 
+will pull the certificate, related to ARO_HCP_MI_CLIENT_ID, from an Azure Key Vault on an AKS management cluster and 
+mount the certificate in a volume on the operator's pod.
 
 For storage operators (azure-file and azure-disk) on the hosted control plane, we will need pass along extra variables 
-so we can mount the cert in a volume on the azure-file and azure-disk controller pod - 
-ARO_HCP_SECRET_PROVIDER_CLASS_FOR_FILE and ARO_HCP_SECRET_PROVIDER_CLASS_FOR_DISK. 
+so we can correctly set up Secret Store CSI driver to mount the certs in a volume on the azure-file and azure-disk 
+controller pods respectively - ARO_HCP_SECRET_PROVIDER_CLASS_FOR_FILE and ARO_HCP_SECRET_PROVIDER_CLASS_FOR_DISK. 
 
-For cloud-network-config-controller, HyperShift will pass AZURE_CLIENT_ID, AZURE_TENANT_ID, 
-AZURE_CLIENT_CERTIFICATE_PATH, and ARO_HCP_SECRET_PROVIDER_CLASS to cluster-network-operator. cluster-network-operator 
+For cloud-network-config-controller, HyperShift will pass ARO_HCP_MI_CLIENT_ID, ARO_HCP_TENANT_ID,
+ARO_HCP_CLIENT_CERTIFICATE_PATH, and ARO_HCP_SECRET_PROVIDER_CLASS to cluster-network-operator. cluster-network-operator 
 will include AZURE_CLIENT_ID, AZURE_TENANT_ID, and AZURE_CLIENT_CERTIFICATE_PATH as environment variables to the 
-deployment of cloud-network-config-controller and mount the ARO_HCP_SECRET_PROVIDER_CLASS as a volume attribute in a 
-volume in the same deployment.
+deployment of cloud-network-config-controller and set up Secret Store CSI driver, with ARO_HCP_SECRET_PROVIDER_CLASS, to 
+mount the certificate to the cloud-network-config-controller pod.
 
 For each component, we should also set this environment variable to true, AZURE_CLIENT_SEND_CERTIFICATE_CHAIN. This 
 enables a Microsoft internal feature called SNI (Subject Name and Issuer authentication). It essentially allows one to 
@@ -87,8 +89,10 @@ the common OpenShift fsnotify +os.Exit() to restart the pod on config change.
 
 ### Workflow Description
 
-* HostedCluster control plane operator will set AZURE_CLIENT_ID, AZURE_TENANT_ID, and AZURE_CLIENT_CERTIFICATE_PATH on deployment of image registry, ingress, cluster network operator (which will pass the value to cloud network config), and storage operators (which will pass the values to azure-file and azure disk)
-* When each operator is configuring the Azure authentication type, it will call Azure SDK for Go's generic function NewDefaultAzureCredential
+* HostedCluster control plane operator will set ARO_HCP_MI_CLIENT_ID, ARO_HCP_TENANT_ID, and ARO_HCP_CLIENT_CERTIFICATE_PATH on deployment of image registry and ingress.
+* HostedCluster control plane operator will set ARO_HCP_MI_CLIENT_ID, ARO_HCP_TENANT_ID, ARO_HCP_CLIENT_CERTIFICATE_PATH, and ARO_HCP_SECRET_PROVIDER_CLASS on deployment of cluster-network-operator.
+* HostedCluster control plane operator will configure the SecretProviderClass and any needed secrets for azure-disk and azure-file.
+* When each operator is configuring the Azure authentication type, it will authenticate with client certificate when HyperShift sets ARO_HCP_MI_CLIENT_ID
 
 ### API Extensions
 
