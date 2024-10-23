@@ -435,7 +435,7 @@ clients would not provide any benefit to the others.
 
 USC could be an optional operator delivered via OLM together with the `UpdateStatus`
 CRD. This means nobody pays any complexity or operations costs unless they
-explicitly opt-in through installing the optional operator. Disadvantage of this
+explicitly opt in through installing the optional operator. Disadvantage of this
 approach is that the update is still a core functionality of the platform,
 realized by platform code through platform-managed resources. To be able to
 report platform update status/health, either the operator would need to contain
@@ -464,7 +464,50 @@ its complexity.
 
 ### Cluster Health API instead of Update Status API
 
-TODO
+There are asks for a more general Cluster Health reporting system, not specific
+to updates. It is currently unknown how such a system would look like. One
+approach would be to invest a significant effort into improving the existing
+status reporting paths in the platform:
+
+- reporting of the operators
+- reporting of the operands
+- reporting of the managed resources
+
+These reporting paths are currently inconsistent and spread both too wide and
+deep in the existing system. There is a minimal reporting contract in the form
+of the `Progressing`/`Failing` conditions on `ClusterOperator` resources, and
+the platform components publishes alerts. For most issues, troubleshooting
+consists of investigating logs, `status` subresources, events and metrics. The
+user must possess the knowledge of where to look and needs to put pieces of the
+state together. Improving this situation would be beneficial also for the update
+without the need for a dedicated system.
+
+There are three reasons why we are not pursuing this approach now:
+
+1. The update is seen as a special, high-importance operation by our users. From
+   the OCP architecture point-of-view, it is just a little special case of
+   cluster reconciliation (which makes _"update"_ a vaguely defined term).
+   Therefore, we (OpenShift developers) traditionally tended to expose the state
+   of the system in a form that is very close to its architecture model. But we
+   are receiving feedback that our users' mental model of the system is
+   different, closer to traditional monolithic systems. They expect high-level
+   concepts (like "update" or "control plane") to be reported at this level,
+   rather than knowing it is really distributed system of loosely coupled
+   parts, each of which owns and reports its own state.
+1. While we _know_ the features offered by the Status API (and UXes consuming it)
+   are useful and appreciated by the users (validated through the client-based
+   prototype), the actual business value of the more general system is not
+   entirely clear and would need to be validated - we would need to discover
+   what the users actually want and need, and pretty much start from scratch.
+   We would delay delivering the features that we know are useful _now_ for this.
+   The feedback on Status API concepts can be useful to inform the design of the
+   cluster health reporting system - like, we may want to reuse the concept of
+   "insights" or the concept of "informers" based on its success in Status API.
+1. Lastly, the general system would likely lack the notion of "progress" useful
+   for monitoring the update, even if all components are healthy. If we treat
+   update as a slightly special reconciliation case and nothing more, there is
+   no notion of progress of the high-level concept of "cluster version", just
+   a notion of pending changes of smaller components.
 
 ## Infrastructure Needed [optional]
 
