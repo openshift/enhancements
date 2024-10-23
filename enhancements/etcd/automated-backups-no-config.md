@@ -34,7 +34,7 @@ This document outlines the possible approaches that were investigated, discussed
 ## Motivation
 
 The current method of **Backup** and **Restore** of an Openshift cluster is outlined in  [Automated Backups of etcd](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups.md). 
-This approach relies on user supplied configuration, in the form of `config.openshift.io/v1alpha1 Backup` CR.
+This approach relies on user supplied configuration, in the form of `config.openshift.io/v1alpha1 Backup` CR. This method utilizes `batchv1.CronJob` in order to take Backups of Etcd and cluster resources.
 
 To improve the user's experience, this work proposes taking etcd backup using default configurations from day one, without user interference.
 
@@ -68,9 +68,16 @@ Moreover, it uses the same [PeriodicBackupController](https://github.com/openshi
 The default configuration is created through `config.openshift.io/v1alpha1 Backup` CR, with name `default`, to distinguish it from other user supplied `Backup` CRs.
 Using a CR enable users to override the default backup configuration.
 
-By design, the _**No-Config**_ backup approach works _orthogonal_ to the [Cron](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups) based method, and not a replacement.
-Therefore, upon applying a `Backup` CR without `name=default`, the _Cron_ based implementation is saving backups on the provided PVC. Moreover, if the default `no-config` backups are being enabled (i.e. by applying a `Backup` CR with `name=default`), then backups are being saved on all master nodes at the default `hostPath`.    
-However, this method is designed to work on all variants of Openshift (e.g. Single-node and Bare-metal), as well as having backups on all control-plane nodes, for recovering from disaster scenarios.
+
+By design, the **No-Config** backup approach works alongside to the [Cron](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups) based method, and not a replacement, as shown in this [test](https://docs.google.com/document/d/1Ee9a7GJsae8EA7komPcEV72YlRgbSbR0B0KSo3XRBUc).
+Although both approaches use the same `config.openshift.io/v1alpha1 Backup` CR for configuration, the No-Config method does not utilise the `PVC` field in `Backup` CR. 
+In fact, configuring the PVC field for the No-Config method is being ignored as this [test](https://docs.google.com/document/d/1813mZo4KEfTWw_FRbmG8Un91oPA9-eF29FcrZk-RLxE) shows. 
+Instead, **No-Config** backups uses a default `hostPath` location on all control-plane nodes. 
+This ensures that backups are always accessible if any of the master node becomes unavailable.
+Using `hostPath` allows the **No-Config** to work on all variants of Openshift (e.g. Single-node and Bare-metal), as well as having backups on all control-plane nodes, for recovering from disaster scenarios.
+
+To sum up, the main two differences between the Cron-based and No-Config backups method are on storage and replication.
+The Cron-based stores the backups on the mounted PVC, while No-Config approach uses `hostPath` on all master nodes, regardless of any PVC configured on the `default` `config.openshift.io/v1alpha1 Backup` CR.
 
 ### API Extensions
 
@@ -166,7 +173,7 @@ No issue has been encountered during testing this approach.
 - What values could be used for default configurations, considering all OCP variants.
 - What is the minimum disk size needed in order to operate this feature without running out of disk space ?
 - How to handle an empty `schedule` ? 
-- How to mitigate losing backups upon control-plane scaling using `CPMSO` ? 
+- How to mitigate losing backups upon control-plane scaling using `CPMSO` ?
 
 ### Implementation Details/Notes/Constraints
 
