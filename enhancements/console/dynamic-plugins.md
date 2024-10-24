@@ -11,7 +11,7 @@ reviewers:
 approvers:
   - "@bparees"
 creation-date: 2020-08-18
-last-updated: 2023-02-22
+last-updated: 2024-10-24
 status: implemented
 ---
 
@@ -472,6 +472,72 @@ be removed when 4.10 goes out of support in favor of the proper API.
 Prior to 4.11 release, localization resources are being loaded by default. In case these
 resources are not present in the dynamic plugin, the initial console load will be slowed 
 down. For more info check [BZ#2015654](https://bugzilla.redhat.com/show_bug.cgi?id=2015654)
+
+### Content Security Policy
+
+`ConsolePlugin` introduces the ability for dynamic plugins to specify their own Content Security Policy (CSP) directives in the OpenShift web console, using the `ConsolePluginCSP` field in the `ConsolePluginSpec`. This field is crucial for mitigating potential security risks, such as cross-site scripting (XSS) and data injection attacks, by controlling which external resources the browser can load.
+
+#### Content Security Policy (CSP) Overview
+CSP is a security feature that helps detect and mitigate attacks by specifying which sources are allowed for fetching content like scripts, styles, images, and fonts. For dynamic plugins that require loading resources from external sources, defining custom CSP rules ensures secure integration into the OpenShift console.
+
+#### Key Features of `ConsolePluginCSP`
+
+- **Directive Types**: 
+  - The supported directive types include `DefaultSrc`, `ScriptSrc`, `StyleSrc`, `ImgSrc`, and `FontSrc`, each of which allows plugins to specify valid sources for loading different types of content.
+  - Each directive type serves different purposes, e.g., `ScriptSrc` defines valid JavaScript sources, while `ImgSrc` controls where images can be loaded from.
+
+- **Values**: 
+  - Each directive can have a list of values representing allowed sources. For example, `ScriptSrc` could specify multiple external scripts. 
+  - These values are restricted to 1024 characters and cannot include whitespace, commas, or semicolons. Additionally, single-quoted strings and wildcard characters (`*`) are disallowed.
+  
+- **Unified Policy**: 
+  - The OpenShift web console aggregates the CSP directives across all enabled `ConsolePlugin` CRs and merges them with its own default policy. The combined policy is then applied via the `Content-Security-Policy` HTTP response header.
+
+#### Example
+If two plugins define overlapping CSP directives, the OpenShift web console server merges them as follows:
+- Plugin A:
+```yaml
+apiVersion: console.openshift.io/v1
+kind: ConsolePlugin
+metadata:
+  name: acm
+spec:
+  displayName: 'Advanced Cluster Management'
+  contentSecurityPolicy:
+  - directive: 'ScriptSrc'
+    values:
+    - 'https://script1.com/'
+    - 'https://script2.com/'
+```
+- Plugin B:
+```yaml
+apiVersion: console.openshift.io/v1
+kind: ConsolePlugin
+metadata:
+  name: cron-tab
+spec:
+  displayName: 'Cron Tab'
+  contentSecurityPolicy:
+  - directive: 'ScriptSrc'
+    values:
+    - 'https://script2.com/'
+    - 'https://script3.com/'
+```
+
+The resulting policy set by the OpenShift Web Console server would be:
+
+```
+script-src: 'self' https://script1.com/ https://script2.com/ https://script3.com/
+```
+
+This ensures that plugins can specify external sources while maintaining a secure environment for the entire web console.
+
+#### Validation Rules
+- Each directive can have up to 16 unique values.
+- The total size of all values across directives must not exceed 8192 bytes (8KB).
+- Each value must be unique, and there are additional validation rules to ensure no quotes, spaces, commas, or wildcard symbols are used.
+
+By defining and enforcing CSP directives, the `ConsolePluginCSP` field helps balance plugin flexibility and security, allowing dynamic plugins to specify external resources while protecting the OpenShift web console from security vulnerabilities.
 
 ### Error Handling
 
