@@ -180,7 +180,7 @@ No issue has been encountered during testing this approach.
 The _no-config_ backups builds atop of the existing [automated backup of etcd](https://docs.openshift.com/container-platform/4.15/backup_and_restore/control_plane_backup_and_restore/backing-up-etcd.html#creating-automated-etcd-backups_backup-etcd).
 
 The `PeriodicBackupController` within **cluster-etcd-operator** checks for `Backup` CR with `name=default` within every sync. Upon applying a `Backup` CR with `name=default`, the _no-config_ backup sidecar container is being enabled within each etcd pod in Openshift cluster.
-The `Backup` configurations such as `scheudle`, `timezone` and `retention policy`, are being supplied to the _no-config_ container as flags. 
+The `Backup` configurations such as `schedule`, `timezone` and `retention policy`, are being supplied to the _no-config_ container as flags. 
 According to user's preference, the default configuration could be modified by updating the CR.
 
 The backups are being stored on the local disk of each master node independently, using `hostPath` volume. This replication is required for disaster recovery scenarios where more than one of the master nodes has been lost.
