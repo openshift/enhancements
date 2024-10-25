@@ -414,7 +414,8 @@ The CRDs spec defines as follows:
 | Subnets        | The subnet to use for the network across the cluster.<br/>E.g. `10.100.200.0/24`.<br/>IPv6 `2001:DBB::/64` and dual-stack `192.168.100.0/24`,`2001:DBB::/64` subnets are supported.<br/>When omitted, the logical switch implementing the network only provides layer 2 communication, and users must configure IP addresses.<br/>Port security only prevents MAC spoofing if the subnets are omitted. | Yes      |
 | ExcludeSubnets | List of CIDRs.<br/>IP addresses are removed from the assignable IP address pool and are never passed to the pods.                                                                                                                                                                                                                                                                                      | Yes      |
 | JoinSubnets    | Subnet used inside the OVN network topology.  When omitted, this means no opinion and the platform is left to choose a reasonable default which is subject to change over time.                                                                                                                                                                                                                        | Yes      |
-| IPAMLifecycle  | Control IP addresses management lifecycle. When `Persistent` is specified it enable workloads have persistent IP addresses. For example: Virtual Machines will have the same IP addresses along their lifecycle (stop, start migration, reboots). Supported by Topology `Layer2` & `Localnet`.                                                                                                         | Yes      |
+| IPAM.Lifecycle | Control IP addresses management lifecycle. When `Persistent` is specified it enable workloads have persistent IP addresses. For example: Virtual Machines will have the same IP addresses along their lifecycle (stop, start migration, reboots). Supported by Topology `Layer2` & `Localnet`.                                                                                                         | Yes      |
+| IPAM.Mode      | Control how much of the IP configuration will be managed by OVN-Kubernetes. Must be one of `Enabled`, `Disabled`.                                                                                                                                                                                                                                                                                      | Yes      |
  
 The cluster scoped CRD should have the following additional field:
 
@@ -463,7 +464,8 @@ Suggested API validation rules:
   UDN spec changes, now pods connected to a network that was created from previous revision spec.
 - `Subnets` are mandatory for `Layer3` topology.
 - `Localnet` topology is not supported for primary network.
-- `IPAMLifecycle` is supported for `Layer2` and `Localnet` topology.
+- `IPAM.Lifecycle` is supported for `Layer2` and `Localnet` topology.
+- `IPAM.Mode` can be set to `Disabled` only on `Layer2` or `Localnet` topologies for `Secondary` networks, where the `Subnets` parameter must be omitted. When set to `Enabled`, the `Subnets` attribute must be defined.
 
 Suggested CRD short-name: `udn`
 
@@ -496,10 +498,7 @@ type UserDefinedNetworkSpec struct {
     // 
     // For `Layer2` and `Localnet` topology types, the format should match standard CIDR notation, without
     // providing any host subnet mask.
-    // This field may be omitted for `Layer2` and `Localnet` topologies. 
-    // In that case the logical switch implementing the network only provides layer 2 communication,
-    // and users must configure IP addresses for the pods.
-    // Port security only prevents MAC spoofing
+    // This field is required when `ipam.mode` is set to `Enabled` and is ignored otherwise.
     // +optional
     Subnets []string `json:"subnets,omitempty"`
     
@@ -514,20 +513,41 @@ type UserDefinedNetworkSpec struct {
     // +kubebuilder:validation:XValidation:rule="1 <= size(self) && size(self) <= 2", message="Unexpected number of join subnets"
     // +optional
     JoinSubnets []string `json:"joinSubnets,omitempty"`
-    
-    // Control IP addresses management lifecycle.
-    // When `Persistent` is specified it enable workloads have persistent IP addresses.
-    // For example: Virtual Machines will have the same IP addresses along their lifecycle (stop, start migration, reboots).
-    // Supported by Topology `Layer2` and `Localnet`.
-    // +optional
-    IPAMLifecycle NetworkIPAMLifecycle `json:"ipamLifecycle,omitempty"`
+
+    // IPAM section contains IPAM-related configuration for the network.
+    IPAM *IPAMSpec `json:"ipam,omitempty"`
 }
+
+type IPAMSpec struct {
+    // Mode controls how much of the IP configuration will be managed by OVN.
+    // `Enabled` means OVN-Kubernetes will apply IP configuration to the SDN infrastructure and it will also assign IPs
+    // from the selected subnet to the individual pods.
+    // `Disabled` means OVN-Kubernetes will only assign MAC addresses and provide layer 2 communication, letting users
+    // configure IP addresses for the pods.
+    // `Disabled` is only available for `Layer2` and `Localnet` topologies for Secondary networks.
+    // By disabling IPAM, any Kubernetes features that rely on selecting pods by IP will no longer function
+    // (such as network policy, services, etc). Additionally, IP port security will also be disabled for interfaces attached to this network.
+    // Defaults to `Enabled`.
+    // +optional
+    Mode IPAMMode `json:"mode"`
+    
+    // Lifecycle controls IP addresses management lifecycle.
+    //
+    // The only allowed value is Persistent. When set, OVN Kubernetes assigned IP addresses will be persisted in an
+    // `ipamclaims.k8s.cni.cncf.io` object. These IP addresses will be reused by other pods if requested.
+    // Only supported when "mode" is `Enabled`.
+    //
+    // +optional
+    Lifecycle NetworkIPAMLifecycle `json:"lifecycle,omitempty"`
+}
+
 ```
 Suggested API validation rules:
 - `Topology` and `Role` fields are mandatory.
 - `Topology` can be one of `Layer2`, `Layer3`, `Localnet`.
 - `Role` can be one of `Primary`, `Secondary`.
-- `IPAMLifecycle` can be `Persistent`.
+- `IPAM.Lifecycle` can be `Persistent`.
+- `IPAM.Mode` can be set to `Disabled` only on `Layer2` or `Localnet` topologies for `Secondary` networks, where the `Subnets` parameter must be omitted. When set to `Enabled`, the `Subnets` attribute must be defined.
 - `JoinSubnets` length can be 1 or 2.
 
 ##### Cluster scoped CRD
@@ -622,7 +642,8 @@ spec:
   mtu: 9000
   subnets: ["10.0.0.0/24"]
   excludeSubnets: ["10.0.0.100/26"]
-  ipamLifecycle: Persistent
+  ipam:
+    lifecycle: Persistent
 status:
   conditions:
   - type: "NetworkReady"
@@ -879,7 +900,7 @@ The controller should validate the request CRD spec and verify:
 - `Subnets` length is at least 1 when topology is `Layer3`.
 - `Topology` is one of `Layer2`, `Layer3` or `Localnet`.
 - `Role` is one of `Primary` or `Secondary`.
-- `IPAMLifecycle` can be `Persistent`, and set only when topology is `Layer2` or `Localnet`. 
+- `IPAM.Lifecycle` can be `Persistent`, and set only when topology is `Layer2` or `Localnet`. 
 - In case `Topology: Localnet`, `Role` cannot be `Primary`
 
 In addition, the following scenarios should be validated: 
