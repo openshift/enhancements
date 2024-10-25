@@ -415,6 +415,7 @@ The CRDs spec defines as follows:
 | ExcludeSubnets | List of CIDRs.<br/>IP addresses are removed from the assignable IP address pool and are never passed to the pods.                                                                                                                                                                                                                                                                                      | Yes      |
 | JoinSubnets    | Subnet used inside the OVN network topology.  When omitted, this means no opinion and the platform is left to choose a reasonable default which is subject to change over time.                                                                                                                                                                                                                        | Yes      |
 | IPAMLifecycle  | Control IP addresses management lifecycle. When `Persistent` is specified it enable workloads have persistent IP addresses. For example: Virtual Machines will have the same IP addresses along their lifecycle (stop, start migration, reboots). Supported by Topology `Layer2` & `Localnet`.                                                                                                         | Yes      |
+| IPAMLevel      | Control how much of the IP configuration will be managed by OVN-Kubernetes. Must be one of `Disabled`, `FullyManaged`.                                                                                                                                                                                                                                                                                            | Yes      |
  
 The cluster scoped CRD should have the following additional field:
 
@@ -464,6 +465,7 @@ Suggested API validation rules:
 - `Subnets` are mandatory for `Layer3` topology.
 - `Localnet` topology is not supported for primary network.
 - `IPAMLifecycle` is supported for `Layer2` and `Localnet` topology.
+- When `IPAMLevel` is `Disabled`, `Subnets` cannot be set. When it is `FullyManaged`, `Subnets` are required.
 
 Suggested CRD short-name: `udn`
 
@@ -496,9 +498,8 @@ type UserDefinedNetworkSpec struct {
     // 
     // For `Layer2` and `Localnet` topology types, the format should match standard CIDR notation, without
     // providing any host subnet mask.
-    // This field may be omitted for `Layer2` and `Localnet` topologies. 
-    // In that case the logical switch implementing the network only provides layer 2 communication,
-    // and users must configure IP addresses for the pods.
+    // This field may be omitted for `Layer2` and `Localnet` topologies *only* when `IPAMLevel` is set to
+    // `Disabled`. 
     // Port security only prevents MAC spoofing
     // +optional
     Subnets []string `json:"subnets,omitempty"`
@@ -521,6 +522,16 @@ type UserDefinedNetworkSpec struct {
     // Supported by Topology `Layer2` and `Localnet`.
     // +optional
     IPAMLifecycle NetworkIPAMLifecycle `json:"ipamLifecycle,omitempty"`
+    
+    // Control how much of the IP configuration will be managed by OVN.
+    // When `FullyManaged`, OVN-Kubernetes will apply IP configuration to the SDN infrastructure and it will also assign IPs from the selected subnet to the
+    // individual pods.
+    // When `Disabled`, OVN-Kubernetes will only provide layer 2 communication, letting users configure IP addresses for the pods. `Disabled` is only available
+    // for `Layer2` and `Localnet` topologies. By disabling IPAM, you are also opting-out from features depending on it, e.g. IP spoof filtering and
+    // namespace/pod selectors in network policies.
+    // Defaults to `FullyManaged`.
+    // +optional
+    IPAMLevel NetworkIPAMLevel `json:"ipamLevel,omitempty"`
 }
 ```
 Suggested API validation rules:
@@ -528,6 +539,7 @@ Suggested API validation rules:
 - `Topology` can be one of `Layer2`, `Layer3`, `Localnet`.
 - `Role` can be one of `Primary`, `Secondary`.
 - `IPAMLifecycle` can be `Persistent`.
+* `IPAMLevel` can be `Disabled` only on `Layer2` or `Localnet` topologies, where the `Subnets` parameter can be omitted. When set to `FullyManaged`, the `Subnets` attribute must be defined.
 - `JoinSubnets` length can be 1 or 2.
 
 ##### Cluster scoped CRD
