@@ -258,6 +258,11 @@ it is running.
 
 If the binary-path ends in `.gz`, the binary will be decompressed.
 
+When iterating locally, `openshift-tests` will support a parameter `--extensions-cache <dir>`
+where binaries will be extracted and stored until removed by the user. It will extract binaries 
+to `<extensions-cache>/<component-sha256>/extension.bin` and will skip re-extraction on
+subsequent runs.
+
 #### Extension Interface
 
 Test Extension binaries must implement a well-defined interface through which information about the
