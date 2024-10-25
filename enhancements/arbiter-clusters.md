@@ -13,18 +13,11 @@ reviewers:
   - "@zaneb"
   - "@rphillips"
 approvers:
-  - "@tjungblu"
-  - "@patrickdillon"
-  - "@racedo"
   - "@jerpeter1"
-  - "@deads2k"
-  - "@sjenning"
-  - "@yuqi-zhang"
-  - "@zaneb"
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2024-08-27
-last-updated: 2024-10-16
+last-updated: 2024-10-24
 tracking-link:
   - https://issues.redhat.com/browse/OCPEDGE-1191
 see-also: []
@@ -92,10 +85,11 @@ The main focus of the enhancement is to support edge deployments of individual
 OpenShift HA clusters at scale, and to do so in a cost effective way. We are
 proposing doing this through the creation of a new node role type called an
 `node-role.kubernetes.io/arbiter` node as a heterogenous quasi control plane
-configuration. The arbiter will run the critical components that help maintain
-an HA cluster, but other platform pods should not be scheduled on the arbiter
-node. The arbiter node will be tainted to make sure that only deployments that
-tolerate that taint are scheduled on the arbiter.
+configuration. The arbiter will run the minimum components that help maintain an
+HA cluster, things like MCD, monitoring and networking. Other platform pods
+should not be scheduled on the arbiter node. The arbiter node will be tainted to
+make sure that only deployments that tolerate that taint are scheduled on the
+arbiter.
 
 We think creating this new node role would be the best approach for this
 feature. Having a new node role type allows our bootstrap flow to leverage the
@@ -107,15 +101,17 @@ arbiter nodes to be deployed with out higher memory and cpu requirements.
 
 Components that we are proposing to change:
 
-| Component                                                  | Change                                                                                                          |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| [Infrastructure API](#infrastructure-api)                  | Add `HighlyAvailableArbiter` as a new value for `ControlPlaneTopology` and `InfrastructureTopology`             |
-| [Installer](#installer-changes)                            | Update install config API to Support arbiter machine types                                                      |
-| [MCO](#mco-changes)                                        | Update validation hook to support arbiter role and add bootstrapping configurations needed for arbiter machines |
-| [Kubernetes](#kubernetes-change)                           | Update allowed `well_known_openshift_labels.go` to include new node role as an upstream carry                   |
-| [ETCD Operator](#etcd-operator-change)                     | Update operator to deploy operands on both `master` and `arbiter` node roles                                    |
-| [library-go](#library-go-change)                           | Update the underlying static pod controller to deploy static pods to `arbiter` node roles                       |
-| [Authentication Operator](#authentication-operator-change) | Update operator to accept minimum 2 kube api servers when `ControlPlaneTopology` is `HighlyAvailableArbiter`    |
+| Component                                                     | Change                                                                                                          |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| [Infrastructure API](#infrastructure-api)                     | Add `HighlyAvailableArbiter` as a new value for `ControlPlaneTopology` and `InfrastructureTopology`             |
+| [Installer](#installer-changes)                               | Update install config API to Support arbiter machine types                                                      |
+| [MCO](#mco-changes)                                           | Update validation hook to support arbiter role and add bootstrapping configurations needed for arbiter machines |
+| [Kubernetes](#kubernetes-change)                              | Update allowed `well_known_openshift_labels.go` to include new node role as an upstream carry                   |
+| [ETCD Operator](#etcd-operator-change)                        | Update operator to deploy operands on both `master` and `arbiter` node roles                                    |
+| [library-go](#library-go-change)                              | Update the underlying static pod controller to deploy static pods to `arbiter` node roles                       |
+| [Authentication Operator](#authentication-operator-change)    | Update operator to accept minimum 2 kube api servers when `ControlPlaneTopology` is `HighlyAvailableArbiter`    |
+| [Hosted Control Plane](#hosted-control-plane-change)          | Disallow HyperShift from installing on the `HighlyAvailableArbiter` and `SingleReplica` topology                |
+| [Alternative Install Flows](#alternative-install-flow-change) | Update installation flow for new node role via tooling such as Assisted Installer, Assisted Service and ZTP     |
 
 ### Infrastructure API
 
@@ -372,6 +368,20 @@ explicitly override, there must be 3 or more `kube-apiservers`. We need to add
 another check to this switch statement to allow minimum 2 replicas for
 `HighlyAvailableArbiter` topologies.
 
+### Hosted Control Plane Change
+
+We will not support running this type of topology for hosted control plane
+installations. We need to update HyperShift to check for the
+`HighlyAvailableArbiter` control plane topology and prevent HCP installations on
+Arbiter clusters. This will need to be done at the `hypershift` cli level as
+well as any bootstrap component that can be created outside of the CLI flow.
+
+### Alternative Install FLow Change
+
+We currently have a few different options for different needs when installing
+OCP that need to also be updated. Work done in the installer should be reflected
+on the Assisted Installer, Assisted Service and ZTP.
+
 ### Workflow Description
 
 #### For Cloud Installs
@@ -379,41 +389,45 @@ another check to this switch statement to allow minimum 2 replicas for
 1. The user creates an `install-config.yaml`.
 2. The user defines the `installConfig.controlPlane` field with `2` replicas.
 3. The user then enters the new field `installConfig.arbiterNode` defines the
-   arbiter node.
+   arbiter node and it's replicas set to `1` and the machine type desired for
+   the platform chosen.
 4. The user generates the manifests with this install config via the
    `openshift-install create manifests`
-5. The installer creates a new `arbiter` MachineSet with a replica of `1` and
-   checks the control plane replicas is `2` or higher
-6. The installer sets the control plane and infrastructure topology to
+5. The installer creates a new `arbiter-machine-0` Machine same as
+   `master-machine-{0-1}` is currently generated.
+6. The arbiter machine is labeled with
+   `machine.openshift.io/cluster-api-machine-role: arbiter` and
+   `machine.openshift.io/cluster-api-machine-type: arbiter` and set with the
+   taint for `node-role.kubernetes.io/arbiter=NoSchedule`.
+7. Arbiter is treated like a master node, in that the installer creates the
+   `arbiter-ssh.yaml` and the `arbiter-user-data-secret.yaml`, mirroring a
+   normal master.
+8. The installer sets the control plane and infrastructure topology to
    `HighlyAvailableArbiter`
-7. With the object `arbiterNode` in the install config, the installer creates
-   the machine object with the correct node labels and machine config resources
-   for ignition bootstrap files.
-8. The installer applies the taint to the arbiter MachineSet
-9. The user can make any alterations to the node machine type to use less
-   powerful machines.
-10. The user then begins the install via `openshift-install create cluster`
+9. The user then begins the install via `openshift-install create cluster`
 
 #### For Baremetal Installs
 
 1. The user creates an `install-config.yaml` like normal.
 2. The user defines the `installConfig.controlPlane` field with `2` replicas.
 3. The user then enters the new field `installConfig.arbiterNode` defines the
-   arbiter node.
+   arbiter node and it's replicas set to `1` and the machine type desired for
+   the platform chosen.
 4. The user then enters the machine information for
    `installConfig.controlPlane.platform.baremetal` and
    `installConfig.arbiterNode.platform.baremetal`
-5. The installer creates a new `arbiter` MachineSet with a replica of `1` and
-   checks the control plane replicas is `2` or higher
-6. The installer sets the control plane and infrastructure topology to
+5. The installer creates a new `arbiter-machine-0` Machine same as
+   `master-machine-{0-1}` is currently generated.
+6. The arbiter machine is labeled with
+   `machine.openshift.io/cluster-api-machine-role: arbiter` and
+   `machine.openshift.io/cluster-api-machine-type: arbiter` and set with the
+   taint for `node-role.kubernetes.io/arbiter=NoSchedule`.
+7. Arbiter is treated like a master node, in that the installer creates the
+   `arbiter-ssh.yaml` and the `arbiter-user-data-secret.yaml`, mirroring a
+   normal master.
+8. The installer sets the control plane and infrastructure topology to
    `HighlyAvailableArbiter`
-7. With the object `arbiterNode` in the install config, the installer creates
-   the machine object with the correct node labels and machine config resources
-   for ignition bootstrap files.
-8. The installer applies the taint to the arbiter MachineSet
-9. The user can make any alterations to the node machine type to use less
-   powerful machines.
-10. The user then begins the install via `openshift-install create cluster`
+9. The user then begins the install via `openshift-install create cluster`
 
 #### During Install
 
@@ -440,8 +454,9 @@ The Infrastructure config fields for `ControlPlaneTopology` and
 
 #### Hypershift / Hosted Control Planes
 
-At the time being there is no impact on Hypershift since this edge deployment
-will require running the control plane.
+We will need to make sure that HyperShift itself can not be installed on the
+`HighlyAvailableArbiter` topology. We should also take the opportunity in that
+change to also disallow `SingleReplica`.
 
 #### Standalone Clusters
 
@@ -471,24 +486,25 @@ In the current POC, a cluster was created on AWS with 2 masters running
 consuming `1.41 GiB / 7.57 GiB	0.135 cores / 2 cores`. The cluster installs and
 operates with the following containers running on the arbiter node. This seems
 very promising, but we will need to identify any other resources we might want
-to run or remove from this list.
+to run or remove from this list. The list is small already so there might not be
+a desire to pre-optimize just yet.
 
-```
-"openshift-cluster-csi-drivers/aws-ebs-csi-driver-node-qvvqc"
-"openshift-cluster-node-tuning-operator/tuned-q7f98"
-"openshift-dns/node-resolver-zcp7j"
-"openshift-etcd/etcd-guard-ip-10-0-21-103.us-west-2.compute.internal"
-"openshift-etcd/etcd-ip-10-0-21-103.us-west-2.compute.internal"
-"openshift-image-registry/node-ca-4cxgp"
-"openshift-machine-config-operator/kube-rbac-proxy-crio-ip-10-0-21-103.us-west-2.compute.internal"
-"openshift-machine-config-operator/machine-config-daemon-mhflm"
-"openshift-monitoring/node-exporter-xzwc6"
-"openshift-multus/multus-544fd"
-"openshift-multus/multus-additional-cni-plugins-wkp64"
-"openshift-multus/network-metrics-daemon-cpskx"
-"openshift-network-diagnostics/network-check-target-fq57x"
-"openshift-ovn-kubernetes/ovnkube-node-gpj6p"
-```
+| Component                                                                                          | Component Outlook on Arbiter                                      |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| "openshift-cluster-csi-drivers/aws-ebs-csi-driver-node-qvvqc"                                      | Probably not needed, no required component provisions EBS volumes |
+| "openshift-cluster-node-tuning-operator/tuned-q7f98"                                               | Might be useful for performance tuning                            |
+| "openshift-dns/node-resolver-zcp7j"                                                                | Keep, DNS configuration                                           |
+| "openshift-etcd/etcd-guard-ip-10-0-21-103.us-west-2.compute.internal"                              | Keep, Needed for HA                                               |
+| "openshift-etcd/etcd-ip-10-0-21-103.us-west-2.compute.internal"                                    | Keep, Needed for HA                                               |
+| "openshift-image-registry/node-ca-4cxgp"                                                           | Not needed, no pods use image registry                            |
+| "openshift-machine-config-operator/kube-rbac-proxy-crio-ip-10-0-21-103.us-west-2.compute.internal" | Keep, Node configuration                                          |
+| "openshift-machine-config-operator/machine-config-daemon-mhflm"                                    | Keep, Node configuration                                          |
+| "openshift-monitoring/node-exporter-xzwc6"                                                         | Keep, Monitoring                                                  |
+| "openshift-multus/multus-544fd"                                                                    | Keep, Networking                                                  |
+| "openshift-multus/multus-additional-cni-plugins-wkp64"                                             | Keep, Networking                                                  |
+| "openshift-multus/network-metrics-daemon-cpskx"                                                    | Keep, Monitoring                                                  |
+| "openshift-network-diagnostics/network-check-target-fq57x"                                         | Keep, Networking                                                  |
+| "openshift-ovn-kubernetes/ovnkube-node-gpj6p"                                                      | Keep, Networking                                                  |
 
 ### Risks and Mitigations
 
@@ -527,6 +543,9 @@ failover.
    compact cluster, do we want to support changing ControlPlaneTopology field
    after the fact?
 
+2. Do we need to modify OLM to filter out deployments based on topology
+   information?
+
 ## Test Plan
 
 - We will create a CI lane to validate install and fail over scenarios such as
@@ -538,7 +557,10 @@ failover.
 - We will add e2e tests to specifically test out the expectations in this type
   of deployment.
   - Create tests to validate correct pods are running on the `arbiter`.
+  - Create tests to validate no incorrect pods are running on the `arbiter`.
   - Create tests to validate routing and disruptions are with in expectations.
+  - Create tests to validate proper usage of affinity and anti-affinity.
+  - Create tests to validate pod disruption budgets are appropriate.
 
 ## Graduation Criteria
 
