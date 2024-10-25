@@ -326,15 +326,9 @@ Annotated example `info` output is provided below.
         # it is testing (e.g. an OLM operator need not
         # report the version of OpenShift) or those relevant
         # to its test results that other extensions would might not
-        # be reporting (e.g. an OLM dependentcy).
-        "versions": [
-            {
-                "component": {
-                    "product": "openshift",
-                    "type": "payload",
-                    "name": "hyperkube"
-                },
-
+        # be reporting (e.g. an OLM dependency).
+        "versions": {
+            "openshift:payload:hyperkube": {
                 "version": "4.18.0",
 
                 # A sha256 pullspec for an image
@@ -355,7 +349,27 @@ Annotated example `info` output is provided below.
                     }
                 ]
             }
-        ],
+        },
+      
+        # There are elements of the environment which origin and other
+        # components do not necessarily need to be aware of when it 
+        # comes to test selection. 
+        # These aspects may, nonetheless, unintentionally impact 
+        # the success rate of tests. Component's may, therefore,
+        # advertise these environmental facts.
+        # These facts will be aggregated by origin and passed in
+        # to verbs as --fact arguments.
+        # For example "--fact=openshift:payload:hyperkube:sts=enabled"
+        # platform attributes advertised by components MUST
+        # be qualified as "<product>:<type>:<component-name>:<fact-name>" (though
+        # it does not need to match the component's coordinate
+        # values. Failure to qualify the fact name with a
+        # prefix will result in an error from origin. Facts
+        # with the same name, but different values from different
+        # components will be result in an error from origin.
+        "facts": {
+            "openshift:payload:hyperkube:sts": "enabled",      
+        }
     },
 
     # A single extension can carry tests for multiple
@@ -501,7 +515,8 @@ Environment Information:
   --topology      The target cluster topology ("ha", "microshift", ...).
   --architecture  The CPU architecture of the target cluster ("amd64", "arm64").
   --installer     The installer used to create the cluster ("ipi", "upi", "assisted", ...).
-  --config        The component configuration to assume is active on the cluster.
+  --config        Multiple. Non-default component configuration in the environment.
+  --fact          Multiple. Facts advertised by cluster components.
   --version       "major.minor" version of target cluster. 
 
 Optional/Devel:
@@ -613,7 +628,6 @@ $ extension-binary run-test
   --component     "default" or "<product>:<type>:<component>"
   --platform      The hardware or cloud platform ("aws", "gcp", "metal", ...).
   ...other environment arguments...
-  --config        The component configuration profile to assume is active on the cluster.
   --name | -n     Test name to invoke (-n can be specified multiple times).
   --list          Filename or "--" for stdin of tests to invoke from 'list' output.
 ```
@@ -1018,28 +1032,34 @@ from prowjob names.
     },
     
     "environment": {
+      
+        # Environmental aspects known by origin
         "platform": "aws",
         "architecture": "amd64",
-        # ...others...
+        # ...others
+      
+        "facts": {
+          # Environmental aspects identified by other components,
+          # aggregated by origin. 
+          # These are to passed to extensions
+          # with --fact=<key>=<value> arguments.
+          "openshift:payload:hyperkube:sts": "enabled",
+        },
 
-        # Configuration information is also included. 
-        "configuration": {
-            # The configuration id applied to the component
-            # before the test was run.
-            "component": "default",
+        # Non-default configuration state of all components . 
+        # These are passed in to the extension with --config=<key>=<value>
+        # arguments.
+        "configurations": {
+            "openshift:payload:image-registry": "cloudfront",
+            "openshift:payload:hyperkube": "non-default-2",
         },
 
         # Aggregated version information from all extensions
         # as well as what origin can identify.
-        "versions": [
+        "versions": {
             # Here, the environment involves a management cluster
             # and a hosted cluster. They have independent versions.
-            {
-                "component": {
-                    "product": "openshift",
-                    "type": "management",
-                },
-
+            "openshift:management:cluster": {
                 "version": "4.18.0",
 
                 "source": {
@@ -1056,7 +1076,7 @@ from prowjob names.
                     }
                 ]
             },
-            {
+            "openshift:hosted:cluster": {
                 "component": {
                     "product": "openshift",
                     "type": "hosted",
@@ -1076,8 +1096,14 @@ from prowjob names.
                         "source": "..."
                     }
                 ]
-            }
-        ],
+            },
+          
+            # origin will aggregate versions advertised by all 
+            # components.
+            "openshift:payload:hyperkube": {
+                # ...
+            },
+        },
     },
 
     # Information about how the test was run which should
