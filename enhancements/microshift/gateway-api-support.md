@@ -190,6 +190,53 @@ released as dev preview, users need to opt into it. Additional memory should be
 planned when enabling this feature, as OSSM components and the gateways
 themselves consume additional resources.
 
+An example from an actual deployment with Gateway API for MicroShift installed
+plus a demo gateway:
+```
+$ oc get pod -n openshift-gateway-api demo-gateway-openshift-gateway-api-6876d6ff47-mt8bg -o json | jq '.spec.containers[].resources'
+{
+  "limits": {
+    "cpu": "2",
+    "memory": "1Gi"
+  },
+  "requests": {
+    "cpu": "100m",
+    "memory": "128Mi"
+  }
+}
+
+$ oc get pod -n openshift-gateway-api istiod-openshift-gateway-api-5f49f78b89-rcgpz -o json | jq '.spec.containers[].resources'
+{
+  "requests": {
+    "cpu": "50m",
+    "memory": "100Mi"
+  }
+}
+
+$ oc get pod -n openshift-gateway-api servicemesh-operator3-85977f8d88-ttxrp -o json | jq '.spec.containers[].resources'
+{
+  "limits": {
+    "cpu": "500m",
+    "memory": "128Mi"
+  },
+  "requests": {
+    "cpu": "5m",
+    "memory": "64Mi"
+  }
+}
+{
+  "limits": {
+    "cpu": "500m",
+    "memory": "512Mi"
+  },
+  "requests": {
+    "cpu": "10m",
+    "memory": "64Mi"
+  }
+}
+```
+As we can see it requires 356Mi of extra memory. 
+
 ## Open Questions [optional]
 N/A
 
