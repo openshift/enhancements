@@ -180,7 +180,7 @@ A requirement for Hypershift support is that the API extensions described
 below should be namespaced since, to my understanding, each guest cluster
 lives within a different namespace of the management cluster.
 
-#### Disconnected Clusters
+#### Standalone Clusters
 
 Clusters in disconnected environments will likely require special environment
 configurations such as a local package mirror, local image registry, etc.
