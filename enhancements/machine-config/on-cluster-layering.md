@@ -1,17 +1,20 @@
 ---
-title: on-cluster-builds
+title: on-cluster-layering
 authors:
   - cheesesashimi
+  - umohnani8
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - mrunalp
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
   - mrunalp
+  - jlebon
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - joelspeed
 creation-date: 2023-11-06
-last-updated: 2023-11-06
+last-updated: 2024-10-29
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/MCO-834
+  - https://issues.redhat.com/browse/MCO-1316
 see-also:
   - "/enhancements/ocp-coreos-layering.md"
 replaces:
@@ -20,7 +23,7 @@ superseded-by:
   - ""
 ---
 
-# On-Cluster Builds
+# On Cluster Layering
 
 ## Summary
 
@@ -93,6 +96,9 @@ Providers.
   though there may be the requirement of a one-time setup step to
   facilitate that.
 
+- Change the CoreOS extensions mechanism to be managed by OCL under the
+  hood (post-GA).
+
 ### Non-Goals
 
 - While we are enabling an OpenShift cluster admin to build a customized
@@ -116,47 +122,71 @@ Providers.
   addressing them within the context of RHEL For Edge and RHIVOS is out-of-scope
   for this enhancement.
 
+- Giving users the ability to create custom derived OCL images, where they
+  are not required to build their image using our base image.This will
+  potentially be in scope for any future work after OCL is GA and used as the default update path.
+
 ## Proposal
 
 ### Workflow Description
 
-1. The cluster administrator realizes that they need to add custom
-   content to the OS on each of their cluster nodes.
+1. The cluster administrator realizes that they need to add custom content,
+   such as a software agent or device driver to the OS on each of their
+   cluster nodes.
 
-2. The cluster administrator edits the MachineConfigPool, adding a
-   Containerfile, as well as the one-time setup of what image registry to push the
-   final image to, the credentials needed to push to this registry, etc.
+2. The cluster administrator creates a MachineOSConfig, adding a
+   Containerfile, as well as the one-time setup of what image registry to
+   push the final image to, and the credentials needed to push to this
+   registry, etc.
 
-3. The BuildController detects that these details are provided and
-   begins a build.
+3. The cluster administrator specifies any machine configuration changes via
+   the MachineConfig object.
 
-4. The built image is pushed to the cluster administrators’ image
-   registry of choice.
+4. The Machine Config Controller will read the MachineConfig, check
+   reconcilability, and create a new rendered-Machineconfig.
 
-5. NodeController updates the `desiredImage` annotation on each node within its
-   pool according to its rules such as maximum unavailable nodes, which nodes
-   haven't been updated yet, etc.
+5. The BuildController detects a new build request from the new
+   MachineOSConfig/MachineConfig creation and creates a build. A new
+   MachineOSBuild object is created to track the build progress and mark the
+   targeted rendered-MachineConfig.
 
-6. The MachineConfigDaemon drains the target node, applies the new OS
+6. The built image is pushed to the cluster administrators’ image registry of
+   choice.
+
+7. NodeController updates the `desiredImage` annotation on each node within
+   its pool according to its rules such as maximum unavailable nodes, which
+   nodes haven't been updated yet, etc.
+
+8. The MachineConfigDaemon drains the target node, applies the new OS
    content to the node, and reboots the node upon completion.
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-Hypershift on the other hand, would require distinct configurations for
-both the host cluster and the guest cluster. Additionally, some
-adaptations would be required to Hypershift in order to traverse the
-host \<-\> guest cluster barrier. (need to page Hypershift MCO process
-back in to have a more complete opinion around this).
+The primary use-case for OCL in Hypershift is for the host cluster admins to
+quickly roll out hotfixes et. al. to all of the guest cluster nodes (in
+addition to control plane nodes). The guest cluster owners do not need to
+customize their OS. Some adaptations would be required to Hypershift in
+order to traverse the host \<-\> guest cluster barrier. It is worth noting
+that within a Hypershift setup, the management cluster may be several
+versions behind the guest clusters or may not even be running OpenShift at
+all. Additionally, the guest clusters can each run different versions of
+OCP, meaning that it would not be appropriate to build a single base image
+to be used for all guest cluster nodes. Instead, images should be built for
+each guest clusters' OS / extensions image.
 
-#### Standalone Clusters
+A requirement for Hypershift support is that the API extensions described
+below should be namespaced since, to my understanding, each guest cluster
+lives within a different namespace of the management cluster.
+
+#### Disconnected Clusters
 
 Clusters in disconnected environments will likely require special environment
 configurations such as a local package mirror, local image registry, etc.
 However, on-cluster builds should continue to work as-is in these environments.
 
-#### Single-node Deployments or MicroShift"
+#### Single-node Deployments or MicroShift
 
 Single-Node OpenShift (SNO) should not have any difficulty running the
 on-cluster build process as-is. However, there may be some efficiency
@@ -172,8 +202,7 @@ separate enhancement.
 Multiarch clusters have special considerations in terms of needing to
 orchestrate more than one build for each target architecture as well as
 manifestlisting the final image. This consideration also extends to the image
-registry the final image will be pushed to. As of OpenShift 4.13, the on-cluster
-image registry now supports manifestlisted images, as does ImageStreams.
+registry the final image will be pushed to.
 
 #### FIPS-Enabled Environments
 
@@ -185,72 +214,84 @@ FIPS-compliant cryptographic libraries.
 
 ### API Extensions
 
-This is a very high-level overview of what the new API extensions are as well as their relationship
-with each other and existing API extensions:
+This is a very high-level overview of what the new API extensions are as
+well as their relationship with each other and existing API extensions:
 
 ```mermaid
 flowchart TB
-    subgraph MachineOSBuildConfig [Machine OS Build Config]
-      Secrets("Push and pull secrets")
-      FinalImagePullspec("Final image pullspec")
-    end
-
-    subgraph MachineOSBuild [Machine OS Build]
-      Containerfile
-      MCPName("MachineConfigPool Name")
+    subgraph MachineOSConfig [MachineOSConfig]
+        Secrets("Push and pull secrets")
+        FinalImagePullspec("Final image pullspec")
+        Containerfile("User-provided Containerfile")
+        MCPName("MachineConfigPool Name")
     end
     
-    subgraph MachineOSImage [Machine OS Image]
-      FinalImagePullspec("Final Image Pullspec")
-      NameOfImage("Name Of Image")
+    subgraph MachineConfigPool [MachineConfigPool]
+        RenderedMachineConfig("Rendered MachineConfig")
     end
     
-    subgraph MachineConfigPool [Machine Config Pool]
-      RenderedMachineConfig("Rendered\nMachine Config")
-      MachineOSImageName("Machine OS Image Name")
+    subgraph MachineOSBuild [MachineOSBuild]
+        MCPName("MachineConfigPool Name")
+        CurrentConfig("Current MachineConfig for pool")
+        Status("Current status of build")
     end
-    
-    MachineOSBuildConfig-->|The one-time setup options needed\nfor the build process are injected|BuildProcess("Build Process")
-    
-    MachineOSBuild-->|Containerfile and other MachineConfigPool-specific\noptions are injected|BuildProcess
-    BuildProcess-->|The build process produces\na MachineOSImage|MachineOSImage-->|The MachineConfigPool is updated with\nthe new MachineOSImage|MachineConfigPool
-    MachineConfigPool-->|The MachineConfigPool rolls out the new OS image to all of\nits nodes by adjusting the desiredImage annotations|Nodes
+       
+    MachineOSConfig-->|A MachineOSConfig or change thereof produces a MachineOSBuild|MachineOSBuild
+    MachineConfigPool-->|A MachineConfig change produces a MachineOSBuild|MachineOSBuild
+    MachineOSBuild-->|The MachineOSBuild starts a build|BuildProcess
+    BuildProcess("Build Process")-->|After completion, the NodeController is notified|NodeController
+    NodeController-->|NodeController rolls out the newly-built image to all of the nodes|Nodes
 ```
 
-#### MachineOSBuildConfig
+#### MachineOSConfig
 
 This is where the knobs that control the Machine OS Build process would live. Most of these would be provided during the one-time setup phase:
 
-| **Field Name / Path (JSONPath):** | **Optional or Required:** | **Intended Use:**                                                                                                                                                                                                                                                                |
-| --------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.spec.baseImagePullSecretName`   | Required                  | The name of the Kubernetes secret that contains the necessary keys to pull the base OS image container for building. If this is absent, we can default to using the `global-pull-secret` (though we'll need to copy it into the MCO namespace so the build processes can use it. |
-| `.spec.finalImagePushSecretName`  | Required                  | The name of the Kubernetes secret that contains the necessary keys to push the final OS image to the container registry.                                                                                                                                                         |
-| `.spec.finalImagePullspec`        | Required                  | The final image pullspec for where to push the final OS image (e.g., `registry.com/org/repo:tag`). Note: Any user-supplied tags (such as `:latest` will not be honored.)                                                                                                         |
-| `.spec.deployMode`                | Optional                  | Controls how the MachineConfigs should be combined with the custom OS contents. Possible options are: `image` and `bootc`. See Implementation Details for details. (Not sure what a sensible default should be).                                                                 |
-| `.spec.imageBuilder`              | Optional                  | Which image builder backend to use. Options currently are: `openshiftImageBuilder` / `customPodBuilder`. Will default to `openshiftImageBuilder`, if available. Alternatively, will use `customPodBuilder`. Future backends may be enabled by changing this option.              |
+| **Field Name / Path (JSONPath):**                 | **Optional or Required:** | **Intended Use:**                                                                                                                                                                                                                                                             |
+| ------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.spec.machineConfigPool.name`                    | Required                  | The name of the MachineConfigPool whose rendered MachineConfig will be built into the image.                                                                                                                                                                                  |
+| `.spec.buildInputs.baseOSExtensionsImagePullspec` | Optional                  | The pullspec of the extensions image. If not provided, this value will come from the system defaults found in the <add me> ConfigMap                                                                                                                                          |
+| `.spec.buildInputs.baseOSImagePullspec`           | Optional                  | The pullspec of the base OS image. If not provided, this value will come from the system defaults found in the <add me> ConfigMap                                                                                                                                             |
+| `.spec.buildInputs.baseImagePullSecret`           | Optional                  | Name of the secret required for pulling the base OS image. If not provided, the global pull secret will be used instead.                                                                                                                                                      |
+| `.spec.buildInputs.imageBuilder`                  | Required                  | Which image builder backend to use. Right now, the only option is `customPodBuilder`. Future backends, such as OpenShift Pipelines (aka Tekton) may be enabled by changing this option.                                                                                       |
+| `.spec.buildInputs.renderedImagePushSecret`       | Required                  | Name of the secret required to push the final OS image to an image registry.                                                                                                                                                                                                  |
+| `.spec.buildInputs.renderedImagePushspec`         | Required                  | The tagged image pushspec (`registry.hostname.com/org/repo:tag`) where the final built image will be used to. Note: Any user-supplied tags (such as `:latest`) will not be honored.                                                                                           |
+| `.spec.buildInputs.containerfiles`                | Required                  | The Containerfile(s) to build for each OS image. Multiple Containerfiles will be allowed to account for minor discrepancies for multiarch builds. Initially, this was a field on the MachineOSConfig object, but this could be a reference (or references) to a ConfigMap(s). |
+| `.spec.buildOutputs.currentImagePullSecret`       | Required                  | Name of image pull secret that will be used by each node to pull the built image.                                                                                                                                                                                             |
+| `.spec.buildOutputs.postBuildStrategy`            | Optional                  | What should happen after the build is complete. Initially, options should be something like, `ImagePushOnly`, `ImagePushAndRollout`, which are self-explanatory. Alternatively, this could be an annotation as described below.                                               |
+
+MachineOSConfigs can also be augmented with the following annotations:
+
+| **Annotation Name:**                             | **Description:**                                                                                                                           |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `machineconfiguration.openshift.io/rebuildImage` | When present, this will clear any failed image builds (and any supporting transitory objects created) and retry the build.                 |
+| `machineconfiguration.openshift.io/noRollout`    | When present, this will perform the image build, but will not roll out the built image to the nodes within the targeted MachineConfigPool. |
+
+MachineOSConfigs can also be augmented with the following annotations:
+
+| **Annotation Name:**                             | **Description:**                                                                                                                           |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `machineconfiguration.openshift.io/rebuildImage` | When present, this will clear any failed image builds (and any supporting transitory objects created) and retry the build.                 |
+| `machineconfiguration.openshift.io/noRollout`    | When present, this will perform the image build, but will not roll out the built image to the nodes within the targeted MachineConfigPool. |
+
 
 #### MachineOSBuild
 
-This represents the configs which perform a given OS image build. Ideally, there
-is a 1:1 relationship between a MachineOSBuild and a MachineConfigPool. However,
-one could have multiple MachineOSBuilds for a pool with the caveat that only one
-(or none) of them are configured to immediately roll out the final OS image:
+A MachineOSBuild represents a given OS image build that was performed. This
+is created by the BuildController in response to a MachineOSConfig change or
+a MachineConfigPool change. It is expected that a MachineOSConfig will have
+multiple MachineOSBuilds associated with it. However, only one actively
+running MachineOSBuild per MachineOSConfig will be permitted at any one time.
 
-| **Field Name / Path (JSONPath):** | **Optional or Required:** | **Intended Use:**                                                                                                                                                                                                                                                                                                             |
-| --------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.spec.baseOSImagePullspec`       | Optional                  | Contains the base OS image pullspec. If missing, will be populated from the `machine-config-osimageurl` ConfigMap. Useful for pre-building images for upgrade cases.                                                                                                                                                          |
-| `.spec.containerfile`             | Required                  | Contains the custom Containerfile lives.                                                                                                                                                                                                                                                                                      |
-| `.spec.machineConfigPool`         | Required                  | Name of the MachineConfigPool to produce images for.                                                                                                                                                                                                                                                                          |
-| `.spec.renderedMachineConfig`     | Optional                  | Name of the rendered MachineConfig to bake into the image. If provided, rebuilds will not occur whenever the MachineConfigPool config changes.                                                                                                                                                                                |
-| `.spec.maxRetries`                | Optional                  | The maximum number of retries for a retriable build before a failure status is added. This will have a hard-coded default of 3 retries. See Retriable Builds section for more info on what this term means.                                                                                                                   |
-| `.spec.rolloutMode`               | Optional                  | Controls whether the built OS image is immediately rolled out to the target MachineConfigPool. Options include `immediate`, `deferred`. `immediate` will roll the image out once the build process is completed. `deferred` will require a cluster admin to manually change the MachineOSImage name on the MachineConfigPool. |
-| `.status.conditions[]`            | Required                  | Additional statuses will be added to indicate what state the build is in. Statuses will include: `BuildSuccess`, `BuildFailed`, `Building`, `BuildPending`.                                                                                                                                                                   |
+It is also worth mentioning that the name for each MachineOSBuild will be
+produced as a hash of the current MachineOSConfig state, the current
+rendered MachineConfig for the MachineConfigPool, as well as the contents of
+the `machine-config-osimageurl` ConfigMap.
 
-MachineOSBuilds can also be augmented with the following annotations:
-
-| **Annotation Name:**                             | **Description:**                                                                                                           |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `machineconfiguration.openshift.io/rebuildImage` | When present, this will clear any failed image builds (and any supporting transitory objects created) and retry the build. |
+| **Field Name / Path (JSONPath):** | **Optional or Required:** | **Intended Use:**                                                             |
+| --------------------------------- | ------------------------- | ----------------------------------------------------------------------------- |
+| `.spec.desiredConfig`             | Required                  | Refers to the rendered MachineConfig that was used to produce the build.      |
+| `.spec.machineOSConfig`           | Required                  | Refers to the name of the MachineOSConfig that was used to produce the build. |
 
 #### MachineOSImage
 
@@ -284,6 +325,9 @@ the current and desired image states:
 | `machineconfiguration.openshift.io/currentImage` | The fully-qualified digested image pullspec for the currently-booted OS image for a given node. |
 | `machineconfiguration.openshift.io/desiredImage` | The fully-qualified digested image pullspec for the desired OS image for a given node.          |
 
+**Discussion:** It was previously discussed that using the `osImageURL`
+field on the MachineConfigs will be a more consistent way of doing this in
+the future, so this practice will likely go away.
 
 #### MachineConfigPools
 
@@ -487,15 +531,9 @@ Doing this allows us to execute the builds with as few permissions as possible.
 
 BuildController should be as modular as possible with how it performs the build
 to allow it to efficiently operate in as many different environments as
-possible. For example, if the OpenShift Image Builds (BuildsV1) facility is
-present, it could leverage that functionality directly. In absence of that
-facility, it could create its own custom build pod where it uses Buildah to
-perform the builds.
-
-As a caveat, BuildsV1 does not support manifestlisted images, so there will need
-to be a process to create a manifestlist with these images. This is primarily a
-concern for multiarch clusters, but having it present for non-multiarch clusters
-would incur very little overhead.
+possible. For example, the current default is to have it use a customized
+build pod that we maintain. In the future, it could potentially interface
+with OpenShift Pipelines and use that mechanism to run the build.
 
 Once the image build is complete, the image is pushed to the image
 registry configured by the cluster administrator where it will be pulled
@@ -519,9 +557,7 @@ merged with the admin-provided Containerfile as well. For Image-Based Config
 Updates (as described above), this process would be crucial. Doing so would
 likely require us to have certain image stages that a cluster admin can refer to
 as they write their Containerfile. For example, `FROM os-base-image` or `FROM
-os-base-image-with-configs`. OpenShift Image Builder can easily substitute those
-targets for the real image pullspec (if it exists), whereas the custom pod
-builder will need a way to do that on its own. Injecting the Containerfile into the
+os-base-image-with-configs`. Injecting the Containerfile into the
 image builder process can be easily accomplished via a ConfigMap.
 
 For Image-Based Updates, we'll also need to figure out how to inject both the
@@ -572,6 +608,15 @@ flowchart TB
   DeleteConfigMaps --> Stop
   LeaveConfigMaps --> Stop
 ```
+
+An alternative to this approach is to use a more sophisticated entrypoint
+for the build process that has permission to extract the needed information
+from the Kube API server and can render the Containerfile on-the-fly before
+beginning the build. A benefit of this approach is that cleanup would be
+fairly straightforward: Since everything would exist in a tempdir within the
+build pod, deletion of the build pod would perform the cleanups. The
+downside of this approach is that should a failure occur, fetching the build
+inputs for inspection and debugging would be more difficult.
 
 Once the bootc ConfigMap annotation standards are better known, we could
 potentially skip the gzip / base64-encoding step by converting MachineConfigs
@@ -626,76 +671,17 @@ flowchart TB
   LeaveConfigMaps --> Stop
 ```
 
-In terms of the ConfigMaps, they would look something like this:
-```yaml
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: etc-hello-world
-  annotations:
-    bootc.coreos.io/baseDir: /etc
-data:
-  hello-world: "hello world"
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: etc-ohai
-  annotations:
-    bootc.coreos.io/baseDir: /etc
-data:
-  ohai: "O Hai!"
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: authorized-ssh-keys
-  annotations:
-    bootc.coreos.io/baseDir: /home/core/.ssh
-    bootc.coreos.io/fileMode: "0600"
-    bootc.coreos.io/baseDirMode: "0600"
-    bootc.coreos.io/userOwner: "core"
-    bootc.coreos.io/groupOwner: "core"
-data:
-  authorized_keys: |
-    ssh-key 1
-    ssh-key 2
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: index-config-map
-data:
-  etc-hello-world: | 
-    {
-      bootc.coreos.io/baseDir: "/etc"
-    }
-  etc-ohai: | 
-    {
-      bootc.coreos.io/baseDir: "/etc"
-    }
-  authorized-ssh-keys: |
-    {
-      bootc.coreos.io/baseDir: "/home/core/.ssh/authorized_keys"
-      bootc.coreos.io/fileMode: "0600"
-      bootc.coreos.io/baseDirMode: "0600"
-      bootc.coreos.io/userOwner: "core"
-      bootc.coreos.io/groupOwner: "core"
-    }
-```
-
 To be clear, these ConfigMaps would be created and managed by the
 BuildController process. A cluster admin would never be expected to create or
 maintain these. This may also not be required if we were to adopt the [Custom OS
 Content Only](#####Custom-OS-Content-Only) idea.
 
-#### Custom Build Pods
+#### Build Pods
 
-For cases where an OpenShift cluster is missing the OpenShift Image
-Builder capability, there will be the need to create and manage a build
-pod to run either Podman or Buildah. This has a few operational concerns
-that should be mentioned:
+Because we cannot rely upon OpenShift Image Builds to be present, there is
+the need for us to maintain our own customized build pod config. Doing this
+will allow OCP to have maximum control over the build process. Nevertheless,
+there are still some caveats that should be explicitly called out:
 
 - At the time of this writing, OpenShift Image Builder requires
   privileged pods to perform its builds. Ideally, the custom build pod
@@ -703,22 +689,71 @@ that should be mentioned:
   showed that Buildah can be used with a service account with the `anyuid`
   ClusterRoleBinding applied without requiring elevated privileges. This
   was done with an off-the-shelf Buildah image
-  (`quay.io/buildah/stable:latest`).
+  (`quay.io/buildah/stable:latest`) and it was verified to work using the
+  lifecycled approach discussed below.
 
 - One of the promises that OpenShift makes is that all of the software
   that is included in a given OpenShift release is tested to work
   together, with no version change until an OpenShift upgrade is
-  performed. This same promise should extend to the image builder. In
-  terms of implementation details, the easiest would be to use the base
-  OS image which already contains Podman. However, experimentation with
-  making this work without elevated privileges proved to be very
-  difficult.
+  performed. This same promise should extend to the image builder. To
+  implement this, Buildah is installed into the MCO image via the ART RPM
+  repository which is lifecycled with OCP. It is possible to install a more
+  recent version of Buildah from a different RPM repository, if desired, to
+  ameliorate concerns around CVEs to Buildah.
 
 - For multiarch cases, we should schedule build pods on each
   architecture within a given cluster. This reduces the need for
   elevated privileges and would also make the build process a bit faster
   since the build is occurring natively as opposed to being emulated via QEMU.
+  
+- Instead of creating bare pods, using a higher-level controller such as
+  [Kubernetes Jobs](https://kubernetes.io/docs/concepts/workloads/
+  controllers/job/) is highly recommended. The rationale is because if the
+  node that the build pod is running on is drained and the build pod
+  evicted, the build process will fail erroneously. Working around this
+  requires a lot of complex retry logic that BuildController should not have
+  to concern itself with. Instead, by leveraging the Kubernetes Jobs
+  controller, all BuildController has to concern itself with is whether the
+  build job succeeded. This also allows us to implement retries to work
+  around transient network issues, etc.
 
+#### Pre-Build Checks
+    
+Prior to beginning the build process, a series of checks should be
+performed. For example, the image pullspec for each image within the
+Containerfile should be extracted and a simple `skopeo inspect` query should
+be performed using the provided base image pull secrets. Doing this will
+allow fast feedback to ascertain whether the image build will be successful.
+Additionally, we could perform some additional checks of the push secret and
+final image pull secrets as well.
+    
+#### Pre-Rollout Checks
+    
+Prior to applying the newly-built image, there are some checks that should
+be considered to validate that the image will work. To be clear, this should
+not be considered a pre-rollout test (as described below). Instead, these
+should be considered a quick sanity check to validate that the image has a
+high probability of working. These checks should include, but are not
+limited to:
+    
+- Check that the Kubelet version is the same.
+- Check that the base OS image is the same.
+- Check that the OS extensions image is the same.
+    
+#### Pre-Rollout Tests
+    
+Within IPI clusters, it might be desirable to have an automated way of
+performing a canary test of a newly-built image. In other words, we can
+automate the process of applying the image to a single node and pausing the
+rollout, pending some automated verifications such as reestablishing contact
+with the API server, being able to schedule workloads, etc. For UPI
+clusters, this might not be possible or might be more limited.
+    
+Assuming that we have some kind of integration with OpenShift Pipelines, a
+significantly more complex testing procedure can be implemented while also
+allowing a cluster admin to provide their own custom verification process as
+well.
+    
 #### Retriable Builds
 
 Whenever a build fails, it is advantageous to inspect the failed build
@@ -728,8 +763,7 @@ to a configurable retry limit). For example, if a build pod gets evicted
 from a node because it was an AWS Spot Instance that is about to be
 reclaimed, BuildController should automatically retry the build since
 this is a recoverable error. In fact, OpenShift Image Builder has
-[<u>first-class
-support</u>](https://github.com/openshift/api/blob/24085c95a7a28e9e8af2a14b2ba04b0a52398195/build/v1/consts.go#L164)
+[first-class support](https://github.com/openshift/api/blob/24085c95a7a28e9e8af2a14b2ba04b0a52398195/build/v1/consts.go#L164)
 for this. For the custom pod builder mechanism described above, we’ll
 need to infer this somehow.
 
@@ -754,7 +788,7 @@ However, for situations where the custom OS content is changed, we should aim to
 somehow work that into the tag name as well. The tagging convention could be
 something like this:
 
-`<machineconfig name>-<sha256 or md5 of merged Containerfile content>`
+`<MachineConfigPool name>-<sha256 or md5 of merged Containerfile content + rendered MachineConfig content + machine-config-osimageurl ConfigMap content>`
 
 For cases where no custom OS content is provided, one could simply use
 the name of the MachineConfig instead (assuming that one is baking the
@@ -781,8 +815,8 @@ Modifications to the MachineConfigDaemon will be required to allow it to
 apply the new base OS image as well as convert the MachineConfigs into
 ConfigMaps and update bootc / rpm-ostree. Initially, there are some
 immediate concerns that we’ll need to work around, such as the Ignition
-spec allowing SSH key updates which breaks some of [<u>ostree’s
-rules</u>](https://ostreedev.github.io/ostree/adapting-existing/#system-layout).
+spec allowing SSH key updates which breaks some of [ostree’s
+rules](https://ostreedev.github.io/ostree/adapting-existing/#system-layout).
 However, as bootc gains momentum, it is expected that what the MCD is
 responsible for will be dramatically reduced.
 
@@ -889,6 +923,26 @@ purpose. We could eventually provide some automation around this process.
 These checks could also be applicable to general config rollouts as a form of
 preflight check.
 
+#### Entitlements
+    
+There was significant engineering work put into Podman and Buildah to enable
+seamless consumption of RHEL-entitled content. OpenShift has a similar model
+for entitled clusters, with the `etc-pki-entitlement` secret being present
+in the `openshift-config-managed` namespace. Given this, it is possible that
+we can consume RHEL-entitled content within the OCL build process itself,
+with a few workarounds:
+    
+- We need to clone the `etc-pki-entitlement` certificates into the MCO
+  namespace.
+- These need to be mounted into the build pod.
+- These need to be copied from the secret volume mount into a place where
+  Buildah can consume them.
+
+In the future, we could make use of the [shared resource CSI driver](https://docs.openshift.com/container-platform/4.17/storage/container_storage_interface/ephemeral-storage-shared-resource-csi-driver-operator.html)
+to automatically keep this secret up-to-date. In lieu of that, the cluster
+admin will need to keep the secret up-to-date or the MCO will have to take
+on that role as well.
+    
 ### Risks and Mitigations
 
 What are the risks of this proposal and how do we mitigate. Think
