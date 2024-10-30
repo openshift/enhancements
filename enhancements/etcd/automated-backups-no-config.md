@@ -312,5 +312,14 @@ A `StatefulSet` could be deployed among all master nodes, where each backup pod 
 The complexity come from the fact that the backups are being triggered by a `CronJob` which spawn a `Job` to take the actual backup, by deploying a Pod.
 Since StatefulSet manages its own Pods, it is not possible to schedule backups by a `CronJob`. However, it is possible to generate event by the `CronJob` which is being watched by the StatefulSet. Then the backups are being taken and controlled mainly by it.
 
+### Parallel Jobs approach
+
+The `CronJob` based implementation schedules a `Job` upon each trigger to take the backup.
+An attempt has been investigated, which exploits [Parallel Jobs](https://kubernetes.io/docs/concepts/workloads/controllers/job/#parallel-jobs).
+Using NodeAffinity and PodAntiAffinity, while setting the Parallelism to the number of master nodes within an Openshift cluster, it is guaranteed that a Backup Job is being scheduled per each master node, while no more than one Backup Job is being scheduled to the same master node.
+Since the `config.openshift.io/v1alpha1 Backup` API expects only one `PVC`, only one Backup Job could mount the PVC and schedule the backup.
+A workaround has been tried, in which the `job.Spec` mounts a `hostPath` volume, so that it is being used on each master node independently.
+However, since the `Backup` job runs two containers (i.e. request-backup and prune) and the containers expect `PVC` as an argument, the approach has been declared as non-viable.
+
 ## Infrastructure Needed
 TBD
