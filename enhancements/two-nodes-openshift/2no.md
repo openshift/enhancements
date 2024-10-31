@@ -269,6 +269,21 @@ Tools for extracting support information (must-gather tarballs) will be updated 
    3. Stop failure is optionally escalated to a node failure (fencing)
    4. Start failure defaults to leaving the service offline
 
+#### Hypershift / Hosted Control Planes
+
+Are there any unique considerations for making this change work with
+Hypershift?
+
+See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282
+
+How does it affect any of the components running in the
+management cluster? How does it affect any components running split
+between the management cluster and guest cluster?
+
+#### Single-node Deployments or MicroShift
+
+How does this proposal affect the resource consumption of a
+single-node OpenShift deployment (SNO), CPU and memory?
 
 ### Risks and Mitigations
 
@@ -371,9 +386,36 @@ Additionally, it would be good to have workload-specific testing once those are 
 
 See template for guidelines/instructions.
 
+### Dev Preview -> Tech Preview
+
+- Ability to utilize the enhancement end to end
+- End user documentation, relative API stability
+- Sufficient test coverage
+- Gather feedback from users rather than just developers
+- Enumerate service level indicators (SLIs), expose SLIs as metrics
+- Write symptoms-based alerts for the component(s)
+
+### Tech Preview -> GA
+
+- More testing (upgrade, downgrade, scale)
+- Sufficient time for feedback
+- Available by default
+- Backhaul SLI telemetry
+- Document SLOs for the component
+- Conduct load testing
+- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+
+**For non-optional features moving to GA, the graduation criteria must include
+end to end tests.**
+
+### Removing a deprecated feature
+
+- Announce deprecation and support policy of the existing feature
+- Deprecate the feature
+
 ## Upgrade / Downgrade Strategy
 
-In-place upgrades and downgrades will not be supported for this first iteration and will be addressed as a separate feature in another enhancement. Upgrades will initially only be achieved by redeploying the machine and its workload.
+In-place upgrades and downgrades will not be supported for this first iteration, and will be addressed as a separate feature in another enhancement. Upgrades will initially only be achieved by redeploying the machine and its workload.
 
 ## Version Skew Strategy
 
