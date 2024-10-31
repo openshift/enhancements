@@ -18,6 +18,7 @@ reviewers:
   - "@gamado"
   - "@frajamomo"
   - "@clobrano"
+  - "@cybertron"
 approvers:
   - "@thomasjungblut"
   - "@jerpeter1"
