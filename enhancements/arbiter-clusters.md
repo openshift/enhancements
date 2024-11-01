@@ -12,6 +12,7 @@ reviewers:
   - "@yuqi-zhang"
   - "@zaneb"
   - "@rphillips"
+  - "@joelanford"
 approvers:
   - "@jerpeter1"
 api-approvers:
@@ -112,6 +113,7 @@ Components that we are proposing to change:
 | [Authentication Operator](#authentication-operator-change)    | Update operator to accept minimum 2 kube api servers when `ControlPlaneTopology` is `HighlyAvailableArbiter`    |
 | [Hosted Control Plane](#hosted-control-plane-change)          | Disallow HyperShift from installing on the `HighlyAvailableArbiter` and `SingleReplica` topology                |
 | [Alternative Install Flows](#alternative-install-flow-change) | Update installation flow for new node role via tooling such as Assisted Installer, Assisted Service and ZTP     |
+| [OLM Filtering](#olm-filter-addition)                         | Add support to OLM to filter operators based off of control plane topology                                      |
 
 ### Infrastructure API
 
@@ -381,6 +383,13 @@ well as any bootstrap component that can be created outside of the CLI flow.
 We currently have a few different options for different needs when installing
 OCP that need to also be updated. Work done in the installer should be reflected
 on the Assisted Installer, Assisted Service and ZTP.
+
+### OLM Filter Addition
+
+With this change it would be prudent to add the ability to allow operators to
+specify which control plane topology they support. This gives us more guards
+against installing layered components on unsupported or unconsidered topologies
+like the Master+Arbiter in this enhancement.
 
 ### Workflow Description
 
