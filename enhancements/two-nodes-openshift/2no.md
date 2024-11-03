@@ -205,7 +205,7 @@ Tools for extracting support information (must-gather tarballs) will be updated 
    3. Node1 does not start etcd or kubelet, remains inert waiting for Node2
    4. Peer (Node2) boots
    5. Corosync membership containing both nodes forms
-   6. Pacemaker “starts” etcd on both nodes
+   6. Pacemaker starts etcd on both nodes
       * Detail, this could be a “soft”-start which allows us to determine which node has the most recent dataset.
    7. Pacemaker “promotes” etcd on whichever node has the most recent dataset
    8. Pacemaker “promotes” etcd on the peer once it has caught up
