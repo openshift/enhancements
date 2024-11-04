@@ -418,9 +418,10 @@ suffice.
 
 ## Support Procedures
 
-
-
-
+No specific support procedures are needed for the USC. The `UpdateStatus` resources
+will be collected by the must-gather tool which will enable and simplify support
+because it will be possible to interpret the state of the cluster update process
+by using the `oc adm upgrade status` command, using a tool such as static-kas.
 
 ## Alternatives
 
