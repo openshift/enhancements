@@ -318,7 +318,7 @@ single-node OpenShift deployment (SNO), CPU and memory?
 The two-node architecture represents yet another distinct install type for users to choose from.
 
 The existence of 1, 2, and 3+ node control-plane sizes will likely generate customer demand to move between them as their needs change.
-Satisfying this demand would come with significant technical and support overhead.
+Satisfying this demand would come with significant technical and support overhead which is out of scope for this enhancement.
 
 ## Open Questions [optional]
 
