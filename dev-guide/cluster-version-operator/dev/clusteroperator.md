@@ -16,11 +16,9 @@ Cluster-admins make use of these resources to check the status of their clusters
 
 When ClusterVersionOperator encounters a ClusterOperator Custom Resource,
 
-- It uses the `.metadata.name` to find the corresponding ClusterOperator instance in the cluster
-- It then waits for the instance in the cluster until
-  - `.status.versions[name=operator].version` in the live instance matches the `.status.version` from the release image and
-  - the live instance `.status.conditions` report available
-- It then continues to the next task.
+- It uses the `.metadata.name` to find the corresponding ClusterOperator instance in the cluster,
+- It waits until the `name-version` pairs of `.status.versions` in the live instance matches the ones in the ClusterOperator from the release image,
+- It then continues to the next ClusterOperator.
 
 ClusterVersionOperator will only deploy files with `.yaml`, `.yml`, or `.json` extensions, like `kubectl create -f DIR`.
 
@@ -30,10 +28,11 @@ It remains a responsibility of the respective operator to properly update (or re
 
 ### What should be the contents of ClusterOperator Custom Resource in /manifests
 
-There are 2 important things that need to be set in the ClusterOperator Custom Resource in /manifests for CVO to correctly handle it.
+There are 3 important things that need to be set in the ClusterOperator Custom Resource in /manifests for CVO to correctly handle it.
 
 - `.metadata.name`: name for finding the live instance
 - `.status.versions[name=operator].version`: this is the version that the operator is expected to report. ClusterVersionOperator only respects the `.status.conditions` from instances that report their version.
+- `.status.versions[name=operator-image].version`: this is the image pull specification that the operator is expected to report.
 
 Additionally, you should include some fundamental [related objects](#related-objects) of your operator (an OpenShift payload informing job reports ClusterOperators that do not define a namespace and at least one other non-namespace object).
 The must-gather and insights operator depend on cluster operators and related objects in order to identify resources to gather.
@@ -57,7 +56,19 @@ status:
     - name: operator
       # The string "0.0.1-snapshot" is substituted in the manifests when the payload is built
       version: "0.0.1-snapshot" 
+    - name: operator-image
+      # The <operator-tag-name> is tag name for the operator defined in the "image-references"
+      # See ./operators.md#how-do-i-ensure-the-right-images-get-used-by-my-manifests
+      # The entire string is substituted in the manifests when the payload is built
+      version: "placeholder.url.oc.will.replace.this.org/placeholdernamespace:<operator-tag-name>"
+    - name: operand-name # OPTIONALLY, for an operand that managed by the operator
+      version: "0.0.1-snapshot" 
+    - name: operand-name-image # OPTIONALLY, for an operand that managed by the operator
+      # The <operand-tag-name> is tag name for the operand defined in the "image-references"
+      version: "placeholder.url.oc.will.replace.this.org/placeholdernamespace:<operand-tag-name>"
 ```
+
+If an operand decides to track some operands and includes them in the above manifest, then versions of the operands have to be reported by the operator as well. See [Section version](#version) below.
 
 ## What should an operator report with ClusterOperator Custom Resource
 
@@ -114,6 +125,8 @@ Here are the guarantees components can get when they follow the rules we define:
 
 ### Status
 
+The operator should use the placeholders for `.status.versions.version` in its deployment manifest to get them replaced with the real values when the payload is built. These values should be passed onto the operator at the runtime, e.g., via environment variables or flags, to populate its `.status.versions`.
+
 The operator should ensure that all the fields of `.status` in ClusterOperator are atomic changes. This means that all the fields in the `.status` are only valid together and do not partially represent the status of the operator.
 
 ### Version
@@ -134,9 +147,14 @@ status:
     - name: operator
       # Watched by the CVO
       version: 4.0.0-0.alpha-2019-03-05-054505
+    - name: operator-image
+      version: "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:digest000" 
     - name: kube-apiserver
       # Used to report underlying upstream version
       version: 1.12.4
+    - name: kube-apiserver-image
+      # Used to report underlying upstream image pull specification
+      version: "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:digest001" 
 ```
 
 #### Version reporting during an upgrade
