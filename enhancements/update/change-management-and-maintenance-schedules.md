@@ -3,19 +3,20 @@ title: change-management-and-maintenance-schedules
 authors:
   - @jupierce
 reviewers: 
-  - TBD
+  - @wking
+  - @petr-muller
 approvers: 
   - @sdodson
   - @jharrington22
-  - @joelspeed
   - @yuqi-zhang
+  - @sjenning
 api-approvers:
-  - TBD    
+  - @joelspeed
 creation-date: 2024-02-29
-last-updated: 2024-02-29
+last-updated: 2024-11-05
 
 tracking-link:
-  - TBD
+  - https://issues.redhat.com/browse/OCPSTRAT-1696
   
 ---
 
