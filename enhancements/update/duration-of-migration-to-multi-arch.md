@@ -9,8 +9,8 @@ approvers:
 api-approvers:
   - "None"
 creation-date: 2024-10-01
-last-updated: yyyy-mm-dd
-tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
+last-updated: 2024-11-05
+tracking-link:
   - https://issues.redhat.com/browse/OTA-962
 see-also:
   
