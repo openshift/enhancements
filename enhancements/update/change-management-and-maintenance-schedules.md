@@ -5,6 +5,8 @@ authors:
 reviewers: 
   - @wking
   - @petr-muller
+  - @sinnykumari
+  - @jewzaam
 approvers: 
   - @sdodson
   - @jharrington22
@@ -56,17 +58,56 @@ validating webhooks or admission policies.
 
 ## Definitions and Reference
 
-**RRULE**
-RRULE, or "Recurrence Rule", is an RFC https://icalendar.org/RFC-Specifications/iCalendar-RFC-5545/
-commonly used to express reoccurring windows of time. Consider a calendar invite for a meeting that
-should occur on the last Friday of every month. RRULE can express this as `FREQ=MONTHLY;INTERVAL=1;BYDAY=-1FR`.
-While commonly employed for calendar data interchange, it is used in this enhancement to allow users
-the ability to specify maintenance schedules.
-Tools for generating RRULES:
-- Simple: https://icalendar.org/rrule-tool.html
-- Complex: https://exontrol.com/exicalendar.jsp?config=/js#calendar
+### Recurrence Rules
+RRULE, short for "Recurrence Rule", is an RFC https://icalendar.org/RFC-Specifications/iCalendar-RFC-5545/
+commonly used to express reoccurring windows of time for calendar data interchange. Consider a calendar 
+invite for a meeting that should occur on the last Friday of every month. RRULE can express 
+this as `FREQ=MONTHLY;INTERVAL=1;BYDAY=-1FR`. 
+Tool for generating / interpreting RRULES: https://jkbrzt.github.io/rrule/
 
-**Change Management Terminology**
+RRULE served as an inspiration for the maintenance schedule recurrence rule definition schema, so 
+a foundational understanding of RRULE may help users decipher maintenance schedules. Examples
+of the schema:
+
+**Example**: Every third day
+As RRULE: `RRULE:FREQ=DAILY;INTERVAL=3`
+Through enhancement schema:
+```yaml
+recurrence:
+  frequency: Daily
+  daily:
+    interval: 3
+```
+
+**Example**: Every Saturday and Sunday
+As RRULE: `FREQ=WEEKLY;BYDAY=SA,SU`
+Through enhancement schema:
+```yaml
+recurrence:
+  frequency: Weekly
+  weekly:
+    days:
+    - Saturday
+    - Sunday
+    interval: 1
+```
+
+**Example**: The last Monday of each month
+As RRULE: `FREQ=MONTHLY;BYDAY=MO;BYSETPOS=-1`
+Through enhancement schema:
+```yaml
+recurrence:
+  frequency: Monthly
+  monthly:
+    by: Day
+    day:
+      days:
+      - day: Monday
+        week: Last
+      interval: 1
+```
+
+### Change Management Terminology
 This document uses specialized terms to describe the key aspects of change management. 
 It is worth internalizing the meaning of these terms before reviewing sections of the document.
 - "Material Change". A longer definition is provided in the Summary, but, in short, any configuration
@@ -424,7 +465,7 @@ spec:
   # Restrictive:
   #   Always restrictive - pauses material changes.
   # MaintenanceSchedule: 
-  #   An RRULE and other fields will be used to specify reoccurring permissive windows
+  #   A recurrence rule and other fields will be used to specify reoccurring permissive windows
   #   as well as any special exclusion periods.
   strategy: Permissive|Restrictive|MaintenanceSchedule
 
@@ -468,7 +509,7 @@ status:
 ### Change Management Strategies
 
 #### Maintenance Schedule Strategy
-The strategy is configured by specifying an RRULE identifying permissive datetimes during which material changes can be
+The strategy is configured by specifying a recurrence rule, identifying permissive dates during which material changes can be
 initiated. The cluster lifecycle administrator can also exclude specific date ranges, during which 
 the policy will request material changes to be paused.
 
@@ -549,7 +590,8 @@ resources (e.g. OpenShift web console) must be updated to proxy that status info
 You may note that several of the fields in `status.changeManagement` can be derived directly from `ChangeManagementPolicy.status`
 (unless overridden by `spec.changeManagement.pausedUntil` or `spec.changeManagement.disabledUntil`). This simplifies
 the work of each controller which supports change management - they simply need to observe `ChanageManagementPolicy.status`
-and the `ChanageManagmentPolicy` controller does the heavy lifting of interpreting policy (e.g. interpreting RRULEs).
+and the `ChanageManagmentPolicy` controller does the heavy lifting of interpreting policy (e.g. interpreting recurrence
+rule definitions).
 
 ```yaml
 kind: ClusterVersion|MachineConfigPool|HostedCluster|NodePool
@@ -926,26 +968,69 @@ spec:
   strategy: MaintenanceSchedule
  
   maintenanceSchedule:
+
     # Specifies a reoccurring permissive window. 
     permit:  
-      # RRULEs (https://www.rfc-editor.org/rfc/rfc5545#section-3.3.10) are commonly used 
-      # for calendar management metadata. Only a subset of the RFC is supported.
-      # See "RRULE Constraints" section for details.
-      # If unset, all dates are permitted and only exclude constrains permissive windows.
-      recurrence: <rrule|null>
-      # Given the identification of a date by an RRULE, at what time (always UTC) can the 
+      
+      # If null, all dates are permitted and only exclude constrains permissive windows.
+      recurrence: 
+        # "frequency" is a discriminant for the unioned types which follow.
+        frequency: Yearly | Monthly | Weekly | Daily
+        
+        # Required when frequency=Daily
+        daily:
+          interval: <int> # How many days should pass before the next occurrence 0 < x < 731
+
+        # Required when frequency=Weekly
+        weekly:
+          days: 
+          - Monday
+          - Tuesday
+          - Wednesday
+          interval: <int> # How many weeks should pass before the next occurrence 0 < x < 27
+
+        # Required when frequency=Monthly
+        monthly:
+          # "by" is a discriminant for the unioned types which follow.
+          by: Day | Date
+          date:
+            dates: 
+            - <int> # List of dates 0 < x < 32
+            interval: <int> # How many months should pass before the next occurrence 0 < x < 12
+          day:
+            days:
+            - week: First | Second | Third | Fourth | Fifth | Last
+              day: Monday | Tuesday | Wednesday | ... | Sunday
+            interval: <int> # How many months should pass before the next occurrence 0 < x < 12
+
+        # Required when frequency=Yearly
+        yearly:
+          # "by" is a discriminant for the unioned types which follow.
+          by: Day | Date
+          date:
+            dates: 
+            - <int> # List of dates 0 < x < 32
+            month: January | February | ... | December
+          day:
+            days:
+            - week: First | Second | Third | Fourth | Fifth | Last
+              day: Monday | Tuesday | Wednesday | ... | Sunday
+            month: January | February | ... | December
+      
+      # Given the identification of a date by a recurrence rule, at what time (always UTC) can the 
       # permissive window begin. "00:00" if unset.
       startTime: <time-of-day|null>
-      # Given the identification of a date by an RRULE, after what offset from the startTime should
+      
+      # Given the identification of a date by a recurrence rule, after what offset from the startTime should
       # the permissive window close. This can create permissive windows within days that are not
-      # identified in the RRULE. For example, recurrence="FREQ=Weekly;BYDAY=Sa;",
+      # identified in the rule. For example, if "weekly on Saturday" is specified as a rule,
       # startTime="20:00", duration="8h" would permit material change initiation starting
       # each Saturday at 8pm and continuing through Sunday 4am (all times are UTC). The default
       # duration is 24:00-startTime (i.e. to the end of the day).
       duration: <duration|null>
       
     
-    # Excluded date ranges override RRULE selections.
+    # Excluded date ranges override recurrence rule selections.
     exclude:
     # Dates should be specified in YYYY-MM-DD. Each date is excluded from 00:00 UTC for 24 hours.
     - fromDate: <date>
@@ -955,34 +1040,24 @@ spec:
       reason: Optional human readable which will be included in status description.
 ```
 
-Permissive windows are specified using a 
-subset of the [RRULE RFC5545](https://www.rfc-editor.org/rfc/rfc5545#section-3.3.10) and, optionally, a
-starting time and duration. https://freetools.textmagic.com/rrule-generator is a helpful tool to
-review the basic semantics RRULE is capable of expressing. https://exontrol.com/exicalendar.jsp?config=/js#calendar
-offers more complex expressions.
+**Recurrence Rule Interpretation**
+The recurrence schema allows users to express recurring intervals of time without specifying start dates. For example:
 
-**RRULE Interpretation**
-RRULE supports expressions that suggest recurrence without implying an exact date. For example:
-- `RRULE:FREQ=YEARLY` - An event that occurs once a year on a specific date. 
-- `RRULE:FREQ=WEEKLY;INTERVAL=2` - An event that occurs every two weeks.
+```yaml
+# Permit every 5th day
+daily:
+  interval: 5
+```
 
-All such expressions shall be evaluated with a starting date of Jan 1st, 1970 00:00Z. In other
-words, `RRULE:FREQ=YEARLY` would be considered permissive, for one day, at the start of each new year.
+A fixed start date must be assumed in order to calculate a deterministic set of days on which to permit
+change. Such rules will be evaluated with a starting date of Jan 1st, 1970 00:00Z. 
 
-If no `startTime` or `duration` is specified, any day selected by the RRULE will suggest a
+If no `startTime` or `duration` is specified, any day selected by the recurrence rule will suggest a
 permissive 24h window unless a date is in the `exclude` ranges.
 
-**RRULE Constraints**
-A valid RRULE for change management:
-- must identify a date, so, although RRULE supports `FREQ=HOURLY`, it will be rejected if an attempt it made to use it.
-- cannot specify an end for the pattern. `RRULE:FREQ=DAILY;COUNT=3` suggests
-  an event that occurs every day for three days only. As such, neither `COUNT` nor `UNTIL` is 
-  supported and will be rejected if an attempt is made to use them.
-- cannot specify a permissive window more than 2 years away.
-
 **Overview of Interactions**
-The MaintenanceSchedule strategy, along with `<resource>.spec.changeManagement.pausedUntil` allows a cluster lifecycle administrator to express 
-one of the following:
+The MaintenanceSchedule strategy, along with `<resource>.spec.changeManagement.pausedUntil` allows a cluster lifecycle 
+administrator to express one of the following:
 
 | pausedUntil    | permit | exclude | Enforcement State (Note that **effective** state must also take into account hierarchy)                                                                                                                                                                                  |
 |----------------|--------|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1138,7 +1213,7 @@ lifecycle administrators could dramatically increase the overhead of managing th
 prevent this outcome, Service Delivery will only expose a subset of the change management
 strategies. They will also implement sanitization of the configuration options a user can
 supply to those strategies. For example, a simplified interface in OCM for building a
-limited range of RRULEs that are compliant with Service Delivery's update policies.
+limited range of recurrence rules that are compliant with Service Delivery's update policies.
 
 #### Node Disruption Policy
 https://github.com/openshift/enhancements/pull/1525 describes the addition of `nodeDisruptionPolicy`
@@ -1153,7 +1228,6 @@ schedule. In other words, it can be applied immediately, even outside a permissi
 
 - Given the range of operators which must implement support for change management, inconsistent behavior or reporting 
   may make it difficult for users to navigate different profiles.
-  - Mitigation: A shared library should be created and vendored for RRULE/exclude/next window calculations/metrics.
 - Users familiar with the fully self-managed nature of OpenShift are confused by the lack of material changes be 
   initiated when change management constraints are active.
    - Mitigation: The introduction of change management will not change the behavior of existing clusters. 
@@ -1161,6 +1235,8 @@ schedule. In other words, it can be applied immediately, even outside a permissi
 - Users may put themselves at risk of CVEs by being too conservative with worker-node updates.
 - Users leveraging change management may be more likely to reach unsupported kubelet skew configurations 
   vs fully self-managed cluster management.
+  - Mitigation: For standalone, clusters will enter Upgradeable=False if another control-plane upgrade would
+    cause unsupported skew. This should encourage cluster lifecycle administrators to update their worker-nodes.
 
 ### Drawbacks
 
@@ -1339,7 +1415,7 @@ Making accommodations for these strategies should be a subset of the overall imp
 of the MaintenanceSchedule strategy and they will enable a foundation for a range of 
 different personas not served by MaintenanceSchedule.
 
-### Use CRON instead of RRULE
+### Use CRON instead of Recurrence Rule
 The CRON specification is typically used to describe when something should start and 
 does not imply when things should end. CRON also cannot, in a standard way,
 express common semantics like "The first Saturday of every month."
