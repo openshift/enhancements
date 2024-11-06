@@ -62,7 +62,7 @@ list of user-defined tags to the OpenShift Installer, and everything created by 
 bootstrapped components will apply those tags to all resources created in AWS, for the life of the cluster, and where supported by AWS.
 - Tags must be applied at creation time, in an atomic operation. It isn't acceptable to create an object and,
 after some period of time, apply the tags post-creation.
-- Tags can be updated day2 on teh AWS resources.
+- Tags can be updated day2 on the AWS resources.
 
 ### Non-Goals
 
@@ -124,6 +124,9 @@ apiVersion: apiextensions.k8s.io/v1
                             user tags in the tags of the AWS resources that the operators create.
                 type: boolean
 ```
+### Implementation constraints
+- The NLB is not reconciled with tag updates from service annotations by cloud-provider-aws controller. The [possible mitigations](https://github.com/openshift/cluster-ingress-operator/pull/1148#issuecomment-2423161470) are in  discussions by stakeholders on possible actions.
+- The AWS load balancer controller implementation considers tag information arguments as single source of truth. Hence, removes any differing tag keys set on the load balancer. As a mitigation, it is suggested for user to set the tags on service annotations rather than AWS resource directly.
 
 ### Risks and Mitigations
 
