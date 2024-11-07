@@ -11,7 +11,7 @@ reviewers:
 approvers:
   - "@bparees"
 creation-date: 2020-08-18
-last-updated: 2023-02-22
+last-updated: 2024-10-24
 status: implemented
 ---
 
@@ -473,6 +473,74 @@ Prior to 4.11 release, localization resources are being loaded by default. In ca
 resources are not present in the dynamic plugin, the initial console load will be slowed 
 down. For more info check [BZ#2015654](https://bugzilla.redhat.com/show_bug.cgi?id=2015654)
 
+### Content Security Policy
+
+`ConsolePlugin` introduces the ability for dynamic plugins to specify their own Content Security Policy (CSP) directives in the OpenShift web console, using the `ConsolePluginCSP` field in the `ConsolePluginSpec`. This field is crucial for mitigating potential security risks, such as cross-site scripting (XSS) and data injection attacks, by controlling which external resources the browser can load.
+
+#### Content Security Policy (CSP) Overview
+CSP is a security feature that helps detect and mitigate attacks by specifying which sources are allowed for fetching content like scripts, styles, images, and fonts. For dynamic plugins that require loading resources from external sources, defining custom CSP rules ensures secure integration into the OpenShift console.
+For more information about the CSP directives, see:
+https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy
+
+#### Key Features of `ConsolePluginCSP`
+
+- **Directive Types**:
+  - The supported directive types include `DefaultSrc`, `ScriptSrc`, `StyleSrc`, `ImgSrc`, and `FontSrc`, each of which allows plugins to specify valid sources for loading different types of content.
+  - Each directive type serves different purposes, e.g., `ScriptSrc` defines valid JavaScript sources, while `ImgSrc` controls where images can be loaded from.
+
+- **Values**:
+  - Each directive can have a list of values representing allowed sources. For example, `ScriptSrc` could specify multiple external scripts.
+  - These values are restricted to 1024 characters and cannot include whitespace, commas, or semicolons. Additionally, single-quoted strings and wildcard characters (`*`) are disallowed.
+
+- **Unified Policy**:
+  - The OpenShift web console aggregates the CSP directives across all enabled `ConsolePlugin` CRs and merges them with its own default policy. The combined policy is then applied via the `Content-Security-Policy` HTTP response header.
+
+#### Example
+If two plugins define overlapping CSP directives, the OpenShift web console server merges them as follows:
+- Plugin A:
+```yaml
+apiVersion: console.openshift.io/v1
+kind: ConsolePlugin
+metadata:
+  name: acm
+spec:
+  displayName: 'Advanced Cluster Management'
+  contentSecurityPolicy:
+  - directive: 'ScriptSrc'
+    values:
+    - 'https://script1.com/'
+    - 'https://script2.com/'
+```
+- Plugin B:
+```yaml
+apiVersion: console.openshift.io/v1
+kind: ConsolePlugin
+metadata:
+  name: cron-tab
+spec:
+  displayName: 'Cron Tab'
+  contentSecurityPolicy:
+  - directive: 'ScriptSrc'
+    values:
+    - 'https://script2.com/'
+    - 'https://script3.com/'
+```
+
+The resulting policy set by the OpenShift Web Console server would be:
+
+```
+script-src: 'self' https://script1.com/ https://script2.com/ https://script3.com/
+```
+
+This ensures that plugins can specify external sources while maintaining a secure environment for the entire web console.
+
+#### Validation Rules
+- Each directive can have up to 16 unique values.
+- The total size of all values across directives must not exceed 8192 bytes (8KB).
+- Each value must be unique, and there are additional validation rules to ensure no quotes, spaces, commas, or wildcard symbols are used.
+
+By defining and enforcing CSP directives, the `ConsolePluginCSP` field helps balance plugin flexibility and security, allowing dynamic plugins to specify external resources while protecting the OpenShift web console from security vulnerabilities.
+
 ### Error Handling
 
 Console will guard against runtime errors in plugins. All plugin components
@@ -533,6 +601,57 @@ is migrated to a dynamic plugin will need to have the same support level.
 Both `v1` and `v1alpha1` version are supported. `v1alpha1` plugins will get
 converted by the conversion webhook server into `v1` representation.
 Conversion webhook server is part of the `console-operator` pod.
+
+#### Content Security Policy
+For Content Security Policy (CSP) feature to be considered stable, the following
+requests need to be met:
+
+##### 1. Documentation updates
+
+* Update the OpenShift official documentation to include detailed guidelines
+on configuring `ConsolePluginCSP` in the `ConsoleDynamicPlugin` CRD, along with
+recommendations.
+PR link: TBD
+
+##### 2. Release notes updates
+
+* Add CSP feature to release notes.
+  * Pull request link: TBD
+
+##### 3. Extending integration and unit test suite
+
+* Extend integration and unit test suite for console-operator repository:
+    * Standart use case, with a single plugin setting valid sources and
+    validating the final CSP result set in the `console-config.yaml` file.
+    * Edge use cases, such as many plugins defining CSPs with overlapping sources,
+    and validates the final merged CSP result, set in the `console-config.yaml` file.
+    * Pull request link: https://github.com/openshift/console-operator/pull/938
+
+##### 4. Updates to demo plugin
+
+* Update one console-demo-plugin to use the new `ConsolePluginCSP` field
+in order to demonstrate the usage.
+  * Pull request link: TBD
+
+##### 5. Integration tests updates
+
+* Extend integration test suite in console repository CI to check for CSP violations.
+* PR link: [TBD](https://issues.redhat.com/browse/CONSOLE-4279)
+
+##### 6. CI updates to all dynamic plugins
+
+* All the dynamic plugins which are enabled on the cluster by default will
+update their CI to check for CSP violations.
+* PR link: TBD
+
+Currently Console uses `Content-Security-Policy-Report-Only` instead of
+`Content-Security-Policy` header. Due to that the browser will only warn about
+Console CSP violations.
+
+To ensure adequate monitoring and adjustment, Console will continue to operate
+in `Content-Security-Policy-Report-Only` mode for at least one release after
+the above requests are met. After this period, Console will switch to using the
+`Content-Security-Policy` header, enabling full enforcement of CSP policies.
 
 #### Dev Preview -> Tech Preview
 
