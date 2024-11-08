@@ -24,7 +24,7 @@ tracking-link:
 
 ## Summary
 
-Starting as early as OpenShift Container Platform (OCP) 4.19 we will ship
+Starting as early as OpenShift Container Platform (OCP) 4.21 we will ship
 and concurrently support two CoreOS streams, each based on one of the two
 most recent major RHEL versions. All components responsible for lifecycling
 hosts and host configuration will be extended to select from multiple streams
@@ -188,7 +188,7 @@ In HCP, in order to upgrade to the new OS you should create new NodePools then
 scale up resources into those pools and scale down resources from the old
 pools.
 
-In OCP 4.19 in order to upgrade to the new major OS in standalone clusters you
+In OCP 4.21 in order to upgrade to the new major OS in standalone clusters you
 will similarly create new MachineSets and MachineConfigPools which reference
 the desired stream then scale those resources up and old resources down.
 
@@ -275,7 +275,7 @@ Significant OCP or layered product features delivered over the next three
 years have a hard dependency on the next major *userspace OS version*. The
 risk here is that as soon as the core platform depends on RHEL10 userspace we
 will drop support for hosts which only offer x86-64-v2. While almost all
-server grade hardware that may run OCP 4.19 and later offers x86-64-v3 or later
+server grade hardware that may run OCP 4.21 and later offers x86-64-v3 or later
 some edge deployments may not. We should collect telemetry data whever possible
 to ensure that we have an understanding of the prevalence of x86-64-v2 limited
 hardware in the fleet, ensuring that we account for disconnected edge devices.
@@ -484,12 +484,11 @@ however have a clearer story around feature enablement wherever host major OS
 version is a factor.
 
 ### Blended/Abbreviated Dual Streams
-Defer introduction of RHEL10 until necessary for hardware enablement, which is
-assumed to be no later than 10.2. Limit the overlap in RHEL9 and RHEL10 support
-to a period for which we're willing to accept lowest common denominator feature
-enablement then extend the last of the dual stream versions to match RHEL9 life
-cycle.  ie: 4.19-4.21 on 9.6, 4.22-4.24 on 9.8/10.2, 4.25-4.27 on 10.4, with
-the life of 4.24 being extended to match RHEL9 EoM.
+Limit the overlap in RHEL9 and RHEL10 support to a period for which we're
+willing to accept lowest common denominator feature enablement then extend
+the last of the dual stream versions to match RHEL9 life cycle. 
+ie: 4.19-4.21 on 9.6, 4.22-4.24 on 9.8/10.2, 4.25-4.27 on 10.4, with the
+life of 4.24 being extended to match RHEL9 EoM.
 
 ## Infrastructure Needed [optional]
 
