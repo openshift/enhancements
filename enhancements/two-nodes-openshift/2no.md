@@ -88,6 +88,7 @@ This requires our solution to provide a management experience consistent with "n
 * Resilient storage - see future enhancement
 * Support for platforms other than bare metal including automated CI testing
 * Support for other topologies (eg. hypershift)
+* Support disconnected cluster installation
 * Adding worker nodes
 * Creation of RHEL-HA events and metrics for consumption by the OpenShift monitoring stack (Deferred to post-MVP)
 * Supporting upgrade/downgrade paths between two-node and other architectures (for initial release)
