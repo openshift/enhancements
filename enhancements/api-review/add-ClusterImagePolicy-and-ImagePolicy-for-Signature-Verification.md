@@ -41,6 +41,7 @@ tools, so that I can utilize the increased security of my software supply chain.
 - MCO container runtime config controller watches ImagePolicy instance in different kubernetes namespaces and merges the instances for each namespace into a single [containers-policy.json](https://github.com/containers/image/blob/main/docs/containers-policy.json.5.md) in a predefined `/path/to/policies/<NAMESPACE>.json`.
 - MCO container runtime config controller watches ClusterImagePolicy instance and merges the instances into a single [/etc/containers/policy.json](https://github.com/containers/image/blob/main/docs/containers-policy.json.5.md).
 - CRI-O can verify Cosign signature signed images using configuration from ClusterImagePolicy and ImagePolicy by matching the namespace from the sandbox config on the `PullImage` RPC.
+- Populate `PolicyType` using a Kubernetes secret.
 
 ### Non-Goals
 
@@ -145,6 +146,12 @@ type PolicyRootOfTrust struct {
 	PolicyType PolicyType `json:"policyType"`
 	// publicKey defines the root of trust based on a sigstore public key.
 	// +optional
+
+    // ImagePolicySecret references a Kubernetes Secret containing PolicyType data.
+    // The Secret should be of type 'Opaque' and include the necessary PolicyType information.
+    // +optional
+    ImagePolicySecret *corev1.SecretReference `json:"imagePolicySecret,omitempty"`
+
 	PublicKey *PublicKey `json:"publicKey,omitempty"`
 	// fulcioCAWithRekor defines the root of trust based on the Fulcio certificate and the Rekor public key.
 	// For more information about Fulcio and Rekor, please refer to the document at:
@@ -164,7 +171,22 @@ const (
 	PublicKeyRootOfTrust         PolicyType = "PublicKey"
 	FulcioCAWithRekorRootOfTrust PolicyType = "FulcioCAWithRekor"
 	PKIRootOfTrust               PolicyType = "PKI"
-)
+
+    // Kuberentes secret data keys for `PublicKey` struct fields
+    SecretPublicKeyDataKey   = "public-key"
+    SecretRekorKeyDataKey    = "rekor-key"
+
+    // Kuberentes secret data keys for `PKI` struct fields (BYOPKI)
+    SecretPKIRootsDataKey           = "ca-roots"
+    SecretPKIIntermediatesDataKey   = "ca-intermediates"
+    SecretPKICertificateEmailKey    = "certificate-email"
+    SecretPKICertificateHostnameKey = "certificate-hostname"
+
+    // Kuberentes secret data keys for `FulcioCAWithRekor` struct fields
+    SecretFulcioCADataKey   = "fulcio-ca"
+    SecretRekorKeyDataKey   = "rekor-key" // reuse of existing constant
+    SecretFulcioOidcIssuerKey  = "oidc-issuer"
+    SecretFulcioSignedEmailKey = "signed-email"
 
 // PublicKey defines the root of trust based on a sigstore public key.
 type PublicKey struct {
@@ -314,6 +336,69 @@ type ImagePolicyStatus struct {
 ```
 
 ### Implementation Details/Notes/Constraints [optional]
+
+#### Populating PolicyType using a Kuberentes Secret
+
+When the Machine Config Operator (MCO) detects a valid (non-nil) reference to a Kubernetes Secret, `ImagePolicySecret` in `PolicyRootOfTrust`, it will fetch the Secret and validate the keys within it according to the specified `PolicyType`. Based on this validation, the `MCO` will populate the corresponding `PolicyType` fields. For example, if the `PolicyType` is set to `PublicKey`, it will extract and validate the `public-key` and `rekor-key` from the Secret, populating the `PublicKey` struct appropriately. Similarly, for other types like `PKI` or `FulcioCAWithRekor`, the MCO will validate and populate fields from the Secret as needed.
+
+For example, a secret referencing the required data for using a `PublicKey` for image verification can be specified in the following way in an `ImagePolicy`
+```yaml
+kind: ImagePolicy
+metadata:
+  name: mypolicy
+  namespace: testnamespace
+spec:
+  scopes:
+  - test0.com
+  policy:
+    rootoftrust:
+      policyType: PublicKey
+      imagePolicySecret:
+        name: public-key-secret         # Name of the Kubernetes Secret
+        namespace: default              # Namespace where the Secret resides
+```
+The Corresponding secret should look like,
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: public-key-secret
+  namespace: default
+type: Opaque
+data:
+  public-key: c29tZS1iYXNlNjQtZW5jb2RlZC1rZXlkYXRhCg==
+  rekor-key: c29tZS1iYXNlNjQtZW5jb2RlZC1yZWtvcmtleWRhdGEK
+```
+
+Kubernetes secret for `BYOPKI` must have following keys,
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: byopki-secret
+  namespace: default
+type: Opaque
+data:
+  ca-roots: c29tZS1iYXNlNjQtZW5jb2RlZC1jYXJvb3RzZGF0YQo=
+  ca-intermediates: c29tZS1iYXNlNjQtZW5jb2RlZC1jYWludGVybWVkaWF0ZXNkYXRhCg==
+  certificate-email: c29tZS1iYXNlNjQtZW5jb2RlZC1lbWFpbAo=
+  certificate-hostname: c29tZS1iYXNlNjQtZW5jb2RlZC1ob3N0bmFtZQo=
+```
+
+and Kubernetes secret for `FulcioCA` must have following keys,
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fulcio-ca-with-rekor-secret
+  namespace: default
+type: Opaque
+data:
+  fulcio-ca: c29tZS1iYXNlNjQtZW5jb2RlZC1mdWxjaW9jYWRhdGEK
+  rekor-key: c29tZS1iYXNlNjQtZW5jb2RlZC1yZWtvcmRhdGEK
+  oidc-issuer: c29tZS1iYXNlNjQtZW5jb2RlZC1vaWRjaXNzdWVyCg==
+  signed-email: c29tZS1iYXNlNjQtZW5jb2RlZC1zaWduZWRlbWFpbAo=
+```
 
 #### Update container runtime config controller to watch ClusterImagePolicy and ImagePolicy
 
