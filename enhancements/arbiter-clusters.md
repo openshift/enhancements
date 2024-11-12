@@ -62,9 +62,9 @@ the 3 nodes for ETCD quorum.
   full master node.
 - HA for a 2+1 arbiter node should match the HA guarantees of a 3 Node Cluster
   deployment.
-- Support installing OpenShift with 2 master nodes and 1 arbiter node.
-- Add a new ControlPlaneTopology and InfrastructureTopology in the
-  Infrastructure API
+- Support installing OpenShift with 2 master nodes and 1 arbiter node on
+  baremetal only for the time being.
+- Add a new `ControlPlaneTopology` enum in the Infrastructure API
 - The arbiter node hardware requirements will be lower than regular nodes in
   both cost and performance. Customers can use devices on the market from OEMs
   like Dell that supply an all in one unit with 2 compute and 1 lower powered
@@ -78,7 +78,12 @@ ideas for future features.
 - Running the arbiter node offsite.
 - Running a virtualized arbiter node on the same cluster.
 - Having a single arbiter supporting multiple clusters.
-- Moving from 2 + 1 to a conventional 3 node cluster
+- Moving from 2 + 1 to a conventional 3 node cluster.
+- Arbiter nodes are never intended to be of worker type.
+- We will not be implementing cloud deployments for now, this is not due to a
+  technical limitation but rather practicality of scope, validation, and
+  testing. With out a clear customer use case is too much change, this is
+  something we can revisit if there is a customer need.
 
 ## Proposal
 
@@ -136,13 +141,18 @@ We will need to update the installer to have awareness of the explicit intent to
 setup the cluster with an arbiter node. Adding a new machine type similar to the
 flow for `master` and `workers` machines. As an example if the intent is to
 generate 1 `arbiter` machine and 2 `master` machines, the user specifies a
-`MachinePool` `installConfig.arbiterNode` field with the desired replicas.
+`MachinePool` for `installConfig.arbiter` field with the desired replicas.
 
-The `arbiterNode` will be a `MachinePool` object that will enforce at least 1
-replica, and at least 2 replicas for the `controlPlane`. When no `arbiterNode`
-field is supplied regular flow will validate. When `arbiterNode` is supplied 2
-replicas will be valid for for `controlPlane` as long as an `arbiterNode` is
-specified.
+The `arbiter` will be a `MachinePool` object that will enforce at least 1
+replica, and at least 2 replicas for the `controlPlane`. When no `arbiter` field
+is supplied regular flow will validate. When `arbiter` is supplied 2 replicas
+will be valid for for `controlPlane` as long as an `arbiter` is specified.
+
+Some validation we will enforce:
+
+1. Only on BareMetal installs.
+2. Minimum 1 Arbiter replica if Arbiter is defined.
+3. Minimum 2 Master replica when Arbiter is defined.
 
 `installConfig.yaml`
 
@@ -155,22 +165,34 @@ compute:
     name: worker
     platform: {}
     replicas: 0
-arbiterNode:
+arbiter:
   architecture: amd64
   hyperthreading: Enabled
   replicas: 1
   name: arbiter
   platform:
-    aws:
-      type: m6a.large
+    baremetal: {}
 controlPlane:
   architecture: amd64
   hyperthreading: Enabled
   name: master
   platform:
-    aws:
-      type: m6a.4xlarge
+    baremetal: {}
   replicas: 2
+platform:
+  baremetal:
+    ...
+    hosts:
+      - name: cluster-master-0
+        role: master
+        ...
+      - name: cluster-master-1
+        role: master
+        ...
+      - name: cluster-arbiter-0
+        role: arbiter
+        ...
+
 ```
 
 Ex. `/machines/arbiter.go`
@@ -252,6 +274,12 @@ and
 In the future we might need to alter these files further to accommodate smaller
 node footprint.
 
+Futhermore, when it comes to the arbiter resources, we need to make sure things
+are not created when not needed. The resources should only be created when the
+arbiter topology is explicitly chosen during install. The MCP and resources
+described here in the MCO changes should only be applied if the arbiter topology
+is explicitly turned on.
+
 `/templates/arbiter/**/kubelet.service.yaml`
 
 ```
@@ -259,6 +287,10 @@ node footprint.
 ...
         --register-with-taints=node-role.kubernetes.io/arbiter=:NoSchedule \
 ```
+
+The initial TechPreview of this feature will copy over the master configurations
+with slight alterations for the `arbiter`. However, for GA we will need to
+create a more appropriate flow for this so we're not duplicating so much.
 
 ### Kubernetes Change
 
@@ -330,7 +362,7 @@ configmap. We also need to do a small addition
 controller, this is responsible for updating the cluster `ETCD` resource with
 the correct `observedConfig.controlPlane.replicas`, this needs to be updated to
 correctly reflect the `replicas` count that contains both `controlPlane` and
-`arbiterNode` counts.
+`arbiter` counts.
 
 We have a few more changes in CEO related to the deligated tooling in
 `library-go`, that will be covered in the next section.
@@ -347,12 +379,12 @@ their internal node listers.
 
 ```go
 
-func (c *Controller) WithArbiterNode() {
-    c.withArbiterNode = true;
+func (c *Controller) WithArbiter() {
+    c.withArbiter = true;
 }
 ...
 
-if c.withArbiterNode {
+if c.withArbiter {
     arbiterselector, err := labels.NewRequirement("node-role.kubernetes.io/arbiter", selection.Equals, []string{""})
     arbiternodes, err := c.nodeLister.List(labels.NewSelector().Add(*arbiterselector))
     nodes = append(nodes, arbiternodes...)
@@ -391,52 +423,38 @@ specify which control plane topology they support. This gives us more guards
 against installing layered components on unsupported or unconsidered topologies
 like the Master+Arbiter in this enhancement.
 
+This is a nice to have before we go GA and we should be looking into adding it
+to OLM.
+
 ### Workflow Description
 
-#### For Cloud Installs
-
-1. The user creates an `install-config.yaml`.
-2. The user defines the `installConfig.controlPlane` field with `2` replicas.
-3. The user then enters the new field `installConfig.arbiterNode` defines the
-   arbiter node and it's replicas set to `1` and the machine type desired for
-   the platform chosen.
-4. The user generates the manifests with this install config via the
-   `openshift-install create manifests`
-5. The installer creates a new `arbiter-machine-0` Machine same as
-   `master-machine-{0-1}` is currently generated.
-6. The arbiter machine is labeled with
-   `machine.openshift.io/cluster-api-machine-role: arbiter` and
-   `machine.openshift.io/cluster-api-machine-type: arbiter` and set with the
-   taint for `node-role.kubernetes.io/arbiter=NoSchedule`.
-7. Arbiter is treated like a master node, in that the installer creates the
-   `arbiter-ssh.yaml` and the `arbiter-user-data-secret.yaml`, mirroring a
-   normal master.
-8. The installer sets the control plane and infrastructure topology to
-   `HighlyAvailableArbiter`
-9. The user then begins the install via `openshift-install create cluster`
-
-#### For Baremetal Installs
+#### For Baremetal IPI Installs
 
 1. The user creates an `install-config.yaml` like normal.
 2. The user defines the `installConfig.controlPlane` field with `2` replicas.
-3. The user then enters the new field `installConfig.arbiterNode` defines the
-   arbiter node and it's replicas set to `1` and the machine type desired for
-   the platform chosen.
-4. The user then enters the machine information for
+3. The user then enters the new field `installConfig.arbiter` defines the
+   arbiter node pool and it's replicas set to `1` and the machine type desired
+   for the platform chosen.
+4. The user then enters the empty information for
    `installConfig.controlPlane.platform.baremetal` and
-   `installConfig.arbiterNode.platform.baremetal`
-5. The installer creates a new `arbiter-machine-0` Machine same as
+   `installConfig.arbiter.platform.baremetal`.
+5. The user adds the appropriate hosts to the `platform.baremetal.hosts` array,
+   2 master machines with the `role` of `master` and 1 arbiter machine with the
+   `role` of `arbiter`, the typical flow for bare metal installs should be
+   followed.
+6. The user runs `openshift-install create manifests`
+7. The installer creates a new `arbiter-machine-0` Machine same as
    `master-machine-{0-1}` is currently generated.
-6. The arbiter machine is labeled with
+8. The arbiter machine is labeled with
    `machine.openshift.io/cluster-api-machine-role: arbiter` and
    `machine.openshift.io/cluster-api-machine-type: arbiter` and set with the
    taint for `node-role.kubernetes.io/arbiter=NoSchedule`.
-7. Arbiter is treated like a master node, in that the installer creates the
+9. Arbiter is treated like a master node, in that the installer creates the
    `arbiter-ssh.yaml` and the `arbiter-user-data-secret.yaml`, mirroring a
-   normal master.
-8. The installer sets the control plane and infrastructure topology to
-   `HighlyAvailableArbiter`
-9. The user then begins the install via `openshift-install create cluster`
+   normal master creation.
+10. The installer sets the `ControlPlaneTopology` to `HighlyAvailableArbiter`
+    and `InfrastructureTopology` to `HighlyAvailable`
+11. The user then begins the install via `openshift-install create cluster`
 
 #### During Install
 
@@ -451,13 +469,22 @@ like the Master+Arbiter in this enhancement.
 
 #### Installer API Change
 
-The `installConfig` will include a `installConfig.arbiterNode` object for a
+The `installConfig` will include a `installConfig.arbiter` object for a
 `MachinePool` to configure arbiter infra structure.
 
 #### OCP Config API Change
 
-The Infrastructure config fields for `ControlPlaneTopology` and
-`InfrastructureTopology` will support the new value of `HighlyAvailableArbiter`
+The Infrastructure config fields for `ControlPlaneTopology` will support the new
+value of `HighlyAvailableArbiter`
+
+`InfrastructureTopology` will be left as `HighlyAvailable` in this situation
+since the existing rule is we only highlight when we are dealing with
+`SingleReplica` workers. In this instance, at minimum 2 masters will be able to
+schedule worker workloads, thus follow the same pattern as a 3 Node cluster.
+This makes the most sense for now since having `InfrastructureTopology` denote a
+halfway point between single and three might be a moot distinction for workers.
+However, we might need to revisit this as a product team might assume a
+`InfrastructureTopology: HighlyAvailable` == `3 Workers`.
 
 ### Topology Considerations
 
@@ -555,10 +582,18 @@ failover.
 2. Do we need to modify OLM to filter out deployments based on topology
    information?
 
+3. Since the focus of this feature is BareMetal for GA, we don't need to worry
+   about the [control-plane machine-set
+   operator](https://github.com/openshift/cluster-control-plane-machine-set-operator/tree/main/docs/user#overview).
+   However, we will need to revisit this so we a proper idea of the role that it
+   plays in this type of configuration.
+
 ## Test Plan
 
 - We will create a CI lane to validate install and fail over scenarios such as
   loosing a master or swaping out an arbiter node.
+- We will create a CI lane to validate upgrades, given the arbiter's role as a
+  quasi master role, we need to validate that MCO treats upgrades as expected
 - Create complimentary lanes for serial/techpreview/no-capabilities.
 - Create a lane for or some method for validating layered products.
 - CI lane for e2e conformance testing, tests that explicitly test 3 node masters
@@ -579,6 +614,10 @@ N/A
 
 ### Tech Preview -> GA
 
+- MCO Changes need to be streamlined so we don't duplicate too much between
+  master and arbiter configurations
+- OLM Needs to be update to allow operator owners to explicitly add or remove
+  support for HA Arbiter deployments
 - More testing (upgrade, downgrade, scale)
 - E2E test additions for this feature
 - Sufficient time for feedback
@@ -588,12 +627,6 @@ N/A
 - Conduct load testing
 - User facing documentation created in
   [openshift-docs](https://github.com/openshift/openshift-docs/)
-
-Before going GA we need to have a proper idea of the role that the
-[control-plane machine-set
-operator](https://github.com/openshift/cluster-control-plane-machine-set-operator/tree/main/docs/user#overview)
-plays in this type of configuration. In TechPreview this will be made `InActive`
-but it's role should be well defined for the `arbiter` before going GA.
 
 ### Removing a deprecated feature
 
