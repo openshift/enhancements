@@ -26,17 +26,11 @@ superseded-by:
 
 This enhancement describes the proposal to extend cert-manager-operator to deploy and manage the `istio-csr`
 controller. `OpenShift Service Mesh` facilitates the security of both intra-cluster and external service
-communications through mTLS. Istio-csr agent is responsible for receiving certificate signing requests for all members of the Service mesh, and signing them through cert-manager.
+communications through mTLS. istio-csr is an agent that allows Istio workload and control plane components to be secured using cert-manager. It is responsible for receiving certificate signing requests for all members of the Istio mesh, and signing them through cert-manager. cert-manager enables obtaining certificates from [various](https://docs.openshift.com/container-platform/4.15/security/cert_manager_operator/index.html#cert-manager-issuer-types_cert-manager-operator-about) certificate authorities and also ensures the validity of certificates by renewing them before they expire. `OpenShift Service Mesh` secures intra-cluster and external service connections with TLS encryption. `cert-manager` can be used to obtain the required certificates through custom resources `issuer` and `clusterissuer`. And `istio-csr` is the agent that simplifies the process of obtaining the certificates from the `cert-manager` for `OpenShift Service Mesh`. `cert-manager-operator` manages `cert-manager` and extending the operator to manage `istio-csr` will help the users to use all the solutions mentioned above effectively and easily.
 
 ## Motivation
 
-cert-manager enables obtaining certificates from [various](https://docs.openshift.com/container-platform/4.15/security/cert_manager_operator/index.html#cert-manager-issuer-types_cert-manager-operator-about)
-certificate authorities and also ensures the validity of certificates by renewing them before they expire.
-`OpenShift Service Mesh` secures intra-cluster and external service connections with TLS encryption. `cert-manager`
-can be used to obtain the required certificates through custom resources `issuer` and `clusterissuer`. And `istio-csr`
-is the agent that simplifies the process of obtaining the certificates from the `cert-manager` for
-`OpenShift Service Mesh`. `cert-manager-operator` manages `cert-manager` and extending the operator to manage
-`istio-csr` will help the users to use all the solutions mentioned above effectively and easily.
+Customers intend to use certificates issued by their own certificate authority rather than self-signed certificates, which are the default configuration for OSSM in production. This is achieved by using cert-manager as the certificate manager, requiring integration with OSSM so that certificate requests are signed and issued through cert-manager.
 
 ### User Stories
 
@@ -310,6 +304,7 @@ type TLSConfig struct {
 	CertificateDNSNames []string `json:"certificateDNSNames,omitempty"`
 
 	// IstiodCertificateDuration is the istio's certificate validity period.
+	//  Default is based on NIST 800-204A recommendations (SM-DR13). https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-204A.pdf. 
 	// +kubebuilder:default:="1h"
 	// +optional
 	IstiodCertificateDuration time.Duration `json:"istiodCertificateDuration,omitempty"`
