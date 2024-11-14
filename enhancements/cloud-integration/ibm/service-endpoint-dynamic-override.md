@@ -54,7 +54,7 @@ To realize this enhancement:
 1. The cluster administrator wishes to use private IBM Cloud endpoints.
 2. The cluster administrator identifies the services that they wish to update (ie IAM and resource controller) and identifies the endpoints for these services.
 3. The cluster administrator updates the infrastructure object to contain a list of overrides where each element is the name of the service and the endpoint to use for that service. `oc edit infrastructure  -n default cluster`
-4. After a delay the cluster administrator observes this change in all dependent components.
+4. Once the service endpoint override update has been processed/reconciled, components can act on the change (if applicable) and use in future operations (note: may need to be restarted to pick up the change).
 
 **cccmo** is an operator responsible for watching updates to the infrastructure object and perforning updates once any value(s) are set. 
 
