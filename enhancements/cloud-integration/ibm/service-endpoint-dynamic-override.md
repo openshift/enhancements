@@ -19,6 +19,8 @@ replaces:
 superseded-by:
 ---
 
+# IBM Cloud Service Endpoint Override Support
+
 ## Summary
 
 In controlled deployments in restricted network environments, support for configuring service endpoints is required. With IBM Cloud, [support](https://docs.openshift.com/container-platform/4.17/installing/installing_ibm_cloud/installing-ibm-cloud-restricted.html#access-to-ibm-service-endpoints_installing-ibm-cloud-restricted) has already been provided to specify desired service endpoints at install time. It is also desirable to be able to change the service endpoint configuration, post install. This enhancement will extend existing support and allow post install changes to be made to the service endpoint configuration.
@@ -43,7 +45,7 @@ To realize this enhancement:
 
 * Expand API definition to support defining services + endpoints within cloud provider spec for IBM
 * Modify CCCMO so that changes are reconciled from infrastructure spec to status for IBM cloud provider and cloud config
-* Evaluate components with service endpoint support (i.e. Storage Operator (CSI), Ingress Operator, MAPI) and ensure they react/respond to changes and utilize new service endpoint specification. In cases, where they do not, update them accordingly.
+* Evaluate IBM components with service endpoint support and how they will react/respond to post-install service endpoint changes.
 
 ### Workflow Description
 
@@ -74,8 +76,21 @@ type IBMCloudPlatformSpec struct {
 	// +optional
 	ServiceEndpoints []IBMCloudServiceEndpoint `json:"serviceEndpoints,omitempty"`
 }
-
 ```
+
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+n/a
+
+#### Standalone Clusters
+
+n/a
+
+#### Single-node Deployments or MicroShift
+
+n/a
 
 ### Implementation Details/Notes/Constraints
 
@@ -85,3 +100,28 @@ type IBMCloudPlatformSpec struct {
 ### Risks and Mitigations
 
 Users may cause service interruptions for their cluster should they define invalid overrides. This is mitigated by performing validation on the endpoint as there requirements are understood at time of implementation for IBM Cloud. 
+
+
+### Drawbacks
+
+n/a
+
+## Test Plan
+
+## Graduation Criteria
+
+### Dev Preview -> Tech Preview
+
+### Tech Preview -> GA
+
+### Removing a deprecated feature
+
+## Upgrade / Downgrade Strategy
+
+## Version Skew Strategy
+
+## Operational Aspects of API Extensions
+
+## Support Procedures
+
+## Alternatives
