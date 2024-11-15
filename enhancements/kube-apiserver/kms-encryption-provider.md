@@ -2,21 +2,21 @@
 title: kms-encryption-provider
 authors:
   - "@swghosh"
-reviewers:
   - "@dgrisonnet"
+reviewers:
   - "@TrilokGeer"
   - "@tkashem"
   - "@rvanderp"
 approvers:
-  - ""
+  - "@tkashem"
+api-approvers:
+  - "@JoelSpeed"
 creation-date: 2024-08-14
 last-updated: 2024-08-14
 status: implementable
 see-also:
   - "/enhancements/kube-apiserver/encrypting-data-at-datastore-layer.md"
   - "/enhancements/installer/storage-class-encrypted.md"
-api-approvers:
-  - ""
 tracking-link:
   - https://issues.redhat.com/browse/API-1684
   - https://issues.redhat.com/browse/OCPSTRAT-108
