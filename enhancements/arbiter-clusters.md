@@ -109,7 +109,7 @@ Components that we are proposing to change:
 
 | Component                                                     | Change                                                                                                          |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| [Infrastructure API](#infrastructure-api)                     | Add `HighlyAvailableArbiter` as a new value for `ControlPlaneTopology` and `InfrastructureTopology`             |
+| [Infrastructure API](#infrastructure-api)                     | Add `HighlyAvailableArbiter` as a new value for `ControlPlaneTopology`                                          |
 | [Installer](#installer-changes)                               | Update install config API to Support arbiter machine types                                                      |
 | [MCO](#mco-changes)                                           | Update validation hook to support arbiter role and add bootstrapping configurations needed for arbiter machines |
 | [Kubernetes](#kubernetes-change)                              | Update allowed `well_known_openshift_labels.go` to include new node role as an upstream carry                   |
@@ -124,7 +124,7 @@ Components that we are proposing to change:
 
 We need an authoritative flag to make it easy for components and tools to
 identify if they are running against an `arbiter` backed HA cluster. We are
-proposing adding a new `ControlPlaneTopology` and `InfrastructureTopology` key
+proposing adding a new `ControlPlaneTopology` key
 called `HighlyAvailableArbiter` to denote that the cluster is installed with an
 arbiter.
 
