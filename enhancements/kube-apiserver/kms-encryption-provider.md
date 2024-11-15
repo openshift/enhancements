@@ -72,21 +72,112 @@ Adding a new `EncryptionType` to the existing `APIServer` config:
 
 ```diff
 diff --git a/config/v1/types_apiserver.go b/config/v1/types_apiserver.go
-index 59b89388..abe1c8ae 100644
+index d815556d2..c9098024f 100644
 --- a/config/v1/types_apiserver.go
 +++ b/config/v1/types_apiserver.go
-@@ -202,6 +202,11 @@ const (
-        // aesgcm refers to a type where AES-GCM with random nonce and a 32-byte key
-        // is used to perform encryption at the datastore layer.
-        EncryptionTypeAESGCM EncryptionType = "aesgcm"
+@@ -173,6 +173,9 @@ type APIServerNamedServingCert struct {
+ 	ServingCertificate SecretNameReference `json:"servingCertificate"`
+ }
+ 
++// APIServerEncryption is used to encrypt sensitive resources on the cluster.
++// +openshift:validation:FeatureGateAwareXValidation:featureGate=KMSEncryptionProvider,rule="has(self.type) && self.type == 'KMS' ?  has(self.kms) : !has(self.kms)",message="kms config is required when encryption type is KMS, and forbidden otherwise"
++// +union
+ type APIServerEncryption struct {
+ 	// type defines what encryption type should be used to encrypt resources at the datastore layer.
+ 	// When this field is unset (i.e. when it is set to the empty string), identity is implied.
+@@ -191,9 +194,23 @@ type APIServerEncryption struct {
+ 	// +unionDiscriminator
+ 	// +optional
+ 	Type EncryptionType `json:"type,omitempty"`
 +
-+       // kms refers to a type of encryption where the encryption keys are managed
-+       // outside the control plane in a Key Management Service instance,
-+       // encryption is still performed at the datastore layer.
-+       EncryptionTypeKMS EncryptionType = "kms"
++	// kms defines the configuration for the external KMS instance that manages the encryption keys,
++	// when KMS encryption is enabled sensitive resources will be encrypted using keys managed by an
++	// externally configured KMS instance.
++	//
++	// The Key Management Service (KMS) instance provides symmetric encryption and is responsible for
++	// managing the lifecyle of the encryption keys outside of the control plane.
++	// This allows integration with an external provider to manage the data encryption keys securely.
++	//
++	// +openshift:enable:FeatureGate=KMSEncryptionProvider
++	// +unionMember
++	// +optional
++	KMS *KMSConfig `json:"kms,omitempty"`
+ }
+ 
+-// +kubebuilder:validation:Enum="";identity;aescbc;aesgcm
++// +openshift:validation:FeatureGateAwareEnum:featureGate="",enum="";identity;aescbc;aesgcm
++// +openshift:validation:FeatureGateAwareEnum:featureGate=KMSEncryptionProvider,enum="";identity;aescbc;aesgcm;KMS
+ type EncryptionType string
+ 
+ const (
+@@ -208,6 +225,11 @@ const (
+ 	// aesgcm refers to a type where AES-GCM with random nonce and a 32-byte key
+ 	// is used to perform encryption at the datastore layer.
+ 	EncryptionTypeAESGCM EncryptionType = "aesgcm"
++
++	// kms refers to a type of encryption where the encryption keys are managed
++	// outside the control plane in a Key Management Service instance,
++	// encryption is still performed at the datastore layer.
++	EncryptionTypeKMS EncryptionType = "KMS"
  )
  
  type APIServerStatus struct {
+diff --git a/config/v1/types_kmsencryption.go b/config/v1/types_kmsencryption.go
+new file mode 100644
+index 000000000..575affae6
+--- /dev/null
++++ b/config/v1/types_kmsencryption.go
+@@ -0,0 +1,50 @@
++package v1
++
++// KMSConfig defines the configuration for the KMS instance
++// that will be used with KMSEncryptionProvider encryption
++// +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'AWS' ?  has(self.aws) : !has(self.aws)",message="aws config is required when kms provider type is AWS, and forbidden otherwise"
++// +union
++type KMSConfig struct {
++	// type defines the kind of platform for the KMS provider.
++	// Available provider types are AWS only.
++	//
++	// +unionDiscriminator
++	// +kubebuilder:validation:Required
++	Type KMSProviderType `json:"type"`
++
++	// aws defines the key config for using an AWS KMS instance
++	// for the encryption. The AWS KMS instance is managed
++	// by the user outside the purview of the control plane.
++	//
++	// +unionMember
++	// +optional
++	AWS *AWSKMSConfig `json:"aws,omitempty"`
++}
++
++// AWSKMSConfig defines the KMS config specific to AWS KMS provider
++type AWSKMSConfig struct {
++	// keyARN specifies the Amazon Resource Name (ARN) of the AWS KMS key used for encryption.
++	// The value must adhere to the format `arn:aws:kms:<region>:<account_id>:key/<key_id>`, where:
++	// - `<region>` is the AWS region consisting of lowercase letters and hyphens followed by a number.
++	// - `<account_id>` is a 12-digit numeric identifier for the AWS account.
++	// - `<key_id>` is a unique identifier for the KMS key, consisting of lowercase hexadecimal characters and hyphens.
++	//
++	// +kubebuilder:validation:Required
++	// +kubebuilder:validation:XValidation:rule="self.matches('^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$') && self.size() <= 128",message="keyARN must follow the format `arn:aws:kms:<region>:<account_id>:key/<key_id>`. The account ID must be a 12 digit number and the region and key ID should consist only of lowercase hexadecimal characters and hyphens (-)."
++	KeyARN string `json:"keyARN"`
++	// region specifies the AWS region where the KMS intance exists, and follows the format
++	// `<region-prefix>-<region-name>-<number>`, e.g.: `us-east-1`.
++	// Only lowercase letters and hyphens followed by numbers are allowed.
++	//
++	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-z]{2}-[a-z]+-[0-9]+$') && self.size() <= 64",message="region must be a valid AWS region"
++	Region string `json:"region"`
++}
++
++// KMSProviderType is a specific supported KMS provider
++// +kubebuilder:validation:Enum="";AWS
++type KMSProviderType string
++
++const (
++	// AWSKMSProvider represents a supported KMS provider for use with AWS KMS
++	AWSKMSProvider KMSProviderType = "AWS"
++)
 ```
 
 The default value today is an empty string which implies identity and that no encryption is used in the cluster by default. Other possible local encryption schemes include `aescbc` and `aesgcm` which will remain as-is. Similar to how local AES encryption works, the kube-apiserver operator and openshift-apiserver operator will observe this config to apply the KMS Encryption Provider config onto kube-apiserver(s) and openshift-apiserver(s) respectively.
