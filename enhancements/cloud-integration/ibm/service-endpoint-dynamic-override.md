@@ -31,7 +31,7 @@ IBM Cloud requires this enhancement for their control plane replatforming effort
 
 ### User Stories
 
-* As an OpenShift cluster administrator, I want to update my cluster's current service endpoint configuration to point to new service endpoints.
+* As an OpenShift cluster administrator, I want to update my cluster's current service endpoint configuration to point to new service endpoints so that I can comply with administrative requirements to directs component traffic through regional or private endpoints.
  
 ### Goals
 
@@ -45,7 +45,6 @@ To realize this enhancement:
 
 * Expand API definition to support defining services + endpoints within cloud provider spec for IBM
 * Modify CCCMO so that changes are reconciled from infrastructure spec to status for IBM cloud provider and cloud config
-* Evaluate IBM components with service endpoint support and how they will react/respond to post-install service endpoint changes.
 
 ### Workflow Description
 
