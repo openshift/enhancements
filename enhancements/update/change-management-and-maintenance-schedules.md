@@ -414,20 +414,22 @@ risks and disruption when rolling out changes to their environments.
 ## Proposal
 
 ### Change Management Overview
-Establish a new, namespaced Custom Resource Definition (CRD) called `ChangeManagementPolicy` which allows cluster lifecycle
-administrators to capture their requirements for when resource(s) associated with the policy can initiate material 
-changes on the cluster. The new resource is namespaced because it will be used in both Standalone and Hosted Control
-Plane (HCP) environments. In HCP, `HostedCluster` (representing hosted control-plane information) and 
-`NodePool` (representing worker-node information) CRDs are namespaced on the management cluster. It is natural then,
-for these namespaced resources to refer to a `ChangeManagementPolicy` in the same namespace.
+We will establish two new custom Resource Definitions (CRDs) which allow cluster lifecycle
+administrators to capture their requirements for when resource(s) associated with the CRDs can initiate material 
+changes to a cluster. 
+1. `ChangeManagementPolicy` - cluster scoped resource for management of internal changes within the cluster hosting the CRD.
+2. `HostedChangeManagementPolicy` - namespaced resource, created on a management cluster, in the same namespace as a `HostedCluster`, to control changes to resources associated with that `HostedCluster`.
 
-Add a `changeManagement` stanza to several existing resources in the OpenShift ecosystem which can reference
-the new `ChangeManagementPolicy` resource to restrict when and how their associated controllers can initiate
-material changes to a cluster.
-- HCP's `HostedCluster`. Honored by HyperShift Operator and supported by underlying CAPI providers.
-- HCP's `NodePool`. Honored by HyperShift Operator and supported by underlying CAPI providers.
-- Standalone's `ClusterVersion`. Honored by Cluster Version Operator.
-- Standalone's `MachineConfigPool`. Honored by Machine Config Operator.
+The semantics of the APIs are identical other than the type of cluster they are intended to influence. 
+
+Resources subject to change management will include a `changeManagement` stanza allowing cluster
+lifecycle administrators to reference defined `[Hosted]ChangeManagementPolicy` objects. Several existing resources in 
+the OpenShift ecosystem will be updated to include support for change management to restrict when and how their 
+associated controllers can initiate material changes to a cluster.
+- HCP's `HostedCluster` can reference `HostedChangeManagementPolicy`. Honored by HyperShift Operator and supported by underlying CAPI providers.
+- HCP's `NodePool` can reference `HostedChangeManagementPolicy`. Honored by HyperShift Operator and supported by underlying CAPI providers.
+- Standalone's `ClusterVersion` can reference `ChangeManagementPolicy`. Honored by Cluster Version Operator.
+- Standalone's `MachineConfigPool` can reference `ChangeManagementPolicy`. Honored by Machine Config Operator.
 
 Changes that are not allowed to be initiated due to a change management policy will be 
 called "pending". Controllers responsible for initiating pending changes will await a permissive window 
@@ -440,21 +442,19 @@ the changes desired by the resource's associated controller. For example, in `Ma
 exact rendered configuration the controller should be working towards (during the next permissive window) vs
 the traditional OpenShift model where the "latest" rendered configuration is always the destination. 
 
-### ChangeManagementPolicy Resource
+### `[Hosted]ChangeManagementPolicy` Resource
 
 ```yaml
-kind: ChangeManagementPolicy
-metdata:
-  # ChangeManagementPolicies are namespaced resources. They will normally reside in the 
-  # namespace associated with the controller initiating material changes. 
-  # For example, in Standalone namespace/openshift-machine-config-operator for the MCO and 
-  # namespace/openshift-cluster-version for the CVO. 
-  # For HCP, the ChangeManagementPolicies for will reside in the same namespace as the 
-  # HostedCluster resource.
-  # This namespace can be overridden in resources being constrained by a ChangeManagementPolicy
-  # but RBAC for the resource's controller must permit reading the object from the non-default 
-  # namespace.
+# HostedChangeManagementPolicy for hosted clusters (referenced by HostedCluster and NodePool)
+# ChangeManagementPolicy for internal policies of a c cluster (referenced by CVO and MCP).
+kind: "[Hosted]ChangeManagementPolicy"
+metadata:
+
+  # Only HostedChangeManagementPolicy are namespaced. This
+  # field is NOT present for ChangeManagementPolicy.
   namespace: openshift-machine-config-operator
+  
+  # The name of the policy, which will be referenced by changeManagement stanzas.
   name: example-policy
 
 spec:
@@ -492,7 +492,7 @@ status:
   lastPermissiveDate: <datetime>
 
   conditions:
-  # If a ChangeManagementPolicy has not calculated yet, it will not
+  # If a [Hosted]ChangeManagementPolicy has not calculated yet, it will not
   # have Ready=True.
   # "reason" and "message" should be set if not ready.
   - type: Ready
@@ -519,12 +519,12 @@ but cannot provide a maintenance schedule (e.g. viable windows are too unpredict
 
 #### Permissive Strategy
 A policy using the permissive strategy will always suggest a permissive window. A cluster lifecycle administrator
-may want to toggle a `ChangeManagementPolicy` from the `Restrictive` to `Permissive` strategy, and back again,
+may want to toggle a `[Hosted]ChangeManagementPolicy` from the `Restrictive` to `Permissive` strategy, and back again,
 as a means to implementing their own change management window mechanism.
 
 ### Resources Supporting Change Management
 
-Resources which support a reference to a `ChangeManagementPolicy` are said to support change management.
+Resources which support a reference to a `[Hosted]ChangeManagementPolicy` are said to support change management.
 Resources which support change management will implement a `spec.changeManagement` stanza. These stanzas
 must support AT LEAST the following fields:
 
@@ -547,13 +547,12 @@ spec:
     # This field is modeled on HCP's existing HostedCluster.spec.pausedUntil which uses a string. 
     pausedUntil: <datetime|bool>str  
     
-    # If not overridden with disabledUntil / pausedUntil, a reference to the ChangeManagementPolicy
+    # If not overridden with disabledUntil / pausedUntil, a reference to the [Hosted]ChangeManagementPolicy
     # to determine whether material changes can be initiated.
     policy:
-      # Namespace is optional. If not specified, the controller assumes the namespace in
-      # which the controller is running.
-      namespace: openshift-machine-config-operator
-      # The name of the ChangeManagementPolicy.
+      # The name of the [Hosted]ChangeManagementPolicy. ClusterVersion and MachineConfigPool can
+      # reference ChangeManagementPolicy. HostedCluster and NodePool can reference 
+      # HostedChangeManagementPolicy.
       name: example-policy
 ```
 
@@ -566,7 +565,7 @@ be initiated) or unpaused (i.e. it is a permissive window where material changes
 - `changeManagement.pausedUntil: "<bool|date>"`: When `pausedUntil: "true"` or `pausedUntil: "<future-date>"`, 
   changes must be paused and the controller must stop initiating material changes. `pausedUntil` overrides
   `policy` when it suggests changes should be paused.
-- `changeManagement.policy`: An optional reference to a `ChangeManagementPolicy` object. If neither `disabledUntil`
+- `changeManagement.policy`: An optional reference to a `[Hosted]ChangeManagementPolicy` object. If neither `disabledUntil`
   or `pausedUntil` overrides it, the permissive or restrictive state suggested by the policy object will 
   inform the controller whether material changes can be initiated.
 
@@ -586,7 +585,7 @@ Each resource which exposes `spec.changeManagement` must also expose change mana
 to explain its current impact. Common user interfaces for aggregating and displaying progress of these underlying 
 resources (e.g. OpenShift web console) must be updated to proxy that status information to end users.
 
-You may note that several of the fields in `status.changeManagement` can be derived directly from `ChangeManagementPolicy.status`
+You may note that several of the fields in `status.changeManagement` can be derived directly from `[Hosted]ChangeManagementPolicy.status`
 (unless overridden by `spec.changeManagement.pausedUntil` or `spec.changeManagement.disabledUntil`). This simplifies
 the work of each controller which supports change management - they simply need to observe `ChanageManagementPolicy.status`
 and the `ChanageManagmentPolicy` controller does the heavy lifting of interpreting policy (e.g. interpreting recurrence
@@ -611,7 +610,7 @@ status:
     message: "human readable summary"
     
     # Last recorded permissive window by THIS MCP (this may be different from a recently
-    # configured ChangeManagementPolicy's lastPermissiveDate).
+    # configured [Hosted]ChangeManagementPolicy's lastPermissiveDate).
     lastPermissiveDate: <datetime>
   conditions:
   - type: ChangesPaused
@@ -942,7 +941,7 @@ giving the cluster lifecycle administrator high level controls on exactly when i
 
 #### OCM Managed Profiles
 OpenShift Cluster Manager (OCM) should expose a user interface allowing users to manage their change management policy.
-Standard Fleet clusters will expose the option to configure the control-plane and worker-node `ChangeManagementPolicy`
+Standard Fleet clusters will expose the option to configure the control-plane and worker-node `[Hosted]ChangeManagementPolicy`
 objects with the `MaintenanceSchedule` strategy - including permit and exclude times.
 
 - Service Delivery will reserve the right to disable this policy for emergency corrective actions.
@@ -957,7 +956,7 @@ and HostedCluster and NodePool (for HCP profiles).
 
 #### MaintenanceSchedule Strategy Configuration
 
-When a `ChangeManagementPolicy` is defined to use the `MaintenanceSchedule` strategy,
+When a `[Hosted]ChangeManagementPolicy` is defined to use the `MaintenanceSchedule` strategy,
 a `maintenanceSchedule` stanza should also be provided to configure the strategy
 (if it is not, the policy is functionally identical to `Restrictive`).
 
