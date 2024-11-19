@@ -8,12 +8,12 @@ autonumber
 actor User
 participant "OpenShift API Server" as API
 participant "cert-manager-operator" as Operator
-participant "istio-csr-agent" as IstioCSROperand
-participant "Istiod" as Istiod
 
 User -> API : Delete istiocsr CR
-API -> Operator : Reconcile istiocsr event
-Operator -> Operator : Remove all resources\ncreated foristio-csr deployment
-Istiod ->x IstioCSROperand : All new certificate requests will fail.
+API -> Operator : Reconcile istiocsr delete event
+note over Operator
+stop managing resources created
+for istio-csr agent installation.
+endnote
 
 @enduml

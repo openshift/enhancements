@@ -9,7 +9,7 @@ approvers:
 api-approvers:
   - "@tgeer" ## approver for cert-manager component
 creation-date: 2024-01-22
-last-updated: 2024-05-13
+last-updated: 2024-11-19
 tracking-link:
   - https://issues.redhat.com/browse/CM-234
 see-also:
@@ -24,46 +24,64 @@ superseded-by:
 
 ## Summary
 
-This enhancement describes the proposal to extend cert-manager-operator to deploy and manage the `istio-csr`
-controller. `OpenShift Service Mesh` facilitates the security of both intra-cluster and external service
-communications through mTLS. istio-csr is an agent that allows Istio workload and control plane components to be secured using cert-manager. It is responsible for receiving certificate signing requests for all members of the Istio mesh, and signing them through cert-manager. cert-manager enables obtaining certificates from [various](https://docs.openshift.com/container-platform/4.15/security/cert_manager_operator/index.html#cert-manager-issuer-types_cert-manager-operator-about) certificate authorities and also ensures the validity of certificates by renewing them before they expire. `OpenShift Service Mesh` secures intra-cluster and external service connections with TLS encryption. `cert-manager` can be used to obtain the required certificates through custom resources `issuer` and `clusterissuer`. And `istio-csr` is the agent that simplifies the process of obtaining the certificates from the `cert-manager` for `OpenShift Service Mesh`. `cert-manager-operator` manages `cert-manager` and extending the operator to manage `istio-csr` will help the users to use all the solutions mentioned above effectively and easily.
+This enhancement describes the proposal to extend cert-manager-operator to deploy and manage the `istio-csr` agent with
+a dedicated controller. `OpenShift Service Mesh` facilitates the security of both intra-cluster and external service
+communications through mTLS. istio-csr is an agent that allows Istio workload and control plane components to be secured
+using cert-manager. It is responsible for receiving certificate signing requests for all members of the Istio mesh, and
+signing them through cert-manager. cert-manager enables obtaining certificates from [various](https://docs.openshift.com/container-platform/4.15/security/cert_manager_operator/index.html#cert-manager-issuer-types_cert-manager-operator-about) certificate authorities
+and also ensures the validity of certificates by renewing them before they expire. `OpenShift Service Mesh` secures
+intra-cluster and external service connections with TLS encryption. `cert-manager` can be used to obtain the required
+certificates through custom resources `issuer` and `clusterissuer`. And `istio-csr` is the agent that simplifies the
+process of obtaining the certificates from the `cert-manager` for `OpenShift Service Mesh`. `cert-manager-operator`
+manages `cert-manager` and extending the operator to manage `istio-csr` agent will help the users to use all the solutions
+mentioned above effectively and easily.
 
 ## Motivation
 
-Customers intend to use certificates issued by their own certificate authority rather than self-signed certificates, which are the default configuration for OSSM in production. This is achieved by using cert-manager as the certificate manager, requiring integration with OSSM so that certificate requests are signed and issued through cert-manager.
+Customers intend to use certificates issued by their own certificate authority rather than self-signed certificates,
+which are the default configuration for OSSM in production. This is achieved by using cert-manager as the certificate
+manager, requiring integration with OSSM so that certificate requests are signed and issued through cert-manager.
 
 ### User Stories
 
-- As an OpenShift user, I want to have an option to dynamically enable `istio-csr`, so that it can be used only
+- As an OpenShift user, I want to have an option to dynamically deploy `istio-csr` agent, so that it can be used only
   when required by creating the custom resource.
-- As an OpenShift user, I want to have an option to dynamically configure `istio-csr`, so that only the required
+- As an OpenShift user, I want to have an option to dynamically configure `istio-csr` agent, so that only the required
   features can be enabled by updating the custom resource.
-- As an OpenShift user, I should be able to disable `istio-csr` when not required by removing the custom resource,
-  and controller should cleanup all resources created for the `istio-csr` deployment.
-- As an OpenShift user, I should be able to install `istio-csr` in the upgrade cluster where istiod control plane
-  is active and should be able to update the certificate endpoint to `istio-csr` endpoint.
+- As an OpenShift user, I should be able to remove `istio-csr` agent when not required by removing the custom resource,
+  and controller should cleanup all resources created for the `istio-csr` agent deployment.
+- As an OpenShift user, I should be able to install `istio-csr` agent in the upgrade cluster where istiod control plane
+  is active and should be able to update the certificate endpoint to `istio-csr` agent endpoint.
 - As an OpenShift user, I want to have an option to dynamically enable monitoring for the `istio-csr` project and
   to use the OpenShift monitoring solution when required.
 
 ### Goals
 
-- `cert-manager-operator` to be extended to manage `istio-csr` along with currently managed `cert-manager`.
-- New custom resource `istiocsr` to be made available to enable, configure and disable deployment.
+- `cert-manager-operator` to be extended to manage `istio-csr` agent along with currently managed `cert-manager`.
+- New custom resource(CR) `istiocsr` to be made available to install, configure and uninstall deployment.
 
 ### Non-Goals
 
-- `istio-csr` can be used only with supported version of `OpenShift Service Mesh`. Please refer `Version Skew Strategy`
+- `istio-csr` agent can be used only with supported version of `OpenShift Service Mesh`. Please refer `Version Skew Strategy`
   section for more details.
 
 ## Proposal
 
-`istio-csr` will be managed by `cert-manager-operator` which can be enabled and configured by a user as and
-when required, using new custom resource which will be made available for configuring `istio-csr`.
+**Note:**
+Throughout the document, the following terminology means.
+- `istio-csr` agent is the operand managed by the cert-manager operator.
+- `istio-csr` controller is the dedicated controller in cert-manager operator managing the `istio-csr` agent deployment.
+- `istiocsr` custom resource is for interacting with `istio-csr` controller to install, configure and uninstall the
+  `istio-csr` agent deployment.
 
-A new controller will be added to `cert-manager-operator` to manage and maintain the `istio-csr` deployment in
+`istio-csr` agent will be installed and managed by `cert-manager-operator`. A new custom resource is defined to configure
+the `istio-csr` agent. The `istiocsr` CR can be added day2 to install `istio-csr` agent post the  installation or upgrade
+of cert-manager operator on the existing OpenShift clusters.
+
+A new controller will be added to `cert-manager-operator` to manage and maintain the `istio-csr` agent deployment in
 desired state which can be monitored by user through the status sub-resource of the new custom resource.
 
-`istio-csr` controller will make use of static manifest templates for creating below resources required for
+`istio-csr` agent controller will make use of static manifest templates for creating below resources required for
 successfully deploying `istio-csr` agent. Please refer `Implementation Details/Notes/Constraints` section for more details.
 * `certificate.cert-manager.io`
 * `clusterissuer.cert-manager.io`
@@ -78,48 +96,54 @@ successfully deploying `istio-csr` agent. Please refer `Implementation Details/N
 * `rolebinding.rbac.authorization.k8s.io`
 * `serviceaccount`
 
-`istio-csr` CR object will be a singleton object, must be named `default` and an OpenShift user will have to
-create the same for enabling the deployment. `istio-csr` will be deployed in the namespace where the CR object is created.
+Each of the resource created for `istio-csr` agent deployment will have below set of labels added.
+* `app: cert-manager-istio-csr`
+* `app.kubernetes.io/name: cert-manager-istio-csr`
+* `app.kubernetes.io/instance: cert-manager-istio-csr`
+* `app.kubernetes.io/version: "v0.12.0"`
+* `app.kubernetes.io/managed-by: cert-manager-operator`
+* `app.kubernetes.io/part-of: cert-manager-operator`
 
-When `istiocsr` custom resource is created without defining `issuerref`, the operator will create a `ClusterIssuer` in the
-`cert-manager` namespace using a self-signed `Issuer`, which will act as a root CA. And the `ClusterIssuer` will be used to
-create an `Issuer` an intermediate CA, in the istio-csr deployed namespace and will used to obtain certificates for gRPC
-service made available for `OpenShift Service Mesh` and also for issuing the certificates requested by `OpenShift Service
-Mesh`. The `Issuer` in the istio-csr deployed namespace will be used for obtaining the signed certificates requested by 
-the `OpenShift Service Mesh`.
+Refer below links for more information on the labels used
+- [Guidelines for Labels and Annotations for OpenShift applications](https://github.com/redhat-developer/app-labels/blob/master/labels-annotation-for-openshift.adoc)
+- [Well-Known Labels, Annotations and Taints](https://kubernetes.io/docs/reference/labels-annotations-taints/)
 
-Configurations made available in the spec of `istiocsr` custom resource are passed as command line arguments to `istio-csr`
-agent and updating these configurations would cause new rollout of the `istio-csr` deployment, which means a new pod will
-be created and old pod will terminated resulting in `istio-csr` restart.
+`istiocsr` CR object is a singleton object and is enforced in CRD to have the name as `default`. `istio-csr` agent will
+be deployed in the namespace where the CR object is created.
 
-When an OpenShift user deletes `istiocsr` CR object `istio-csr` agent deployment will be deleted and all the
-other resources created will also be cleaned up, including the `clusterissuer` and `issuer` objects if created by the
-controller.
+Configurations made available in the spec of `istiocsr` CR are passed as command line arguments to `istio-csr` agent and
+updating these configurations would cause new rollout of the `istio-csr` agent deployment, which means a new pod will be
+created and old pod will terminate resulting in `istio-csr` agent restart.
+All configurations can be updated on-demand, except for below which can be configured only while creating the `istiocsr`
+CR, which is enforced in the CRD using CEL validations.
+- `.spec.istioCSRConfig.certmanager.issuerRef`
+- `.spec.istioCSRConfig.istiodTLSConfig.privateKeySize`
+- `.spec.istioCSRConfig.server.certificateKeySize`
+- `.spec.istioCSRConfig.server.signatureAlgorithm`
+- `.spec.istioCSRConfig.istio.revisions`
+- `.spec.istioCSRConfig.istio.namespace`
+
+When an OpenShift user deletes `istiocsr` CR object, `istio-csr` controller will stop managing all the resources created
+for installing `istio-csr` agent and user will manually clean up the resources. Please refer `Operational Aspects of API Extensions`
+section for command to list all the resources.
+
+`istiocsr` CR status sub-resource will be used for updating the status of the `istio-csr` agent installation, any error
+encountered while creating the required resources or the reconciling the state.
 
 A fork of [upstream](https://github.com/cert-manager/istio-csr) `istio-csr` will be created [downstream](https://github.com/openshift/cert-manager-istio-csr)
 for better version management.
 
 ### Workflow Description
 
-- Enable istio-csr deployment
-  - An OpenShift user enables `istio-csr` by creating the new custom resource made available for configuring
-  `istio-csr`.
-  - `istio-csr` controller based on the configuration in CR
-    - Creates below `Issuers` when user does not provide `issuerref` to be used by `istio-csr` for obtaining the certificates.
-      - Creates an `ClusterIssuer` in `cert-manager` namespace which acts as root CA for obtaining the
-        CA certificate for `istio-csr` use case.
-      - Creates an `Issuer` in `istio-system` namespace which is an intermediate CA signed by `ClusterIssuer`
-        root CA.
-    - Deploys istio-csr agent in `istio-system` namespace.
+- Enable `istio-csr` controller
+  - An OpenShift user enables `istio-csr` controller by creating the `istiocsr` CR.
+  - `istio-csr` controller based on the configuration in `istiocsr` CR, deploys `istio-csr` agent in the CR created
+    namespace.
 
 ![alt text](./istio-csr-create.png).
 
-- Disable istio-csr deployment
-  - An OpenShift user disables `istio-csr` by deleting the new custom resource made available for configuring
-    `istio-csr`.
-  - `istio-csr` controller will remove all the resources created for deploying `istio-csr` agent.
-    - `istio-csr` agent deployment will be removed.
-    - GRPC CertificateRequest endpoint will be inaccessible and any new certificate request will fail.
+- Disable `istio-csr` controller
+  - An OpenShift user disables `istio-csr` controller by deleting the `istiocsr` CR.
 
 ![alt text](./istio-csr-delete.png).
 
@@ -257,13 +281,14 @@ type IstiodTLSConfig struct {
 	CertificateRenewBefore time.Duration `json:"certificateRenewBefore,omitempty"`
 
 	// privateKeySize is the key size to be for RSAKey.
+	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="privateKeySize is immutable once set"
 	// +kubebuilder:default:=2048
 	// +optional
 	PrivateKeySize int32 `json:"privateKeySize,omitempty"`
 }
 
 // ServerConfig is for configuring the server endpoint used by istio
-// for ontaining the certificates.
+// for obtaining the certificates.
 type ServerConfig struct {
 	// Address to serve istio-csr gRPC service.
 	// +kubebuilder:default:="0.0.0.0"
@@ -277,6 +302,7 @@ type ServerConfig struct {
 
 	// CertificateKeySize is the server's serving certificate's key size.
 	// +kubebuilder:default:=2048
+	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="certificateKeySize is immutable once set"
 	// +optional
 	CertificateKeySize int32 `json:"certificateKeySize,omitempty"`
 
@@ -284,6 +310,7 @@ type ServerConfig struct {
 	// private keys. At present only RSA and ECDSA are supported.
 	// +kubebuilder:default:="RSA"
 	// +kubebuilder:validation:Enum:="RSA";"ECDSA"
+	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="signatureAlgorithm is immutable once set"
 	// +optional
 	SignatureAlgorithm string `json:"signatureAlgorithm,omitempty"`
 
@@ -300,11 +327,13 @@ type IstioConfig struct {
 	// Changing this field will modify the DNS names that will be requested for
 	// the istiod certificate.
 	// +kubebuilder:default:=["default"]
+	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="revisions is immutable once set"
 	// +optional
 	Revisions []string `json:"revisions,omitempty"`
 
 	// namespace of the istio control-plane. In the same namespace issuer will be created
 	// used for obtaining the serving certificates.
+	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="namespace is immutable once set"
 	// +required
 	Namespace string `json:"namespace,omitempty"`
 }
@@ -353,394 +382,275 @@ None
 
 ### Implementation Details/Notes/Constraints
 
-Below static manifests are used for creating `istio-csr` required resources when enabled.
-1. A ClusterIssuer for istio-csr which will act as the Root CA certificate. ClusterIssuer will be created in
-   `cert-manager` namespace since `cert-manager` will look for referenced secrets in its own namespace.
-```yaml
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: istio-csr-selfsigned-issuer
-  namespace: cert-manager
-spec:
-  selfSigned: {}
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: istio-csr-root-ca
-  namespace: cert-manager
-spec:
-  isCA: true
-  duration: 21600h # 900d
-  secretName: istio-csr-root-ca
-  commonName: istio-csr-root-ca
-  issuerRef:
-    name: istio-csr-selfsigned-issuer
-    kind: Issuer
-    group: cert-manager.io
----
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  generateName: istio-csr-cluster-issuer-
-spec:
-  ca:
-    secretName: istio-csr-root-ca
-```
+Below are the example static manifests used for creating required resources for installing `istio-csr` agent.
+1. Service for creating istio-csr grpc server, for serving CertificateRequests endpoint.
+   ```yaml
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: cert-manager-istio-csr
+     namespace: istio-system
+     labels:
+       app: cert-manager-istio-csr
+   spec:
+     type: ClusterIP
+     ports:
+     - port: 443
+       targetPort: 6443
+       protocol: TCP
+       name: grpc
+     selector:
+       app: cert-manager-istio-csr
+   ```
 
-2. An intermediate CA signed by the Root CA in the previous step will act as the CA will be referenced in istio-csr CR
-   for obtaining the certificates for `OpenShift Service Mesh`.
-```yaml
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: istio-csr-ca
-  namespace: istio-system
-spec:
-  isCA: true
-  duration: 21600h
-  secretName: istio-csr-ca
-  commonName: istio-csr-ca
-  issuerRef:
-    name: istio-csr-cluster-issuer
-    kind: ClusterIssuer
-    group: cert-manager.io
----
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: istio-csr-issuer
-  namespace: istio-system
-spec:
-  ca:
-    secretName: istio-csr-ca
-```
+2. ServiceAccount required by the agent, which will be associated with the required ClusterRole and
+   Roles in next step.
+   ```yaml
+   apiVersion: v1
+   kind: ServiceAccount
+   metadata:
+     labels:
+       app: cert-manager-istio-csr
+     name: cert-manager-istio-csr
+     namespace: istio-system
+   ```
 
-3. Resources required for deploying istio-csr agent.
-  1. `istio-system` namespace, where all the istio-csr required resources will be created.
-     ```yaml
-     apiVersion: v1
-     kind: Namespace
-     metadata:
-       name: istio-system
-     ```
+3. ClusterRoles and Roles required by istio-csr.
+   ```yaml
+   ## required for creating ConfigMap with the CA in selected namespaces
+   ## by istio-csr agent.
+   kind: ClusterRole
+   apiVersion: rbac.authorization.k8s.io/v1
+   metadata:
+     name: cert-manager-istio-csr
+     labels:
+       app: cert-manager-istio-csr
+   rules:
+   - apiGroups:
+     - ""
+     resources:
+     - "configmaps"
+     verbs: ["get", "list", "create", "update", "watch"]
+   - apiGroups:
+     - ""
+     resources:
+     - "namespaces"
+     verbs: ["get", "list", "watch"]
+   - apiGroups:
+     - "authentication.k8s.io"
+     resources:
+     - "tokenreviews"
+     verbs:
+     - "create"
+   ```
 
-  2. Service for creating istio-csr grpc server, for serving CertificateRequests endpoint.
-     ```yaml
-     apiVersion: v1
-     kind: Service
-     metadata:
-       name: cert-manager-istio-csr
-       namespace: istio-system
-       labels:
-         app: cert-manager-istio-csr
-     spec:
-       type: ClusterIP
-       ports:
-       - port: 443
-         targetPort: 6443
-         protocol: TCP
-         name: grpc
-       selector:
-         app: cert-manager-istio-csr
-     ```
-
-  3. Service for supporting metrics.
-     ```yaml
-     apiVersion: v1
-     kind: Service
-     metadata:
-       name: cert-manager-istio-csr-metrics
-       namespace: istio-system
-       labels:
-         app: cert-manager-istio-csr
-     spec:
-       type: ClusterIP
-       ports:
-       - port: 9402
-         targetPort: 9402
-         protocol: TCP
-         name: metrics
-       selector:
-         app: cert-manager-istio-csr
-     ```
-
-  4. ServiceMonitor resource to monitor and collect metrics of istio-csr.
-     ```yaml
-     apiVersion: monitoring.coreos.com/v1
-     kind: ServiceMonitor
-     metadata:
-       name: cert-manager-istio-csr
-       namespace: istio-system
-       labels:
-         app: cert-manager-istio-csr
-         prometheus: default
-     spec:
-       jobLabel: cert-manager-istio-csr
-       selector:
-         matchLabels:
-           app: cert-manager-istio-csr-metrics
-       namespaceSelector:
-         matchNames:
-           - cert-manager
-       endpoints:
-       - targetPort: 9402
-         path: "/metrics"
-         interval: 10s
-         scrapeTimeout: 5s
-     ```
-
-  5. ServiceAccount required by the agent, which will be associated with the required ClusterRole and
-     Roles in next step.
-     ```yaml
-     apiVersion: v1
-     kind: ServiceAccount
-     metadata:
-       labels:
-         app: cert-manager-istio-csr
-       name: cert-manager-istio-csr
-       namespace: istio-system
-     ```
-
-  6. ClusterRoles and Roles required by istio-csr.
-     ```yaml
-     ## required for creating ConfigMap with the CA in selected namespaces
-     ## by istio-csr agent.
+   ```yaml
+   kind: ClusterRoleBinding
+   apiVersion: rbac.authorization.k8s.io/v1
+   metadata:
+     labels:
+       app: cert-manager-istio-csr
+     generateName: cert-manager-istio-csr-
+   roleRef:
+     apiGroup: rbac.authorization.k8s.io
      kind: ClusterRole
-     apiVersion: rbac.authorization.k8s.io/v1
-     metadata:
-       name: cert-manager-istio-csr
-       labels:
-         app: cert-manager-istio-csr
-     rules:
-     - apiGroups:
-       - ""
-       resources:
-       - "configmaps"
-       verbs: ["get", "list", "create", "update", "watch"]
-     - apiGroups:
-       - ""
-       resources:
-       - "namespaces"
-       verbs: ["get", "list", "watch"]
-     - apiGroups:
-       - "authentication.k8s.io"
-       resources:
-       - "tokenreviews"
-       verbs:
-       - "create"
-     
-     ```
+     name: cert-manager-istio-csr
+   subjects:
+   - kind: ServiceAccount
+     name: cert-manager-istio-csr
+     namespace: istio-system
+   ```
 
-     ```yaml
-     kind: ClusterRoleBinding
-     apiVersion: rbac.authorization.k8s.io/v1
-     metadata:
-       labels:
-         app: cert-manager-istio-csr
-       generateName: cert-manager-istio-csr-
-     roleRef:
-       apiGroup: rbac.authorization.k8s.io
-       kind: ClusterRole
-       name: cert-manager-istio-csr
-     subjects:
-     - kind: ServiceAccount
-       name: cert-manager-istio-csr
-       namespace: istio-system
-     ```
+   ```yaml
+   ## required for creating CertificateRequests.
+   kind: Role
+   apiVersion: rbac.authorization.k8s.io/v1
+   metadata:
+     name: cert-manager-istio-csr
+     namespace: istio-system
+     labels:
+       app: cert-manager-istio-csr
+   rules:
+   - apiGroups:
+     - "cert-manager.io"
+     resources:
+     - "certificaterequests"
+     verbs:
+     - "get"
+     - "list"
+     - "create"
+     - "update"
+     - "delete"
+     - "watch"
+   - apiGroups: [""]
+     resources: ["events"]
+     verbs: ["create"]
+   ```
 
-     ```yaml
-     ## required for creating CertificateRequests.
+   ```yaml
+   kind: RoleBinding
+   apiVersion: rbac.authorization.k8s.io/v1
+   metadata:
+     name: cert-manager-istio-csr
+     namespace: istio-system
+     labels:
+       app: cert-manager-istio-csr
+   roleRef:
+     apiGroup: rbac.authorization.k8s.io
      kind: Role
-     apiVersion: rbac.authorization.k8s.io/v1
-     metadata:
-       name: cert-manager-istio-csr
-       namespace: istio-system
-       labels:
-         app: cert-manager-istio-csr
-     rules:
-     - apiGroups:
-       - "cert-manager.io"
-       resources:
-       - "certificaterequests"
-       verbs:
-       - "get"
-       - "list"
-       - "create"
-       - "update"
-       - "delete"
-       - "watch"
-     - apiGroups: [""]
-       resources: ["events"]
-       verbs: ["create"]
-     ```
+     name: cert-manager-istio-csr
+   subjects:
+   - kind: ServiceAccount
+     name: cert-manager-istio-csr
+     namespace: istio-system
+   ```
 
-     ```yaml
-     kind: RoleBinding
-     apiVersion: rbac.authorization.k8s.io/v1
-     metadata:
-       name: cert-manager-istio-csr
-       namespace: istio-system
-       labels:
-         app: cert-manager-istio-csr
-     roleRef:
-       apiGroup: rbac.authorization.k8s.io
-       kind: Role
-       name: cert-manager-istio-csr
-     subjects:
-     - kind: ServiceAccount
-       name: cert-manager-istio-csr
-       namespace: istio-system
-     ```
+   ```yaml
+   kind: Role
+   apiVersion: rbac.authorization.k8s.io/v1
+   metadata:
+     labels:
+       app: cert-manager-istio-csr
+     name: cert-manager-istio-csr-leases
+     namespace: istio-system
+   rules:
+   - apiGroups:
+     - "coordination.k8s.io"
+     resources:
+     - "leases"
+     verbs:
+     - "get"
+     - "create"
+     - "update"
+     - "watch"
+     - "list"
+   ```
 
-     ```yaml
+   ```yaml
+   kind: RoleBinding
+   apiVersion: rbac.authorization.k8s.io/v1
+   metadata:
+     name: cert-manager-istio-csr-leases
+     namespace: istio-system
+     labels:
+       app: cert-manager-istio-csr
+   roleRef:
+     apiGroup: rbac.authorization.k8s.io
      kind: Role
-     apiVersion: rbac.authorization.k8s.io/v1
-     metadata:
-       labels:
-         app: cert-manager-istio-csr
-       name: cert-manager-istio-csr-leases
-       namespace: istio-system
-     rules:
-     - apiGroups:
-       - "coordination.k8s.io"
-       resources:
-       - "leases"
-       verbs:
-       - "get"
-       - "create"
-       - "update"
-       - "watch"
-       - "list"
-     ```
+     name: cert-manager-istio-csr-leases
+   subjects:
+   - kind: ServiceAccount
+     name: cert-manager-istio-csr
+     namespace: istio-system
+   ```
 
-     ```yaml
-     kind: RoleBinding
-     apiVersion: rbac.authorization.k8s.io/v1
-     metadata:
-       name: cert-manager-istio-csr-leases
-       namespace: istio-system
-       labels:
-         app: cert-manager-istio-csr
-     roleRef:
-       apiGroup: rbac.authorization.k8s.io
-       kind: Role
-       name: cert-manager-istio-csr-leases
-     subjects:
-     - kind: ServiceAccount
-       name: cert-manager-istio-csr
-       namespace: istio-system
-     ```
+4. Certificate required by the istiod.
+   ```yaml
+   ## certificate required by the istiod.
+   apiVersion: cert-manager.io/v1
+   kind: Certificate
+   metadata:
+     name: istiod
+     namespace: istio-system
+     labels:
+       app: cert-manager-istio-csr
+   spec:
+     commonName: istiod.istio-system.svc
+     dnsNames:
+     - istiod-basic.istio-system.svc
+     uris:
+     - spiffe://cluster.local/ns/istio-system/sa/istiod-service-account
+     secretName: istiod-tls
+     duration: 1h
+     renewBefore: 30m
+     privateKey:
+       rotationPolicy: Always
+       algorithm: RSA
+       size: 2048
+     revisionHistoryLimit: 1
+     issuerRef:
+       name: istio-csr-issuer
+       kind: Issuer
+       group: cert-manager.io
+   ```
 
-  7. Certificate required by the istiod.
-     ```yaml
-     ## certificate required by the istiod.
-     apiVersion: cert-manager.io/v1
-     kind: Certificate
-     metadata:
-       name: istiod
-       namespace: istio-system
-       labels:
+5. istio-csr deployment.
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: cert-manager-istio-csr
+     namespace: istio-system
+     labels:
+       app: cert-manager-istio-csr
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
          app: cert-manager-istio-csr
-     spec:
-       commonName: istiod.istio-system.svc
-       dnsNames:
-       - istiod-basic.istio-system.svc
-       uris:
-       - spiffe://cluster.local/ns/istio-system/sa/istiod-service-account
-       secretName: istiod-tls
-       duration: 1h
-       renewBefore: 30m
-       privateKey:
-         rotationPolicy: Always
-         algorithm: RSA
-         size: 2048
-       revisionHistoryLimit: 1
-       issuerRef:
-         name: istio-csr-issuer
-         kind: Issuer
-         group: cert-manager.io
-     ```
-
-  8. istio-csr deployment.
-     ```yaml
-     apiVersion: apps/v1
-     kind: Deployment
-     metadata:
-       name: cert-manager-istio-csr
-       namespace: istio-system
-       labels:
-         app: cert-manager-istio-csr
-     spec:
-       replicas: 1
-       selector:
-         matchLabels:
+     template:
+       metadata:
+         labels:
            app: cert-manager-istio-csr
-       template:
-         metadata:
-           labels:
-             app: cert-manager-istio-csr
-         spec:
-           serviceAccountName: cert-manager-istio-csr
-           containers:
-           - name: cert-manager-istio-csr
-             image: "quay.io/jetstack/cert-manager-istio-csr:v0.7.1"
-             imagePullPolicy: IfNotPresent
-             ports:
-             - containerPort: 6443
-             - containerPort: 9402
-             readinessProbe:
-               httpGet:
-                 port: 6060
-                 path: /readyz
-               initialDelaySeconds: 3
-               periodSeconds: 7
-             command: ["cert-manager-istio-csr"]
-             args:
-               - "--log-level=1"
-               - "--metrics-port=9402"
-               - "--readiness-probe-path=/readyz"
-               - "--readiness-probe-port=6060"
-     
-               # cert-manager
-               - "--certificate-namespace=istio-system"
-               - "--issuer-group=cert-manager.io"
-               - "--issuer-kind=Issuer"
-               - "--issuer-name=istio-csr-issuer"
-               - "--preserve-certificate-requests=false"
-     
-               # AdditionalAnnotations
-     
-               # tls
-               - "--root-ca-file=/var/run/secrets/istio-csr/ca.crt"
-               - "--serving-certificate-dns-names=cert-manager-istio-csr.istio-system.svc"
-               - "--serving-certificate-duration=1h"
-               - "--serving-certificate-key-size=2048"
-               - "--serving-signature-algorithm=RSA"
-               - "--trust-domain=cluster.local"
-     
-               # server
-               - "--max-client-certificate-duration=1h"
-               - "--serving-address=0.0.0.0:6443"
-     
-               # controller
-               - "--configmap-namespace-selector=maistra.io/member-of=istio-system"
-               - "--leader-election-namespace=istio-system"
-             volumeMounts:
-               - mountPath: /var/run/secrets/istio-csr
-                 name: root-ca
-           volumes:
-           - name: root-ca
-             secret:
-               secretName: istio-csr-ca
-     ```
+       spec:
+         serviceAccountName: cert-manager-istio-csr
+         containers:
+         - name: cert-manager-istio-csr
+           image: "quay.io/jetstack/cert-manager-istio-csr:v0.7.1"
+           imagePullPolicy: IfNotPresent
+           ports:
+           - containerPort: 6443
+           - containerPort: 9402
+           readinessProbe:
+             httpGet:
+               port: 6060
+               path: /readyz
+             initialDelaySeconds: 3
+             periodSeconds: 7
+           command: ["cert-manager-istio-csr"]
+           args:
+             - "--log-level=1"
+             - "--metrics-port=9402"
+             - "--readiness-probe-path=/readyz"
+             - "--readiness-probe-port=6060"
+
+             # cert-manager
+             - "--certificate-namespace=istio-system"
+             - "--issuer-group=cert-manager.io"
+             - "--issuer-kind=Issuer"
+             - "--issuer-name=istio-csr-issuer"
+             - "--preserve-certificate-requests=false"
+
+             # AdditionalAnnotations
+
+             # tls
+             - "--root-ca-file=/var/run/secrets/istio-csr/ca.crt"
+             - "--serving-certificate-dns-names=cert-manager-istio-csr.istio-system.svc"
+             - "--serving-certificate-duration=1h"
+             - "--serving-certificate-key-size=2048"
+             - "--serving-signature-algorithm=RSA"
+             - "--trust-domain=cluster.local"
+
+             # server
+             - "--max-client-certificate-duration=1h"
+             - "--serving-address=0.0.0.0:6443"
+
+             # controller
+             - "--configmap-namespace-selector=maistra.io/member-of=istio-system"
+             - "--leader-election-namespace=istio-system"
+           volumeMounts:
+             - mountPath: /var/run/secrets/istio-csr
+               name: root-ca
+         volumes:
+         - name: root-ca
+           secret:
+             secretName: istio-csr-ca
+   ```
 
 ### Risks and Mitigations
 
-An OpenShift administrator configuring istio-csr CR object could configure insecure certificate
-signature algorithm, certificate key size or certificate validity to be too long which could
-cause vulnerability.
+An OpenShift administrator configuring `istiocsr` CR object could configure insecure certificate signature algorithm,
+certificate key size or certificate validity to be too long which could cause vulnerability.
   - These configurations could be validated and can be overridden with default values.
 
 ### Drawbacks
@@ -755,13 +665,11 @@ None
 
 ## Test Plan
 
-- Enable istio-csr through cert-manager-operator CR and check the behavior
-  with default istio-csr configuration.
-- Enable istio-csr by creating the istio-csr CR object with permutations of
-  configurations and validate the behavior.
+- Enable `istio-csr` controller by creating `istiocsr` CR and check the behavior with default istio-csr configuration.
+- Enable `istio-csr` controller by creating the `istiocsr` CR with permutations of configurations and validate the behavior.
 - Upgrade/downgrade testing
   - Scenarios mentioned in the section Upgrade / Downgrade Strategy has expected behavior.
-  - Sufficient time for feedback from the QE.
+- Sufficient time for feedback from the QE.
 - The feature is available by default and does not have any specific featureGate defined.
 
 ## Graduation Criteria
@@ -834,6 +742,11 @@ Istio-csr will be supported for OpenShift Service Mesh Operator 2.4+, Istio v1.1
     ```bash
     oc delete secrets -n istio-system istio-ca-secret
     ```
+
+- Listing all the resources created for installing the `istio-csr` agent
+  ```bash
+  oc get all -l "app=cert-manager-istio-csr,app.kubernetes.io/name=cert-manager-istio-csr" -A
+  ```
 
 ## Support Procedures
 
