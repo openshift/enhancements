@@ -101,15 +101,27 @@ for better version management.
 
 ### Workflow Description
 
-- An OpenShift user enables `istio-csr` by creating the new custom resource made available for configuring
+- Enable istio-csr deployment
+  - An OpenShift user enables `istio-csr` by creating the new custom resource made available for configuring
   `istio-csr`.
-- `istio-csr` controller based on the configuration in CR
-  - Creates below `Issuers` when user does not provide `issuerref` to be used by `istio-csr` for obtaining the certificates.
-    - Creates an `ClusterIssuer` in `cert-manager` namespace which acts as root CA for obtaining the
-      CA certificate for `istio-csr` use case.
-    - Creates an `Issuer` in `istio-system` namespace which is an intermediate CA signed by `ClusterIssuer`
-      root CA.
-  - Deploys istio-csr agent in `istio-system` namespace.
+  - `istio-csr` controller based on the configuration in CR
+    - Creates below `Issuers` when user does not provide `issuerref` to be used by `istio-csr` for obtaining the certificates.
+      - Creates an `ClusterIssuer` in `cert-manager` namespace which acts as root CA for obtaining the
+        CA certificate for `istio-csr` use case.
+      - Creates an `Issuer` in `istio-system` namespace which is an intermediate CA signed by `ClusterIssuer`
+        root CA.
+    - Deploys istio-csr agent in `istio-system` namespace.
+
+![alt text](./istio-csr-create.png).
+
+- Disable istio-csr deployment
+  - An OpenShift user disables `istio-csr` by deleting the new custom resource made available for configuring
+    `istio-csr`.
+  - `istio-csr` controller will remove all the resources created for deploying `istio-csr` agent.
+    - `istio-csr` agent deployment will be removed.
+    - GRPC CertificateRequest endpoint will be inaccessible and any new certificate request will fail.
+
+![alt text](./istio-csr-delete.png).
 
 ### API Extensions
 
@@ -155,11 +167,6 @@ type IstioCSRSpec struct {
 
 // IstioCSRConfig is for configuring the istio-csr agent behavior.
 type IstioCSRConfig struct {
-	// replicas is the number of desired istio-csr agent replicas.
-	// +kubebuilder:default:=1
-	// +optional
-	Replicas int32 `json:"replicas,omitempty"`
-
 	// logLevel is for setting verbosity of istio-csr agent logging.
 	// Supported log levels: 1-5.
 	// +kubebuilder:default:=1
@@ -174,17 +181,13 @@ type IstioCSRConfig struct {
 	// +optional
 	LogFormat string `json:"logFormat,omitempty"`
 
-	// metrics is for configuring Prometheus metrics behavior.
-	// +optional
-	Metrics *MetricsConfig `json:"metrics,omitempty"`
-
 	// certmanager is for configuring cert-manager specifics.
-	// +optional
+	// +required
 	CertManager *CertManagerConfig `json:"certmanager,omitempty"`
 
-	// tls is for configuring certificate specifics.
-	// +optional
-	TLS *TLSConfig `json:"tls,omitempty"`
+	// istiodTLSConfig is for configuring istiod certificate specifics.
+	// +required
+	IstiodTLSConfig *IstiodTLSConfig `json:"istiodTLSConfig,omitempty"`
 
 	// server is for configuring the server endpoint used by istio
 	// for obtaining the certificates.
@@ -215,64 +218,6 @@ type IstioCSRConfig struct {
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 }
 
-// MetricsConfig is for configuring Prometheus metrics behavior.
-type MetricsConfig struct {
-	// port for exposing Prometheus metrics on 0.0.0.0 on path '/metrics'.
-	// +kubebuilder:default:="9402"
-	// +optional
-	Port string `json:"port,omitempty"`
-
-	// service is for configuring the metrics server specifics.
-	// +optional
-	Service *MetricServiceConfig `json:"service,omitempty"`
-}
-
-// MetricServiceConfig is for confuring the metrics server specifics.
-type MetricServiceConfig struct {
-	// enabled when set will create a Service resource to expose metrics endpoint.
-	// +kubebuilder:default:=false
-	// +optional
-	Enabled bool `json:"enabled,omitempty"`
-
-	// serviceType of the service resource created for metrics.
-	// +kubebuilder:default:="ClusterIP"
-	// +optional
-	ServiceType corev1.ServiceType `json:"serviceType,omitempty"`
-
-	// serviceMonitor is for configuring the service monitor specifics
-	// for the metrics service.
-	// +optional
-	ServiceMonitor *MetricsServiceMonitorConfig `json:"serviceMonitor,omitempty"`
-}
-
-// MetricsServiceMonitorConfig is for configuring the service monitor specifics
-// for the metrics service.
-type MetricsServiceMonitorConfig struct {
-	// enabled when set creates Prometheus ServiceMonitor resource for approver-policy.
-	// +kubebuilder:default:=false
-	// +optional
-	Enabled bool `json:"enabled,omitempty"`
-
-	// prometheusInstance name to set the value for the "prometheus" label on the ServiceMonitor.
-	// +kubebuilder:default:="default"
-	// +optional
-	PrometheusInstance string `json:"prometheusInstance,omitempty"`
-
-	// interval defines periodicity the Prometheus will scrape for metrics.
-	// +kubebuilder:default:="10s"
-	// +optional
-	Interval time.Duration `json:"interval,omitempty"`
-
-	// scrapeTimeout defines timeout on each metric probe request.
-	// +kubebuilder:default:="5s"
-	// +optional
-	ScrapeTimeout time.Duration `json:"scrapeTimeout,omitempty"`
-
-	// labels to add to the ServiceMonitor resource.
-	// +optional
-	Labels map[string]string `json:"labels,omitempty"`
-}
-
 // CertManagerConfig is for configuring cert-manager specifics.
 type CertManagerConfig struct {
 	// issuerRef contains details to the referenced object used for
@@ -280,45 +225,41 @@ type CertManagerConfig struct {
 	// When unset operator will create Issuer in the configured istio's
 	// namespace.
 	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="issuerRef is immutable once set"
-	// +optional
+	// +required
 	IssuerRef certmanagerv1.ObjectReference `json:"issuerRef,omitempty"`
 }
 
-// TLSConfig is for configuring certificate specifics.
-type TLSConfig struct {
+// IstiodTLSConfig is for configuring certificate specifics.
+type IstiodTLSConfig struct {
 	// TrustDomain is the cluster's trust domain.
-	// +kubebuilder:default:="cluster.local"
-	// +optional
+	// +required
 	TrustDomain string `json:"trustDomain,omitempty"`
 
 	// RootCAFile is for setting the file location containing the root CA which is
 	// present in the configured IssuerRef. File should be made available using the
 	// Volume and VolumeMount options.
-	// +kubebuilder:default:="/var/run/secrets/istio-csr/ca.crt"
 	// +optional
 	RootCAFile string `json:"rootCAFile,omitempty"`
 
 	// CertificateDNSNames contains DNS names to be added to the certificate SAN.
-	// +kubebuilder:example:=["cert-manager-istio-csr.istio-system.svc"]
-	// +optional
+	// +required
 	CertificateDNSNames []string `json:"certificateDNSNames,omitempty"`
 
-	// IstiodCertificateDuration is the istio's certificate validity period.
-	//  Default is based on NIST 800-204A recommendations (SM-DR13). https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-204A.pdf. 
+	// certificateDuration is the istio's certificate validity period.
 	// +kubebuilder:default:="1h"
 	// +optional
-	IstiodCertificateDuration time.Duration `json:"istiodCertificateDuration,omitempty"`
+	CertificateDuration time.Duration `json:"certificateDuration,omitempty"`
 
-	// IstiodCertificateRenewBefore is the ahead time to renew the istio's certificate before
+	// certificateRenewBefore is the ahead time to renew the istio's certificate before
 	// expiry.
 	// +kubebuilder:default:="30m"
 	// +optional
-	IstiodCertificateRenewBefore time.Duration `json:"istiodCertificateRenewBefore,omitempty"`
+	CertificateRenewBefore time.Duration `json:"certificateRenewBefore,omitempty"`
 
-	// IstiodPrivateKeySize is the key size to be for RSAKey.
+	// privateKeySize is the key size to be for RSAKey.
 	// +kubebuilder:default:=2048
 	// +optional
-	IstiodPrivateKeySize int32 `json:"istiodPrivateKeySize,omitempty"`
+	PrivateKeySize int32 `json:"privateKeySize,omitempty"`
 }
 
 // ServerConfig is for configuring the server endpoint used by istio
@@ -358,12 +299,13 @@ type IstioConfig struct {
 	// Revisions are the istio revisions that are currently installed in the cluster.
 	// Changing this field will modify the DNS names that will be requested for
 	// the istiod certificate.
-	// +kubebuilder:default:=["basic"]
+	// +kubebuilder:default:=["default"]
 	// +optional
 	Revisions []string `json:"revisions,omitempty"`
 
 	// namespace of the istio control-plane. In the same namespace issuer will be created
 	// used for obtaining the serving certificates.
+	// +required
 	Namespace string `json:"namespace,omitempty"`
 }
 
@@ -372,20 +314,6 @@ type IstioConfig struct {
 type ControllerConfig struct {
 	// labels to apply to all resources created for istio-csr agent deployment.
 	Labels map[string]string `json:"labels,omitempty"`
-
-	// issuerConfig is for setting the issuer specifics to be created by the controller.
-	IssuerConfig *IssuerConfig `json:"issuerConfig,omitempty"`
-}
-
-type IssuerConfig struct {
-	// issuerType is for specifying issuer type `ClusterIssuer` or `Issuer`.
-	Issuertype string `json:"issuerType,omitempty"`
-
-	// duration is for setting the default certificate validity duration.
-	Duration string `json:"duration,omitempty"`
-
-	// renewBefore is for specifying the certificate renewal time before the certificate expiry.
-	RenewBefore string `json:"renewBefore,omitempty"`
 }
 
 // IstioCSRStatus is the most recently observed status of the IstioCSR.
@@ -393,9 +321,8 @@ type IstioCSRStatus struct {
 	// conditions holds information of the current state of the istio-csr agent deployment.
 	Conditions *metav1.Condition `json:"conditions,omitempty"`
 
-	// generatedIstioCSRConfig holds information about the clusterissuer/issuer created
-	// by the controller or user required by the istio-csr agent.
-	GeneratedIstioCSRConfig []IstioCSRConfig `json:"generatedIstioCSRConfig,omitempty"`
+	// istioCSRImage is the name of the image and the tag used for deploying istio-csr.
+	IstioCSRImage string `json:"istioCSRImage,omitempty"`
 
 	// istioCSRGRPCEndpoint is the service endpoint of istio-csr made available for user
 	// to configure the same in istiod config to enable istio to use istio-csr for
