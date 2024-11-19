@@ -124,8 +124,8 @@ Components that we are proposing to change:
 
 We need an authoritative flag to make it easy for components and tools to
 identify if they are running against an `arbiter` backed HA cluster. We are
-proposing adding a new `ControlPlaneTopology` key
-called `HighlyAvailableArbiter` to denote that the cluster is installed with an
+proposing adding a new `ControlPlaneTopology` key called
+`HighlyAvailableArbiter` to denote that the cluster is installed with an
 arbiter.
 
 Currently this field will not change, once a cluster is installed as an arbiter
@@ -606,6 +606,13 @@ failover.
   - Create tests to validate proper usage of affinity and anti-affinity.
   - Create tests to validate pod disruption budgets are appropriate.
 
+- We will need to make sure we validate and test that the arbiter cluster
+  deployment does not interfere with telco configurations.
+  - Create a CI lane that configures a telco lane with workload partitioning and
+    RT kernel.
+  - Existing Workload partitioning tests should pass or modified to work.
+  - Existing RT kernel tests should pass or modified to work.
+
 ## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
@@ -614,6 +621,8 @@ N/A
 
 ### Tech Preview -> GA
 
+- Telco considerations are documented if any difference present itself during
+  testing
 - MCO Changes need to be streamlined so we don't duplicate too much between
   master and arbiter configurations
 - OLM Needs to be update to allow operator owners to explicitly add or remove
