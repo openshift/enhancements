@@ -19,6 +19,7 @@ last-updated: 2024-11-05
 
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1696
+  - https://issues.redhat.com/browse/OCPSTRAT-1695
 ---
 
 # Change Management and Maintenance Schedules
@@ -902,21 +903,18 @@ There are other paths through which a similar outcome could be achieved.
   
 ### API Extensions
 
-API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
+The enhancement is API driven, as described in the overview. Two new CRDs are introduced:
+- HostedChangeManagementPolicy
+- ChangeManagementPolicy
 
-- Name the API extensions this enhancement adds or modifies.
-- Does this enhancement modify the behaviour of existing resources, especially those owned
-  by other parties than the authoring team (including upstream resources), and, if yes, how?
-  Please add those other parties as reviewers to the enhancement.
+Four existing APIs are modified in order to support change management policy definitions:
+- HostedCluster
+- NodePool
+- ClusterVersion
+- MachineConfigPool
 
-  Examples:
-  - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
-  - Restricts the label format for objects to X.
-  - Defaults field Y on object kind Z.
-
-Fill in the operational impact of these API Extensions in the "Operational Aspects
-of API Extensions" section.
+Support for change management policies requires behavioral changes in controllers associated with
+these resources to honor configured policies. 
 
 ### Topology Considerations
 
