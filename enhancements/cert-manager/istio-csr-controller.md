@@ -71,6 +71,9 @@ manager, requiring integration with OSSM so that certificate requests are signed
 
 - `istio-csr` agent can be used only with supported version of `OpenShift Service Mesh`. Please refer `Version Skew Strategy`
   section for more details.
+- Removing `istiocsr.operator.openshift.io` CR object will not remove `istio-csr` agent deployment. But will only stop
+  the reconciliation of kubernetes resources created for agent deployment. (Note: This will be a limitation for TechPreview
+  and will be re-evaluated for GA)
 
 ## Proposal
 
@@ -135,15 +138,17 @@ for better version management.
 
 ### Workflow Description
 
-- Enable `istio-csr-controller`
-  - An OpenShift user enables `istio-csr-controller` by creating the `istiocsr.operator.openshift.io` CR.
-  - `istio-csr-controller` based on the configuration in `istiocsr.operator.openshift.io` CR, deploys `istio-csr` agent
+- Installation of `istio-csr` agent
+  - An OpenShift user creates the `istiocsr.operator.openshift.io` CR.
+  - `istio-csr-controller` based on the configuration in `istiocsr.operator.openshift.io` CR, installs `istio-csr` agent
     in the CR created namespace.
 
 ![alt text](./istio-csr-create.png).
 
-- Disable `istio-csr-controller`
-  - An OpenShift user disables `istio-csr-controller` by deleting the `istiocsr.operator.openshift.io` CR.
+- Uninstallation of `istio-csr` agent
+  - An OpenShift user deletes the `istiocsr.operator.openshift.io` CR.
+  - `istio-csr-controller` will not uninstall `istio-csr` agent, but will only stop reconciling the kubernetes resources
+    created for installing the agent. Please refer `Non-Goals` section for more details.
 
 ![alt text](./istio-csr-delete.png).
 
