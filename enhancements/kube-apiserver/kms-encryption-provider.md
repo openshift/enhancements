@@ -18,6 +18,7 @@ last-updated: 2024-11-21
 status: implementable
 see-also:
   - "/enhancements/kube-apiserver/encrypting-data-at-datastore-layer.md"
+  - "/enhancements/authentication/direct-external-oidc-provider.md"
   - "/enhancements/installer/storage-class-encrypted.md"
 tracking-link:
   - https://issues.redhat.com/browse/API-1684
@@ -235,6 +236,26 @@ For our initial iteration, we plan to manage the lifecycle of the plugin pods ho
 
 ## Design Details
 
+All of the apiserver(s) in OpenShift (i.e. kube-apiserver, openshift-apiserver, oauth-apiserver) use the [library-go encryption controller set implementation](https://github.com/openshift/library-go/blob/master/pkg/operator/encryption/controllers.go) managed by their respective operators to manage the encryption key and configs jointly. In case, of KMS the keys are managed by the external KMS instance endpoint however the config state would reuse an extension of the same controllers' logic. The controllers today support migration in terms of encryption/decryption of resources, by considering the user-configured value of `spec.encryption.type` as the desired state of encryption across all control-plane nodes of the cluster. The responsibilities of the controller set are as follows:
+1. Key controller
+  - manages the persistence state of local encryption keys like aescbc, aescgcm, etc.
+  - backs up the keys in the control plane etcd as Kube Secrets in a central `openshift-config-managed` namespace for each apiserver operator to be able to infer cluster state independetly
+2. State controller
+  - generates the encryption config that apiserver(s) can consume and enact upon for actual encryption of resources
+  - implements a distributed state machine to transition only takes place when all API servers have converged to the same revision
+3. Prune controller
+  - prunes inactive keys present in the cluster
+  - ensures that at any given time N keys are present (today `N=10` and hardcoded i.e. non-configurable)
+4. Migration controller
+  - mark that all the resources as migrated once they have been rewritten in etcd with desired encryption state
+5. Condition controller
+  - decides whether the other controllers should start acting upon depending upon the current &/ desired encryption mode
+  - provide for status conditions that an operator can write to their respective status field(s) eg. EncryptionInProgress, EncryptionCompleted, etc.  
+For more details about the design of the existing encryption controller(s), refer to the related enhancement: https://github.com/openshift/enhancements/blob/master/enhancements/kube-apiserver/encrypting-data-at-datastore-layer.md which explains all the transition state and key management/rotation procedures.
+
+For KMS the state_controller and key_controller will be extended to allow KMSv2 as an added type for the `EncryptionConfig.Resources.Providers.KMS` configuration. 
+
+Additional, to the encryption controller set we need to add the KMS plugin as separate static pod (or as a new container within the same kube-apiserver pod) managed via kube-apiserver-operator which will ensure to keep the gRPC unix socket active on the control-plane nodes. This can make use of livenessProbe and readinessProbes over sample encrypt and status calls sent to the plugin socket (eg. [probes](https://github.com/kubernetes-sigs/aws-encryption-provider?tab=readme-ov-file#deploy-the-aws-encryption-provider-plugin)) for health checks initially until we introduce new mechanisms to detect failures. The other operators need not run additional instances of the KMS plugin but can share the same hostPath mount from the master nodes to perform encrypt/decrypt at their end. In kube-apiserver-operator, a static pod deployment hook can alter the pod spec to add the kms plugin container only when KMS encryption type is enabled.
 
 ## Implementation History
 
@@ -255,4 +276,5 @@ None
 
 ## Infrastructure Needed [optional]
 
-Some extra tooling and or configuration may be required from CI infrastructure pool to request access to cloud KMS instances especially, AWS KMS instances initially. The same can be integrated into an e2e test.
+Some extra tooling and or configuration may be required from CI infrastructure pool to request access to cloud KMS instances especially, AWS KMS instances initially. The same can be integrated into an e2e test.<br>
+A CI step for AWS KMS instance provisioning is already present in steps registry today: https://github.com/openshift/release/tree/master/ci-operator/step-registry/ipi/conf/aws/kms-key which could serve helpful.
