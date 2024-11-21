@@ -9,7 +9,7 @@ approvers:
 api-approvers:
   - "@tgeer" ## approver for cert-manager component
 creation-date: 2024-01-22
-last-updated: 2024-11-19
+last-updated: 2024-11-21
 tracking-link:
   - https://issues.redhat.com/browse/CM-234
 see-also:
@@ -36,6 +36,13 @@ process of obtaining the certificates from the `cert-manager` for `OpenShift Ser
 manages `cert-manager` and extending the operator to manage `istio-csr` agent will help the users to use all the solutions
 mentioned above effectively and easily.
 
+**Note:**
+Throughout the document, the following terminology means.
+- `istio-csr` agent is the operand managed by the cert-manager operator.
+- `istio-csr-controller` is the dedicated controller in cert-manager operator managing the `istio-csr` agent deployment.
+- `istiocsr.operator.openshift.io` is the custom resource for interacting with `istio-csr-controller` to install, configure
+  and uninstall the `istio-csr` agent deployment.
+
 ## Motivation
 
 Customers intend to use certificates issued by their own certificate authority rather than self-signed certificates,
@@ -58,7 +65,7 @@ manager, requiring integration with OSSM so that certificate requests are signed
 ### Goals
 
 - `cert-manager-operator` to be extended to manage `istio-csr` agent along with currently managed `cert-manager`.
-- New custom resource(CR) `istiocsr` to be made available to install, configure and uninstall deployment.
+- New custom resource(CR) `istiocsr.operator.openshift.io` to be made available to install, configure and uninstall deployment.
 
 ### Non-Goals
 
@@ -67,16 +74,9 @@ manager, requiring integration with OSSM so that certificate requests are signed
 
 ## Proposal
 
-**Note:**
-Throughout the document, the following terminology means.
-- `istio-csr` agent is the operand managed by the cert-manager operator.
-- `istio-csr` controller is the dedicated controller in cert-manager operator managing the `istio-csr` agent deployment.
-- `istiocsr` custom resource is for interacting with `istio-csr` controller to install, configure and uninstall the
-  `istio-csr` agent deployment.
-
 `istio-csr` agent will be installed and managed by `cert-manager-operator`. A new custom resource is defined to configure
-the `istio-csr` agent. The `istiocsr` CR can be added day2 to install `istio-csr` agent post the  installation or upgrade
-of cert-manager operator on the existing OpenShift clusters.
+the `istio-csr` agent. The `istiocsr.operator.openshift.io` CR can be added day2 to install `istio-csr` agent post the
+installation or upgrade of cert-manager operator on the existing OpenShift clusters.
 
 A new controller will be added to `cert-manager-operator` to manage and maintain the `istio-csr` agent deployment in
 desired state which can be monitored by user through the status sub-resource of the new custom resource.
@@ -108,13 +108,13 @@ Refer below links for more information on the labels used
 - [Guidelines for Labels and Annotations for OpenShift applications](https://github.com/redhat-developer/app-labels/blob/master/labels-annotation-for-openshift.adoc)
 - [Well-Known Labels, Annotations and Taints](https://kubernetes.io/docs/reference/labels-annotations-taints/)
 
-`istiocsr` CR object is a singleton object and is enforced in CRD to have the name as `default`. `istio-csr` agent will
-be deployed in the namespace where the CR object is created.
+`istiocsr.operator.openshift.io` CR object is a singleton object and is enforced in CRD to have the name as `default`.
+`istio-csr` agent will be deployed in the namespace where the CR object is created.
 
-Configurations made available in the spec of `istiocsr` CR are passed as command line arguments to `istio-csr` agent and
-updating these configurations would cause new rollout of the `istio-csr` agent deployment, which means a new pod will be
-created and old pod will terminate resulting in `istio-csr` agent restart.
-All configurations can be updated on-demand, except for below which can be configured only while creating the `istiocsr`
+Configurations made available in the spec of `istiocsr.operator.openshift.io` CR are passed as command line arguments to
+`istio-csr` agent and updating these configurations would cause new rollout of the `istio-csr` agent deployment, which
+means a new pod will be created and old pod will terminate resulting in `istio-csr` agent restart.
+All configurations can be updated on-demand, except for below which can be configured only while creating the `istiocsr.operator.openshift.io`
 CR, which is enforced in the CRD using CEL validations.
 - `.spec.istioCSRConfig.certmanager.issuerRef`
 - `.spec.istioCSRConfig.istiodTLSConfig.privateKeySize`
@@ -123,27 +123,27 @@ CR, which is enforced in the CRD using CEL validations.
 - `.spec.istioCSRConfig.istio.revisions`
 - `.spec.istioCSRConfig.istio.namespace`
 
-When an OpenShift user deletes `istiocsr` CR object, `istio-csr` controller will stop managing all the resources created
-for installing `istio-csr` agent and user will manually clean up the resources. Please refer `Operational Aspects of API Extensions`
-section for command to list all the resources.
+When an OpenShift user deletes `istiocsr.operator.openshift.io` CR object, `istio-csr-controller` will stop managing all
+the resources created for installing `istio-csr` agent and user will manually clean up the resources. Please refer
+`Operational Aspects of API Extensions` section for command to list all the resources.
 
-`istiocsr` CR status sub-resource will be used for updating the status of the `istio-csr` agent installation, any error
-encountered while creating the required resources or the reconciling the state.
+`istiocsr.operator.openshift.io` CR status sub-resource will be used for updating the status of the `istio-csr` agent
+installation, any error encountered while creating the required resources or the reconciling the state.
 
 A fork of [upstream](https://github.com/cert-manager/istio-csr) `istio-csr` will be created [downstream](https://github.com/openshift/cert-manager-istio-csr)
 for better version management.
 
 ### Workflow Description
 
-- Enable `istio-csr` controller
-  - An OpenShift user enables `istio-csr` controller by creating the `istiocsr` CR.
-  - `istio-csr` controller based on the configuration in `istiocsr` CR, deploys `istio-csr` agent in the CR created
-    namespace.
+- Enable `istio-csr-controller`
+  - An OpenShift user enables `istio-csr-controller` by creating the `istiocsr.operator.openshift.io` CR.
+  - `istio-csr-controller` based on the configuration in `istiocsr.operator.openshift.io` CR, deploys `istio-csr` agent
+    in the CR created namespace.
 
 ![alt text](./istio-csr-create.png).
 
-- Disable `istio-csr` controller
-  - An OpenShift user disables `istio-csr` controller by deleting the `istiocsr` CR.
+- Disable `istio-csr-controller`
+  - An OpenShift user disables `istio-csr-controller` by deleting the `istiocsr.operator.openshift.io` CR.
 
 ![alt text](./istio-csr-delete.png).
 
@@ -649,8 +649,8 @@ Below are the example static manifests used for creating required resources for 
 
 ### Risks and Mitigations
 
-An OpenShift administrator configuring `istiocsr` CR object could configure insecure certificate signature algorithm,
-certificate key size or certificate validity to be too long which could cause vulnerability.
+An OpenShift administrator configuring `istiocsr.operator.openshift.io` CR object could configure insecure certificate
+signature algorithm, certificate key size or certificate validity to be too long which could cause vulnerability.
   - These configurations could be validated and can be overridden with default values.
 
 ### Drawbacks
@@ -665,8 +665,10 @@ None
 
 ## Test Plan
 
-- Enable `istio-csr` controller by creating `istiocsr` CR and check the behavior with default istio-csr configuration.
-- Enable `istio-csr` controller by creating the `istiocsr` CR with permutations of configurations and validate the behavior.
+- Enable `istio-csr-controller` by creating `istiocsr.operator.openshift.io` CR and check the behavior with default
+  istio-csr configuration.
+- Enable `istio-csr-controller` by creating the `istiocsr.operator.openshift.io` CR with permutations of configurations
+  and validate the behavior.
 - Upgrade/downgrade testing
   - Scenarios mentioned in the section Upgrade / Downgrade Strategy has expected behavior.
 - Sufficient time for feedback from the QE.
@@ -683,7 +685,7 @@ None
 
 ### Tech Preview -> GA
 
-N/A. This feature is for Dev Preview, until decided for GA.
+N/A. This feature is for Tech Preview, until decided for GA.
 
 ### Removing a deprecated feature
 
