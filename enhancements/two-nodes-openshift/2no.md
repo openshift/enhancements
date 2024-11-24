@@ -36,17 +36,17 @@ tracking-link:
 
 RHEL-HA - a general-purpose clustering stack shipped by Red Hat (and others) primarily consisting of Corosync and Pacemaker.  Known to be in use by airports, financial exchanges, and defense organizations, as well as used on trains, satellites, and expeditions to Mars.
 
-Corosync - a Red Hat led [open-source project](https://corosync.github.io/corosync/) that provides a consistent view of cluster membership, reliable ordered messaging, and flexible quorum capabilities.  
+Corosync - a Red Hat led [open-source project](https://corosync.github.io/corosync/) that provides a consistent view of cluster membership, reliable ordered messaging, and flexible quorum capabilities.
 
 Pacemaker - a Red Hat led [open-source project](https://clusterlabs.org/pacemaker/doc/) that works in conjunction with Corosync to provide general-purpose fault tolerance and automatic failover for critical services and applications.
 
-Fencing - the process of “somehow” isolating or powering off malfunctioning or unresponsive nodes to prevent them from causing further harm, such as data corruption or the creation of divergent datasets.  
+Fencing - the process of “somehow” isolating or powering off malfunctioning or unresponsive nodes to prevent them from causing further harm, such as data corruption or the creation of divergent datasets.
 
 Quorum - having the minimum number of members required for decision-making. The most common threshold is 1 plus half the total number of members, though more complicated algorithms predicated on fencing are also possible.
  * C-quorum: quorum as determined by Corosync members and algorithms
  * E-quorum: quorum as determined by etcd members and algorithms
 
-Split-brain - a scenario where a set of peers are separated into groups smaller than the quorum threshold AND peers decide to host services already running in other groups.  Typically results in data loss or corruption.
+Split-brain - a scenario where a set of peers are separated into groups smaller than the quorum threshold AND peers decide to host services already running in other groups.  Typically, it results in data loss or corruption.
 
 MCO - Machine Config Operator. This operator manages updates to the node's systemd, cri-o/kubelet, kernel, NetworkManager, etc., and can write custom files to it, configurable by MachineConfig custom resources.
 
@@ -79,7 +79,7 @@ This requires our solution to provide a management experience consistent with "n
 * Minimize recovery-caused unavailability. Eg. by avoiding fencing loops, wherein each node powers cycles its peer after booting, reducing the cluster's availability.
 * Recover the API server in less than 120s, as measured by the surviving node's detection of a failure
 * Minimize any differences to existing OpenShift topologies
-* Avoid any decisions that would prevent future implementation and support for upgrade/downgrade paths between two-node and traditional architectures 
+* Avoid any decisions that would prevent future implementation and support for upgrade/downgrade paths between two-node and traditional architectures
 * Provide an OpenShift cluster experience that is similar to that of a 3-node hyperconverged cluster but with 2 nodes
 
 ### Non-Goals
@@ -119,12 +119,24 @@ When starting etcd, the OCF script will use etcd's cluster ID and version counte
 
 #### Cluster Creation
 
-User creation of a two-node control-plane will be possible via the Assisted Installer.
+User creation of a two-node control-plane will be possible via the Assisted Installer. A key requirement is that the cluster can be deployed using only 2 nodes because requiring a third baremetal server for installation can be expensive when deploying baremetal at scale. To accomplish this, deployments will take advantage of the Assisted Installer's ability to use one of the target machines as the bootstrap node before it is rebooted into a control-plane node. There is a critical transition during this process, where to maintain etcd quorum, the bootstrap node will need to be removed from the etcd cluster before it is rebooted so that quorum can be maintained as the machine reboots into a second control-plane.
 
-The procedure follows the standard flow except for the configuration of 2 nodes instead of 3, and the collection of RedFish details (including passwords!) for each node which are needed for the RHEL-HA configuration.
-If available via the SaaS offering (not confirmed, ZTP may be the target), the offering will need to ensure passwords are appropriately handled. 
+Otherwise, the procedure follows the standard flow except for the configuration of 2 nodes instead of 3. At this time we've discussed the collection of RedFish details (including passwords!) for each node. This is needed for the RHEL-HA configuration by leveraging the BareMetalHost CRDs populated from the baremetal platform specification in the install-config. There are open questions on how to ensure that pacemaker is the only entity responsible for fencing to prevent conflicting requests to change the machine state between pacemaker and the baremetal operator. Preventing conflicting fencing logic is also important for optional operators like Node Health Check, Self Node Remediation, and Fence Agents Remediation, but these should not be present during installation.
 
-Everything else about cluster creation will be an opaque implementation detail not exposed to the user. 
+An important facility of the installation flow is the transition from a CEO deployed etcd to one controlled by pacemaker. The basic transition works as follows:
+1. MCO Extensions are used to ensure that pacemaker, corosync, and resource agents are pre-configured on CoreOS using installation manifests.
+2. Upon detection that the cluster infrastructure is using the DualReplica controlPlaneTopology in the infrastructure config, an in-cluster entity (see open questions regarding whether this should be handled by CEO or an additional operator) will run a command on one of the cluster nodes to initialize pacemaker. The outcome of this is that the resource agent will be started on both nodes.
+3. The aforementioned in-cluster entity will signal CEO to relinquish control of etcd by setting CEO's `managedEtcdKind` to `External`. When this happens, CEO removes the etcd pod from the static pod configs. The resource agents for etcd are running from step 2, and they are configured to wait for etcd pods to be gone so they can restart them using Podman.
+4. The installation proceeds as normal once the pods start.
+If for some reason, the etcd pods cannot be started, then the installation will fail. The installer will need to be able to pull logs from the control-plane nodes to provide context for this failure.
+
+Fencing setup is the last important aspect of the cluster installation. In order for the cluster installation to be successful, fencing should be configured and active before we declare the installation successful. Ideally, the fencing secrets should be made available to the control-plane nodes in the initial pacemaker initialization so that fencing can be configured during step 2. There are a few more critical open questions with this:
+1. Should fencing be made active during the installation or should pacemaker start with it disabled and only enable it after being signaled by the in-cluster entity when the cluster installation is detected as successful?
+2. What mechanism will pacemaker use to get access to the secret linked from the BareMetalHost CRD?
+
+If available via the SaaS offering (not confirmed), ZTP may be evaluated as a future offering. This will need further evaluation to ensure passwords are appropriately handled.
+
+Everything else about cluster creation will be an opaque implementation detail not exposed to the user.
 
 #### Day 2 Procedures
 
@@ -135,7 +147,7 @@ The experience of managing a 2-node control-plane should be largely indistinguis
 The primary exception is (re)booting one of the peers while the other is offline and expected to remain so.
 
 As in a 3-node control-plane cluster, starting only one node is not expected to result in a functioning cluster.
-Should the admin wish for the control-plane to start, the admin will need to execute a supplied confirmation command on the active cluster node. 
+Should the admin wish for the control-plane to start, the admin will need to execute a supplied confirmation command on the active cluster node.
 This command will grant quorum to the RHEL-HA components, authorizing it to fence its peer and start etcd as a cluster-of-one in read/write mode.
 Confirmation can be given at any point and optionally make use of SSH to facilitate initiation by an external script.
 
@@ -152,8 +164,7 @@ A mechanism is needed for components of the cluster to understand that this is a
 We will define a new value for the `TopologyMode` enum: `DualReplica`.
 The enum is used for the `controlPlaneTopology` and `infrastructureTopology` fields, and the currently supported values are `HighlyAvailable`, `SingleReplica`, and `External`.
 
-However `TopologyMode` is not available at the point the Agent Based Installer (ABI) performs validation.
-We will therefore additionally define a new feature gate `DualReplicaTopology` that can be enabled in `install-config.yaml`, and which ABI can use to validate the proposed cluster - such as the proposed node count.
+We will additionally define a new feature gate `DualReplicaTopology` that can be enabled in `install-config.yaml` to ensure the feature can be set as `TechPreviewNoUpgrade`.
 
 #### CEO Trigger
 
@@ -171,20 +182,21 @@ This will allow the use of a credential scoped to `ConfigMap`s in the `openshift
 
 #### Standalone Clusters
 
-Is the change relevant for standalone clusters?
-TODO: Exactly what is the definition of a standalone cluster?  Disconnected?  Physical hardware?
+Two-node OpenShift is first and foremost a topology of OpenShift, so it should be able to run without any assumptions of a cluster manager.
 
 ### Implementation Details/Notes/Constraints
 
-While the target installation requires exactly 2 nodes, this will be achieved by building support in the core installer for a "bootstrap plus 2 nodes" flow and then using the Assisted Installer's ability to bootstrap-in-place to remove the requirement for a bootstrap node.
+While the target installation requires exactly 2 nodes, this will be achieved by proving out the "bootstrap plus 2 nodes" flow in the core installer and then using the Assisted Installer's ability to bootstrap from one of the target machines to remove the requirement for a bootstrap node.
+
+So far, we've discovered topology-sensitive logic in ingress, authentication, CEO, and the cluster-control-plane-machineset-operator. We expect to find others once we introduce the new infrastructure topology.
 
 The delivery of RHEL-HA components will be opaque to the user and be delivered as an [MCO Extension](../rhcos/extensions.md) in the 4.18 and 4.19 timeframes.
 A switch to [MCO Layering](../ocp-coreos-layering/ocp-coreos-layering.md ) will be investigated once it is GA in a shipping version of OpenShift.
 
-Configuration of the RHEL-HA components will be via one or more `MachineConfig`s and will require RedFish details to have been collected by the installer.
+Once installed, the configuration of the RHEL-HA components will be done via an in-cluster entity. This entity could be a dedicated in-cluster operator or a function of CEO triggering a script on one of the control-plane nodes. This initialization will require that RedFish details have been collected by the installer.
 Sensible defaults will be chosen where possible, and user customization only where necessary.
 
-The entity (likely a one-shot systemd job as part of a `MachineConfig`) that configures RHEL-HA will also configure a fencing priority.
+This RHEL-HA initialization script will also configure a fencing priority.
 This is usually done based on the sort order of a piece of shared info (such as IP or node name).
 The priority takes the form of a delay, usually in the order of 10s of seconds, and is used to prevent parallel fencing operations during a primary-network outage where each side powers off the other - resulting in a total cluster outage.
 
@@ -197,6 +209,8 @@ The latter is the most powerful, adding the concept of promotion, and demotion.
 More information on creating OCF agents can be found in the upstream [developer guide](https://github.com/ClusterLabs/resource-agents/blob/main/doc/dev-guides/ra-dev-guide.asc).
 
 Tools for extracting support information (must-gather tarballs) will be updated to gather relevant logs for triaging issues.
+
+As part of the fencing setup, the cri-o and kubelet services will still be owned by systemd when running under pacemaker. The main difference is that the resource agent will be responsible for signaling systemd to change their active states. The etcd pods are different in this respect since they will be restarted using Podman. It may be possible to start these with the same user account as the original pods.
 
 #### Failure Scenario Timelines:
 
@@ -272,19 +286,11 @@ Tools for extracting support information (must-gather tarballs) will be updated 
 
 #### Hypershift / Hosted Control Planes
 
-Are there any unique considerations for making this change work with
-Hypershift?
-
-See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282
-
-How does it affect any of the components running in the
-management cluster? How does it affect any components running split
-between the management cluster and guest cluster?
+This topology is anti-synergistic with HyperShift. As the management cluster, a cost-sensitive control-plane runs counter to the the proposition of highly-scaleable hosted control-planes since your compute resources are limited. As the hosted cluster, the benefit of hypershift is that your control-planes are running as pods in the management cluster. Reducing the number of instances of control-plane nodes would trade the minimal cost of a third set of control-plane pods at the cost of having to implement fencing between your control-plane pods.
 
 #### Single-node Deployments or MicroShift
 
-How does this proposal affect the resource consumption of a
-single-node OpenShift deployment (SNO), CPU and memory?
+This proposal is an alternative architecture to Single-node and MicroShift, so it shouldn't introduce any complications for those topologies.
 
 ### Risks and Mitigations
 
@@ -312,8 +318,6 @@ single-node OpenShift deployment (SNO), CPU and memory?
    1. Mitigation: ... CI ...
 
 
-
-
 ### Drawbacks
 
 The two-node architecture represents yet another distinct install type for users to choose from.
@@ -328,16 +332,14 @@ Satisfying this demand would come with significant technical and support overhea
 2. Are there consequences of changing the parentage of processes running cri-o, kubelet, and etcd? (E.g. user process limits)
 3. In the test plan, which subset of layered products needs to be evaluated for the initial release (if any)?
 4. How are the BMC credentials getting from the install-config and onto the nodes?
-5. How does the cluster know it has achieved a ready state?
-   From the cluster's perspective, we know that CEO needs to have `managedEtcd: External` set, and all of the operators need to be available. However, there is a time delay between when that configuration is set by CEO and when etcd comes back up as health after it's restarted under the RHEL-HA components. Is a fixed wait enough to determine that we have successfully transitioned to the new topology? If not, how do we detect this?
-6. Are there any scenarios that would require signaling from the cluster to the RHEL-HA components to modify or change their behavior?
-7. Are there incompatibilities between the existing design and the function of the load balancer deployed through the BareMetalPlatform spec?
-8. Which installers will be supported for the initial release?
-    The current discussions around the installer point us towards ABI for the initial release. There also seems to be interest in making this available for ZTP for managed clusters.
-9. Which platform specs will be available for this topology?
+5. Are there incompatibilities between the existing design and the function of the load balancer deployed through the BareMetalPlatform spec?
+6. Which platform specs will be available for this topology?
     As discussed, we are currently targeting the BareMetalPlatform spec, but the load-balancing component needs to be evaluated for compatibility.
-10. What happens if something fails during the initial setup of the RHEL-HA stack? How will this be communicated back to the user?
-    For example, what happens if the setup job fails and etcd is left running? From the perspective of the user and the cluster, this would be identical to etcd being stopped and restarted under the control of the RHEL-HA components. Nothing about the cluster knows about the external entity that owns etcd.
+7. What in-cluster entity will be responsible for initializing pacemaker?
+We've narrowed this down to either CEO or a 2NO-specific operator. The advantage of accomplishing this in CEO is that it could be tested and maintained by the control-plane team, and will always need to be tested alongside etcd. The advantage of introducing a new operator is that it gives us greater flexibility over the design.
+8. What in-cluster entity will be responsible for preparing fencing credentials for pacemaker to consume?
+Similar to the question above, this can probably be done by CEO, BMO, or a new operator.
+9. What happens if a cluster's fencing credentials are rotated after installation?
 
 
 ## Test Plan
@@ -413,21 +415,13 @@ end to end tests.**
 
 ## Upgrade / Downgrade Strategy
 
-In-place upgrades and downgrades will not be supported for this first iteration, and will be addressed as a separate feature in another enhancement. Upgrades will initially only be achieved by redeploying the machine and its workload.
+In-place upgrades and downgrades will not be supported for this first iteration and will be addressed as a separate feature in another enhancement. Upgrades will initially only be achieved by redeploying the machine and its workload.
 
 ## Version Skew Strategy
 
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
-
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control-plane and
-  the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI,
-  or CNI may require updating that component before the kubelet.
+Most components of this enhancement are external to the cluster itself. The main challenge with upgrading
+is ensuring the cluster stays functional and consistent through the reboots of the upgrade. We may
+need to revisit this if we decide to introduce our own operator.
 
 ## Operational Aspects of API Extensions
 
