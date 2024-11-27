@@ -220,19 +220,21 @@ As part of the fencing setup, the cri-o and kubelet services will still be owned
    3. Node1 does not start etcd or kubelet, remains inert waiting for Node2
    4. Peer (Node2) boots
    5. Corosync membership containing both nodes forms
-   6. Pacemaker starts etcd on both nodes
-      * Detail, this could be a “soft”-start which allows us to determine which node has the most recent dataset.
-   7. Pacemaker “promotes” etcd on whichever node has the most recent dataset
-   8. Pacemaker “promotes” etcd on the peer once it has caught up
-   9. Pacemaker starts kubelet on both nodes
-   10. Fully functional cluster
+   6. Pacemaker starts kubelet on both nodes
+   7. Pacemaker starts etcd on both nodes
+      * if one node has a more recent dataset than the peer:
+         * Pacemaker starts etcd standalone on the node with the most recent dataset and adds the peer as learning member
+         * Pacemaker starts etcd on the peer as joining member
+      * otherwise, Pacemaker starts both instances as joining members
+   10. CEO promotes the learning member as voting member
+   11. Fully functional cluster
 2. Network Failure
    1. Corosync on both nodes detects separation
    2. Etcd loses internal quorum (E-quorum) and goes read-only
    3. Both sides retain C-quorum and initiate fencing of the other side.
       RHEL-HA's fencing priority avoids parallel fencing operations and thus the total shutdown of the system.
    4. One side wins, pre-configured as Node1
-   5. Pacemaker on Node1 forces E-quorum (etcd promotion event)
+   5. Pacemaker on Node1 restarts etcd forcing a new cluster with old state to recover E-quorum. Node2 is added to etcd members list as learning member.
    6. Cluster continues with no redundancy
    7. … time passes …
    8. Node2 boots - persistent network failure
@@ -240,15 +242,15 @@ As part of the fencing setup, the cri-o and kubelet services will still be owned
       * Node2 does not start etcd or kubelet, remains inert waiting for Node1
    9. Network is repaired
    10. Corosync membership containing both nodes forms
-   11. Pacemaker “starts” etcd on Node2 as a follower of Node1
-   12. Pacemaker “promotes” etcd on Node2 as a full replica of Node1
-   13. Pacemaker starts kubelet
+   11. Pacemaker starts kubelet
+   12. Pacemaker detects etcd is running standalone already on the peer, it backs up the etcd data and resets the etcd state to allow Node2 to start as a follower of Node1
+   13. CEO promotes etcd on Node2 as a voting member
    14. Cluster continues with 1+1 redundancy
 3. Node Failure
    1. Corosync on the survivor (Node1)
    2. Etcd loses internal quorum (E-quorum) and goes read-only
    3. Node1 retains “corosync quorum” (C-quorum) and initiates fencing of Node2
-   4. Pacemaker on Node1 forces E-quorum (etcd promotion event)
+   4. Pacemaker on Node1 restarts etcd forcing a new cluster with old state to recover E-quorum. Node2 is added to etcd members list as learning member.
    5. Cluster continues with no redundancy
    6. … time passes …
    7. Node2 has a persistent failure that prevents communication with Node1
@@ -256,16 +258,16 @@ As part of the fencing setup, the cri-o and kubelet services will still be owned
       * Node2 does not start etcd or kubelet, remains inert waiting for Node1
    8. Persistent failure on Node2 is repaired
    9. Corosync membership containing both nodes forms
-   10. Pacemaker “starts” etcd on Node2 as a follower of Node1
-   11. Pacemaker “promotes” etcd on Node2 as a full replica of Node1
-   12. Pacemaker starts kubelet
+   10. Pacemaker starts kubelet
+   11. Pacemaker detects etcd is running standalone already on the peer, it backs up the etcd data and resets the etcd state to allow Node2 to start as a follower of Node1
+   12. CEO promotes etcd on Node2 as a voting member
    13. Cluster continues with 1+1 redundancy
 4. Two Failures
    1. Node2 failure (1st failure)
    2. Corosync on the survivor (Node1)
    3. Etcd loses internal quorum (E-quorum) and goes read-only
    4. Node1 retains “corosync quorum” (C-quorum) and initiates fencing of Node2
-   5. Pacemaker on Node1 forces E-quorum (etcd promotion event)
+   5. Pacemaker on Node1 restarts Etcd forcing a new cluster with old state to recover E-quorum. Node2 is added to etcd members list as learning member.
    6. Cluster continues with no redundancy
    7. Node1 experience a power failure (2nd Failure)
    8. … time passes …
@@ -280,7 +282,7 @@ As part of the fencing setup, the cri-o and kubelet services will still be owned
    4. Start failure defaults to leaving the service offline
 6. Etcd Failure
    1. Pacemaker’s monitoring detects the failure
-   2. Pacemaker either demotes etcd so it can resync, or restarts and promotes etcd
+   2. Pacemaker removes etcd from the members list and restart it, so it can resync
    3. Stop failure is optionally escalated to a node failure (fencing)
    4. Start failure defaults to leaving the service offline
 
