@@ -99,7 +99,8 @@ Current Config struct in CMO
 
 We will strive to maintain the previous structure as much as possible while adapting it to OpenShift API standards. 
 
-Current ClusterMonitoringConfiguration struct:
+[Current ClusterMonitoringConfiguration struct:](
+https://github.com/openshift/cluster-monitoring-operator/blob/eca25a9571d721a90f1b7f8d26931c679ae93aec/pkg/manifests/types.go#L36)
 ```
 type ClusterMonitoringConfiguration struct {
 	AlertmanagerMainConfig *AlertmanagerMainConfig `json:"alertmanagerMain,omitempty"`
@@ -130,15 +131,9 @@ To initiate the process, let's establish a feature gate that will serve as the e
 One proposal for a minimal DoD was:
 - Feature gate in openshift/api
     - API types moved to openshift/api
-    - CRD Initial dev https://github.com/openshift/api/pull/1929
-        Add controller-gen logic to makefile
-        Add API to api/config/v1
-        Add Generated CRD: config/v1/zz_generated.crd-manifests/0000_10_config-operator_01_clustermonitoring.crd.yaml
-        Add example CustomResource: config/examples/clustermonitoringoperator.yaml
-    - Client codegen 
+    - Client-go codegen 
     - Reconcile logic: https://github.com/openshift/cluster-monitoring-operator/pull/2350
-    - Add decoupling ConfigMap / CustomResource:
-        Controller logic is strongly dependant of *manifests.Config struct.
+    - Add merge ConfigMap / CustomResource for phase 1
         
 
 ### Example configuration
