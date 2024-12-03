@@ -179,7 +179,7 @@ index 000000000..8841cd749
 +}
 
 +// KMSProviderType is a specific supported KMS provider
-+// +kubebuilder:validation:Enum="";AWS
++// +kubebuilder:validation:Enum=AWS
 +type KMSProviderType string
 +
 +const (
