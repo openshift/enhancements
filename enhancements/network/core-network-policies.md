@@ -46,7 +46,10 @@ compromised pod can not be used as a springboard for other attacks.
 
 - As an administrator, I need to be able to override specific
   OpenShift policies to be more restrictive so that I can satisfy my
-  security department
+  security requirements.  For instance there may be cases where a core
+  component may be able to call webhooks, but I do not want to use
+  them on the cluster, or have a specific list of endpoints.  I may
+  want to override our permissive list to make it more restrictive.
 
 - As an OpenShift release manager, I want to know that all cluster
   namespaces have policies applied so that I can determine if we are
@@ -69,19 +72,26 @@ compromised pod can not be used as a springboard for other attacks.
 
 - Audit the policies for compliance
 
-- Ensure all OpenShift namespaces have a default deny-all policy
-  defined, and identify those that do not (including “openshift-”
-  namespaces managed by a non Red Hat operator)
+- Ensure all OpenShift namespaces have a default deny-all policy for
+  both egress and ingress defined, and identify those that do not
+  (including `openshift-` namespaces managed by a non Red Hat
+  operator)
 
 
 ### Non-Goals
 
 - We are not considering requiring the definition of Admin Network
-  Policy for components (yet).  But the documentation of the network
+  Policy for components.  But the documentation of the network
   connections that a namespace uses should make future development of
-  Admin Network Policy easier.  We will be using Admin Network Policy
-  to allow cluster admins to override our namespace Network Policies
-  if needed.
+  Admin Network Policy easier should we desire it.  We will be using
+  Admin Network Policy to allow cluster admins to override our
+  namespace Network Policies if needed.  One of the reasons for not
+  requiring core components to have Admin Network Policy is that then
+  the operational complexity of managing them across upgrades would
+  need to move to a third-party operator.  Similarly, it is better to
+  have the network policies near the code that uses them so that the
+  team responsible for the objects develops and maintains the network
+  policies.
 
 - Adding policies for operators not created by Red Hat
 
@@ -90,7 +100,7 @@ compromised pod can not be used as a springboard for other attacks.
 
 1. Change the namespace admission controller so all namespaces with an
    openshift- prefix (since those are special anyway) are labeled with
-   the “openshift-namespace’ label so **that network policy can address
+   the `security.openshift.io/openshift-namespace` label so **that network policy can address
    them**
 
 2. Change the cluster-network-operator to apply the same label to all
@@ -123,14 +133,6 @@ compromised pod can not be used as a springboard for other attacks.
     chance to run (but that may break things installed from the operator
     catalog into the openshift namespace)
 
-Issues:
-
-- Need to work out a good way to say “can not talk to pods, only to
-  external”.  Right now it is ugly, it needs an ipblock rule with an
-  ‘except’ clause for all of the pod CIDRs… so an operator that needs
-  that rule needs to read the config and maintain the policy
-
-
 ### Workflow Description
 
 **Cluster administrator** is a human user in charge of running a cluster.
@@ -138,7 +140,7 @@ Issues:
 **OpenShift developer** is a human responsible for creating and maintaining OpenShift.
 
 **Third-Party developer** is a human who creates an operator that
-  creates an “openshift-” namespace.  This is assumed to be for
+  creates an `openshift-` namespace.  This is assumed to be for
   something extending OpenShift platform capabilities.
 
 **Namespace Admission Controller** is a function in the OpenShift API
@@ -156,15 +158,15 @@ Issues:
 
 2. The Namespace Admission Controller will look at the namespace name
 
-3. If it starts with “openshift-” it will be treated as an OpenShift
+3. If it starts with `openshift-` it will be treated as an OpenShift
    namespace (since that namespace prefix has special meaning already
    elsewhere in the code)
 
   1. The namespace object will be changed to have a label applied with
-     the name “openshift-namespace” and the value “true”
+     the name `security.openshift.io/openshift-namespace` and the value ''
 
-4.  If it does not start with “openshift-” then any
-    “openshift-namespace” label will be stripped out and can not be set
+4.  If it does not start with `openshift-` then any
+    `security.openshift.io/openshift-namespace` label will be stripped out and can not be set
 
 
 #### Applying the label at upgrade
@@ -176,12 +178,18 @@ Issues:
 
    1. Loop over all namespaces
 
-   2. If it sees a namespace starting with “openshift-”
+   2. If it sees a namespace starting with `openshift-`
 
        1. The namespace object will be changed to have a label applied
-          with the name “openshift-namespace” and the value “true”
+          with the name `security.openshift.io/openshift-namespace` and the value ""
        
-   3. Otherwise it will strip the “openshift-namespace” label
+   3. Otherwise it will strip the `security.openshift.io/openshift-namespace` label
+
+   TODO: Decide if this is the correct behavior... do we want to allow
+   namespaces to opt-in to being part of the platform.  I do not think
+   there is a security issue since we are just adding restrictions,
+   but that needs more consideration.  The advantage would be for
+   things like ACS that do not install into an `openshift-` namespace.
 
 
 #### Opting Into a Default Deny for OpenShift
@@ -196,7 +204,7 @@ Issues:
 
 #### Setting a Global Default Deny
 
-1. The Cluster Administrator can deploy an Admin Network Policy we
+1. The Cluster Administrator can deploy an AdminNetworkPolicy we
    will document and test
 
 2. The policy will change the default for all namespaces in the
@@ -206,7 +214,7 @@ Issues:
 
 #### Removing Policy Restrictions for OpenShift
 
-1. The Cluster Administrator can deploy an Admin Network Policy we
+1. The Cluster Administrator can deploy an AdminNetworkPolicy we
    will document with a public KCS and test
 
 2. The policy will bypass Network Policy for all namespaces with the
@@ -257,9 +265,9 @@ Issues:
 ### API Extensions
 
 This extends the API server by changing the Admission Controller on
-namespace objects so that the label “openshift-namespace” is applied
+namespace objects so that the label `security.openshift.io/openshift-namespace` is applied
 or removed depending on whether the namespace name starts with
-“openshift-”.
+`openshift-`.
 
 Other than that, there is no other API change.
 
@@ -310,7 +318,7 @@ enhancement.
 
 Almost every pod will need to have an egress policy to allow DNS.
 Would it be better to have one policy that can be enabled by a label?
-Or just have an admin network policy that just allows it.
+Or just have an AdminNetworkPolicy that just allows it.
 
 
 #### Host Network Pods
@@ -357,19 +365,6 @@ Admin Network Policy can be used to override our policies until a fix
 can be delivered in a z-stream.
 
 
-#### Policies Too Open
-
-The converse can also happen… we may write a policy that a customer
-finds is too open, or they may wish to impose additional restrictions
-that we may allow in general (for instance, something could allow a
-webhook to be called off-cluster, but they may want to forbid all
-off-cluster traffic from the namespace since they do not use that
-feature).
-
-Customers can write admin network policies that override the network
-policies that we ship.
-
-
 #### Challenges Debugging and Supporting
 
 When a network policy blocks traffic, it may be blocking traffic of an
@@ -393,7 +388,7 @@ None foreseen.
 
 - The existing e2e and integration tests should catch network policy errors where they are too restrictive
 
-- We will need to add new tests to ensure that all “openshift-” namespaces have the default deny policy defined.
+- We will need to add new tests to ensure that all `openshift-` namespaces have the default deny policy defined.
 
 - We should add a test that runs alongside the existing e2e tests to
   monitor for connections being blocked by network policy in openshift
@@ -404,11 +399,15 @@ None foreseen.
 
 ## Graduation Criteria
 
-GA:
+### Dev Preview -> Tech Preview
+
+We do not anticipate a dev preview or tech preview.
+
+### Tech Preview -> GA
 
 - Cluster Network Operator changes complete:
 - Namespace Admission controller change complete
-- Must-gather able to get all recent network policy connection blocks in “openshift-” namespaces
+- Must-gather able to get all recent network policy connection blocks in `openshift-` namespaces
 - Customers must be able to see network policy connection blocks using the observability tools
 - The test changes as described above must be complete
 - Documentation will be updated to describe how to:
@@ -417,13 +416,15 @@ GA:
     - Apply a default-deny rule to all cluster namespaces
     - Disable our policies in a KCS
 
+### Removing a deprecated feature
+
+If the feature is deprecated, then we will need to strip the labels we
+added and remove the code.  The policies developed for the namespaces
+should remain.
 
 ## Upgrade / Downgrade Strategy
 
-
 #### Upgrades:
-
-
 
 1. The new API server will roll out and will start labeling namespaces
 
@@ -459,6 +460,10 @@ At which point, the cluster administrator can use the new labels to easily apply
 - If the traffic flows change substantially in a namespace, it may
   have to define policies for the old flow and the new, but that would
   be atypical
+
+## Operational Aspects of API Extensions
+
+Not applicable.  There will be no API change.
 
 
 ## Support Procedures
@@ -530,3 +535,13 @@ Ideas:
 
 - Should we allow everything to get DNS access?  Is there ever a need
   not to?
+
+- Need to work out a good way to say “can not talk to pods, only to
+  external”.  Right now it is ugly, it needs an ipblock rule with an
+  ‘except’ clause for all of the pod CIDRs… so an operator that needs
+  that rule needs to read the config and maintain the policy.
+
+  Or we may define a global ANP that allows namespaces labelled with
+  `security.openshift.io/openshift-namespace` to label pods that need
+  this rule applied.
+
