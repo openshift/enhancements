@@ -75,7 +75,10 @@ Introduce configuration options for API server cipher suites.
 ```yaml
 apiServer:
   tls:
-    cipherSuites: # Defaults to the suites of the configured minVersion
+    # Defaults to the suites of the configured minVersion. When using TLS 1.3
+    # the cipherSuites user input is ignored and replaced with TLS 1.3 default
+    # suites.
+    cipherSuites:
     - <cipher suite 1>
     - ...
     minVersion: <VersionTLS12|VersionTLS13> # Defaults to 1.2
@@ -111,7 +114,7 @@ control plane components:
 * Route controller manager
 
 Except for API server the rest of the components are internal to MicroShift
-and are not exposed through an endpoint but require secure connections too.
+and require secure connections too.
 
 IMPORTANT: Because of limitations in the Go implementation of TLS, using
 version 1.3 does not allow to change the cipher suites. Whenever TLS 1.3 is
@@ -131,7 +134,7 @@ cluster.
    suites or else connections will fail in TLS handshake phase.
 
 ### API Extensions
-As described in hte proposal section, there is one new configuration option:
+As described in the proposal section, there is one new configuration option:
 ```yaml
 apiServer:
   tls:
