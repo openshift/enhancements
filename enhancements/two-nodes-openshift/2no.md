@@ -107,6 +107,8 @@ Upon a peer failure, the RHEL-HA components on the survivor will fence the peer 
 
 Upon a network failure, the RHEL-HA components ensure that exactly one node will survive, fence its peer, and use the OCF script to restart etcd as a new cluster-of-one.
 
+Upon an etcd failure, the OCF script will detect the issue and try to restart etcd.
+
 In both cases, the control-plane's dependence on etcd will cause it to respond with errors until etcd has been restarted.
 
 Upon rebooting, the RHEL-HA components ensure that a node remains inert (not running cri-o, kubelet, or etcd) until it sees its peer.
