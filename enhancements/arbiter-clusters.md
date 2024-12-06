@@ -107,18 +107,18 @@ arbiter nodes to be deployed with out higher memory and cpu requirements.
 
 Components that we are proposing to change:
 
-| Component                                                     | Change                                                                                                          |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| [Infrastructure API](#infrastructure-api)                     | Add `HighlyAvailableArbiter` as a new value for `ControlPlaneTopology`                                          |
-| [Installer](#installer-changes)                               | Update install config API to Support arbiter machine types                                                      |
-| [MCO](#mco-changes)                                           | Update validation hook to support arbiter role and add bootstrapping configurations needed for arbiter machines |
-| [Kubernetes](#kubernetes-change)                              | Update allowed `well_known_openshift_labels.go` to include new node role as an upstream carry                   |
-| [ETCD Operator](#etcd-operator-change)                        | Update operator to deploy operands on both `master` and `arbiter` node roles                                    |
-| [library-go](#library-go-change)                              | Update the underlying static pod controller to deploy static pods to `arbiter` node roles                       |
-| [Authentication Operator](#authentication-operator-change)    | Update operator to accept minimum 2 kube api servers when `ControlPlaneTopology` is `HighlyAvailableArbiter`    |
-| [Hosted Control Plane](#hosted-control-plane-change)          | Disallow HyperShift from installing on the `HighlyAvailableArbiter` and `SingleReplica` topology                |
-| [Alternative Install Flows](#alternative-install-flow-change) | Update installation flow for new node role via tooling such as Assisted Installer, Assisted Service and ZTP     |
-| [OLM Filtering](#olm-filter-addition)                         | Add support to OLM to filter operators based off of control plane topology                                      |
+| Component                                                     | Change                                                                                                           |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| [Infrastructure API](#infrastructure-api)                     | Add `HighlyAvailableArbiter` as a new value for `ControlPlaneTopology`                                           |
+| [Installer](#installer-changes)                               | Update install config API to Support arbiter machine types                                                       |
+| [MCO](#mco-changes)                                           | Update validation hook to support arbiter role and add bootstrapping configurations needed for arbiter machines  |
+| [Kubernetes](#kubernetes-change)                              | Update allowed `well_known_openshift_labels.go` to include new node role as an upstream carry                    |
+| [ETCD Operator](#etcd-operator-change)                        | Update operator to deploy operands on both `master` and `arbiter` node roles                                     |
+| [library-go](#library-go-change)                              | Update the underlying static pod controller to deploy static pods to `arbiter` node roles                        |
+| [Authentication Operator](#authentication-operator-change)    | Update operator to accept minimum 2 kube api servers when `ControlPlaneTopology` is `HighlyAvailableArbiter`     |
+| [Hosted Control Plane](#hosted-control-plane-change)          | Disallow HyperShift from installing on the `HighlyAvailableArbiter` and `SingleReplica` topology                 |
+| [Alternative Install Flows](#alternative-install-flow-change) | Update installation flow for new node role via tooling such as Assisted Installer, Agent Based Installer and ZTP |
+| [OLM Filtering](#olm-filter-addition)                         | Add support to OLM to filter operators based off of control plane topology                                       |
 
 ### Infrastructure API
 
@@ -137,6 +137,10 @@ topology migrations.
 
 ### Installer Changes
 
+> Note: When we say `MachinePool` in the below statements, we are referring to
+> the installer config struct used for generating resources and NOT the Machine
+> Config Operator CR.
+
 We will need to update the installer to have awareness of the explicit intent to
 setup the cluster with an arbiter node. Adding a new machine type similar to the
 flow for `master` and `workers` machines. As an example if the intent is to
@@ -147,6 +151,11 @@ The `arbiter` will be a `MachinePool` object that will enforce at least 1
 replica, and at least 2 replicas for the `controlPlane`. When no `arbiter` field
 is supplied regular flow will validate. When `arbiter` is supplied 2 replicas
 will be valid for for `controlPlane` as long as an `arbiter` is specified.
+
+When defining the hosts in the `installConfig.platform.baremetal.hosts` objects,
+users should use the `role` field to denote `master` and `arbiter`. However, for
+ABI and Assisted Installer the `role` is not required and we will automatically
+choose the smallest compute node as the arbiter in the control plane nodes.
 
 Some validation we will enforce:
 
@@ -300,7 +309,7 @@ validation](https://github.com/openshift/kubernetes/blob/6c76c890616c214538d2b5d
 preventing a node from containing roles that use the prefix
 `node-role.kubernetes.io`. We will need modify
 [well_known_openshift_labels.go](https://github.com/openshift/kubernetes/blob/master/staging/src/k8s.io/kubelet/pkg/apis/well_known_openshift_labels.go)
-to include the new `node-role.kubernetes.io/arbiter`. This will be an upstream
+to include the new `node-role.kubernetes.io/arbiter`. This will be a downstream
 carry patch for this file, and from what we could identify this was the only
 needed spot to modify in the openshift/kubernetes code.
 
@@ -414,7 +423,19 @@ well as any bootstrap component that can be created outside of the CLI flow.
 
 We currently have a few different options for different needs when installing
 OCP that need to also be updated. Work done in the installer should be reflected
-on the Assisted Installer, Assisted Service and ZTP.
+on the Assisted Installer Service, Agent Based Installer and ZTP.
+
+In ABI (Agent Based Installer) the bootstrap node, which runs the
+`assisted-service` as well as the `in-place bootstrap`, is required to be a
+control plane node. This should not run on the arbiter node since it will have
+less compute and thus we would prefer it to run on one of the larger control
+plane nodes.
+
+In both ABI and Assisted, the node that runs the `in-place bootstrap` is the
+last to be rebooted to join the cluster. We would require this to be the one of
+the large control plane node, and since 2 etcd replicas are all that is required
+to add the third node safely, a 1 control plane + 1 arbiter cluster satisfies
+this requirement. This also would mean less major code changes.
 
 ### OLM Filter Addition
 
@@ -591,7 +612,7 @@ failover.
 ## Test Plan
 
 - We will create a CI lane to validate install and fail over scenarios such as
-  loosing a master or swaping out an arbiter node.
+  losing a master or swapping out an arbiter node.
 - We will create a CI lane to validate upgrades, given the arbiter's role as a
   quasi master role, we need to validate that MCO treats upgrades as expected
 - Create complimentary lanes for serial/techpreview/no-capabilities.
@@ -600,6 +621,7 @@ failover.
   will need to be altered to accommodate the different topology.
 - We will add e2e tests to specifically test out the expectations in this type
   of deployment.
+
   - Create tests to validate correct pods are running on the `arbiter`.
   - Create tests to validate no incorrect pods are running on the `arbiter`.
   - Create tests to validate routing and disruptions are with in expectations.
