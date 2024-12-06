@@ -391,7 +391,7 @@ The Kubernetes rebase is a good example of a large change that doesn’t really 
 The teams involved in landing these changes have worked with the TRT to create sufficient pre-merge signal to greatly
 decrease the regression risk—effectively achieving the same goal as Feature Gates via another route.
 
-Small features that take less than a sprint to fully develop, merge and test don’t really benefit from Feature Gates.
+Small features involing a single team that take less than a sprint to fully develop, merge and test don’t really benefit from Feature Gates.
 Those sorts of features haven’t been the biggest cause of our release risk.
 
 ## Should feature gates necessarily be tied to an API, i.e does it apply only when there are new APIs?
