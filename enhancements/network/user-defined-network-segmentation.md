@@ -406,15 +406,16 @@ If there are pods still attached to this network, the network will not be remove
 
 The CRDs spec defines as follows:
 
-| Field name     | Description                                                                                                                                                                                                                                                                                                                                                                                            | optional |
-|----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------|
-| Topology       | The topological configuration for the network. Must be one of `Layer2`, `layer3`, `Localnet`.                                                                                                                                                                                                                                                                                                          | No       |
-| Role           | Select the network role in the pod, either `Primary` or `Secondary`. Primary network support topologies `Layer2` and `Layer3` only.                                                                                                                                                                                                                                                                    | No       |
-| MTU            | The maximum transmission unit (MTU).<br/>The default is 1400.                                                                                                                                                                                                                                                                                                                                          | Yes      |
-| Subnets        | The subnet to use for the network across the cluster.<br/>E.g. `10.100.200.0/24`.<br/>IPv6 `2001:DBB::/64` and dual-stack `192.168.100.0/24`,`2001:DBB::/64` subnets are supported.<br/>When omitted, the logical switch implementing the network only provides layer 2 communication, and users must configure IP addresses.<br/>Port security only prevents MAC spoofing if the subnets are omitted. | Yes      |
-| ExcludeSubnets | List of CIDRs.<br/>IP addresses are removed from the assignable IP address pool and are never passed to the pods.                                                                                                                                                                                                                                                                                      | Yes      |
-| JoinSubnets    | Subnet used inside the OVN network topology.  When omitted, this means no opinion and the platform is left to choose a reasonable default which is subject to change over time.                                                                                                                                                                                                                        | Yes      |
-| IPAMLifecycle  | Control IP addresses management lifecycle. When `Persistent` is specified it enable workloads have persistent IP addresses. For example: Virtual Machines will have the same IP addresses along their lifecycle (stop, start migration, reboots). Supported by Topology `Layer2` & `Localnet`.                                                                                                         | Yes      |
+| Field name        | Description                                                                                                                                                                                                                                                                                                                                                                                            | optional |
+|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------|
+| Topology          | The topological configuration for the network. Must be one of `Layer2`, `layer3`, `Localnet`.                                                                                                                                                                                                                                                                                                          | No       |
+| Role              | Select the network role in the pod, either `Primary` or `Secondary`. Primary network support topologies `Layer2` and `Layer3` only.                                                                                                                                                                                                                                                                    | No       |
+| MTU               | The maximum transmission unit (MTU).<br/>The default is 1400.                                                                                                                                                                                                                                                                                                                                          | Yes      |
+| Subnets           | The subnet to use for the network across the cluster.<br/>E.g. `10.100.200.0/24`.<br/>IPv6 `2001:DBB::/64` and dual-stack `192.168.100.0/24`,`2001:DBB::/64` subnets are supported.<br/>When omitted, the logical switch implementing the network only provides layer 2 communication, and users must configure IP addresses.<br/>Port security only prevents MAC spoofing if the subnets are omitted. | Yes      |
+| ExcludeSubnets    | List of CIDRs.<br/>IP addresses are removed from the assignable IP address pool and are never passed to the pods.                                                                                                                                                                                                                                                                                      | Yes      |
+| JoinSubnets       | Subnet used inside the OVN network topology.  When omitted, this means no opinion and the platform is left to choose a reasonable default which is subject to change over time.                                                                                                                                                                                                                        | Yes      |
+| IPAMLifecycle     | Control IP addresses management lifecycle. When `Persistent` is specified it enable workloads have persistent IP addresses. For example: Virtual Machines will have the same IP addresses along their lifecycle (stop, start migration, reboots). Supported by Topology `Layer2` & `Localnet`.                                                                                                         | Yes      |
+| AddressManagement | Control how much of the IP/MAC configuration will be managed by OVN-Kubernetes. Must be one of `Full`, `MAC`.                                                                                                                                                                                                                                                                                   | Yes      |
  
 The cluster scoped CRD should have the following additional field:
 
@@ -464,6 +465,7 @@ Suggested API validation rules:
 - `Subnets` are mandatory for `Layer3` topology.
 - `Localnet` topology is not supported for primary network.
 - `IPAMLifecycle` is supported for `Layer2` and `Localnet` topology.
+- `AddressManagement` can be set to `MAC` only on `Layer2` or `Localnet` topologies for `Secondary` networks, where the `Subnets` parameter must be omitted. When set to `Full`, the `Subnets` attribute must be defined.
 
 Suggested CRD short-name: `udn`
 
@@ -496,10 +498,7 @@ type UserDefinedNetworkSpec struct {
     // 
     // For `Layer2` and `Localnet` topology types, the format should match standard CIDR notation, without
     // providing any host subnet mask.
-    // This field may be omitted for `Layer2` and `Localnet` topologies. 
-    // In that case the logical switch implementing the network only provides layer 2 communication,
-    // and users must configure IP addresses for the pods.
-    // Port security only prevents MAC spoofing
+    // This field is required when `AddressManagement` is set to `Full` and is ignored otherwise.
     // +optional
     Subnets []string `json:"subnets,omitempty"`
     
@@ -521,6 +520,17 @@ type UserDefinedNetworkSpec struct {
     // Supported by Topology `Layer2` and `Localnet`.
     // +optional
     IPAMLifecycle NetworkIPAMLifecycle `json:"ipamLifecycle,omitempty"`
+    
+    // Control how much of the IP/MAC-address configuration will be managed by OVN.
+    // `Full` means OVN-Kubernetes will apply IP configuration to the SDN infrastructure and it will also assign IPs from the selected subnet to the
+    // individual pods.
+    // `MAC` means OVN-Kubernetes will only assign MAC addresses and provide layer 2 communication, letting users configure IP addresses for the pods. 
+    //`MAC` is only available for `Layer2` and `Localnet` topologies for Secondary networks. 
+    // By disabling IPAM, any Kubernetes features that rely on selecting pods by IP will no longer function 
+    // (such as network policy, services, etc). Additionally, IP port security will also be disabled for interfaces attached to this network.
+    // Defaults to `Full`.
+    // +optional
+    AddressManagement AddrManagement `json:"addrManagement,omitempty"`
 }
 ```
 Suggested API validation rules:
@@ -528,6 +538,7 @@ Suggested API validation rules:
 - `Topology` can be one of `Layer2`, `Layer3`, `Localnet`.
 - `Role` can be one of `Primary`, `Secondary`.
 - `IPAMLifecycle` can be `Persistent`.
+- `AddressManagement` can be set to `MAC` only on `Layer2` or `Localnet` topologies for `Secondary` networks, where the `Subnets` parameter must be omitted. When set to `Full`, the `Subnets` attribute must be defined.
 - `JoinSubnets` length can be 1 or 2.
 
 ##### Cluster scoped CRD
