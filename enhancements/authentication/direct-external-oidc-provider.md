@@ -212,6 +212,24 @@ These changes have already been implemented, and the initial PR for them can be 
 
 In order to use `oc` with an external OIDC provider, the tool has been [extended](https://github.com/openshift/oc/pull/1640) with the necessary functionality, including command-line arguments that enable the required configuration. In particular, [`oauth2cli`](https://github.com/int128/oauth2cli) has been vendored into the `oc` codebase. One important consideration here is that depending on the OIDC provider, further functionality might be required, in which case `oc` will have to be extended to support that too.
 
+#### kube-apiserver considerations
+
+The kube-apiserver (KAS) has an OpenShift-specific patch that adds the `restrictusers` admission plugin, which is responsible for ensuring `RoleBinding` subjects meet restrictions outlined by any existing `RoleBindingRestriction` resources. This admission plugin relies on the oauth-apiserver provided `User` and `Group` APIs.
+
+Removing the OAuth stack entirely during external OIDC setup may result in the `restrictusers` admission plugin not having the ability to function as expected as the `User` and `Group` APIs will no longer be available.
+
+In an effort to prevent unexpected behavior of the `restrictusers` admission plugin, it is proposed that the logic of the admission plugin is updated to:
+
+- Check for the `ExternalOIDC` feature-gate being enabled
+- If the `ExternalOIDC` feature-gate is enabled, check if the configured authentication method is `OIDC`
+- If both the `ExternalOIDC` feature-gate is enabled _and_ the authentication method is `OIDC`, do not attempt to use the `User` and `Group` APIs. If any `RoleBindingRestriction` resources exist that restrict based on user or group subjects, reject admission of the `RoleBinding` with a helpful message informing users that we can not evalute the user and group subject restrictions when external OIDC authentication is configured.
+
+In addition to the `restrictusers` admission plugin change, to ensure users are aware of the impacts to this admission plugin's behavior when enabling external OIDC, it is proposed that we:
+
+- Reject creation of new `RoleBindingRestriction` resources containing user and/or group restrictions when external OIDC is configured using an admission plugin
+- Inform users when enabling external OIDC, using the `Authentication` resource, of any `RoleBindingRestriction` resources that specify user and/or group restrictions that will no longer be able to be properly evaluated when using an external OIDC provider.
+
+
 #### Authentication disruptions
 
 In case something goes wrong with the external provider, authentication might stop working. In such cases, cluster admins will still be able to access the cluster using a `kubeconfig` file with client certificates for an admin user. It is the responsibility of the cluster admins to make sure that such users exist; deleting all admin users might result in losing access to the cluster should any issues with the external provider arise.
