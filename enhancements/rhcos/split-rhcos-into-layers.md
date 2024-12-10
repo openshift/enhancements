@@ -357,16 +357,34 @@ https://github.com/openshift/enhancements/pull/1637#discussion_r1806785754
 
 #### Versioning scheme
 
-The versioning scheme for the *node image* will remain unchanged (e.g.
-418.94.202409090849-0). But the versioning scheme for the *bootimages* will
-change from e.g. 418.94.202409090849-0 to e.g. 9.4.202409090849-0 since they'll
-no longer be versioned with OpenShift. (But note that the format itself remains
-the same, and is still semver-compatible.)
+The versioning scheme for the base CoreOS container images, and their associated
+bootimages, will change from e.g. 418.94.202409090849-0 to e.g. 9.4.20240909-0
+since they'll no longer be versioned with OpenShift. (But note that the format
+itself remains similar and, importantly, semver-compatible.)
+
+The node image will inherit this versioning information from the base CoreOS
+image instead of trying to reinstate the previous 418.94... versioning scheme.
+The primary reason is that we can't anyway and even if we could it would be
+inconsistent with the rest of OCP.
+
+When building the layered node image, we can't easily come up with a good
+version string from inside that process. It would need to be driven by the build
+system so that e.g. it knows what the previous version string was and it can add
+it to labels for example. AFAIK, there is no precedence for doing this for other
+OCP components. Instead, the focus is on tying git commits to built images, and
+all the same mechanisms there should work just the same on openshift/os as other
+repos.
+
+One important note here: we will still have the CVO version label for the
+`machine-os` component, and that version will be the version of the CoreOS base
+image we layered on. The whole point of the CVO version label AIUI is to surface
+versioning information for embedded components that are versioned differently
+from OCP, so this fits nicely here.
 
 This change is likely to throw off anything that currently parses the version
 string to for example derive the OCP and RHEL versions for which an RHCOS image
-was built. Those will need to be adapted if they deal with bootimages. The
-release browser as mentioned above is a likely candidate.
+was built. Those will need to be adapted. The release browser as mentioned above
+is a likely candidate.
 
 Additionally, RHCOS artifacts on the official mirrors are currently versioned
 by the OCP release (e.g. `rhcos-4.16.3-x86_64-live.x86_64.iso`) and kept under
