@@ -212,22 +212,34 @@ These changes have already been implemented, and the initial PR for them can be 
 
 In order to use `oc` with an external OIDC provider, the tool has been [extended](https://github.com/openshift/oc/pull/1640) with the necessary functionality, including command-line arguments that enable the required configuration. In particular, [`oauth2cli`](https://github.com/int128/oauth2cli) has been vendored into the `oc` codebase. One important consideration here is that depending on the OIDC provider, further functionality might be required, in which case `oc` will have to be extended to support that too.
 
-#### kube-apiserver considerations
+#### authorization.openshift.io/RestrictSubjectBindings admission plugin considerations
 
-The kube-apiserver (KAS) has an OpenShift-specific patch that adds the `restrictusers` admission plugin, which is responsible for ensuring `RoleBinding` subjects meet restrictions outlined by any existing `RoleBindingRestriction` resources. This admission plugin relies on the oauth-apiserver provided `User` and `Group` APIs.
+OpenShift's default admission plugin `authorization.openshift.io/RestrictSubjectBindings`
+utilizes the OAuth stack, specifically the `User` and `Group` APIs, to ensure `RoleBinding`
+subjects do not violate any restrictions in the namespace they are going to be created in.
+These restrictions are specified by `RoleBindingRestriction` resources that are served
+by the openshift-apiserver.
 
-Removing the OAuth stack entirely during external OIDC setup may result in the `restrictusers` admission plugin not having the ability to function as expected as the `User` and `Group` APIs will no longer be available.
+Removing the OAuth stack entirely during external OIDC setup may result in the `authorization.openshift.io/RestrictSubjectBindings` admission plugin, and thus the KAS appearing degraded.
 
-In an effort to prevent unexpected behavior of the `restrictusers` admission plugin, it is proposed that the logic of the admission plugin is updated to:
+##### Changes to the kube-apiserver
 
-- Check for the `ExternalOIDC` feature-gate being enabled
-- If the `ExternalOIDC` feature-gate is enabled, check if the configured authentication method is `OIDC`
-- If both the `ExternalOIDC` feature-gate is enabled _and_ the authentication method is `OIDC`, do not attempt to use the `User` and `Group` APIs. If any `RoleBindingRestriction` resources exist that restrict based on user or group subjects, reject admission of the `RoleBinding` with a helpful message informing users that we can not evalute the user and group subject restrictions when external OIDC authentication is configured.
+To account for the impacts to the `authorization.openshift.io/RestrictSubjectBindings` admission plugin, the OpenShift-specific patch to the kube-apiserver that adds this admission plugin will be updated such that:
 
-In addition to the `restrictusers` admission plugin change, to ensure users are aware of the impacts to this admission plugin's behavior when enabling external OIDC, it is proposed that we:
+- Informers for the `Group` API are not started if the `Authentication` resource `.Spec.Type` is set to `OIDC`
+- The post-start hook that checks for oauth-apiserver connectivity will be skipped if the `Authentication` resource `.Spec.Type` is set to `OIDC`
+- `RoleBinding`s will be rejected if there exists a `RoleBindingRestriction` that specifies user and/or group restrictions
+- It is considered a failure if we are unable to determine the authentication type for the cluster, leading to rejection of the `RoleBinding`
 
-- Reject creation of new `RoleBindingRestriction` resources containing user and/or group restrictions when external OIDC is configured using an admission plugin
-- Inform users when enabling external OIDC, using the `Authentication` resource, of any `RoleBindingRestriction` resources that specify user and/or group restrictions that will no longer be able to be properly evaluated when using an external OIDC provider.
+##### Changes to openshift-apiserver
+
+To help keep users informed of the expected behavior of the `authorization.openshift.io/RestrictSubjectBindings` admission plugin when using the OIDC cluster authentication mode, it is proposed that a new admission plugin is added to the openshift-apiserver to reject creation of `RoleBindingRestriction` resources containing user/group restrictions.
+
+Alternative: Do not reject admission, but issue a warning of the impacts creating a `RoleBindingRestriction` may have when using OIDC as the cluster authentication method.
+
+##### Changes to the `Authentication` API
+
+TODO: Write.
 
 
 #### Authentication disruptions
