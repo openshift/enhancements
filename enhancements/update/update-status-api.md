@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "@joelspeed"
 creation-date: 2024-10-16
-last-updated: 2024-10-16
+last-updated: 2024-12-11
 tracking-link: 
   - https://issues.redhat.com/browse/OTA-1260
   - https://issues.redhat.com/browse/OTA-1339
@@ -33,18 +33,18 @@ This enhancement proposes a new API to expose the status and health of the OpenS
 
 ## Motivation
 
-The OpenShift update process is complex and often challenging to troubleshoot. It involves multiple components, their hierarchies, and differing interfaces. Administrators need extensive knowledge of resources, conditions, and processes to manage updates across different cluster types and form factors effectively.
+The OpenShift update process is complex and often challenging to troubleshoot. It involves a hierarchy of components with distinct responsibility domains and differing interfaces. Administrators need extensive knowledge of resources, conditions, and processes to manage updates across different cluster types and form factors effectively.
 
-There is a need for a centralized API to evaluate update status and health across different OpenShift tools and interfaces. This API would standardize the interpretation of the update process state, centralize the information provided by various components involved in updates, and integrate with related concepts like pre-checks and maintenance windows. User interfaces enabled by Update Status API will improve the user experience for administrators and support.
+There is a need for a centralized API to expose update status and health across different OpenShift tools and interfaces. This API would standardize the interpretation of the update process state, centralize the information provided by various components involved in updates, and integrate with related concepts like pre-checks and maintenance windows. User interfaces enabled by Update Status API will improve the user experience for administrators and support.
 
 ### User Stories
 
-* As a cluster administrator, I want to easily observe the update process so that I know if the update is going well or if there are issues to address.
-* As a cluster administrator, I want to observe the update process in a single place so that I do not have to dig through different command outputs to understand what is going on.
+* As a cluster administrator, I want to easily observe the update process so that I know if the update is going well or if there are issues I need to address.
+* As a cluster administrator, I need a single place to observe the update process so that I do not have to dig through different command outputs to understand what is going on.
 * As a cluster administrator, I want to be clearly told if there are issues I need to address during the update so that I can do so.
-* As a cluster administrator, I only want to be informed about issues relevant to the update and not be overwhelmed with reports that signal problems that may or may not exist so that I can save effort investigating.
-* As an engineer building tooling and UXes that interact with OpenShift clusters, I want the process and health information available through an API so that I can build software to consume and expose this information.
-* As an engineer building tooling and UXes that interact with OpenShift clusters, I want the information available through a designated API so that there is a standardized interpretation of the update process state provided by the platform, and I do not need to interpret individual component states.
+* As a cluster administrator, I only want to be informed about issues relevant to the update and not be overwhelmed with reports that may not be relevant to me so that I can save effort investigating.
+* As an engineer building tooling and UXes that interact with OpenShift clusters, I want both status and health information to be available through an API so that I can build software to consume and present it to users.
+* As an engineer building tooling and UXes that interact with OpenShift clusters, I want the information available through a designated API so that there is a standardized interpretation of the update process state provided by the platform, and my software does not need to interpret individual component states.
 
 ### Goals
 
@@ -70,9 +70,9 @@ Introduce a new Update Status Controller (USC) component in OpenShift that will 
 
 Implement a default `oc adm upgrade status` mode that will consume the API and present the information in a human-targeted format, similar to the existing client-based prototype implementation.
 
-All functionality will be delivered under the new `UpdateStatus` [Capability][cluster-capabilities] so that clusters that do not want the functionality do not need to spend resources on running the new controller. The Capability will be a part of the `vCurrent` and `v4.X` capability sets, which means the functionality will be enabled by default, and admins need to opt-out at installation or update time. Like all capabilities, once enabled, they cannot be disabled.
+All functionality will be delivered under the new `UpdateStatus` [Capability][cluster-capabilities] so that clusters that do not want the functionality do not need to spend resources on running the new controller. The Capability will be a part of the `vCurrent` and `v4.X` capability sets, which means the functionality will be enabled by default, and admins need to opt-out at installation or update time. Like all capabilities, once enabled, it cannot be disabled.
 
-This proposal intends to capture only a limited part of the roadmap for a system reporting update health and status. There is a vision that the system, where external, responsible components are closer to their domain, will produce update insights into the `UpdateStatus` API. This enhancement proposal only corresponds to Stage 1 of the implementation roadmap outlined in the [Update Health API Controller Proposal][update-health-api-dd]. There is no consensus on further stages of the implementation outlined in that document, and this enhancement does not aim to achieve it. Any hypothetical modular system will be a much larger effort to implement, and its design will benefit from experience and feedback obtained by seeing API consumed by users, backed by the proposed simple implementation in the USC.
+This proposal intends to capture only a limited part of the roadmap for a system reporting update health and status. The [Update Health API Controller Proposal][update-health-api-dd] document describes a potential future system where individual (and possibly external) domain-responsible components would produce update insights into the `UpdateStatus` API. This enhancement proposal corresponds to only Stage 1 of the implementation roadmap outlined there. There has yet to be a consensus on further stages, and this enhancement does not aim to achieve it. Any hypothetical modular system will be a much larger effort to implement, and its design will benefit from experience and feedback obtained by seeing API consumed by users, backed by the proposed simple implementation in the USC.
 
 ### Workflow Description
 
@@ -81,7 +81,7 @@ This proposal intends to capture only a limited part of the roadmap for a system
 1. While there is no update happening, respective conditions convey:
    1. `.status.controlPlane.conditions` has a `Updating=False` condition.
    1. `.status.workerPools[*].conditions` each have a `Updating=False` condition.
-1. When a user runs `oc adm upgrade status`, the client reads the `UpdateStatus` and reports that no update is happening.
+1. When a user runs `oc adm upgrade status`, the `oc` client reads the `UpdateStatus` and reports that no update is happening.
 1. The user triggers the update.
 1. The USC monitors `ClusterVersion`, `ClusterOperator`, `MachineConfigPool`, and `Node` resources and reflects the state of the update through the `UpdateStatus` resource via a set of status and health insights.
 1. When the user runs `oc adm upgrade status`, the client reads the `UpdateStatus` and uses status insights to convey progress and health insights to convey issues the admin needs to address.
@@ -92,7 +92,7 @@ Introduce a new `UpdateStatus` CRD. The CRD is namespaced to allow usage in Host
 
 The primary purpose of the `UpdateStatus` CRD is to convey status information. For now, its `.spec` is empty but can be used in the future to configure the desired form or content of the information surfaced in status.
 
-The `status` subresource is the primary value of the enhancement. The status and health information about the update are expressed through status.
+The `status` subresource content is the primary value of the enhancement. The status and health information about the update are expressed through the `status` subresource.
 
 Introduce a new `update.openshift.io` group for `UpdateStatus`. There is no suitable existing OpenShift API group for where `UpdateStatus` would fit. The `ClusterVersion` CRD, which is used to convey some information about the update process, is in the `config.openshift.io` group. `UpdateStatus` provides no configuration capabilities, so `config.openshift.io` is a poor fit. The new group is well-suited to contain some of the other update-related APIs needed for further incoming features like maintenance windows or update pre-checks.
 
@@ -167,7 +167,7 @@ Update Status Insights are directly tied to the update process, regardless of wh
 1. Either has a notion of "being updated," such as a `Node` or `ClusterOperator`
 1. or represents a higher-level abstraction, such as a `ClusterVersion` resource (represents the control plane) or `MachineConfigPool` (represents a pool of nodes).
 
-Initially, the USC will create status insights for `ClusterVersion`, `ClusterOperator`, `MachineConfigPool`, and `Node` resources.
+Initially, the USC will produce status insights for `ClusterVersion`, `ClusterOperator`, `MachineConfigPool`, and `Node` resources.
 
 ##### Update Health Insights
 
@@ -175,11 +175,11 @@ Update Health Insights report a state or condition in the cluster that is abnorm
 
 #### Update Status Controller
 
-The Update Status Controller (USC) is a new component in OpenShift that will be deployed directly by the CVO and is being treated as its operand. This is uncommon in OpenShift, as the CVO typically deploys only second-level operators as its operands. In this model, the USC (providing cluster functionality) would normally be an operand, (and we would need to invent a new cluster operator to manage it. Because the CVO is directly involved in updates, such an additional layer does not have value.
+The Update Status Controller (USC) is a new component in OpenShift that will be deployed directly by the CVO and is being treated as its operand. This is uncommon in OpenShift, as the CVO typically deploys only second-level operators as its operands. In this model, the USC (providing cluster functionality) would normally be an operand, and we would need to invent a new cluster operator to manage it. Because the CVO is directly involved in updates, such an additional layer does not have value.
 
 The Update Status Controller does not need HA deployment, and it is sufficient to run a single replica.
 
-The Update Status Controller will run a primary controller that will maintain the `UpdateStatus` resource. The resource has no `.spec`, so the controller will ensure the resource exists and its `.status` content is up-to-date and correct. It will determine the status content by receiving and processing insights from the other controllers in the USC.
+The Update Status Controller will run a primary controller that will maintain the `UpdateStatus` resource. The resource has no `.spec`, so the controller will ensure the resource exists and its `.status` content is up-to-date and correct. It will determine the `status` subresource content by receiving and processing insights from the other controllers in the USC.
 
 The Update Status Controller will have two additional control loops, both serving as producers of insights for the given domain. One will monitor the control plane and will watch `ClusterVersion` and `ClusterOperator` resources. The other will monitor the node pools and will watch `MachineConfigPool` and `Node` resources. Both will report their observations as status or health insights to the primary controller so it can update the `UpdateStatus` resource. These control loops will reuse the existing cluster check code implemented in the client-side `oc adm upgrade status` prototype.
 
@@ -193,7 +193,7 @@ The proposal to deliver the API and a controller that both manages the API and m
 
 The pattern of the CVO directly deploying a non-operator component is unusual in OpenShift. We could introduce an entirely new Cluster Operator to manage the USC, but because the update functionality is so closely tied to the CVO, an additional layer seems excessive and unnecessary. Adding this layer can be considered in the future if the proposed model is problematic.
 
-Placing the cluster inspection logic directly into the USC puts the OTA team in a position where we need to maintain the logic while not being experts in a significant part of the domain (interpreting MCP and `Node` states). This is fine as long as we eventually move the logic to the MCO to serve as an insight producer, which depends on the future architecture of the system.
+Placing the cluster inspection logic directly into the USC puts the OTA team in a position where we need to maintain the logic while not being experts in a significant part of the domain (interpreting `MachineConfigPool` and `Node` states). This is fine as long as we eventually move the logic to the Machine Config Operator to serve as an insight producer, which depends on the future architecture of the system.
 
 The API-backed `oc adm upgrade status` will lose the ability to run against older clusters that do not have the API (or against non-TechPreview clusters while the feature is still in TechPreview). The feature was requested to be an API from the start, and the client-based prototype was meant to be a temporary solution.
 
@@ -204,9 +204,9 @@ The API-backed `oc adm upgrade status` will lose the ability to run against olde
 
 ## Test Plan
 
-* Tests for the Status API will be added to the `openshift/origin` test suite, covering both update and non-update paths. In non-update paths, we will test that the API correctly reports the cluster as not updating. In update paths, the presence of the expected status insights will be monitored, and their properties checked.
+* Tests for the Status API will be added to the `openshift/origin` test suite, covering both update and non-update paths. In non-update paths, we will test that the API correctly reports the cluster as not updating. In update paths, the presence of the expected status insights will be monitored, and their properties checked. We can consider tightening the test suite to fail in the presence of health insights because these signal undesirable conditions during the update.
 * USC code will reside in the CVO repository, which has CI jobs for TechPreview installs and both update directions (into the change and out of the change).
-The client `oc adm upgrade status` code that interprets the API to human-readable output will receive similar [integration example-based tests][oc-adm-upgrade-status-examples] as the client-based implementation.
+* The client `oc adm upgrade status` code that interprets the API to human-readable output will receive similar [integration example-based tests][oc-adm-upgrade-status-examples] as the client-based implementation.
 * All code will be appropriately unit-tested.
 
 ## Graduation Criteria
@@ -238,7 +238,7 @@ The USC will be updated by the CVO very early in the update process, immediately
 There are two sources of skew:
 
 1. The updated USC needs to monitor resources of potentially old-version CRDs managed by old-version controllers. This should be fine, as CRDs are updated early in the process.
-1. oc needs to be able to process and display `UpdateStatus` resources for OCP versions following the version skew policy. `oc adm upgrade status` of version 4.x must gracefully handle `UpdateStatus` resources from 4.x-1, 4.x and 4.x+1.
+1. `oc` client needs to be able to process and display `UpdateStatus` resources for OCP versions following the version skew policy. `oc adm upgrade status` of version 4.x must gracefully handle `UpdateStatus` resources from 4.x-1, 4.x and 4.x+1.
 
 ## Operational Aspects of API Extensions
 The USC will be deployed as a single-replica Deployment, running a binary shipped in the CVO image. The CVO itself will manage this Deployment as its operand. USC operational matters will be exposed via the `UpdateStatus` resource's `.status` conditions. For the initial implementation, the `Available` condition will suffice.
@@ -251,18 +251,18 @@ No specific support procedures are needed for the USC. The `UpdateStatus` resour
 
 ### CLI
 
-We could continue improving the `oc adm upgrade status` CLI command we prototyped for 4.16, placing all analysis logic into the `oc` client. This approach even has a significant advantage of being able to run the most recent code against older version clusters. The downside is that without a component continuously running in the cluster, the CLI invocation always only sees the current snapshot of the system state and is unable to implement some desirable features, such as knowing when certain states started or stopped occurring. Additionally, the business case for the feature is to enable multiple UXes (oc, web console, OCM) to report the core platform status/health, so implementing advanced logic in one of the clients would not provide any benefit to the others.
+We could continue improving the `oc adm upgrade status` CLI command we prototyped for 4.16 and extended in 4.17 and 4.18, placing all analysis logic into the `oc` client. This approach even has a significant advantage of being able to run the most recent code against older version clusters. The downside is that without a component continuously running in the cluster, the CLI invocation always only sees the current snapshot of the system state and is unable to implement some desirable features, such as knowing when certain states started or stopped occurring. Additionally, the business case for the feature is to enable multiple UXes (oc, web console, OCM) to report the core platform status/health, so implementing advanced logic in one of the clients would not provide any benefit to the others.
 
 ### OLM Operator
 
-USC could be an optional operator delivered via OLM together with the `UpdateStatus` CRD. This means nobody pays any complexity or operational costs unless they explicitly opt-in by installing the optional operator. The disadvantage of this approach is that the update is still a core functionality of the platform, realized by platform code through platform-managed resources. To be able to report platform update status/health, either the operator would need to contain all analysis logic (essentially locking the architecture into the state proposed here), or the platform would still need to be modified to expose necessary information.
+USC could be an optional operator delivered via OLM together with the `UpdateStatus` CRD. This means nobody pays any complexity or operational costs unless they explicitly opt in by installing the optional operator. The disadvantage of this approach is that the update is still a core functionality of the platform, performed by platform code through platform-managed resources. To be able to report platform update status/health, either the operator would need to contain all analysis logic (essentially locking the architecture into the state proposed here), or the platform would still need to be modified to expose necessary information.
 
-Explicit installation would likely hamper feature adoption. Many admins would likely require the feature only after they encounter an issue during the update without previously installing the operator.
+Explicit opt-in through optional operator installation would likely hamper adoption. Many admins would likely require the feature only after they encounter an issue during the update without previously installing the operator.
 
 Lastly, maintaining such an optional operator would be difficult because it would need to support multiple platform versions somehow. It is also unclear how we would treat form factors such as HyperShift.
 
 ### CVO
-In standalone OCP, the CVO manages the overall process of updating a cluster and contains some form of status/health reporting through its `ClusterOperator`-like status `Progressing`/`Failing` conditions. The CVO could be extended with the functionality proposed for the USC. However, this would be suboptimal for HyperShift, where the CVO does not manage updates. Additionally, the CVO is a complex, hard-to-maintain component (it is an old-school operator where individual controllers are implemented directly, without utilizing controller library code from library-go), and extending it with new functionality would only increase its complexity.
+In standalone OCP, the CVO manages the overall process of updating a cluster and contains some form of status/health reporting through its `ClusterOperator`-like status `Progressing` and `Failing` conditions. The CVO could be extended with the functionality proposed for the USC. However, this would be suboptimal for HyperShift, where the CVO does not manage updates. Additionally, the CVO is a complex, hard-to-maintain component (it is an old-school operator where individual controllers are implemented directly, without utilizing controller library code from library-go), and extending it with new functionality would only increase its complexity.
 
 ### Cluster Health API instead of Update Status API
 
@@ -276,8 +276,8 @@ These reporting paths are currently inconsistent and spread both too wide and de
 
 There are three reasons why we are not pursuing this approach now
 
-1. Our users see the update as a special, high-importance operation. From the OCP architecture point of view, it is just a slightly special case of cluster reconciliation (which makes "update" a vaguely defined term). Therefore, we (OpenShift developers) traditionally tended to expose the state of the system in a form that is very close to its architecture model. However, we are receiving feedback that our users' mental model of the system is different and closer to traditional monolithic systems. They expect high-level concepts (like "update" or "control plane") to be reported at this level rather than knowing it is really a distributed system of loosely coupled parts, each of which owns and reports its state.
-1. While we know the features offered by the Status API (and UXes consuming it) are useful and appreciated by the users (validated through the client-based prototype), the actual business value of the more general system is not entirely clear and would need to be validated. We would need to discover what the users actually want and need and pretty much start from scratch, delaying delivery of the features that we know are useful now. The feedback on Status API concepts can be helpful to inform the design of the cluster health reporting system. For example, we may want to reuse the concept of "insights" or the concept of "informers" based on its success in the Status API.
+1. Our users see the update as a special, high-importance operation. From the OCP architecture point of view, it is just a slightly special case of cluster reconciliation (which makes "update" a vaguely defined term -- is MCO rebooting a `Node` after a `MachineConfig` change an "update"? From the MCO point of view, it is no different from any other configuration change. But a typical user would not consider that operation to be an "update" when a version change is not involved). Therefore, we (OpenShift developers) traditionally tended to expose the state of the system in a form that is very close to its architecture model. However, we are receiving feedback that our users' mental model of the system is different and closer to traditional monolithic systems. They expect high-level concepts (like "update" or "control plane") to be reported at this level rather than knowing it is really a distributed system of loosely coupled parts, each of which owns and reports its state.
+1. Because we validated the ideas through the client-based prototype, we are confident the features offered by the Status API (and UXes consuming it) are useful and appreciated by the users. The actual business value of the more general system is not entirely clear and would need to be validated. We would need to discover what the users actually want and need and pretty much start from scratch, delaying delivery of the features that we know are useful now. The feedback on Status API concepts can be helpful to inform the design of the cluster health reporting system. For example, we could reuse the concept of insights or the concept of informers based on its success in the Status API.
 1. Lastly, the general system would likely lack the notion of "progress" useful for monitoring the update, even if all components are healthy. If we treat the update as a slightly special reconciliation case and nothing more, there is no notion of progress of the high-level concept of "cluster version," just an idea of pending changes of smaller components.
 
 ## Infrastructure Needed [optional]
