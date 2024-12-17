@@ -113,6 +113,22 @@ on the spec and status structures defined below.
 ```go
 // ControlPlaneMachineSet represents the configuration of the ControlPlaneMachineSet.
 type ControlPlaneMachineSetSpec struct {
+	// machineNamePrefix is the prefix used when creating machine names.
+	// Each machine name will consist of this prefix, followed by
+	// a randomly generated string of 5 characters, and the index of the machine.
+	// It must be a lowercase RFC 1123 subdomain, consisting of lowercase
+	// alphanumeric characters, '-', or '.', and must start and end
+	// with an alphanumeric character.
+	// The prefix must be between 1 and 245 characters in length.
+	// For example, if machineNamePrefix is set to 'control-plane',
+	// and three machines are created, their names might be:
+	// control-plane-abcde-0, control-plane-fghij-1, control-plane-klmno-2
+	// +openshift:validation:FeatureGateAwareXValidation:featureGate=CPMSMachineNamePrefix,rule="!format.dns1123Subdomain().validate(self).hasValue()",message="a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character."
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=245
+	// +openshift:enable:FeatureGate=CPMSMachineNamePrefix
+	// +optional
+	MachineNamePrefix string `json:"machineNamePrefix,omitempty"`
 	// State defines whether the ControlPlaneMachineSet is Active or Inactive.
 	// When Inactive, the ControlPlaneMachineSet will not take any action on the
 	// state of the Machines within the cluster.
@@ -754,6 +770,19 @@ discover during testing something that is currently unknown to us. If we discove
 on a particular naming scheme for the Control Plane Machines, we will need to solve this issue within the other
 component.
 
+#### Customizing Control Plane Machine Names
+
+The `MachineNamePrefix` field allows users to customize the naming format of Control Plane Machines managed by the `ControlPlaneMachineSet`. This feature is gated behind the `CPMSMachineNamePrefix` feature gate and must be enabled before use.
+
+When the `MachineNamePrefix` is specified, and `CPMSMachineNamePrefix` feature gate is enabled, it replaces the default naming convention specified in [Naming of Control Plane Machines owned by the ControlPlaneMachineSet](#naming-of-control-plane-machines-owned-by-the-controlplanemachineset).
+The generated machine name will consist of the provided prefix, followed by a randomly generated string of 5 characters, and the machine index.  For example, if the `MachineNamePrefix` is set to `my-control-plane`, a machine name might be `my-control-plane-abcde-0`.
+
+The `MachineNamePrefix` field is subject to the following validation rules:
+
+* It must be between 1 and 245 characters in length.
+* It must be a lowercase RFC 1123 subdomain, consisting of lowercase alphanumeric characters, '-', or '.', 
+and must start and end with an alphanumeric character.
+
 #### Delivery via the core OpenShift payload
 
 This new operator will form part of the core OpenShift release payload for clusters installed on/upgrading to OpenShift
@@ -973,6 +1002,13 @@ integration suite should prevent this however.
 We will ensure that the origin E2E suite is updated to include tests for this component to prevent regressions in either
 the etcd operator or Machine API ecosystem from breaking the functionality provided by this operator.
 
+#### MachineNamePrefix Functionality
+Verify the behavior of the `MachineNamePrefix` field, including:
+- When the `MachineNamePrefix` is specified and the feature gate `CPMSMachineNamePrefix` is enabled:
+    - The generated machine name uses the provided prefix and is suffixed with a 5-character random string and the machine index.
+- When the `CPMSMachineNamePrefix` feature gate is disabled or `MachineNamePrefix` is not specified:
+    - The machine name is generated following the existing rules (using cluster ID, machine role, random characters, and index).
+
 ### Graduation Criteria
 
 TBD
@@ -983,7 +1019,10 @@ TBD
 
 #### Tech Preview -> GA
 
-TBD
+##### MachineNamePrefix Functionality
+- Promote the `CPMSMachineNamePrefix` feature gate (enabled by default).
+- Thorough QE testing of the functionality in various scenarios, including upgrades and different cloud providers.
+- Integrate tests into the existing E2E test suite to ensure stability.
 
 #### Removing a deprecated feature
 
