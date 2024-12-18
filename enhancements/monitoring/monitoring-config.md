@@ -51,6 +51,8 @@ tracking-link:
 ### User Stories
 
 As a cluster administrator, I want to be able to add a CRD so that I can configure monitoring stack.
+As a Service Provider I want to have granular ownership over some configuration knobs like remoteWrite so I can forward data to a centralized managed service without other entities clobbering my config.
+As a Service Provider I want my managed (bad) configuration to fail on admission so I can propagate and signal the failure appropriately to watching components within the managed service and to a Service Consumer.
 
 
 ### Goals
@@ -130,10 +132,10 @@ To initiate the process, let's establish a feature gate that will serve as the e
 
 One proposal for a minimal DoD was:
 - Feature gate in openshift/api
-    - API types moved to openshift/api
-    - Client-go codegen 
-    - Reconcile logic: https://github.com/openshift/cluster-monitoring-operator/pull/2350
-    - Add merge ConfigMap / CustomResource for phase 1
+- API types moved to openshift/api
+- Client-go codegen 
+- Reconcile logic: https://github.com/openshift/cluster-monitoring-operator/pull/2350
+- Add merge ConfigMap / CustomResource for phase 1
         
 
 ### Example configuration
@@ -229,16 +231,23 @@ Migration path it will be split in three phases
       If a field is nil in the ConfigMap, use the CRD; otherwise, stick with the ConfigMap.
 
 - Phase 2: Transition (User Control)
-  Discuss whether to keep dual support for a couple of releases.
+  Keep dual support for a at least 2 releases.
   - New Logic:
     Allow users to choose the source of configuration (ConfigMap or CRD, warn about CRD preference).
     If a CRD exists, prioritize it over the ConfigMap.
     Add logic for users to manually switch to CRD if desired.
     No merge process.
 
+    ![h](assets/monitoring_config_phase2.png)
+
 - Phase 3: Full Migration (CRD as Default)
     After a few releases, the migration from ConfigMap to CRD will be complete.
     ConfigMap will be deprecated, with CRD becoming the default configuration source.
+  
+  - To start with deprecation we follow these steps:
+    Documentation and release notes to warn user about changes.
+    Cluster Fleet Evaluation to check how many user already use CRD instead of ConfigMap
+    Eventually you can mark CMO as upgradeable=false if the ConfigMap exist
 
 
 - Extensive testing will be required to validate the new behavior.
