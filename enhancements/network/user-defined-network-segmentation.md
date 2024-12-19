@@ -4,6 +4,7 @@ authors:
   - "@trozet"
   - "@qinqon"
   - "@ormergi"
+  - "@jcaamano"
 reviewers:
   - "@tssurya"
   - "@danwinship"
@@ -15,11 +16,10 @@ reviewers:
   - "@dougbtv"
 approvers:
   - "@tssurya"
-  - "@jcaamano"
 api-approvers:
   - "None"
 creation-date: 2024-05-03
-last-updated: 2024-05-28
+last-updated: 2024-12-19
 tracking-link:
   - https://issues.redhat.com/browse/SDN-4789
 ---
@@ -84,6 +84,8 @@ tenant to isolate traffic.
 * As a user, I want to be able to use my own consistent IP addressing scheme in my network. I want to be able to specify
   and re-use the same IP subnet for my pods across different namespaces and clusters. This provides a consistent
   and repeatable network environment for administrators and users.
+* As an administrator, I want to use predictable VRF names on the cluster nodes so that I can easily attach network devices
+  and customize routing on it from day 0 to day 2 as I would be able to do with the default VRF.
 
 ### Goals
 
@@ -421,6 +423,7 @@ The cluster scoped CRD should have the following additional field:
 
 | Field name        | Description                                                                                                   | optional |
 |-------------------|---------------------------------------------------------------------------------------------------------------|----------|
+| VRF               | A custom VRF device name to use                                                                               | Yes      |
 | NamespaceSelector | List of the standard `metav1.LabelSelector` selector for which namespace the network should be available for. | No       |
 | Template          | The user defined network spec.                                                                                | No       |
 
@@ -565,6 +568,13 @@ type ClusterUserDefinedNetwork struct {
 
 // ClusterUserDefinedNetwork defines the desired state of ClusterUserDefinedNetwork.
 type ClusterUserDefinedNetwork struct {
+    // VRF is an optional VRF device name to use for the network. It has to be less than
+    // 16 characters long and unique. If omitted, the ClusterUserDefinedNetwork name
+    // will be used as long as it is less than 16 characters long. Otherwise an internal
+    // name will be generated.
+    // +optional
+    VRF string `json:"vrf,omitempty"`
+    
     // NamespaceSelector Label selector for which namespace network should be available for.
     // +kubebuilder:validation:Required
     // +required
@@ -590,6 +600,9 @@ type ClusterUserDefinedNetworkStatus struct {
     Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 ```
+
+Suggested API validation rules:
+- `VRF` needs to be less than 16 characters long.
 
 Suggested CRD short-name: `cudn`
 
@@ -658,6 +671,7 @@ kind: ClusterUserDefinedNetwork
 metadata:
   name: db-network
 spec:
+  vrf: db-network
   namespaceSelector:
     matchExpressions:
     - key: kubernetes.io/metadata.name
@@ -836,6 +850,11 @@ Having the prefix avoids conflicting with existing NADs who has the same `metada
 For example:
 Given the CR meta.name is `db-network`,the NAD metadata.name will be `cluster.udn.db-network`.
 
+If a VRF name is provided in the cluster-scope CRD instance, it will be set to an homonimous field in the NAD NetConf. If the 
+provided VRF name is already used in any other cluster-scope CRD instance, a failed status should be reported for the cluster-scope 
+CRD instance. If a VRF name is not provided, the cluster-scope CRD name will be set on that NetConf field if less than 16 characters long.
+Otherwise, a name will be generrated following the template `udn-<network ID>-vrf` to be set on that NetConf field.
+
 Creating cluster scoped CRD instance should trigger creation of the corresponding NAD at each namespace specified in the spec.
 Following the above cluster-scope CRD [example](#example---cluster-scoped-network), the following NADs should be created:
 ```yaml
@@ -863,7 +882,8 @@ spec:
           "subnets":"10.0.0.0/24",
           "topology":"layer2",
           "type":"ovn-k8s-cni-overlay",
-          "role": "primary"
+          "role": "primary",
+          "vrf": "db-network"
       }'
 ---
 apiVersion: k8s.cni.cncf.io/v1
@@ -891,6 +911,7 @@ spec:
         "topology":"layer2",
         "type":"ovn-k8s-cni-overlay",
         "role": "primary"
+        "vrf": "db-network"
     }'
 ```
 
