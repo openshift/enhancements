@@ -88,9 +88,7 @@ This proposal intends to capture only a limited part of the roadmap for a system
 
 ### API Extensions
 
-Introduce a new `UpdateStatus` CRD. The CRD is namespaced to allow usage in Hosted Control Plane management clusters as part of the control plane.
-
-The primary purpose of the `UpdateStatus` CRD is to convey status information. For now, its `.spec` is empty but can be used in the future to configure the desired form or content of the information surfaced in status.
+Introduce a new Cluster-scoped `UpdateStatus` CRD to convey update status information. For now, its `.spec` is empty but can be used in the future to configure the desired form or content of the information surfaced in status.
 
 The `status` subresource content is the primary value of the enhancement. The status and health information about the update are expressed through the `status` subresource.
 
@@ -102,11 +100,11 @@ Introduce a new `update.openshift.io` group for `UpdateStatus`. There is no suit
 
 The enhancement allows adoption in HCP as an extension. The API and controller will be extended to handle the resources that represent the control plane and worker pools (`HostedCluster` and `NodePool`, respectively) and surface update progress through status insights for these resources.
 
-The Update Status Controller will run as a CVO operand and part of the hosted cluster control plane. The `UpdateStatus` resource was made namespaced to be utilized in HCP. It will reside in the management cluster, which is natural because the information it conveys primarily targets cluster administrators tasked with updating clusters.
+The Update Status Controller will run as a CVO operand and part of the hosted cluster control plane. The status-conveying API needs reside in the management cluster because the information it conveys primarily targets cluster administrators tasked with updating clusters, and needs to report insights about both the hosted cluster and management cluster resources. Because `UpdateStatus` API is cluster-scoped, it is not suitable for HCP use, and we will need to introduce a namespaced HCP-specific flavor, such as `HostedClusterUpdateStatus`. HCP-specific API variant will also allow expressing information about resources in two API surfaces (management and hosted clusters), while the `UpdateStatus` API can use simple resource references assuming all resources are in the same cluster.
 
 #### Standalone Clusters
 
-Standalone clusters are the primary target of the functionality. Using namespaced `UpdateStatus` CRD for a singleton resource is awkward, but it is a tradeoff to make the resource usable in HCP. We do not expect users to interact with `UpdateStatus` resources directly; the API is intended to be used mainly by tooling. The `openshift-cluster-version` namespace is suitable for containing the resource.
+Standalone clusters are the primary target of the functionality and no special considerations are needed.
 
 #### Single-node Deployments or MicroShift
 
@@ -123,7 +121,6 @@ apiVersion: update.openshift.io/v1alpha1
 kind: UpdateStatus
 metadata:
   name: cluster
-  namespace: openshift-cluster-version
 spec: { }
 status:
   controlPlane:
@@ -155,6 +152,8 @@ The API has three conceptual layers:
 1. Through the innermost layer `.status.{controlPlane,workerPools[]}.informers`, the API exposes detailed information about individual concerns related to the update, called "Update Insights." The API is prepared to allow multiple external informers to contribute insights, but in this enhancement, the only informer is the USC itself.
 1. The aggregation layer `.status.{controlPlane,workerPools[]}` reports higher-level information about the update through this layer, serving as the USC's interpretation of all insights.
 1. The outermost layer, `.status.conditions`, is used to report operational matters related to the USC itself (the health of the controller and gathering the insights, not the health of the update process).
+
+We do not expect users to interact with `UpdateStatus` resources directly; the API is intended to be used mainly by tooling. A typical `UpdateStatus` instance is likely to be quite verbose.
 
 #### Update Insights
 
