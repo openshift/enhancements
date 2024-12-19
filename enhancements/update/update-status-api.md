@@ -176,8 +176,6 @@ Update Health Insights report a state or condition in the cluster that is abnorm
 
 The Update Status Controller (USC) is a new component in OpenShift that will be deployed directly by the CVO and is being treated as its operand. This is uncommon in OpenShift, as the CVO typically deploys only second-level operators as its operands. In this model, the USC (providing cluster functionality) would normally be an operand, and we would need to invent a new cluster operator to manage it. Because the CVO is directly involved in updates, such an additional layer does not have value.
 
-The Update Status Controller does not need HA deployment, and it is sufficient to run a single replica.
-
 The Update Status Controller will run a primary controller that will maintain the `UpdateStatus` resource. The resource has no `.spec`, so the controller will ensure the resource exists and its `.status` content is up-to-date and correct. It will determine the `status` subresource content by receiving and processing insights from the other controllers in the USC.
 
 The Update Status Controller will have two additional control loops, both serving as producers of insights for the given domain. One will monitor the control plane and will watch `ClusterVersion` and `ClusterOperator` resources. The other will monitor the node pools and will watch `MachineConfigPool` and `Node` resources. Both will report their observations as status or health insights to the primary controller so it can update the `UpdateStatus` resource. These control loops will reuse the existing cluster check code implemented in the client-side `oc adm upgrade status` prototype.
@@ -240,7 +238,8 @@ There are two sources of skew:
 1. `oc` client needs to be able to process and display `UpdateStatus` resources for OCP versions following the version skew policy. `oc adm upgrade status` of version 4.x must gracefully handle `UpdateStatus` resources from 4.x-1, 4.x and 4.x+1.
 
 ## Operational Aspects of API Extensions
-The USC will be deployed as a single-replica Deployment, running a binary shipped in the CVO image. The CVO itself will manage this Deployment as its operand. USC operational matters will be exposed via the `UpdateStatus` resource's `.status` conditions. For the initial implementation, the `Available` condition will suffice.
+
+The Update Status Controller will be installed by CVO into a new dedicated `openshift-update-status-controller` namespace. Resources necessary to operate the new controller will be a Deployment, ServiceAccount and RBAC resources to allow the controller to read the necessary state in the cluster (in the initial implementation, watch and read `ClusterVersion`, `ClusterOperator`, `MachineConfigPool`, and `Node` resources) and manage the `UpdateStatus` resource. The USC will be deployed as a single-replica Deployment, running a binary shipped in the CVO image. The CVO itself will manage this Deployment as its operand. USC operational matters will be exposed via the `UpdateStatus` resource's `.status` conditions. For the initial implementation, the `Available` condition will suffice.
 
 ## Support Procedures
 
