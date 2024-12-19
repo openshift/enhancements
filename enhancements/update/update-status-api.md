@@ -194,6 +194,8 @@ Placing the cluster inspection logic directly into the USC puts the OTA team in 
 
 The API-backed `oc adm upgrade status` will lose the ability to run against older clusters that do not have the API (or against non-TechPreview clusters while the feature is still in TechPreview). The feature was requested to be an API from the start, and the client-based prototype was meant to be a temporary solution.
 
+The real instances of the `UpdateStatus` API will likely be quite overwhelming for humans to read. Even in the happy path where there is no problematic condition that would produce a health insight and the `UpdateStatus` would contain only status insights, we would expect 30+ reported insights for ClusterOperator resources alone, and then the number grows with cluster size (one insight per `Node`). That is a lot of YAML for humans to read so to consume to value, users would depend on tooling provided in the OpenShift ecosystem. It is likely that some technical users will dislike this because they expect Kubernetes resources to be human-readable. It does not seem to be possible to reduce the API verbosity without losing valuable information, but it should be possible to provide a human-oriented counterpart (maybe `UpdateStatusSummary`) that would contain aggregated information only. Such counterpart could be a separate controller in the USC.
+
 ## Open Questions [optional]
 
 * When should the client-based prototype be deprecated and removed?
