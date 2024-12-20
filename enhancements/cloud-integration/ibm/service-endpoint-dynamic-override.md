@@ -5,11 +5,14 @@ authors:
   - cjschaef
   - jeffnowicki
 reviewers:
-  - TBD
+  - JoelSpeed
+  - elmiko
 approvers:
-  - TBD
+  - JoelSpeed
+  - elmiko
 api-approvers:
-  - TBD
+  - JoelSpeed
+  - elmiko
 creation-date: 2024-11-05
 last-updated: 2024-11-05
 tracking-link:
@@ -37,6 +40,8 @@ IBM Cloud requires this enhancement for their control plane replatforming effort
 
 * Provide an official path for IBM deployed clusters to update the infrastructure object with service endpoint override(s) that will propagate to all dependent components without further user intervention.
 
+### Non-Goals
+n/a
 
 
 ## Proposal
