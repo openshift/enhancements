@@ -232,6 +232,11 @@ adds configuration options through API resources, should any of those
 behaviors also be exposed to MicroShift admins through the
 configuration file for MicroShift?
 
+### Backup/restore Considerations
+
+How does your feature impact backup and restore of the cluster ? Are the
+impacted APIs idempotent ?
+
 ### Implementation Details/Notes/Constraints
 
 What are some important details that didn't come across above in the
