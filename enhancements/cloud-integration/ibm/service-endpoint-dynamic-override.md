@@ -57,13 +57,15 @@ To realize this enhancement:
 
 **cccmo** is an operator responsible for watching updates to the infrastructure object and perforning updates once any value(s) are set. 
 
-1. The cccmo reconciliation loop observes that the IBMCloudPlatform spec within the infrastructure object has been set,
-2. The cccmo validates the endpoints and then updates the IBMCloudPlatformStatus and cloud config.
+1. A user edits the IBMCloudPlatform spec withthin the infrastructure object with a list endpoint overrides. At admission time, basic validation of the provided URLs is performed including verifying the URL is valid, follows the IBM URL path spec, and is directing traffic using https.
+2. The cccmo reconciliation loop observes that the IBMCloudPlatform spec within the infrastructure object has been set,
+3. The cccmo validates the host can be reached and then updates the IBMCloudPlatformStatus and cloud config.
 
 
 ### API Extensions
 
 * Extend `IBMCloudPlatformSpec` to contain service endpoint field that users may define as desired overrides.
+* Given changes to the spec, the CCCMO reconciliation loop will read in the infrastructure spec, pick up the changes, and write forward the defined endpoint overrides to the `IBMCloudPlatformStatus` and cloud config. These changes are consumed by downstream resources such as the ingress operator for updating their behavior when making calls to IBM services.
 
 ```
 type IBMCloudPlatformSpec struct {
@@ -77,7 +79,12 @@ type IBMCloudPlatformSpec struct {
 }
 ```
 
+
+
 ### Topology Considerations
+
+### Cluster wide proxy
+Should a customer choose to enable the cluster wide proxy while using this feature, to ensure traffic is properly handled for the IBM service endpoints they will need to exclude these overrides from the proxy. Currently by default the proxy does not exclude IBM traffic so this will need to be configured on the customer's end when enabling the proxy by adding the relevant endpoints to the `noProxy` field.
 
 #### Hypershift / Hosted Control Planes
 
