@@ -67,6 +67,7 @@ memory utilization per node, in order to reduce the cost per virtual machine.
 * Fit more virtual machines onto a node once higher workload density
   is enabled
 * Integrate well with [KSM] and [FPR]
+* Protect the node from resource starvation upon high swapping activity.        
 
 #### Usability
 
@@ -81,6 +82,8 @@ memory utilization per node, in order to reduce the cost per virtual machine.
   * [Kubernetes SWAP] is close, writing a fully fledged operator seems
     to be no good use of resources
   * To simplify the transition from WASP to [Kubernetes SWAP]
+* Allow swapping for VM pods only. We don't want to diverge from the upstream approach 
+  since [Kubernetes SWAP] allows swapping for all pods associated with the burtsable QoS class.
 
 ## Proposal
 
