@@ -108,15 +108,16 @@ We expect to mitigate the following situations
 
 #### Scope
 
-Memory over-commitment, and as such swapping, will be initially limited to
+Memory over-commitment will be limited to
 virtual machines running in the burstable QoS class.
 Virtual machines in the guaranteed QoS classes are not getting over
 committed due to alignment with upstream Kubernetes. Virtual machines
 will never be in the best-effort QoS because memory requests are
 always set.
 
-Later SWAP will be extended to burstable pods - by WASP as well as by
-Kube swap.
+Swapping will be allowed by WASP (and later on by kube swap) for all pods
+that are associated with the burstable QoS. Thus, over-commited VM stability 
+can be achieved during memory spikes by swapping out "cold" memory pages.
 
 #### Timeline & Phases
 
