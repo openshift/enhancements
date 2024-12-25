@@ -230,7 +230,6 @@ An OCI Hook to enable swap by setting the containers cgroup
 `memory.swap.max=max`.
 
 * **Technology Preview**
-  * Limited to virt launcher pods.
   * Uses `UnlimitedSwap`.
 * **General Availability**
   * Limited to burstable QoS class pods.
@@ -349,22 +348,22 @@ The mechanisms are:
 
 ##### Differences between Technology Preview vs GA
 
-|                              | TP            | GA                  |
-|------------------------------|---------------|---------------------|
-| SWAP Provisioning            | MachineConfig | MachineConfig       |
-| SWAP Eligibility             | VM pods       | burstable QoS pods  |
-| Node service protection      | Yes           | Yes                 |
-| I/O saturation protection    | Yes           | Yes                 |
-| Critical workload protection | No            | Yes                 |
-| Memory pressure handling     | Memory based  | Memory & Swap based |
+|                              | TP                  | GA                  |
+|------------------------------|---------------------|---------------------|
+| SWAP Provisioning            | MachineConfig       | MachineConfig       |
+| SWAP Eligibility             | burstable QoS pods  | burstable QoS pods  |
+| Node service protection      | Yes                 | Yes                 |
+| I/O saturation protection    | Yes                 | Yes                 |
+| Critical workload protection | No                  | Yes                 |
+| Memory pressure handling     | Memory based        | Memory & Swap based |
 
 ### Risks and Mitigations
 
 #### Phase 1
 
-| Risk                                       | Mitigation             |
-|--------------------------------------------|------------------------|
-| Miss details and introduce instability     | Limit to VM pods       |
+| Risk                                       | Mitigation                                                                                               |
+|--------------------------------------------|----------------------------------------------------------------------------------------------------------|
+| Miss details and introduce instability     | * Adjust overcommit ratio <br/> * Tweak eviction thresholds <br/> * Use de-scheduler to balance the load |
 
 #### Phase 2
 
