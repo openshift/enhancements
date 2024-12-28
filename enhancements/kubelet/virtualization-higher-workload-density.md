@@ -25,27 +25,27 @@ status: implementable
 ## Summary
 
 Fit more workloads onto a given node - achieve a higher workload
-density - by overcommitting it's memory resources. Due to timeline
+density - by overcommitting its memory resources. Due to timeline
 needs a multi-phased approach is considered.
 
 ## Motivation
 
 Today, OpenShift Virtualization is reserving memory (`requests.memory`)
-according to the needs of the virtual machine and it's infrastructure
+according to the needs of the virtual machine and its infrastructure
 (the VM related pod). However, usually an application within the virtual
 machine does not utilize _all_ the memory _all_ the time. Instead,
 only _sometimes_ there are memory spikes within the virtual machine.
 And usually this is also true for the infrastucture part (the pod) of a VM:
 Not all the memory is used all the time. Because of this assumption, in
 the following we are not differentiating between the guest of a VM and the
-infrastructure of a VM, instead we are just speaking colectively of a VM.
+infrastructure of a VM, instead we are just speaking collectively of a VM.
 
 Now - Extrapolating this behavior from one to all virtual machines on a
-given node leads to the observation that _on average_ there is no memory
-ressure and often a rather low memory utilization - despite the fact that
-much memory has been reserved.
-Reserved but underutilized hardware resources - like memory in this case -
-are a cost factor to cluster owners.
+given node leads to the observation that _on average_ much of the reserved memory is not utilized.
+Moreover, the memory pages that are utilized can be classified to a frequently used (a.k.a working set) and inactive memory pages.
+In case of memory pressure the inactive memory pages can be swapped out. 
+From the cluster owner perspective, reserved but underutilized hardware resources - like memory in this case -
+are a cost factor.
 
 This proposal is about increasing the virtual machine density and thus
 memory utilization per node, in order to reduce the cost per virtual machine.
@@ -74,14 +74,13 @@ memory utilization per node, in order to reduce the cost per virtual machine.
 * Provide a boolean in the OpenShift Console for enabling higher-density.
   Do not require any additional workload or cluster level configuration
   besides the initial provisioning.
+* Provide a method to deploy the requried configuration for safer
+  memory overcommit, such as swap provisioning, tuning of system services, etc.
 
 ### Non-Goals
 
-* Complete life-cycling of the WASP Agent. We are not intending to write
-  an Operator for memory over commit for two reasons:
-  * [Kubernetes SWAP] is close, writing a fully fledged operator seems
-    to be no good use of resources
-  * To simplify the transition from WASP to [Kubernetes SWAP]
+* Automated approach to deploy machine-level configuration related to swap.
+  This proposal aims to emphasize on enabling higher memory density for VM workloads with user-based steps to deploy the solution.
 * Allow swapping for VM pods only. We don't want to diverge from the upstream approach 
   since [Kubernetes SWAP] allows swapping for all pods associated with the burtsable QoS class.
 
@@ -108,40 +107,37 @@ We expect to mitigate the following situations
 
 #### Scope
 
-Memory over-commitment will be limited to
-virtual machines running in the burstable QoS class.
-Virtual machines in the guaranteed QoS classes are not getting over
-committed due to alignment with upstream Kubernetes. Virtual machines
-will never be in the best-effort QoS because memory requests are
-always set.
+Following the upstream kubernetes approach every workload marked as burstable QoS would be able to swap.
+There is no differentiation between the type of the workload: regular pod or a VM.
+With that being said, swapping will be allowed by WASP (and later on by kube swap) for pods
+with Burstable QoS class.
 
-Swapping will be allowed by WASP (and later on by kube swap) for all pods
-that are associated with the burstable QoS. Thus, over-commited VM stability 
-can be achieved during memory spikes by swapping out "cold" memory pages.
+Among the VM workloads, VMs of high-performance configuration (NUMA affinity, CPU affinity, etc.) cannot overcommit.
+Also, VMs with best-effort QoS class don't exist because requesting memory is mandatory for the VM spec. 
+For VMs of Burstable Qos Class over-commited VM stability can be achieved during memory spikes by swapping out "cold" memory pages.
 
 #### Timeline & Phases
 
-| Phase                                                              | Target       |
-|--------------------------------------------------------------------|--------------|
-| Phase 1 - Out-Of-Tree SWAP with WASP                               | 2024         |
-| Phase 2 - Transition to Kubernetes SWAP. Limited to CNV-only users | mid-end 2025 |
-| Phase 3 - Kubernetes SWAP for all Openshift users                  | TBD          |
+| Phase                                                              | Target       | WASP Graduation   | Kube swap Graduation | Machine-level configuration deployment |
+|--------------------------------------------------------------------|--------------|-------------------|----------------------|----------------------------------------|
+| Phase 1 - Out-Of-Tree SWAP with WASP TP                            | mid 2024     | Tech-Preview      | Beta                 | Manual                                 |
+| Phase 2 - WASP GA with swap-based evictions                        | end 2024     | GA                | Beta                 | Manual                                 |
+| Phase 3 - Transition to Kubernetes SWAP. Limited to CNV-only users | mid-end 2025 | Start Deprecation | GA                   | Manual                                 |
+| Phase 4 - Kubernetes SWAP for all OpenShift users                  | TBD          | Removed           | GA                   | Operator                               |
 
 Because [Kubernetes SWAP] is currently in Beta and is only expected to GA within
-Kubernetes releases 1.33-1.35 (discussion about its GA criterias are still ongoing).
-this proposal is taking a three-phased approach in order to meet the timeline requirements.
+Kubernetes releases 1.33-1.35 (discussion about its GA criterias is still ongoing).
+this proposal is taking a four-phased approach in order to meet the timeline requirements.
 
-* **Phase 1** - OpenShift Virtualization will provide an out-of-tree
-  solution to enable higher workload density and swap-based eviction mechanisms.
-* **Phase 2** - OpenShift Virtualization will transition to [Kubernetes SWAP] (in-tree).
-  OpenShift will allow using SWAP only for CNV users, that is,
-  whenever OpenShift Virtualization is installed on the cluster.
-  In this phase, WASP will be dropped in favor of GAed Kubernetes mechanisms.
-* **Phase 3** - OpenShift will GA SWAP for every user, even if OpenShift Virtualization
-  is not installed on the cluster.
-
-This enhancement is focusing on Phase 1 and the transition to Phase 2.
-Phase 2 is covered by the upstream [Kubernetes SWAP] enhancements.
+* **Phase 1 (Done)** - OpenShift Virtualization will provide an out-of-tree
+  solution (WASP) to enable higher workload density and swap-based eviction mechanisms.
+* **Phase 2 (Done)** - WASP will include swap-based eviction mechanisms.
+* **Phase 3 (WIP)** - OpenShift Virtualization will transition to [Kubernetes SWAP] (in-tree).
+  OpenShift will [allow](#swap-ga-for-cnv-users-only) SWAP to be configured only if OpenShift Virtualization is installed on the cluster.
+  In this phase, WASP deprecation will start.
+* **Phase 4** - OpenShift will GA SWAP for every user, even if OpenShift Virtualization
+  is not installed on the cluster. In this phase WASP will be removed, machine-level configuration
+  will be managed by Swap Operator.
 
 ### Workflow Description
 
@@ -156,23 +152,12 @@ virtual machine in a cluster.
 1. The cluster admin is deploying a bare-metal OpenShift cluster
 2. The cluster admin is deploying the OpenShift Virtualization Operator
 3. The cluster admin is deploying the WASP Agent according to the
-   documentation
-
-   a. The cluster admin is adding the `failOnSwap=false` flag to the
-      kubelet configuration via a `KubeletConfig` CR, in order to ensure
-      that the kubelet will start once swap has been rolled out.
-   a. The cluster admin is calculating the amount of swap space to
-      provision based on the amount of physical ram and overcommitment
-      ratio
-   b. The cluster admin is creating a `MachineConfig` for provisioning
-      swap on worker nodes
-   c. The cluster admin is deploying the [WASP Agent] DaemonSet
-
+   [documentation](https://github.com/openshift-virtualization/wasp-agent/blob/main/docs/configuration.md)
 4. The cluster admin is configuring OpenShift Virtualization for higher
-   workload density via
+   workload density via:
 
-   a. the OpenShift Virtualization Console "Settings" page
-   b. or `HCO` API
+   a. the OpenShift Virtualization Console "Settings" page 
+   b. [or `HCO` API](https://github.com/kubevirt/hyperconverged-cluster-operator/blob/main/docs/cluster-configuration.md#configure-higher-workload-density)
 
 The cluster is now set up for higher workload density.
 
@@ -180,40 +165,54 @@ In phase 3, deploying the WASP agent will not be needed.
 
 #### Workflow: Leveraging higher workload density
 
-1. The VM Owner is creating a regular virtual machine and is launching it.
+1. The VM Owner is creating a regular virtual machine and is launching it. The VM owner must not specify memory requests in the VM spec, but only the guest memory size.
 
 ### API Extensions
 
-This proposal does not require any Kubernetes, OpenShift, or OpenShift
-Virtualization API changes.
+#### Phase 3
+In phase 3 WASP will be replaced by kubernetes swap, which should be GA by then. With that being said it's requried to update the worker kubelet configuration with `memorySwap.swapBehavior`.
+Following is a KubeletConfig example:
+```yaml
+apiVersion: machineconfiguration.openshift.io/v1
+kind: KubeletConfig
+metadata:
+  name: custom-config
+spec:
+  machineConfigPoolSelector:
+    matchLabels:
+      custom-kubelet: enabled
+  kubeletConfig:
+    failSwapOn: false
+    memorySwap:
+      swapBehavior: LimitedSwap
+```
+More info about kubelet swap API can be found [here](https://github.com/kubernetes/enhancements/blob/master/keps/sig-node/2400-node-swap/README.md#api-changes)
+
+#### Phase 4
+In previous phases the machine-level configuration was deployed manually using machine configs. The transition to phase 4
+will require re-deployment of the configuration by the operator.
+
 
 ### Topology Considerations
 
-#### Hypershift / Hosted Control Planes
+#### Hosted Control Planes: Hosting cluster with OCP Virt
+No special consideration required since it's identical to the regular cluster case
 
-The `MachineConfig` based swap provisioning will not work, as HCP does
-not provide the `MachineConfig` APIs.
+#### Hosted Control Planes: Hosted cluster with OCP Virt
+Since nested virt is not supported, the only topology that is supported is when the data plane resides on a bare metal.
+In that case the abovementioned `KubeletConfig` and `MachineConfig` should be injected into the `NodePool` CR.
 
 #### Standalone Clusters
 
-Standalone, regular and compact clusters are the primary use-cases for
+Standalone and regular clusters are the primary use-cases for
 swap.
 
-#### Single-node Deployments or MicroShift
+#### All-in-one deployments
 
-Single-node and MicroShift deployments are out of scope of this
-proposal.
+Single-node Openshift (SNO), MicroShift and Compact Cluster deployments are out of scope of this
+proposal, since enabling swap on control-plane nodes is not supported.
 
 ### Implementation Details/Notes/Constraints
-
-#### WASP Agent
-
-At it's core the [wasp agent] is a `DaemonSet` delivering an [OCI Hook]
-which is used to turn on swap for selected workloads.
-
-Overall the agent is intended to align - and specifically not
-conflict - with the upstream Kubernetes SWAP design and behavior in
-order to simplify a transition.
 
 ##### Design
 
@@ -224,25 +223,39 @@ The design is driven by the following guiding principles:
 * Try to stay aligned to upstream Kubernetes swap behavior in order
   to ease the transition to Kubernetes SWAP once available
 
-###### Enabling swap
+###### WASP Agent
 
-An OCI Hook to enable swap by setting the containers cgroup
-`memory.swap.max=max`.
+At its core the [wasp agent] is a `DaemonSet` delivering an [OCI Hook]
+which is used to turn on swap for selected workloads.
 
-* **Technology Preview**
-  * Uses `UnlimitedSwap`.
-* **General Availability**
+Overall the agent is intended to align - and specifically not
+conflict - with the upstream Kubernetes SWAP design and behavior in
+order to simplify a transition. 
+
+The agent uses an OCI Hook to enable swap via container cgroup. The hook script 
+sets the containers cgroup `memory.swap.max=max`.
+
+* **Tech Preview**
   * Limited to burstable QoS class pods.
-  * Uses `LimitedSwap`.
-  * Limited to non-high-priority pods.
+  * Uses `UnlimitedSwap` approach. Using OCI hook each container is started with `memory.swap.max=max` in its cgroup.
+* **General Availability**
+  * Container starts with `UnlimitedSwap` as in TP, then reconciled to `LimitedSwap` by the wasp-agent limited swap controller.
+    * For more info, refer to the upstream documentation on how to calculate [limited swap](https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/2400-node-swap#steps-to-calculate-swap-limit). 
+  * Added Limitation to non-high-priority pods.
+  * Added swap-based evictions.
+  * Added critical workload protection (same as kube swap).
 
-For more info, refer to the upstream documentation on how to calculate
-[limited swap](https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/2400-node-swap#steps-to-calculate-swap-limit).
+![wasp](https://github.com/user-attachments/assets/314d387d-788a-4aa6-9275-c882f5f329aa)
 
-###### Provisioning swap
+**NOTE**: In WASP GA setting the swap limit isn't atomic, it can happen that a container application will start
+to allocate memory before the limit is set by the wasp-agent.
+
+###### Machine-level swap configuration
+
+* Provisioning swap
 
 Provisioning of swap is left to the cluster administrator.
-The hook itself is not making any assumption where the swap is located.
+The OCI hook itself is not making any assumption where the swap is located.
 
 As long as there is no additional tooling available, the recommendation
 is to use `MachineConfig` objects to provision swap on nodes.
@@ -250,7 +263,7 @@ is to use `MachineConfig` objects to provision swap on nodes.
 The `MachineConfig` object would include the necessary scripts
 in order to provision swap on a disk, partition, or in a file.
 
-###### Node service protection
+* Node service protection
 
 All container workloads are run in the `kubepods.slice` cgroup.
 All system services are run in the `system.slice` cgroup.
@@ -263,45 +276,26 @@ Without system services such as `kubelet` or `crio`, any container will
 not be able to run well.
 
 Thus, in order to protect the `system.slice` and ensure that the nodes
-infrastructure health is prioritized over workload health, the agent is
-reconfiguring the `system.slice` and setting `memory.swap.max=0` to
-prevent any system service within from swapping.
+infrastructure health is prioritized over workload health, Machine Config is
+used to configure `memory.swap.max` to zero on the system slice parent cgroup.
+The configuration is done via systemd for the sake of consistency.
 
-###### Preventing SWAP traffic I/O saturation
+* Preventing SWAP traffic I/O saturation
 
 One risk of heavy swapping is to saturate the disk bus with swap traffic,
 potentially preventing other processes from performing I/O.
 
 In order to ensure that system services are able to perform I/O, the
-agent is configuring `io.latency=50` for the `system.slice` in order
-to ensure that it's I/O requests are prioritized over any other slice.
+machine config is configuring `io.latency=50` for the `system.slice` in order
+to ensure that its I/O requests are prioritized over any other slice.
 This is, because by default, no other slice is configured to have
 `io.latency` set.
 
-###### Critical workload protection
-
-Even critical pod workloads are run in burstable QoS class pods.
-However, swapping can lead to increased latencies and response times.
-For example, if a critical pod is depending on `LivenessProbe`s, then
-these checks can start to fail, once the pod is starting to swap.
-
-This is undesirable and can put a node or a cluster (i.e. if a critical
-Operator is affected) at risk.
-
-Therefore, at **General Availability** time they will not be eligible to swap.
-This is aligned with the upstream behavior.
-
-In order to prevent this problem, swap will be selectively disabled
-for pod using the two well-known [critical `priorityClass`es]:
-
-* `system-cluster-critical`
-* `system-node-critical`
-
-###### Node memory pressure handling
+* Node memory pressure handling
 
 Dealing with memory pressure on a node is differentiating the TP fom GA.
 
-* **Technology Preview** - `memory.high` is set on the `kubepods.slice`
+** **Technology Preview** - `memory.high` is set on the `kubepods.slice`
   in order to force the node to swap, once the `kubepods.slice` memory is
   filling up. Only once swap is full, the system will cross `memory.high`
   and trigger soft evictions.
@@ -314,7 +308,7 @@ Dealing with memory pressure on a node is differentiating the TP fom GA.
     * Once `memory.high` is reached, the whole `kubepods.slice` is throttled
       and cannot allocate memory, which might lead to applications crashing.
 
-* **General Availability** - Memory-based soft eviction is going to
+** **General Availability** - Memory-based soft eviction is going to
   be disabled, in favor of enabling swap-based hard evictions, based on new
   swap traffic and swap utilization eviction metrics.
 
@@ -325,10 +319,10 @@ Dealing with memory pressure on a node is differentiating the TP fom GA.
     * Swap-based evictions are made through a 3rd party container, which means
       it has to be done through an API-initiated eviction.
 
-###### Node memory reduction
+###### Hypervisor/OS level assistance 
 
-Swap (with wasp or kube swap) are mechanisms in order to increase the
-virtual address space, this is required in order to reduce the
+Swap allows us to increase the
+virtual address space. This is required in order to reduce the
 likelihood for workloads to OOM significantly.
 
 Besides _increasing_ the virtual address space, there are two
@@ -346,7 +340,7 @@ The mechanisms are:
   in situations where similar guests are running on a hypervisor.
   It has however some security implications.
 
-##### Differences between Technology Preview vs GA
+##### VM higher-density: Differences between Technology Preview vs GA
 
 |                              | TP                  | GA                  |
 |------------------------------|---------------------|---------------------|
@@ -359,29 +353,31 @@ The mechanisms are:
 
 ### Risks and Mitigations
 
-#### Phase 1
+#### Phases 1-2
 
 | Risk                                       | Mitigation                                                                                               |
 |--------------------------------------------|----------------------------------------------------------------------------------------------------------|
-| Miss details and introduce instability     | * Adjust overcommit ratio <br/> * Tweak eviction thresholds <br/> * Use de-scheduler to balance the load |
+| Miss details and introduce instability     | * Adjust overcommit ratio <br/> * Tweak eviction thresholds <br/> * Use [de-scheduler](https://developers.redhat.com/blog/2024/12/19/load-aware-rebalancing-openshift-virtualization) to balance the load |
 
-#### Phase 2
+#### Phase 3
 
 Swap is handled by upstream Kubernetes.
+Wasp is starting deprecation process.
 
 | Risk                                                      | Mitigation                                        |
 |-----------------------------------------------------------|---------------------------------------------------|
 | Swap-based evictions are based on API-initiated evictions | Also rely on kubelet-level memory-based evictions |
 
-#### Phase 3
+#### Phase 4
 
+Wasp will be removed.
 Upstream Kubernetes handles both swap and evictions.
-Swap provision handled by OpenShift.
+Machine-level swap confguration handled by the swap operator.
 
 ### Drawbacks
 
 The major drawback and risk of the [WASP Agent] approach in phase 1 is
-due to the lack of integration with Kubernetes. It's prone to
+due to the lack of integration with Kubernetes. Its prone to
 regressions due to changes in Kubernetes.
 
 Thus phase 2 is critical in order to eliminate those risks and
@@ -389,12 +385,31 @@ drawbacks.
 
 ## Open Questions [optional]
 
-None.
+### Transition to swap operator
+Swap operator content and API needs to be discussed, possibly in a separate proposal. Current potential responsibilites could be as follows:
+* Swap provision.
+* Swap optimizations i.e. using zswap.
+* Machine level configuration.
+* Swap-related kubelet configuration.
+
+### Ownership of swap operator
+Currently it unclear where the swap operator should live. The aim is to have a consolidated solution that eliminates redundant API transitions.
 
 ## Test Plan
 
-Add e2e tests for the WASP agent repository for regression testing against
-OpenShift.
+The cluster under test has worker nodes with identical amount of RAM and disk size.
+Memory overcommit is configured to 200%. There should be enough free space on the disk
+in order to create the required file-based swap i.e. 8G of RAM and 200% overcommit require
+at least (8G + 8G*SWAP_UTILIZATION_THRESHOLD_FACTOR)  free space on the root disk.
+
+* Fill the cluster with dormant VM's until each worker node is overcommited. 
+* Test the following scenarios: 
+  * Node drain
+  * VM live-migration
+  * Cluster upgrade. 
+* The expectation is to see that nodes are stable 
+as well as the workloads.
+
 
 ## Graduation Criteria
 
@@ -414,14 +429,14 @@ Generic needs
 - Backhaul SLI telemetry
 - Document SLOs for the component
 - Conduct load testing
-- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- User facing documentation created in [OpenShift-docs](https://github.com/OpenShift/OpenShift-docs/)
 
 #### Swap GA for CNV users only
 In addition, swap is intended to become GA only for CNV users.
 
 This will be achieved in the following way:
 - The system will figure out if CNV is enabled by checking if the `hyperconvergeds.hco.kubevirt.io`
-object and the `openshift-cnv` namespace exist.
+object and the `OpenShift-cnv` namespace exist.
 - If CNV is enabled, do not emit an alert.
 - Otherwise, emit an alert that says this cluster has swap enabled and it is not supported.
 - Guard against non CNV users setting `LimitedSwap` in the KubeletConfig via MCO validation logic.
@@ -433,118 +448,40 @@ object and the `openshift-cnv` namespace exist.
 
 ## Upgrade / Downgrade Strategy
 
-If applicable, how will the component be upgraded and downgraded? Make sure this
-is in the test plan.
 
-Consider the following in developing an upgrade/downgrade strategy for this
-enhancement:
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to keep previous behavior?
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to make use of the enhancement?
+### Phases 1-2
+WASP update is done manually since it doesn't have an operator. The user must follow the 
+downstream documentation of the relevant CNV release and re-run the deployment steps.
 
-Upgrade expectations:
-- Each component should remain available for user requests and
-  workloads during upgrades. Ensure the components leverage best practices in handling [voluntary
-  disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to
-  this should be identified and discussed here.
-- Micro version upgrades - users should be able to skip forward versions within a
-  minor release stream without being required to pass through intermediate
-  versions - i.e. `x.y.N->x.y.N+2` should work without requiring `x.y.N->x.y.N+1`
-  as an intermediate step.
-- Minor version upgrades - you only need to support `x.N->x.N+1` upgrade
-  steps. So, for example, it is acceptable to require a user running 4.3 to
-  upgrade to 4.5 with a `4.3->4.4` step followed by a `4.4->4.5` step.
-- While an upgrade is in progress, new component versions should
-  continue to operate correctly in concert with older component
-  versions (aka "version skew"). For example, if a node is down, and
-  an operator is rolling out a daemonset, the old and new daemonset
-  pods must continue to work correctly even while the cluster remains
-  in this partially upgraded state for some time.
+On OpenShift level no specific action needed, since all of the APIs used
+by the WASP agent deliverables are stable (DaemonSet, OCI Hook, MachineConfig, KubeletConfig)
 
-Downgrade expectations:
-- If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
-  misbehaving, it should be possible for the user to rollback to `N`. It is
-  acceptable to require some documented manual steps in order to fully restore
-  the downgraded cluster to its previous state. Examples of acceptable steps
-  include:
-  - Deleting any CVO-managed resources added by the new version. The
-    CVO does not currently delete resources that no longer exist in
-    the target version.
+### Phase 3
+Since kube swap should be GAed by then, the user will be advised to switch using kube swap instead of WASP.
+Configuation of kube swap should be done manually, as described in the [API Extension](#api-extensions)
+Machine-level configuration deployment will remain as-is.
 
-* On the cgroup level WASP agent supports only cgroups v2
-* On OpenShift level no specific action needed, since all of the APIs used
-  by the WASP agent deliverables are stable (DaemonSet, OCI Hook, MachineConfig, KubeletConfig)
+### Phase 4
+The user will have to switch using kube swap, since WASP will be removed.
+Machine-level configuration should be re-deployed by the operator.
 
 ## Version Skew Strategy
 
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
-
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
-
 The WASP Agent OCI hook is based on a stable OCI Hook API, thus few regressions are expected.
-Furthermore we expect to go through every minor version of OpenShift, reducing skew.
+Furthermore, we expect to go through every minor version of OpenShift, reducing skew.
 
 ## Operational Aspects of API Extensions
 
-None
+### Worker nodes
+The amount of RAM and the disk topology must be identical on all worker nodes.
+
+### WASP deployment
+As was mentioned in the non-goals, WASP doesn't have an operator. Therefore, the deployment
+of WASP should be done manually according to the downstream [documentation](https://docs.openshift.com/container-platform/4.17/virt/post_installation_configuration/virt-configuring-higher-vm-workload-density.html).
 
 ## Support Procedures
 
-Describe how to
-- detect the failure modes in a support situation, describe possible symptoms (events, metrics,
-  alerts, which log output in which component)
-
-  Examples:
-  - If the webhook is not running, kube-apiserver logs will show errors like "failed to call admission webhook xyz".
-  - Operator X will degrade with message "Failed to launch webhook server" and reason "WehhookServerFailed".
-  - The metric `webhook_admission_duration_seconds("openpolicyagent-admission", "mutating", "put", "false")`
-    will show >1s latency and alert `WebhookAdmissionLatencyHigh` will fire.
-
-- disable the API extension (e.g. remove MutatingWebhookConfiguration `xyz`, remove APIService `foo`)
-
-  - What consequences does it have on the cluster health?
-
-    Examples:
-    - Garbage collection in kube-controller-manager will stop working.
-    - Quota will be wrongly computed.
-    - Disabling/removing the CRD is not possible without removing the CR instances. Customer will lose data.
-      Disabling the conversion webhook will break garbage collection.
-
-  - What consequences does it have on existing, running workloads?
-
-    Examples:
-    - New namespaces won't get the finalizer "xyz" and hence might leak resource X
-      when deleted.
-    - SDN pod-to-pod routing will stop updating, potentially breaking pod-to-pod
-      communication after some minutes.
-
-  - What consequences does it have for newly created workloads?
-
-    Examples:
-    - New pods in namespace with Istio support will not get sidecars injected, breaking
-      their networking.
-
-- Does functionality fail gracefully and will work resume when re-enabled without risking
-  consistency?
-
-  Examples:
-  - The mutating admission webhook "xyz" has FailPolicy=Ignore and hence
-    will not block the creation or updates on objects when it fails. When the
-    webhook comes back online, there is a controller reconciling all objects, applying
-    labels that were not applied during admission webhook downtime.
-  - Namespaces deletion will not delete all objects in etcd, leading to zombie
-    objects when another namespace with the same name is created.
-
-TBD
+Please refer to the **Verification** section in the wasp-agent deployment [documentation](https://docs.openshift.com/container-platform/4.17/virt/post_installation_configuration/virt-configuring-higher-vm-workload-density.html#virt-using-wasp-agent-to-configure-higher-vm-workload-density_virt-configuring-higher-vm-workload-density).
 
 ## Alternatives
 
@@ -558,7 +495,7 @@ TBD
   testing.
 
 [Kubernetes SWAP]: https://github.com/kubernetes/enhancements/issues/2400
-[WASP Agent]: https://github.com/openshift-virtualization/wasp-agent
+[WASP Agent]: https://github.com/OpenShift-virtualization/wasp-agent
 [OCI hook]: https://github.com/containers/common/blob/main/pkg/hooks/docs/oci-hooks.5.md
 [LLN]: https://en.wikipedia.org/wiki/Law_of_large_numbers
 [critical `priorityClass`es]: https://kubernetes.io/docs/tasks/administer-cluster/guaranteed-scheduling-critical-addon-pods/
