@@ -186,7 +186,9 @@ No issue has been encountered during testing this approach.
 
 - What values could be used for default configurations, considering all OCP variants.
 - What is the minimum disk size needed in order to operate this feature without running out of disk space ?
-- How to handle an empty `schedule` ? 
+- How to handle an empty `schedule` ?
+  - This has been fixed, by using a default schedule to run the backup once at midnight.
+  - This configuration could be overridden by user supplied schedule.
 - How to mitigate losing backups upon control-plane scaling using `CPMSO` ?
 
 ### Implementation Details/Notes/Constraints
@@ -208,7 +210,7 @@ metadata:
   name: default
 spec:
   etcd:
-    schedule: "*/5 * * * *"
+    schedule: "0 0 * * *"
     timeZone: "UTC"
     retentionPolicy:
       retentionType: RetentionNumber
