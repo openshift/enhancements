@@ -69,7 +69,7 @@ The default configuration is created through `config.openshift.io/v1alpha1 Backu
 Using a CR enable users to override the default backup configuration.
 
 
-By design, the **No-Config** backup approach works alongside to the [Cron](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups) based method, and not a replacement, as shown in this [test](https://docs.google.com/document/d/1Ee9a7GJsae8EA7komPcEV72YlRgbSbR0B0KSo3XRBUc).
+By design, the **No-Config** backup approach works alongside to the [Cron](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups) based method, and not a replacement, as shown in this [test](https://docs.google.com/document/u/1/d/e/2PACX-1vSsgWZtM1D6SfSzjpZdOABAjZE8A7TUGhSauhg1-cftchUI2LjulcTUbl93j_59nvFZ88XWGA6TDIF_/pub).
 Although both approaches use the same `config.openshift.io/v1alpha1 Backup` CR for configuration, the No-Config method does not utilise the `PVC` field in `Backup` CR. 
 In fact, configuring the PVC field for the No-Config method is being ignored as this [test](https://docs.google.com/document/d/1813mZo4KEfTWw_FRbmG8Un91oPA9-eF29FcrZk-RLxE) shows. 
 Instead, **No-Config** backups uses a default `hostPath` location on all control-plane nodes. 
