@@ -234,7 +234,8 @@ TBD
 TBD
 
 ### Tech Preview -> GA
-TBD
+- To guarantee that master nodes does not run out of disk space, as well as to predict beforehand that the master node needs more space for coming backups, an alert is required for GA release.
+The alert will consider the given retention policy, the size of the whole etcd database file, and the disk space on the node. Once the free disk space on the current node is not enough for the coming three backups, the alert should fire per node.    
 
 ### Removing a deprecated feature
 TBD
