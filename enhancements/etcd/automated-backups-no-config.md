@@ -188,11 +188,12 @@ No issue has been encountered during testing this approach.
   - This has been discussed over the reviews.
   - The default schedule to run once at midnight, which is expressed as `0 0 * * *`.
   - The default retention is to keep the backups over the last `72h` (i.e. the last three backups).
-- What is the minimum disk size needed in order to operate this feature without running out of disk space ?
 - How to handle an empty `schedule` ?
   - This has been fixed, by using a default schedule to run the backup once at midnight.
   - This configuration could be overridden by user supplied schedule.
 - How to mitigate losing backups upon control-plane scaling using `CPMSO` ?
+  - This has been fixed by using a label to identify the nodes with `voting` etcd member, and using the label during scheduling the backup pods to master nodes.
+- What is the minimum disk size needed in order to operate this feature without running out of disk space ?
 
 ### Implementation Details/Notes/Constraints
 
