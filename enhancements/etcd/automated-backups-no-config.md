@@ -59,7 +59,7 @@ Having backups of an Openshift cluster on all control-plane nodes, improves the 
   - This could be a future enhancement or extension to the API.
   - Having backups in an independent storage from OCP cluster is crucial for Disaster Recovery scenarios.
 * Automate cluster restoration.
-* Provide automated backups for non-self hosted architectures like Hypershift.
+* Provide automated backups for non-self hosted Control-plane architectures like Hypershift. The current [Backup](https://github.com/openshift/api/blob/188620a9ab5eaad36199cf83d9a0afcb08fdfd52/config/v1alpha1/types_backup.go#L19) can not be used within Hypershift. Therefore, it should not be applied by Cluster-version-operator to any hosted Control-plane cluster. 
 
 ## Proposal
 
