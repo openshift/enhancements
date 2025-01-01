@@ -16,7 +16,12 @@ reviewers:
   - "@rhuss"
   - "@gnufied"
 approvers:
+  - "@deads2k"
+  - "@JoelSpeed"
   - "@hasbro17"
+  - "@tjungblu"
+  - "@vrutkovs"
+  - "@JoelSpeed"
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2024-06-17
