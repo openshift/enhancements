@@ -252,6 +252,11 @@ An OCI Hook to enable swap by setting the containers cgroup
   * Added Limitation to non-high-priority pods.
   * Added swap-based evictions.
 
+![wasp](https://github.com/user-attachments/assets/314d387d-788a-4aa6-9275-c882f5f329aa)
+
+**NOTE**: In WASP GA setting the swap limit isn't atomic, it can happen that a container application will start
+to allocate memory before the limit is set by the wasp-agent.
+
 ###### Provisioning swap
 
 Provisioning of swap is left to the cluster administrator.
@@ -277,8 +282,8 @@ not be able to run well.
 
 Thus, in order to protect the `system.slice` and ensure that the nodes
 infrastructure health is prioritized over workload health, WASP agent is
-reconfiguring the `system.slice` and setting `memory.swap.max=0` to
-prevent any system service from swapping.
+reconfiguring the `system.slice` and setting `memory.swap.max=0` at 
+node boot to prevent any system service from swapping.
 
 ###### Preventing SWAP traffic I/O saturation
 
@@ -301,7 +306,7 @@ these checks can start to fail, once the pod is starting to swap.
 This is undesirable and can put a node or a cluster (i.e. if a critical
 Operator is affected) at risk.
 
-Therefore, at **General Availability** time they will not be eligible to swap.
+Therefore, at **Phase 2** time they will not be eligible to swap.
 This is aligned with the upstream behavior.
 
 In order to prevent this problem, swap will be selectively disabled
@@ -409,7 +414,7 @@ None.
 The cluster under test has worker nodes with identical amount of RAM and disk size.
 Memory overcommit is configured to 200%. There should be enough free space on the disk
 in order to create the required file-based swap i.e. 8G of RAM and 200% overcommit require
-at least 8G free space on the root disk.
+at least (8G + 8G*SWAP_UTILIZATION_THRESHOLD_FACTOR)  free space on the root disk.
 
 * Fill the cluster with dormant VM's until each worker node is overcommited. 
 * Test the following scenarios: 
@@ -457,14 +462,17 @@ object and the `OpenShift-cnv` namespace exist.
 
 ## Upgrade / Downgrade Strategy
 
+
+### Phases 1-2
+WASP update is done manually since it doesn't have an operator. The user must follow the 
+downstream documentation of the relevant CNV release and re-run the deployment steps.
+
 On OpenShift level no specific action needed, since all of the APIs used
 by the WASP agent deliverables are stable (DaemonSet, OCI Hook, MachineConfig, KubeletConfig)
 
-Upgrade expectations:
-- WASP from CNV-X.Y must work with OCP-X.Y as well as OCP-X.(Y+1)
+### Phases 3-4
+Kube swap GA means the swap API is stable, therefore nothing manual needs to be done.
 
-Downgrade expectations:
-- WASP from CNV-X.Y must work with OCP-X.Y as well as OCP-X.(Y-1)
 
 ## Version Skew Strategy
 
@@ -481,60 +489,20 @@ enhancement:
   or CNI may require updating that component before the kubelet.
 
 The WASP Agent OCI hook is based on a stable OCI Hook API, thus few regressions are expected.
-Furthermore we expect to go through every minor version of OpenShift, reducing skew.
+Furthermore, we expect to go through every minor version of OpenShift, reducing skew.
 
 ## Operational Aspects of API Extensions
 
-None
+### Worker nodes
+The amount of RAM and the disk topology must be identical on all worker nodes.
+
+### WASP deployment
+As was mentioned in the non-goals, WASP doesn't have an operator. Therefore, the deployment
+of WASP should be done manually according to the downstream [documentation](https://docs.openshift.com/container-platform/4.17/virt/post_installation_configuration/virt-configuring-higher-vm-workload-density.html).
 
 ## Support Procedures
 
-Describe how to
-- detect the failure modes in a support situation, describe possible symptoms (events, metrics,
-  alerts, which log output in which component)
-
-  Examples:
-  - If the webhook is not running, kube-apiserver logs will show errors like "failed to call admission webhook xyz".
-  - Operator X will degrade with message "Failed to launch webhook server" and reason "WehhookServerFailed".
-  - The metric `webhook_admission_duration_seconds("openpolicyagent-admission", "mutating", "put", "false")`
-    will show >1s latency and alert `WebhookAdmissionLatencyHigh` will fire.
-
-- disable the API extension (e.g. remove MutatingWebhookConfiguration `xyz`, remove APIService `foo`)
-
-  - What consequences does it have on the cluster health?
-
-    Examples:
-    - Garbage collection in kube-controller-manager will stop working.
-    - Quota will be wrongly computed.
-    - Disabling/removing the CRD is not possible without removing the CR instances. Customer will lose data.
-      Disabling the conversion webhook will break garbage collection.
-
-  - What consequences does it have on existing, running workloads?
-
-    Examples:
-    - New namespaces won't get the finalizer "xyz" and hence might leak resource X
-      when deleted.
-    - SDN pod-to-pod routing will stop updating, potentially breaking pod-to-pod
-      communication after some minutes.
-
-  - What consequences does it have for newly created workloads?
-
-    Examples:
-    - New pods in namespace with Istio support will not get sidecars injected, breaking
-      their networking.
-
-- Does functionality fail gracefully and will work resume when re-enabled without risking
-  consistency?
-
-  Examples:
-  - The mutating admission webhook "xyz" has FailPolicy=Ignore and hence
-    will not block the creation or updates on objects when it fails. When the
-    webhook comes back online, there is a controller reconciling all objects, applying
-    labels that were not applied during admission webhook downtime.
-  - Namespaces deletion will not delete all objects in etcd, leading to zombie
-    objects when another namespace with the same name is created.
-
-TBD
+Please refer to the **Verification** section in the wasp-agent deployment [documentation](https://docs.openshift.com/container-platform/4.17/virt/post_installation_configuration/virt-configuring-higher-vm-workload-density.html#virt-using-wasp-agent-to-configure-higher-vm-workload-density_virt-configuring-higher-vm-workload-density).
 
 ## Alternatives
 
