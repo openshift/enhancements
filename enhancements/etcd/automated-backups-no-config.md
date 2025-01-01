@@ -185,6 +185,9 @@ No issue has been encountered during testing this approach.
 ### Open Questions
 
 - What values could be used for default configurations, considering all OCP variants.
+  - This has been discussed over the reviews.
+  - The default schedule to run once at midnight, which is expressed as `0 0 * * *`.
+  - The default retention is to keep the backups over the last `72h` (i.e. the last three backups).
 - What is the minimum disk size needed in order to operate this feature without running out of disk space ?
 - How to handle an empty `schedule` ?
   - This has been fixed, by using a default schedule to run the backup once at midnight.
