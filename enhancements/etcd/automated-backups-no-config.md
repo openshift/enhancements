@@ -43,7 +43,7 @@ This document outlines the possible approaches that were investigated, discussed
 The current method of **Backup** and **Restore** of an Openshift cluster is outlined in  [Automated Backups of etcd](https://github.com/openshift/enhancements/blob/master/enhancements/etcd/automated-backups.md). 
 This approach relies on user supplied configuration, in the form of `config.openshift.io/v1alpha1 Backup` CR. This method utilizes `batchv1.CronJob` in order to take Backups of Etcd and cluster resources.
 
-To improve the user's experience, this work proposes taking etcd backup using default configurations from day one, without user interference.
+To improve the user's experience, this work proposes taking etcd backup using default configurations from day one, without user intervention.
 
 Moreover, for recovery in disaster scenarios, where more than one control-plane node is lost from an Openshift cluster, this proposal attempts to store backups on all control-plane nodes.
 Having backups of an Openshift cluster on all control-plane nodes, improves the recovery probability in disaster scenarios.
