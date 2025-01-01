@@ -102,7 +102,10 @@ This proposal does not affect HyperShift.
 #### Standalone Clusters
 TBD
 #### Single-node Deployments or MicroShift
-TBD
+
+- Since `Microshift` does not run Cluster-etcd-operator, this proposal does not apply to it.
+- For `Single-node` Openshift clusters, the same configurations applies as to HA cluster.
+
 ### Workflow Description
 TBD
 
