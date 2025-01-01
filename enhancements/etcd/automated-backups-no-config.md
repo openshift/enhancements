@@ -8,6 +8,13 @@ reviewers:
   - "@hasbro17"
   - "@tjungblu"
   - "@vrutkovs"
+  - "@jmhbnz"
+  - "@deads2k"
+  - "@csrwng"
+  - "@sjenning"
+  - "@wking"
+  - "@rhuss"
+  - "@gnufied"
 approvers:
   - "@hasbro17"
 api-approvers:
