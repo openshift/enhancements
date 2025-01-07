@@ -68,7 +68,42 @@ Introduce a new Update Status Controller (USC) component in OpenShift that will 
 * Monitor the node pool update process and report progress, completion, and high-level health assessment of the process and individual nodes.
 * Monitor the cluster for potentially problematic states and surface them as relevant and actionable "health insights."
 
-Implement a default `oc adm upgrade status` mode that will consume the API and present the information in a human-targeted format, similar to the existing client-based prototype implementation.
+Implement a default `oc adm upgrade status` mode that will consume the API and present the information in a human-targeted format, similar to the existing client-based prototype implementation. This is an example of the output of the prototype (find more in the `*.output` files [here][oc-adm-upgrade-status-examples]), illustrating the value provided by the feature:
+
+```
+= Control Plane =
+Assessment:      Stalled
+Target Version:  4.14.1 (from 4.14.0-rc.3)
+Updating:        machine-config
+Completion:      97% (32 operators updated, 1 updating, 0 waiting)
+Duration:        1h59m (Est. Time Remaining: N/A; estimate duration was 1h24m)
+Operator Health: 31 Healthy, 1 Unavailable, 1 Available but degraded
+
+Control Plane Nodes
+NAME                                        ASSESSMENT   PHASE     VERSION       EST   MESSAGE
+ip-10-0-30-217.us-east-2.compute.internal   Progressing  Draining  4.14.0-rc.3   +10m   
+ip-10-0-53-40.us-east-2.compute.internal    Outdated     Pending   4.14.0-rc.3   ?
+ip-10-0-92-180.us-east-2.compute.internal   Outdated     Pending   4.14.0-rc.3   ?
+
+= Worker Upgrade =
+
+WORKER POOL   ASSESSMENT   COMPLETION   STATUS
+worker        Pending      0% (0/3)     2 Available, 0 Progressing, 0 Draining
+
+Worker Pool Nodes: worker
+NAME                                        ASSESSMENT   PHASE     VERSION       EST   MESSAGE
+ip-10-0-20-162.us-east-2.compute.internal   Unavailable  Pending   ?             ?     Not ready
+ip-10-0-4-159.us-east-2.compute.internal    Outdated     Pending   4.14.0-rc.3   ?
+ip-10-0-99-40.us-east-2.compute.internal    Outdated     Pending   4.14.0-rc.3   ?
+
+= Update Health =
+SINCE     LEVEL     IMPACT             MESSAGE
+58m18s    Error     API Availability   Cluster Operator kube-apiserver is degraded (NodeController_MasterNodesReady)
+1h0m17s   Error     API Availability   Cluster Operator control-plane-machine-set is unavailable (UnavailableReplicas)
+now       Warning   Update Stalled     Cluster Version version is failing to proceed with the update (ClusterOperatorsDegraded)
+
+Run with --details=health for additional description and links to related online documentation
+```
 
 All functionality will be delivered under the new `UpdateStatus` [Capability][cluster-capabilities] so that clusters that do not want the functionality do not need to spend resources on running the new controller. The Capability will be a part of the `vCurrent` and `v4.X` capability sets, which means the functionality will be enabled by default, and admins need to opt-out at installation or update time. Like all capabilities, once enabled, it cannot be disabled.
 
