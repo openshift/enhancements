@@ -186,6 +186,40 @@ To avoid inflating OpenShift payload images, the USC will be delivered in the sa
 
 The proposal to deliver the API and a controller that both manages the API and monitors the cluster (producing insights) before achieving consensus on the eventual modular system architecture risks that the existing API will not accommodate the future architecture well. We are making a tradeoff to deliver the API early to start providing value, which also allows us to learn about how and if such an API is really consumed. Early delivery directly addresses the risk of investing effort into building a much larger system that may not address real user needs.
 
+#### API Size and Footprint
+
+The instances of `UpdateStatus` API, as proposed in https://github.com/openshift/api/pull/2012, are expected to be quite large. A single `UpdateStatus` resource status is a tree of the following shape, with update insight structures as leaves:
+
+```
+status:
+  # two nodes on this level
+  controPlane:
+    ...
+    informers:
+    # one node per informer reporting control plane insights, typically ~2-5
+    - name: informer-1
+      insights:
+      # one leaf per insight
+  workerPools:
+  # one node per pool
+  - name: mcp-1
+    informers:
+    # one node per informer reporting pool insights, typically ~2-5
+    - name: informer-2
+      insights
+      # one leaf per insight
+```
+
+Health insights are not expected to be created in large numbers (like alerts, they are not helpful when too many are reported). A healthy update should have zero. The aspiration for the system is to produce precisely one health insight for a problematic update: the one that clearly describes the problem affecting the update. We are unlikely to achieve this ideal, but a typical problematic update should produce no more than ~10 health insights.
+
+However, there is a single Status Insight for each resource involved in the update, so we can expect `1 + # of ClusterOperators + # of MachineConfigPools + # of Nodes` status insights. That means that for big clusters, there will always be (lower) hundreds of insights, primarily because of Nodes.
+
+The Status Insights are not expected to be large data structures, but some contain Kubernetes conditions, so they cannot be considered entirely trivial, and there can be a high number of them. The Health Insights are larger because they can carry a longer-form description of the issue, expected to be around a paragraph of text.
+
+For an API this large, we need to consider the possibility of hitting Kubernetes API resource limits. Even with too many long insights, hitting the 1.5MiB limit does not seem plausible under regular operation. We can protect against the risk by setting appropriate bounds and limits on API fields (especially lists and the long-form description field of health insights), and these limits will be part of the contract for insight producers.
+
+The size and complexity also impact the readability of the API for humans. This is further discussed in the Drawbacks section.
+
 ### Drawbacks
 
 The pattern of the CVO directly deploying a non-operator component is unusual in OpenShift. We could introduce an entirely new Cluster Operator to manage the USC, but because the update functionality is so closely tied to the CVO, an additional layer seems excessive and unnecessary. Adding this layer can be considered in the future if the proposed model is problematic.
@@ -194,7 +228,7 @@ Placing the cluster inspection logic directly into the USC puts the OTA team in 
 
 The API-backed `oc adm upgrade status` will lose the ability to run against older clusters that do not have the API (or against non-TechPreview clusters while the feature is still in TechPreview). The feature was requested to be an API from the start, and the client-based prototype was meant to be a temporary solution.
 
-The real instances of the `UpdateStatus` API will likely be quite overwhelming for humans to read. Even in the happy path where there is no problematic condition that would produce a health insight and the `UpdateStatus` would contain only status insights, we would expect 30+ reported insights for ClusterOperator resources alone, and then the number grows with cluster size (one insight per `Node`). That is a lot of YAML for humans to read so to consume to value, users would depend on tooling provided in the OpenShift ecosystem. It is likely that some technical users will dislike this because they expect Kubernetes resources to be human-readable. It does not seem to be possible to reduce the API verbosity without losing valuable information, but it should be possible to provide a human-oriented counterpart (maybe `UpdateStatusSummary`) that would contain aggregated information only. Such counterpart could be a separate controller in the USC.
+Because of their size, the instances of the `UpdateStatus` API will likely be overwhelming for humans to read. As discussed in the API Size and Footprint section under Risks, the serialized resources will be a lot of YAML for humans to read, so humans would depend on tooling provided in the OpenShift ecosystem to benefit from the feature. Some technical users will likely dislike this because they expect Kubernetes resources to be human-readable. It is not possible to reduce the API verbosity without losing valuable information, but it should be possible to provide a human-oriented counterpart (maybe `UpdateStatusSummary`) that would contain aggregated information only. Such a counterpart could be a separate controller in the USC.
 
 ## Open Questions [optional]
 
