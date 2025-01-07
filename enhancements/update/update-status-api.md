@@ -182,6 +182,8 @@ The Update Status Controller will have two additional control loops, both servin
 
 To avoid inflating OpenShift payload images, the USC will be delivered in the same image as the CVO, so its code will live in the `openshift/cluster-version-operator` repository. The USC will be either a separate binary or a subcommand of the CVO binary (the CVO already has subcommands).
 
+> Note: As of Jan 7, the prototyping work showed the via-CVO delivery causes issues because the CVO image and manifests inside are treated specially by code that interacts with them (like hypershift [OCPBUGS-44438](https://issues.redhat.com/browse/OCPBUGS-44438) or release payload build [OCPBUGS-30080](https://issues.redhat.com/browse/OCPBUGS-30080)). Coupling with CVO still makes sense, but delivery through a standard additional payload image would prevent us from hitting subtle issues like the one mentioned above. What is the bar for the inclusion of a new image in the payload?
+
 ### Risks and Mitigations
 
 The proposal to deliver the API and a controller that both manages the API and monitors the cluster (producing insights) before achieving consensus on the eventual modular system architecture risks that the existing API will not accommodate the future architecture well. We are making a tradeoff to deliver the API early to start providing value, which also allows us to learn about how and if such an API is really consumed. Early delivery directly addresses the risk of investing effort into building a much larger system that may not address real user needs.
@@ -218,7 +220,7 @@ The Status Insights are not expected to be large data structures, but some conta
 
 For an API this large, we need to consider the possibility of hitting Kubernetes API resource limits. Even with too many long insights, hitting the 1.5MiB limit does not seem plausible under regular operation. We can protect against the risk by setting appropriate bounds and limits on API fields (especially lists and the long-form description field of health insights), and these limits will be part of the contract for insight producers.
 
-The size and complexity also impact the readability of the API for humans. This is further discussed in the Drawbacks section.
+The size and complexity also impact the readability of the API for humans. This is further discussed in [Drawbacks][this-drawbacks].
 
 ### Drawbacks
 
@@ -228,11 +230,12 @@ Placing the cluster inspection logic directly into the USC puts the OTA team in 
 
 The API-backed `oc adm upgrade status` will lose the ability to run against older clusters that do not have the API (or against non-TechPreview clusters while the feature is still in TechPreview). The feature was requested to be an API from the start, and the client-based prototype was meant to be a temporary solution.
 
-Because of their size, the instances of the `UpdateStatus` API will likely be overwhelming for humans to read. As discussed in the API Size and Footprint section under Risks, the serialized resources will be a lot of YAML for humans to read, so humans would depend on tooling provided in the OpenShift ecosystem to benefit from the feature. Some technical users will likely dislike this because they expect Kubernetes resources to be human-readable. It is not possible to reduce the API verbosity without losing valuable information, but it should be possible to provide a human-oriented counterpart (maybe `UpdateStatusSummary`) that would contain aggregated information only. Such a counterpart could be a separate controller in the USC.
+Because of their size, the instances of the `UpdateStatus` API will likely be overwhelming for humans to read. As discussed in [API Size and Footprint][this-api-size] under [Risks][this-risks], the serialized resources will be a lot of YAML for humans to read, so humans would depend on tooling provided in the OpenShift ecosystem to benefit from the feature. Some technical users will likely dislike this because they expect Kubernetes resources to be human-readable. It is not possible to reduce the API verbosity without losing valuable information, but it should be possible to provide a human-oriented counterpart (maybe `UpdateStatusSummary`) that would contain aggregated information only. Such a counterpart could be a separate controller in the USC.
 
 ## Open Questions [optional]
 
 * When should the client-based prototype be deprecated and removed?
+* What is the bar for the delivery of USC via a new image in the payload? (see note in [Update Status Controller][this-usc])
 * What is the best architecture for the future system where the USC only aggregates and summarizes information (possibly provided in the form of Update Insights) from external components that want to contribute update-related information?
 
 ## Test Plan
@@ -275,7 +278,7 @@ There are two sources of skew:
 
 ## Operational Aspects of API Extensions
 
-The Update Status Controller will be installed by CVO into a new dedicated `openshift-update-status-controller` namespace. Resources necessary to operate the new controller will be a Deployment, ServiceAccount and RBAC resources to allow the controller to read the necessary state in the cluster (in the initial implementation, watch and read `ClusterVersion`, `ClusterOperator`, `MachineConfigPool`, and `Node` resources) and manage the `UpdateStatus` resource. The USC will be deployed as a single-replica Deployment, running a binary shipped in the CVO image. The CVO itself will manage this Deployment as its operand. USC operational matters will be exposed via the `UpdateStatus` resource's `.status` conditions. For the initial implementation, the `Available` condition will suffice.
+The Update Status Controller will be installed by CVO into a new dedicated `openshift-update-status-controller` namespace. Resources necessary to operate the new controller will be a Deployment, ServiceAccount and RBAC resources to allow the controller to read the necessary state in the cluster (in the initial implementation, watch and read `ClusterVersion`, `ClusterOperator`, `MachineConfigPool`, and `Node` resources) and manage the `UpdateStatus` resource. The USC will be deployed as a single-replica Deployment. The CVO itself will manage this Deployment as its operand. USC operational matters will be exposed via the `UpdateStatus` resource's `.status` conditions. For the initial implementation, the `Available` condition will suffice.
 
 ## Support Procedures
 
@@ -321,3 +324,7 @@ N/A
 [cluster-capabilities]: https://docs.openshift.com/container-platform/4.17/installing/overview/cluster-capabilities.html
 [update-health-api-dd]: https://docs.google.com/document/d/1aEIWkfhhaVSe-XlSXvmokymOe3X_969pRCJhfhPDwFQ/edit#heading=h.9g05u56hri6y
 [oc-adm-upgrade-status-examples]: https://github.com/openshift/oc/tree/master/pkg/cli/admin/upgrade/status/examples
+[this-usc]: #update-status-controller
+[this-drawbacks]: #drawbacks
+[this-api-size]: #api-size-and-footprint
+[this-risks]: #risks-and-mitigations
