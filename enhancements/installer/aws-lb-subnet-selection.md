@@ -15,7 +15,7 @@ approvers:
 api-approvers:
 - "@JoelSpeed"
 creation-date: 2024-05-29
-last-updated: 2025-01-07
+last-updated: 2025-01-10
 tracking-link:
   - https://issues.redhat.com/browse/CORS-3440
 see-also:
@@ -207,6 +207,22 @@ environment variable is preserved. See
 [Specifying Manual Subnet Roles with BYO VPC during Installation Workflow](#specifying-manual-subnet-roles-with-byo-vpc-during-installation-workflow)
 for the workflow for this use case.
 
+#### Cluster Nodes on Different Private Subnets User Story
+
+_"As a cluster admin, I want to install an internal cluster into an existing VPC with AWS
+Direct Connect where my cluster nodes use private subnets with non-routable IPs and my load
+balancers use private subnets with routable IPs, so that I can conserve valuable routable IPs."_
+
+AWS clusters that connect to a customer network via AWS Direct Connect (or similar mechanism)
+require their load balancers to use internally routable IPs. However, internally routable IPs
+may be limited, and placing cluster nodes (compute and worker) on the same subnet with routable
+IPs as the load balancers unnecessarily consumes these limited IPs. Allowing customers to separate
+non-routable and routable private subnets for compute nodes and load balancer saves valuable IPs.
+See [RFE-4738](https://issues.redhat.com/browse/RFE-4738).
+
+See [Specifying Manual Subnet Roles with BYO VPC during Installation Workflow](#specifying-manual-subnet-roles-with-byo-vpc-during-installation-workflow)
+for the workflow for this use case.
+
 ### Goals
 
 - Deprecate the `platform.aws.subnets` field in the install-config and add a
@@ -214,9 +230,9 @@ for the workflow for this use case.
 - Enable users to explicitly configure the subnets for the `default` IngressController on AWS
   through the install-config (i.e. IngressControllerLB subnets).
 - Enable users to still use AWS Subnet Discovery for the `default` IngressController.
-- Prevent AWS Subnet Discovery from selecting subnets that do not belong to the cluster.
-- Enables users to explicitly configure the subnets for the ControlPlaneExternalLB and ControlPlaneInternalLB subnets.
-- Support automatic subnet role selection (opinionated defaults).
+- Prevent installations into existing VPCs where AWS Subnet Discovery would select subnets that do not belong to the cluster.
+- Enables users to explicitly configure the subnets for the ControlPlaneLB subnets.
+- Support automatic subnet role selection (opinionated defaults) similar to the existing `platform.aws.subnets` behavior.
 - Provide install-time validation for all user-provided subnets roles.
 - Maintain support for configuring the `default` IngressController or ControlPlaneLB subnets via customizing the
   installer manifest.
@@ -225,10 +241,8 @@ for the workflow for this use case.
 
 - Extend support to platforms other than AWS.
 - Support install-time subnet configuration for LoadBalancer-type Services that aren't associated with an IngressController.
-- Support subnet defaulting for user-created IngressControllers.
+- Support defaulting subnets for user-created IngressControllers to the IngressControllerLB subnet.
 - Remove the `platform.aws.subnets` install-config field.
-- Support separate configuration of subnets for compute nodes and control plane nodes.
-- Combine ControlPlaneExternalLB and ControlPlaneInternalLB subnet roles into a single role.
 - Split ClusterNode into ControlPlaneNodes and ComputeNode roles.
 - Support mixing automatic and manually specified roles.
 
@@ -266,8 +280,12 @@ a role, and each role must be assigned to at least one subnet.
 In BYO VPCs, untagged subnets are nuisance as the AWS CCM may select them, leading to various bugs, RFEs, and
 support cases. Since this proposal introduces a new subnet install-config field, it's a great opportunity
 to introduce a new behavior which will provide a better user experience. If `platform.aws.vpc.subnets`
-is specified to use automatic role selection (i.e. subnet discovery), the installer will inspect
-the VPC for untagged subnets and reject the installation if any exist. 
+is using automatic role selection (i.e. subnet discovery), the installer will inspect the VPC for untagged
+subnets not already specified in `platform.aws.vpc.subnets` and reject the installation if any exist.
+
+It's important to note that while the installer will reject additional untagged subnets during installation,
+a cluster admin can still add untagged subnets after installation (Day 2), which may cause IngressControllers
+to automatically use these new subnets. This proposal does not attempt to prevent this type of misconfiguration.
 
 ### Implementation Details/Notes/Constraints
 
@@ -279,7 +297,7 @@ and nodes.
 
 The `platform.aws.subnets` field in the install-config will be deprecated and replaced with a new
 field, `platform.aws.vpc.subnets`. Much like the old `subnets` field, the new `subnets` field indicates
-a list of subnets in a pre-existing VPC, but also can optionally override the roles that the subnet will fulfill in the
+a list of subnets in a pre-existing VPC, but also can optionally specify the roles that the subnet will fulfill in the
 cluster. Additionally, since it is a struct and not a `[]string`, it provide the ability to be
 expanded with additional subnet-related fields in the future.
 
@@ -312,20 +330,21 @@ type Platform struct {
 // VPCSpec configures the VPC for the cluster.
 type VPCSpec struct {
     // subnets defines the subnets in an existing VPC
-    // and can optionally override their intended roles for use by the installer.
-    // If no roles are overridden on any subnet, then the subnet roles
+    // and can optionally specify their intended roles for use by the installer.
+    // If no roles are specified on any subnet, then the subnet roles
     // are decided automatically. In this case, the VPC must not contain
     // any subnets without the kubernetes.io/cluster/<cluster-id> tag.
     //
-    // For overridden subnet role selection, each subnet must have at
+    // For manually specified subnet role selection, each subnet must have at
     // least one assigned role, and all roles (ClusterNode, IngressControllerLB,
     // ControlPlaneExternalLB, ControlPlaneInternalLB) must be assigned to
-    // at least one subnet.
+    // at least one subnet. However, if the cluster scope is internal,
+    // then ControlPlaneExternalLB is not required.
     // 
     // Leave this field unset to have the installer create subnets
-    // in a new VPC on your behalf. subnets must contain unique IDs
-    // and must not contain more than 10 subnets with the IngressController
-    // role.
+    // in a new VPC on your behalf. subnets must contain unique IDs,
+    // must not exceed a total of 40 subnets, and can include no more than
+    // 10 subnets with the IngressController role.
     // subnets is only available in TechPreview.
     //
     // +optional
@@ -333,6 +352,7 @@ type VPCSpec struct {
     // +kubebuilder:validation:XValidation:rule=`self.all(x, self.exists_one(y, x.id == y.id))`,message="subnets cannot contain duplicate IDs" 
     // +kubebuilder:validation:XValidation:rule=`self.exists(x, x.roles.exists(r, r == 'ClusterNode'))`,message="subnets must contain at least 1 subnet with the ClusterNode role"
     // +kubebuilder:validation:XValidation:rule=`self.filter(x, x.roles.exists(r, r == 'IngressControllerLB')).size() <= 10`,message="subnets must contain less than 10 subnets with the IngressControllerLB role"
+    // +kubebuilder:validation:MaxLength=40
     Subnets []Subnet `json:"subnets,omitempty"`
 }
 
@@ -345,15 +365,16 @@ type Subnet struct {
     // +required
     ID AWSSubnetID `json:"id"`
 
-    // rolesOverride manually overrides the roles (aka functions)
+    // roles specifies the roles (aka functions)
     // that the subnet will provide in the cluster. If no roles are
     // specified on any subnet, then the subnet roles are decided
     // automatically. Each role must be unique.
     //
     // +optional
     // +listType=atomic
-    // +kubebuilder:validation:XValidation:rule=`self.all(x, self.exists_one(y, x == y))`,message="rolesOverride cannot contain duplicates"
-    RolesOverride []SubnetRole `json:"rolesOverride"`
+    // +kubebuilder:validation:XValidation:rule=`self.all(x, self.exists_one(y, x == y))`,message="roles cannot contain duplicates"
+    // +kubebuilder:validation:MaxLength=4
+    Roles []SubnetRole `json:"roles"`
 }
 
 // AWSSubnetID is a reference to an AWS subnet ID.
@@ -388,7 +409,8 @@ will be deprecated when `platform.aws.vpc.subnets` graduates to GA.
 
 ##### Installer Validation Rules
 
-These validation rules only apply to the new `platform.aws.vpc.subnets` field.
+These validation rules only apply to the new `platform.aws.vpc.subnets` field. These validations aim to improve
+user experience, but are not permanent and may be updated or removed to accommodate future use cases.
 
 ###### All or Nothing Subnet Roles Selection
 
@@ -407,7 +429,7 @@ should apply to all subnets specified in `platform.aws.vpc.subnets`.
 
 ###### Multiple Load Balancer Subnets in the Same AZ Validation
 
-The installer must reject multiple `IngressControllerLB` role subnets in the same AZ as this will be
+The installer must reject multiple IngressControllerLB subnets in the same AZ as this will be
 rejected by the AWS CCM.
 
 ###### The Old and New Subnets Fields Cannot be Specified Together Validation
@@ -431,7 +453,8 @@ Conversely, the installer must now allow **any** private IngressControllerLB sub
 ###### Consistent Cluster Scope with ControlPlaneLB Subnets Validation
 
 The installer must not allow **any** public subnets to be specified with the ControlPlaneInternalLB role and must
-not allow **any** private subnets to be specified with the ControlPlaneExternalLB role.
+not allow **any** private subnets to be specified with the ControlPlaneExternalLB role. As a result,
+ControlPlaneInternalLB and ControlPlaneExternalLB are mutually exclusive roles.
 
 Private clusters (`installconfig.publish: Internal`) should reject an install-config containing
 any ControlPlaneExternalLB roles, as only an internal control plane load balancer will be created.
@@ -456,10 +479,17 @@ nodes use an AZ that is not a load balancer AZ, the router pod might be schedule
 cannot reach. Conversely, if the load balancer includes an AZ that is not a node AZ, there will be no nodes in that
 AZ for the load balancer to register.
 
+Additionally, the AZs provided in `controlPlane.platform.aws.zones` and `compute.platform.aws.zones` must be
+AZs provided by the subnets in `platform.aws.vpc.subnets`. This validation exists for `platform.aws.subnets`
+in [`validateMachinePool`](https://github.com/openshift/installer/blob/6fd2928b4f810c0592c042acb6b90028a8a3d6a6/pkg/asset/installconfig/aws/validation.go#L314).
+
 ##### Installer-Generated Manifests Updates
 
-The installer will apply the specified IngressControllerLB subnets to the `default` IngressController
-manifest within the `generateDefaultIngressController` function.
+The installer will apply the specified IngressControllerLB subnets to the `default` IngressController's
+`spec.endpointPublishingStrategy.loadBalancer.providerParameters.aws.classicLoadBalancer.subnets` or
+`...networkLoadBalancer.subnets` field (based on `platform.aws.lbType`) in the manifest generated by
+the `generateDefaultIngressController` function.
+
 
 ##### Installer ControlPlaneLB Subnets Configuration Updates
 
@@ -484,13 +514,13 @@ that may be installed within the same VPC.
 
 #### Specifying Manual Subnet Roles with BYO VPC during Installation Workflow
 
-A cluster admin may prefer to override the subnet roles to gain full control over their usage.
-For example, they may want to override the subnets for the `default` IngressController during
+A cluster admin may prefer to specify the subnet roles to gain full control over their usage.
+For example, they may want to specify the subnets for the `default` IngressController during
 installation rather than relying on [AWS Subnet Discovery](#aws-subnet-discovery).
 In order to do this, they must assign all the subnet roles:
 
 1. Cluster admin creates an install-config with `platform.aws.vpc.subnets` specified
-   with subnets that manually override the subnet roles:
+   with subnets that manually specify the subnet roles:
     ```yaml
     apiVersion: v1
     baseDomain: devcluster.openshift.com
@@ -503,11 +533,11 @@ In order to do this, they must assign all the subnet roles:
         vpc:
           subnets:
           - id: subnet-0fcf8e0392f0910d0 # public / us-east-1a
-            rolesOverride:
+            roles:
             - IngressControllerLB
             - ControlPlaneExternalLB
           - id: subnet-0fcf8e0392f0910d1 # private / us-east-1a
-            rolesOverride:
+            roles:
             - ControlPlaneInternalLB
             - ClusterNode
         lbType: Classic
@@ -551,16 +581,16 @@ In order to do this, they must assign all the subnet roles:
       vpc:
         subnets:
         - id: subnet-0fcf8e0392f0910d4 # Private / AZ us-east-1a
-          rolesOverride:
+          roles:
           - ClusterNode
         - id: subnet-0fcf8e0392f0910d5 # Public / AZ us-east-1a
-          rolesOverride:
+          roles:
           - IngressControllerLB
         - id: subnet-0fcf8e0392f0910d6 # Public / AZ us-east-1a
-          rolesOverride:
+          roles:
           - ControlPlaneExternalLB
         - id: subnet-0fcf8e0392f0910d7 # Private / AZ us-east-1a
-          rolesOverride:
+          roles:
           - ControlPlaneInternalLB
   #...
   ```
@@ -571,14 +601,14 @@ In order to do this, they must assign all the subnet roles:
       vpc:
         subnets:
         - id: subnet-0fcf8e0392f0910d4 # Private / AZ us-east-1a
-          rolesOverride:
+          roles:
           - ClusterNode
           - ControlPlaneInternalLB
         - id: subnet-0fcf8e0392f0910d5 # Public / AZ us-east-1a
-          rolesOverride:
+          roles:
           - IngressControllerLB
         - id: subnet-0fcf8e0392f0910d6 # Public / AZ us-east-1a
-          rolesOverride:
+          roles:
           - ControlPlaneExternalLB
   #...
   ```
@@ -588,10 +618,10 @@ In order to do this, they must assign all the subnet roles:
       vpc:
         subnets:
         - id: subnet-0fcf8e0392f0910d4 # Private / AZ us-east-1a
-          rolesOverride:
+          roles:
           - ControlPlaneInternalLB
         - id: subnet-0fcf8e0392f0910d5 # Public / AZ us-east-1a
-          rolesOverride:
+          roles:
           - ClusterNode
           - IngressControllerLB
           - ControlPlaneExternalLB
@@ -605,7 +635,7 @@ A cluster administrator may prefer to have automatically assigned subnet roles, 
 subnet configuration.
 
 1. Cluster admin creates an install-config with `platform.aws.vpc.subnets` specified
-   with the subnet(s) while ensuring `platform.aws.vpc.subnets[].rolesOverride` is left empty:
+   with the subnet(s) while ensuring `platform.aws.vpc.subnets[].roles` is left empty:
     ```yaml
     apiVersion: v1
     baseDomain: devcluster.openshift.com
@@ -634,8 +664,10 @@ This proposal doesn't add any API extensions.
 
 #### Hypershift / Hosted Control Planes
 
-This enhancement is directly enabling the https://issues.redhat.com/browse/XCMSTRAT-545
-feature for ROSA Hosted Control Planes.
+This enhancement is directly enabling the [XCMSTRAT-545](https://issues.redhat.com/browse/XCMSTRAT-545)
+feature for ROSA Hosted Control Planes by allowing users to install a single AZ cluster into an
+existing VPC with other untagged subnets. Users will be able to explicitly configure their subnets
+at install time so that the `default` IngressController doesn't attach to additional subnets in other AZs.
 
 #### Standalone Clusters
 
@@ -665,6 +697,8 @@ deployments or MicroShift.
   subnets configuration.
   - For example, there may be a future desire to specify the IngressController role for installer-created subnets,
     and it is unclear how this API design would accommodate that.
+  - One solution is to make `platform.aws.vpc.subnets[].id` optional, and if `platform.aws.vpc.subnets[].availabilityZone`
+    is specified, then the installer would assume a managed VPC while using the provided subnet roles or configuration.
 - The all-or-nothing approach in [Automatic vs. Manual Role Selection](#automatic-vs-manual-role-selection) prevents
   users from specifying only a subset of roles to be automatically determined.
   - For example, a cluster admin might want to isolate the ClusterNode subnet from the ControlPlaneInternalLB subnet,
@@ -679,9 +713,13 @@ deployments or MicroShift.
 - Q: Should the install-config design assume all IngressControllerLB subnets are ClusterNode subnets too?
   - A: No, we must support dedicated IngressController subnet use cases.
 - Q: When using manual role selection, what subnet does the bootstrap node use? Do we need another role?
+  - A: We do not want a separate role for the bootstrap node, as it is an implementation detail. It should
+    function as it does with `platform.aws.subnets`, using the provided public subnets for external clusters
+    and the provided private subnets for internal clusters.
 - Q: Should we require the `OPENSHIFT_INSTALL_AWS_PUBLIC_ONLY` flag to be set when using `platform.aws.vpc.subnets`
   to assign ClusterNode roles to public subnets? Or should we disallow public ClusterNode subnets, and only enable
-  `OPENSHIFT_INSTALL_AWS_PUBLIC_ONLY`functionality in automatic role selection mode? Or a combination of both?
+  `OPENSHIFT_INSTALL_AWS_PUBLIC_ONLY` functionality in automatic role selection mode? Or a combination of both?
+  - A: We should disallow public ClusterNode and only allow when `OPENSHIFT_INSTALL_AWS_PUBLIC_ONLY` is set.
 
 ## Test Plan
 
@@ -691,6 +729,14 @@ E2E test(s) will also be added to the installer to verify functionality of the n
 These tests, typically written by QE, will follow existing patterns established for testing installer functionality in
 the [openshift-tests-private](https://github.com/openshift/release/tree/master/ci-operator/config/openshift/openshift-tests-private)
 directory of the openshift/release repo. These installer tests are run as nightly CI jobs.
+
+Suggested tests cases for the new `platform.aws.vpc.subnets` field:
+
+- Manually specified roles where IngressControllerLB and ControlPlaneExternalLB share the same subnets, and ClusterNodes
+  and ControlPlaneInternalLB share the same subnets.
+- Manually specified roles where dedicated subnets are used for all roles (IngressControllerLB, ControlPlaneInternalLB,
+  ControlPlaneExternalLB, and ClusterNode)
+- Public subnets only (`OPENSHIFT_INSTALL_AWS_PUBLIC_ONLY`)
 
 ### Impact of Deprecation on Testing
 
@@ -803,7 +849,7 @@ However, this alternative has been deemed insufficient because:
 - Custom installer manifests are unvalidated, whereas a new API in install-config will have validation.
 - The mechanics of providing a `default` IngressController manifest is complicated and error-prone.
 
-### User-Created IngressController Day 2 Defaulting
+### User-Created IngressController Day 2 Subnet Defaulting
 
 In addition to setting the `default` IngressController subnets, IngressControllerLB subnets could also serve as the
 default for all user-created IngressControllers on Day 2. Previous revisions of this enhancement included this
@@ -814,6 +860,9 @@ type of defaulting, but we deemed it out-of-scope for the following reasons:
      defaulting would need to happen in spec, and that mechanism would need to be built.
    - Since the IngressController `subnets` field is split into `classicLoadBalancer` and `networkLoadBalancer`,
      switching between NLBs and Classic load balancer while maintaining the default subnets is tricky.
+   - Since `platform.aws.vpc.subnets` specifies either public subnets for public clusters or private subnets
+     for private clusters, and cluster admins can create IngressController on Day 2 with a different scope
+     than the cluster, the Ingress Config must store both public and private IngressControllerLB subnets.
 2. It's not a hard requirement for service delivery.
    - Day 2 subnet defaulting mostly provides a UX convenience.
 3. It can be done later if needed.
@@ -936,7 +985,7 @@ type Subnet struct {
     // +kubebuilder:validation:XValidation:rule=`self.all(x, self.exists_one(y, x == y))`,message="ingressControllerLBSubnets cannot contain duplicates"
     IngressControllerLBSubnets []AWSSubnetID `json:"ingressControllerLBSubnets,omitempty"`
 
-	//...etc
+    //...etc
 }
 ```
 
@@ -954,13 +1003,13 @@ However, the semantics are unclear. Take this install-config example that lacks 
   vpc:
     subnets:
     - id: subnet-001 # Private / AZ us-east-1a
-      rolesOverride:
+      roles:
       - ClusterNode
     - id: subnet-002 # Public / AZ us-east-1a
-      rolesOverride:
+      roles:
       - ControlPlaneExternalLB
     - id: subnet-003 # Private / AZ us-east-1a
-      rolesOverride:
+      roles:
       - ControlPlaneInternalLB
 #...
 ```
@@ -977,10 +1026,10 @@ Additionally, consider a scenario where some subnets have assigned roles, while 
   vpc:
     subnets:
     - id: subnet-001 # Private / AZ us-east-1a
-      rolesOverride:
+      roles:
       - ClusterNode
     - id: subnet-002 # Public / AZ us-east-1a
-      rolesOverride:
+      roles:
       - ControlPlaneExternalLB
     - id: subnet-003 # Private / AZ us-east-1a
     - id: subnet-004 # Public / AZ us-east-1a
