@@ -273,16 +273,25 @@ https://github.com/openshift/kubernetes/blob/3c62f738ce74a624d46b4f73f25d6c15b3a
 In order to prevent misleading logs about informers that failed to start or failure to connect to the oauth-apiserver, the following changes to this patch are to be made:
 
 - Informers for the `Group` API are only configured and started as part of the first run of the `authorization.openshift.io/RestrictSubjectBindings` admission plugin validation loop. This makes it such that the informer will not be configured or attempt to start when the admission plugin is disabled.
-- The post-start hook that checks for oauth-apiserver connectivity will be skipped if the `Authentication` resource `.spec.type` is set to `OIDC`. This will prevent logs in the kube-apiserver associated with not being able to connect to the oauth-apiserver, which we know should not be running when OIDC is enabled.
+- To prevent logs in the kube-apiserver associated with not being able to connect to the oauth-apiserver, which we know should not be running when OIDC is enabled, the post-start hook checks for oauth-apiserver connectivity will be skipped if the following conditions are met (signalling that the kube-apiserver has been intentionally configured to use an external OIDC provider):
+    - The `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins are present in the `--disable-admission-plugins` flag
+    - The `--authentication-config` flag is set to `/etc/kubernetes/static-pod-resources/configmaps/auth-config/auth-config.json`
+    - The `--oauthMetadataFile` flag is set to an empty string
+    - The `--authentication-token-webhook-config-file` flag is not present
 
 ##### Changes to the cluster-kube-apiserver-operator
 
-When authentication type is set to OIDC, the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins will be disabled.
+When the `Authentication` resource with name `cluster` has `.spec.type` set to `OIDC`, the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins will be disabled.
 
-This will be done through updates to the appropriate config observers to update the `KubeAPIServerConfig.apiServerArguments` map to:
+When transitioning from another value to `OIDC`, the appropriate config observers will update the `KubeAPIServerConfig.apiServerArguments` map to:
 
 - Remove the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins from the `--enable-admission-plugins` argument
 - Add the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins to the `--disable-admission-plugins` argument
+
+When transitioning from `OIDC` to another value, the appropriate config observers will update the `KubeAPIServerConfig.apiServerArguments` map to:
+
+- Remove the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins from the `--disable-admission-plugins` argument
+- Add the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins to the `--enable-admission-plugins` argument
 
 ##### Changes to the cluster-authentication-operator
 
@@ -294,7 +303,12 @@ To support the need to remove the `rolebindingrestrictions.authorization.openshi
 
 This will mean vendoring the generated CRD manifests as outlined in https://github.com/openshift/api/tree/master?tab=readme-ov-file#vendoring-generated-manifests-into-other-repositories and adding a new controller to manage the CRD.
 
-Managing the CRD will consist of ensuring that the CRD is present on the cluster, and matches the desired manifest, when the authentication type is _not_ OIDC, and ensuring the CRD is not present present on the cluster when the authentication type _is_ OIDC and OIDC configuration has been successfully rolled out. 
+Managing the CRD will consist of the following:
+
+- When internal oauth server is desired, ensure the `RoleBindingRestriction` CRD exists and matches desired state
+- When external OIDC is desired, but `RoleBindingRestriction` resources exist, ensure the `RoleBindingRestriction` CRD exists and matches desired state
+- When external OIDC is desired, no `RoleBindingRestriction` resources exist, remove the `RoleBindingRestriction` CRD
+- When external OIDC is configured, remove the `RoleBindingRestriction` CRD
 
 Additionally, the CAO will be updated to block OIDC configuration on existence of `RoleBindingRestriction` resources. If `RoleBindingRestriction` resources are found,
 the Authentication CR's `OIDCConfig` status field will be updated to contain the following conditions:
