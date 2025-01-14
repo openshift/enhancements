@@ -86,7 +86,7 @@ Through enhancement schema:
 recurrence:
   frequency: Weekly
   weekly:
-    days:
+    daysOfWeek:
     - Saturday
     - Sunday
     interval: 1
@@ -453,7 +453,7 @@ metadata:
 
   # Only HostedChangeManagementPolicy are namespaced. This
   # field is NOT present for ChangeManagementPolicy.
-  namespace: openshift-machine-config-operator
+  namespace: <hosted-cluster-namespace>
   
   # The name of the policy, which will be referenced by changeManagement stanzas.
   name: example-policy
@@ -979,7 +979,7 @@ spec:
 
         # Required when frequency=Weekly
         weekly:
-          days: 
+          daysOfWeek: 
           - Monday
           - Tuesday
           - Wednesday
@@ -990,13 +990,13 @@ spec:
           # "by" is a discriminant for the unioned types which follow.
           by: Day | Date
           date:
-            dates: 
+            datesOfMonth: 
             - <int> # List of dates 0 < x < 32
             interval: <int> # How many months should pass before the next occurrence 0 < x < 12
           day:
             days:
-            - week: First | Second | Third | Fourth | Fifth | Last
-              day: Monday | Tuesday | Wednesday | ... | Sunday
+            - weekOfMonth: First | Second | Third | Fourth | Fifth | Last
+              dayOfWeek: Monday | Tuesday | Wednesday | ... | Sunday
             interval: <int> # How many months should pass before the next occurrence 0 < x < 12
 
         # Required when frequency=Yearly
@@ -1004,13 +1004,13 @@ spec:
           # "by" is a discriminant for the unioned types which follow.
           by: Day | Date
           date:
-            dates: 
+            datesOfMonth: 
             - <int> # List of dates 0 < x < 32
             month: January | February | ... | December
           day:
             days:
-            - week: First | Second | Third | Fourth | Fifth | Last
-              day: Monday | Tuesday | Wednesday | ... | Sunday
+            - weekOfMonth: First | Second | Third | Fourth | Fifth | Last
+              dayOfWeek: Monday | Tuesday | Wednesday | ... | Sunday
             month: January | February | ... | December
       
       # Given the identification of a date by a recurrence rule, at what time (always UTC) can the 
