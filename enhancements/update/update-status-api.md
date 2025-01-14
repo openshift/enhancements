@@ -313,7 +313,11 @@ There are two sources of skew:
 
 ## Operational Aspects of API Extensions
 
-The Update Status Controller will be installed by CVO into a new dedicated `openshift-update-status-controller` namespace. Resources necessary to operate the new controller will be a Deployment, ServiceAccount and RBAC resources to allow the controller to read the necessary state in the cluster (in the initial implementation, watch and read `ClusterVersion`, `ClusterOperator`, `MachineConfigPool`, and `Node` resources) and manage the `UpdateStatus` resource. The USC will be deployed as a single-replica Deployment. The CVO itself will manage this Deployment as its operand. USC operational matters will be exposed via the `UpdateStatus` resource's `.status` conditions. For the initial implementation, the `Available` condition will suffice.
+The Update Status Controller will be installed by CVO into a new dedicated `openshift-update-status-controller` namespace. Resources necessary to operate the new controller will be a Deployment, ServiceAccount and RBAC resources to allow the controller to read the necessary state in the cluster (in the initial implementation, watch and read `ClusterVersion`, `ClusterOperator`, `MachineConfigPool`, and `Node` resources) and manage the `UpdateStatus` resource. The USC will be deployed as a single-replica Deployment. The CVO itself will manage this Deployment as its operand.
+
+USC operational matters will be exposed via the `UpdateStatus` resource's `.status` conditions. For the initial implementation, the `Available` condition will suffice. The operational conditions will need to be consumed by the same clients consuming `UpdateStatus` (to assess the trustworthiness of the data), and the user interested in USC operational matters is the same persona as the one interested in the update status: cluster administrator.
+
+We may consider placing a cluster operator layer between CVO and USC in the future for the sake of architecture consistency and to improve the operational reporting layer (use the same concepts as other operators) if necessary, but at the moment, we propose not to introduce this layer, at least while the feature is in Tech Preview. Compliance with the OCP cluster operator pattern can be considered for GA graduation criteria.
 
 ## Support Procedures
 
