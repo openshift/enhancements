@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2024-11-25
-last-updated: 2025-01-09
+last-updated: 2025-01-14
 tracking-link:
   - https://issues.redhat.com/browse/OTA-540
 ---
@@ -126,6 +126,48 @@ expectations).
 ## Graduation Criteria
 
 There are no API changes proposed by this enhancement, which only affects sad-path handling, so we expect the code change to go straight to the next generally-available release, without feature gating or staged graduation.
+
+### Enhancement merge
+
+To ensure we do not surprise anyone with this shift, we are collecting acks from at least one maintainer for each ClusterOperator approving this pull request, and the [existing semantics for `status.versions[name=operator]`](/dev-guide/cluster-version-operator/dev/clusteroperator.md#version):
+
+> There MUST be a version with the name `operator`, which is watched by the CVO to know if a cluster operator has achieved the new level.
+
+* [ ] authentication
+* [ ] baremetal
+* [ ] cloud-controller-manager
+* [ ] cloud-credential
+* [ ] cluster-api
+* [ ] cluster-autoscaler
+* [ ] config-operator
+* [ ] console
+* [ ] control-plane-machine-set
+* [ ] csi-snapshot-controller
+* [ ] dns
+* [ ] etcd
+* [ ] image-registry
+* [ ] ingress
+* [ ] insights
+* [ ] kube-apiserver
+* [ ] kube-controller-manager
+* [ ] kube-scheduler
+* [ ] kube-storage-version-migrator
+* [ ] machine-api
+* [ ] machine-approver
+* [ ] machine-config
+* [ ] marketplace
+* [ ] monitoring
+* [ ] network
+* [ ] node-tuning
+* [ ] olm
+* [ ] openshift-apiserver
+* [ ] openshift-controller-manager
+* [ ] openshift-samples
+* [ ] operator-lifecycle-manager
+* [ ] operator-lifecycle-manager-catalog
+* [ ] operator-lifecycle-manager-packageserver
+* [ ] service-ca
+* [ ] storage
 
 ### Dev Preview -> Tech Preview
 
