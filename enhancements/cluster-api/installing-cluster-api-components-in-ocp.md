@@ -17,6 +17,7 @@ last-updated: 2023-09-25
 tracking-link:
   - "https://issues.redhat.com/browse/OCPCLOUD-1910"
 see-also:
+  - "/enhancements/machine-api/converting-machine-api-to-cluster-api.md"
 replaces:
   - "https://github.com/openshift/enhancements/blob/master/enhancements/machine-api/cluster-api-integration.md"
 superseded-by:

@@ -15,8 +15,10 @@ creation-date: 2023-08-30
 last-updated: 2024-04-30
 tracking-link: 
   - https://issues.redhat.com/browse/OCPCLOUD-1578
-see-also: []
-replaces: []
+see-also: 
+  - "/enhancements/cluster-api/installing-cluster-api-components-in-ocp.md"
+replaces: 
+  - "/enhancements/machine-api/machine-api-integration.md"
 superseded-by: []
 ---
 ...
