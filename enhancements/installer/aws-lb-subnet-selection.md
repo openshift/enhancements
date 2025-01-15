@@ -15,7 +15,7 @@ approvers:
 api-approvers:
 - "@JoelSpeed"
 creation-date: 2024-05-29
-last-updated: 2025-01-10
+last-updated: 2025-01-13
 tracking-link:
   - https://issues.redhat.com/browse/CORS-3440
 see-also:
@@ -36,7 +36,7 @@ It also fixes a common issue where load balancers would map to unintended subnet
 To achieve this, this enhancement deprecates the existing install-config field `platform.aws.subnets`
 in favor of a more flexible configuration field that handles specifying subnets for IngressControllers,
 control plane load balancers, and the cluster nodes. These new subnet roles, referred to as
-IngressControllerLB, ControlPlaneExternalLB, ControlPlaneInternalLB, and ClusterNode subnets
+IngressControllerLB, ControlPlaneExternalLB, ControlPlaneInternalLB, ClusterNode, and EdgeNode subnets
 are further defined in [Defining Subnet Roles](#defining-subnets-roles).
 
 ## Definitions and Terminology
@@ -62,38 +62,26 @@ We use the concept of roles to recognize that a single subnet can simultaneously
 
 Let's define the new subnet roles:
 
-**ClusterNode Subnet Role**
-
-Subnets with this role host the cluster nodes, including both control plane and compute nodes.
-These are typically private subnets, though they can occasionally be public subnets in special scenarios.
-
-**IngressControllerLB Subnet Role**
-
-Subnets with this role are designated as the subnets for hosting AWS load balancer created specifically
-for the `default` IngressController. This role does not include load balancers created from generic
-LoadBalancer-type Services, but only those from the `default` IngressController. Currently, defaulting
-for user-created IngressControllers is not included for this role; however, this role may be extended in
-the future include such support.
-
-**ControlPlaneExternalLB Subnet Role**
-
-Subnets with this role are designated as subnets for the control plane's **external** load balancer
-that serves the Kubernetes API server. Only created for externally published clusters.
-
-**ControlPlaneInternalLB Subnet Role**
-
-Subnets with this role are designated as subnets for the control plane **internal** load balancers
-that serves the Kubernetes API server. Always created for all clusters.
+| Role                   | Description                                                                                                                                                                                                                                                                                                                      | Allowed Subnet Scope                                        | 
+|------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------|
+| ClusterNode            | Host the cluster nodes, including both control plane and compute nodes in standard availability zones (excluding local zones).                                                                                                                                                                                                   | Private [^1]                                                |
+| EdgeNode               | Host nodes running in AWS edge zones, Local Zones or Wavelength Zones. These subnets are exclusively used for hosting edge nodes and cannot attach to Control Plane or IngressController load balancers.                                                                                                                         | Private [^1]                                                |
+| Bootstrap          | Host the bootstrap resources such as a temporary machine booted to act as a temporary control plane whose sole purpose is launching the rest of the cluster ([reference](https://github.com/openshift/installer/blob/main/docs/user/overview.md#cluster-installation-process)).                                                  | Public or Private                                           |
+| IngressControllerLB    | Host AWS load balancer created specifically for the `default` IngressController. This role does not include load balancers created from generic LoadBalancer-type Services. Defaulting for user-created IngressControllers is not included for this role; however, this role may be extended in the future include such support. | Public for External Clusters, Private for Internal Clusters |
+| ControlPlaneExternalLB | Host the control plane's **external** load balancer that serves the Kubernetes API server. Only created for externally published clusters.                                                                                                                                                                                       | Public                                                      |
+| ControlPlaneInternalLB | Host the control plane **internal** load balancers that serves the Kubernetes API server. Always created for all clusters.                                                                                                                                                                                                       | Private                                                     |
+[^1]: Can be public for OPENSHIFT_INSTALL_AWS_PUBLIC_ONLY
 
 _Note: These roles are defined only to establish a common language within the context of the install-config
 and may not be applicable to other environments, situations, or APIs._
 
 ### Clarifying Subnet Roles Terminology
 
-For simplicity, "IngressControllerLB subnets," "ControlPlaneExternalLB subnets," "ControlPlaneInternalLB subnets"
-and "ClusterNode subnets" refer to subnets that fulfill their respective roles, but may also serve other roles.
-Additionally, this proposal will use "ControlPlaneLB subnets" to mean both ControlPlaneExternalLB and
-ControlPlaneInternalLB subnets; however "ControlPlaneLB" is NOT an official subnet role in the API.
+For simplicity, "IngressControllerLB subnets," "ControlPlaneExternalLB subnets," "ControlPlaneInternalLB subnets",
+"Bootstrap subnets", "EdgeNode subnets", and "ClusterNode subnets" refer to subnets that fulfill their respective
+roles, but may also serve other roles. Additionally, this proposal will use "ControlPlaneLB subnets" to mean both
+ControlPlaneExternalLB and ControlPlaneInternalLB subnets; however "ControlPlaneLB" is NOT an official subnet role
+in the API.
 
 When this proposal refers to a "IngressController subnet", it is generically referring to a subnet that associated with
 an IngressController's load balancer, not specifically a subnet that was specified with the IngressControllerLB role
@@ -229,9 +217,11 @@ for the workflow for this use case.
   new, more flexible subnet field for subnet-related configuration.
 - Enable users to explicitly configure the subnets for the `default` IngressController on AWS
   through the install-config (i.e. IngressControllerLB subnets).
+- Enable users to explicitly configure the subnets for the ControlPlaneLB subnets.
+- Enable users to explicitly configure the subnets for the cluster nodes, both ClusterNode and EdgeNode.
+- Enable users to explicitly configure the subnets for the bootstrap machine.
 - Enable users to still use AWS Subnet Discovery for the `default` IngressController.
 - Prevent installations into existing VPCs where AWS Subnet Discovery would select subnets that do not belong to the cluster.
-- Enables users to explicitly configure the subnets for the ControlPlaneLB subnets.
 - Support automatic subnet role selection (opinionated defaults) similar to the existing `platform.aws.subnets` behavior.
 - Provide install-time validation for all user-provided subnets roles.
 - Maintain support for configuring the `default` IngressController or ControlPlaneLB subnets via customizing the
@@ -269,11 +259,24 @@ continue to support automatic role selection for users who prefer a standard, op
 config, but only if no roles are explicitly assigned to any subnet. For IngressControllers, using automatic role
 selection enables the AWS CCM to use [AWS Subnet Discovery](#aws-subnet-discovery) as it did previously with
 `platform.aws.subnets`. For ControlPlaneLBs and ClusterNodes, the subnets are selected based on whether they are
-public or private and whether the cluster is configured as internal or external.
+public or private and whether the cluster is configured as internal or external. Refer to the table below for more
+details on auto-selection.
 
 Manual role selection is when the cluster admin assigns roles to the provided subnets, and the installer
 explicitly configures the subnets to be used according to the cluster admin's role selection. Every subnet must have
-a role, and each role must be assigned to at least one subnet.
+a role, and the roles labeled as "Required in Manual Mode" in the table below must be assigned at least one subnet:
+
+| Role                   | Required in Manual Mode   | Auto-Selection Component | Auto-Selected Subnets Type[^1]                             |
+|------------------------|---------------------------|--------------------------|------------------------------------------------------------|
+| ClusterNode            | Yes                       | Installer                | Private[^2]                                                |
+| EdgeNode               | No                        | Installer                | Local Zone                                                 |
+| Bootstrap              | Yes                       | Installer                | Public or Private                                          |
+| IngressControllerLB    | Yes                       | AWS CCM                  | Public for External Cluster, Private for Internal Clusters |
+| ControlPlaneExternalLB | Yes (if external cluster) | Installer (CAPA)         | Public                                                     |
+| ControlPlaneInternalLB | Yes                       | Installer (CAPA)         | Private                                                    |
+[^1]: Describes what type of subnets will be selected for this role in automatic role selection.
+[^2]: Public for OPENSHIFT_INSTALL_AWS_PUBLIC_ONLY
+
 
 ### Rejecting Untagged Subnets Proposal
 
@@ -336,9 +339,9 @@ type VPCSpec struct {
     // any subnets without the kubernetes.io/cluster/<cluster-id> tag.
     //
     // For manually specified subnet role selection, each subnet must have at
-    // least one assigned role, and all roles (ClusterNode, IngressControllerLB,
-    // ControlPlaneExternalLB, ControlPlaneInternalLB) must be assigned to
-    // at least one subnet. However, if the cluster scope is internal,
+    // least one assigned role, and the ClusterNode, IngressControllerLB,
+    // ControlPlaneExternalLB, and ControlPlaneInternalLB roles must be assigned
+    // to at least one subnet. However, if the cluster scope is internal,
     // then ControlPlaneExternalLB is not required.
     // 
     // Leave this field unset to have the installer create subnets
@@ -350,9 +353,9 @@ type VPCSpec struct {
     // +optional
     // +listType=atomic
     // +kubebuilder:validation:XValidation:rule=`self.all(x, self.exists_one(y, x.id == y.id))`,message="subnets cannot contain duplicate IDs" 
-    // +kubebuilder:validation:XValidation:rule=`self.exists(x, x.roles.exists(r, r == 'ClusterNode'))`,message="subnets must contain at least 1 subnet with the ClusterNode role"
-    // +kubebuilder:validation:XValidation:rule=`self.filter(x, x.roles.exists(r, r == 'IngressControllerLB')).size() <= 10`,message="subnets must contain less than 10 subnets with the IngressControllerLB role"
-    // +kubebuilder:validation:MaxLength=40
+    // +kubebuilder:validation:XValidation:rule=`self.exists(x, x.roles.exists(r, r.type == 'ClusterNode'))`,message="subnets must contain at least 1 subnet with the ClusterNode role"
+    // +kubebuilder:validation:XValidation:rule=`self.filter(x, x.roles.exists(r, r.type == 'IngressControllerLB')).size() <= 10`,message="subnets must contain less than 10 subnets with the IngressControllerLB role"
+    // +kubebuilder:validation:MaxLength=50
     Subnets []Subnet `json:"subnets,omitempty"`
 }
 
@@ -373,7 +376,9 @@ type Subnet struct {
     // +optional
     // +listType=atomic
     // +kubebuilder:validation:XValidation:rule=`self.all(x, self.exists_one(y, x == y))`,message="roles cannot contain duplicates"
-    // +kubebuilder:validation:MaxLength=4
+    // +kubebuilder:validation:XValidation:rule=`!self.exists(r, r.type == 'EdgeNode') || self.size() == 1`,message="EdgeNode roles cannot be combined with any other roles"
+    // +kubebuilder:validation:XValidation:rule=`!(self.exists(r1, r1.type == 'ControlPlaneExternalLB') && self.exists(r2, r2.type == 'ControlPlaneInternalLB'))`,message="roles cannot contain both ControlPlaneExternalLB and ControlPlaneInternalLB"
+    // +kubebuilder:validation:MaxLength=5
     Roles []SubnetRole `json:"roles"`
 }
 
@@ -383,24 +388,43 @@ type Subnet struct {
 // +kubebuilder:validation:Pattern=`^subnet-[0-9A-Za-z]+$`
 type AWSSubnetID string
 
-// SubnetRole specifies the roles (aka functions) that the subnet will provide in the cluster.
-type SubnetRole string
+// SubnetRole specifies the role (aka functions) that the subnet will provide in the cluster.
+// +kubebuilder:validation:XValidation:rule=`self.role != 'ControlPlaneLB' || has(self.controlPlaneLB)`,message="controlPlaneLB is required when role is ControlPlaneLB"
+// +kubebuilder:validation:XValidation:rule=`self.role != 'ControlPlaneLB' || has(self.ingressControllerLB)`,message="controlPlaneLB is required when role is IngressControllerLB"
+type SubnetRole struct {
+    // type specifies the type of role (aka function)
+    // that the subnet will provide in the cluster.
+    //
+    // +required
+    Type SubnetRoleType `json:"type"`
+}
+
+// SubnetRoleName specifies the name of the roles (aka functions) that the subnet will provide in the cluster.
+type SubnetRoleType string
 
 const (
     // ClusterNodeSubnetRole specifies subnets that will be used as subnets for the
     // control plane and compute nodes.
-    ClusterNodeSubnetRole SubnetRole = "ClusterNode"
+    ClusterNodeSubnetRole SubnetRoleType = "ClusterNode"
+
+    // EdgeNodeSubnetRole specifies subnets that will be used as edge subnets residing
+    // in local zones for edge compute nodes.
+    EdgeNodeSubnetRole SubnetRoleType = "EdgeNode"
+
+    // BootstrapSubnetRole specifies subnets that will be used as subnets for the
+    // bootstrap node used to create the cluster.
+    BootstrapSubnetRole SubnetRoleType = "Bootstrap"
 
     // IngressControllerLBSubnetRole specifies subnets used by the default IngressController.
-    IngressControllerLBSubnetRole SubnetRole = "IngressControllerLB"
+    IngressControllerLBSubnetRole SubnetRoleType = "IngressControllerLB"
 
     // ControlPlaneExternalLBSubnetRole specifies subnets used by the external control plane
     // load balancer that serves the Kubernetes API server.
-    ControlPlaneExternalLBSubnetRole SubnetRole = "ControlPlaneExternalLB" 
+    ControlPlaneExternalLBSubnetRole SubnetRoleType = "ControlPlaneExternalLB" 
 
     // ControlPlaneInternalLBSubnetRole specifies subnets used by the internal control plane
     // load balancer that serves the Kubernetes API server.
-    ControlPlaneInternalLBSubnetRole SubnetRole = "ControlPlaneInternalLB"
+    ControlPlaneInternalLBSubnetRole SubnetRoleType = "ControlPlaneInternalLB"
 )
 ```
 
@@ -414,12 +438,10 @@ user experience, but are not permanent and may be updated or removed to accommod
 
 ###### All or Nothing Subnet Roles Selection
 
-This proposed API follows an "all or nothing" approach for roles: either all roles must be explicitly assigned
+This proposed API follows an "all or nothing" approach for roles: either all required roles (see
+[Automatic vs. Manual Role Selection](#automatic-vs-manual-role-selection) for list) must be explicitly assigned
 (manual role selection), or no roles must be assigned (automatic role selection). The installer must not allow a mix of
 automatic and manual role assignments, as this could lead to confusing behavior. See [Allowing Mixed Automatic and Manual Subnet Selection Alternative](#allowing-mixed-automatic-and-manual-subnet-selection-alternative) for the reason behind this validation.
-
-However, one exception is if the cluster is private (`installconfig.publish: Internal`), then
-ControlPlaneExternalLB can be omitted.
 
 ###### All Subnets Belong to the Same VPC Validation
 
@@ -483,6 +505,17 @@ Additionally, the AZs provided in `controlPlane.platform.aws.zones` and `compute
 AZs provided by the subnets in `platform.aws.vpc.subnets`. This validation exists for `platform.aws.subnets`
 in [`validateMachinePool`](https://github.com/openshift/installer/blob/6fd2928b4f810c0592c042acb6b90028a8a3d6a6/pkg/asset/installconfig/aws/validation.go#L314).
 
+###### Reject Duplicate AZs
+
+The installer should ensure that each role does not contain multiple subnets from the same AZ, regardless of
+automatic or manual role selection. This is implemented with `platform.aws.subnets` in the
+`validateDuplicateSubnetZones` function.
+
+###### Edge Subnet Restrictions
+
+The installer must not allow any edge subnets (local or wavelength zone) to be specified with the ClusterNode,
+ControlPlaneLB, or IngressControllerLB roles. Additionally, the EdgeNode role must be restricted to edge subnets only.
+
 ##### Installer-Generated Manifests Updates
 
 The installer will apply the specified IngressControllerLB subnets to the `default` IngressController's
@@ -510,6 +543,14 @@ installer and should continue to be excluded. These tags assist the AWS CCM in i
 during [AWS Subnet Discovery](#aws-subnet-discovery) for both the cluster being installed and any other clusters
 that may be installed within the same VPC.
 
+##### Installer Subnet Deprecated API Conversion
+
+As `platform.aws.subnets` is being deprecated, the existing upconversion process should convert it into
+`platform.aws.vpc.subnets` to maintain backwards compatibility with the old API. Caution must be taken to
+ensure that any new behaviors introduced in the new API, such as
+[Reject BYO VPC Installations that Contain Untagged Subnets](#reject-byo-vpc-installations-that-contain-untagged-subnets),
+are not inadvertently applied to the old API.
+
 ### Workflow Description
 
 #### Specifying Manual Subnet Roles with BYO VPC during Installation Workflow
@@ -534,12 +575,13 @@ In order to do this, they must assign all the subnet roles:
           subnets:
           - id: subnet-0fcf8e0392f0910d0 # public / us-east-1a
             roles:
-            - IngressControllerLB
-            - ControlPlaneExternalLB
+            - type: IngressControllerLB
+            - type: ControlPlaneLB
+            - type: Bootstrap
           - id: subnet-0fcf8e0392f0910d1 # private / us-east-1a
             roles:
-            - ControlPlaneInternalLB
-            - ClusterNode
+            - type: ControlPlaneLB
+            - type: ClusterNode
         lbType: Classic
     #...
     ```
@@ -582,16 +624,18 @@ In order to do this, they must assign all the subnet roles:
         subnets:
         - id: subnet-0fcf8e0392f0910d4 # Private / AZ us-east-1a
           roles:
-          - ClusterNode
+          - type: ClusterNode
         - id: subnet-0fcf8e0392f0910d5 # Public / AZ us-east-1a
           roles:
-          - IngressControllerLB
+          - type: IngressControllerLB
+          - type: Bootstrap
         - id: subnet-0fcf8e0392f0910d6 # Public / AZ us-east-1a
           roles:
-          - ControlPlaneExternalLB
+          - type: ControlPlaneExternalLB
+          - type: Bootstrap
         - id: subnet-0fcf8e0392f0910d7 # Private / AZ us-east-1a
           roles:
-          - ControlPlaneInternalLB
+          - type: ControlPlaneInternalLB
   #...
   ```
 
@@ -602,14 +646,16 @@ In order to do this, they must assign all the subnet roles:
         subnets:
         - id: subnet-0fcf8e0392f0910d4 # Private / AZ us-east-1a
           roles:
-          - ClusterNode
-          - ControlPlaneInternalLB
+          - type: ClusterNode
+          - type: ControlPlaneInternalLB
         - id: subnet-0fcf8e0392f0910d5 # Public / AZ us-east-1a
           roles:
-          - IngressControllerLB
+          - type: IngressControllerLB
+          - type: Bootstrap
         - id: subnet-0fcf8e0392f0910d6 # Public / AZ us-east-1a
           roles:
-          - ControlPlaneExternalLB
+          - type: ControlPlaneExternalLB
+          - type: Bootstrap
   #...
   ```
 - ClusterNodes on public subnets so that they are externally accessible:
@@ -619,14 +665,35 @@ In order to do this, they must assign all the subnet roles:
         subnets:
         - id: subnet-0fcf8e0392f0910d4 # Private / AZ us-east-1a
           roles:
-          - ControlPlaneInternalLB
+          - type: ControlPlaneInternalLB
         - id: subnet-0fcf8e0392f0910d5 # Public / AZ us-east-1a
           roles:
-          - ClusterNode
-          - IngressControllerLB
-          - ControlPlaneExternalLB
+          - type: ClusterNode
+          - type: IngressControllerLB
+          - type: ControlPlaneExternalLB
+          - type: Bootstrap
   #...
   ```
+- Cluster installation with EdgeNodes:
+  ```yaml
+  #...
+      vpc:
+        subnets:
+        - id: subnet-0fcf8e0392f0910d4 # Private / AZ us-east-1a
+          roles:
+          - type: ClusterNode
+          - type: ControlPlaneInternalLB
+        - id: subnet-0fcf8e0392f0910d5 # Public / AZ us-east-1a
+          roles:
+          - type: IngressControllerLB
+          - type: ControlPlaneExternalLB
+          - type: Bootstrap
+        - id: subnet-0fcf8e0392f0910e0 # Private / Local Zone us-east-dca-1a
+          roles:
+          - type: EdgeNode
+  #...
+  ```
+
 
 #### Using Automatic Subnet Roles with BYO VPC during Installation Workflow
 
@@ -737,6 +804,7 @@ Suggested tests cases for the new `platform.aws.vpc.subnets` field:
 - Manually specified roles where dedicated subnets are used for all roles (IngressControllerLB, ControlPlaneInternalLB,
   ControlPlaneExternalLB, and ClusterNode)
 - Public subnets only (`OPENSHIFT_INSTALL_AWS_PUBLIC_ONLY`)
+- Manually specified roles where EdgeNode is specified.
 
 ### Impact of Deprecation on Testing
 
@@ -989,7 +1057,8 @@ type Subnet struct {
 }
 ```
 
-However, it's not clear how this API design would enable automatic subnet selection.
+However, it's not clear how this API design would enable automatic subnet selection since a list of subnets is
+no longer required.
 
 ### Allowing Mixed Automatic and Manual Subnet Selection Alternative
 
@@ -1004,13 +1073,13 @@ However, the semantics are unclear. Take this install-config example that lacks 
     subnets:
     - id: subnet-001 # Private / AZ us-east-1a
       roles:
-      - ClusterNode
+      - type: ClusterNode
     - id: subnet-002 # Public / AZ us-east-1a
       roles:
-      - ControlPlaneExternalLB
+      - type: ControlPlaneExternalLB
     - id: subnet-003 # Private / AZ us-east-1a
       roles:
-      - ControlPlaneInternalLB
+      - type: ControlPlaneInternalLB
 #...
 ```
 
@@ -1027,10 +1096,10 @@ Additionally, consider a scenario where some subnets have assigned roles, while 
     subnets:
     - id: subnet-001 # Private / AZ us-east-1a
       roles:
-      - ClusterNode
+      - type: ClusterNode
     - id: subnet-002 # Public / AZ us-east-1a
       roles:
-      - ControlPlaneExternalLB
+      - type: ControlPlaneExternalLB
     - id: subnet-003 # Private / AZ us-east-1a
     - id: subnet-004 # Public / AZ us-east-1a
 #...
