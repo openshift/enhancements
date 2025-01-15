@@ -135,7 +135,13 @@ Introduce a new `update.openshift.io` group for `UpdateStatus`. There is no suit
 
 The enhancement allows adoption in HCP as an extension. The API and controller will be extended to handle the resources that represent the control plane and worker pools (`HostedCluster` and `NodePool`, respectively) and surface update progress through status insights for these resources.
 
-The Update Status Controller will run as a CVO operand and part of the hosted cluster control plane. The status-conveying API needs reside in the management cluster because the information it conveys primarily targets cluster administrators tasked with updating clusters, and needs to report insights about both the hosted cluster and management cluster resources. Because `UpdateStatus` API is cluster-scoped, it is not suitable for HCP use, and we will need to introduce a namespaced HCP-specific flavor, such as `HostedClusterUpdateStatus`. HCP-specific API variant will also allow expressing information about resources in two API surfaces (management and hosted clusters), while the `UpdateStatus` API can use simple resource references assuming all resources are in the same cluster.
+The Update Status Controller will run as a part of the hosted control plane. Unlike in Standalone, where it is a CVO operand, USC will be managed by the Control Plane Controller in HCP, where the CVO does not have access to management cluster API and cannot manage resources there. USC needs to access the management cluster API layer to manage the status-reporting API (which targets cluster administrators tasked with updating clusters) and needs to report insights about both the hosted cluster and management cluster resources. It will also need access to the hosted cluster API layer to report on resources present there.
+
+Because `UpdateStatus` API is cluster-scoped, it is not suitable for HCP use, and we will need to introduce a namespaced HCP-specific flavor, such as `HostedClusterUpdateStatus`. HCP-specific API variant will also need to be able to refer to resources in two API surfaces (management and hosted clusters), while the `UpdateStatus` API can rely on all resources being in the same cluster and use simple resource references.
+
+The updates in HCP are not initiated by the [`hcp` client][hcp-client] binary but by [directly modifying `HostedCluster` and `NodePool` resources][updates-in-hcp] using the `oc` client. Hence, at the moment, there is no apparent suitable place to put the update status UX (a client that would consume a `HostedClusterUpdateStatus` instance and present its content). The best place for that is the [`hcp` client][hcp-client], if necessary. It is expected that managed OCP product layers using HCP (ROSA) would consume `HostedClusterUpdateStatus` to improve their update experience, but that work is outside the scope of this enhancement.
+
+When the management cluster is a standalone OCP cluster, there will also be a standard standalone USC instance in the respective platform namespace, managing an `UpdateStatus` that provides information about the management cluster itself.
 
 #### Standalone Clusters
 
@@ -363,6 +369,8 @@ N/A
 [cluster-capabilities]: https://docs.openshift.com/container-platform/4.17/installing/overview/cluster-capabilities.html
 [update-health-api-dd]: https://docs.google.com/document/d/1aEIWkfhhaVSe-XlSXvmokymOe3X_969pRCJhfhPDwFQ/edit#heading=h.9g05u56hri6y
 [oc-adm-upgrade-status-examples]: https://github.com/openshift/oc/tree/master/pkg/cli/admin/upgrade/status/examples
+[hcp-client]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.17/html/hosted_control_planes/hosted-control-planes-overview#hcp-versioning-cli_hcp-overview
+[updates-in-hcp]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.17/html/hosted_control_planes/updating-hosted-control-planes#hcp-get-upgrade-versions_hcp-updating
 [this-usc]: #update-status-controller
 [this-drawbacks]: #drawbacks
 [this-api-size]: #api-size-and-footprint
