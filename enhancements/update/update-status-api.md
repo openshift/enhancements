@@ -149,7 +149,9 @@ Standalone clusters are the primary target of the functionality and no special c
 
 #### Single-node Deployments or MicroShift
 
-No special considerations
+USC and `UpdateStatus` API can work on SNO. USC is updated early in the procedure and will be able to expose the update status when the apiserver is available. USC and `UpdateStatus` can be disabled at installation time through the Capability mechanism for resource-sensitive SNO deployments. Existing SNO clusters using the `vCurrent` capability set would enable USC unless the cluster administrator intervenes by tweaking the capabilities before they update, which may warrant a release note when the feature goes GA.
+
+MicroShift is updated through `rpm-ostree` or `dnf`, so `UpdateStatus` API or any part of USC is not applicable and should not be included in MicroShift.
 
 ### Implementation Details/Notes/Constraints
 
