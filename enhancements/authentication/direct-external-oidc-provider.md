@@ -308,7 +308,7 @@ Overall, for this feature there must be e2e tests that cover the following:
   - authenticate users with bearer tokens issued by the OIDC provider
   - ensure tokens issued by the built-in oauth stack do not work
   - ensure user mapping capabilities work as expected
-  - ensure that existence of `RoleBindingRestriction` resources blocks external OIDC configuration from progressing
+  - ensure that existence of `RoleBindingRestriction` resources results in the CAO status going Degraded
 - on a cluster that uses an external OIDC provider, test reverting configuration back to the built-in OAuth stack (good/bad configurations should be tested)
 - on a cluster that uses an external OIDC provider, test monitoring and cluster-authentication-operator status when the provider becomes unavailable
 - version skew between participating components; e.g. the cluster-authentication-operator has picked up the new configuration but the kube-apiserver-operator hasn't yet
