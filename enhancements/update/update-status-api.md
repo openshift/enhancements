@@ -325,6 +325,12 @@ USC operational matters will be exposed via the `UpdateStatus` resource's `.stat
 
 We may consider placing a cluster operator layer between CVO and USC in the future for the sake of architecture consistency and to improve the operational reporting layer (use the same concepts as other operators) if necessary, but at the moment, we propose not to introduce this layer, at least while the feature is in Tech Preview. Compliance with the OCP cluster operator pattern can be considered for GA graduation criteria.
 
+### Metrics
+
+For operational purposes, USC will expose simple gauges exposing how many insights are currently known to USC, labeled by source informer and by status/health type.
+
+Some managed service layers above OCP, like OCM, consume information about the cluster in the form of metrics, not by interacting with the cluster API. These layers could benefit from exposing the status information _through_ metrics, but USC is not a good architectural fit for this functionality. USC _manages_ the API by collecting data from informers; it does not interpret it. We could consider making USC contain a separate controller, which serves as an in-cluster _consumer_ of the `UpdateStatus` API, interpreting its state and exposing the update status through metrics. Such effort could benefit from sharing code with the `oc adm upgrade status` command.
+
 ## Support Procedures
 
 No specific support procedures are needed for the USC. The `UpdateStatus` resources will be collected by the must-gather tool, which will enable and simplify support because it will be possible to interpret the state of the cluster update process by using the `oc adm upgrade status` command, using a tool such as static-kas.
