@@ -115,33 +115,6 @@ type AuthenticationSpec struct {
 
 For more details on the `OIDCProvider` type and its fields, see [here](https://github.com/openshift/api/blob/fa2f9ad8645efed0a83c24de025fd7fe791cc558/config/v1/types_authentication.go#L197).
 
-To communicate the state of the OIDC configuration between control plane components and end-users, the Authentication CRD is extended with a new field `OIDCConfig`, in it's status:
-
-```go
-type AuthenticationStatus struct {
-    ...
-
-    // oidcConfig holds information related to the status
-    // of the configuration of the OIDC authentication type
-    // ...
-    //
-    // +openshift:enable:FeatureGate=ExternalOIDC
-    // +optional
-    OIDCConfig *OIDCConfigStatus `json:"oidcConfig,omitempty"`
-}
-
-type OIDCConfigStatus struct {
-    // conditions convey the state of the OIDC configuration
-    // ...
-    //
-    // +patchMergeKey=type
-    // +patchStrategy=merge
-    // +listType=map
-    // +listMapKey=type
-    Conditions []metav1.Condition `json:"conditions"`
-}
-```
-
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
@@ -208,8 +181,9 @@ When the built-in OAuth server is used for authentication (the default and origi
 In case an external OIDC provider is configured for authentication, then these controllers and resources are neither useful nor relevant. The operator must watch the OIDC configuration status, and once it becomes available it must deactivate the OAuth stack.
 
 _What signals that the OIDC configuration is available, and when should deactivation start?_
+At the time of writing this enhancement, there is no suitable API that the cluster-kube-apiserver-operator can use to signal that the OIDC configuration is available. The Authentication CR contains an OIDC Clients Status field, however this is specific to clients in the context of the OIDC protocol. Additionally, that field uses the Available/Progressing/Degraded pattern which is not suitable for determining whether the operator needs to deactivate or reactivate the OAuth stack.
 
-The current proposed solution for this is for the cluster-kube-apiserver-operator to inspect the following:
+The current proposed solution for this is for the authentication operator to inspect the following:
 
 1. Check all current revisions of the kube-apiserver pods
 2. For each observed revision, check whether it includes a revisioned structured auth-config ConfigMap
@@ -217,10 +191,6 @@ The current proposed solution for this is for the cluster-kube-apiserver-operato
 4. If any pod is on a revision that does not include an OIDC auth-config, then the OIDC rollout has not been completed in full yet, or that a rollout that switches auth from OIDC back to OAuth is in progress
 
 The above information is available in the `kubeapiservers/cluster` resource.
-
-The cluster-kube-apiserver-operator will update the Authentication CR's `OIDCConfig` status field to signal to the authentication operator that the KAS pods have successfully rolled out with the OIDC configuration in place.
-
-The status condition used to communicate availability of the OIDC configuration will be `Available`.
 
 This process determines whether OIDC is available on the KAS pods or not; when it is detected to be available, then the authentication operator can proceed with deactivation.
 
@@ -263,7 +233,7 @@ To ensure a holistic change in cluster behavior when enabling the OIDC functiona
 
 - Disable the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins
 - Remove the `rolebindingrestrictions.authorization.openshift.io` CustomResourceDefinition
-- Block OIDC enablement while any `RoleBindingRestriction` resources exist; This will be communicated in the `Authentication` resource via the `OIDCConfig` status field
+- Disable the OpenShift oauth-apiserver availability check
 
 ##### Changes to the kube-apiserver
 
@@ -272,12 +242,8 @@ https://github.com/openshift/kubernetes/blob/3c62f738ce74a624d46b4f73f25d6c15b3a
 
 In order to prevent misleading logs about informers that failed to start or failure to connect to the oauth-apiserver, the following changes to this patch are to be made:
 
+- Add a new default flag, `--openshift-oauth-desired`, that gates the oauth-apiserver availability check. The availability check will be run when `--openshift-oauth-desired` is set and not run when it is not set.
 - Informers for the `Group` API are only configured and started as part of the first run of the `authorization.openshift.io/RestrictSubjectBindings` admission plugin validation loop. This makes it such that the informer will not be configured or attempt to start when the admission plugin is disabled.
-- To prevent logs in the kube-apiserver associated with not being able to connect to the oauth-apiserver, which we know should not be running when OIDC is enabled, the post-start hook checks for oauth-apiserver connectivity will be skipped if the following conditions are met (signalling that the kube-apiserver has been intentionally configured to use an external OIDC provider):
-    - The `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins are present in the `--disable-admission-plugins` flag
-    - The `--authentication-config` flag is set to `/etc/kubernetes/static-pod-resources/configmaps/auth-config/auth-config.json`
-    - The `--oauthMetadataFile` flag is set to an empty string
-    - The `--authentication-token-webhook-config-file` flag is not present
 
 ##### Changes to the cluster-kube-apiserver-operator
 
@@ -295,25 +261,15 @@ When transitioning from `OIDC` to another value, the appropriate config observer
 
 ##### Changes to the cluster-authentication-operator
 
-A couple changes will need to be made to the cluster-authentication-operator. Mainly:
-- Ownership/Management of the `rolebindingrestrictions.authorization.openshift.io` CustomResourceDefinition
-- Blocking OIDC configuration due to existence of `RoleBindingRestriction` resources and communicating it via the `Authentication` resources new `OIDCConfig` status field
-
-To support the need to remove the `rolebindingrestrictions.authorization.openshift.io` CustomResourceDefinition when configuring the authentication type as OIDC, the cluster-authentication-operator will be updated to manage this CRD.
+To support the need to remove the `rolebindingrestrictions.authorization.openshift.io` CustomResourceDefinition when the OpenShift oauth server is not desired, the cluster-authentication-operator will be updated to manage this CRD.
 
 This will mean vendoring the generated CRD manifests as outlined in https://github.com/openshift/api/tree/master?tab=readme-ov-file#vendoring-generated-manifests-into-other-repositories and adding a new controller to manage the CRD.
 
 Managing the CRD will consist of the following:
 
-- When internal oauth server is desired, ensure the `RoleBindingRestriction` CRD exists and matches desired state
-- When external OIDC is desired, but `RoleBindingRestriction` resources exist, ensure the `RoleBindingRestriction` CRD exists and matches desired state
-- When external OIDC is desired, no `RoleBindingRestriction` resources exist, remove the `RoleBindingRestriction` CRD
-- When external OIDC is configured, remove the `RoleBindingRestriction` CRD
-
-Additionally, the CAO will be updated to block OIDC configuration on existence of `RoleBindingRestriction` resources. If `RoleBindingRestriction` resources are found,
-the Authentication CR's `OIDCConfig` status field will be updated to contain the following conditions:
-
-- Condition: `Progressing`, Status: `False`, Reason: `Blocked`, Message: `OIDC configuration blocked: RoleBindingRestriction resources found`
+- When OpenShift oauth server is desired, ensure the `RoleBindingRestriction` CRD exists and matches desired state
+- When OpenShift oauth server is not desired, but `RoleBindingRestriction` resources exist, ensure the `RoleBindingRestriction` CRD exists and matches desired state, set CAO status to `Degraded` with a message stating that `RoleBindingRestriction` resources exist and as such we can not delete the CRD
+- When OpenShift oauth server is not desired, no `RoleBindingRestriction` resources exist, remove the `RoleBindingRestriction` CRD
 
 ##### Changes to openshift/api
 
