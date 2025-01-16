@@ -37,6 +37,8 @@ The OpenShift update process is complex and often challenging to troubleshoot. I
 
 There is a need for a centralized API to expose update status and health across different OpenShift tools and interfaces. This API would standardize the interpretation of the update process state, centralize the information provided by various components involved in updates, and integrate with related concepts like pre-checks and maintenance windows. User interfaces enabled by Update Status API will improve the user experience for administrators and support.
 
+Part of the problem is that the way OpenShift works internally does not always correspond well with the established mental models that our users have. An update is usually understood to be a simple transition from one version to another. But in OpenShift, an update is often just a slightly special case of standard Kubernetes distributed system reconciliation, where the specification change that drives the transition happens to be related to a version change, and the underlying controllers do not know about a version update. Therefore, simply exposing the existing state of the system will always create a gap where components cannot inform the users how the update is going because they do not know anything about the update context. Historically, we attempted to teach our users, through support and documentation, to understand OpenShift enough so they can interpret the system state. This enhancement proposes to approach the problem from the other side, moving the responsibility for interpreting the system state to the platform and presenting the system state to the user in a way that more closely relates to established software models.
+
 ### User Stories
 
 * As a cluster administrator, I want to easily observe the update process so that I know if the update is going well or if there are issues I need to address.
@@ -104,6 +106,8 @@ now       Warning   Update Stalled     Cluster Version version is failing to pro
 
 Run with --details=health for additional description and links to related online documentation
 ```
+
+The example illustrates the proposal to translate the OpenShift state closer to a typical administrator's mental model. Nodes flipping their versions from old to new is something that humans expect to see in an update, but assigning a version to a `Node` is not a trivial operation in OpenShift because a version is just one of the metadata items on a configuration that MCO is reconciling on Nodes. For MCO, this is a simple config change to reconcile, not an abstract "update."
 
 All functionality will be delivered under the new `UpdateStatus` [Capability][cluster-capabilities] so that clusters that do not want the functionality do not need to spend resources on running the new controller. The Capability will be a part of the `vCurrent` and `v4.X` capability sets, which means the functionality will be enabled by default, and admins need to opt-out at installation or update time. Like all capabilities, once enabled, it cannot be disabled.
 
