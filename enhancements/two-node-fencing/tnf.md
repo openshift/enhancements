@@ -1,5 +1,5 @@
 ---
-title: 2no
+title: tnf
 authors:
   - "@mshitrit"
   - "@jaypoulz"
@@ -30,7 +30,7 @@ tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1514
 ---
 
-# Two Nodes Openshift (2NO) - Control Plane Availability
+# Two Node Fencing (TNF)
 
 ## Terms
 
@@ -152,7 +152,7 @@ Three aspects of cluster creation need to happen for a vanilla two-node cluster 
 ###### Transitioning etcd Management to RHEL-HA
 An important facility of the installation flow is the transition from a CEO deployed etcd to one controlled by RHEL-HA. The basic transition works as follows:
 1. [MCO extensions](https://docs.openshift.com/container-platform/4.17/machine_configuration/machine-configs-configure.html#rhcos-add-extensions_machine-configs-configure) are used to ensure that the pacemaker and corosync RPMs are installed. The installer also creates MachineConfig manifests to pre-configure resource agents.
-2. Upon detection that the cluster infrastructure is using the DualReplica controlPlaneTopology in the infrastructure config, an in-cluster entity (see open questions regarding whether this should be handled by CEO or a new 2NO setup operator) will run a command on one of the cluster nodes to initialize pacemaker. The outcome of this is that the resource agent will be started on both nodes.
+2. Upon detection that the cluster infrastructure is using the DualReplica controlPlaneTopology in the infrastructure config, an in-cluster entity (see open questions regarding whether this should be handled by CEO or a new TNF setup operator) will run a command on one of the cluster nodes to initialize pacemaker. The outcome of this is that the resource agent will be started on both nodes.
 3. The aforementioned in-cluster entity will signal CEO to relinquish control of etcd by setting CEO's `managedEtcdKind` to `External`. When this happens, CEO immediately removes the etcd pod from the static pod configs. The resource agents for etcd are running from step 2, and they are configured to wait for etcd pods to be gone so they can restart them using Podman.
 4. The installation proceeds as normal once the pods start.
 If for some reason, the etcd pods cannot be started, then the installation will fail. The installer will pull logs from the control-plane nodes to provide context for this failure.
@@ -312,7 +312,7 @@ sshKey: ''
 
 ### Topology Considerations
 
-2NO represents a new topology and is not appropriate for use with HyperShift, SNO, or MicroShift
+TNF represents a new topology and is not appropriate for use with HyperShift, SNO, or MicroShift
 
 #### Standalone Clusters
 
@@ -328,7 +328,7 @@ So far, we've discovered topology-sensitive logic in ingress, authentication, CE
 The delivery of RHEL-HA components will be opaque to the user and be delivered as an [MCO Extension](../rhcos/extensions.md) in the 4.18 and 4.19 timeframes.
 A switch to [MCO Layering](../ocp-coreos-layering/ocp-coreos-layering.md ) will be investigated once it is GA in a shipping version of OpenShift.
 
-Once installed, the configuration of the RHEL-HA components will be done via an in-cluster entity. This entity could be a dedicated in-cluster 2NO setup operator or a function of CEO triggering a script on one of the control-plane nodes.
+Once installed, the configuration of the RHEL-HA components will be done via an in-cluster entity. This entity could be a dedicated in-cluster TNF setup operator or a function of CEO triggering a script on one of the control-plane nodes.
 This script needs to be run with root permissions, so this is another factor to consider when evaluating if a new in-cluster operator is needed.
 Regardless, this initialization will require that RedFish details have been collected by the installer and synced to the nodes.
 
@@ -349,7 +349,7 @@ Tools for extracting support information (must-gather tarballs) will be updated 
 As part of the fencing setup, the cri-o and kubelet services will still be owned by systemd when running under pacemaker. The main difference is that the resource agent will be responsible for signaling systemd to change their active states.
 The etcd pods are different in this respect since they will be restarted using Podman, but this will be running as root, as it was under CEO.
 
-#### 2NO Setup Operator
+#### TNF Setup Operator
 
 From a high level, the proposed 2 setup operator's job is to ensure that the RHEL-HA components can be initialized with agents (resource, fencing, etc.).
 The most involved aspect of this is triggering the pacemaker initialization script. It is an open question as to whether this should be a mechanism leveraged to notify
@@ -363,7 +363,7 @@ Outside of potentially reusing the networking bits of `platform: baremetal`, we 
 
 This means that the Baremetal Operator is not initially in scope for a two-node cluster because we don't intend to support compute nodes. However, if this requirement were to change for future business opportunities, it may still be useful to provide the user with an install-time option for deploying the Baremetal Operator.
 
-Given the likelihood of customers wanting flexibility over the footprint and capabilities of the platform operators running on the cluster, the safest path forward is to target 2NO clusters on both `platform: none` and platform `platform: baremetal` clusters.
+Given the likelihood of customers wanting flexibility over the footprint and capabilities of the platform operators running on the cluster, the safest path forward is to target TNF clusters on both `platform: none` and platform `platform: baremetal` clusters.
 
 For `platform: none` clusters, this will require customers to provide an ingress load balancer. That said, if in-cluster networking becomes a feature customers request for `platform: none` we can work with the Metal Networking team to prioritize this as a feature for this platform in the future.
 
@@ -499,14 +499,14 @@ Satisfying this demand would come with significant technical and support overhea
 
 3. Can we do pacemaker initialization without the introduction of a new operator?
 
-   We've talked over the pros and cons of a new operator to handle aspects of the 2NO setup. The primary job of a 2NO setup operator would be to initialize pacemaker and
+   We've talked over the pros and cons of a new operator to handle aspects of the TNF setup. The primary job of a TNF setup operator would be to initialize pacemaker and
    to ensure that it reaches a healthy state. This becomes a simple way of kicking off the transition from CEO controlled etcd to RHEL-HA controlled etcd. As an operator,
    it can also degrade during installation to ensure that installation fails if fencing credentials are invalid or the etcd containers cannot be started. The last benefit is
    that the operator could later be used to communicate information about pacemaker to a cluster admin in case the resource and/or fencing agents become unhealthy.
 
    After some discussion, we're prioritizing an exploration of a solution to this initialization without introducing a new operator. The operator that is closest in scope
    to pacemaker initialization is the cluster-etcd-operator. Ideally, we could have it be responsible for kicking off the initialization of pacemaker, since the core of a
-   successful 2NO setup is to ensure etcd ownership is transitioned to a healthy RHEL-HA deployment. While it is a little unorthodox for a core operator to initialize an external
+   successful TNF setup is to ensure etcd ownership is transitioned to a healthy RHEL-HA deployment. While it is a little unorthodox for a core operator to initialize an external
    component, that component is tightly coupled with the health of etcd to begin with and they benefit from being deployed and tested together.  Additionally, most cases that
    would result in pacemaker failing to initialize would result in CEO being degraded as well. One concern raised for this approach is that we may introduce a greater security
    risk since CEO permissions need to be elevated so that a container can run as root to initialize pacemaker. The other challenge to solve with this approach is how we
@@ -516,7 +516,7 @@ Satisfying this demand would come with significant technical and support overhea
 
    Pacemaker will be running as a system daemon and reporting errors about its various agents to the system journal. The question is, what is the best way to expose these to
    a cluster admin? A simple example of this would be an issue where pacemaker discovers that its fencing agent can no longer talk to the BMC. What is the best way to raise this
-   error to the cluster admin, such that they can see that their cluster may be at risk of failure if no action is taken to resolve the problem? If we introduce a 2NO setup operator, this could be one of the ongoing functions of this operator. In our current design, we'd likely need to explore what kinds of errors we can bubble up through existing cluster health APIs to see if something suitable can be reused.
+   error to the cluster admin, such that they can see that their cluster may be at risk of failure if no action is taken to resolve the problem? If we introduce a TNF setup operator, this could be one of the ongoing functions of this operator. In our current design, we'd likely need to explore what kinds of errors we can bubble up through existing cluster health APIs to see if something suitable can be reused.
 
 5. How do we handle updates to the etcd pod?
 
@@ -528,18 +528,18 @@ Satisfying this demand would come with significant technical and support overhea
 **Note:** *Section not required until targeted at a release.*
 
 ### CI
-The initial release of 2NO should aim to build a regression baseline.
+The initial release of TNF should aim to build a regression baseline.
 
 | Type  | Name                          | Description                                                                 |
 | ----- | ----------------------------- | --------------------------------------------------------------------------- |
 | Job   | End-to-End tests (e2e)        | The standard test suite (openshift/conformance/parallel) for establishing a regression baseline between payloads. |
 | Job   | Upgrade between z-streams     | The standard test suite for evaluating upgrade behavior between payloads.   |
 | Job   | Upgrade between y-streams [^1] | The standard test suite for evaluating upgrade behavior between payloads.  |
-| Suite | 2NO Recovery                  | This is a new suite consisting of the tests listed below.                   |
-| Test  | Node failure [^2]              | A new 2NO test to detect if the cluster recovers if a node crashes.        |
-| Test  | Network failure [^2]           | A new 2NO test to detect if the cluster recovers if the network is disrupted such that a node is unavailable. |
-| Test  | Kubelet failure [^2]           | A new 2NO test to detect if the cluster recovers if kubelet fails.         |
-| Test  | Failure in etcd [^2]           | A new 2NO test to detect if the cluster recovers if etcd fails.            |
+| Suite | TNF Recovery                  | This is a new suite consisting of the tests listed below.                   |
+| Test  | Node failure [^2]              | A new TNF test to detect if the cluster recovers if a node crashes.        |
+| Test  | Network failure [^2]           | A new TNF test to detect if the cluster recovers if the network is disrupted such that a node is unavailable. |
+| Test  | Kubelet failure [^2]           | A new TNF test to detect if the cluster recovers if kubelet fails.         |
+| Test  | Failure in etcd [^2]           | A new TNF test to detect if the cluster recovers if etcd fails.            |
 
 [^1]: This will be added after the initial release when more than one minor version of OpenShift is compatible with the
 topology.
@@ -547,7 +547,7 @@ topology.
 being restarted mid-test.
 
 ### QE
-This section outlines test scenarios for 2NO.
+This section outlines test scenarios for TNF.
 
 | Scenario                      | Description                                                                         |
 | ----------------------------- | ----------------------------------------------------------------------------------- |
@@ -648,7 +648,7 @@ is ensuring the cluster stays functional and consistent through the reboots of t
 
 ## Alternatives
 
-* MicroShift was considered as an alternative but it was ruled out because it does not support multi-node and has a very different experience than OpenShift which does not match the 2NO initiative which is on getting the OpenShift experience on two nodes
+* MicroShift was considered as an alternative but it was ruled out because it does not support multi-node and has a very different experience than OpenShift which does not match the TNF initiative which is on getting the OpenShift experience on two nodes
 
 * 2 SNO + KCP:
 [KCP](https://github.com/kcp-dev/kcp/) allows you to manage multiple clusters from a single control-plane, reducing the complexity of managing each cluster independently.
@@ -661,4 +661,4 @@ Disadvantages:
 
 ## Infrastructure Needed [optional]
 
-A new repository in the OpenShift GitHub organization will be created for the 2NO setup operator if we decide to proceed with this design.
+A new repository in the OpenShift GitHub organization will be created for the TNF setup operator if we decide to proceed with this design.
