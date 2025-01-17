@@ -231,6 +231,12 @@ To avoid inflating OpenShift payload images, the USC will be delivered in the sa
 
 > Note: As of Jan 7, the prototyping work showed the via-CVO delivery causes issues because the CVO image and manifests inside are treated specially by code that interacts with them (like hypershift [OCPBUGS-44438](https://issues.redhat.com/browse/OCPBUGS-44438) or release payload build [OCPBUGS-30080](https://issues.redhat.com/browse/OCPBUGS-30080)). Coupling with CVO still makes sense, but delivery through a standard additional payload image would prevent us from hitting subtle issues like the one mentioned above. What is the bar for the inclusion of a new image in the payload?
 
+#### `oc adm upgrade status`
+
+The existing `oc adm upgrade status` command will be changed to consume the `UpdateStatus` resource exclusively from the cluster (doing no further checks) and present its content.
+
+The existing TechPreview client-based functionality will be put behind a dedicated flag and eventually deprecated. While the client-based functionality is present, the plain `oc adm upgrade status` command may hint about using it when it detects that `UpdateStatus` API is not provided by the cluster.
+
 ### Risks and Mitigations
 
 The proposal to deliver the API and a controller that both manages the API and monitors the cluster (producing insights) before achieving consensus on the eventual modular system architecture risks that the existing API will not accommodate the future architecture well. We are making a tradeoff to deliver the API early to start providing value, which also allows us to learn about how and if such an API is really consumed. Early delivery directly addresses the risk of investing effort into building a much larger system that may not address real user needs.
