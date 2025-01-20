@@ -242,7 +242,7 @@ https://github.com/openshift/kubernetes/blob/3c62f738ce74a624d46b4f73f25d6c15b3a
 
 In order to prevent misleading logs about informers that failed to start or failure to connect to the oauth-apiserver, the following changes to this patch are to be made:
 
-- Add a new default flag, `--openshift-oauth-desired`, that gates the oauth-apiserver availability check. The availability check will be run when `--openshift-oauth-desired` is set and not run when it is not set.
+- Add a new default flag, `--openshift-oauth-not-desired`, that gates the oauth-apiserver availability check. The availability check will be run when `--openshift-oauth-not-desired` is not set and not run when it is set.
 - Informers for the `Group` API are only configured and started as part of the first run of the `authorization.openshift.io/RestrictSubjectBindings` admission plugin validation loop. This makes it such that the informer will not be configured or attempt to start when the admission plugin is disabled.
 
 ##### Changes to the cluster-kube-apiserver-operator
@@ -281,6 +281,13 @@ During an upgrade from a version of OpenShift where the CRD is part of the paylo
 
 - CRD is in payload of 4.X, managed by CVO
 - CRD is not in payload of 4.Y, CVO ignores CRD, managed by cluster-authentication-operator
+
+##### Changes to HyperShift
+
+To ensure commonality in behavior between standalone OpenShift and HyperShift, HyperShift will be updated such that the `HostedControlPlane` controller will act in the same way the cluster-authentication-operator and cluster-kube-apiserver-operator will. Specifically:
+
+- Managing the `RoleBindingRestriction` CRD
+- Setting the appropriate flags on the kube-apiserver when oauth stack is not desired
 
 #### Authentication disruptions
 
