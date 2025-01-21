@@ -55,7 +55,7 @@ Backwards compatibility (deserialization) of APIs is required.
 Backwards compatibility of behavior is not required.
 Support is offered, but can end with, “we’re sorry, that’s broken”.
    1. Tech Preview components may frequently use alpha-level APIs as they are evolving.
-   Alpha APIs have no compatibility guarantees and can change any time from one API version to the next 
+   Alpha APIs have no compatibility guarantees and can change any time from one API version to the next
    (see [support tiers](https://docs.openshift.com/container-platform/4.13/rest_api/understanding-api-support-tiers.html) for full details).
    2. Within a single alpha API version, e.g. v1alpha1, it must always provide backwards compatibility at the deserialization level.
    Practically, this means you cannot remove fields, rename fields, change field types (e.g. go from string to int).
@@ -76,7 +76,7 @@ If your PR is feature gated as TechPreview, it can merge ahead of non-gated PRs,
 2. Confidence of stability when moving to accessible-by-default.
 TechPreview jobs run on every major cloud and test reliability can be shown in sippy.
 3. “No-action” leaves us ready to release.
-All features without proven reliability are not accessible-by-default in ECs, RCs, and releases.  
+All features without proven reliability are not accessible-by-default in ECs, RCs, and releases.
 4. Enables cost-efficient statistical testing to provide deeper validation for race-conditions, flaky failure modes, and disruption budgets.
 5. Creates an atomic signal (moving a feature gate from TechPreviewNoUpgrade to On-by-Default) indicating a new cluster capability is enabled.
 This is useful as a tool for coordinating cross-functional teams, or specifying which new capabilities are available in an EC build.
@@ -145,9 +145,9 @@ aware so that the docs team can ensure that the Tech Preview tables and TechPrev
 # Code
 ## openshift/api
 ```go
-// in config/v1/feature_gates.go
+// in features/features.go
 FeatureGateGatewayAPI = FeatureGateName("GatewayAPI")
-  gateGatewayAPI        = FeatureGateDescription{
+gateGatewayAPI        = FeatureGateDescription{
   FeatureGateAttributes: FeatureGateAttributes{
       Name: FeatureGateGatewayAPI,
   },
@@ -431,7 +431,7 @@ information is required.
 Beyond using feature gates, there are other approaches to merge functionality:
 
 ## One or more merges of on-by-default code
-1. This puts ECs, RCs, and releases at risk if there is problem with delivery. 
+1. This puts ECs, RCs, and releases at risk if there is problem with delivery.
 Aes-gcm is a good recent example.
 2. For any feature requiring more than one PR, there is no way to gain reliable CI signal prior to having the code accessible-by-default.
 3. Revert of multiple PRs is often/usually difficult
