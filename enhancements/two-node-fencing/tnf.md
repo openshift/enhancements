@@ -30,7 +30,7 @@ tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1514
 ---
 
-# Two Node Fencing (TNF)
+# Two Node OpenShift with Fencing (TNF)
 
 ## Terms
 
@@ -50,30 +50,38 @@ tracking-link:
 
 **MCO** - Machine Config Operator. This operator manages updates to the node's systemd, cri-o/kubelet, kernel, NetworkManager, etc., and can write custom files to it, configurable by MachineConfig custom resources.
 
-**ABI** - Agent-Based Installer. A installation path through the core-installer that leverages the assisted service to facilate baremetal installations. Can be used in disconnected environments.
+**ABI** - Agent-Based Installer. A installation path through the core-installer that leverages the assisted service to facilate bare-metal installations. Can be used in disconnected environments.
 
-**BMO** - Baremetal Operator. An optional operator whose primary function is to provide the ability to scale clusters in baremetal deployment environments.
+**BMO** - Baremetal Operator. An optional operator whose primary function is to provide the ability to scale clusters in bare-metal deployment environments.
 
 **CEO** - cluster-etcd-operator. The OpenShift operator responsible for deploying and maintaining healthy etcd instances for the cluster.
 
-**BMC** - Baseboard Management Console. Used to manage baremetal machines. Can modify firmware settings and machine power state.
+**BMC** - Baseboard Management Console. Used to manage bare-metal machines. Can modify firmware settings and machine power state.
 
 ## Summary
 
-Leverage traditional high-availability concepts and technologies to provide a container management solution that has a minimal footprint but remains resilient to single node-level failures suitable for customers with numerous geographically dispersed locations.
+Leverage traditional high-availability concepts and technologies to provide a container management solution that has a minimal footprint but remains resilient to single
+node-level failures suitable for customers with numerous geographically dispersed locations.
 
 ## Motivation
 
-Customers with hundreds, or even tens of thousands, of geographically dispersed locations are asking for a container management solution that retains some level of resilience to node-level failures but does not come with a traditional three-node footprint and/or price tag.
+Customers with hundreds, or even tens of thousands, of geographically dispersed locations are asking for a container management solution that retains some level of resilience
+to node-level failures but does not come with a traditional three-node footprint and/or price tag.
 
-The need for some level of fault tolerance prevents the applicability of Single Node OpenShift (SNO), and a converged 3-node cluster is cost prohibitive at the scale of retail and telcos - even when the third node is a "cheap" one that doesn't run workloads.
+The need for some level of fault tolerance prevents the applicability of Single Node OpenShift (SNO), and a converged 3-node cluster is cost prohibitive at the scale of
+retail and telcos - even when the third node is a "cheap" one that doesn't run workloads.
+
+While the degree of resiliency achievable with two nodes is not suitable for safety-critical workloads like emergency services, this proposal aims to deliver a solution
+for workloads that can trade off some amount of determinism and reliability in exchange for cost-effective deployments at scale that fully utilize the capacity of both nodes
+while minimizing the time to recovery for node-level failures of either node.
 
 The benefits of the cloud-native approach to developing and deploying applications are increasingly being adopted in edge computing.
-This requires our solution to provide a management experience consistent with "normal" OpenShift deployments and be compatible with the full ecosystem of Red Hat and partner workloads designed for OpenShift.
+This requires our solution to provide a management experience consistent with "normal" OpenShift deployments and be compatible with the full ecosystem of Red Hat and partner
+workloads designed for OpenShift.
 
 ### User Stories
 
-* As a solutions architect for a large enterprise with multiple remote sites, I want a cost-effective OpenShift cluster solution so that I can manage containers without the overhead of a third node.
+* As a solutions architect for a large enterprise with multiple remote sites, I want a cost-effective OpenShift cluster solution so that I can manage applications without incurring the cost of a third node at scale.
 * As a solutions architect for a large enterprise running workloads on a minimal OpenShift footprint, I want to leverage the full capacity of both control-plane nodes to run my workloads.
 * As a solutions architect for a large enterprise running workloads on a minimal OpenShift footprint, I want to minimize time-to-recovery and data loss for my workloads when a node fails.
 * As an OpenShift cluster administrator, I want a safe and automated method for handling the failure of a single node so that the downtime of the control-plane is minimized and the cluster fully recovers.
@@ -93,6 +101,7 @@ This requires our solution to provide a management experience consistent with "n
 ### Non-Goals
 
 * Achieving the same level of resilience or guarantees provided by a cluster with 3 control-plane nodes or 2 nodes with an arbiter
+* Achieving the same level of deterministic failure modes as can be provided by setting up two Single-Node OpenShift instances as an active-passive pair
 * Workload resilience - see related [Pre-DRAFT enhancement](https://docs.google.com/document/d/1TDU_4I4LP6Z9_HugeC-kaQ297YvqVJQhBs06lRIC9m8/edit)
 * Resilient storage - see future enhancement
 * Support for platforms other than `platform: "None"` and `platform: "Baremetal"`
@@ -100,6 +109,7 @@ This requires our solution to provide a management experience consistent with "n
 * Support disconnected cluster installation
 * Adding worker nodes
 * Supporting upgrade/downgrade paths between 2-node and other topologies (e.g. single-node, 3-node, 2-node with arbiter) (highly requested future extension)
+* Cluster upgrades when only a single node is available
 * Creation of RHEL-HA events and metrics for consumption by the OpenShift monitoring stack (future extension)
 * Support for IBI (image-based install) and IBU (image-based upgrade)
 
@@ -142,8 +152,8 @@ At a glance, here are the components we are proposing to change:
 | [Authentication Operator](#authentication-operator-changes)       | Update operator to accept minimum 1 kube api servers when `ControlPlaneTopology` is `DualReplica`                                  |
 | [Hosted Control Plane](#hosted-control-plane-changes)             | Disallow HyperShift from installing on the `DualReplica` topology                                                                  |
 | [OLM Filtering](#olm-filtering-changes)                           | Leverage support for OLM to filter operators based off of control plane topology                                                   |
-| [Assisted Installer Family](#assisted-installer-family-changes)   | Add support for deploying baremetal clusters with 2 control-plane nodes using Assisted Installer and Agent-Based Installer         |
-| [Baremetal Operator](#baremetal-operator-changes)                 | Prevent power-management of control-plane nodes when the infrastructureTopology is set to `DualReplica`                            |
+| [Assisted Installer Family](#assisted-installer-family-changes)   | Add support for deploying bare-metal clusters with 2 control-plane nodes using Assisted Installer and Agent-Based Installer        |
+| [Bare Metal Operator](#bare-metal-operator-changes)               | Prevent power-management of control-plane nodes when the infrastructureTopology is set to `DualReplica`                            |
 | [Node Health Check Operator](#node-health-check-operator-changes) | Prevent fencing of control-plane nodes when the infrastructureTopology is set to `DualReplica`                                     |
 
 
@@ -152,7 +162,7 @@ At a glance, here are the components we are proposing to change:
 #### Cluster Creation
 
 User creation of a two-node control-plane is possible via the Assisted Installer and the Agent-Based Installer (ABI). The initial implementation will focus on providing support for the Assisted Installer in managed cluster environments (i.e. ACM), followed by stand-alone cluster support via the Agent-Based Installer.
-The requirement that the cluster can be deployed using only 2 nodes is key because requiring a third baremetal server for installation can be expensive when deploying baremetal at scale. To accomplish this, deployments will use one of the target machines as the bootstrap node before it is rebooted into a control-plane node.
+The requirement that the cluster can be deployed using only 2 nodes is key because requiring a third bare-metal server for installation can be expensive when deploying bare metal at scale. To accomplish this, deployments will use one of the target machines as the bootstrap node before it is rebooted into a control-plane node.
 
 A critical transition during bootstrapping is when the bootstrap reboots into the control-plane node. Before this reboot, it needs to be removed from the etcd cluster so that quorum can be maintained as the machine reboots into a second control-plane.
 
@@ -161,7 +171,7 @@ Otherwise, the procedure follows the standard flow except for the configuration 
 To constrain the scope of support, we've targeted Assisted Installer (in ACM) and Agent-Based Installer (ABI) as our supported installation paths. Support for other installation paths
 may be reevaluated as business requirements change. For example, it is technically possible to install a cluster with two control-plane nodes via `openshift-install` using an
 auxiliary bootstrap node but we don't intend to support this for customers unless this becomes a business requirement. Similarly, ZTP may be evaluated as a future offering for clusters
-deployed by ACM environments via Multi-Cluster Engine (MCE), Assisted Installer, and Baremetal Operator.
+deployed by ACM environments via Multi-Cluster Engine (MCE), Assisted Installer, and Bare Metal Operator.
 
 Because BMC passwords are being collected to initialize fencing, the Assisted Installer SaaS offering will not be available (to avoid storing customer BMC credentials in a Red Hat database).
 
@@ -184,10 +194,10 @@ If for some reason, the etcd containers cannot be started, then the installation
 ###### Configuring Fencing Via MCO
 Fencing setup is the last important aspect of the cluster installation. For the cluster installation to be successful, fencing should be configured and active before we declare the installation successful. To do this, baseboard management console (BMC) credentials need to be made available to the control-plane nodes as part of pacemaker initialization.
 To ensure rapid fencing using pacemaker, we will collect RedFish details (address, username, and **password**) for each node via the install-config (see proposed install-config changes).
-This will take a format similar to that of the [Baremetal Operator](https://docs.openshift.com/container-platform/4.17/installing/installing_bare_metal_ipi/ipi-install-installation-workflow.html#bmc-addressing_ipi-install-installation-workflow).
+This will take a format similar to that of the [Bare Metal Operator](https://docs.openshift.com/container-platform/4.17/installing/installing_bare_metal_ipi/ipi-install-installation-workflow.html#bmc-addressing_ipi-install-installation-workflow).
 We will create a new MachineConfig that writes BMC credentials to the control-plane disks. This will resemble the BMC specification used by the [BareMetalHost](https://docs.openshift.com/container-platform/4.17/rest_api/provisioning_apis/baremetalhost-metal3-io-v1alpha1.html#spec-bmc) CRD.
 
-BMC information can be used to change the power state of a baremetal machine, so it's critically important that we ensure that pacemaker is the **only entity** responsible for these operations to prevent conflicting requests to change the machine state. This means that we need to ensure that there are installer validations and validations in the Baremetal Operator (BMO) to prevent control-plane nodes from having power management enabled in a two-node topology. Additionally, optional operators like Node Health Check, Self Node Remediation, and Fence Agents Remediation must have the same considerations but these are not present during installation.
+BMC information can be used to change the power state of a bare-metal machine, so it's critically important that we ensure that pacemaker is the **only entity** responsible for these operations to prevent conflicting requests to change the machine state. This means that we need to ensure that there are installer validations and validations in the Bare Metal Operator (BMO) to prevent control-plane nodes from having power management enabled in a two-node topology. Additionally, optional operators like Node Health Check, Self Node Remediation, and Fence Agents Remediation must have the same considerations but these are not present during installation.
 
 See the API Extensions section below for sample install-configs.
 
@@ -210,8 +220,9 @@ Future Enhancements
 
 #### Day 2 Procedures
 
-As per a standard 3-node control-plane, OpenShift upgrades and `MachineConfig` changes can not be applied when the cluster is in a degraded state.
-Such operations will only proceed when both peers are online and healthy.
+As per a standard 3-node control-plane, OpenShift upgrades and `MachineConfig` changes that would trigger a node reboot cannot proceed if the aforementioned reboot
+would go over the `maxUnavailable` allowance specified in the machine config pool, which defaults to 1. For a two-node control plane, `maxUnavailable` should only ever
+be set to 1 to help ensure that these events only proceed when both peers are online and healthy, or 0 in the case where the administrator wishes to temporarily disable these events.
 
 The experience of managing a two-node control-plane should be largely indistinguishable from that of a 3-node one.
 The primary exception is (re)booting one of the peers while the other is offline and expected to remain so.
@@ -227,7 +238,8 @@ The full list of changes proposed is [summarized above](#summary-of-changes). Ea
 
 #### Feature Gate Changes
 
-We will define a new `DualReplicaTopology` feature that can be enabled in `install-config.yaml` to ensure the clusters running this feature cannot be upgraded.
+We will define a new `DualReplicaTopology` feature that can be enabled in `install-config.yaml` to ensure the clusters running this feature cannot be upgraded until
+the feature is ready for general availability.
 
 #### Infrastructure API Changes
 
@@ -287,7 +299,7 @@ pullSecret: ''
 sshKey: ''
 ```
 
-For platform baremetal, a valid configuration is quite similar.
+For `platform: baremetal`, a valid configuration is quite similar.
 ```
 apiVersion: v1
 baseDomain: example.com
@@ -314,8 +326,8 @@ pullSecret: ''
 sshKey: ''
 ```
 
-Unfortunately, Baremetal Operator already has a place to specify bmc credentials. However, providing credentials like this will result in conflicts as both the
-Baremetal Operator and the pacemaker fencing agent will have control over the machine state. In short, this example shows an invalid configuration that we must check for
+Unfortunately, Bare Metal Operator already has a place to specify bmc credentials. However, providing credentials like this will result in conflicts as both the
+Bare Metal Operator and the pacemaker fencing agent will have control over the machine state. In short, this example shows an invalid configuration that we must check for
 in the installer.
 ```
 apiVersion: v1
@@ -367,7 +379,7 @@ A cluster is assumed to be a 2-node cluster if the following statements are true
 
 The number of compute nodes is also expected to be zero, but this will not be enforced.
 
-Additionally, we will enforce that 2-node clusters are only allowed on platform `None` or platform `Baremetal`. This is not a technical restriction, but
+Additionally, we will enforce that 2-node clusters are only allowed on platform `none` or platform `baremetal`. This is not a technical restriction, but
 rather one that stems from a desire to limit the number of supportable configurations. If use cases emerge, cloud support for this topology may be considered
 in the future.
 
@@ -398,8 +410,8 @@ Agent-Based installers. The core of this change is an update to the assisted-ser
 included in this, since we do not wish to store customer fencing credentials in a Red Hat database. In other words, installing using the Assisted Installer will
 only be supported using MCE.
 
-#### BareMetal Operator Changes
-Because paceamaker is the only entity allowed to take fencing actions on the control-plane nodes, the baremetal operator will need to be updated to ensure that `BareMetalHost` entries cannot be added for the control-plane nodes.
+#### Bare Metal Operator Changes
+Because paceamaker is the only entity allowed to take fencing actions on the control-plane nodes, the Bare Metal Operator will need to be updated to ensure that `BareMetalHost` entries cannot be added for the control-plane nodes.
 This will prevent power management operations from being triggered outside of the purview of pacemaker.
 
 #### Node Health Check Operator Changes
@@ -444,11 +456,32 @@ Tools for extracting support information (must-gather tarballs) will be updated 
 As part of the fencing setup, the cri-o and kubelet services will still be owned by systemd when running under pacemaker. The main difference is that the resource agent will be responsible for signaling systemd to change their active states.
 The etcd containers are different in this respect since they will be restarted using Podman, but this will be running as root, as it was under CEO.
 
-#### Platform None vs. Baremetal
+#### The Fencing Network
+The [goals](#goals) section of this proposal highlights the intent of minimizing the scenarios that require manual administrator intervention and maximizing the cluster's
+similarity to the experience of running a 3-node hyperconverged cluster - especially in regard to auto-recovering from the failure of either node. The key to delivering on these goals is fencing.
+
+In order be able to leverage fencing, two conditions must be met:
+1. The fencing network must be available
+2. Fencing must be properly configured
+
+Because of the criticality of the fencing network being available, the fencing network should be isolated from main network used by the cluster. This ensures that a network
+disruption experienced between the nodes on the main network can still proceed with a recovery operation with an available fencing network.
+
+Addressing the matter of ensuring that fencing is configured properly is more challenging. While the installer should protect from some kinds of invalid configuration
+(e.g. an incorrect BMC password), this is not a guarantee that the configuration is actually valid. For example, a user could accidentally enter the BMC credentials for
+a different server altogether, and pacemaker would be none-the-wiser. The only way to ensure that fencing is configured properly is to test it.
+
+##### Fencing Health Check
+To test that fencing is operating as intended in an installed cluster, a special fencing-verification Day-2 operation will be made available to users. At first, this would
+exist as a Fencing Health Check script that is run to crash each of the nodes in turn, waiting for the cluster to recover between crash events. As a longer term objective, it
+might make sense to explore if this could be integrated into the OpenShift client. It is recommended that cluster administrators run the Fencing Health Check operation
+regularly for TNF clusters. A future improvement could add reminders for cluster administrators who haven't run the Fencing Health Check in the last 3 or 6 months.
+
+#### Platform `none` vs. `baremetal`
 One of the major design questions of two-node OpenShift is whether to target support for `platform: none` or `platform: baremetal`. The advantage of selecting `platform: baremetal` is that we can leverage the benefits of deploying an ingress-VIP out of the box using keepalived and haproxy. After some discussion with the metal networking team, it is expected that this might work without modifications as long as pacemaker fencing doesn't remove nodes from the node list so that both keepalived instances are always peers. Furthermore, it was noted that this might be solved more simply without keepalived at all by using the ipaddr2 resource agent for pacemaker to run the `ip addr add` and `ip addr remove` commands for the VIP.
 The bottom line is that it will take some engineering effort to modify the out-of-the-box in-cluster networking feature for two-node OpenShift.
 
-Outside of potentially reusing the networking bits of `platform: baremetal`, we discussed potentially reusing its API for collecting BMC credentials for fencing. In this approach, we'd use the `platform: baremetal` BMC entries would be loaded into BareMetalHost CRDs and we'd extend BMO to initialize pacemaker instead of a new operator. After a discussion with the Baremetal Platform team, we were advised against using the Baremetal Operator as an inventory. Its purpose/scope is provisioning nodes.
+Outside of potentially reusing the networking bits of `platform: baremetal`, we discussed potentially reusing its API for collecting BMC credentials for fencing. In this approach, we'd use the `platform: baremetal` BMC entries would be loaded into `BareMetalHost` CRDs and we'd extend BMO to initialize pacemaker instead of a new operator. After a discussion with the Bare Metal Platform team, we were advised against using the Bare Metal Operator as an inventory. Its purpose/scope is provisioning nodes.
 
 This means that the Baremetal Operator is not initially in scope for a two-node cluster because we don't intend to support compute nodes. However, if this requirement were to change for future business opportunities, it may still be useful to provide the user with an install-time option for deploying the Baremetal Operator.
 
@@ -554,7 +587,7 @@ This proposal is an alternative architecture to Single-node and MicroShift, so i
    1. Mitigation: The CEO will run in a mode that does manage not etcd membership
 
 3. Risk: Other operators that perform power-management functions could conflict with pacemaker.
-   1. Mitigation: Update the Baremetal and Node Health Check operators to ensure control-plane nodes can not perform power operations for the control-plane nodes in the two-node topology.
+   1. Mitigation: Update the Bare Metal and Node Health Check operators to ensure control-plane nodes can not perform power operations for the control-plane nodes in the two-node topology.
 
 4. Risk: Rebooting the surviving peer would require human intervention before the cluster starts, increasing downtime and creating an admin burden at remote sites
    1. Mitigation: Lifecycle events, such as upgrades and applying new `MachineConfig`s, are not permitted in a single-node degraded state
@@ -580,7 +613,7 @@ This proposal is an alternative architecture to Single-node and MicroShift, so i
 ### Drawbacks
 
 The two-node architecture represents yet another distinct install type for users to choose from, and therefore another addition to the test matrix
-for baremetal installation variants. Because this topology has so many unique failure recovery paths, it also requires an in-depth new test
+for bare-metal installation variants. Because this topology has so many unique failure recovery paths, it also requires an in-depth new test
 suite which can be used to exercise all of these failure recovery scenarios.
 
 More critically, this is the only variant of OpenShift that would recommend a regular maintenance check to ensure that failures that require
@@ -635,25 +668,26 @@ Satisfying this demand would come with significant technical and support overhea
 ### CI
 The initial release of TNF should aim to build a regression baseline.
 
-| Type  | Name                           | Description                                                                                                       |
-| ----- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| Job   | End-to-End tests (e2e)         | The standard test suite (openshift/conformance/parallel) for establishing a regression baseline between payloads. |
-| Job   | Upgrade between z-streams      | The standard test suite for evaluating upgrade behavior between payloads.                                         |
-| Job   | Upgrade between y-streams [^1] | The standard test suite for evaluating upgrade behavior between payloads.                                         |
-| Job   | Serial tests                   | The standard test suite (openshift/conformance/serial) for establishing a regression baseline between payloads.   |
-| Job   | TechPreview                    | The standard test suite (openshift/conformance/parallel) run with TechPreview features enabled.                   |
-| Suite | TNF Recovery                   | This is a new suite consisting of the tests listed below.                                                         |
-| Test  | Double Node failure            | A new TNF test to detect if the cluster recovers if both nodes crash and are manually reset                       |
-| Test  | Cold boot                      | A new TNF test to detect if the cluster recovers if both nodes are stopped gracefully and then restarted together |
-| Test  | Node restart [^2]              | A new TNF test to detect if the cluster recovers if a node is gracefully restarted.                               |
-| Test  | Node failure [^2]              | A new TNF test to detect if the cluster recovers if a node crashes.                                               |
-| Test  | Network failure [^2]           | A new TNF test to detect if the cluster recovers if the network is disrupted such that a node is unavailable.     |
-| Test  | Kubelet failure [^2]           | A new TNF test to detect if the cluster recovers if kubelet fails.                                                |
-| Test  | Failure in etcd [^2]           | A new TNF test to detect if the cluster recovers if etcd fails.                                                   |
-| Test  | Valid PDBs                     | A new TNF test to verify that PDBs are set to the correct configuration                                           |
-| Test  | Conformant recovery            | A new TNF test to verify recovery times for failure events are within the creteria defined in the requirements    |
-| Test  | Fencing health check           | A new TNF test to verify fencing health check process successful                                                  |
-| Test  | Replacing a control-plane node | A new TNF test to verify that you can replace a control-plane node in a 2-node cluster                            |
+| Type  | Name                                        | Description                                                                                                       |
+| ----- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Job   | End-to-End tests (e2e)                      | The standard test suite (openshift/conformance/parallel) for establishing a regression baseline between payloads. |
+| Job   | Upgrade between z-streams                   | The standard test suite for evaluating upgrade behavior between payloads.                                         |
+| Job   | Upgrade between y-streams [^1]              | The standard test suite for evaluating upgrade behavior between payloads.                                         |
+| Job   | Serial tests                                | The standard test suite (openshift/conformance/serial) for establishing a regression baseline between payloads.   |
+| Job   | TechPreview                                 | The standard test suite (openshift/conformance/parallel) run with TechPreview features enabled.                   |
+| Suite | TNF Recovery                                | This is a new suite consisting of the tests listed below.                                                         |
+| Test  | Double Node failure                         | A new TNF test to detect if the cluster recovers if both nodes crash and are manually reset                       |
+| Test  | Cold boot                                   | A new TNF test to detect if the cluster recovers if both nodes are stopped gracefully and then restarted together |
+| Test  | Node restart [^2]                           | A new TNF test to detect if the cluster recovers if a node is gracefully restarted.                               |
+| Test  | Node failure [^2]                           | A new TNF test to detect if the cluster recovers if a node crashes.                                               |
+| Test  | Network failure [^2]                        | A new TNF test to detect if the cluster recovers if the network is disrupted such that a node is unavailable.     |
+| Test  | Kubelet failure [^2]                        | A new TNF test to detect if the cluster recovers if kubelet fails.                                                |
+| Test  | Failure in etcd [^2]                        | A new TNF test to detect if the cluster recovers if etcd fails.                                                   |
+| Test  | Valid PDBs                                  | A new TNF test to verify that PDBs are set to the correct configuration                                           |
+| Test  | Conformant recovery                         | A new TNF test to verify recovery times for failure events are within the creteria defined in the requirements    |
+| Test  | Fencing health check                        | A new TNF test to verify that the [Fencing Health Check](#fencing-health-check) process is successful             |
+| Test  | Replacing a control-plane node              | A new TNF test to verify that you can replace a control-plane node in a 2-node cluster                            |
+| Test  | Certificate rotation with an unhealthy node | A new TNF test to verify certificate rotation on a cluster with an unhealthy node that rejoins after the rotation |
 
 [^1]: This will be added after the initial release when more than one minor version of OpenShift is compatible with the topology.
 [^2]: These tests will be designed to make a component a randomly selected node fail.
@@ -769,9 +803,30 @@ a close eye on when evaluating upgrade jobs for potential race conditions.
 
 ## Alternatives
 
-* MicroShift was considered as an alternative but it was ruled out because it does not support multi-node and has a very different experience than OpenShift which does not match the TNF initiative which is on getting the OpenShift experience on two nodes
+#### Active-Passive Single-Node OpenShift
+One of the first options that comes to mind when thinking about how to run OpenShift with two control plane nodes at scale without the risk of split-brain is deploying 2 Single-Node OpenShift
+instances and setting them up as an active node with a passive backup.
 
-* 2 SNO + KCP:
+This option requires the user to run external software like keepalived in front of the instances to ensure that only one instance is the active instance and receiving traffic at a time.
+
+The advantage of this this kind of set up is that failures of each instance is reliably deterministic. A failure of the active instance passes traffic over to the passive instance, and a failure of
+the passive instance doesn't interrupt the active instance. Since both instances cannot be the active instance at the same time, there is no risk of a split-brain situation. Additionally, each Single
+Node OpenShift instance is a cluster by itself - meaning it does not need the other instance to be operational for it to proceed with upgrade or configuration operations that require a node reboot.
+
+That said, there are major tradeoffs of structuring the nodes in the fashion. Firstly, all aspects of the customer's applications must be available on both nodes. This means that the cluster
+administrator needs to actively synchronize both nodes so that either of them could become the active node at any given time. How this data is synchronized between the SNO instances is left as an a
+challenge for the solutions architect. For some applications, this results in more overhead on each node since both need to be able to run fully independently. For example, a deployment that specifies
+two replicas would end up with two replicas on each SNO instance. Furthermore, stateful workloads require special configuration to synchronize data between the active and passive clusters. Finally,
+the end user cannot utilize the full capacity of both nodes at the same time.
+
+The bottom line is that this solution may be viable for simple setups with stateless workloads, but it becomes logistically much harder to deploy and maintain for workloads that need to maintain
+synchronised state between the OpenShift instances. Solving the state synchronization challenges means having to solve the same core issues TNF faces around maintaining data integrity - without
+actively benefiting from the computation power of the second server.
+
+#### MicroShift
+MicroShift was considered as an alternative but it was ruled out because it does not support multi-node and has a very different experience than OpenShift which does not match the TNF initiative which is on getting the OpenShift experience on two nodes
+
+#### 2 SNO + KCP:
 [KCP](https://github.com/kcp-dev/kcp/) allows you to manage multiple clusters from a single control-plane, reducing the complexity of managing each cluster independently.
 With kcp, you can manage the two single-node clusters, each single-node OpenShift cluster can continue to operate independently even if the central kcp management plane becomes unavailable.
 The main advantage of this approach is that it doesn’t require inventing a new Openshift flavor and we don’t need to create a new installation flow to accommodate it.
