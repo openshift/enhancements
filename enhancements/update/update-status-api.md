@@ -8,11 +8,12 @@ reviewers:
   - "@joelspeed"        # API approver
   - "@jupierce"         # Original design author
 approvers:
-  - TBD
+  - "@pratikmahajan"    # OTA Team Lead
+  - "@sdodson"          # OCP Architect
 api-approvers:
   - "@joelspeed"
 creation-date: 2024-10-16
-last-updated: 2024-12-11
+last-updated: 2025-01-22
 tracking-link: 
   - https://issues.redhat.com/browse/OTA-1260
   - https://issues.redhat.com/browse/OTA-1339
