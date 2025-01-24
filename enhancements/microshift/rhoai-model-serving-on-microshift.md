@@ -282,6 +282,11 @@ expected that in case of MicroShift upgrade, the kserve also will be upgraded.
 MicroShift team might need to monitor (or simply test upgrades) version changes
 of the kserve CRDs, so there's always an upgrade path.
 
+MicroShift team will need to monitor (or automate) RHOAI versions to make sure
+each MicroShift release uses most recent stable RHOAI version (relates to the
+MicroShift rebase procedure - RHOAI not being part of OCP payload is sort of
+side loaded).
+
 ## Version Skew Strategy
 
 MicroShift and kserve RPMs built from the same .spec file should not introduce
