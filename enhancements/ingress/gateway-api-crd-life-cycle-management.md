@@ -148,10 +148,6 @@ reconcile conflicting CRDs.
 _TBD_: Talk about how we could use Server-Side Apply for CRD updates in upgrades
 from OpenShift 4.19.0.
 
-### Dead fields
-
-_TBD_: Describe the issue and how we will address it in 4.19.
-
 ### Workflow Description
 
 > Explain how the user will use the feature. Be detailed and explicit.  Describe
@@ -218,18 +214,39 @@ enhancement).
 
 #### Dead fields
 
-If an installed Gateway API CRD includes some field that is not implemented by
-the installed Gateway API implementation, then updates to this field may be
-silently ignored.  In the context of a security feature, ignoring this field
-could result in a configuration that inadvertently exposes workload.
+We define "dead fields" as the situation where an implementation that uses CRDs
+(such as our Gateway API implementation) is technically _compatible_ with a
+newer installed version of the CRDs, but fields in that new version are inert
+when specified and the user would have insufficient feedback to be aware of
+this. In the worse cases, the user may believe something critical is configured
+on the running configuration, but it is not and the remaining configuration is
+erroneously deployed anyway.
 
-Potential mitigation strategies:
+A primary concern here would be when a new version of a CRD provides some new
+kind of security sensitive field. It may not always be intuitive for a user to
+know by way of component awareness or documentation that such a field may be
+_present_, but wont actually be accomodated by the implementation. For example,
+if a newer version of the API provides a new authentication related field and
+the user specifies that not knowing the implementation doesn't support it, we
+would want to protect against deploying the remaining specification even were
+it "technically functional", so that we're not exposing resources without
+authentication that were intended to require authentication.
 
-- Handle with an admission webhook (see [Admission webhook](#admission-webhook) under [Alternatives](#alternatives).
-- Work upstream to address this issue.  _TODO: Link to a relevant upstream discussion._
-- Defer the issue until we allow some newer CRD version than we initially allow.
+In 4.19.0 we will address this by pinning to one specific version of the
+Gateway API CRDs that is tested and vetted by us to ensure freedom from "dead
+fields" with the corresponding version of our first-party implementation. We
+fully anticipate that in future iterations we'll need to expand upon this to
+better accomodate third-party solutions.
 
-_TBD: Fill in more details._
+> **Note**: As we move further into the 4.x.x release cycle we will take
+> feedback and consider continued augmentation to how we manage this and may
+> eventually cover a version range instead of a specific version. We may add
+> additional validation tools that can identify if a field is dead given the
+> implementation being used and reject that. We expect this problem is not a
+> problem unique to us however, and so we will try and pursue this in upstream
+> so that the community has well agreed upon upstream documentation and tools
+> to deal with it, as this will help provide a more consistent user experience
+> for Gateway API users as a whole.
 
 ### Drawbacks
 
