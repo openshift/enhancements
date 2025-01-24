@@ -202,9 +202,17 @@ Potential solutions so far:
 > - If you want to use graphics processing units (GPUs) with your model server, you have enabled GPU support in OpenShift AI.
 > - To use the vLLM runtime, you have enabled GPU support in OpenShift AI and have installed and configured the Node Feature Discovery operator on your cluster
 
-Neither GPU Operator, NFD, or Intel Gaudi AI Accelerator Operator are supported on MicroShift.
+~~Neither GPU Operator, NFD, or Intel Gaudi AI Accelerator Operator are supported on MicroShift.~~
+[Accelerating workloads with NVIDIA GPUs with Red Hat Device Edge](https://docs.nvidia.com/datacenter/cloud-native/edge/latest/nvidia-gpu-with-device-edge.html)
+is a procedure on setting up NVIDIA GPU for MicroShift. Users will be directed to
+that website's relevant sections and also to [RHOAI's guide on adding NVIDIA Triton ServingRuntime](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/2.16/html/serving_models/serving-large-models_serving-large-models#adding-a-tested-and-verified-model-serving-runtime-for-the-single-model-serving-platform_serving-large-models).
 
-Should users be instructed to use upstream releases of these components and configure them on their own?
+~~Should users be instructed to use upstream releases of these components and configure them on their own?~~
+
+If there's no existing guide on setting specific accelerator for usage with RHDE,
+we shall work with partners to achieve that. We want to avoid directing users
+to generic upstream information without any support.
+
 
 ## Versioning
 
