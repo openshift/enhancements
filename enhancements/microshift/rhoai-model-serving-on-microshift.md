@@ -218,7 +218,8 @@ minor version.
 
 ## Test Plan
 
-Because RHOAI is not support on ARM architecture, testing will not happen on nvidia Jetson Orin devices.
+At the time of writing this enhancement, RHOAI is not yet supported on ARM
+architecture, so testing on NVIDIA Jetson Orin devices will be postponed.
 
 First, a smoke test in MicroShift's test harness:
 - Stand up MicroShift device/cluster
