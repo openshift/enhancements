@@ -5,7 +5,7 @@ authors:
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - DanielFroehlich, MicroShift PM
   - jerpeter1, MicroShift Staff Eng, Architect
-  - TBD, RHOAI Expert
+  - lburgazzoli, RHOAI Expert
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
   - jerpeter1
 api-approvers:
