@@ -84,7 +84,7 @@ newer version of these CRDs).
 - Ensure the installed Gateway API CRDs are compatible with OpenShift's needs.
 - Protect against bad updates or removals of the Gateway API CRDs.
 - Detect and warn if an incompatible version of the CRDs is installed.
-- Protect users against "dead fields" (defined below).
+- Protect users against "unknown fields"/"dead fields" (defined below).
 - Provide a method to transfer ownership of previously existing CRDs to when upgrading from 4.18 to 4.19.
 
 ### Non-Goals
@@ -92,7 +92,6 @@ newer version of these CRDs).
 - _Automatically_ replace incompatible CRDs that some other agent installed.
 - Provide an _automatic_ pre-upgrade check in OpenShift 4.18 for incompatible CRDs.
 - Provide an explicit override for the cluster-admin to take CRD ownership.
-- Implement an admission webhook to block updates to dead fields.
 - Solve CRD life-cycle management in OLM.
 - Solve OLM subscription management.
 - Solve CRD life-cycle management for OSSM or Istio resources.
@@ -147,10 +146,6 @@ reconcile conflicting CRDs.
 
 _TBD_: Talk about how we could use Server-Side Apply for CRD updates in upgrades
 from OpenShift 4.19.0.
-
-### Dead fields
-
-_TBD_: Describe the issue and how we will address it in 4.19.
 
 ### Workflow Description
 
@@ -216,20 +211,19 @@ enhancement).
 
 ### Risks and Mitigations
 
-#### Dead fields
+#### Unknown Fields
 
-If an installed Gateway API CRD includes some field that is not implemented by
-the installed Gateway API implementation, then updates to this field may be
-silently ignored.  In the context of a security feature, ignoring this field
-could result in a configuration that inadvertently exposes workload.
+> **Note**: aka "dead fields"
 
-Potential mitigation strategies:
+The definition of the "unknown fields" problem is provided upstream in
+[gateway-api#3624]. Since this problem does not have any standards or solutions
+defined in upstream at the time of writing we will address this by pinning to
+one specific version of the Gateway API CRDs that is tested and vetted by us to
+ensure freedom from "dead fields" with the corresponding version of our
+first-party implementation. When the upstream community provides standards and
+solution around this we will implement that solution.
 
-- Handle with an admission webhook (see [Admission webhook](#admission-webhook) under [Alternatives](#alternatives).
-- Work upstream to address this issue.  _TODO: Link to a relevant upstream discussion._
-- Defer the issue until we allow some newer CRD version than we initially allow.
-
-_TBD: Fill in more details._
+[gateway-api#3624]:https://github.com/kubernetes-sigs/gateway-api/issues/3624
 
 ### Drawbacks
 
